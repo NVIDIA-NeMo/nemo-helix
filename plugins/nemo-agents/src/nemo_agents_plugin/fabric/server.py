@@ -50,8 +50,7 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_openai_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
-from nemo_agents_plugin.fabric.tool_discovery import McpToolCatalog
-from nemo_agents_plugin.schema import AgentToolsResponse
+from nemo_agents_plugin.mcp_status import MCP_STATUS_CACHE_SECONDS, McpStatusCache, McpStatusResponse
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from starlette.types import Receive, Scope, Send
 
@@ -332,7 +331,6 @@ def create_fabric_serving_app(
             app.state.agent_config = agent_config
             app.state.base_dir = base_dir
             app.state.validation_result = validation_result
-            app.state.tool_catalog = McpToolCatalog(agent_config, cwd=base_dir)
             session_registry = FabricSessionRegistry()
             app.state.session_registry = session_registry
             session_manager = FabricSessionManager(
@@ -342,6 +340,7 @@ def create_fabric_serving_app(
                 max_concurrent_invocations=settings.max_concurrent_invocations,
             )
             app.state.session_manager = session_manager
+            app.state.mcp_status_cache = McpStatusCache(agent_config)
             cleanup_shutdown = asyncio.Event()
             cleanup_task = asyncio.create_task(
                 _run_idle_session_cleanup(
@@ -375,6 +374,25 @@ def create_fabric_serving_app(
             "runtime_instance_id": runtime_instance_id,
             "runtime_started_at": runtime_started_at.isoformat(),
         }
+
+    async def _mcp_servers(max_age: float | None) -> McpStatusResponse:
+        cache: McpStatusCache = app.state.mcp_status_cache
+        servers, checked_at = await cache.get(max_age=max_age)
+        return McpStatusResponse(
+            runtime_instance_id=runtime_instance_id,
+            checked_at=checked_at,
+            servers=servers,
+        )
+
+    @app.get("/mcp/status", response_model=McpStatusResponse)
+    async def mcp_status() -> McpStatusResponse:
+        """Report every declared MCP server as this runtime process sees it, re-checking results past the TTL."""
+        return await _mcp_servers(MCP_STATUS_CACHE_SECONDS)
+
+    @app.get("/mcp/tools", response_model=McpStatusResponse)
+    async def mcp_tools(refresh: bool = False) -> McpStatusResponse:
+        """Report every declared MCP server's tools, reusing a running server's listing until *refresh*."""
+        return await _mcp_servers(0 if refresh else None)
 
     @app.post("/v1/chat/completions", response_model=None, response_model_exclude_none=True)
     async def chat_completions(
@@ -471,10 +489,6 @@ def create_fabric_serving_app(
         if response_headers is not None:
             response.headers.update(response_headers)
         return completion
-
-    @app.get("/v1/tools", response_model=AgentToolsResponse)
-    async def list_tools(refresh: bool = False) -> AgentToolsResponse:
-        return AgentToolsResponse(servers=await app.state.tool_catalog.list_servers(refresh=refresh))
 
     @app.delete("/v1/sessions/{session_id}", status_code=204)
     async def close_session(session_id: str) -> Response:

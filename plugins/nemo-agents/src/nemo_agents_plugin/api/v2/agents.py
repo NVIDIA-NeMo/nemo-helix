@@ -10,7 +10,9 @@ prefix from the RouterSpec).
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -24,11 +26,18 @@ from nemo_agents_plugin.deployment_routing import (
     get_deployment_transport,
     is_deployment_routable,
 )
-from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT, Agent, AgentDeployment
+from nemo_agents_plugin.entities import Agent, AgentDeployment
+from nemo_agents_plugin.mcp_status import (
+    McpServerStatus,
+    McpStatusResponse,
+    config_from_dict,
+    declared_mcp_servers,
+)
 from nemo_agents_plugin.schema import (
+    AgentDeploymentStatus,
     AgentFilter,
-    AgentMcpServerTools,
     AgentPage,
+    AgentStatus,
     AgentToolsResponse,
     RegisterAgentRequest,
 )
@@ -47,8 +56,7 @@ from nemo_helix_plugin.schema import PaginationData
 # do not represent an actively running process the user needs to clean up first.
 _BLOCKING_STATUSES = frozenset({"pending", "starting", "running"})
 
-# Covers the runtime's per-server discovery timeout, which it applies to every server at once.
-_RUNTIME_TOOLS_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+_RUNTIME_PROBE_TIMEOUT_SECONDS = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +151,12 @@ async def get_agent(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> Agent:
     """Get a specific agent by name."""
+    return await _get_agent_or_404(workspace, name, entity_client)
+
+
+async def _get_agent_or_404(workspace: str, name: str, entity_client: NemoEntitiesClient) -> Agent:
     try:
-        agent = await entity_client.get(Agent, name=name, workspace=workspace)
+        return await entity_client.get(Agent, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,
@@ -153,7 +165,184 @@ async def get_agent(
     except Exception as exc:
         logger.exception("Failed to get agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get agent.") from exc
-    return agent
+
+
+@router.get(
+    "/agents/{name}/status",
+    response_model=AgentStatus,
+    tags=["Agents"],
+    responses={
+        404: {"description": "Agent not found"},
+        500: {
+            "description": "Failed to list deployments for the agent",
+            "content": {
+                "application/json": {"schema": {"type": "object", "properties": {"detail": {"type": "string"}}}}
+            },
+        },
+    },
+)
+@scope.read
+@path_rule(
+    callers=[CallerKind.PRINCIPAL],
+    permissions=[AgentPerms.READ],
+)
+async def get_agent_status(
+    workspace: str,
+    name: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> AgentStatus:
+    """Report the runtime status of an agent, including its MCP servers.
+
+    Each running deployment checks its servers by launching (stdio) or connecting to
+    (remote) them, and reuses that check briefly so polling does not relaunch them.
+    """
+    agent = await _get_agent_or_404(workspace, name, entity_client)
+
+    try:
+        result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except Exception as exc:
+        logger.exception("Failed to list deployments for an agent status check")
+        raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc
+
+    agent_config = config_from_dict(agent.config)
+    deployments = sorted((d for d in result.data if d.agent == name), key=lambda d: d.name)
+    deployment_statuses = await asyncio.gather(*(_deployment_status(deployment) for deployment in deployments))
+    return AgentStatus(
+        agent=name,
+        workspace=workspace,
+        checked_at=datetime.now(UTC),
+        declared_mcp_servers=declared_mcp_servers(agent_config) if agent_config else [],
+        deployments=list(deployment_statuses),
+    )
+
+
+async def _deployment_status(deployment: AgentDeployment) -> AgentDeploymentStatus:
+    """Read one deployment's MCP status from its runtime, or say why we could not."""
+    config = config_from_dict(deployment.config)
+    declared = declared_mcp_servers(config) if config else []
+    endpoint = get_deployment_endpoint(deployment) or ""
+    status = AgentDeploymentStatus(
+        deployment=deployment.name,
+        deployment_mode=deployment.deployment_mode,
+        status=deployment.status,
+        endpoint=endpoint,
+        error=deployment.error,
+        mcp_servers=declared,
+    )
+    if not is_deployment_routable(deployment):
+        return status
+
+    probed, probe_error = await _probe_deployment(deployment, endpoint, "mcp/status")
+    if probed is None:
+        status.probe_error = probe_error
+        status.mcp_servers = [_unknown(server, probe_error) for server in declared]
+        return status
+    status.mcp_servers = probed.servers
+    return status
+
+
+async def _probe_deployment(
+    deployment: AgentDeployment,
+    endpoint: str,
+    path: str,
+    params: dict[str, str] | None = None,
+) -> tuple[McpStatusResponse | None, str]:
+    """Ask one runtime for its MCP servers at *path*, or return a short reason it could not be read."""
+    # Dial the way the gateway does: an executor may route through a service address with its own TLS.
+    try:
+        transport = get_deployment_transport(deployment)
+        url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/{path}")
+        client_kwargs = transport.client_kwargs()
+    except Exception:
+        logger.exception("Failed to resolve how to reach a deployment's runtime")
+        return None, "Could not reach the runtime."
+    try:
+        async with httpx.AsyncClient(
+            timeout=_RUNTIME_PROBE_TIMEOUT_SECONDS,
+            follow_redirects=False,
+            **client_kwargs,
+        ) as client:
+            response = await client.get(url, headers=routing_headers, params=params)
+    except httpx.TimeoutException:
+        logger.debug("MCP status check of %s timed out", url, exc_info=True)
+        return None, "Runtime did not respond in time."
+    except httpx.HTTPError:
+        logger.debug("MCP status check of %s failed", url, exc_info=True)
+        return None, "Could not reach the runtime."
+    if response.status_code == 404:
+        return None, "Runtime does not report MCP status."
+    if response.status_code >= 400:
+        return None, f"Runtime returned HTTP {response.status_code}."
+    try:
+        return McpStatusResponse.model_validate(response.json()), ""
+    except Exception:
+        logger.debug("Unreadable MCP status from %s", url, exc_info=True)
+        return None, "Runtime returned an unreadable status."
+
+
+@router.get(
+    "/agents/{name}/tools",
+    response_model=AgentToolsResponse,
+    tags=["Agents"],
+    responses={
+        404: {"description": "Agent not found"},
+        500: {
+            "description": "Failed to list deployments for the agent",
+            "content": {
+                "application/json": {"schema": {"type": "object", "properties": {"detail": {"type": "string"}}}}
+            },
+        },
+    },
+)
+@scope.read
+@path_rule(
+    callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
+    permissions=[AgentPerms.READ],
+)
+async def list_agent_tools(
+    workspace: str,
+    name: str,
+    refresh: bool = Query(default=False, description="Re-probe every server instead of reusing the runtime's listing."),
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> AgentToolsResponse:
+    """List the tools each of the agent's MCP servers exposes, in one call.
+
+    The agent's first running deployment probes every declared server concurrently and keeps a
+    running server's listing until refreshed, so this costs one runtime round-trip however many
+    servers the agent declares. Without a running deployment, the declared servers come back as
+    ``not_started`` with no tools.
+    """
+    agent = await _get_agent_or_404(workspace, name, entity_client)
+
+    try:
+        result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except Exception as exc:
+        logger.exception("Failed to list deployments for an agent tools listing")
+        raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc
+
+    # Same choice as the gateway: the deployment that chat and invoke requests reach.
+    deployment = next((d for d in result.data if d.agent == name and is_deployment_routable(d)), None)
+    config = config_from_dict(deployment.config if deployment is not None else agent.config)
+    declared = declared_mcp_servers(config) if config else []
+    if deployment is None or not declared:
+        return AgentToolsResponse(servers=declared)
+
+    endpoint = get_deployment_endpoint(deployment) or ""
+    probed, probe_error = await _probe_deployment(
+        deployment, endpoint, "mcp/tools", {"refresh": "true"} if refresh else None
+    )
+    if probed is None:
+        return AgentToolsResponse(
+            deployment=deployment.name,
+            probe_error=probe_error,
+            servers=[_unknown(server, probe_error) for server in declared],
+        )
+    return AgentToolsResponse(deployment=deployment.name, checked_at=probed.checked_at, servers=probed.servers)
+
+
+def _unknown(server: McpServerStatus, probe_error: str) -> McpServerStatus:
+    """The declared server, marked as un-checked because the runtime did not answer."""
+    return server.model_copy(update={"state": "unknown", "detail": probe_error})
 
 
 @router.delete("/agents/{name}", status_code=204, tags=["Agents"])
@@ -209,94 +398,6 @@ async def delete_agent(
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc
-
-
-@router.get("/agents/{name}/tools", response_model=AgentToolsResponse, tags=["Agents"])
-@scope.read
-@path_rule(
-    callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
-    permissions=[AgentPerms.READ],
-)
-async def list_agent_tools(
-    workspace: str,
-    name: str,
-    refresh: bool = Query(default=False, description="Re-list every server instead of using the runtime's cache."),
-    entity_client: NemoEntitiesClient = Depends(get_entity_client),
-) -> AgentToolsResponse:
-    """List the tools each of the agent's MCP servers exposes, in one call.
-
-    The agent's first running deployment lists every declared server concurrently and caches the
-    result, so this costs one runtime round-trip however many servers the agent declares. Without a
-    running deployment, the declared servers come back as ``not_deployed`` with no tools.
-    """
-    try:
-        agent = await entity_client.get(Agent, name=name, workspace=workspace)
-        deployments = await entity_client.list(AgentDeployment, workspace=workspace)
-    except NemoEntityNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Agent '{name}' not found in workspace '{workspace}'.",
-        ) from exc
-    except Exception as exc:
-        logger.exception("Failed to load agent '%s' for tool listing", name)
-        raise HTTPException(status_code=500, detail="Failed to list agent tools.") from exc
-
-    declared = _declared_mcp_servers(agent)
-    if not declared:
-        return AgentToolsResponse(servers=[])
-
-    deployment = next((d for d in deployments.data if d.agent == name and is_deployment_routable(d)), None)
-    if deployment is None:
-        return AgentToolsResponse(
-            servers=[
-                AgentMcpServerTools(name=server, transport=transport, status="not_deployed")
-                for server, transport in declared.items()
-            ]
-        )
-
-    try:
-        return await _fetch_runtime_tools(deployment, refresh=refresh)
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Deployment '%s' did not report tools", deployment.name, exc_info=True)
-        error = (
-            "This deployment predates tool listing; redeploy the agent to list its tools."
-            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404
-            else f"Deployment '{deployment.name}' did not report its tools."
-        )
-        return AgentToolsResponse(
-            deployment=deployment.name,
-            servers=[
-                AgentMcpServerTools(name=server, transport=transport, status="error", error=error)
-                for server, transport in declared.items()
-            ],
-        )
-
-
-def _declared_mcp_servers(agent: Agent) -> dict[str, str]:
-    """Map each MCP server name in an agent spec to its transport; empty for other config formats."""
-    if agent.config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-        return {}
-    mcp = agent.config.get("mcp")
-    servers = mcp.get("servers") if isinstance(mcp, dict) else None
-    if not isinstance(servers, dict):
-        return {}
-    return {
-        str(server): str(spec.get("transport", "")) if isinstance(spec, dict) else ""
-        for server, spec in servers.items()
-    }
-
-
-async def _fetch_runtime_tools(deployment: AgentDeployment, *, refresh: bool) -> AgentToolsResponse:
-    """Ask a running deployment's runtime for its tools; the runtime's view wins over the stored spec."""
-    endpoint = get_deployment_endpoint(deployment)
-    if endpoint is None:  # pragma: no cover - is_deployment_routable guarantees an endpoint
-        raise ValueError(f"Deployment '{deployment.name}' has no routable endpoint.")
-    url, headers = get_deployment_transport(deployment).target(f"{endpoint.rstrip('/')}/v1/tools")
-    async with httpx.AsyncClient(timeout=_RUNTIME_TOOLS_TIMEOUT) as client:
-        response = await client.get(url, headers=headers, params={"refresh": "true"} if refresh else None)
-        response.raise_for_status()
-    reported = AgentToolsResponse.model_validate(response.json())
-    return reported.model_copy(update={"deployment": deployment.name})
 
 
 def _validate_agent_config_for_register(body: RegisterAgentRequest) -> dict[str, Any]:

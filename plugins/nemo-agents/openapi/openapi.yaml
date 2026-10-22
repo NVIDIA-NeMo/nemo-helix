@@ -186,6 +186,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/agents/{name}/status:
+    get:
+      tags:
+      - Agents
+      summary: Get Agent Status
+      description: 'Report the runtime status of an agent, including its MCP servers.
+
+
+        Each running deployment checks its servers by launching (stdio) or connecting
+        to
+
+        (remote) them, and reuses that check briefly so polling does not relaunch
+        them.'
+      operationId: get_agent_status_apis_agents_v2_workspaces__workspace__agents__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatus'
+        '404':
+          description: Agent not found
+        '500':
+          description: Failed to list deployments for the agent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/agents/{name}/tools:
     get:
       tags:
@@ -195,14 +246,16 @@ paths:
         call.
 
 
-        The agent''s first running deployment lists every declared server concurrently
-        and caches the
+        The agent''s first running deployment probes every declared server concurrently
+        and keeps a
 
-        result, so this costs one runtime round-trip however many servers the agent
-        declares. Without a
+        running server''s listing until refreshed, so this costs one runtime round-trip
+        however many
 
-        running deployment, the declared servers come back as ``not_deployed`` with
-        no tools.'
+        servers the agent declares. Without a running deployment, the declared servers
+        come back as
+
+        ``not_started`` with no tools.'
       operationId: list_agent_tools_apis_agents_v2_workspaces__workspace__agents__name__tools_get
       parameters:
       - name: workspace
@@ -222,10 +275,10 @@ paths:
         required: false
         schema:
           type: boolean
-          description: Re-list every server instead of using the runtime's cache.
+          description: Re-probe every server instead of reusing the runtime's listing.
           default: false
           title: Refresh
-        description: Re-list every server instead of using the runtime's cache.
+        description: Re-probe every server instead of reusing the runtime's listing.
       responses:
         '200':
           description: Successful Response
@@ -233,6 +286,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentToolsResponse'
+        '404':
+          description: Agent not found
+        '500':
+          description: Failed to list deployments for the agent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -3133,6 +3197,61 @@ components:
         \ ``agent_deployment``\nLifecycle: pending \u2192 starting \u2192 running\
         \ | failed.\nThe :class:`~nemo_agents_plugin.runner.controller.AgentDeploymentController`\n\
         drives state transitions by reconciling this entity against the\n:class:`~nemo_agents_plugin.runner.backend.RunnerBackend`."
+    AgentDeploymentStatus:
+      properties:
+        deployment:
+          type: string
+          title: Deployment
+          description: Name of the AgentDeployment.
+        deployment_mode:
+          type: string
+          enum:
+          - subprocess
+          - docker
+          - k8s
+          - openshell
+          title: Deployment Mode
+          description: subprocess | docker | k8s.
+        status:
+          type: string
+          enum:
+          - pending
+          - starting
+          - running
+          - failed
+          - deleting
+          title: Status
+          description: Deployment lifecycle status.
+        endpoint:
+          type: string
+          title: Endpoint
+          description: Routable endpoint of the runtime, when it has one.
+          default: ''
+        error:
+          type: string
+          title: Error
+          description: Deployment-level error, when the deployment itself failed.
+          default: ''
+        probe_error:
+          type: string
+          title: Probe Error
+          description: Why the MCP status could not be read from the runtime; empty
+            when the check ran.
+          default: ''
+        mcp_servers:
+          items:
+            $ref: '#/components/schemas/McpServerStatus'
+          type: array
+          title: Mcp Servers
+          description: Every MCP server this deployment's config declares, with its
+            runtime state.
+      type: object
+      required:
+      - deployment
+      - deployment_mode
+      - status
+      title: AgentDeploymentStatus
+      description: Runtime status of one deployment of an agent, with its MCP servers.
     AgentEnvironment:
       properties:
         description:
@@ -3435,41 +3554,6 @@ components:
         \ than this model narrowing them for everyone. The\n``agents.execute`` job,\
         \ for example, accepts only ``nemo-agents-spec-v1``\nand rejects a config\
         \ that is not a valid agent spec."
-    AgentMcpServerTools:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: Server name, as declared under the agent config's ``mcp.servers``.
-        transport:
-          type: string
-          title: Transport
-        status:
-          type: string
-          enum:
-          - discovered
-          - error
-          - not_deployed
-          title: Status
-          description: '``discovered`` when ``tools`` came from the running server;
-            ``error`` when listing failed (see ``error``); ``not_deployed`` when the
-            agent has no running deployment to ask.'
-        error:
-          title: Error
-          type: string
-        tools:
-          items:
-            $ref: '#/components/schemas/AgentTool'
-          type: array
-          title: Tools
-      type: object
-      required:
-      - name
-      - transport
-      - status
-      title: AgentMcpServerTools
-      description: The tools one declared MCP server exposes, or why they could not
-        be listed.
     AgentSession:
       properties:
         name:
@@ -3574,34 +3658,51 @@ components:
         The session entity owns Platform-level conversation identity only. Live
 
         harness state remains process-local to the deployment''s serving runtime.'
-    AgentTool:
+    AgentStatus:
       properties:
-        name:
+        agent:
           type: string
-          title: Name
-        title:
-          title: Title
-          description: Human-readable display name, when the server sets one.
+          title: Agent
+          description: Name of the agent.
+        workspace:
           type: string
-        description:
-          title: Description
+          title: Workspace
+          description: Workspace the agent belongs to.
+        checked_at:
           type: string
-        input_schema:
-          additionalProperties: true
-          type: object
-          title: Input Schema
-          description: JSON Schema for the tool's arguments.
-        enabled:
-          type: boolean
-          title: Enabled
-          description: False when the agent's allowed/blocked tool policy hides this
-            tool from the model.
+          format: date-time
+          title: Checked At
+          description: When the status was assembled, after every deployment's probe
+            completed; not when individual probes began.
+        declared_mcp_servers:
+          items:
+            $ref: '#/components/schemas/McpServerStatus'
+          type: array
+          title: Declared Mcp Servers
+          description: MCP servers declared in the stored agent config, each reported
+            as 'not_started'.
+        deployments:
+          items:
+            $ref: '#/components/schemas/AgentDeploymentStatus'
+          type: array
+          title: Deployments
+          description: Runtime status per deployment of this agent.
       type: object
       required:
-      - name
-      - enabled
-      title: AgentTool
-      description: One tool an MCP server reports through ``tools/list``.
+      - agent
+      - workspace
+      - checked_at
+      title: AgentStatus
+      description: 'Response body for ``GET /v2/workspaces/{workspace}/agents/{name}/status``.
+
+
+        ``declared_mcp_servers`` is the static view from the stored agent config,
+
+        what the agent expects to exist, and is populated whether or not anything
+
+        is deployed. ``deployments`` adds the runtime view, one entry per deployment,
+
+        each reporting the same servers as the runtime actually finds them.'
     AgentToolsResponse:
       properties:
         deployment:
@@ -3609,16 +3710,27 @@ components:
           description: The running deployment the tools were listed from; null when
             none is running.
           type: string
+        checked_at:
+          title: Checked At
+          description: When the oldest server listing was checked; null when no runtime
+            was asked.
+          type: string
+          format: date-time
+        probe_error:
+          type: string
+          title: Probe Error
+          description: Why the runtime could not be asked for its tools; empty when
+            it answered.
+          default: ''
         servers:
           items:
-            $ref: '#/components/schemas/AgentMcpServerTools'
+            $ref: '#/components/schemas/McpServerStatus'
           type: array
           title: Servers
+          description: Every MCP server the agent declares, with the tools it exposes.
       type: object
-      required:
-      - servers
       title: AgentToolsResponse
-      description: Response for ``GET /v2/workspaces/{workspace}/agents/{name}/tools``.
+      description: Response body for ``GET /v2/workspaces/{workspace}/agents/{name}/tools``.
     AgentWorkdir:
       properties:
         base_workdir:
@@ -5156,6 +5268,137 @@ components:
         the url + env + secrets for that same name. Matched by server-name key at
 
         compile time; ``secrets`` are merged into the server''s ``env``.'
+    McpServerInfo:
+      properties:
+        name:
+          type: string
+          title: Name
+        version:
+          type: string
+          title: Version
+      type: object
+      required:
+      - name
+      - version
+      title: McpServerInfo
+      description: The name and version a server reported when its MCP session initialized.
+    McpServerStatus:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Server name as declared under mcp.servers in the agent config.
+        transport:
+          type: string
+          title: Transport
+          description: Transport as declared (e.g. 'stdio', 'streamable_http').
+        target:
+          type: string
+          title: Target
+          description: Command to spawn for stdio servers, or the endpoint URL for
+            remote ones.
+        args:
+          items:
+            type: string
+          type: array
+          title: Args
+          description: Arguments passed to a stdio command.
+        exposure:
+          type: string
+          title: Exposure
+          description: '''harness_native'' or ''fabric_managed''.'
+          default: ''
+        state:
+          type: string
+          enum:
+          - running
+          - unresolved
+          - spawn_failed
+          - unreachable
+          - not_started
+          - unknown
+          title: State
+          description: 'running: a probe from the runtime process started (stdio)
+            or connected to (remote) the server, initialized an MCP session, and listed
+            its tools. The probe is its own launch or connection, not the harness''s
+            live one, so this says the server can come up, not that the harness has
+            it. unresolved: stdio command not found on the runtime PATH. spawn_failed:
+            command resolved but the server died or never initialized. unreachable:
+            remote server did not answer. not_started: nothing is running to check
+            against. unknown: transport not understood, so no check was made.'
+        command_resolved:
+          type: boolean
+          title: Command Resolved
+          description: Whether a stdio command was found on the runtime PATH. Always
+            false for remote transports, which have no command to resolve. The path
+            it resolved to is deliberately not reported.
+          default: false
+        detail:
+          type: string
+          title: Detail
+          description: Human-readable explanation of the state.
+          default: ''
+        error:
+          type: string
+          title: Error
+          description: Short, generic error message when the server failed to start.
+          default: ''
+        server_info:
+          allOf:
+          - $ref: '#/components/schemas/McpServerInfo'
+          description: Name and version the server reported, when it started.
+        latency_ms:
+          title: Latency Ms
+          description: Milliseconds the probe took to launch or connect, initialize,
+            and list tools; null when no connection was attempted.
+          type: integer
+        checked_at:
+          title: Checked At
+          description: When this server's probe finished; null when it was never probed.
+          type: string
+          format: date-time
+        tools:
+          items:
+            $ref: '#/components/schemas/McpTool'
+          type: array
+          title: Tools
+          description: Tools the server advertised, when it started.
+      type: object
+      required:
+      - name
+      - transport
+      - target
+      - state
+      title: McpServerStatus
+      description: Runtime state of one MCP server an agent declares.
+    McpTool:
+      properties:
+        name:
+          type: string
+          title: Name
+        title:
+          title: Title
+          description: Human-readable display name, when the server sets one.
+          type: string
+        description:
+          title: Description
+          type: string
+        input_schema:
+          additionalProperties: true
+          type: object
+          title: Input Schema
+          description: JSON Schema for the tool's arguments.
+        enabled:
+          type: boolean
+          title: Enabled
+          description: False when the agent's allowed/blocked tool policy hides this
+            tool from the model.
+          default: true
+      type: object
+      required:
+      - name
+      title: McpTool
+      description: One tool an MCP server advertised through ``tools/list``.
     ModelProviderOverride:
       properties:
         base_url:

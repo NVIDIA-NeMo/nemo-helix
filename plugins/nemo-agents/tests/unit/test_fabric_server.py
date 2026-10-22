@@ -7,7 +7,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -33,8 +33,7 @@ from nemo_agents_plugin.fabric.session_manager import (
     FabricSessionStopError,
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
-from nemo_agents_plugin.fabric.tool_discovery import McpToolCatalog
-from nemo_agents_plugin.schema import AgentMcpServerTools
+from nemo_agents_plugin.mcp_status import MCP_STATUS_CACHE_SECONDS
 from starlette.requests import ClientDisconnect
 
 
@@ -148,6 +147,42 @@ def _sse_payload(event: str) -> dict[str, object]:
 def _sse_line_payload(line: str) -> dict[str, object]:
     assert line.startswith("data: ")
     return json.loads(line.removeprefix("data: "))
+
+
+def test_mcp_status_reports_a_declared_stdio_server_that_is_not_on_path(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+) -> None:
+    """The runtime answers for a server it cannot resolve, rather than staying silent."""
+    config = _example_config()
+    config["mcp"] = {"servers": {"iocs": {"transport": "stdio", "url": "nemo-mcp-server-that-is-not-installed"}}}
+    config_path = _write_agent_config(tmp_path, config)
+    app = create_fabric_serving_app(config_path)
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert uuid.UUID(body["runtime_instance_id"])
+    [server_status] = body["servers"]
+    assert server_status["name"] == "iocs"
+    assert server_status["state"] == "unresolved"
+    assert server_status["detail"] == "Command not found."
+
+
+def test_mcp_status_is_empty_when_no_servers_are_declared(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+) -> None:
+    config_path = _write_agent_config(tmp_path)
+    app = create_fabric_serving_app(config_path)
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    assert response.json()["servers"] == []
 
 
 def test_shutdown_removes_a_staged_agent_root(
@@ -1064,29 +1099,27 @@ async def test_idle_cleanup_runs_periodically_until_shutdown() -> None:
     assert cleanup_calls == [30.0]
 
 
-def test_list_tools_returns_catalog_servers(
+def test_mcp_tools_and_status_share_one_cache_with_different_freshness(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Status re-checks past the TTL; tools reuse a running server's listing until refreshed."""
     config_path = _write_agent_config(tmp_path)
     app = create_fabric_serving_app(config_path)
-    refresh_calls: list[bool] = []
+    max_ages: list[float | None] = []
 
-    async def list_servers(*, refresh: bool = False) -> list[AgentMcpServerTools]:
-        refresh_calls.append(refresh)
-        return [AgentMcpServerTools(name="calculator", transport="stdio", status="discovered")]
+    async def get(*, max_age: float | None) -> tuple[list[Any], datetime]:
+        max_ages.append(max_age)
+        return [], datetime(2026, 1, 1, tzinfo=UTC)
 
     with TestClient(app) as client:
-        assert isinstance(app.state.tool_catalog, McpToolCatalog)
-        monkeypatch.setattr(app.state.tool_catalog, "list_servers", list_servers)
-        response = client.get("/v1/tools")
-        refreshed = client.get("/v1/tools", params={"refresh": "true"})
+        monkeypatch.setattr(app.state.mcp_status_cache, "get", get)
+        responses = [
+            client.get("/mcp/status"),
+            client.get("/mcp/tools"),
+            client.get("/mcp/tools", params={"refresh": "true"}),
+        ]
 
-    assert response.status_code == 200
-    assert refreshed.status_code == 200
-    assert response.json() == {
-        "deployment": None,
-        "servers": [{"name": "calculator", "transport": "stdio", "status": "discovered", "error": None, "tools": []}],
-    }
-    assert refresh_calls == [False, True]
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert max_ages == [MCP_STATUS_CACHE_SECONDS, None, 0]

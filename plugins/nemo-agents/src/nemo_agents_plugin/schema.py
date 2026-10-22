@@ -20,7 +20,7 @@ Naming conventions:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from datetime import datetime
 
 from nemo_agents_plugin.entities import (
     Agent,
@@ -32,6 +32,7 @@ from nemo_agents_plugin.entities import (
     DeploymentMode,
     DeploymentStatus,
 )
+from nemo_agents_plugin.mcp_status import McpServerStatus
 from nemo_helix_plugin.agents.types import (
     CreateComputeSpecRequest as CreateComputeSpecRequest,
 )
@@ -56,6 +57,71 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 # Filters — extend NemoFilter so extra fields are rejected (extra="forbid")
 # ---------------------------------------------------------------------------
+
+
+class AgentDeploymentStatus(BaseModel):
+    """Runtime status of one deployment of an agent, with its MCP servers."""
+
+    deployment: str = Field(description="Name of the AgentDeployment.")
+    deployment_mode: DeploymentMode = Field(description="subprocess | docker | k8s.")
+    status: DeploymentStatus = Field(description="Deployment lifecycle status.")
+    endpoint: str = Field(default="", description="Routable endpoint of the runtime, when it has one.")
+    error: str = Field(default="", description="Deployment-level error, when the deployment itself failed.")
+    probe_error: str = Field(
+        default="",
+        description="Why the MCP status could not be read from the runtime; empty when the check ran.",
+    )
+    mcp_servers: list[McpServerStatus] = Field(
+        default_factory=list,
+        description="Every MCP server this deployment's config declares, with its runtime state.",
+    )
+
+
+class AgentStatus(BaseModel):
+    """Response body for ``GET /v2/workspaces/{workspace}/agents/{name}/status``.
+
+    ``declared_mcp_servers`` is the static view from the stored agent config,
+    what the agent expects to exist, and is populated whether or not anything
+    is deployed. ``deployments`` adds the runtime view, one entry per deployment,
+    each reporting the same servers as the runtime actually finds them.
+    """
+
+    agent: str = Field(description="Name of the agent.")
+    workspace: str = Field(description="Workspace the agent belongs to.")
+    checked_at: datetime = Field(
+        description=(
+            "When the status was assembled, after every deployment's probe completed; not when individual probes began."
+        )
+    )
+    declared_mcp_servers: list[McpServerStatus] = Field(
+        default_factory=list,
+        description="MCP servers declared in the stored agent config, each reported as 'not_started'.",
+    )
+    deployments: list[AgentDeploymentStatus] = Field(
+        default_factory=list,
+        description="Runtime status per deployment of this agent.",
+    )
+
+
+class AgentToolsResponse(BaseModel):
+    """Response body for ``GET /v2/workspaces/{workspace}/agents/{name}/tools``."""
+
+    deployment: str | None = Field(
+        default=None,
+        description="The running deployment the tools were listed from; null when none is running.",
+    )
+    checked_at: datetime | None = Field(
+        default=None,
+        description="When the oldest server listing was checked; null when no runtime was asked.",
+    )
+    probe_error: str = Field(
+        default="",
+        description="Why the runtime could not be asked for its tools; empty when it answered.",
+    )
+    servers: list[McpServerStatus] = Field(
+        default_factory=list,
+        description="Every MCP server the agent declares, with the tools it exposes.",
+    )
 
 
 class AgentFilter(NemoFilter):
@@ -117,50 +183,6 @@ class DeploymentModeList(BaseModel):
     """Response for ``GET /v2/workspaces/{workspace}/deployment-modes``."""
 
     data: list[DeploymentModeAvailability]
-
-
-# ---------------------------------------------------------------------------
-# Agent tools — what an agent's MCP servers expose
-# ---------------------------------------------------------------------------
-
-McpServerToolsStatus = Literal["discovered", "error", "not_deployed"]
-
-
-class AgentTool(BaseModel):
-    """One tool an MCP server reports through ``tools/list``."""
-
-    name: str
-    title: str | None = Field(default=None, description="Human-readable display name, when the server sets one.")
-    description: str | None = None
-    input_schema: dict[str, Any] = Field(default_factory=dict, description="JSON Schema for the tool's arguments.")
-    enabled: bool = Field(
-        description="False when the agent's allowed/blocked tool policy hides this tool from the model.",
-    )
-
-
-class AgentMcpServerTools(BaseModel):
-    """The tools one declared MCP server exposes, or why they could not be listed."""
-
-    name: str = Field(description="Server name, as declared under the agent config's ``mcp.servers``.")
-    transport: str
-    status: McpServerToolsStatus = Field(
-        description=(
-            "``discovered`` when ``tools`` came from the running server; ``error`` when listing failed "
-            "(see ``error``); ``not_deployed`` when the agent has no running deployment to ask."
-        ),
-    )
-    error: str | None = None
-    tools: list[AgentTool] = Field(default_factory=list)
-
-
-class AgentToolsResponse(BaseModel):
-    """Response for ``GET /v2/workspaces/{workspace}/agents/{name}/tools``."""
-
-    deployment: str | None = Field(
-        default=None,
-        description="The running deployment the tools were listed from; null when none is running.",
-    )
-    servers: list[AgentMcpServerTools]
 
 
 # ---------------------------------------------------------------------------
