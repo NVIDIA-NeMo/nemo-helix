@@ -43,6 +43,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
 }) => {
   const {
     workspace,
+    hasSearchOrFilters,
     dataViewState,
     modalDataset,
     setModalDataset,
@@ -149,8 +150,9 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
             requestStatus: isFetching ? 'loading' : undefined,
           },
           DataViewTableContent: {
-            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
-              hasFiltersApplied || hasSearchApplied ? (
+            // The hook's flag ignores the seeded default purposes, so an empty table is still "first use".
+            renderEmptyState: () =>
+              hasSearchOrFilters ? (
                 <EntityEmptyState
                   entity="filesets"
                   variant="no-results"
