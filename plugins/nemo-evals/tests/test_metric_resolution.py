@@ -15,6 +15,7 @@ from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver, HelixMet
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import ResolvedModelReference
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.values import ModelRef
 from nhx_evals_sdk.values.common import SecretRef
 from pytest_mock import MockerFixture
@@ -95,6 +96,12 @@ async def test_model_resolver_mints_job_reachable_gateway_urls(
     entity = SimpleNamespace(workspace="default", name="judge", model_providers=[])
     mocker.patch.object(
         AsyncModelsClient, "get_model", AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=entity)))
+    )
+    passthrough = SimpleNamespace(autoprovisioned=True, default_model_entity=f"{entity.workspace}/{entity.name}")
+    mocker.patch.object(
+        AsyncVirtualModelsClient,
+        "get_virtual_model",
+        AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=passthrough))),
     )
     models_client = AsyncModelsClient.from_client(
         AsyncNemoClient(base_url=client_base_url, http_client=AsyncMock(spec=httpx.AsyncClient))

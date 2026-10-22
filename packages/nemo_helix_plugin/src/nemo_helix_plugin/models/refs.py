@@ -42,6 +42,15 @@ class ModelEntityRefLike(Protocol):
     def name(self) -> str: ...
 
 
+class VirtualModelLike(Protocol):
+    """A VirtualModel's routing identity."""
+
+    @property
+    def autoprovisioned(self) -> bool | None: ...
+    @property
+    def default_model_entity(self) -> str | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedModelReference:
     """Inference route details for a workspace-qualified model reference."""
@@ -51,7 +60,7 @@ class ResolvedModelReference:
     host_url: str | None
     served_model_name: str | None = None
     virtual_model: bool = False
-    """The reference names a VirtualModel with no model entity behind it, so it has no single provider."""
+    """The name is held by a user-managed VirtualModel, so calls may go to any model it routes to."""
 
 
 def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "workspace/name") -> tuple[str, str]:
@@ -97,6 +106,11 @@ def resolved_model_reference(
         host_url=host_url,
         served_model_name=served_model_name,
     )
+
+
+def is_passthrough_virtual_model(virtual_model: VirtualModelLike, workspace: str, name: str) -> bool:
+    """Whether ``virtual_model`` is the passthrough the platform created for model entity ``workspace/name``."""
+    return bool(virtual_model.autoprovisioned) and virtual_model.default_model_entity == f"{workspace}/{name}"
 
 
 def resolved_virtual_model_reference(*, base_url: str, workspace: str, name: str) -> ResolvedModelReference:
