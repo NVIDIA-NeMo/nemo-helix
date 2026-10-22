@@ -29,16 +29,19 @@ export function useOwnedFirstDatasets(workspace: string, pageSize: number) {
     { query: { enabled: Boolean(ownerId) } }
   );
 
+  // The owned query only improves the ordering: wait for it to settle, but if it fails fall back
+  // to the plain newest-first list instead of failing the picker.
+  const ownedSettled = !ownerId || !mine.isPending;
   const datasets = useMemo<FilesetOutput[] | undefined>(
-    () => (all.data ? ownedFirst(mine.data?.data ?? [], all.data.data) : undefined),
-    [all.data, mine.data]
+    () => (all.data && ownedSettled ? ownedFirst(mine.data?.data ?? [], all.data.data) : undefined),
+    [all.data, mine.data, ownedSettled]
   );
 
   return {
     datasets,
-    isPending: all.isPending || (Boolean(ownerId) && mine.isPending),
+    isPending: all.isPending || !ownedSettled,
     isFetching: all.isFetching || mine.isFetching,
-    isError: all.isError || mine.isError,
-    error: all.error ?? mine.error,
+    isError: all.isError,
+    error: all.error,
   };
 }

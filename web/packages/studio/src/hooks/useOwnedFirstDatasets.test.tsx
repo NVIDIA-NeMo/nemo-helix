@@ -46,14 +46,34 @@ describe('useOwnedFirstDatasets', () => {
     );
 
     const { result } = renderHook(() => useOwnedFirstDatasets('default', 3), { wrapper });
-    await waitFor(() => expect(result.current.datasets).toBeDefined());
+    // Owned first (newest first), then the rest of the newest page, with no duplicates. Waiting on
+    // the final names (not just "defined") keeps this independent of which query settles first.
+    await waitFor(() =>
+      expect(result.current.datasets?.map((d) => d.name)).toEqual([
+        'mine-new',
+        'mine-old',
+        'other-1',
+        'other-2',
+      ])
+    );
+  });
 
-    // Owned first (newest first), then the rest of the newest page, with no duplicates.
-    expect(result.current.datasets?.map((d) => d.name)).toEqual([
-      'mine-new',
-      'mine-old',
-      'other-1',
-      'other-2',
-    ]);
+  it('falls back to the plain newest-first list when the owned query fails', async () => {
+    const everyone = [dataset('other-1', 'x'), dataset('mine-new', ME)];
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`,
+        ({ request }) =>
+          new URL(request.url).searchParams.get('filter[created_by]')
+            ? new HttpResponse(null, { status: 500 })
+            : HttpResponse.json({ data: everyone, pagination: { total_results: 2 } })
+      )
+    );
+
+    const { result } = renderHook(() => useOwnedFirstDatasets('default', 3), { wrapper });
+    await waitFor(() =>
+      expect(result.current.datasets?.map((d) => d.name)).toEqual(['other-1', 'mine-new'])
+    );
+    expect(result.current.isError).toBe(false);
   });
 });
