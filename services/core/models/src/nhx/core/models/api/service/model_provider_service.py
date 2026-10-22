@@ -24,6 +24,11 @@ from nhx.core.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# The models controller writes a provider's status once it discovers the provider, so a delete
+# that lands just after creation can find the version it read already replaced. Re-reading and
+# retrying covers that write; repeated conflicts mean a real concurrent edit, so give up then.
+_DELETE_PROVIDER_ATTEMPTS = 3
+
 
 class ModelProviderValidationError(Exception):
     """Raised when model provider validation fails."""
@@ -293,27 +298,37 @@ class ModelProviderService:
         """Delete a provider and the models only it serves, unless it is a deployment's provider."""
         logger.debug("Deleting model provider", extra={"workspace": request.workspace, "provider_name": request.name})
 
-        try:
-            provider = await self.entity_client.get(
-                ModelProviderEntity,
-                workspace=request.workspace,
-                name=request.name,
-            )
-        except EntityNotFoundError:
-            logger.warning(
-                "Model provider not found for deletion",
-                extra={"workspace": request.workspace, "provider_name": request.name},
-            )
-            return False
+        for attempt in range(1, _DELETE_PROVIDER_ATTEMPTS + 1):
+            try:
+                provider = await self.entity_client.get(
+                    ModelProviderEntity,
+                    workspace=request.workspace,
+                    name=request.name,
+                )
+            except EntityNotFoundError:
+                logger.warning(
+                    "Model provider not found for deletion",
+                    extra={"workspace": request.workspace, "provider_name": request.name},
+                )
+                return False
+
+            try:
+                await self.entity_client.delete(
+                    ModelProviderEntity,
+                    provider.name,
+                    workspace=request.workspace,
+                    expected_db_version=provider.db_version,
+                )
+                break
+            except EntityConflictError:
+                if attempt == _DELETE_PROVIDER_ATTEMPTS:
+                    raise
+                logger.info(
+                    "Model provider changed while deleting, retrying",
+                    extra={"workspace": request.workspace, "provider_name": request.name, "attempt": attempt},
+                )
 
         provider_id = f"{request.workspace}/{request.name}"
-        await self.entity_client.delete(
-            ModelProviderEntity,
-            provider.name,
-            workspace=request.workspace,
-            expected_db_version=provider.db_version,
-        )
-
         await self._cleanup_model_entities(provider, provider_id)
         logger.info("Model provider deleted", extra={"workspace": request.workspace, "provider_name": request.name})
         return True
