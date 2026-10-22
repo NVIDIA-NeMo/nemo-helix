@@ -17,17 +17,8 @@ import { getFilesetRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
-/** Config keys rendered by the Summary panel or dedicated structured panels below. */
-const RENDERED_KEYS = new Set([
-  'name',
-  'workspace',
-  'project',
-  'description',
-  'config_format',
-  'workflow',
-  'llms',
-  'functions',
-]);
+/** Config keys always rendered by dedicated structured panels below. */
+const PANEL_KEYS = new Set(['workflow', 'llms', 'functions']);
 
 interface DetailsTabProps {
   workspace: string;
@@ -48,7 +39,18 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
   const workflow = asRecord(config['workflow']);
   const llms = asRecord(config['llms']);
   const functions = asRecord(config['functions']);
-  const extraEntries = Object.entries(config).filter(([key]) => !RENDERED_KEYS.has(key));
+  const summaryValues: Record<string, unknown> = {
+    name: agent?.name ?? agentName,
+    workspace: agent?.workspace ?? workspace,
+    project: agent?.project,
+    description: agent?.description,
+    config_format: agent?.config_format,
+  };
+  // Keep a config key unless the Summary shows the same value for it.
+  const extraEntries = Object.entries(config).filter(
+    ([key, value]) =>
+      !PANEL_KEYS.has(key) && !(isDefined(summaryValues[key]) && summaryValues[key] === value)
+  );
 
   return (
     <Stack gap="4" className="mx-auto w-full max-w-3xl pb-6">

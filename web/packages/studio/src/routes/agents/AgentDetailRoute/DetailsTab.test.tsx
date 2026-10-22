@@ -95,6 +95,31 @@ describe('DetailsTab', () => {
     expect(screen.getAllByText('Support agent')).toHaveLength(1);
   });
 
+  it('keeps config keys when the Summary metadata is absent or differs', async () => {
+    const user = userEvent.setup();
+    render(
+      <DetailsTab
+        workspace="default"
+        agentName="react-agent"
+        agent={{
+          ...baseAgent,
+          description: 'Summary description',
+          config: {
+            description: 'Config description',
+            project: 'config-project',
+            config_format: 'nemo-agents-spec-v1',
+          },
+        }}
+      />
+    );
+
+    await user.click(screen.getByText('Additional configuration'));
+
+    expect(screen.getByText('Config description')).toBeVisible();
+    expect(screen.getByText('config-project')).toBeVisible();
+    expect(screen.getByText('nemo-agents-spec-v1')).toBeVisible();
+  });
+
   it('links to the agent spec fileset from the Summary panel', async () => {
     server.use(
       http.get(FILESET_URL, ({ params }) =>
