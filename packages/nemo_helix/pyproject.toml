@@ -747,6 +747,7 @@ garak = "nemo_garak.docs:get_docs_path"
 [project.entry-points."nemo.inference_middleware"]
 nemo-guardrails = "nemo_guardrails_plugin.middleware:GuardrailsMiddleware"
 nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
+nemo-evals-closed-book = "nemo_evals.closed_book:ClosedBookMiddleware"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.jobs"]
