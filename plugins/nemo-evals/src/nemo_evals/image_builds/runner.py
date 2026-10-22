@@ -9,10 +9,12 @@ import asyncio
 import logging
 import tempfile
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.identity import normalize_reference
+from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import FileSetSource, ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
@@ -70,9 +72,13 @@ async def run_task_image_build(
 ) -> TaskImageBuildEntity:
     """Plan, submit and follow every image of one build, recording progress on its record."""
     head = await entities.get(TaskEntity, name=spec.task, workspace=spec.workspace)
+    # Any revision with this digest will do: they hold the same contents.
     revision = await get_revision(entities, TaskRevisionEntity, head, spec.revision_digest)
     build = await entities.get(
-        TaskImageBuildEntity, name=build_entity_name(spec.attempt), workspace=spec.workspace, parent=revision.id
+        TaskImageBuildEntity,
+        name=build_entity_name(spec.revision_digest, spec.attempt),
+        workspace=spec.workspace,
+        parent=head.id,
     )
     if build.status in TERMINAL_BUILD_STATUSES:
         return build
@@ -90,9 +96,7 @@ async def run_task_image_build(
         )
     except Exception as exc:
         logger.exception("Image build %s of %s raised", build.name, build.task)
-        current = await entities.get(
-            TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=revision.id
-        )
+        current = await entities.get(TaskImageBuildEntity, name=build.name, workspace=build.workspace, parent=head.id)
         if current.status in TERMINAL_BUILD_STATUSES:
             return current
         return await _fail(entities, current, f"task-builder error: {exc}")
@@ -115,8 +119,7 @@ async def _build(
     definition = revision.spec
 
     try:
-        archive = await read_task_archive(files, definition.source)
-        images = plan_images(definition.config, archive, allowed_registries=build.allowed_registries)
+        images = await _plan(files, definition, build)
     except ImagePlanError as exc:
         return await _fail(entities, build, str(exc))
 
@@ -145,6 +148,20 @@ async def _build(
     return await entities.update(build)
 
 
+def _choose_platforms(images: list[BuildImage], requested: str | None) -> None:
+    """Give each image the request's platform, or keep the one its task pins; the two must agree."""
+    if requested is None:
+        return
+    requested = str(Platform.parse(requested))
+    for image in images:
+        if image.platform is not None and image.platform != requested:
+            raise ImagePlanError(
+                "platform_conflict",
+                f"{image.role} is pinned to {image.platform} by the task, and the request asks for {requested}",
+            )
+        image.platform = requested
+
+
 def _settled(images: list[BuildImage]) -> bool:
     return all(image.status in TERMINAL_IMAGE_STATUSES for image in images) or any(
         image.status == "failed" for image in images
@@ -152,7 +169,31 @@ def _settled(images: list[BuildImage]) -> bool:
 
 
 async def read_task_archive(files: AsyncFilesClient, source: HarborArchiveSource) -> TaskArchive:
-    """Download a task archive, check its digest, and list its files."""
+    """Download a task archive, check its digest, and list its files.
+
+    The download is gone once this returns, so the archive keeps no path to it: ``text`` reads nothing.
+    """
+    async with _downloaded(files, source) as path:
+        return replace(await asyncio.to_thread(TaskArchive.read, path), path=None)
+
+
+async def _plan(
+    files: AsyncFilesClient, definition: HarborTaskDefinition, build: TaskImageBuildEntity
+) -> list[BuildImage]:
+    """The task's images, planned while its downloaded archive still exists: planning reads Dockerfiles from it."""
+
+    def plan(path: Path) -> list[BuildImage]:
+        images = plan_images(definition.config, TaskArchive.read(path), allowed_registries=build.allowed_registries)
+        _choose_platforms(images, build.platform)
+        return images
+
+    async with _downloaded(files, definition.source) as path:
+        return await asyncio.to_thread(plan, path)
+
+
+@asynccontextmanager
+async def _downloaded(files: AsyncFilesClient, source: HarborArchiveSource) -> AsyncGenerator[Path]:
+    """A task archive downloaded to a scratch file, its digest checked, for as long as the context lasts."""
     with tempfile.TemporaryDirectory(prefix="task-image-build-") as scratch:
         path = Path(scratch) / "task_archive"
         with path.open("wb") as output:
@@ -163,7 +204,7 @@ async def read_task_archive(files: AsyncFilesClient, source: HarborArchiveSource
                 limit=MAX_ARCHIVE_BYTES,
                 expected_digest=source.files_hash,
             )
-        return await asyncio.to_thread(TaskArchive.read, path)
+        yield path
 
 
 async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition) -> None:
@@ -171,16 +212,27 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
     dockerfile: str | None
     if image.image is not None:
         reference = str(normalize_reference(image.image))
-        name = copy_builder_name(reference)
+        if image.platform is None:
+            # An image published for one platform can only be copied for that one.
+            published = [p for p in await builder.image_platforms(reference) if p.startswith("linux/")]
+            if len(published) == 1:
+                image.platform = published[0]
+        name = copy_builder_name(reference, image.platform)
         source, dockerfile = ImageSource(image=reference), None
     else:
         assert image.context_path is not None and image.dockerfile is not None
         name = builder_name(
-            archive_digest=definition.source.files_hash, context_path=image.context_path, dockerfile=image.dockerfile
+            archive=definition.source.fileset_ref,
+            archive_digest=definition.source.files_hash,
+            context_path=image.context_path,
+            dockerfile=image.dockerfile,
+            platform=image.platform,
         )
         source, dockerfile = archive_source(definition.source.fileset_ref, image.context_path), image.dockerfile
     try:
-        submitted = await ensure_build(builder, name=name, source=source, dockerfile=dockerfile)
+        submitted = await ensure_build(
+            builder, name=name, source=source, dockerfile=dockerfile, platform=image.platform
+        )
     except NemoClientError as exc:
         image.status = "failed"
         image.error = f"Builder refused the build: {exc}"

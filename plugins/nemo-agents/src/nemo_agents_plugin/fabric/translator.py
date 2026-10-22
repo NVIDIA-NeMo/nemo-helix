@@ -193,7 +193,7 @@ def _model_payloads(config: AgentConfig, selected: ModelConfig) -> dict[str, dic
 
     ``FabricConfig.models`` and the adapter contract's ``AgentConfig.models`` are
     both keyed maps, so the whole map is forwarded rather than just the harness's
-    primary model. An adapter that reads a secondary key (the Insights analyst
+    primary model. An adapter that reads a secondary key (Compass
     reads ``fast`` for context summarization) would otherwise see it silently
     missing and fall back to ``default``.
 

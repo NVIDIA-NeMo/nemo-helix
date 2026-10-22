@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import datetime
 import json
 import logging
 import re
@@ -29,16 +30,20 @@ from nhx.common.jobs.schemas import (
 from nhx.common.observability import create_counter
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixJobAttemptResponse,
+    HelixJobAttemptSortField,
     HelixJobListSortField,
     HelixJobResponse,
     HelixJobSortField,
     HelixJobStepsListFilter,
     HelixJobStepWithContext,
     HelixJobTaskUpdate,
+    UpdateHelixJobRequest,
     get_model_id,
     job_artifact_base_path,
 )
 from nhx.core.jobs.app.constants import (
+    ERROR_CAUSE,
     IMAGE_DIGEST_AT_SAVE,
     IMAGE_DIGEST_STEP,
     JOB_TASK_CLEANUP_PENDING_KEY,
@@ -46,6 +51,7 @@ from nhx.core.jobs.app.constants import (
 )
 from nhx.core.jobs.app.lifecycle import (
     attempt_can_transition,
+    clear_image_comparison,
     rerun_status_details,
     saved_image_digest_for_step,
     storage_targets,
@@ -129,6 +135,10 @@ def generate_job_name(source: str, short_id: str) -> str:
     return f"{prefix or _AUTO_NAME_FALLBACK_PREFIX}-{short_id}"
 
 
+class JobHasNoAttemptError(ValueError):
+    """Raised when the reserved current selector is used before a job has run."""
+
+
 operations_counter = create_counter(
     meter=meter,
     subsystem="jobs",
@@ -184,6 +194,18 @@ def _reject_pause_ttl_over_maximum(pause_ttl_seconds: int | None) -> None:
         raise PauseTTLLimitError(f"pause_ttl_seconds cannot exceed the platform maximum of {maximum} seconds.")
 
 
+def _keep_reported_cause(reported: dict[str, Any] | None, update: dict[str, Any]) -> dict[str, Any]:
+    """Return the error details after ``update`` arrives for an error already ``reported``.
+
+    A task that classified its own failure reports a ``cause`` key, None when no rule matched. A later error
+    for the same failure, such as the controller's when the process exits, only sees the exit, so it adds
+    keys without replacing what the task reported.
+    """
+    if reported and ERROR_CAUSE in reported:
+        return {**update, **reported}
+    return update
+
+
 def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> HelixJobResponse:
     """Helper to create HelixJobResponse from job and attempt entities."""
     ownership = job.ownership
@@ -209,6 +231,27 @@ def create_platform_job_response(job: HelixJob, attempt: HelixJobAttempt) -> Hel
         error_details=attempt.error_details,
         ownership=ownership,
         custom_fields=job.custom_fields,
+    )
+
+
+def create_attempt_response(attempt: HelixJobAttempt, *, current_attempt_id: str | None) -> HelixJobAttemptResponse:
+    """Convert an attempt entity into the public attempt response."""
+    if attempt.created_at is None or attempt.updated_at is None:
+        raise ValueError(f"Attempt '{attempt.id}' is missing persistence timestamps.")
+    return HelixJobAttemptResponse(
+        id=attempt.id,
+        name=attempt.name,
+        job=attempt.job,
+        workspace=attempt.workspace,
+        seq=attempt.seq,
+        spec=attempt.spec,
+        platform_spec=attempt.platform_spec,
+        status=attempt.status,
+        status_details=attempt.status_details,
+        error_details=attempt.error_details,
+        created_at=attempt.created_at,
+        updated_at=attempt.updated_at,
+        is_current=attempt.id == current_attempt_id,
     )
 
 
@@ -380,10 +423,10 @@ class JobDispatcher:
         """Get a platform job by name or ID, with its current attempt.
 
         ``nemo jobs list`` leads with the job ``id`` (the ``platform-job-...``
-        value), while jobs are stored keyed by ``name``. To avoid rejecting the
-        identifier the list surfaces, resolve by name first and fall back to an
-        ID lookup on a miss. The ID lookup is workspace-agnostic, so the result
-        is discarded unless it lives in the requested workspace.
+        value), while jobs are stored keyed by ``name``. Resolve the stable ID
+        first, then fall back to a workspace-scoped name lookup. The ID lookup
+        is workspace-agnostic, so its result is accepted only when it lives in
+        the requested workspace.
         """
         job_entity = await self._resolve_job(identifier, workspace)
         if job_entity is None or job_entity.current_attempt_id is None:
@@ -395,15 +438,60 @@ class JobDispatcher:
         return create_platform_job_response(job_entity, attempt)
 
     async def _resolve_job(self, identifier: str, workspace: str) -> Optional[HelixJob]:
-        """Resolve a job by name, falling back to its ID within the workspace."""
-        try:
-            return await self.store.get(HelixJob, identifier, workspace=workspace)
-        except EntityNotFoundError:
-            pass
+        """Resolve a job by ID, falling back to its name within the workspace."""
         job_entity = await self._get_job_by_id_optional(identifier)
         if job_entity is not None and job_entity.workspace == workspace:
             return job_entity
-        return None
+        try:
+            return await self.store.get(HelixJob, identifier, workspace=workspace)
+        except EntityNotFoundError:
+            return None
+
+    async def update_job(
+        self,
+        identifier: str,
+        workspace: str,
+        update: UpdateHelixJobRequest,
+        auth_context: AuthContext | None = None,
+    ) -> HelixJobResponse | None:
+        """Apply a validated partial update to a job definition or metadata."""
+        resolved = await self._resolve_job(identifier, workspace)
+        if resolved is None:
+            return None
+        async with _get_job_mutation_lock(resolved.name, workspace):
+            try:
+                job = await self.store.get(HelixJob, resolved.name, workspace=workspace)
+            except EntityNotFoundError:
+                return None
+            if job.id != resolved.id:
+                return None
+
+            fields = update.model_fields_set
+            if "spec" in fields:
+                assert update.platform_spec is not None
+                await self.validate_job_secrets(update.platform_spec, workspace)
+
+            if job.current_attempt_id is None:
+                raise JobHasNoAttemptError(f"Job '{job.name}' has not run yet.")
+            attempt = await self.get_attempt(job.current_attempt_id)
+            if attempt is None or attempt.job != job.id or attempt.workspace != workspace:
+                raise JobHasNoAttemptError(f"Current attempt for job '{job.name}' does not exist.")
+
+            if "description" in fields:
+                job.description = update.description
+            if "spec" in fields:
+                assert update.spec is not None
+                assert update.platform_spec is not None
+                job.spec = update.spec
+                job.platform_spec = update.platform_spec
+
+            if auth_context is not None:
+                job.with_auth_context(auth_context)
+            job = await self.store.update(job)
+            if auth_context is not None:
+                job.with_auth_context(auth_context)
+            operations_counter.add(1, attributes={"operation": "update_job"})
+            return create_platform_job_response(job, attempt)
 
     async def list_jobs(
         self,
@@ -508,7 +596,7 @@ class JobDispatcher:
                             "terminal state before deleting."
                         )
 
-            await self._queue_storage_reclaim(job_entity)
+            await self._queue_storage_reclaim(job_entity, attempts)
 
             # Get all results
             results = await self._list_all_entities(
@@ -567,18 +655,28 @@ class JobDispatcher:
             logger.exception("Error deleting job", extra=extras)
             raise e
 
-    async def _queue_storage_reclaim(self, job: HelixJob) -> None:
+    async def _queue_storage_reclaim(self, job: HelixJob, attempts: list[HelixJobAttempt]) -> None:
         """Record the job's storage for the controller to reclaim once the job is gone.
 
         Skipped when the job never mounted storage. Written before any entity is deleted,
         and a failure to write it fails the delete: without the record, a new job with the
         same name would mount this job's storage. A job the storage sweep already reclaimed
         is recorded too, since the sweep may have stopped before queueing it.
+
+        The current attempt is marked reclaimed first. A delete that fails after queueing
+        leaves the job in place while the controller deletes its storage, and the mark makes
+        resume, rerun and control updates refuse it.
         """
         targets = storage_targets(job.platform_spec)
         if not targets:
             return
         extras = {"job": job.name, "workspace": job.workspace}
+        current = next((attempt for attempt in attempts if attempt.id == job.current_attempt_id), None)
+        if current is not None and not (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
+            current.status_details = self._update_status_details_object(
+                current.status_details, {STORAGE_RECLAIMED_AT: datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            )
+            await self.store.update(current)
         try:
             await self.system_store.create(
                 HelixJobStorageReclaim(
@@ -684,6 +782,57 @@ class JobDispatcher:
         except EntityNotFoundError:
             return None
 
+    async def resolve_attempt(
+        self,
+        job_identifier: str,
+        attempt_identifier: str,
+        workspace: str,
+    ) -> tuple[HelixJob, HelixJobAttempt] | None:
+        """Resolve an attempt by ID or the reserved current selector."""
+        job = await self._resolve_job(job_identifier, workspace)
+        if job is None:
+            return None
+
+        if attempt_identifier == "current":
+            if job.current_attempt_id is None:
+                raise JobHasNoAttemptError(f"Job '{job.name}' has not run yet.")
+            attempt = await self.get_attempt(job.current_attempt_id)
+        else:
+            attempt = await self.get_attempt(attempt_identifier)
+
+        if attempt is None or attempt.workspace != workspace or attempt.job != job.id:
+            return None
+        return job, attempt
+
+    async def list_attempts(
+        self,
+        job_identifier: str,
+        workspace: str,
+        parsed: ParsedFilter,
+        *,
+        page: int,
+        page_size: int,
+        sort: HelixJobAttemptSortField,
+    ) -> tuple[list[HelixJobAttemptResponse], int] | None:
+        """List attempts belonging to a job with store-backed pagination."""
+        job = await self._resolve_job(job_identifier, workspace)
+        if job is None:
+            return None
+        parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="data.job", value=job.id))
+        response = await self.store.list(
+            HelixJobAttempt,
+            workspace=workspace,
+            filter_operation=parsed.operation,
+            sort=sort.value,
+            page=page,
+            page_size=page_size,
+        )
+        attempts = [
+            create_attempt_response(attempt, current_attempt_id=job.current_attempt_id) for attempt in response.data
+        ]
+        operations_counter.add(1, attributes={"operation": "list_attempts"})
+        return attempts, response.pagination.total_results
+
     async def _get_job_by_id_optional(self, job_id: str) -> Optional[HelixJob]:
         """Get a job by ID, returning None if not found."""
         try:
@@ -724,21 +873,13 @@ class JobDispatcher:
 
     async def get_current_attempt(self, job_name: str, workspace: str) -> Optional[HelixJobAttempt]:
         """Get the current attempt for a job."""
-
-        job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
-        response = await self.store.list(
-            HelixJobAttempt,
-            filter_obj={"job": job_entity.id},
-            page_size=1000,
-            workspace=workspace,
-        )
-
-        if not response.data:
+        job_entity = await self._resolve_job(job_name, workspace)
+        if job_entity is None or job_entity.current_attempt_id is None:
             return None
-
-        # Sort by seq descending and return first
-        sorted_attempts = sorted(response.data, key=lambda a: a.seq, reverse=True)
-        return sorted_attempts[0] if sorted_attempts else None
+        attempt = await self.get_attempt(job_entity.current_attempt_id)
+        if attempt is None or attempt.job != job_entity.id or attempt.workspace != workspace:
+            return None
+        return attempt
 
     # =========================================================================
     # Step Operations
@@ -773,6 +914,74 @@ class JobDispatcher:
             if step.name == step_name:
                 return step
         return None
+
+    async def get_attempt_step_by_name(
+        self,
+        job_identifier: str,
+        attempt_identifier: str,
+        step_name: str,
+        workspace: str,
+    ) -> Optional[HelixJobStep]:
+        """Get a step after validating its complete job/attempt parent chain."""
+        resolved = await self.resolve_attempt(job_identifier, attempt_identifier, workspace)
+        if resolved is None:
+            return None
+        _, attempt = resolved
+        try:
+            step = await self.store.get(HelixJobStep, step_name, workspace=workspace, parent=attempt.id)
+        except EntityNotFoundError:
+            return None
+        return step if step.attempt_id == attempt.id else None
+
+    async def list_attempt_steps(
+        self,
+        job_identifier: str,
+        attempt_identifier: str,
+        workspace: str,
+        parsed: ParsedFilter,
+        *,
+        page: int,
+        page_size: int,
+        sort: HelixJobSortField,
+    ) -> tuple[list[HelixJobStepWithContext], int] | None:
+        """List steps for one resolved attempt with full parent validation."""
+        resolved = await self.resolve_attempt(job_identifier, attempt_identifier, workspace)
+        if resolved is None:
+            return None
+        job, attempt = resolved
+        parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="data.attempt_id", value=attempt.id))
+        response = await self.store.list(
+            HelixJobStep,
+            workspace=workspace,
+            filter_operation=parsed.operation,
+            sort=sort.value,
+            page=page,
+            page_size=page_size,
+        )
+        steps: list[HelixJobStepWithContext] = []
+        for step in response.data:
+            if step.created_at is None or step.updated_at is None:
+                raise ValueError(f"Job step '{step.id}' is missing persistence timestamps.")
+            steps.append(
+                HelixJobStepWithContext(
+                    id=step.id,
+                    job=job.name,
+                    attempt_id=attempt.id,
+                    workspace=step.workspace,
+                    fileset=job.fileset,
+                    artifact_base_path=job_artifact_base_path(job.name, job.output_location),
+                    name=step.name,
+                    step_spec=attempt.get_step_spec(get_step_spec_name(step.config, step.name) or step.name),
+                    status=step.status,
+                    status_details=step.status_details,
+                    error_details=step.error_details,
+                    auth_context=job.auth_context,
+                    created_at=step.created_at,
+                    updated_at=step.updated_at,
+                )
+            )
+        operations_counter.add(1, attributes={"operation": "list_attempt_steps"})
+        return steps, response.pagination.total_results
 
     async def _get_step_by_status(
         self, job: HelixJob, workspace: str, possible_statuses: list[HelixJobStatus]
@@ -878,6 +1087,7 @@ class JobDispatcher:
             enriched_step = HelixJobStepWithContext(
                 id=step.id,
                 job=job.name,
+                job_id=job.id,
                 attempt_id=step.attempt_id,
                 workspace=step.workspace,
                 fileset=job.fileset,
@@ -1012,6 +1222,13 @@ class JobDispatcher:
             raise JobStatusUpdateSkippedError(f"Job does not exist: {attempt.job}") from exc
 
         async with _get_job_mutation_lock(job.name, job.workspace):
+            if status == HelixJobStatus.RESUMING:
+                # Checked again under the lock the storage sweep holds while it marks storage reclaimed.
+                current = await self.get_attempt(step.attempt_id)
+                if current is not None and (current.status_details or {}).get(STORAGE_RECLAIMED_AT):
+                    raise JobOperationConflictError(
+                        f"Cannot resume job '{job.name}': storage has been reclaimed. Create a new job."
+                    )
             return await self._update_job_status_from_step_locked(step, status, status_details, error_details)
 
     async def _update_job_status_from_step_locked(
@@ -1023,6 +1240,8 @@ class JobDispatcher:
     ) -> tuple[HelixJobStep, HelixJobAttempt]:
         """Update a job from a step while holding the per-job mutation lock."""
         step_to_save = await self.store.get_by_id(HelixJobStep, step.id)
+        if status == HelixJobStatus.ERROR:
+            error_details = await self._with_task_cause(step_to_save, error_details)
         saved_step: HelixJobStep | None = None
         requested_details = status_details
         for attempt in range(2):
@@ -1053,6 +1272,8 @@ class JobDispatcher:
                 step_to_save.status = status
             if error_details:
                 step_to_save.error_details = error_details
+            if status == HelixJobStatus.RESUMING:
+                clear_image_comparison(step_to_save.status_details)
             if status_details:
                 step_to_save.status_details = self._update_status_details_object(
                     step_to_save.status_details, status_details
@@ -1227,6 +1448,13 @@ class JobDispatcher:
         operations_counter.add(1, attributes={"operation": "update_job_status_from_step"})
         return saved_step, attempt
 
+    async def _with_task_cause(self, step: HelixJobStep, error_details: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Return the step's error details, led by the error a failed task classified for itself, if any."""
+        for task in await self.list_tasks(step.id, step.workspace):
+            if task.status == HelixJobStatus.ERROR and ERROR_CAUSE in (task.error_details or {}):
+                return _keep_reported_cause(task.error_details, error_details or step.error_details or {})
+        return error_details
+
     async def _save_attempt_status(
         self,
         attempt: HelixJobAttempt,
@@ -1290,23 +1518,77 @@ class JobDispatcher:
                 if try_number > 0:
                     raise
 
-    async def update_job_status_details(
-        self, job_name: str, workspace: str, status_details: Dict[str, Any]
+    async def update_attempt_status_details(
+        self,
+        job_identifier: str,
+        attempt_identifier: str,
+        workspace: str,
+        status_details: Dict[str, Any],
+        expected_step_id: str | None = None,
+        expected_step_status: HelixJobStatus | None = None,
     ) -> HelixJobResponse | None:
-        """Update the status details of a job attempt."""
-        job = await self.store.get(HelixJob, job_name, workspace=workspace)
-        if job is None:
+        """Update status details for one concrete, job-owned attempt.
+
+        With ``expected_step_id``, the update applies only while that step is in this attempt, the
+        attempt is the job's current one, and the step has ``expected_step_status``. Otherwise this
+        raises ``JobOperationConflictError``. The check and the write hold the job's lock, as resume
+        and rerun do, so the storage sweep cannot mark a job that one of them took over.
+        """
+        resolved = await self.resolve_attempt(job_identifier, attempt_identifier, workspace)
+        if resolved is None:
             return None
+        job, attempt = resolved
+        async with _get_job_mutation_lock(job.name, workspace):
+            if expected_step_id is not None:
+                await self._require_current_step(job, attempt, expected_step_id, expected_step_status)
+            attempt = await self._update_attempt_status_details_locked(job, attempt, workspace, status_details)
+            if attempt is None:
+                return None
 
-        attempt = await self.get_current_attempt(job.name, workspace=workspace)
-        if attempt is None:
-            raise Exception(f"Job attempt with Job ID {job.id} does not exist.")
-
-        attempt.status_details = self._update_status_details_object(attempt.status_details, status_details)
-        attempt = await self.store.update(attempt)
-
-        operations_counter.add(1, attributes={"operation": "update_job_status_details"})
+        operations_counter.add(1, attributes={"operation": "update_attempt_status_details"})
         return create_platform_job_response(job, attempt)
+
+    async def _require_current_step(
+        self,
+        job: HelixJob,
+        attempt: HelixJobAttempt,
+        step_id: str,
+        step_status: HelixJobStatus | None,
+    ) -> None:
+        """Raise ``JobOperationConflictError`` unless the step is still in the job's current attempt, with ``step_status``.
+
+        The caller holds the job's lock. The job is read again under it, because a rerun changes its
+        current attempt.
+        """
+        try:
+            current_attempt_id = (await self.store.get_by_id(HelixJob, job.id)).current_attempt_id
+            step = await self.store.get_by_id(HelixJobStep, step_id)
+        except EntityNotFoundError:
+            current_attempt_id, step = None, None
+        if (
+            step is None
+            or step.attempt_id != attempt.id
+            or current_attempt_id != attempt.id
+            or (step_status is not None and step.status != step_status)
+        ):
+            expected = f" and {step_status.value}" if step_status is not None else ""
+            raise JobOperationConflictError(
+                f"Job '{job.name}' changed: step '{step_id}' is no longer in its current attempt{expected}."
+            )
+
+    async def _update_attempt_status_details_locked(
+        self,
+        job: HelixJob,
+        attempt: HelixJobAttempt,
+        workspace: str,
+        status_details: Dict[str, Any],
+    ) -> HelixJobAttempt | None:
+        """Update one attempt while the caller holds the job mutation lock."""
+        attempt = await self.store.get_by_id(HelixJobAttempt, attempt.id)
+        if attempt.job != job.id or attempt.workspace != workspace:
+            return None
+        attempt.status_details = self._update_status_details_object(dict(attempt.status_details), status_details)
+        return await self.store.update(attempt)
 
     @staticmethod
     def _update_status_details_object(existing: Optional[Dict[str, Any]], updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -1637,7 +1919,7 @@ class JobDispatcher:
         self, job_name: str, task_name: str, workspace: str, task_update: HelixJobTaskUpdate, step: HelixJobStep
     ) -> HelixJobTask:
         """Create or update a task while holding the per-job mutation lock."""
-        await self.store.get(HelixJob, job_name, workspace=workspace)
+        job = await self.store.get(HelixJob, job_name, workspace=workspace)
         step = await self.store.get_by_id(HelixJobStep, step.id)
 
         task = await self.get_task(step.id, task_name, workspace=workspace)
@@ -1702,7 +1984,7 @@ class JobDispatcher:
                 task.status = new_status
 
             if task_update.error_details:
-                task.error_details = task_update.error_details
+                task.error_details = _keep_reported_cause(task.error_details, task_update.error_details)
             if task_update.status_details:
                 task.status_details = self._update_status_details_object(
                     task.status_details, task_update.status_details
@@ -1734,7 +2016,14 @@ class JobDispatcher:
         # job.status_details would be empty and users couldn't see training progress.
         if task_update.status_details:
             try:
-                await self.update_job_status_details(job_name, workspace, task_update.status_details)
+                attempt = await self.get_attempt(step.attempt_id)
+                if attempt is not None:
+                    await self._update_attempt_status_details_locked(
+                        job,
+                        attempt,
+                        workspace,
+                        task_update.status_details,
+                    )
                 logger.debug("Propagated task status_details to job", extra={"job": job_name, "workspace": workspace})
             except Exception as e:
                 # Log but don't fail the task update if job status_details update fails
@@ -1762,6 +2051,7 @@ class JobDispatcher:
         artifact_url: str,
         artifact_storage_type: Any,
         workspace: str,
+        attempt_id: str,
     ) -> HelixJobResult:
         """Create a job result.
 
@@ -1776,20 +2066,23 @@ class JobDispatcher:
             job = await self.store.get(HelixJob, job_name, workspace=workspace)
             if job.id != job_id:
                 raise EntityNotFoundError(f"Job ID mismatch for {workspace}/{job_name}")
+            attempt = await self.get_attempt(attempt_id)
+            if attempt is None or attempt.job != job.id or attempt.workspace != workspace:
+                raise EntityNotFoundError(f"Attempt '{attempt_id}' does not belong to job '{job_name}'")
             result = HelixJobResult(
                 name=result_name,
                 workspace=workspace,
-                job=job_id,  # Use entity ID for parent FK
+                job=job_id,
+                attempt_id=attempt.id,
                 artifact_url=artifact_url,
                 artifact_storage_type=artifact_storage_type,
             )
             return await self.store.create(result)
 
     async def get_result(self, job_name: str, result_name: str, workspace: str) -> Optional[HelixJobResult]:
-        """Get a platform job result."""
-        try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
-        except EntityNotFoundError:
+        """Get a job result by its job-wide unique name."""
+        job_entity = await self._resolve_job(job_name, workspace)
+        if job_entity is None:
             logger.warning(f"Job '{job_name}' not found in workspace '{workspace}'")
             return None
         try:
@@ -1799,16 +2092,22 @@ class JobDispatcher:
             return None
 
     async def list_results(
-        self, job_id: str, workspace: str, sort: Optional[HelixJobSortField] = None
+        self,
+        job_id: str,
+        workspace: str,
+        sort: Optional[HelixJobSortField] = None,
+        attempt_id: str | None = None,
     ) -> tuple[list[HelixJobResult], int]:
-        """List platform job results with optional filtering and pagination."""
+        """List job-owned results, optionally filtered by producing attempt."""
+        filter_obj = {"job": job_id}
+        if attempt_id is not None:
+            filter_obj["attempt_id"] = attempt_id
         response = await self.store.list(
             HelixJobResult,
-            filter_obj={"job": job_id},
+            filter_obj=filter_obj,
             page_size=1000,
             workspace=workspace,
         )
-
         results = list(response.data)
         if sort:
             reverse = sort.get_sort_direction() == "desc"

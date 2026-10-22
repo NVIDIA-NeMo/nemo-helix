@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from nemo_agent_optimization_plugin.discovery import discover_strategy_jobs
 from nemo_agent_optimization_plugin.schemas.optimize import RunStrategySpec, RunStrategySubmitSpec
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -47,7 +47,7 @@ class RunStrategyJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> RunStrategySpec:
         del entity_client, async_sdk, is_local
@@ -63,7 +63,7 @@ class RunStrategyJob(NemoJob):
         spec: RunStrategySpec,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
@@ -146,7 +146,7 @@ async def _strategy_spec(
     *,
     workspace: str,
     entity_client: object,
-    async_sdk: AsyncHelixClient,
+    async_sdk: AsyncNemoClient,
 ) -> Any:
     """Put the forwarded fields through *target*'s own submit lifecycle.
 

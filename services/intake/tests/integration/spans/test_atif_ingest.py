@@ -968,6 +968,83 @@ def test_atif_trace_tokens_do_not_double_count_when_trajectory_and_steps_both_ca
     assert trace["cost_usd"] == pytest.approx(0.45)
 
 
+def test_atif_ingest_ignores_content_part_cache_control(client: TestClient):
+    session_id = "atif-content-part-cache-control"
+    body = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": session_id,
+        "agent": {"name": "test-agent", "version": "1.0"},
+        "steps": [
+            {
+                "step_id": 1,
+                "source": "user",
+                "message": [{"type": "text", "text": "hello", "cache_control": {"type": "ephemeral"}}],
+            }
+        ],
+    }
+
+    ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert ingest_response.status_code == 201, ingest_response.text
+
+    spans_response = client.get(
+        "/apis/intake/v2/workspaces/default/spans",
+        params={"filter[session_id]": session_id, "page_size": 10},
+    )
+    assert spans_response.status_code == 200, spans_response.text
+    user_step = next(span for span in spans_response.json()["data"] if span.get("input") and "hello" in span["input"])
+    assert "hello" in user_step["input"]
+    assert "cache_control" not in user_step["input"]
+
+
+@pytest.mark.parametrize(
+    ("session_id", "payload", "forbidden_key"),
+    [
+        ("atif-unknown-root", {"not_a_field": True}, "not_a_field"),
+        (
+            "atif-unknown-step",
+            {
+                "steps": [
+                    {"step_id": 1, "source": "user", "message": "hello", "not_a_field": True},
+                ]
+            },
+            "not_a_field",
+        ),
+        (
+            "atif-unknown-tool-call",
+            {
+                "steps": [
+                    {
+                        "step_id": 1,
+                        "source": "agent",
+                        "message": "hello",
+                        "tool_calls": [
+                            {"tool_call_id": "call-1", "function_name": "bash", "not_a_field": True},
+                        ],
+                    }
+                ]
+            },
+            "not_a_field",
+        ),
+    ],
+)
+def test_atif_ingest_rejects_unknown_keys_outside_content_parts(
+    client: TestClient,
+    session_id: str,
+    payload: dict,
+    forbidden_key: str,
+):
+    body = {
+        "schema_version": "ATIF-v1.7",
+        "session_id": session_id,
+        "agent": {"name": "test-agent", "version": "1.0"},
+        **payload,
+    }
+
+    ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert ingest_response.status_code == 422, ingest_response.text
+    assert forbidden_key in ingest_response.text
+
+
 def _create_experiment(client: TestClient, name: str) -> str:
     group_id = _ensure_group(client)
     response = client.post(

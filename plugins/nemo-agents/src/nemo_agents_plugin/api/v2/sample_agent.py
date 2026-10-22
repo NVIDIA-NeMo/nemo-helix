@@ -19,9 +19,9 @@ from nemo_agents_plugin.utils import expand_env_vars
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import (
     AgentDeployment,
-    CreateAgentRequest,
     CreateDeploymentRequest,
     CreateSampleAgentRequest,
+    RegisterAgentRequest,
     SampleAgentResponse,
     SampleAgentStreamEvent,
 )
@@ -132,9 +132,9 @@ async def _agent_and_deployment(
         agent = None
         agent_created = True
     if agent is None:
-        await agents.create_agent(
+        await agents.register_agent(
             workspace=workspace,
-            body=CreateAgentRequest(
+            body=RegisterAgentRequest(
                 name=_AGENT_NAME,
                 description=_AGENT_DESCRIPTION,
                 config=config,

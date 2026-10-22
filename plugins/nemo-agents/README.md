@@ -108,7 +108,7 @@ nemo --help   # should show "agents" under Plugins
 | Config contract | Platform-managed `nemo-agents-spec-v1` `agent.yaml` | NAT `nat-workflow-v1` workflow YAML |
 | Runtime | Platform-managed execution through supported harness adapters | NVIDIA Agent Toolkit runtime |
 | Local execution | Invoked through the Platform agent runtime | Delegated to `nat run` |
-| Platform lifecycle | `nemo agents create`, `deploy`, and `invoke` | The same Platform lifecycle commands |
+| Platform lifecycle | `nemo agents register`, `deploy`, and `invoke` | The same Platform lifecycle commands |
 | Packaging | Automatically selects the Platform agent image pipeline | Automatically selects the NAT image pipeline |
 | Compatibility status | First-class flow | Supported legacy flow |
 
@@ -148,10 +148,10 @@ curl -fsS --connect-timeout 2 --max-time 5 \
 }
 ```
 
-#### Step 2 — Create and deploy the agent
+#### Step 2 — Register and deploy the agent
 
 ```bash
-nemo agents create \
+nemo agents register \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
 
@@ -161,7 +161,7 @@ nemo agents deploy \
   --mode subprocess
 ```
 
-`create` validates the config and registers the agent. `deploy` waits for the
+`register` validates the config and registers the agent. `deploy` waits for the
 deployment to reach `running` by default.
 
 #### Step 3 — Invoke through the gateway
@@ -190,7 +190,7 @@ find ~/.local/share/nemo/agents/system/default \
 `nemo agents package` automatically detects `nemo-agents-spec-v1` and selects
 the Platform agent image pipeline. Packaging creates a runnable image and
 bundles its runtime dependencies and ancillary files. It does not register,
-create, or deploy the agent on Platform.
+register, or deploy the agent on Platform.
 
 The packaging command runs locally; Platform services are not required.
 
@@ -324,7 +324,7 @@ referenced-artifact checks. It can produce an image that fails at startup.
 #### Packaging an agent that already lives on the platform
 
 The CLI above packages a directory on your machine. For an agent created
-through Studio or `nemo agents create`, the source of truth is the
+through Studio or `nemo agents register`, the source of truth is the
 `{agent}-spec` fileset instead, and the `agents.package` job builds from that:
 
 ```bash
@@ -581,7 +581,7 @@ nemo agents invoke \
 Docker mode requires a configured Docker executor. Kubernetes mode uses the
 same flow with `--mode k8s` and a registry-reachable image.
 
-When `nemo agents create` registers a Platform-managed agent, it uploads the
+When `nemo agents register` registers a Platform-managed agent, it uploads the
 directory containing `agent.yaml` to the `{agent-name}-ethos` fileset. Docker and
 Kubernetes deployments stage that fileset beside `agent.yaml`, preserving
 referenced skills and other text artifacts. If the fileset is unavailable, the
@@ -712,7 +712,7 @@ nat --help    # should show run, eval, optimize, start, …
 When deployed via the platform, the Inference Gateway URL is injected
 automatically into the agent config — you only need to:
 
-1. Create an `nvidia-build` inference provider pointing at NVIDIA Build
+1. Create an inference provider, such as `openrouter`, pointing at an OpenAI-compatible endpoint
 2. Create the agent and deploy it
 3. Invoke through the gateway
 
@@ -735,34 +735,35 @@ export NHX_BASE_URL=http://127.0.0.1:8080
 cd plugins/nemo-agents/
 ```
 
-In production the `system/nvidia-build` provider is created automatically by
-the platform seed job. For local development, create it manually:
+Create a provider explicitly; `nemo setup` and platform seed jobs do not
+auto-create NVIDIA Build providers by default. This example uses OpenRouter:
 
 ```bash
 # Store the API key as a secret
-nemo secrets create ngc-api-key \
-    --value "$NVIDIA_API_KEY"
+export OPENROUTER_API_KEY=sk-or-...
+nemo secrets create openrouter-api-key \
+    --value "$OPENROUTER_API_KEY"
 
 # Create the model provider
-nemo inference providers create nvidia-build \
-    --host-url https://integrate.api.nvidia.com \
-    --api-key-secret-name ngc-api-key
+nemo inference providers create openrouter \
+    --host-url https://openrouter.ai/api/v1 \
+    --api-key-secret-name openrouter-api-key
 ```
 
 Wait for the models controller to discover served models and register model
 entities:
 
 ```bash
-nemo wait inference provider nvidia-build
+nemo wait inference provider openrouter
 ```
 
-#### NAT Step 3 — Create and deploy the agent
+#### NAT Step 3 — Register and deploy the agent
 
 ```bash
 # The config resolves this model when the agent is created.
 nemo models list
 export NEMO_DEFAULT_MODEL=your-model-entity-name
-nemo agents create \
+nemo agents register \
     --name react-agent \
     --agent-config examples/react-agent/react-agent.yml
 

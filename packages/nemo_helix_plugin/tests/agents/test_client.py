@@ -12,12 +12,12 @@ import pytest
 from nemo_helix_plugin.agents.client import AgentsClient, AsyncAgentsClient
 from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
-    CreateAgentRequest,
     CreateDeploymentRequest,
     CreateExecuteJobRequest,
     CreateSampleAgentRequest,
     CreateSessionRequest,
     InvokeAgentRequest,
+    RegisterAgentRequest,
 )
 from nemo_helix_plugin.client.errors import BadRequestError, ConflictError, NotFoundError, UnprocessableEntityError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
@@ -46,7 +46,7 @@ def _read_json(request: httpx.Request) -> dict[str, JsonValue]:
     return body
 
 
-def test_create_agent_serializes_body_and_unwraps() -> None:
+def test_register_agent_serializes_body_and_unwraps() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -59,14 +59,14 @@ def test_create_agent_serializes_body_and_unwraps() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
     client = AgentsClient(base_url=BASE, workspace="default", http_client=http_client)
 
-    agent = client.create_agent(body=CreateAgentRequest(name="calc", config={"workflow": {}})).data()
+    agent = client.register_agent(body=RegisterAgentRequest(name="calc", config={"workflow": {}})).data()
 
     assert agent.name == "calc"
     assert agent.config == {"workflow": {}}
     assert len(seen) == 1
 
 
-def test_create_agent_exist_ok_replays_get_on_conflict() -> None:
+def test_register_agent_exist_ok_replays_get_on_conflict() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -80,7 +80,7 @@ def test_create_agent_exist_ok_replays_get_on_conflict() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
     client = AgentsClient(base_url=BASE, workspace="default", http_client=http_client)
 
-    agent = client.create_agent(body=CreateAgentRequest(name="calc", config={"workflow": {}}), exist_ok=True).data()
+    agent = client.register_agent(body=RegisterAgentRequest(name="calc", config={"workflow": {}}), exist_ok=True).data()
 
     assert agent.name == "calc"
     assert [request.method for request in seen] == ["POST", "GET"]
@@ -150,7 +150,7 @@ def test_stream_deployment_logs_parses_sse() -> None:
     assert parsed[0].message == "ready"
 
 
-def test_create_sample_agent_parses_progress_stream() -> None:
+def test_register_sample_agent_parses_progress_stream() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
         assert request.url == f"{BASE}/apis/agents/v2/sample-agent"

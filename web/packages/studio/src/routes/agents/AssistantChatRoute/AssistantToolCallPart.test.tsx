@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { AssistantToolCallPart } from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
-import {
-  ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME,
-  ASSISTANT_JOB_PROGRESS_TOOL_NAME,
-} from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
   ASSISTANT_THINKING_TOOL_NAME,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { AssistantToolCallPart } from '@studio/routes/agents/AssistantChatRoute/AssistantToolCallPart';
+import {
+  ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME,
+  ASSISTANT_JOB_PROGRESS_TOOL_NAME,
+} from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -240,6 +240,28 @@ describe('AssistantToolCallPart', () => {
 
     expect(screen.getByText('View work')).toBeVisible();
     expect(screen.queryByText('worked for unknown')).not.toBeInTheDocument();
+  });
+
+  it('renders reasoning inside collapsed work details as a thinking disclosure', () => {
+    render(
+      <AssistantToolCallPart
+        addResult={vi.fn()}
+        args={{
+          label: 'Work details',
+          parts: [{ type: 'reasoning', text: 'Comparing options.' }],
+        }}
+        argsText=""
+        resume={vi.fn()}
+        status={{ type: 'complete' }}
+        toolCallId="assistant-collapsed-studio-details"
+        toolName={ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME}
+        type="tool-call"
+      />
+    );
+
+    expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
+      'Thought processComparing options.'
+    );
   });
 
   it.each(subtleToolCases)(

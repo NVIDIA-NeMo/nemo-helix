@@ -31,6 +31,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
@@ -43,6 +44,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobExecutionProfileConfig,
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -254,10 +256,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         self._start_log_capture(step, metadata, "stderr")
 
         status_details = {"message": "Subprocess scheduled", **self._task_status_details(metadata)}
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=metadata.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=HelixJobStatus.PENDING,
@@ -336,7 +339,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
             return self._create_step_update(step, metadata)
         ttl_seconds = (
-            self._execution_profile_config.ttl_seconds_active
+            step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
             if step.status == HelixJobStatus.ACTIVE
             else self._execution_profile_config.ttl_seconds_before_active
         )
@@ -371,7 +374,12 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             if metadata.process.poll() is None:
                 continue
 
-            step = self.get_step_safe(job=key.job, step_name=key.step, workspace=key.workspace)
+            step = self.get_step_safe(
+                job=key.job,
+                step_name=key.step,
+                workspace=key.workspace,
+                attempt_id=key.attempt_id,
+            )
             should_cleanup = step is None
             if step is not None and step.status in ("cancelled", "error", "completed"):
                 should_cleanup = self._execution_profile_config.cleanup_completed_jobs_immediately
@@ -390,9 +398,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def _get_task_fallback_update(self, step: HelixJobStepWithContext) -> JobUpdate | None:
         try:
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
+            tasks = self._jobs.list_attempt_step_tasks(
+                step=step.name,
                 job=step.job,
+                attempt=step.attempt_id,
                 workspace=step.workspace,
             ).data()
         except Exception:
@@ -482,6 +491,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                **({NEMO_JOB_UID_ENVVAR: step.job_id} if step.job_id else {}),
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: str(ephemeral_dir),
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: str(config_dir),
                 PERSISTENT_JOB_STORAGE_PATH_ENVVAR: str(persistent_dir),
@@ -632,10 +642,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         error_details: dict,
         error_stack: str = "",
     ) -> None:
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=metadata.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,

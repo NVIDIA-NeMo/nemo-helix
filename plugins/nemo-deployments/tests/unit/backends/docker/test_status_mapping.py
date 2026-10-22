@@ -10,6 +10,7 @@ from nemo_deployments_plugin.backends.docker.status import (
     map_exited_status,
     missing_container_status,
 )
+from nemo_deployments_plugin.types import RestartPolicy
 
 
 @pytest.mark.parametrize(
@@ -21,8 +22,8 @@ from nemo_deployments_plugin.backends.docker.status import (
         (1, "Always", "FAILED"),
     ],
 )
-def test_map_exited_status(exit_code: int, restart_policy: str, expected: str) -> None:
-    assert map_exited_status(exit_code, restart_policy) == expected  # type: ignore[arg-type]
+def test_map_exited_status(exit_code: int, restart_policy: RestartPolicy, expected: str) -> None:
+    assert map_exited_status(exit_code, restart_policy) == expected
 
 
 def test_missing_container_lost_for_always() -> None:

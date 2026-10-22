@@ -3,58 +3,19 @@
 
 """Unit tests for the tasks router.
 
-Uses an in-process FastAPI TestClient against the in-memory Entity Store,
-with a mocked psycopg connection (via dependency_overrides on the mounted
-/v1 sub-app) for the evaluation lookups that remain in Postgres.
+Uses an in-process FastAPI TestClient against the in-memory Entity Store.
 """
 
-from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("scaled_evals")
-from api_test_fixture import client, v1
+from api_test_fixture import client
 from scaled_evals.api import build
-from scaled_evals.api.db import get_conn
 from scaled_evals.api.settings import settings
 from scaled_evals.api.task_store import TaskStore
-from task_fixtures import stored_revision, stored_task
-
-
-def _conn_returning(fetchones: list) -> MagicMock:
-    """Fake connection whose cursor.fetchone yields each value in turn."""
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = list(fetchones)
-    cur.rowcount = 1
-    return conn
-
-
-def _use_conn(conn: MagicMock) -> None:
-    """Point get_conn at a specific fake connection for one test."""
-
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    v1.dependency_overrides[get_conn] = _gen
-
-
-def _empty_db() -> Iterator[MagicMock]:
-    """Fake connection whose queries return nothing — empty list, no row."""
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = []
-    cur.fetchone.return_value = None
-    yield conn
-
-
-@pytest.fixture(autouse=True)
-def _override_db():
-    v1.dependency_overrides[get_conn] = _empty_db
-    yield
-    v1.dependency_overrides.pop(get_conn, None)
-
+from task_fixtures import seed_evaluation, stored_revision, stored_task
 
 # ---------- list ----------------------------------------------------------
 
@@ -152,7 +113,7 @@ def test_delete_returns_404_when_missing() -> None:
 
 def test_delete_returns_409_when_active_evaluation_references_task() -> None:
     store = _seed("task_in_use")
-    _use_conn(_conn_returning([{"id": "ev_active"}]))
+    seed_evaluation({"id": "ev_active", "status": "running", "task_id": "task_in_use"})
 
     response = client.delete("/v1/tasks/task_in_use")
 
@@ -163,7 +124,6 @@ def test_delete_returns_409_when_active_evaluation_references_task() -> None:
 
 def test_delete_allows_task_when_no_active_evaluation_references_it() -> None:
     store = _seed("task_done")
-    _use_conn(_conn_returning([None, None]))
 
     response = client.delete("/v1/tasks/task_done")
 

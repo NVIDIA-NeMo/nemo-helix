@@ -828,6 +828,8 @@ automodel:
   default_job_resource_memory_limit: 16Gi
   # Terminate training if no task progress within this many seconds (0 disables). | default: 3600
   training_staleness_timeout_seconds: 3600
+  # How long a paused training step may take to finish its current step, save a checkpoint, and exit. Past this, the step is stopped and fails. 0 means training cannot be paused. | default: 1800
+  training_pause_deadline_seconds: 1800
   # Default GPU execution profile when the job spec omits training.execution_profile. | default: 'gpu'
   default_training_execution_profile: gpu
 ```
@@ -852,6 +854,8 @@ unsloth:
   default_job_resource_cpu_limit: '4'
   # default: '16Gi'
   default_job_resource_memory_limit: 16Gi
+  # How long a paused training step may take to finish its current step, save a checkpoint, and exit. Past this, the step is stopped and fails. 0 means training cannot be paused. | default: 1800
+  training_pause_deadline_seconds: 1800
   # Default GPU execution profile when the job spec omits training.execution_profile. | default: 'gpu'
   default_training_execution_profile: gpu
 ```
@@ -915,6 +919,8 @@ builder:
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
   repository_prefix: ''
+  # The platform a build or copy is for when its request names none, as `os/architecture`. Set it to your nodes' architecture: `linux/arm64` for a cluster on Apple silicon, such as Docker Desktop on a Mac. Changing it doesn't rebuild task images evals already has: request their builds with `rebuild` set. | default: 'linux/amd64'
+  default_platform: linux/amd64
   # Registries a build may copy a published image from, as hosts. A copy from any other registry is refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy.
   import_registries:
   - docker.io

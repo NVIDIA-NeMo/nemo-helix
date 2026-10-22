@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -130,8 +129,7 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
     controller = ScaledEvalsJobsController()
     controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status, cancel_job=_cancel_job))
     monkeypatch.setattr(controller, "_list_cancelled_evaluations", lambda: rows)
-    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
-    monkeypatch.setattr(controller_module, "EvaluationRepository", lambda conn: repo)
+    monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: repo)
 
     await controller._cancel_evaluation_jobs()
 
@@ -189,8 +187,7 @@ async def test_an_active_job_keeps_its_reconcile_lease_so_the_drain_advances(
     controller = ScaledEvalsJobsController()
     controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status))
     monkeypatch.setattr(controller, "_claim_stale_evaluation", _claim)
-    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
-    monkeypatch.setattr(controller_module, "EvaluationRepository", lambda conn: repo)
+    monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: repo)
 
     await controller._drain(controller._reconcile_one_evaluation)()
 
@@ -236,15 +233,10 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
         "_cleanup_one_benchmark_archive",
     ):
         monkeypatch.setattr(controller, name, _phase(name))
-    heartbeats: list[int] = []
-    monkeypatch.setattr(controller, "_heartbeat", lambda: heartbeats.append(1))
-
     await controller.reconcile()
     await asyncio.gather(*controller._background.values())
 
-    # A failing phase must not abort the pass, skip the heartbeat, or report the
-    # controller unhealthy: readiness gates the API, so either would take the
-    # control plane offline over one bad row. Cleanup and finalize backstops run
+    # A failing phase must not abort the pass. Cleanup and finalize backstops run
     # in the background.
     assert calls == [
         "_submit_one_build",
@@ -258,17 +250,6 @@ async def test_controller_heartbeat_survives_an_unprocessable_row(monkeypatch: p
         "_build_one_archive",
         "_cleanup_one_benchmark_archive",
     ]
-    assert heartbeats == [1]
-    assert controller.is_healthy
-
-    def _unreachable_database() -> None:
-        raise RuntimeError("database is unreachable")
-
-    monkeypatch.setattr(controller, "_heartbeat", _unreachable_database)
-    await controller.reconcile()
-    await asyncio.gather(*controller._background.values())
-
-    assert not controller.is_healthy
 
 
 @pytest.mark.asyncio
@@ -371,12 +352,7 @@ async def test_controller_tears_down_orphaned_executions_off_the_pass(monkeypatc
         claim_kwargs.append(kwargs)
         return next(claims)
 
-    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
-    monkeypatch.setattr(
-        controller_module,
-        "ExecutionCleanupRepository",
-        lambda _conn: SimpleNamespace(claim_one=claim_one),
-    )
+    monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: SimpleNamespace(claim_cleanup=claim_one))
     release = threading.Event()
     teardown = MagicMock(side_effect=lambda *a, **k: release.wait(5))
     monkeypatch.setattr(controller_module, "teardown_orphaned_execution", teardown)
@@ -391,16 +367,11 @@ async def test_controller_tears_down_orphaned_executions_off_the_pass(monkeypatc
     release.set()
     await asyncio.wait_for(running, 5)
     assert claim_kwargs[0]["claim_timeout"] == controller_module.CLEANUP_CLAIM_TIMEOUT_SECONDS
-    teardown.assert_called_once_with(
-        cleanup,
-        worker_id=controller._worker_id,
-        connect=controller_module.pooled_connection,
-    )
+    teardown.assert_called_once_with(cleanup, worker_id=controller._worker_id)
 
 
 @pytest.mark.asyncio
 async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
     controller = ScaledEvalsJobsController()
     jobs = AsyncMock()
     controller._jobs = cast(Any, jobs)
@@ -451,7 +422,7 @@ async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.M
 
     repo = MagicMock()
     repo.claim_cleanup.side_effect = ["run_1", None]
-    monkeypatch.setattr(controller_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    monkeypatch.setattr(controller_module, "BenchmarkArchiveStore", lambda: repo)
     await phases["cleanup_benchmark_archives"]()
     await asyncio.gather(*controller._background.values())
     dispatcher.cleanup_benchmark_archives.assert_called_once_with("run_1")
@@ -464,9 +435,7 @@ def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.Monke
     row = {"id": "eval_1", "name": "e", "status": "provisioning", "current_execution": 3, "created_at": _CREATED}
     repo = MagicMock()
     repo.load_for_dispatch.return_value = row
-    monkeypatch.setattr(submitter_module, "pooled_connection", lambda: nullcontext(MagicMock()))
-    monkeypatch.setattr(submitter_module, "EvaluationRepository", lambda _conn: repo)
-    monkeypatch.setattr(submitter_module, "private_workspace", lambda: "private")
+    monkeypatch.setattr(submitter_module, "EvaluationStore", lambda *_: repo)
     entities = MagicMock()
     submitter = submitter_module.EvaluationSubmitter(AsyncMock(), "w", entities)
 
@@ -474,7 +443,7 @@ def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.Monke
     entity = entities.create.call_args.args[0]
     assert (entity.name, entity.workspace, entity.evaluation_id, entity.execution_number) == (
         "job-e3",
-        "private",
+        submitter_module.entity_store.private_workspace(),
         "eval_1",
         3,
     )

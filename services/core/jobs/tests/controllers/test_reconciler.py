@@ -280,8 +280,7 @@ def test_storage_retention_uses_live_job_ttl(
             paginated_response([step]),
         ]
         mock_jobs_client.get_job.return_value = data_response(job)
-        mock_jobs_client.get_job_step.return_value = data_response(step)
-        mock_jobs_client.update_job_status_details.reset_mock()
+        mock_jobs_client.update_job_attempt_status_details.reset_mock()
         mock_jobs_client.update_job_step_status.reset_mock()
         mock_jobs_client.cancel_job.reset_mock()
         system_entities.create.reset_mock()
@@ -290,17 +289,22 @@ def test_storage_retention_uses_live_job_ttl(
         # The reclaim pass removes the storage on a later tick, from the queued record.
         reclaim.assert_not_called()
         if should_reclaim:
-            body = mock_jobs_client.update_job_status_details.call_args.kwargs["body"]
-            assert body.root["storage_reclaimed_at"]
+            mark = mock_jobs_client.update_job_attempt_status_details.call_args.kwargs
+            assert mark["body"].root["storage_reclaimed_at"]
+            # The jobs API writes the mark only while the step is still current and stopped.
+            assert mark["attempt"] == step.attempt_id
+            assert mark["query_params"] == {"expected_step_id": step.id, "expected_step_status": step.status.value}
             (record,) = system_entities.create.call_args.args
             assert (record.job_id, record.job_workspace, record.job_name) == ("job-id", step.workspace, step.job)
             assert record.targets == [JobStorageTarget(provider="subprocess", profile="default")]
             # The step is marked so later passes skip it without looking up the job.
             body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
-            assert body.status == step.status
+            # Cancel moves a paused step to cancelling, so the mark carries that status.
+            assert body.status == (HelixJobStatus.CANCELLING if should_cancel else step.status)
+            assert body.expected_step_id == step.id
             assert "storage_swept_at" in body.status_details
         else:
-            mock_jobs_client.update_job_status_details.assert_not_called()
+            mock_jobs_client.update_job_attempt_status_details.assert_not_called()
             system_entities.create.assert_not_called()
             mock_jobs_client.update_job_step_status.assert_not_called()
         if should_cancel:
@@ -315,12 +319,11 @@ def test_storage_retention_marks_steps_with_nothing_to_reclaim(
     mock_jobs_client,
     test_step_error: HelixJobStepWithContext,
 ):
-    """Old attempts and jobs without storage are marked once and then skipped."""
+    """Jobs without storage are marked once and then skipped."""
     reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
     backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
     expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
     cases = [
-        _job(attempt_id="newer-attempt"),
         _job(uses_storage=False),
     ]
     for job in cases:
@@ -338,6 +341,8 @@ def test_storage_retention_marks_steps_with_nothing_to_reclaim(
         reclaim.assert_not_called()
         system_entities.create.assert_not_called()
         mock_jobs_client.update_job_step_status.assert_called_once()
+        # The update names the step, so it carries the step's ID to never land on a rerun's step.
+        assert mock_jobs_client.update_job_step_status.call_args.kwargs["body"].expected_step_id == expired.id
 
     swept = expired.model_copy(deep=True)
     swept.status_details = {**swept.status_details, "storage_swept_at": "2026-10-01T00:00:00+00:00"}
@@ -397,7 +402,7 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
     system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
 
 
-def _run_retention(reconciler, mock_jobs_client, step, job, current_status):
+def _run_retention(reconciler, mock_jobs_client, step, job):
     reconciler._last_retention_at = None
     # Active steps, terminal steps pending task cleanup, then stopped steps for storage retention.
     mock_jobs_client.list_steps.side_effect = [
@@ -406,8 +411,28 @@ def _run_retention(reconciler, mock_jobs_client, step, job, current_status):
         paginated_response([step]),
     ]
     mock_jobs_client.get_job.return_value = data_response(job)
-    mock_jobs_client.get_job_step.return_value = data_response(step.model_copy(update={"status": current_status}))
     reconciler.step()
+
+
+def test_storage_retention_leaves_a_step_replaced_by_a_rerun_alone(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_error: HelixJobStepWithContext,
+):
+    """A failed attempt's step is neither reclaimed nor marked once a rerun replaced it.
+
+    Step names repeat across attempts, so a status update by name would land on the rerun's step.
+    """
+    reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    replaced = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
+
+    _run_retention(reconciler, mock_jobs_client, replaced, _job(attempt_id="rerun-attempt"))
+
+    mock_jobs_client.update_job_attempt_status_details.assert_not_called()
+    system_entities.create.assert_not_called()
+    mock_jobs_client.update_job_step_status.assert_not_called()
+    mock_jobs_client.cancel_job.assert_not_called()
 
 
 def test_storage_retention_marks_the_job_before_queueing_its_storage(
@@ -419,12 +444,12 @@ def test_storage_retention_marks_the_job_before_queueing_its_storage(
     """The mark makes a resume refuse the job, so it is written before the storage is handed off."""
     reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
     calls = MagicMock()
-    mock_jobs_client.update_job_status_details.side_effect = calls.mark
+    mock_jobs_client.update_job_attempt_status_details.side_effect = calls.mark
     system_entities.create.side_effect = calls.queue
     mock_jobs_client.cancel_job.side_effect = calls.cancel
     expired = _aged_step(test_step_paused, HelixJobStatus.PAUSED, datetime.timedelta(days=8))
 
-    _run_retention(reconciler, mock_jobs_client, expired, _job(), HelixJobStatus.PAUSED)
+    _run_retention(reconciler, mock_jobs_client, expired, _job())
 
     assert [call[0] for call in calls.mock_calls] == ["mark", "queue", "cancel"]
 
@@ -435,16 +460,15 @@ def test_storage_retention_keeps_the_storage_of_a_job_resumed_meanwhile(
     mock_jobs_client,
     test_step_paused: HelixJobStepWithContext,
 ):
-    """A resume that moved the step before the mark landed keeps its storage, and the mark is taken back."""
+    """The jobs API refuses the mark when a resume or rerun took the job after the step was listed."""
     reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    request = httpx.Request("PATCH", "http://test")
+    mock_jobs_client.update_job_attempt_status_details.side_effect = NemoHTTPError(httpx.Response(409, request=request))
     expired = _aged_step(test_step_paused, HelixJobStatus.PAUSED, datetime.timedelta(days=8))
 
-    _run_retention(reconciler, mock_jobs_client, expired, _job(), HelixJobStatus.RESUMING)
+    _run_retention(reconciler, mock_jobs_client, expired, _job())
 
-    marks = [
-        c.kwargs["body"].root["storage_reclaimed_at"] for c in mock_jobs_client.update_job_status_details.call_args_list
-    ]
-    assert len(marks) == 2 and marks[0] and marks[1] is None
+    mock_jobs_client.update_job_attempt_status_details.assert_called_once()
     system_entities.create.assert_not_called()
     mock_jobs_client.cancel_job.assert_not_called()
     mock_jobs_client.update_job_step_status.assert_not_called()
@@ -462,9 +486,9 @@ def test_storage_retention_queues_a_marked_job_again(
     marked = _job(status_details={"storage_reclaimed_at": "2026-10-01T00:00:00+00:00"})
     expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
 
-    _run_retention(reconciler, mock_jobs_client, expired, marked, HelixJobStatus.ERROR)
+    _run_retention(reconciler, mock_jobs_client, expired, marked)
 
-    mock_jobs_client.update_job_status_details.assert_not_called()
+    mock_jobs_client.update_job_attempt_status_details.assert_not_called()
     system_entities.create.assert_called_once()
     mock_jobs_client.update_job_step_status.assert_called_once()
 

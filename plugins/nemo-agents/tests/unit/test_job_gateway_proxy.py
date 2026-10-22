@@ -166,6 +166,7 @@ def test_proxy_closes_on_invocation_failure(workload: Mock, failure: BaseExcepti
             proxy_url = gateway_proxy.rewrite_gateway_models(_config(), origin).models["default"].base_url
             assert proxy_url is not None
             raise failure
+    assert proxy_url is not None
     _assert_closed(proxy_url)
 
 

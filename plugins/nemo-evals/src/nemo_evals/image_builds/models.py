@@ -9,7 +9,7 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar, Literal
 
-from nemo_builder_plugin.identity import ImageIdentityError, normalize_registry
+from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry, platform_name
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -49,6 +49,13 @@ class BuildImage(BaseModel):
         default=None, description="Dockerfile path relative to `context_path`, for a `dockerfile` image."
     )
     image: str | None = Field(default=None, description="The image the task names, for a `prebuilt` image.")
+    platform: str | None = Field(
+        default=None,
+        description=(
+            "The platform the image is built or copied for, once the build decides it: the request's `platform`, "
+            "the task's own pin, or a prebuilt image's only platform. None means the deployment's default."
+        ),
+    )
     status: ImageStatus = "pending"
     builder_image: str | None = Field(default=None, description="The Builder container image record.")
     build_job: str | None = Field(default=None, description="The Builder job building this image.")
@@ -59,16 +66,21 @@ class BuildImage(BaseModel):
 
 
 class TaskImageBuildEntity(EntityBase):
-    """One attempt at building every container image a task revision needs."""
+    """One attempt at building every container image a task's contents need.
+
+    A child of the task, keyed by the revision digest: revisions with the same contents need the same images, so
+    they share builds. Publishing earlier contents again republishes them as a new revision with the same digest.
+    """
 
     __entity_type__: ClassVar[str] = "task_image_build"
 
     task: str = Field(description="`<workspace>/<name>` of the task.")
     revision_digest: str = Field(min_length=DIGEST_LENGTH, max_length=DIGEST_LENGTH, pattern=DIGEST_PATTERN)
-    attempt: int = Field(ge=1, description="1-based attempt for this revision. Matches the `build.<n>` name.")
+    attempt: int = Field(ge=1, description="1-based attempt for these contents. Ends the record's name.")
     status: BuildStatus = "pending"
     job: str = Field(description="Name of the task-builder Job that runs this attempt.")
     allowed_registries: list[str] = Field(default_factory=list)
+    platform: str | None = Field(default=None, description="The platform the request asked for, if any.")
     images: list[BuildImage] = Field(default_factory=list)
     error: str | None = None
 
@@ -84,6 +96,29 @@ class ImageBuildRequest(BaseModel):
             "Registry hosts, such as `docker.io`, that a prebuilt image named by the task may be copied from. "
             "Narrows the registries the deployment allows; empty allows all of those. A prebuilt image from "
             "any other registry fails the build."
+        ),
+    )
+
+    platform: str | None = Field(
+        default=None,
+        pattern=PLATFORM_PATTERN,
+        description=(
+            "The platform to build every image for, as `os/architecture`, such as `linux/arm64`. Omit to follow the "
+            "task: an image whose Dockerfile or compose service pins a platform is built for it, a prebuilt image "
+            "published for one platform is copied for that one, and anything else follows the deployment's default. "
+            "An image pinned to another platform fails the build. BuildKit's spellings, such as `linux/x86_64`, are "
+            "taken and named as it names them."
+        ),
+    )
+
+    _platform_name = field_validator("platform", mode="before")(platform_name)
+
+    rebuild: bool = Field(
+        default=False,
+        description=(
+            "Start a new attempt even when the newest build is ready, so the request reaches Builder again: after "
+            "the deployment's default platform changes, this builds for the new one. A build still running is "
+            "returned as it is. Builder reuses any image it already has for an unchanged request."
         ),
     )
 
@@ -105,6 +140,7 @@ class ImageBuild(BaseModel):
     status: BuildStatus
     job: str
     allowed_registries: list[str]
+    platform: str | None = None
     images: list[BuildImage]
     error: str | None = None
     created_at: datetime | None = None
@@ -119,6 +155,7 @@ class ImageBuild(BaseModel):
             status=entity.status,
             job=entity.job,
             allowed_registries=entity.allowed_registries,
+            platform=entity.platform,
             images=entity.images,
             error=entity.error,
             created_at=entity.created_at,
@@ -126,11 +163,16 @@ class ImageBuild(BaseModel):
         )
 
 
-def build_entity_name(attempt: int) -> str:
-    return f"{_BUILD_NAME_PREFIX}{attempt}"
+def build_entity_name(revision_digest: str, attempt: int) -> str:
+    """Name of one attempt's record under its task: the digest's first 32 characters keep it a valid entity name."""
+    return f"{_BUILD_NAME_PREFIX}{revision_digest[:32]}.{attempt}"
 
 
 def build_job_name(task: str, revision_digest: str, attempt: int) -> str:
-    """Name of the task-builder Job for one attempt, unique per task revision and attempt."""
-    key = hashlib.sha256(f"{task}#{revision_digest}".encode()).hexdigest()[:16]
+    """Name of the task-builder Job for one attempt, unique per task contents and attempt.
+
+    ``by-contents`` keeps these names apart from the Jobs of builds kept under a revision, before builds were keyed
+    by contents: such a Job would never write a build kept by contents.
+    """
+    key = hashlib.sha256(f"by-contents:{task}#{revision_digest}".encode()).hexdigest()[:16]
     return f"task-image-build-{key}-{attempt}"

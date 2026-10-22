@@ -20,8 +20,8 @@ from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.naming import evaluation_execution_job_name
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_evaluation_secret_environment, resolve_executor
-from nemo_scaled_evals_plugin.projection import platform_entities
 from pydantic import BaseModel
+from scaled_evals.api import entity_store
 
 # The task posts no updates, so the staleness timeout bounds its whole runtime.
 # The run budget alone would kill the task while it builds evidence and the archive.
@@ -88,7 +88,7 @@ class EvaluationExecutionJob(NemoJob):
         inputs = None
         if spec.inputs_workspace:
             inputs = (
-                platform_entities()
+                entity_store.entity_client()
                 .get(
                     ScaledEvaluationExecution,
                     evaluation_execution_job_name(spec.evaluation_id, spec.execution_number),

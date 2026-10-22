@@ -22,7 +22,7 @@ labeled data.
 ## Step 1: Deploy the agent
 
 ```bash
-nemo agents create --name email-security-triage \
+nemo agents register --name email-security-triage \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/email-security-triage/agent.yaml
 nemo agents deploy --agent email-security-triage \
   --name email-security-triage-deployment --mode subprocess

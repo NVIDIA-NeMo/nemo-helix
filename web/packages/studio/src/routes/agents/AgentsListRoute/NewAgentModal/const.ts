@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DeploymentModeAvailabilityMode } from '@studio/api/agents/useDeploymentModes';
+import { deployOnCreateFormSchema } from '@studio/api/agents/useDeployOnCreate';
 import { z } from 'zod';
 
 export const AGENT_CONFIG_FILENAME = 'agent.yaml';
@@ -45,13 +45,13 @@ export const agentNameSchema = z
   .min(1, 'Name is required')
   .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens');
 
-export const uploadAgentFormSchema = z.object({
-  name: agentNameSchema,
-  repoUrl: z.string().trim().default(''),
-  secretKey: z.string().default(''),
-  deploy: z.boolean().default(true),
-  deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('subprocess'),
-});
+export const uploadAgentFormSchema = z
+  .object({
+    name: agentNameSchema,
+    repoUrl: z.string().trim().default(''),
+    secretKey: z.string().default(''),
+  })
+  .merge(deployOnCreateFormSchema);
 
 export const UPLOAD_AGENT_FORM_DEFAULTS = {
   name: '',

@@ -70,6 +70,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     TERMINAL_EXIT_CODES,
@@ -116,6 +117,7 @@ from nhx.core.jobs.controllers.backends.base import (
     resolve_gpu_job_shm_size,
     resolve_task_image,
     staleness_error_message,
+    step_ttl_seconds_active,
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.exceptions import (
@@ -314,7 +316,7 @@ class DockerJobBackend(JobBackend[ProviderT, DockerJobExecutionProfileConfig], G
             attempt_id=step.attempt_id,
             step_id=step.id,
             auth_context=auth_context,
-            ttl_seconds_active=self._execution_profile_config.ttl_seconds_active,
+            ttl_seconds_active=step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
         )
         self._workload_delegation_store.register(
             delegation,
@@ -892,6 +894,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: DEFAULT_TASK_STORAGE_PATH,
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: DEFAULT_CONFIG_STORAGE_PATH,
                 NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
+                **({NEMO_JOB_UID_ENVVAR: step.job_id} if step.job_id else {}),
                 # Private env vars for jobs-launcher to export captured logs.
                 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR: get_logs_endpoint_from_fileset(
                     platform_config,
@@ -1137,7 +1140,12 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
     def cancel_scheduling(self, step: HelixJobStepWithContext, *, created_container: Container | None = None) -> bool:
         """Check if the job step is cancelling or pausing, and update status accordingly."""
-        updated_step = self.get_step_safe(step_name=step.name, job=step.job, workspace=step.workspace)
+        updated_step = self.get_step_safe(
+            step_name=step.name,
+            job=step.job,
+            workspace=step.workspace,
+            attempt_id=step.attempt_id,
+        )
         if updated_step is None:
             logger.info(
                 "Job step disappeared before Docker container start; cancelling scheduling",
@@ -1177,10 +1185,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 status_details["message"] = "Job is cancelled, not creating container"
             logger.info("Job step is not scheduling container", extra={"status": updated_step.status})
             try:
-                self._jobs.update_job_step_status(
+                self._jobs.update_attempt_step_status(
                     name=step.name,
                     workspace=step.workspace,
                     job=step.job,
+                    attempt=step.attempt_id,
                     body=HelixJobStatusUpdateRequest(status=status, status_details=status_details),
                 )
             except ClientNotFoundError:
@@ -1236,10 +1245,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 )
                 status = HelixJobStatus.ERROR
                 try:
-                    self._jobs.update_job_step_status(
+                    self._jobs.update_attempt_step_status(
                         name=step.name,
                         workspace=step.workspace,
                         job=step.job,
+                        attempt=step.attempt_id,
                         body=HelixJobStatusUpdateRequest(status=status, error_details=e.error_details),
                     )
                 except Exception:
@@ -1266,10 +1276,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
         message: str,
     ) -> None:
         status_details["message"] = message
-        self._jobs.update_job_step_status(
+        self._jobs.update_attempt_step_status(
             name=step.name,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             body=HelixJobStatusUpdateRequest(status=status, status_details=status_details),
         )
 
@@ -1592,10 +1603,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
             # If no errors to this point, start the container
             status_details["message"] = "Starting container"
             pre_start_status_write_started_at = time.monotonic()
-            self._jobs.update_job_step_status(
+            self._jobs.update_attempt_step_status(
                 name=step.name,
                 workspace=step.workspace,
                 job=step.job,
+                attempt=step.attempt_id,
                 body=HelixJobStatusUpdateRequest(status=status, status_details=status_details),
             )
             logger.debug(
@@ -1652,7 +1664,10 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 if task_fallback is not None:
                     return task_fallback
             if result := self.enforce_sync_ttl(
-                step, self._execution_profile_config.ttl_seconds_active, container, before_active=False
+                step,
+                step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
+                container,
+                before_active=False,
             ):
                 return result
             if container is not None and self.check_step_is_stale(step):
@@ -1747,10 +1762,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 raise
 
         task_id = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=HelixJobStatus.ERROR,
@@ -1784,9 +1800,10 @@ chmod -R 777 {job_vol}/{storage_subpath}
     def _get_terminal_task_fallback_update(self, step: HelixJobStepWithContext) -> JobUpdate | None:
         """Return the latest persisted terminal task status for a missing Docker container."""
         try:
-            tasks = self._jobs.list_job_step_tasks(
-                name=step.name,
+            tasks = self._jobs.list_attempt_step_tasks(
+                step=step.name,
                 job=step.job,
+                attempt=step.attempt_id,
                 workspace=step.workspace,
             ).data()
         except Exception:
@@ -2012,10 +2029,11 @@ chmod -R 777 {job_vol}/{storage_subpath}
         )
 
         # Upsert the task against the Jobs API.
-        self._jobs.update_job_step_task(
+        self._jobs.update_attempt_step_task(
             name=task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,
@@ -2150,11 +2168,17 @@ chmod -R 777 {job_vol}/{storage_subpath}
                     job = self.get_label_from_container(container, JOB_ID_LABEL)
                     step_name = self.get_label_from_container(container, JOB_STEP_NAME_LABEL)
                     workspace = self.get_label_from_container(container, JOB_WORKSPACE_ID_LABEL)
+                    attempt_id = (container.labels or {}).get(JOB_ATTEMPT_ID_LABEL)
 
                     # Verify the step is terminal before cleaning up.
                     # This prevents cleaning up resources that we last marked in active state,
                     # were prematurely cleaned up, and then sync active to error because the resource is gone.
-                    step_is_terminal = self.check_step_is_terminal(job=job, step_name=step_name, workspace=workspace)
+                    step_is_terminal = self.check_step_is_terminal(
+                        job=job,
+                        step_name=step_name,
+                        workspace=workspace,
+                        attempt_id=attempt_id,
+                    )
                     cleanup_log_extra = {
                         "workspace": workspace,
                         "job": job,
@@ -2239,6 +2263,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
         workspace = self.get_label_from_container(container, JOB_WORKSPACE_ID_LABEL)
         job = self.get_label_from_container(container, JOB_ID_LABEL)
         task = self.get_label_from_container(container, JOB_TASK_ID_LABEL)
+        attempt_id = (container.labels or {}).get(JOB_ATTEMPT_ID_LABEL)
         delegation_name = self._workload_delegation_name_from_container(container)
 
         self._try_revoke_workload_delegation(
@@ -2267,7 +2292,12 @@ chmod -R 777 {job_vol}/{storage_subpath}
             # retention pass and lets completed and cancelled jobs reclaim here.
             if uses_persistent_storage:
                 step_name = self.get_label_from_container(container, JOB_STEP_NAME_LABEL)
-                if self.check_job_persistent_storage_cleanup_allowed(job=job, step_name=step_name, workspace=workspace):
+                if self.check_job_persistent_storage_cleanup_allowed(
+                    job=job,
+                    step_name=step_name,
+                    workspace=workspace,
+                    attempt_id=attempt_id,
+                ):
                     logger.debug(
                         "Cleaning up persistent storage for successful job", extra={"workspace": workspace, "job": job}
                     )

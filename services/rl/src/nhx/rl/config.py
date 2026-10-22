@@ -36,6 +36,15 @@ class RlConfig(create_service_config_class("rl")):  # type: ignore[misc]  # ty: 
     default_job_resource_cpu_limit: str = Field(default="4")
     default_job_resource_memory_limit: str = Field(default="16Gi")
 
+    training_pause_deadline_seconds: int = Field(
+        default=3600,
+        ge=0,
+        description=(
+            "How long a paused training step may take to finish its current step, save a checkpoint, "
+            "and exit. Past this, the step is stopped and fails. 0 means training cannot be paused."
+        ),
+    )
+
     default_training_execution_profile: str = Field(
         default="gpu",
         description="Default single-node GPU profile when training.execution_profile is omitted.",

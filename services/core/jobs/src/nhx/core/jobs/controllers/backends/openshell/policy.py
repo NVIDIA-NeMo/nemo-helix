@@ -4,10 +4,11 @@
 """Build an OpenShell ``SandboxPolicy`` proto for job sandboxes.
 
 This is a separate copy from the deployments plugin's policy builder, so the
-jobs service does not depend on that plugin. It mirrors that builder with
-job-specific defaults: the task venv
-and scratch storage shape of the nhx-tasks-openshell image, and an egress
-allowlist restricted to the jobs-launcher and the task interpreter.
+jobs service does not depend on that plugin. It follows that builder with
+job-specific defaults: the task venv and scratch storage shape of the
+nhx-tasks-openshell image, and an egress allowlist restricted to the
+jobs-launcher and the task interpreter. Unlike that builder, a ``policy_path``
+file is layered over the generated policy.
 
 Everything here is a property of the *sandbox*, not of a job: plain structured
 inputs in, a policy proto out.
@@ -109,8 +110,8 @@ class HelixEgress:
 
     Environment-specific (docker driver -> host.docker.internal:8080; k8s -> the
     platform Service). This is the sole allowed rule in a generated default-deny
-    policy, and is re-injected into any static policy so a job can never lose its
-    path home.
+    policy, and is re-injected after any ``policy_path`` file is layered on, so a
+    job can never lose its path home.
     """
 
     host: str
@@ -133,34 +134,23 @@ def load_policy_dict(path: str) -> dict[str, Any]:
     return data
 
 
-def normalize_loaded_policy(
-    data: dict[str, Any], *, landlock_compatibility: str = DEFAULT_LANDLOCK_COMPATIBILITY
-) -> dict[str, Any]:
-    """Inject safe defaults into a hand-written policy mapping before it becomes a proto.
+def layer_policy_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Layer a hand-written policy mapping over a generated one.
 
-    A loaded YAML that omits ``process`` would run as the image-default user (possibly
-    root); one that omits ``landlock`` would ship no filesystem confinement. Default the
-    process block to the sandbox user/group and default the landlock block; blocks the
-    author wrote are kept as-is. Mutates and returns ``data``.
+    Mappings merge recursively; lists and scalars replace; ``null`` keeps the base
+    value. A file naming only ``network_policies`` keeps the generated filesystem,
+    landlock and process sections, including their defaults for keys the file omits.
     """
-    process = data.get("process")
-    if not isinstance(process, dict):
-        process = {}
-        data["process"] = process
-    process.setdefault("run_as_user", DEFAULT_RUN_AS_USER)
-    process.setdefault("run_as_group", DEFAULT_RUN_AS_GROUP)
-
-    landlock = data.get("landlock")
-    if not isinstance(landlock, dict):
-        data["landlock"] = {"compatibility": landlock_compatibility}
-    else:
-        landlock.setdefault("compatibility", landlock_compatibility)
-    return data
-
-
-def load_sandbox_policy(path: str) -> Any:
-    """Read a policy YAML file and return a ``SandboxPolicy`` proto."""
-    return build_sandbox_policy(normalize_loaded_policy(load_policy_dict(path)))
+    merged = dict(base)
+    for key, value in overlay.items():
+        if value is None:
+            continue
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = layer_policy_dict(current, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def generate_policy_dict(*, filesystem: SandboxFilesystem, egress: HelixEgress | None) -> dict[str, Any]:
@@ -187,8 +177,8 @@ def generate_policy_dict(*, filesystem: SandboxFilesystem, egress: HelixEgress |
 def inject_platform_egress(policy: dict[str, Any], egress: HelixEgress) -> dict[str, Any]:
     """Ensure the mandatory platform egress rule is present, overwriting any rule at its key.
 
-    Applied to every policy (generated or static YAML) so a policy can never sever the
-    sandbox's path back to the platform. Mutates and returns ``policy``.
+    Applied after any ``policy_path`` file is layered on, so the file can never sever
+    the sandbox's path back to the platform. Mutates and returns ``policy``.
     """
     network = policy.setdefault("network_policies", {})
     if not isinstance(network, dict):

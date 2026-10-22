@@ -5,17 +5,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 from typing import Protocol
 
 from filesets import parse_fileset_ref
 from nemo_builder_plugin.client import AsyncBuilderClient
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference
 from nemo_builder_plugin.schema import BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.upstream import UpstreamError, UpstreamRegistry
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+
+logger = logging.getLogger(__name__)
 
 _BUILDER_NAME_PREFIX = "harbor-env-"
 _COPY_NAME_PREFIX = "harbor-img-"
@@ -31,9 +37,19 @@ class ImageBuilder(Protocol):
         ...
 
     async def submit(
-        self, *, name: str, revision: int, source: FileSetSource | ImageSource, dockerfile: str | None
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: FileSetSource | ImageSource,
+        dockerfile: str | None,
+        platform: str | None,
     ) -> SubmitBuildResponse:
-        """Submit (or rejoin) one build, or copy, of one image."""
+        """Submit (or rejoin) one build, or copy, of one image; for the deployment's platform when ``platform`` is None."""
+        ...
+
+    async def image_platforms(self, image: str) -> list[str]:
+        """The platforms a published image has, or none when they can't be read."""
         ...
 
     async def job_status(self, job: str) -> str | None:
@@ -41,20 +57,28 @@ class ImageBuilder(Protocol):
         ...
 
 
-def builder_name(*, archive_digest: str, context_path: str, dockerfile: str) -> str:
-    """Builder build-set name for one image of one task archive."""
-    key = json.dumps(
-        {"v": 1, "archive": archive_digest, "context": context_path, "dockerfile": dockerfile},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return f"{_BUILDER_NAME_PREFIX}{hashlib.sha256(key.encode()).hexdigest()[:12]}"
+def builder_name(
+    *, archive: str, archive_digest: str, context_path: str, dockerfile: str, platform: str | None = None
+) -> str:
+    """Builder build-set name for one image of the task archive at ``archive``, a fileset reference, for one platform.
+
+    Builder fingerprints the whole request, archive location included, so one name for the same archive at two
+    locations would conflict there. A build for the deployment's default platform leaves ``platform`` out of the
+    key, as names did before a build could name one.
+    """
+    key = {"v": 2, "location": archive, "archive": archive_digest, "context": context_path, "dockerfile": dockerfile}
+    return f"{_BUILDER_NAME_PREFIX}{_key_hash(key, platform)}"
 
 
-def copy_builder_name(image: str) -> str:
-    """Builder build-set name for a copy of ``image``, by its fully qualified reference."""
-    key = json.dumps({"v": 1, "image": image}, sort_keys=True, separators=(",", ":"))
-    return f"{_COPY_NAME_PREFIX}{hashlib.sha256(key.encode()).hexdigest()[:12]}"
+def copy_builder_name(image: str, platform: str | None = None) -> str:
+    """Builder build-set name for a copy of ``image``, by its fully qualified reference, for one platform."""
+    return f"{_COPY_NAME_PREFIX}{_key_hash({'v': 1, 'image': image}, platform)}"
+
+
+def _key_hash(key: dict[str, object], platform: str | None) -> str:
+    if platform is not None:
+        key = {**key, "platform": platform}
+    return hashlib.sha256(json.dumps(key, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:12]
 
 
 def archive_source(fileset_ref: str, context_path: str) -> FileSetSource:
@@ -64,11 +88,18 @@ def archive_source(fileset_ref: str, context_path: str) -> FileSetSource:
 
 
 async def ensure_build(
-    builder: ImageBuilder, *, name: str, source: FileSetSource | ImageSource, dockerfile: str | None
+    builder: ImageBuilder,
+    *,
+    name: str,
+    source: FileSetSource | ImageSource,
+    dockerfile: str | None,
+    platform: str | None = None,
 ) -> SubmitBuildResponse:
     """Submit the newest revision of ``name`` again, or the next one when the newest failed.
 
     A pending revision whose job has ended, or has none, counts as failed: Builder leaves it pending for good.
+    So does one Builder refuses as another request's: the same name can mean another platform once the
+    deployment's default changes.
     """
     newest: ContainerImage | None = None
     revision = 1
@@ -76,8 +107,13 @@ async def ensure_build(
         newest = image
         revision += 1
     if newest is not None and not await _abandoned(builder, newest):
-        revision -= 1
-    return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile)
+        try:
+            return await builder.submit(
+                name=name, revision=revision - 1, source=source, dockerfile=dockerfile, platform=platform
+            )
+        except ConflictError:
+            logger.info("Builder holds %s-%d for another request; submitting the next revision", name, revision - 1)
+    return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform)
 
 
 async def _abandoned(builder: ImageBuilder, image: ContainerImage) -> bool:
@@ -103,11 +139,33 @@ class HttpImageBuilder:
         return response.data()
 
     async def submit(
-        self, *, name: str, revision: int, source: FileSetSource | ImageSource, dockerfile: str | None
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: FileSetSource | ImageSource,
+        dockerfile: str | None,
+        platform: str | None,
     ) -> SubmitBuildResponse:
-        spec = BuildSpec(source=source) if dockerfile is None else BuildSpec(source=source, dockerfile=dockerfile)
+        # Only what is set: the client serializes with `exclude_unset`, and a copy takes no dockerfile.
+        options: dict[str, str] = {}
+        if dockerfile is not None:
+            options["dockerfile"] = dockerfile
+        if platform is not None:
+            options["platform"] = platform
+        spec = BuildSpec.model_validate({"source": source, **options})
         build_set = BuildSet(name=name, revision=revision, build_specs=[spec])
         return (await self._builder.submit_build(workspace=self._workspace, body=build_set)).data()
+
+    async def image_platforms(self, image: str) -> list[str]:
+        registry = UpstreamRegistry()
+        try:
+            return await asyncio.to_thread(registry.platforms, normalize_reference(image))
+        except (UpstreamError, ImageIdentityError) as exc:
+            logger.warning("Can't read the platforms of %s: %s", image, exc)
+            return []
+        finally:
+            registry.close()
 
     async def job_status(self, job: str) -> str | None:
         try:

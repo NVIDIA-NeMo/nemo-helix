@@ -283,9 +283,14 @@ class ListResponse(BaseModel, Generic[EntityT]):
 
 
 class EntityToken(Protocol):
-    """Entity identifier token used for typed unions and entity classes."""
+    """Entity identifier token used for typed unions and entity classes.
+
+    Tokens are hashable because converted entity types are cached per token.
+    """
 
     __entity_type__: str
+
+    def __hash__(self) -> int: ...
 
 
 EntityTypeLike = Type[EntityT] | EntityToken

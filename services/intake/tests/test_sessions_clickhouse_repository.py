@@ -41,8 +41,9 @@ def test_session_query_is_primary_key_pruned_and_payload_free() -> None:
     assert "JOIN" not in query.statement
     assert "session_spans.input" not in query.statement
     assert "session_spans.output" not in query.statement
-    assert "uniqExact(session_spans.source_format, session_spans.trace_id) AS trace_count" in query.statement
+    assert "uniqExact(source_format, trace_id) AS trace_count" in query.statement
     assert "count() AS span_count" in query.statement
+    assert "sum(trace_usage.span_count) AS span_count" in query.statement
     assert query.parameters["input_tokens_key"] == "llm.token_count.prompt"
     assert query.parameters["cost_usd_key"] == "cost.total"
 

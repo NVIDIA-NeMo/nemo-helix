@@ -31,9 +31,6 @@ from nemo_agents_plugin.entities import (
     DeploymentStatus,
 )
 from nemo_helix_plugin.agents.types import (
-    CreateAgentRequest as CreateAgentRequest,
-)
-from nemo_helix_plugin.agents.types import (
     CreateComputeSpecRequest as CreateComputeSpecRequest,
 )
 from nemo_helix_plugin.agents.types import (
@@ -47,6 +44,9 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
+)
+from nemo_helix_plugin.agents.types import (
+    RegisterAgentRequest as RegisterAgentRequest,
 )
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import BaseModel, Field

@@ -78,6 +78,7 @@ def parse_buildx_logs(lines: list[str]):
                     "time_taken_seconds": None,
                 }
             )
+            current_step = parsed_steps[step_number]
             continue
 
         # Check for DONE status line

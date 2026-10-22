@@ -102,13 +102,12 @@ class TestDownloadAuditArtifacts:
             ]
         )
 
-        mock_rm = AsyncMock()
-        mock_rm.download_artifact = AsyncMock(side_effect=[jsonl_tmp, html_tmp, hitlog_tmp])
+        download_artifact = AsyncMock(side_effect=[jsonl_tmp, html_tmp, hitlog_tmp])
 
         with (
             patch.object(artifacts_module.AsyncJobsClient, "from_client", return_value=mock_jobs),
             patch.object(artifacts_module.AsyncFilesClient, "from_client", return_value=MagicMock()),
-            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm),
+            patch.object(artifacts_module, "download_artifact_from_url", download_artifact),
         ):
             resp = client.get("/apis/garak/v2/workspaces/default/jobs/audit/job-1/results/artifacts/download")
 
@@ -133,13 +132,12 @@ class TestDownloadAuditArtifacts:
             ]
         )
 
-        mock_rm = AsyncMock()
-        mock_rm.download_artifact = AsyncMock(return_value=jsonl_tmp)
+        download_artifact = AsyncMock(return_value=jsonl_tmp)
 
         with (
             patch.object(artifacts_module.AsyncJobsClient, "from_client", return_value=mock_jobs),
             patch.object(artifacts_module.AsyncFilesClient, "from_client", return_value=MagicMock()),
-            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm),
+            patch.object(artifacts_module, "download_artifact_from_url", download_artifact),
         ):
             resp = client.get("/apis/garak/v2/workspaces/default/jobs/audit/job-1/results/artifacts/download")
 
@@ -152,12 +150,10 @@ class TestDownloadAuditArtifacts:
         mock_jobs = AsyncMock()
         mock_jobs.get_job_result = AsyncMock(side_effect=NotFoundError(MagicMock()))
 
-        mock_rm = AsyncMock()
-
         with (
             patch.object(artifacts_module.AsyncJobsClient, "from_client", return_value=mock_jobs),
             patch.object(artifacts_module.AsyncFilesClient, "from_client", return_value=MagicMock()),
-            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm),
+            patch.object(artifacts_module, "download_artifact_from_url", new=AsyncMock()),
         ):
             resp = client.get("/apis/garak/v2/workspaces/default/jobs/audit/job-1/results/artifacts/download")
 
@@ -178,13 +174,12 @@ class TestDownloadAuditArtifacts:
             ]
         )
 
-        mock_rm = AsyncMock()
-        mock_rm.download_artifact = AsyncMock(side_effect=[jsonl_tmp, html_tmp, hitlog_tmp])
+        download_artifact = AsyncMock(side_effect=[jsonl_tmp, html_tmp, hitlog_tmp])
 
         with (
             patch.object(artifacts_module.AsyncJobsClient, "from_client", return_value=mock_jobs),
             patch.object(artifacts_module.AsyncFilesClient, "from_client", return_value=MagicMock()),
-            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm),
+            patch.object(artifacts_module, "download_artifact_from_url", download_artifact),
         ):
             client.get("/apis/garak/v2/workspaces/default/jobs/audit/job-1/results/artifacts/download")
 
@@ -202,24 +197,22 @@ class TestDownloadAuditArtifacts:
         )
 
         mock_files = MagicMock()
-        mock_rm = AsyncMock()
-        mock_rm.download_artifact = AsyncMock(return_value=tmp)
+        download_artifact = AsyncMock(return_value=tmp)
 
         with (
             patch.object(artifacts_module.AsyncJobsClient, "from_client", return_value=mock_jobs),
             patch.object(artifacts_module.AsyncFilesClient, "from_client", return_value=mock_files),
-            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm) as factory,
+            patch.object(artifacts_module, "download_artifact_from_url", download_artifact),
         ):
             client.get("/apis/garak/v2/workspaces/prod/jobs/audit/my-job/results/artifacts/download")
 
         first_call = mock_jobs.get_job_result.await_args_list[0]
         assert first_call.kwargs["workspace"] == "prod"
         assert first_call.kwargs["job"] == "my-job"
-        factory.assert_called_once_with(
-            job_name="my-job",
+        download_artifact.assert_awaited_once_with(
+            "fileset://default/fs/r",
             workspace="prod",
             files_client=mock_files,
-            jobs_client=mock_jobs,
         )
 
 

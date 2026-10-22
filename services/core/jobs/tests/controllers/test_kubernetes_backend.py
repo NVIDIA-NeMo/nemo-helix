@@ -620,6 +620,7 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     )
     batch_v1.create_namespaced_job.assert_called_once()
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert body.spec.ttl_seconds_after_finished == 300
     sc = body.spec.template.spec.security_context
     assert sc is not None
     assert sc.run_as_user == 2000
@@ -686,8 +687,10 @@ def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
         f"{JOB_EXECUTION_PROFILE_LABEL}=default",
     ):
         assert label in selector
-    labels = batch_v1.create_namespaced_job.call_args.kwargs["body"].metadata.labels
-    assert all(labels[key] == value for key, value in (item.split("=") for item in selector))
+    body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
+    # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.
+    assert body.spec.ttl_seconds_after_finished is None
 
 
 def test_reclaim_waits_for_a_running_cleanup_job():
@@ -971,6 +974,7 @@ def test_schedule_job_success(kubernetes_job, cpu_execution_provider, test_step_
     assert "ENV_VAR" in env_vars
     assert env_vars["ENV_VAR"] == "test_value"
     assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
+    assert env_vars["NEMO_JOB_UID"] == "platform-job-test-uid"
     assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
     assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
     assert "NHX_BASE_URL" in env_vars
@@ -1748,8 +1752,9 @@ def test_sync_pausing_exit_gives_the_task_the_pause_outcome(
     ):
         update = kubernetes_job.sync(step)
 
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
     assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
     assert task_update["body"].status == update.status == expected
     assert task_update["body"].error_details == (update.error_details or {})
     assert bool(task_update["body"].error_stack) == (expected == HelixJobStatus.ERROR)
@@ -1769,8 +1774,9 @@ def test_sync_pausing_deadline_fails_the_task(kubernetes_job, mock_jobs_client, 
         update = kubernetes_job.sync(step)
 
     assert update.status == HelixJobStatus.ERROR
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
     assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
     assert task_update["body"].status == HelixJobStatus.ERROR
     assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 
@@ -2684,6 +2690,37 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
     assert call_args.kwargs["namespace"] == "test-namespace"
 
 
+def test_cleanup_active_by_the_step_ttl(kubernetes_job, test_step_active):
+    """A TTL in the step's lifecycle replaces the execution profile's."""
+    assert test_step_active.step_spec is not None
+    test_step_active.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=3600)
+    test_step_active.status = HelixJobStatus.ACTIVE
+    test_step_active.created_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    mock_job = MagicMock()
+    mock_job.metadata.name = "test-job-active"
+    mock_job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
+
+    with (
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"),
+    ):
+        result = kubernetes_job.sync(test_step_active)
+
+    assert result.status == HelixJobStatus.ERROR.value
+    assert result.error_details == {"message": "Job timed out after reaching max TTL of 3600 seconds"}
+
+
+def test_schedule_sets_the_pod_deadline_from_the_step_ttl(kubernetes_job, cpu_execution_provider, test_step_pending):
+    assert test_step_pending.step_spec is not None
+    test_step_pending.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=259200)
+
+    kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+    job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert job_body.spec.template.spec.active_deadline_seconds == 259200
+
+
 # =============================================================================
 # Auth Context Tests
 # =============================================================================
@@ -3065,7 +3102,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
     kubernetes_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     # Mock check_step_is_terminal: step1 terminal (True), step2 not terminal (False)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         return step_name == "step1"
 
     kubernetes_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)
@@ -3145,12 +3182,12 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
         # Verify check_step_is_terminal was called for step 1 (and step 2, but we skip step 2)
         assert kubernetes_job.check_step_is_terminal.call_count >= 1
         kubernetes_job.check_step_is_terminal.assert_any_call(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup eligibility was checked for step 1
         kubernetes_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup was NOT called
@@ -3341,7 +3378,7 @@ def test_cancel_reports_teardown_completion_to_jobs_service(kubernetes_job):
     update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
     assert update.status == HelixJobStatus.CANCELLED
-    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+    kubernetes_job._jobs.update_attempt_step_task.assert_not_called()
 
 
 def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job):
@@ -3353,7 +3390,7 @@ def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job
 
     kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
-    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+    kubernetes_job._jobs.update_attempt_step_task.assert_not_called()
 
 
 def test_cancel_missing_job_revokes_delegations(kubernetes_job, test_step_cancelling):

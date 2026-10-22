@@ -110,7 +110,7 @@ def run(*, client: NemoClient | None = None) -> int:
         files = FilesClient.from_client(client)
         files.create_fileset(body=CreateFilesetRequest(name=fileset_name), workspace=workspace, exist_ok=True)
         files.upload_file(
-            content=config.message,
+            content=config.message.encode(),
             path=DEFAULT_FILE_PATH,
             name=fileset_name,
             workspace=workspace,

@@ -2,13 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
-import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
-import { Text } from '@nvidia/foundations-react-core';
-import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
-import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
-import { CollapsedThinkingToolCall } from '@studio/routes/agents/AssistantChatRoute/toolCall/CollapsedThinkingToolCall';
-import { TOOL_LABELS } from '@studio/routes/agents/AssistantChatRoute/toolCall/constants';
-import { FileChangeToolCallCard } from '@studio/routes/agents/AssistantChatRoute/toolCall/FileChangeToolCallCard';
+import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
+import { TOOL_LABELS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
+import { FileChangeToolCallCard } from '@nemo/common/src/components/AssistantChat/toolCall/FileChangeToolCallCard';
 import {
   formatSubtleToolMessage,
   getFileChangeSummary,
@@ -19,8 +15,8 @@ import {
   getSubtleToolMessage,
   getToolInvocation,
   getToolSummary,
-} from '@studio/routes/agents/AssistantChatRoute/toolCall/helpers';
-import { SubtleToolCallRow } from '@studio/routes/agents/AssistantChatRoute/toolCall/SubtleToolCallRow';
+} from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
+import { SubtleToolCallRow } from '@nemo/common/src/components/AssistantChat/toolCall/SubtleToolCallRow';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
@@ -30,7 +26,11 @@ import {
   isAssistantJobProgressToolName,
   toAssistantToolArgs,
   type AssistantToolArgs,
-} from '@studio/routes/agents/AssistantChatRoute/toolParts';
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
+import { Text } from '@nvidia/foundations-react-core';
+import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
+import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
 import { ChevronRight, ClipboardList } from 'lucide-react';
 
 interface AssistantToolCallPartContentProps {
@@ -52,7 +52,15 @@ interface CollapsedStudioDetailsToolPart {
   readonly type: 'tool-call';
 }
 
-type CollapsedStudioDetailsPart = CollapsedStudioDetailsTextPart | CollapsedStudioDetailsToolPart;
+interface CollapsedStudioDetailsReasoningPart {
+  readonly text: string;
+  readonly type: 'reasoning';
+}
+
+type CollapsedStudioDetailsPart =
+  | CollapsedStudioDetailsReasoningPart
+  | CollapsedStudioDetailsTextPart
+  | CollapsedStudioDetailsToolPart;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,8 +75,12 @@ const getCollapsedStudioDetailsParts = (
     .map((part): CollapsedStudioDetailsPart | undefined => {
       if (!isRecord(part)) return undefined;
 
-      if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-        return { type: 'text', text: part.text };
+      if (
+        (part.type === 'text' || part.type === 'reasoning') &&
+        typeof part.text === 'string' &&
+        part.text.trim()
+      ) {
+        return { type: part.type, text: part.text };
       }
 
       if (
@@ -101,6 +113,8 @@ const CollapsedStudioDetailsPartContent = ({
   readonly part: CollapsedStudioDetailsPart;
 }) => {
   if (part.type === 'text') return <CollapsedStudioDetailsText text={part.text} />;
+  if (part.type === 'reasoning')
+    return <CollapsedThinkingToolCall label="Thought process" text={part.text} />;
 
   return (
     <AssistantToolCallPartContent
@@ -144,7 +158,7 @@ const CollapsedStudioDetailsToolCall = ({ args }: { readonly args: AssistantTool
         >
           {parts.map((part, index) => (
             <CollapsedStudioDetailsPartContent
-              key={`${part.type}-${part.type === 'text' ? part.text.slice(0, 24) : part.toolCallId}-${index}`}
+              key={`${part.type}-${part.type === 'tool-call' ? part.toolCallId : part.text.slice(0, 24)}-${index}`}
               part={part}
             />
           ))}

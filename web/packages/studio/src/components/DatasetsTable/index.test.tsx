@@ -5,6 +5,7 @@ import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyStat
 import { FilesetPurpose, type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { DatasetsTable } from '@studio/components/DatasetsTable';
+import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -17,6 +18,9 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router';
+
+// Signed-out by default; the owned-first ordering is covered by useOwnedFirstFilesets.test.tsx
+vi.mock('@studio/providers/auth/useAuthProfile', () => ({ useAuthProfile: () => undefined }));
 
 vi.mock('use-debounce', () => ({
   useDebounce: (value: unknown) => [value, () => {}],
@@ -216,7 +220,7 @@ describe('DatasetsTable', () => {
   });
 
   describe('Columns', () => {
-    it('renders the standard columns (Name, Purpose, Storage Backend, Path, Description, Created)', async () => {
+    it('renders the standard columns (Name, Purpose, Storage Backend, Path, Description, Created By, Created)', async () => {
       installListHandler();
       renderTable();
 
@@ -228,7 +232,35 @@ describe('DatasetsTable', () => {
       expect(screen.getAllByText('Storage Backend').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('Path')).toBeInTheDocument();
       expect(screen.getByText('Description')).toBeInTheDocument();
+      expect(screen.getByText('Created By')).toBeInTheDocument();
       expect(screen.getByText('Created')).toBeInTheDocument();
+    });
+
+    it('renders created_by as returned by the API', async () => {
+      installListHandler([
+        makeDataset({ name: 'email-ds', created_by: 'someone@example.com' }),
+        makeDataset({ name: 'id-ds', created_by: 'a1b2c3d4-principal' }),
+      ]);
+      renderTable();
+
+      await screen.findByText('email-ds', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      expect(screen.getByText('someone@example.com')).toBeInTheDocument();
+      expect(screen.getByText('a1b2c3d4-principal')).toBeInTheDocument();
+    });
+
+    it('renders the empty placeholder when created_by is null or missing', async () => {
+      installListHandler([
+        makeDataset({ name: 'null-owner-ds', created_by: null }),
+        makeDataset({ name: 'missing-owner-ds' }),
+      ]);
+      renderTable();
+
+      await screen.findByText('null-owner-ds', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      expect(screen.getAllByText(EMPTY_FIELD_VALUE)).toHaveLength(2);
+      expect(screen.queryByText('null')).not.toBeInTheDocument();
+      expect(screen.queryByText('undefined')).not.toBeInTheDocument();
     });
 
     it('renders friendly purpose labels in the Purpose column cells', async () => {
@@ -342,10 +374,10 @@ describe('DatasetsTable', () => {
   });
 
   describe('Filtering', () => {
-    it('sends filter[purpose] when the purpose column filter is active', async () => {
+    it('sends the checked purposes as a $in filter, including generic when checked', async () => {
       const state = installListHandler();
       const filtersParam = encodeURIComponent(
-        JSON.stringify([{ id: 'purpose', value: 'dataset' }])
+        JSON.stringify([{ id: 'purpose', value: { dataset: true, generic: true } }])
       );
 
       render(
@@ -358,7 +390,62 @@ describe('DatasetsTable', () => {
 
       await waitFor(
         () => {
-          expect(state.lastUrl?.searchParams.get('filter[purpose]')).toBe('dataset');
+          expect(state.lastUrl?.searchParams.getAll('filter[purpose][$in]').sort()).toEqual([
+            'dataset',
+            'generic',
+          ]);
+        },
+        { timeout: LG_SELECTOR_TIMEOUT }
+      );
+    });
+
+    it('keeps other URL filters and still seeds the default purposes', async () => {
+      const state = installListHandler();
+      const filtersParam = encodeURIComponent(
+        JSON.stringify([{ id: 'storage_type', value: 'local' }])
+      );
+      render(
+        <TestProviders>
+          <MemoryRouter initialEntries={[`/?filters=${filtersParam}`]}>
+            <DatasetsTable enableFilters />
+          </MemoryRouter>
+        </TestProviders>
+      );
+      await waitFor(
+        () => {
+          expect(state.lastUrl?.searchParams.get('filter[storage_type]')).toBe('local');
+          expect(state.lastUrl?.searchParams.getAll('filter[purpose][$in]').sort()).toEqual([
+            'dataset',
+            'environment',
+            'model',
+          ]);
+        },
+        { timeout: LG_SELECTOR_TIMEOUT }
+      );
+    });
+
+    it('does not narrow purposes when filters are off (pickers list every purpose)', async () => {
+      const state = installListHandler();
+      renderTable();
+      await screen.findByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+      expect(state.lastUrl?.searchParams.has('filter[purpose][$in]')).toBe(false);
+    });
+
+    it('honours a legacy single-select purpose value from a saved URL', async () => {
+      const state = installListHandler();
+      const filtersParam = encodeURIComponent(
+        JSON.stringify([{ id: 'purpose', value: 'generic' }])
+      );
+      render(
+        <TestProviders>
+          <MemoryRouter initialEntries={[`/?filters=${filtersParam}`]}>
+            <DatasetsTable enableFilters />
+          </MemoryRouter>
+        </TestProviders>
+      );
+      await waitFor(
+        () => {
+          expect(state.lastUrl?.searchParams.getAll('filter[purpose][$in]')).toEqual(['generic']);
         },
         { timeout: LG_SELECTOR_TIMEOUT }
       );
@@ -487,6 +574,17 @@ describe('DatasetsTable', () => {
       );
     });
 
+    it('still shows the first-use empty state when only the seeded default purposes are set', async () => {
+      installListHandler([]);
+      renderTable({ enableFilters: true });
+
+      expect(
+        await screen.findByText(ENTITY_EMPTY_STATES.filesets.heading, undefined, {
+          timeout: LG_SELECTOR_TIMEOUT,
+        })
+      ).toBeInTheDocument();
+    });
+
     it('shows the no-results empty state with a Clear filters button when search is active', async () => {
       installListHandler([]);
       renderTable({ enableFilters: true });
@@ -504,7 +602,8 @@ describe('DatasetsTable', () => {
       expect(
         screen.getByText('No items match your current search or filters.')
       ).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Clear filters/i })).toBeInTheDocument();
+      // the applied-filters bar (default purposes) also offers one, so expect at least the empty state's
+      expect(screen.getAllByRole('button', { name: /Clear filters/i }).length).toBeGreaterThan(0);
     });
   });
 

@@ -8,6 +8,15 @@ description: "Register an agent on NeMo Helix from code, a container image, a re
 
 <a id="register-agents"></a>
 
+<Warning>
+**Upgrading to 0.9:** `nemo agents create` was renamed to `nemo agents register`.
+There is no compatibility alias; the legacy command fails with
+`No such command 'create'`. Update scripts and CI to use `register` with the same
+arguments, and Python callers from `AgentsResource.create` to
+`AgentsResource.register`. See [Fabric 0.5 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
+for the version, preflight and telemetry migration checklist.
+</Warning>
+
 Registering an agent creates an `agent` entity in a workspace. Choose the method that matches what you have:
 
 | Method | You provide | Use when |
@@ -55,7 +64,7 @@ Register it:
 <Tab title="CLI">
 
 ```bash
-nemo agents create \
+nemo agents register \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
 ```
@@ -73,7 +82,7 @@ agents = AgentsResource(NemoClient.from_config())
 with open("plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml") as f:
     config = yaml.safe_load(f)
 
-agents.create(name="calculator-agent", config=config, config_format=config["config_format"])
+agents.register(name="calculator-agent", config=config, config_format=config["config_format"])
 ```
 
 </Tab>
@@ -97,6 +106,11 @@ Deployments and evaluations stage that fileset beside `agent.yaml`, so relative 
 working. The Python SDK registers the config only; use the CLI or Studio when the agent has other
 files.
 
+Config files must contain a YAML mapping; `{}` is accepted as an empty config.
+API and SDK registration use `config.config_format` when the outer `config_format`
+is omitted. If both are supplied, they must match. Nonempty configs without a
+format retain the legacy `nat-workflow-v1` default.
+
 ### `agent.yaml` Reference
 
 | Field | Purpose |
@@ -117,14 +131,17 @@ See the [examples directory](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main
 for a config per harness.
 
 <Note>
-`nemo agents create` also accepts legacy NeMo Agent Toolkit (NAT) workflow configs
-(`config_format: nat-workflow-v1`, the default when `config_format` is omitted). Use
+`nemo agents register` also accepts legacy NeMo Agent Toolkit (NAT) workflow configs
+(`config_format: nat-workflow-v1`, the default for nonempty configs when `config_format` is omitted). Use
 `nemo-agents-spec-v1` for new agents; registered-agent evaluation targets and the optimization
 strategies require it.
 </Note>
 
 For the built-in Mini-SWE-Agent 2.x harness, install `nemo-helix[nemo-agents-plugin-mini-swe-agent]`
-or, from a source checkout, `nemo-agents-plugin[mini-swe-agent]`.
+or, from a source checkout, `nemo-agents-plugin[mini-swe-agent]`. The public
+[Mini-SWE lifecycle guide](/documentation/agents/mini-swe-agent) covers model
+credentials, deployment, invocation, sessions, telemetry, timeouts and unsupported
+shared capabilities.
 
 ### Bring Your Own Harness
 
@@ -224,7 +241,7 @@ harnesses:
 
 **5. Install the package everywhere the agent is validated or runs:**
 
-- The environment where you run `nemo agents create` and `nemo agents package`, which validate the
+- The environment where you run `nemo agents register` and `nemo agents package`, which validate the
   agent against its adapter.
 - The platform's Python environment, for subprocess deployments. If you installed NeMo Helix with
   `uv tool install`, add your package to that tool environment with `--with`.
@@ -233,8 +250,8 @@ harnesses:
 
 Automatic trace export and streaming depend on what the descriptor declares; see the
 [adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.4.0/docs/adapter-contract). The
-Insights plugin's
-[`nvidia.fabric.insights-analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-insights)
+Compass plugin's
+[`nvidia.fabric.insights-analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-compass)
 adapter is a complete example.
 
 ### Model Access
@@ -329,7 +346,7 @@ configured on the remote agent; tag its traces with the agent's name so they mat
 
 ## Register from Traces
 
-To analyze an agent that already sends traces to Intake, register its name with an empty config.
+To analyze an agent that already sends traces to Intake, register it with only a name. The platform stores an empty Fabric config.
 The name must match the agent name on its traces (`agent.name` in ATIF, `gen_ai.agent.name` in
 OTLP); see [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
 
@@ -338,7 +355,7 @@ OTLP); see [Collect Agent Traces](/documentation/agents/traces-and-insights/coll
 <Tab title="CLI">
 
 ```bash
-nemo agents create --name support-agent --agent-config <(echo '{}')
+nemo agents register --name support-agent
 ```
 
 </Tab>
@@ -349,7 +366,7 @@ from nemo_agents_plugin.sdk import AgentsResource
 from nemo_helix_plugin.client.client import NemoClient
 
 agents = AgentsResource(NemoClient.from_config())
-agents.create(name="support-agent", config={})
+agents.register(name="support-agent")
 ```
 
 </Tab>
@@ -363,8 +380,9 @@ agent name found in ingested traces.
 </Tabs>
 
 A trace-only agent works with [Insights](/documentation/agents/traces-and-insights/insights-from-traces),
-but has nothing to deploy or evaluate. To run it on NeMo Helix, delete it and register it again
-under the same name with a config.
+but has no runnable config. Deployment, execute jobs, registered-agent evaluations, and the built-in
+optimization strategies reject it at submission. To run it on NeMo Helix, delete it and register it
+again under the same name with a config.
 
 ## Manage Registered Agents
 

@@ -12,22 +12,26 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from nemo_automodel.components.checkpoint.checkpointing import Checkpointer
+from nemo_automodel.components.checkpoint.config import SaveConsolidatedMode
 from nemo_automodel.components.config._arg_parser import parse_args_and_load_config
 from nemo_automodel.components.training.step_scheduler import StepScheduler
 from nemo_automodel.recipes.llm.kd import KnowledgeDistillationRecipeForNextTokenPrediction
 from nemo_automodel.recipes.llm.train_ft import TrainFinetuneRecipeForNextTokenPrediction
 from nemo_automodel.recipes.retrieval.train_bi_encoder import TrainBiEncoderRecipe
 from nemo_automodel.recipes.retrieval.train_cross_encoder import TrainCrossEncoderRecipe
+from nhx.automodel.app.constants import PAUSE_SIGNAL, SERVICE_NAME
 from nhx.automodel.app.jobs.training.schemas import TrainingRecipe
 from nhx.automodel.tasks.tqdm_logging import install_line_tqdm
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.callbacks import DatasetQualifier, TrainingProgressCallback
+from nhx.customization_common.training.pause import PausePoller
 from nhx.customization_common.training.reporting import (
     DEFAULT_MIN_REPORT_INTERVAL_SECONDS,
     DIAGNOSTIC_TIME_SERIES,
@@ -36,6 +40,33 @@ from nhx.customization_common.training.reporting import (
 logger = logging.getLogger(__name__)
 
 CHECKPOINT_STATS_FILENAME = "checkpoint_stats.json"
+
+
+def _is_global_rank_zero() -> bool:
+    return int(os.environ.get("RANK", "0")) == 0
+
+
+def _barrier() -> None:
+    """Wait for every rank. Imported here because torch exists only in the training image."""
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+
+
+def _load_checkpoint_stats(checkpoint_dir: Any) -> list[dict[str, Any]]:
+    """Read the entries an earlier run of this job wrote, so a resume or rerun appends to them."""
+    if not checkpoint_dir:
+        return []
+    stats_path = Path(checkpoint_dir) / CHECKPOINT_STATS_FILENAME
+    try:
+        entries = json.loads(stats_path.read_text(encoding="utf-8")).get("checkpoints")
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        logger.warning(f"Could not read existing checkpoint statistics, starting a new list: {e}")
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
 
 
 def _json_metric(value: Any) -> Any:
@@ -244,13 +275,17 @@ class AutomodelRecipeWrapper:
             time_series_metrics=_resolve_time_series_metrics(recipe),
             min_report_interval_seconds=_resolve_min_report_interval(recipe),
         )
+        # setup() restored the newest complete checkpoint, and the scheduler's step is the number
+        # of steps it holds. A rerun after a crash can restore an earlier step than the last one
+        # reported, and the curves must not keep points for steps that are about to run again.
+        self.callback.rewind_to(self._recipe.step_scheduler.step)
         logger.info(f"Automodel recipe wrapper initialized: max_steps={self.max_steps}, num_epochs={self.num_epochs}")
 
         # Store original methods before patching
         self._original_log_train_metrics = recipe.log_train_metrics
         self._original_log_val_metrics = recipe.log_val_metrics
         self._original_save_checkpoint = recipe.save_checkpoint
-        self._checkpoint_stats: list[dict[str, Any]] = []
+        self._checkpoint_stats = _load_checkpoint_stats(self._checkpoint_dir())
 
         # Monkey-patch the recipe's methods to add our callbacks
         recipe.log_train_metrics = self._log_train_metrics  # type: ignore[method-assign]
@@ -263,14 +298,84 @@ class AutomodelRecipeWrapper:
         return self._recipe
 
     def run_train_validation_loop(self) -> None:
-        """Run training and close the progress callback."""
+        """Run training and close the progress callback.
+
+        If training stopped for a pause, global rank 0 records that for the runner,
+        which then skips publication and exits 75.
+        """
+        poller = self._start_pause_poller()
         try:
             self.callback.report_training_start(self.max_steps, self.num_epochs)
             self._recipe.run_train_validation_loop()
+            if self._stopped_for_pause():
+                self._record_pause()
         finally:
+            if poller is not None:
+                poller.stop()
             if self.callback:
                 self.callback.close()
                 logger.info("Training progress callback closed")
+
+    def _start_pause_poller(self) -> PausePoller | None:
+        """Watch for a pause on global rank 0 only.
+
+        The signal goes to this process, and Automodel shares it with every rank at
+        the next step, so one rank is enough.
+        """
+        if not _is_global_rank_zero():
+            return None
+        pid = os.getpid()
+        return PausePoller(self._job_ctx, SERVICE_NAME, on_pause=lambda: os.kill(pid, PAUSE_SIGNAL)).start()
+
+    def _stopped_for_pause(self) -> bool:
+        """Whether the loop ended on the pause signal rather than by finishing.
+
+        A pause that arrives as training reaches its last step loses the race:
+        training finished, so it publishes as usual.
+        """
+        scheduler = self._recipe.step_scheduler
+        return bool(getattr(scheduler, "sigterm_flag", False)) and scheduler.step < self.max_steps
+
+    def _record_pause(self) -> None:
+        sentinel = self._pause_sentinel()
+        if sentinel is None:
+            # Exiting 0 would publish the pause checkpoint as the finished model. Failing keeps
+            # the checkpoint for a rerun instead.
+            raise RuntimeError("Training stopped for a pause, but the config names no pause marker for the runner")
+        if _is_global_rank_zero():
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text(f"{self._recipe.step_scheduler.step}\n", encoding="utf-8")
+            logger.info(f"Training paused at step {self._recipe.step_scheduler.step}; wrote {sentinel}")
+        # No rank exits before the marker exists. Runners on other nodes read it when their torchrun exits.
+        _barrier()
+
+    def _pause_sentinel(self) -> Path | None:
+        cfg = getattr(self._recipe, "cfg", None)
+        value = cfg.get("_pause_sentinel") if hasattr(cfg, "get") else None
+        return Path(value) if isinstance(value, str) and value else None
+
+    def _checkpoint_dir(self) -> Any:
+        return getattr(getattr(self._recipe.checkpointer, "config", None), "checkpoint_dir", None)
+
+    @contextmanager
+    def _without_consolidation_for_a_pause(self) -> Iterator[None]:
+        """Skip the consolidated export while saving a pause checkpoint.
+
+        The pause checkpoint is never published, and the export is the slowest part
+        of a save, so it would only lengthen the pause. The checkpointer reads the
+        setting on each save, so it is restored right after.
+        """
+        config = getattr(self._recipe.checkpointer, "config", None)
+        pausing = bool(getattr(self._recipe.step_scheduler, "sigterm_flag", False))
+        if not pausing or config is None or not hasattr(config, "save_consolidated"):
+            yield
+            return
+        previous = config.save_consolidated
+        config.save_consolidated = SaveConsolidatedMode.FALSE
+        try:
+            yield
+        finally:
+            config.save_consolidated = previous
 
     def _log_train_metrics(self, log_data: Any) -> None:
         """Wrapped log_train_metrics with Jobs-service reporting."""
@@ -351,12 +456,9 @@ class AutomodelRecipeWrapper:
                 self.callback.report_checkpoint_saving(step=step + 1, epoch=epoch + 1)  # Convert to 1-based
             except Exception as e:
                 logger.warning(f"Failed to report checkpoint save start: {e}")
-        self._original_save_checkpoint(epoch, step, train_loss, val_loss, best_metric_key)
-        checkpoint_dir = getattr(
-            getattr(self._recipe.checkpointer, "config", None),
-            "checkpoint_dir",
-            None,
-        )
+        with self._without_consolidation_for_a_pause():
+            self._original_save_checkpoint(epoch, step, train_loss, val_loss, best_metric_key)
+        checkpoint_dir = self._checkpoint_dir()
         if self.callback:
             try:
                 self.callback.report_checkpoint_saved(
@@ -367,7 +469,7 @@ class AutomodelRecipeWrapper:
             except Exception as e:
                 logger.warning(f"Failed to report checkpoint save: {e}")
 
-        if checkpoint_dir and int(os.environ.get("RANK", "0")) == 0:
+        if checkpoint_dir and _is_global_rank_zero():
             try:
                 self._checkpoint_stats.append(
                     {

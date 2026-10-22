@@ -8,11 +8,18 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import { getAgentsListAgentsQueryKey, useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import { Banner, CodeSnippet, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
 import { useCreateAgentFromTrial } from '@studio/api/agents/useCreateAgentFromTrial';
+import {
+  DEPLOY_ON_CREATE_FORM_DEFAULTS,
+  type DeployOnCreatePlan,
+  deployOnCreateFormSchema,
+  useDeployOnCreate,
+} from '@studio/api/agents/useDeployOnCreate';
 import { isTextValue } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
+import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
 import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import {
   type AppliedTrialConfig,
@@ -23,16 +30,19 @@ import {
   withAgentName,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
 import { agentNameSchema } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
-import { getAgentDetailRoute } from '@studio/routes/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect, useMemo, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
-import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
-const deployTrialFormSchema = z.object({ name: agentNameSchema });
+const deployTrialFormSchema = z.object({ name: agentNameSchema }).merge(deployOnCreateFormSchema);
 
 type DeployTrialFormData = z.infer<typeof deployTrialFormSchema>;
+
+const DEPLOY_TRIAL_FORM_DEFAULTS: DeployTrialFormData = {
+  name: '',
+  ...DEPLOY_ON_CREATE_FORM_DEFAULTS,
+};
 
 // `ws/name`, or a bare name resolved against the study's workspace, as the optimize job does.
 const resolveAgentRef = (
@@ -56,7 +66,6 @@ export interface DeployTrialModalProps {
 export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, trial, onClose }) => {
   const open = trial !== null;
   const toast = useToast();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { spec } = job;
   const studyWorkspace = spec.workspace ?? workspace;
@@ -66,6 +75,9 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     [spec, studyWorkspace]
   );
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
+  // Set on submit, so the choice made for this agent is the one that runs once it exists.
+  const deployAfterCreate = useRef<DeployOnCreatePlan | null>(null);
+  const deployOnCreate = useDeployOnCreate(workspace, { enabled: open });
 
   const {
     data: sourceAgent,
@@ -100,9 +112,16 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
       void queryClient.invalidateQueries({
         queryKey: getAgentsListAgentsQueryKey(targetWorkspace),
       });
-      if (agent.name) navigate(getAgentDetailRoute(targetWorkspace, agent.name));
+      if (agent.name) {
+        void deployOnCreate.openCreatedAgent(
+          targetWorkspace,
+          agent.name,
+          deployAfterCreate.current
+        );
+      }
     },
   });
+  const busy = isPending || deployOnCreate.isDeploying;
 
   const {
     control,
@@ -111,16 +130,20 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     formState: { errors },
   } = useForm<DeployTrialFormData>({
     resolver: zodResolver(deployTrialFormSchema),
-    defaultValues: { name: '' },
-    disabled: isPending,
+    defaultValues: DEPLOY_TRIAL_FORM_DEFAULTS,
+    disabled: busy,
     mode: 'onChange',
   });
   const watchedName = useWatch({ control, name: 'name' });
+  const watchedDeploy = useWatch({ control, name: 'deploy' });
   const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
 
   const sourceName = sourceRef?.name;
   useEffect(() => {
-    resetForm({ name: trial && sourceName ? buildTrialAgentName(sourceName, trial) : '' });
+    resetForm({
+      ...DEPLOY_TRIAL_FORM_DEFAULTS,
+      name: trial && sourceName ? buildTrialAgentName(sourceName, trial) : '',
+    });
     setReplaceArmedFor(null);
   }, [trial, sourceName, resetForm]);
 
@@ -152,8 +175,10 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     onClose();
   };
 
-  const onSubmit: SubmitHandler<DeployTrialFormData> = async ({ name }) => {
+  const onSubmit: SubmitHandler<DeployTrialFormData> = async (formData) => {
+    const { name } = formData;
     if (!sourceAgent || !sourceRef || !appliedConfig) return;
+    deployAfterCreate.current = deployOnCreate.plan(formData);
     try {
       await createAgent({
         workspace,
@@ -163,7 +188,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
           description: sourceAgent.description,
           config_format: sourceAgent.config_format,
         },
-        config: withAgentName(appliedConfig.config, name) as CreateAgentRequestConfig,
+        config: withAgentName(appliedConfig.config, name) as RegisterAgentRequestConfig,
         replaceOrphanedFileset: replaceOrphan,
       });
     } catch (error) {
@@ -186,6 +211,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     (applied?.ok === false ? applied.error : undefined) ??
     (createError ? getErrorMessage(createError, 'Failed to create agent') : undefined);
   const isLoading = isLoadingAgent || isLoadingStudyConfig;
+  const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
 
   return (
     <FormModal
@@ -199,9 +225,9 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
       }
       submitButtonText={replaceOrphan ? 'Replace and deploy' : 'Deploy'}
       onSubmit={handleSubmit(onSubmit)}
-      disabled={isPending}
-      loading={isPending || isLoading}
-      submitDisabled={!!loadError || !appliedConfig}
+      disabled={busy}
+      loading={busy || isLoading}
+      submitDisabled={!!loadError || !appliedConfig || awaitingDeployModes}
       errorText={errorText}
     >
       {appliedConfig && agentChangedSinceStudy && (
@@ -266,6 +292,11 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
           optimize config, which the agent ran with during the study.
         </Text>
       )}
+      <DeployOnCreateFields
+        deployOnCreate={deployOnCreate}
+        deployControllerProps={{ control, name: 'deploy' }}
+        modeControllerProps={{ control, name: 'deploymentMode' }}
+      />
     </FormModal>
   );
 };

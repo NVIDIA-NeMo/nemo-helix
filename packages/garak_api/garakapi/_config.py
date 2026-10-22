@@ -1,3 +1,4 @@
+# WARNING: This file is maintained by the garak project. Do not modify it directly in Helix.
 """garak global config"""
 
 # SPDX-FileCopyrightText: Portions Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.

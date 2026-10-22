@@ -70,7 +70,9 @@ HARBOR_REJECTED_VALUES = {
 
 
 def test_harbor_configuration_survives_submission_without_local_storage(tmp_path, monkeypatch):
-    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES)
+    config = HarborRuntimeConfig.model_validate(
+        {"jobs_dir": tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES}
+    )
     runner = HarborAgentTaskRunner(config=config)
     # Conversion must not inspect the caller's filesystem or start Harbor.
     with monkeypatch.context() as scoped:

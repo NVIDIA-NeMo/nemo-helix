@@ -14,6 +14,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
     HelixJobStepWithContext,
+    JobStatusDetailsQueryParams,
     JobStatusDetailsUpdate,
     ListStepsQueryParams,
 )
@@ -292,10 +293,10 @@ class JobReconciler(HeartbeatMixin, Controller):
 
     def _retain_step_storage(self, step: HelixJobStepWithContext) -> None:
         job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
-        # An older attempt's stopped step must not reclaim storage from under a rerun.
+        # An older attempt's stopped step must not reclaim storage from under a rerun. It is not
+        # marked either: step names repeat across attempts, so the update could land on the rerun's.
         current_attempt_id = getattr(job, "attempt_id", None)
         if current_attempt_id is not None and step.attempt_id != current_attempt_id:
-            self._mark_step_swept(step)
             return
         targets = storage_targets(job.platform_spec)
         if not targets:
@@ -319,33 +320,42 @@ class JobReconciler(HeartbeatMixin, Controller):
                 return
 
         self._queue_storage_reclaim(job.id, step, targets)
+        swept_status = step.status
         if step.status == HelixJobStatus.PAUSED:
             self._jobs.cancel_job(name=step.job, workspace=step.workspace)
-        self._mark_step_swept(step)
+            # Cancel moves the paused step to cancelling, and the sweep mark must not move it back.
+            swept_status = HelixJobStatus.CANCELLING
+        self._mark_step_swept(step, swept_status)
 
     def _mark_storage_reclaimed(self, step: HelixJobStepWithContext) -> bool:
-        """Mark the job's storage reclaimed before reclaiming it. Return False if a resume got there first.
+        """Mark the job's storage reclaimed before reclaiming it. Return False if the job moved on.
 
-        Resume, rerun and control updates refuse a marked job. A resume that moved the step
-        before the mark was written keeps its storage, so the mark is taken back.
+        The jobs API writes the mark on the step's attempt only while it is the job's current
+        attempt and the step has the status it was listed with. It checks under the job's lock,
+        as resume and rerun do, so either they refuse the marked job, or one of them took the
+        job first and the mark is refused.
         """
-        self._set_storage_reclaimed_at(step, datetime.datetime.now(datetime.timezone.utc).isoformat())
-        current = self._jobs.get_job_step(name=step.name, workspace=step.workspace, job=step.job).data()
-        if current.status == step.status:
-            return True
-        self._set_storage_reclaimed_at(step, None)
-        logger.info(
-            "Kept the storage of a job that left its stopped state",
-            extra={"job": step.job, "step": step.name, "workspace": step.workspace, "status": current.status},
-        )
-        return False
-
-    def _set_storage_reclaimed_at(self, step: HelixJobStepWithContext, reclaimed_at: str | None) -> None:
-        self._jobs.update_job_status_details(
-            name=step.job,
-            workspace=step.workspace,
-            body=JobStatusDetailsUpdate({STORAGE_RECLAIMED_AT: reclaimed_at}),
-        )
+        try:
+            self._jobs.update_job_attempt_status_details(
+                job=step.job,
+                attempt=step.attempt_id,
+                workspace=step.workspace,
+                body=JobStatusDetailsUpdate(
+                    {STORAGE_RECLAIMED_AT: datetime.datetime.now(datetime.timezone.utc).isoformat()}
+                ),
+                query_params=JobStatusDetailsQueryParams(
+                    expected_step_id=step.id, expected_step_status=HelixJobStatus(step.status).value
+                ),
+            )
+        except NemoHTTPError as exc:
+            if exc.status_code != 409:
+                raise
+            logger.info(
+                "Kept the storage of a job that moved on",
+                extra={"job": step.job, "step": step.name, "workspace": step.workspace},
+            )
+            return False
+        return True
 
     def _queue_storage_reclaim(
         self, job_id: str, step: HelixJobStepWithContext, targets: list[JobStorageTarget]
@@ -365,15 +375,20 @@ class JobReconciler(HeartbeatMixin, Controller):
         except EntityConflictError:
             pass  # Already queued.
 
-    def _mark_step_swept(self, step: HelixJobStepWithContext) -> None:
-        """Record on the step that the sweep is done with it, so later passes skip it without a lookup."""
+    def _mark_step_swept(self, step: HelixJobStepWithContext, status: HelixJobStatus | None = None) -> None:
+        """Record on the step that the sweep is done with it, so later passes skip it without a lookup.
+
+        ``status`` is the step's status now, when the sweep changed it since the step was listed.
+        """
         self._jobs.update_job_step_status(
             name=step.name,
             workspace=step.workspace,
             job=step.job,
             body=HelixJobStatusUpdateRequest(
-                status=step.status,
+                status=status or step.status,
                 status_details={STORAGE_SWEPT_AT: datetime.datetime.now(datetime.timezone.utc).isoformat()},
+                # Rejected if a rerun has replaced the step since it was listed.
+                expected_step_id=step.id,
             ),
         )
 
@@ -394,10 +409,11 @@ class JobReconciler(HeartbeatMixin, Controller):
         if error_details is not None:
             update_fields["error_details"] = error_details
         try:
-            response = self._jobs.update_job_step_status(
+            response = self._jobs.update_attempt_step_status(
                 name=step.name,
                 workspace=step.workspace,
                 job=step.job,
+                attempt=step.attempt_id,
                 body=HelixJobStatusUpdateRequest(**update_fields),
             ).data()
         except Exception:

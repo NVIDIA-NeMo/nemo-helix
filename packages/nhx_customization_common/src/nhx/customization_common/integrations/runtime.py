@@ -5,12 +5,17 @@
 
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from nhx.customization_common.integrations.context import IntegrationRuntimeContext
 
 logger = logging.getLogger(__name__)
+
+#: MLflow tag that ties every run of one platform job together across pause,
+#: resume, and rerun. Set after the user's tags, so a user tag cannot replace it.
+MLFLOW_JOB_UID_TAG = "job_uid"
 
 
 def _resolve_wandb_dir(workspace_path: str) -> Path:
@@ -44,6 +49,7 @@ def build_mlflow_config(ctx: IntegrationRuntimeContext) -> dict[str, Any] | None
     Run naming strategy (same as W&B):
     - ``name`` on input resolves to ``run_name`` in the output dict (defaults to job_id)
     - task_id is added to tags for granular execution tracking
+    - the job_uid tag lets a resume or rerun find and continue the run
 
     Missing tracking URI disables integration with a warning.
     """
@@ -77,6 +83,8 @@ def build_mlflow_config(ctx: IntegrationRuntimeContext) -> dict[str, Any] | None
         tags.update(user_config.tags)
     if user_config.description:
         tags["mlflow.note.content"] = user_config.description
+    if ctx.job_ctx.job_uid:
+        tags[MLFLOW_JOB_UID_TAG] = ctx.job_ctx.job_uid
 
     experiment_name = _resolve_with_fallback(
         user_config.experiment_name,
@@ -147,5 +155,48 @@ def build_wandb_config(ctx: IntegrationRuntimeContext) -> dict[str, Any] | None:
     if user_config.base_url:
         logger.info(f"Using self-hosted W&B server: {user_config.base_url}")
         wandb_config["settings"] = {"base_url": user_config.base_url}
+    if ctx.job_ctx.job_uid:
+        # One W&B run per platform job: "allow" creates it on the first start and
+        # continues it after a resume or rerun, instead of starting another run.
+        wandb_config["id"] = ctx.job_ctx.job_uid
+        wandb_config["resume"] = "allow"
 
     return wandb_config
+
+
+def find_mlflow_run_id(mlflow_config: Mapping[str, Any] | None) -> str | None:
+    """Return the ID of this job's existing MLflow run, if it has one.
+
+    MLflow creates run IDs on the server, so a job cannot name its run ahead of
+    time the way it can with W&B. Each run is tagged with the job's ``job_uid``
+    instead, and this finds the newest active run with that tag. Backends pass the
+    result as ``MLFLOW_RUN_ID``, which ``mlflow.start_run()`` uses to continue the
+    run. The training frameworks call ``start_run`` themselves, and that variable
+    is the one hook all of them honor.
+
+    Any failure returns ``None``, and the job starts a new run.
+    """
+    if not mlflow_config:
+        return None
+    job_uid = (mlflow_config.get("tags") or {}).get(MLFLOW_JOB_UID_TAG)
+    if not job_uid:
+        return None
+    try:
+        from mlflow.tracking import MlflowClient
+    except ImportError:
+        return None
+    try:
+        client = MlflowClient(tracking_uri=mlflow_config["tracking_uri"])
+        experiment = client.get_experiment_by_name(mlflow_config["experiment_name"])
+        if experiment is None:
+            return None
+        runs = client.search_runs(
+            [experiment.experiment_id],
+            filter_string=f"tags.{MLFLOW_JOB_UID_TAG} = '{job_uid}'",
+            order_by=["attributes.start_time DESC"],
+            max_results=1,
+        )
+    except Exception as e:
+        logger.warning(f"Could not look up this job's MLflow run, so a new run starts: {e}")
+        return None
+    return runs[0].info.run_id if runs else None

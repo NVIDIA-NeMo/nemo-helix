@@ -24,7 +24,7 @@ from typing import Any
 _SANDBOX_GROUP_PATH = "/apis/agents.x-k8s.io/v1alpha1"
 _DEFAULT_ALLOWED = ("1.1.1.1", 443)
 _DEFAULT_DENIED = ("1.0.0.1", 443)
-_CONTROL_SERVICES = ("scaled-evals-api", "postgres", "rustfs", "registry", "buildkit")
+_CONTROL_SERVICES = ("scaled-evals-api", "rustfs", "registry", "buildkit")
 _PROBE_PORT = 18080
 
 

@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=0.88.0",
+    "certifi>=2026.10.19",
     "fastapi>=0.115.4",
     "filesets",
     "jsonschema>=4.0.0",

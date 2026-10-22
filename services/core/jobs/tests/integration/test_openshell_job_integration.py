@@ -281,6 +281,8 @@ def test_custom_policy_allows_declared_egress(make_backend, tmp_path: Path) -> N
     custom = make_backend(policy_path=_write_egress_policy(tmp_path))
     # The user rule is added alongside the platform rule, never in place of it.
     assert set(custom._policy.network_policies) == {"egress_test_host", PLATFORM_EGRESS_KEY}
+    # The file only declares network rules, so the generated filesystem contract stays.
+    assert "/var/run/scratch" in custom._policy.filesystem.read_write
 
     step = _step()
     _create_sandbox(custom, step, _FETCH_EGRESS_HOST)

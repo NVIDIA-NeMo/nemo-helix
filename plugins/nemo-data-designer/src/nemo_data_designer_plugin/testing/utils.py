@@ -431,6 +431,7 @@ async def task_context(
                     platform_spec=job_config_dict,
                 ),
             ).data()
+            assert job.attempt_id is not None
             job_ctx = JobContext(
                 workspace="default",
                 storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
@@ -438,8 +439,10 @@ async def task_context(
                     job_name=job_name,
                     workspace="default",
                     client=client_context.client,
+                    attempt_id=job.attempt_id,
                 ),
                 job_id=job.id,
+                attempt_id=job.attempt_id,
             )
             yield CreateJobTestContext(
                 client=client_context.client,

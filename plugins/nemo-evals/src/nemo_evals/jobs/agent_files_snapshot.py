@@ -4,7 +4,7 @@
 """Snapshot a registered agent's Ethos files for one evaluation job.
 
 ``resolved_config`` is captured at submit, but the files it refers to (skills, prompts, local adapters)
-live in the agent's ``<agent>-ethos`` FileSet, which ``nemo agents create`` clears and rewrites every time
+live in the agent's ``<agent>-ethos`` FileSet, which ``nemo agents register`` clears and rewrites every time
 the agent is re-registered. A job queued across a re-registration would otherwise stage new files under
 old config. So submission copies the FileSet into a job-owned snapshot, the staging step downloads that
 snapshot, and the evaluation step deletes it once the run has succeeded.

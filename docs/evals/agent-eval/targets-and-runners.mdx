@@ -174,9 +174,15 @@ covers several agent frontends:
 | `nvidia.fabric.hermes` | Hermes SDK (`transport="library"`) |
 | `nvidia.fabric.langchain.deepagents` | LangChain deepagents — **not** installed by this SDK's `fabric` extra (see below) |
 
-Fabric 0.5 also ships Cline, Droid, Kilo, Nooa, OpenClaw, OpenCode, OpenHands, Qwen Code, and Pi
-adapters. NeMo Helix does not install those; add the matching `nemo-fabric-adapters-*` package
-yourself to use one.
+Fabric 0.5 also has Cline, Droid, Kilo, NOOA, OpenClaw, OpenCode, OpenHands,
+Qwen Code, Pi and Mini-SWE adapters. This upstream inventory is not the
+installation set of the SDK's `fabric` extra or a NeMo Helix release-support
+matrix. The Agents plugin supplies additional contracts and optional harness
+extras, including Mini-SWE; Pi ships a host-side descriptor and generated-image
+integration but requires Node/npm runtime components and is not end-to-end
+release-gated in Helix 0.9. See
+[adapter availability and installation boundaries](/documentation/agents/fabric-upgrade#adapter-availability-is-not-runtime-installation)
+before choosing a harness.
 
 `FabricAgentRuntime` runs that config on the host by default, capturing an ATIF trajectory. Pass
 `sandbox=<SandboxProvider>` to run the same configuration inside a sandbox instead; `image` and

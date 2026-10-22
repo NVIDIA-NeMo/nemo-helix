@@ -28,6 +28,7 @@ from typing import Any, ClassVar
 import yaml
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.validation import require_registered_agent_config
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -90,6 +91,20 @@ class SwitchyardOptimizeJob(NemoJob):
     )
     description: ClassVar[str] = "Build Switchyard-routed variants of a platform agent."
     spec_schema: ClassVar[type[BaseModel]] = SwitchyardOptimizeSpec
+
+    @classmethod
+    async def to_spec(
+        cls,
+        input_spec: BaseModel,
+        *,
+        workspace: str,
+        entity_client: object,
+        async_sdk: AsyncNemoClient,
+        is_local: bool,
+    ) -> BaseModel:
+        spec = SwitchyardOptimizeSpec.model_validate(input_spec.model_dump())
+        await require_registered_agent_config(spec.agent, workspace=workspace, async_sdk=async_sdk)
+        return spec
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)

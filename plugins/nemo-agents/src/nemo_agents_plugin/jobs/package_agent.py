@@ -34,7 +34,9 @@ from nemo_agents_plugin.entities import (
     Agent,
     ethos_fileset_name,
 )
+from nemo_helix_plugin.agents.validation import require_agent_config
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoResponseValidationError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -215,7 +217,7 @@ class PackageAgentJob(NemoJob):
     ) -> BaseModel:
         """Resolve the agent name into its inline config.
 
-        Reads the entity at submit time so a missing or non-Fabric agent fails
+        Reads the entity at submit time so a missing, unconfigured, or non-Fabric agent fails
         the POST rather than the build.
         """
         del is_local
@@ -228,6 +230,7 @@ class PackageAgentJob(NemoJob):
         except NemoEntityNotFoundError as exc:
             raise HelixJobCompilationError(f"Agent '{input_spec.agent}' not found in workspace '{workspace}'.") from exc
 
+        require_agent_config(agent.config, name=input_spec.agent, workspace=workspace)
         if agent.config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
             raise HelixJobCompilationError(
                 f"Agent '{input_spec.agent}' has config_format '{agent.config_format}'; platform-side "
@@ -317,6 +320,9 @@ class PackageAgentJob(NemoJob):
             profiles = (
                 await AsyncJobsClient.from_client(cast(AsyncNemoClient, async_sdk)).get_execution_profiles()
             ).data()
+        except NemoResponseValidationError:
+            # A response that does not match the client contract is not transient; retrying cannot fix it.
+            raise
         except Exception as exc:
             raise HelixJobDependencyUnavailableError(
                 f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "

@@ -1255,6 +1255,68 @@ authz:
         scopes:
         - jobs:write
         - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details:
+      patch:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}/status:
+      patch:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
+      put:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
       get:
         permissions:
@@ -1303,12 +1365,6 @@ authz:
         scopes:
         - jobs:read
         - platform:read
-      put:
-        permissions:
-        - jobs.update
-        scopes:
-        - jobs:write
-        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}:
       delete:
         permissions:
@@ -1322,6 +1378,12 @@ authz:
         scopes:
         - jobs:read
         - platform:read
+      patch:
+        permissions:
+        - jobs.update
+        scopes:
+        - jobs:write
+        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/cancel:
       post:
         permissions:
@@ -1371,13 +1433,6 @@ authz:
         scopes:
         - jobs:read
         - platform:read
-    /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details:
-      patch:
-        permissions:
-        - jobs.update
-        scopes:
-        - jobs:write
-        - platform:write
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/steps:
       get:
         permissions:

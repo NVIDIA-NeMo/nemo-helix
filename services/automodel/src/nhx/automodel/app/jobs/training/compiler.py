@@ -274,7 +274,10 @@ def compile_training_step(
         executor=executor,
         environment=[*base_env, *secret_envs, EnvironmentVariable(name="HF_DATASETS_OFFLINE", value="1")],
         config=training_config.model_dump(mode="json"),
-        lifecycle=StepLifecycle(staleness_timeout_seconds=config.training_staleness_timeout_seconds),
+        lifecycle=StepLifecycle(
+            staleness_timeout_seconds=config.training_staleness_timeout_seconds,
+            pause_deadline_seconds=config.training_pause_deadline_seconds,
+        ),
     )
 
 

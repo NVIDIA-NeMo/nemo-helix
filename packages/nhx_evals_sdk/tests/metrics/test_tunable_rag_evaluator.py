@@ -231,7 +231,7 @@ async def test_parse_failure_returns_zero_scores() -> None:
     metric = TunableRagEvaluatorMetric(model=_make_model(), default_scoring=True)
 
     async def fake_inference(model: Model, request: dict, max_retries: int | None, **kwargs: Any) -> dict:
-        return _judge_response("not-json")
+        return {"choices": [{"message": {"content": "not-json"}}]}
 
     metric.set_inference_fn(fake_inference)
 

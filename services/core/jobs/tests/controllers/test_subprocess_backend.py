@@ -86,7 +86,7 @@ def test_schedule_starts_process_and_stages_environment(
     assert metadata.process.wait(timeout=5) == 0
     assert metadata.work_dir.is_relative_to(tmp_path)
     assert metadata.persistent_dir.is_relative_to(tmp_path)
-    mock_jobs_client.update_job_step_task.assert_called()
+    mock_jobs_client.update_attempt_step_task.assert_called()
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(
@@ -229,6 +229,7 @@ def test_schedule_preserves_uds_otlp_metadata_in_runtime_env(mock_nemo_client, t
     )
     assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR] == "uds"
     assert captured_env[NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR] == "/tmp/nemo-helix.sock"
+    assert captured_env["NEMO_JOB_UID"] == "platform-job-test-uid"
 
 
 def test_schedule_terminates_process_when_post_popen_setup_fails(
@@ -270,7 +271,7 @@ def test_sync_completed_closes_logs(
     assert update.status == HelixJobStatus.COMPLETED
     assert metadata.closed_logs is True
     assert "hello logs" in metadata.log_path.read_text(encoding="utf-8")
-    last_call = mock_jobs_client.update_job_step_task.call_args
+    last_call = mock_jobs_client.update_attempt_step_task.call_args
     assert last_call.kwargs["body"].status == HelixJobStatus.COMPLETED
 
 
@@ -656,7 +657,7 @@ def test_sync_pausing_nonzero_exit_is_error(
     update = backend.sync(step)
 
     assert update.status == HelixJobStatus.ERROR
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs["body"]
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs["body"]
     assert task_update.status == HelixJobStatus.ERROR
     assert "out of memory" in task_update.error_stack
 
@@ -711,7 +712,7 @@ def test_sync_pausing_deadline_kills_the_process(
         assert update.status == HelixJobStatus.ERROR
         assert metadata.process.wait(timeout=5) is not None
         assert metadata.closed_logs
-        assert mock_jobs_client.update_job_step_task.call_args.kwargs["body"].status == HelixJobStatus.ERROR
+        assert mock_jobs_client.update_attempt_step_task.call_args.kwargs["body"].status == HelixJobStatus.ERROR
     finally:
         if metadata.process.poll() is None:
             metadata.process.kill()
@@ -791,3 +792,24 @@ def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_pat
         pytest.raises(PermissionError),
     ):
         backend.reclaim_persistent_storage("default", "train-llama")
+
+
+def test_cleanup_reads_step_from_registered_attempt(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
+    _schedule_without_otel_export(backend, step)
+    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    metadata = backend._process_registry.get(key)
+    assert metadata is not None
+    assert metadata.process.wait(timeout=5) == 0
+    with patch.object(backend, "get_step_safe", return_value=None) as get_step_safe:
+        backend.cleanup_steps()
+
+    get_step_safe.assert_called_once_with(
+        job=step.job,
+        step_name=step.name,
+        workspace=step.workspace,
+        attempt_id=str(step.attempt_id),
+    )

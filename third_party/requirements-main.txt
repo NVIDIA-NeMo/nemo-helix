@@ -26,7 +26,7 @@
     #   nemo-builder-plugin
     #   nemo-garak-plugin
     #   nemo-guardrails-plugin
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-optimization-plugin
     #   nemo-safe-synthesizer-plugin
     #   nemo-unsloth-plugin
@@ -53,7 +53,7 @@
     #   nemo-guardrails-plugin
     #   nemo-helix
     #   nemo-helix-ext
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-optimization-plugin
     #   nemo-rl-plugin
     #   nemo-safe-synthesizer-plugin
@@ -150,7 +150,7 @@
     #   nemo-helix
     #   nhx-platform-seed
 -e ./plugins/nemo-guardrails ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-insights ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-compass ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-rl ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-safe-synthesizer
@@ -927,7 +927,7 @@ fastapi==0.138.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-deployments-plugin
     #   nemo-helix
     #   nemo-helix-plugin
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-safe-synthesizer-plugin
     #   nemo-sandboxed-gym
     #   nemohelix
@@ -1302,7 +1302,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-garak-plugin
     #   nemo-helix
     #   nemo-helix-ext
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-safe-synthesizer
     #   nemo-safe-synthesizer-plugin
     #   nemo-switchyard-plugin
@@ -2012,7 +2012,7 @@ nemo-compass==0.1.0 ; (python_full_version < '3.14' and platform_machine == 'arm
     --hash=sha256:6b50a6cc8b13991af5dce5469f5eb8e97103e77f3d59e6f2b90d8a9b4762a0a4
     # via
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
 nemo-fabric==0.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:9308238f62fb1792659c3651bf10cc8bca6e02dd940eeee7802b1e6ce6cf3c5a
     # via
@@ -2034,7 +2034,7 @@ nemo-fabric-adapter-contract==0.5.0 ; (platform_machine == 'arm64' and sys_platf
     #   nemo-fabric-adapters-nooa
     #   nemo-fabric-adapters-remote-agent
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
 nemo-fabric-adapters-claude==0.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:8cfec4e4f8a410f0f757c8a113c0f9217e63310c504d18a103b39231a2112383
     # via
@@ -2056,7 +2056,7 @@ nemo-fabric-adapters-common==0.5.0 ; (platform_machine == 'arm64' and sys_platfo
     #   nemo-fabric-adapters-nooa
     #   nemo-fabric-adapters-remote-agent
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
 nemo-fabric-adapters-deepagents==0.5.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:e2850c3ccaa004f467a3b5d7c9fab6abe54fee95bb01df6d259eec5d9cc2864b
     # via
@@ -2100,7 +2100,7 @@ nemo-relay==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') o
     # via
     #   nemo-fabric
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nhx-evals-sdk
 nemo-relay-cli-bin==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:3911f264d1d8720cdd640870d61bfa817de833fb22af23ea4e93287d63b85ff5 \
@@ -2167,7 +2167,7 @@ nooa==0.0.10 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     # via
     #   nemo-compass
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
 numpy==2.5.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:1c6759f538fb912fc46de0a6b1758ccf7b57bc7c7ebebc23974fdac3de8db0cd \
     --hash=sha256:224ca51130ef7da85bea2191625181cb4f337f9cb64b471f10c1a12aa8b60077 \
@@ -2456,7 +2456,7 @@ opentelemetry-exporter-otlp==1.43.0 ; (platform_machine == 'arm64' and sys_platf
     --hash=sha256:70f3fe740a64596d4157588a2ee7e4fd37d2acc0c0f522a2882b8c29316cd0f0
     # via
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nhx-guardrails
     #   nvidia-nat-opentelemetry
 opentelemetry-exporter-otlp-proto-common==1.43.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
@@ -2552,7 +2552,7 @@ opentelemetry-sdk==1.43.0 ; (platform_machine == 'arm64' and sys_platform == 'da
     #   data-designer
     #   mlflow-skinny
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nhx-common
     #   nhx-guardrails
     #   nooa
@@ -3034,7 +3034,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-helix-plugin
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-optimization-plugin
     #   nemo-rl-plugin
     #   nemo-safe-synthesizer
@@ -3292,7 +3292,7 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-helix-plugin
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-optimization-plugin
     #   nemo-safe-synthesizer
     #   nemo-sandboxed-gym
@@ -4004,7 +4004,7 @@ typer==0.25.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-helix
     #   nemo-helix-ext
     #   nemo-helix-plugin
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   nemo-optimization-plugin
     #   nemo-rl-plugin
     #   nemo-safe-synthesizer-plugin
@@ -4107,7 +4107,7 @@ tzdata==2026.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     --hash=sha256:bbe9af844f658da81a5f95019480da3a89415801f6cc966806612cc7169bffe7
     # via
     #   nemo-helix
-    #   nemo-insights-plugin
+    #   nemo-compass-plugin
     #   pandas
 tzlocal==5.4.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:8dbb8660838688a7b6ba4fed31d18dedf842afb4d47ca050d6d891c2c15f3be4 \

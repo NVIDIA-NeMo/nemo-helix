@@ -1532,7 +1532,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
     volcano_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     # Mock check_step_is_terminal: step1 terminal (True), step2 not terminal (False)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         return step_name == "step1"
 
     volcano_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)  # type: ignore[assignment]
@@ -1599,12 +1599,16 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
 
         # Verify check_step_is_terminal was called for both steps (loop checks all jobs)
         assert volcano_job.check_step_is_terminal.call_count == 2
-        volcano_job.check_step_is_terminal.assert_any_call(job="multi-step-job", step_name="step1", workspace="default")
-        volcano_job.check_step_is_terminal.assert_any_call(job="multi-step-job", step_name="step2", workspace="default")
+        volcano_job.check_step_is_terminal.assert_any_call(
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
+        )
+        volcano_job.check_step_is_terminal.assert_any_call(
+            job="multi-step-job", step_name="step2", workspace="default", attempt_id=None
+        )
 
         # Verify persistent storage cleanup eligibility was checked once for step 1
         volcano_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup was NOT called
@@ -2042,9 +2046,9 @@ def test_volcano_pausing_exit_gives_each_task_the_pause_outcome(volcano_job, moc
         update = volcano_job.sync(step)
 
     assert update.status == HelixJobStatus.PAUSED
-    task_updates = {
-        call.kwargs["name"]: call.kwargs["body"] for call in mock_jobs_client.update_job_step_task.call_args_list
-    }
+    calls = mock_jobs_client.update_attempt_step_task.call_args_list
+    assert all(call.kwargs["attempt"] == step.attempt_id for call in calls)
+    task_updates = {call.kwargs["name"]: call.kwargs["body"] for call in calls}
     assert set(task_updates) == {"task-uid-leader", "task-uid-worker"}
     for body in task_updates.values():
         assert body.status == HelixJobStatus.PAUSED
@@ -2068,8 +2072,9 @@ def test_volcano_pausing_deadline_fails_each_task(volcano_job, mock_jobs_client,
         update = volcano_job.sync(step)
 
     assert update.status == HelixJobStatus.ERROR
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
     assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
     assert task_update["body"].status == HelixJobStatus.ERROR
     assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 

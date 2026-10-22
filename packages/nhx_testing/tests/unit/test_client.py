@@ -5,6 +5,7 @@
 
 import asyncio
 import threading
+from collections.abc import Mapping
 
 import httpx
 import pytest
@@ -530,3 +531,45 @@ def test_request_scoped_nemo_client_overrides_carry_request_headers():
         assert headers["X-NHX-Principal-Id"] == "user@example.com"
         assert headers["traceparent"] == "00-trace-span-01"
     assert "X-NHX-Principal-Id" not in base_async.default_headers
+
+
+class _ScriptedPostClient:
+    def __init__(self, status_codes: list[int]) -> None:
+        self.status_codes = list(status_codes)
+        self.calls = 0
+
+    def post(self, url: str, *, json: Mapping[str, str], headers: Mapping[str, str]) -> httpx.Response:
+        self.calls += 1
+        self.last = (url, json, headers)
+        return httpx.Response(self.status_codes.pop(0), text="denied")
+
+
+def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.testing.client import _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    client = _ScriptedPostClient([403, 201])
+
+    _post_after_auth_warmup(
+        client,
+        "/apis/entities/v2/workspaces",
+        json={"name": "destination"},
+        headers={"X-NHX-Principal-Id": "user@example.com"},
+    )
+
+    assert client.calls == 2
+
+
+def test_post_after_auth_warmup_raises_when_the_denial_is_not_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.testing.client import _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    client = _ScriptedPostClient([422])
+
+    with pytest.raises(RuntimeError, match="422"):
+        _post_after_auth_warmup(
+            client,
+            "/apis/entities/v2/workspaces",
+            json={"name": "destination"},
+            headers={"X-NHX-Principal-Id": "user@example.com"},
+        )

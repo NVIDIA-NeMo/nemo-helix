@@ -32,7 +32,7 @@ ToTime = Annotated[datetime | None, Query(alias="to")]
 @router.get("/users/{user_id}/summary", response_model=AdminUserSummaryResponse)
 @admin_only
 def admin_user_summary(user_id: str, db: Db) -> AdminUserSummaryResponse:
-    summary = db.users.summary(user_id)
+    summary = db.evaluations.summary(user_id)
     return AdminUserSummaryResponse(user_id=user_id, **summary)
 
 
@@ -60,7 +60,7 @@ def admin_user_evaluations(
 @admin_only
 def admin_capacity(db: Db) -> AdminCapacityResponse:
     return AdminCapacityResponse(
-        **db.users.capacity(),
+        **db.evaluations.capacity(),
         cluster_limit=settings.control_plane_cluster_run_limit,
         per_user_limit=settings.control_plane_per_user_run_limit,
     )
@@ -131,7 +131,9 @@ def admin_usage(
     to_time: ToTime = None,
 ) -> AdminUsageSummaryResponse:
     window_start, window_end, window_days = _admin_window(days=days, from_time=from_time, to_time=to_time, noun="usage")
-    summary = execution_analytics.usage_summary(_records(window_start, window_end), db.users.live_usage(), limit=limit)
+    summary = execution_analytics.usage_summary(
+        _records(window_start, window_end), db.evaluations.live_usage(), limit=limit
+    )
     return AdminUsageSummaryResponse(
         window_days=window_days, window_start=window_start, window_end=window_end, **summary
     )

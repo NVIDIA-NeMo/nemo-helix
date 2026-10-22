@@ -11,6 +11,7 @@ from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import get_workload_delegation_audience
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.constants import (
+    JOB_ATTEMPT_ID_LABEL,
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -37,6 +38,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     require_staleness_timeout_seconds,
     staleness_error_message,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
@@ -119,7 +121,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
             namespace=self.namespace,
-            ttl_seconds_active=lambda: self._execution_profile_config.ttl_seconds_active,
+            ttl_seconds_active=lambda step: step_ttl_seconds_active(
+                step, self._execution_profile_config.ttl_seconds_active
+            ),
             workload_audience=get_workload_delegation_audience,
             register_workload_delegation=self._workload_delegation_store.register,
             revoke_workload_delegation=self._workload_delegation_store.revoke,
@@ -330,7 +334,10 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if step.status == HelixJobStatus.ACTIVE:
             if k8s_job is not None and (
                 result := self.enforce_sync_ttl(
-                    step, self._execution_profile_config.ttl_seconds_active, k8s_job, before_active=False
+                    step,
+                    step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
+                    k8s_job,
+                    before_active=False,
                 )
             ):
                 return result
@@ -675,6 +682,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             ):
                 # Extract job_id and step_name from labels
                 job_id = job.metadata.labels.get(JOB_ID_LABEL)
+                attempt_id = job.metadata.labels.get(JOB_ATTEMPT_ID_LABEL)
                 step_name = job.metadata.labels.get(JOB_STEP_NAME_LABEL)
                 workspace_id = job.metadata.labels.get(JOB_WORKSPACE_ID_LABEL)
                 job_type = job.metadata.labels.get(JOB_TYPE_LABEL)
@@ -698,7 +706,12 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
 
                 # Verify the step is terminal before cleaning up, or that the job entity is gone (e.g. workspace deleted).
                 # check_step_is_terminal returns True when terminal or when step entity is not found (404).
-                if not self.check_step_is_terminal(job=job_id, step_name=step_name, workspace=workspace_id):
+                if not self.check_step_is_terminal(
+                    job=job_id,
+                    step_name=step_name,
+                    workspace=workspace_id,
+                    attempt_id=attempt_id,
+                ):
                     logger.debug(
                         "Skipping cleanup for kubernetes job as step is not in terminal state",
                         extra={
@@ -712,7 +725,10 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 uses_persistent_storage = job.metadata.labels.get(JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
                 if uses_persistent_storage and self._execution_profile_config.storage:
                     if self.check_job_persistent_storage_cleanup_allowed(
-                        job=job_id, step_name=step_name, workspace=workspace_id
+                        job=job_id,
+                        step_name=step_name,
+                        workspace=workspace_id,
+                        attempt_id=attempt_id,
                     ):
                         logger.info(
                             "Cleaning up persistent storage for successful job",

@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-_flox_ver="$(yq '.install.uv.version' tools/python/.flox/env/manifest.toml)"
+_flox_ver="$(yq '.install.uv.version // .vars.UV_VERSION' tools/python/.flox/env/manifest.toml)"
 _make_ver="$(sed -n 's/^UV_VERSION[[:space:]]*:=[[:space:]]*\([^[:space:]#]*\).*/\1/p' Makefile)"
 _pyproject_minimum="$(sed -n 's/^required-version = ">=\([^"]*\)"/\1/p' pyproject.toml)"
 

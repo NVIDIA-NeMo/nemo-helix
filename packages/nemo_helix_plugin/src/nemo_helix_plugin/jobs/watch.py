@@ -58,7 +58,7 @@ class _AsyncWatchClients:
 @dataclass(frozen=True, slots=True)
 class _WatchOptions:
     workspace: str | None
-    attempt_id: int | None
+    attempt_id: str | None
     step_id: str | None
     task_id: str | None
     limit: int | None
@@ -197,7 +197,7 @@ def watch_job(
     timeout: float | None = None,
     include_history: bool = True,
     include_logs: bool = True,
-    attempt_id: int | None = None,
+    attempt_id: str | None = None,
     step_id: str | None = None,
     task_id: str | None = None,
     limit: int | None = None,
@@ -239,7 +239,7 @@ def async_watch_job(
     timeout: float | None = None,
     include_history: bool = True,
     include_logs: bool = True,
-    attempt_id: int | None = None,
+    attempt_id: str | None = None,
     step_id: str | None = None,
     task_id: str | None = None,
     limit: int | None = None,

@@ -102,6 +102,7 @@ class TestBuildOutputFilesetMetadataFromModelEntity:
             ),
         )
         meta = build_output_fileset_metadata_from_model_entity(me)
+        assert meta is not None
 
         validated = assert_conforms_to_fileset_metadata(meta)
         assert validated == FilesetMetadata(

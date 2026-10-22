@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import httpx
-from nemo_builder_plugin.identity import DIGEST_PATTERN, ImageReference
+from nemo_builder_plugin.identity import DIGEST_PATTERN, ImageIdentityError, ImageReference, Platform
 from nemo_builder_plugin.registry_auth import parse_challenges
 
 MANIFEST_ACCEPT = ", ".join(
@@ -49,14 +49,33 @@ class UpstreamManifest:
 
 
 def _platform_matches(candidate: dict, platform: str) -> bool:
-    """Whether ``os``/``architecture``/``variant`` is ``os/arch[/variant]``; ``arm64`` with no variant is ``v8``."""
-    os_name, _, rest = platform.partition("/")
-    architecture, _, variant = rest.partition("/")
-    if candidate.get("os") != os_name or candidate.get("architecture") != architecture:
+    """Whether an image config or index entry is for ``platform``; a platform naming no variant takes any."""
+    try:
+        have = Platform.from_oci(candidate)
+    except ImageIdentityError:
         return False
-    if not variant:
-        return True
-    return (candidate.get("variant") or ("v8" if architecture == "arm64" else "")) == variant
+    want = Platform.parse(platform)
+    return (have.os, have.architecture) == (want.os, want.architecture) and want.variant in (None, have.variant)
+
+
+def _platform_names(candidates: list[dict]) -> set[str]:
+    """The platforms ``candidates`` name, leaving out any that names none readably."""
+    names = set()
+    for candidate in candidates:
+        try:
+            names.add(str(Platform.from_oci(candidate)))
+        except ImageIdentityError:
+            continue
+    return names
+
+
+def _platform_entries(document: dict) -> list[dict]:
+    """An index's entries that name a platform."""
+    return [
+        entry
+        for entry in document.get("manifests") or []
+        if isinstance(entry, dict) and isinstance(entry.get("platform"), dict)
+    ]
 
 
 def _sha256(content: bytes) -> str:
@@ -81,6 +100,33 @@ class UpstreamRegistry:
     def resolve(self, reference: ImageReference, *, platform: str) -> UpstreamManifest:
         """The manifest ``reference`` names for ``platform``: the matching child of an index, or a single image
         whose config says it is for ``platform``."""
+        digest, document, is_index = self._manifest(reference)
+        if is_index:
+            for entry in _platform_entries(document):
+                if _platform_matches(entry["platform"], platform):
+                    child = entry.get("digest")
+                    if not isinstance(child, str) or not re.fullmatch(DIGEST_PATTERN, child):
+                        raise UpstreamError(f"{reference} lists its {platform} image without a sha256 digest")
+                    return UpstreamManifest(reference, child)
+            raise UpstreamNotFound(f"{reference} has no {platform} image")
+        if not _platform_matches(self._config(reference, document), platform):
+            raise UpstreamNotFound(f"{reference} is a single image that isn't for {platform}")
+        return UpstreamManifest(reference, digest)
+
+    def platforms(self, reference: ImageReference) -> list[str]:
+        """The platforms ``reference`` has an image for, as ``os/architecture[/variant]``, sorted.
+
+        An index's entries for no real platform, such as the attestations BuildKit adds as ``unknown/unknown``,
+        are left out. ``arm64`` is named without its default variant, ``v8``.
+        """
+        _, document, is_index = self._manifest(reference)
+        if is_index:
+            names = _platform_names([entry["platform"] for entry in _platform_entries(document)])
+            return sorted(name for name in names if not name.startswith("unknown/"))
+        return sorted(_platform_names([self._config(reference, document)]))
+
+    def _manifest(self, reference: ImageReference) -> tuple[str, dict, bool]:
+        """The digest and document ``reference`` names, and whether it is an index."""
         manifest = self._get(reference, f"manifests/{reference.reference}", accept=MANIFEST_ACCEPT)
         digest = _sha256(manifest.content)
         stated = manifest.headers.get("Docker-Content-Digest")
@@ -88,26 +134,18 @@ class UpstreamRegistry:
             raise UpstreamError(f"{reference} says it is {stated} but hashes to {digest}")
         if reference.digest is not None and digest != reference.digest:
             raise UpstreamError(f"{reference} was served as {digest}")
-        document = _json(manifest, str(reference))
-        if manifest.headers.get("Content-Type", "").split(";")[0] in _INDEX_TYPES:
-            for entry in document.get("manifests") or []:
-                if not isinstance(entry, dict) or not isinstance(entry.get("platform"), dict):
-                    continue
-                if _platform_matches(entry["platform"], platform):
-                    child = entry.get("digest")
-                    if not isinstance(child, str) or not re.fullmatch(DIGEST_PATTERN, child):
-                        raise UpstreamError(f"{reference} lists its {platform} image without a sha256 digest")
-                    return UpstreamManifest(reference, child)
-            raise UpstreamNotFound(f"{reference} has no {platform} image")
+        is_index = manifest.headers.get("Content-Type", "").split(";")[0] in _INDEX_TYPES
+        return digest, _json(manifest, str(reference)), is_index
+
+    def _config(self, reference: ImageReference, document: dict) -> dict:
+        """A single image's config, which says its platform."""
         config_digest = (document.get("config") or {}).get("digest")
         if not isinstance(config_digest, str):
             raise UpstreamError(f"{reference} names no config")
         config = self._get(reference, f"blobs/{config_digest}", accept="*/*")
         if _sha256(config.content) != config_digest:
             raise UpstreamError(f"{reference} served its config with the wrong content")
-        if not _platform_matches(_json(config, str(reference)), platform):
-            raise UpstreamNotFound(f"{reference} is a single image that isn't for {platform}")
-        return UpstreamManifest(reference, digest)
+        return _json(config, str(reference))
 
     def _get(self, reference: ImageReference, path: str, *, accept: str) -> httpx.Response:
         repository = f"{reference.registry}/{reference.repository}"

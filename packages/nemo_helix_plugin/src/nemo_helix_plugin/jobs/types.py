@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Any, NotRequired, Optional, Protocol, TypedDict
+from typing import Annotated, Any, NotRequired, Optional, Protocol, Self, TypedDict
 
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
@@ -269,6 +269,24 @@ class HelixJobResponse(BaseModel):
     custom_fields: Optional[dict[str, Any]] = Field(default=None, description="Custom Fields")
 
 
+class HelixJobAttemptResponse(BaseModel):
+    """Response model for one execution attempt of a platform job."""
+
+    id: str
+    name: str
+    job: str = Field(..., description="Parent job ID")
+    workspace: str
+    seq: int
+    spec: dict[str, Any] = Field(default_factory=dict)
+    platform_spec: HelixJobSpec
+    status: HelixJobStatus
+    status_details: dict[str, Any] = Field(default_factory=dict)
+    error_details: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+    is_current: bool = False
+
+
 class HelixJobStepResponse(BaseModel):
     """Response model for a job step (wire shape of the ``HelixJobStep`` entity)."""
 
@@ -294,6 +312,10 @@ class HelixJobStepWithContext(BaseModel):
 
     id: str
     job: str
+    job_id: str | None = Field(
+        default=None,
+        description="ID of the platform job. Unlike the job name, it is never reused by a later job.",
+    )
     attempt_id: str
     fileset: str
     artifact_base_path: str | None = Field(
@@ -398,6 +420,28 @@ class CreateHelixJobRequest(BaseModel):
     _validate_name_fits_derived_fileset = model_validator(mode="after")(validate_job_name_fits_derived_fileset)
 
 
+class UpdateHelixJobRequest(BaseModel):
+    """Validated partial update for a job description or definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
+    spec: dict[str, Any] | None = None
+    platform_spec: HelixJobSpec | None = None
+
+    @model_validator(mode="after")
+    def validate_paired_specs(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job field is required")
+        spec_supplied = "spec" in self.model_fields_set
+        platform_spec_supplied = "platform_spec" in self.model_fields_set
+        if spec_supplied != platform_spec_supplied:
+            raise ValueError("spec and platform_spec must be supplied together")
+        if spec_supplied and (self.spec is None or self.platform_spec is None):
+            raise ValueError("spec and platform_spec cannot be null")
+        return self
+
+
 class HelixJobTaskUpdate(BaseModel):
     """Request model for updating a platform job task."""
 
@@ -428,7 +472,7 @@ HelixJobStatusDetailsUpdateRequest = dict[str, Any]
 
 
 class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
-    """Client request body for ``update_job_status_details`` (a bare JSON object)."""
+    """Client request body for attempt status-details updates (a bare JSON object)."""
 
 
 # NB: list *filter* models (``HelixJobsListFilter`` etc.) are intentionally
@@ -456,14 +500,27 @@ class ListStepsQueryParams(TypedDict, total=False):
     filter: NotRequired[str | dict[str, Any]]
 
 
+class ListAttemptsQueryParams(TypedDict, total=False):
+    page: NotRequired[int]
+    page_size: NotRequired[int]
+    sort: NotRequired[str]
+    filter: NotRequired[str | dict[str, Any]]
+
+
 class ListJobResultsQueryParams(TypedDict, total=False):
     sort: NotRequired[str]
+    attempt_id: NotRequired[str]
+
+
+class JobStatusDetailsQueryParams(TypedDict, total=False):
+    expected_step_id: NotRequired[str]
+    expected_step_status: NotRequired[str]
 
 
 class JobLogsQueryParams(TypedDict, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
-    attempt_id: NotRequired[int]
+    attempt_id: NotRequired[str | int]
     step_id: NotRequired[str]
     task_id: NotRequired[str]
     tail: NotRequired[int]

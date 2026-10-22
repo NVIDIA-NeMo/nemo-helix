@@ -143,7 +143,6 @@ def resolve_executor(
 def _shared_secret_refs() -> dict[str, str]:
     """Map each environment variable every Platform Job needs to the Platform Secret that holds it."""
     return {
-        "PGPASSWORD": settings.platform_jobs_postgres_password_secret,
         "TASK_IMAGE_REGISTRY_AUTH_JSON": settings.platform_jobs_registry_auth_secret,
     }
 

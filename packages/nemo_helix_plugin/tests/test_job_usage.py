@@ -42,12 +42,13 @@ def test_local_reporter_replaces_cumulative_totals() -> None:
 
 def test_platform_reporter_patches_canonical_status_details() -> None:
     jobs_client = MagicMock()
-    reporter = HelixJobUsageReporter(job_name="job-a", workspace="ws", jobs_client=jobs_client)
+    reporter = HelixJobUsageReporter(job_name="job-a", attempt_id="attempt-a", workspace="ws", jobs_client=jobs_client)
 
     reporter.report_totals(input_tokens=12, output_tokens=7)
 
-    jobs_client.update_status_details.assert_called_once_with(
+    jobs_client.update_attempt_status_details.assert_called_once_with(
         "job-a",
+        "attempt-a",
         workspace="ws",
         body={"input_tokens": 12, "output_tokens": 7},
     )
@@ -55,12 +56,13 @@ def test_platform_reporter_patches_canonical_status_details() -> None:
 
 def test_platform_reporter_omits_unknown_dimension() -> None:
     jobs_client = MagicMock()
-    reporter = HelixJobUsageReporter(job_name="job-a", workspace="ws", jobs_client=jobs_client)
+    reporter = HelixJobUsageReporter(job_name="job-a", attempt_id="attempt-a", workspace="ws", jobs_client=jobs_client)
 
     reporter.report_totals(output_tokens=7)
 
-    jobs_client.update_status_details.assert_called_once_with(
+    jobs_client.update_attempt_status_details.assert_called_once_with(
         "job-a",
+        "attempt-a",
         workspace="ws",
         body={"output_tokens": 7},
     )
@@ -68,8 +70,8 @@ def test_platform_reporter_omits_unknown_dimension() -> None:
 
 def test_platform_reporter_does_not_fail_job_on_transport_error() -> None:
     jobs_client = MagicMock()
-    jobs_client.update_status_details.side_effect = RuntimeError("unavailable")
-    reporter = HelixJobUsageReporter(job_name="job-a", workspace="ws", jobs_client=jobs_client)
+    jobs_client.update_attempt_status_details.side_effect = RuntimeError("unavailable")
+    reporter = HelixJobUsageReporter(job_name="job-a", attempt_id="attempt-a", workspace="ws", jobs_client=jobs_client)
 
     with patch("nemo_helix_plugin.job_usage.logger.warning") as warning:
         reporter.report_totals(input_tokens=1)

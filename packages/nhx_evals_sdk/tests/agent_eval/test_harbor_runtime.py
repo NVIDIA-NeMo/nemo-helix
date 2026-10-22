@@ -26,6 +26,8 @@ from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.metrics import AgentPhaseSuccessMetric
 from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
+    HOST_ALIAS_JOB,
+    NETWORK_RESTRICTED_JOB,
     HarborAgentTaskRunner,
     HarborEnvironmentConfig,
     HarborRewardMetric,
@@ -37,6 +39,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     scoped_harbor_agent_import,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import (
+    HARBOR_SPLIT_MARKER,
     _rewards_mapping,
     _trial_from_harbor_result,
 )
@@ -99,7 +102,7 @@ def test_custom_environment_rejects_persisted_api_key():
 @pytest.mark.parametrize("directory", ["omitted", "none", "path"])
 def test_jobs_dir_is_optional_until_execution(directory, tmp_path):
     options = {} if directory == "omitted" else {"jobs_dir": None if directory == "none" else tmp_path}
-    config = HarborRuntimeConfig(**options)
+    config = HarborRuntimeConfig.model_validate(options)
     assert config.jobs_dir == (tmp_path if directory == "path" else None)
     info = HarborAgentTaskRunner(config=config).runner_info()
     assert info.config["jobs_dir"] == (str(tmp_path) if directory == "path" else None)
@@ -1231,7 +1234,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
         agent_dir.mkdir()
         (agent_dir / "harbor_wrapper.py").write_text("x = 1\n", encoding="utf-8")
         agent_options.update(agent_import_path="harbor_wrapper:WrappedAgent", agent_dir=agent_dir)
-    config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="kwargs-job", **agent_options)
+    config = HarborRuntimeConfig.model_validate({"jobs_dir": jobs_dir, "job_name": "kwargs-job", **agent_options})
 
     created: list[Any] = []
 
@@ -3491,6 +3494,242 @@ async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
     assert len(overrides) == 1
     compose = yaml.safe_load(overrides[0].read_text())
     assert compose == {"services": {"main": {"extra_hosts": {"host.docker.internal": "host-gateway"}}}}
+
+
+def _harbor_task(root: Path, name: str, toml: str = "") -> None:
+    task = root / name
+    (task / "environment").mkdir(parents=True)
+    (task / "tests").mkdir()
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.13-slim\n")
+    (task / "tests" / "test.sh").write_text("#!/usr/bin/env bash\n")
+    (task / "instruction.md").write_text("Do it.\n")
+    (task / "task.toml").write_text(f'schema_version = "1.1"\n\n[task]\nname = "probe/{name}"\n{toml}')
+
+
+async def _created_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: Path
+) -> list[tuple[str, Path, Any, list[str]]]:
+    """Run a native job over ``dataset`` with Harbor's Job faked: ``(name, parent, task filter, overlays)`` per job."""
+    import harbor.job
+
+    created: list[Any] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            created.append(job_config)
+            return cls()
+
+        async def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", agent_name="oracle")
+    _, run_job = _build_native_job(config, dataset, None, job_name="j", env_templates={})
+    await run_job()
+    return [
+        (
+            job.job_name,
+            Path(job.jobs_dir),
+            job.datasets[0].task_names,
+            [Path(overlay).name for overlay in job.environment.extra_docker_compose],
+        )
+        for job in created
+    ]
+
+
+CONTAINER_ALIAS = "host-gateway.yaml"
+SIDECAR_ALIAS = "host-gateway-sidecar.yaml"
+
+RESTRICTED_TASKS = [
+    # Harbor attaches the task container to its egress sidecar's network, and Docker refuses extra_hosts there.
+    '\n[environment]\nnetwork_mode = "allowlist"\nallowed_hosts = ["example.com"]\n',
+    '\n[environment]\nnetwork_mode = "no-network"\n',
+    '\n[agent]\nnetwork_mode = "no-network"\n',
+    # A verifier sharing the agent's container restricts that container too.
+    '\n[verifier]\nnetwork_mode = "no-network"\n',
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "toml",
+    [
+        "",
+        # In its own container, a restricted verifier leaves the agent's container public.
+        '\n[verifier]\nenvironment_mode = "separate"\nnetwork_mode = "no-network"\n',
+    ],
+)
+async def test_an_all_public_selection_runs_as_one_job_with_the_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml: str
+) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", toml)
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert jobs == [("j", tmp_path / "jobs", None, [CONTAINER_ALIAS])]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("toml", RESTRICTED_TASKS)
+async def test_a_mixed_selection_runs_its_restricted_tasks_as_a_job_with_the_alias_on_the_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml: str
+) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", toml)
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    job_dir = tmp_path / "jobs" / "j"
+    assert jobs == [
+        (HOST_ALIAS_JOB, job_dir, ["open"], [CONTAINER_ALIAS]),
+        (NETWORK_RESTRICTED_JOB, job_dir, ["probe"], [SIDECAR_ALIAS]),
+    ]
+    marker = json.loads((job_dir / HARBOR_SPLIT_MARKER).read_text())
+    assert marker == {"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}
+
+
+@pytest.mark.asyncio
+async def test_an_all_restricted_selection_runs_as_one_job_with_the_alias_on_the_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "probe", RESTRICTED_TASKS[0])
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert jobs == [("j", tmp_path / "jobs", None, [SIDECAR_ALIAS])]
+
+
+def test_the_sidecar_overlay_aliases_the_host_on_harbors_egress_sidecar() -> None:
+    import yaml
+    from harbor.environments.docker.docker import (  # ty: ignore[unresolved-import,unused-ignore-comment]
+        DockerEnvironment,
+    )
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime
+
+    compose = yaml.safe_load(Path(runtime.__file__).with_name(SIDECAR_ALIAS).read_text())
+
+    assert compose == {
+        "services": {
+            DockerEnvironment._EGRESS_CONTROL_SERVICE_NAME: {"extra_hosts": {"host.docker.internal": "host-gateway"}}
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_task_harbor_cant_load_runs_the_selection_as_one_job_without_an_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import harbor.trial.network_policy as network_policy
+
+    # A sidecar overlay on a task Harbor ends up running without a sidecar would break its compose project.
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", RESTRICTED_TASKS[0])
+    _harbor_task(dataset, "unknown")
+    plan = network_policy.resolve_trial_network_plan
+
+    def fail_for_unknown(task_config: Any, *args: Any, **kwargs: Any) -> Any:
+        if task_config.task.name == "probe/unknown":
+            raise ValueError("unclassifiable")
+        return plan(task_config, *args, **kwargs)
+
+    monkeypatch.setattr(network_policy, "resolve_trial_network_plan", fail_for_unknown)
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert jobs == [("j", tmp_path / "jobs", None, [])]
+
+
+@pytest.mark.asyncio
+async def test_split_job_task_filters_select_folder_names_literally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from harbor.job import DatasetConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
+
+    # Harbor reads task names as fnmatch patterns, so an unescaped "probe[1]" would also select "probe1".
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "probe1")
+    _harbor_task(dataset, "probe[1]", RESTRICTED_TASKS[0])
+    toml = dataset / "probe[1]" / "task.toml"
+    toml.write_text(toml.read_text().replace('"probe/probe[1]"', '"probe/bracketed"'))  # brackets aren't valid here
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    selected = {
+        name: {entry.path for entry in await DatasetConfig(path=dataset, task_names=task_names).get_task_configs()}
+        for name, _, task_names, _ in jobs
+    }
+    assert selected == {HOST_ALIAS_JOB: {dataset / "probe1"}, NETWORK_RESTRICTED_JOB: {dataset / "probe[1]"}}
+
+
+def test_a_split_job_dir_yields_the_trials_of_both_harbor_jobs(tmp_path: Path) -> None:
+    job_dir = tmp_path / "j"
+    write_harbor_trial_result(job_dir / HOST_ALIAS_JOB / "open__a", task_name="probe/open", rewards={"reward": 1})
+    write_harbor_trial_result(
+        job_dir / NETWORK_RESTRICTED_JOB / "probe__b", task_name="probe/probe", rewards={"reward": 0}
+    )
+    # Each Harbor job also writes its own aggregate result.json, which is not a trial.
+    (job_dir / HOST_ALIAS_JOB / "result.json").write_text("{}")
+    (job_dir / HARBOR_SPLIT_MARKER).write_text(json.dumps({"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}))
+    tasks = [
+        AgentEvalTask(id=task_id, intent="x", inputs={"instruction": "x"}, metrics=[HarborRewardMetric()])
+        for task_id in ("probe/open", "probe/probe")
+    ]
+
+    trials = build_trials_from_job_dir(job_dir, tasks)
+
+    assert sorted(trial.task_id for trial in trials) == ["probe/open", "probe/probe"]
+
+
+@pytest.mark.parametrize("marker", [{"jobs": None}, {"jobs": "host-alias"}, {"jobs": [""]}, {"jobs": [1]}])
+def test_a_malformed_split_marker_reads_the_job_dir_as_one_harbor_job(tmp_path: Path, marker: object) -> None:
+    job_dir = tmp_path / "j"
+    write_harbor_trial_result(job_dir / "open__a", task_name="probe/open", rewards={"reward": 1})
+    (job_dir / HARBOR_SPLIT_MARKER).write_text(json.dumps(marker))
+    task = AgentEvalTask(id="probe/open", intent="x", inputs={"instruction": "x"}, metrics=[HarborRewardMetric()])
+
+    trials = build_trials_from_job_dir(job_dir, [task])
+
+    assert [trial.task_id for trial in trials] == ["probe/open"]
+
+
+@pytest.mark.asyncio
+async def test_a_split_job_dir_rerun_as_one_job_is_discarded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    job_dir = tmp_path / "jobs" / "j"
+    (job_dir / HOST_ALIAS_JOB).mkdir(parents=True)
+    (job_dir / HARBOR_SPLIT_MARKER).write_text(json.dumps({"jobs": [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]}))
+
+    await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert not (job_dir / HARBOR_SPLIT_MARKER).exists()
+    assert not (job_dir / HOST_ALIAS_JOB).exists()
+
+
+@pytest.mark.asyncio
+async def test_a_single_harbor_job_dir_rerun_as_a_split_is_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Harbor keeps a single job's config.json and trials at the top of the job dir; the split must not run on top.
+    dataset = tmp_path / "dataset"
+    _harbor_task(dataset, "open")
+    _harbor_task(dataset, "probe", RESTRICTED_TASKS[0])
+    job_dir = tmp_path / "jobs" / "j"
+    (job_dir / "open__old").mkdir(parents=True)
+    (job_dir / "config.json").write_text("{}")
+
+    jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
+
+    assert [name for name, *_ in jobs] == [HOST_ALIAS_JOB, NETWORK_RESTRICTED_JOB]
+    assert not (job_dir / "config.json").exists()
+    assert not (job_dir / "open__old").exists()
+    assert (job_dir / HARBOR_SPLIT_MARKER).exists()
 
 
 @pytest.mark.asyncio

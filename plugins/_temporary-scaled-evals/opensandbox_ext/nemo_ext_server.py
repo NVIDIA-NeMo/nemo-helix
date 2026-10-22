@@ -14,7 +14,8 @@ The stock server copies each extension onto the pod as an annotation (``POD_ANNO
   (``nemo_ext_pod.add_services``). An invalid spec raises ``ValueError``, which the stock server
   returns as a 400.
 * The routes below read the same annotations from the pod, so they work for any sandbox and
-  survive server restarts. They sit behind the server's API-key middleware:
+  survive server restarts. They sit behind the server's API-key middleware, and with tenants
+  configured they look in the caller's tenant namespace and don't see another tenant's sandboxes:
 
   * ``GET /v1/nemo-ext/health``: lets clients check the extension is loaded, and which features
     it has, because a stock server ignores unknown extensions and would create the sandbox
@@ -59,8 +60,21 @@ from opensandbox_server.services.k8s import provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from pydantic import BaseModel, ConfigDict, Field
 
+try:
+    from opensandbox_server.tenants.context import get_current_tenant
+except ImportError:  # Servers before multi-tenancy (opensandbox-server 0.2.2) have no tenants.
+
+    def get_current_tenant() -> Any:
+        """No tenant: every sandbox is in the provider's namespace."""
+        return None
+
+
 # Under the server's logger tree, which is the only one its logging config enables.
 logger = logging.getLogger("opensandbox_server.nemo_ext")
+
+# The label a server with tenants puts on a tenant's sandboxes and their pods. Spelled out here because
+# ``SANDBOX_TENANT_LABEL`` doesn't exist in servers without tenants, and importing it would stop them.
+TENANT_LABEL = "opensandbox.io/tenant"
 
 # Exec buffers a command's output in memory; this caps it per call.
 EXEC_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
@@ -150,31 +164,44 @@ class NemoComposeProvider(BatchSandboxProvider):
             raise ValueError(f"extensions[{AGENT_BUNDLE_EXTENSION_KEY!r}] can't be combined with poolRef")
         return super()._create_workload_from_pool(*args, **kwargs)
 
-    def find_pod(self, sandbox_id: str) -> tuple[Any, ComposeServices | None, SandboxAgentBundle | None]:
-        """The sandbox's pod, its services and its agent bundle; 404 if it has no pod or neither."""
-        pods = self.k8s_client.list_pods(namespace=self.namespace, label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}")
-        annotations = (pods[0].metadata.annotations or {}) if pods else {}
+    def find_pod(
+        self, sandbox_id: str, namespace: str, tenant: str | None = None
+    ) -> tuple[Any, ComposeServices | None, SandboxAgentBundle | None]:
+        """The sandbox's pod, its services and its agent bundle; 404 if it has no pod or neither.
+
+        ``namespace`` is where the caller's sandboxes are, and ``tenant`` the caller's tenant name when the
+        server has tenants (see ``_caller_scope``). Tenants can share a namespace, and the stock server hides
+        one tenant's sandbox from the others as not found, so a pod labeled for another tenant is not found here too.
+        """
+        pods = self.k8s_client.list_pods(namespace=namespace, label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}")
+        pod = pods[0] if pods else None
+        if pod is not None and tenant is not None:
+            owner = (pod.metadata.labels or {}).get(TENANT_LABEL)
+            # An unlabeled pod isn't any tenant's, as in the stock server.
+            if owner is not None and owner != tenant:
+                pod = None
+        annotations = (pod.metadata.annotations or {}) if pod is not None else {}
         raw_services = annotations.get(POD_ANNOTATION)
         raw_bundle = annotations.get(AGENT_BUNDLE_POD_ANNOTATION)
 
         # A sandbox the extension added nothing to isn't one these routes know about.
-        if raw_services is None and raw_bundle is None:
+        if pod is None or (raw_services is None and raw_bundle is None):
             raise _error(404, "NOT_FOUND", f"sandbox {sandbox_id} has no pod with compose services or an agent bundle")
 
         return (
-            pods[0],
+            pod,
             ComposeServices.model_validate_json(raw_services) if raw_services is not None else None,
             SandboxAgentBundle.model_validate_json(raw_bundle) if raw_bundle is not None else None,
         )
 
-    def services_status(self, sandbox_id: str) -> dict[str, Any]:
+    def services_status(self, sandbox_id: str, namespace: str, tenant: str | None = None) -> dict[str, Any]:
         """``{"failure": str | None, "not_ready": [names]}`` for the sandbox's agent bundle and services.
 
         A failure names the first container that can't come up, in start order, and includes its
         last log lines, so the client can fail the trial with the cause instead of a timeout. The
         bundle's init container is listed in ``not_ready`` as ``agent-bundle`` until it exits 0.
         """
-        pod, services, bundle = self.find_pod(sandbox_id)
+        pod, services, bundle = self.find_pod(sandbox_id, namespace, tenant)
         not_ready: list[str] = []
 
         # The bundle's init container runs before any service, so it's checked first.
@@ -207,13 +234,15 @@ class NemoComposeProvider(BatchSandboxProvider):
             tail = f"<logs unavailable: {exc.__class__.__name__}>"
         return f"{label} {reason}. Last log lines:\n{tail}"
 
-    def exec(self, sandbox_id: str, service: str, req: ExecRequest) -> ExecResponse:
+    def exec(
+        self, sandbox_id: str, service: str, req: ExecRequest, namespace: str, tenant: str | None = None
+    ) -> ExecResponse:
         """Run ``req.command`` in one of the sandbox's services through the Kubernetes exec API.
 
         Blocking; the route runs it on the extension's thread pool. 404 if ``service`` isn't one of
         the sandbox's services, 504 on timeout, 413 if the output passes the limit.
         """
-        pod, services, _ = self.find_pod(sandbox_id)
+        pod, services, _ = self.find_pod(sandbox_id, namespace, tenant)
         # Only the task's services, never sandbox, egress, execd or the agent bundle.
         if services is None or service not in services.names():
             raise _error(404, "NOT_FOUND", f"{service!r} is not a compose service of sandbox {sandbox_id}")
@@ -278,6 +307,19 @@ def _require_provider() -> NemoComposeProvider:
     return _provider
 
 
+def _caller_scope(provider: NemoComposeProvider) -> tuple[str, str | None]:
+    """``(namespace, tenant name)`` for the request being served.
+
+    A server with tenants resolves the caller's API key to a tenant and creates its sandboxes in that tenant's
+    namespace. Without tenants every sandbox is in the provider's namespace, and there is no tenant name.
+    Read this in the route, not in the thread pool, which doesn't carry the request's context.
+    """
+    tenant = get_current_tenant()
+    if tenant is None:
+        return provider.namespace, None
+    return tenant.namespace, tenant.name
+
+
 class ExecRequest(BaseModel):
     """The argv to run, without a shell, and how many seconds to wait for it."""
 
@@ -309,19 +351,25 @@ async def health() -> dict[str, Any]:
 async def services_status(sandbox_id: str) -> dict[str, Any]:
     """Which of the sandbox's services failed or aren't ready; see ``NemoComposeProvider.services_status``."""
     provider = _require_provider()
+    namespace, tenant = _caller_scope(provider)
     # The Kubernetes client blocks, so it runs off the event loop.
-    return await asyncio.get_running_loop().run_in_executor(_pool, provider.services_status, sandbox_id)
+    return await asyncio.get_running_loop().run_in_executor(
+        _pool, provider.services_status, sandbox_id, namespace, tenant
+    )
 
 
 @router.post("/sandboxes/{sandbox_id}/services/{service}/exec", response_model=ExecResponse)
 async def exec_in_service(sandbox_id: str, service: str, req: ExecRequest) -> ExecResponse:
     """Run a command in one service; see ``NemoComposeProvider.exec``. 429 when all exec slots are busy."""
     provider = _require_provider()
+    namespace, tenant = _caller_scope(provider)
     # Refuse rather than queue, so a burst of execs can't tie up the server's threads.
     if _exec_slots.locked():
         raise _error(429, "EXEC_BUSY", f"{EXEC_CONCURRENCY} execs are already running; retry later")
     async with _exec_slots:
-        return await asyncio.get_running_loop().run_in_executor(_pool, provider.exec, sandbox_id, service, req)
+        return await asyncio.get_running_loop().run_in_executor(
+            _pool, provider.exec, sandbox_id, service, req, namespace, tenant
+        )
 
 
 def install(argv: list[str]) -> None:

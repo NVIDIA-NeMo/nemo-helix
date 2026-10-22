@@ -15,11 +15,11 @@ from nemo_helix_plugin.discovery import AGENT_CLI_GROUP
 from typer.testing import CliRunner
 
 
-class _AnalystCLI(NemoCLI):
-    name = "analyst"
+class _CompassCLI(NemoCLI):
+    name = "compass"
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help="Analyst agent commands.")
+        app = typer.Typer(help="Compass agent commands.")
 
         @app.callback()
         def _root() -> None:
@@ -49,14 +49,14 @@ def test_broken_plugin_does_not_hide_other_agent_clis(caplog, monkeypatch) -> No
     monkeypatch.setitem(sys.modules, "_agents_cli_extensions_test", sys.modules[__name__])
     entry_points = {
         "broken": EntryPoint(name="broken", value="_agents_cli_extensions_test:_BrokenCLI", group=AGENT_CLI_GROUP),
-        "analyst": EntryPoint(name="analyst", value="_agents_cli_extensions_test:_AnalystCLI", group=AGENT_CLI_GROUP),
+        "compass": EntryPoint(name="compass", value="_agents_cli_extensions_test:_CompassCLI", group=AGENT_CLI_GROUP),
     }
     with patch("nemo_agents_plugin.cli.discover_entry_points", return_value=entry_points):
         app = AgentsCLI().get_cli()
 
-        analyst_result = CliRunner().invoke(app, ["analyst", "run"])
-        assert analyst_result.exit_code == 0, analyst_result.stderr
-        assert analyst_result.stdout.strip() == "analysis complete"
+        compass_result = CliRunner().invoke(app, ["compass", "run"])
+        assert compass_result.exit_code == 0, compass_result.stderr
+        assert compass_result.stdout.strip() == "analysis complete"
 
         with caplog.at_level(logging.WARNING, logger="nemo_agents_plugin.cli"):
             broken_result = CliRunner().invoke(app, ["broken"])

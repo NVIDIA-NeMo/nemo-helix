@@ -25,7 +25,7 @@ not-for:
 preconditions:
   - nemo_setup_complete
   - agents_plugin_available
-compatibility: nemo-helix >= 0.1.0; writes or edits agents/{name}/agent.yaml; validates through nemo agents create; supports nemo-agents-spec-v1 configs; safe under sandbox.
+compatibility: nemo-helix >= 0.1.0; writes or edits agents/{name}/agent.yaml; validates through nemo agents register; supports nemo-agents-spec-v1 configs; safe under sandbox.
 maturity: active
 license: Apache-2.0
 user-invocable: true
@@ -86,7 +86,7 @@ The canonical remote config location is derivable from workspace and agent name:
 7. Add optional skills, MCP servers, blocked tools, environment directories, and
    telemetry using only fields in the template.
 8. Keep all local file paths relative to the directory containing `agent.yaml`.
-9. Validate by running `nemo agents create` against the config. Do not treat a
+9. Validate by running `nemo agents register` against the config. Do not treat a
    successful create as validation of an unused or untested harness.
 
 For the standard subprocess or default-image deployment path, keep
@@ -244,11 +244,11 @@ valid inference request through the required wire API.
 ## Validate and register
 
 Before registering, validate the YAML shape with the Platform create path.
-Immediately before running `nemo agents create`, show the command to the user,
+Immediately before running `nemo agents register`, show the command to the user,
 ask for explicit confirmation, and wait for approval.
 
 ```bash
-.venv/bin/nemo agents create \
+.venv/bin/nemo agents register \
   --name "$AGENT_NAME" \
   --agent-config "agents/$AGENT_NAME/agent.yaml"
 ```
@@ -259,7 +259,7 @@ silence validation errors by moving unknown fields into `settings`.
 ## Deploy and invoke
 
 The base NeMo Agents plugin supplies the adapter implementations, not the
-third-party harness runtimes. Config authoring and `nemo agents create` can
+third-party harness runtimes. Config authoring and `nemo agents register` can
 proceed with the selected adapter alone; do not treat a successful create as
 proof that the harness can execute.
 
@@ -348,7 +348,7 @@ accessible host only when the user explicitly asks to expose the server:
 
 - **Default model vs harness model.** A harness-local `model` always wins over
   `models.default`.
-- **Registration validates and normalizes.** `nemo agents create` is the
+- **Registration validates and normalizes.** `nemo agents register` is the
   user-facing validation command.
 - **`agent.yaml` is the implementation config, not the Ethos.**
   `ETHOS.md` explains what the agent should do; `agent.yaml` tells the

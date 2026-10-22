@@ -13,6 +13,7 @@ from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
@@ -25,13 +26,20 @@ from nhx.common.client_factory import get_nemo_client
 def _get_ctx(client: NemoClient) -> JobContext:
     workspace = os.environ[NEMO_JOB_WORKSPACE_ENVVAR]
     job_name = os.environ[NEMO_JOB_ID_ENVVAR]
+    attempt_id = os.environ[NEMO_JOB_ATTEMPT_ID_ENVVAR]
     persistent_env = os.environ.get(PERSISTENT_JOB_STORAGE_PATH_ENVVAR)
     storage = StoragePaths(
         ephemeral=Path(os.environ[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR]),
         persistent=Path(persistent_env) if persistent_env else None,
     )
-    results = HelixJobResults(workspace=workspace, job_name=job_name, client=client)
-    return JobContext(workspace=workspace, job_id=job_name, storage=storage, results=results)
+    results = HelixJobResults(workspace=workspace, job_name=job_name, client=client, attempt_id=attempt_id)
+    return JobContext(
+        workspace=workspace,
+        job_id=job_name,
+        attempt_id=attempt_id,
+        storage=storage,
+        results=results,
+    )
 
 
 def main() -> int:

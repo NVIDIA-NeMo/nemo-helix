@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_scaled_evals_plugin.authz import admin_only
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
+from scaled_evals.api.benchmark_store import TaskRef
 from scaled_evals.api.db import Database, get_db
 from scaled_evals.api.repositories.base_repository import Conflict, InvalidReference
-from scaled_evals.api.repositories.benchmark_repository import TaskRef
 from scaled_evals.api.schemas.benchmarks import (
     SLUG_MAX_LEN,
     Benchmark,
@@ -78,7 +78,7 @@ def _task_refs(tasks: list) -> list[TaskRef]:
 
 
 @router.post("", status_code=201, response_model=BenchmarkCreateResponse)
-def create_benchmark(body: BenchmarkCreate, db: Db) -> BenchmarkCreateResponse:
+def create_benchmark(body: BenchmarkCreate, db: Db, current: Principal) -> BenchmarkCreateResponse:
     """Register a benchmark and its first revision.
 
     A benchmark is a revisioned *collection of tasks*. Input: `BenchmarkCreate`
@@ -100,6 +100,7 @@ def create_benchmark(body: BenchmarkCreate, db: Db) -> BenchmarkCreateResponse:
             description=body.description,
             visibility=body.visibility,
             tasks=_task_refs(body.tasks),
+            owner_id=current.owner_id,
         )
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
@@ -122,7 +123,9 @@ def create_benchmark(body: BenchmarkCreate, db: Db) -> BenchmarkCreateResponse:
     status_code=201,
     response_model=BenchmarkVariantCreateResponse,
 )
-def create_benchmark_variant(benchmark_id: str, body: BenchmarkVariantCreate, db: Db) -> BenchmarkVariantCreateResponse:
+def create_benchmark_variant(
+    benchmark_id: str, body: BenchmarkVariantCreate, db: Db, current: Principal
+) -> BenchmarkVariantCreateResponse:
     """Derive a metadata-only variant of an existing benchmark revision.
 
     Copies the base member task pins unchanged and stores an allowlisted
@@ -144,6 +147,7 @@ def create_benchmark_variant(benchmark_id: str, body: BenchmarkVariantCreate, db
             description=body.description,
             visibility=body.visibility,
             operational_policy=body.operational_policy.model_dump(),
+            owner_id=current.owner_id,
         )
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
@@ -348,5 +352,4 @@ def delete_benchmark(benchmark_id: str, db: Db) -> DeleteResponse:
     deleted = db.benchmarks.soft_delete(benchmark_id)
     if not deleted:
         raise _http_error(404, "not_found", "benchmark not found")
-    db.commit()
     return DeleteResponse(id=benchmark_id)

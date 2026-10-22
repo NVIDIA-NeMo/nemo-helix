@@ -29,7 +29,7 @@ def _make_jobs_client_with_logs() -> Mock:
             steps=[],
         )
     )
-    jobs.get_job_step.return_value = data_response(
+    jobs.get_attempt_step.return_value = data_response(
         SimpleNamespace(
             name="step-1",
             status="error",
@@ -37,7 +37,7 @@ def _make_jobs_client_with_logs() -> Mock:
             error_details={},
         )
     )
-    jobs.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
+    jobs.list_attempt_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
     jobs.list_job_logs.return_value.page.return_value = SimpleNamespace(
         items=[SimpleNamespace(message="secret-token=abc123"), SimpleNamespace(message="another line")]
     )
@@ -62,6 +62,18 @@ def test_collect_job_diagnostics_omits_raw_job_logs_by_default() -> None:
 
     assert "job_logs" not in diagnostics
     jobs.list_job_logs.assert_not_called()
+    jobs.get_attempt_step.assert_called_once_with(
+        name="step-1",
+        job="job-1",
+        attempt="current",
+        workspace="default",
+    )
+    jobs.list_attempt_step_tasks.assert_called_once_with(
+        step="step-1",
+        job="job-1",
+        attempt="current",
+        workspace="default",
+    )
 
 
 def test_collect_job_diagnostics_includes_raw_job_logs_when_enabled() -> None:
@@ -81,7 +93,11 @@ def test_collect_job_diagnostics_includes_raw_job_logs_when_enabled() -> None:
         )
 
     assert diagnostics["job_logs"] == ["secret-token=abc123", "another line"]
-    jobs.list_job_logs.assert_called_once_with(workspace="default", name="job-1")
+    jobs.list_job_logs.assert_called_once_with(
+        workspace="default",
+        name="job-1",
+        query_params={"attempt_id": "current"},
+    )
 
 
 def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
@@ -122,7 +138,7 @@ def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
             ],
         )
     )
-    jobs.get_job_step.return_value = data_response(
+    jobs.get_attempt_step.return_value = data_response(
         SimpleNamespace(
             name="step-1",
             status="error",
@@ -130,7 +146,7 @@ def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
             error_details=error_details,
         )
     )
-    jobs.list_job_step_tasks.return_value = data_response(
+    jobs.list_attempt_step_tasks.return_value = data_response(
         SimpleNamespace(
             data=[
                 SimpleNamespace(
@@ -159,3 +175,46 @@ def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
     assert diagnostics["status_api"]["steps"][0]["tasks"][0]["error_details"]["error"] == expected_trimmed
     assert diagnostics["step"]["error_details"]["error"] == expected_trimmed
     assert diagnostics["tasks_api"][0]["error_details"]["error"] == expected_trimmed
+
+
+def test_collect_job_diagnostics_uses_concrete_step_attempt() -> None:
+    nemo_client = Mock()
+    jobs = _make_jobs_client_with_logs()
+    step = SimpleNamespace(workspace="default", job="job-1", name="step-1", attempt_id="attempt-1")
+
+    with (
+        patch.object(JobsClient, "from_client", return_value=jobs),
+        patch("nhx.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", False),
+    ):
+        collect_job_diagnostics(nemo_client, step, context="test")
+
+    jobs.get_attempt_step.assert_called_once_with(
+        name="step-1",
+        job="job-1",
+        attempt="attempt-1",
+        workspace="default",
+    )
+    jobs.list_attempt_step_tasks.assert_called_once_with(
+        step="step-1",
+        job="job-1",
+        attempt="attempt-1",
+        workspace="default",
+    )
+
+
+def test_collect_job_diagnostics_scopes_logs_to_concrete_attempt() -> None:
+    nemo_client = Mock()
+    jobs = _make_jobs_client_with_logs()
+    step = SimpleNamespace(workspace="default", job="job-1", name="step-1", attempt_id="attempt-1")
+
+    with (
+        patch.object(JobsClient, "from_client", return_value=jobs),
+        patch("nhx.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", True),
+    ):
+        collect_job_diagnostics(nemo_client, step, context="test")
+
+    jobs.list_job_logs.assert_called_once_with(
+        workspace="default",
+        name="job-1",
+        query_params={"attempt_id": "attempt-1"},
+    )

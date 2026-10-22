@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
-import { agentsCreateAgent } from '@nemo/sdk/generated/agents/agents';
+import { agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { filesCreateFileset, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
@@ -40,7 +40,7 @@ export const createAgentFromTrial = async ({
   await claimFileset(workspace, name, filesetName, replaceOrphanedFileset);
 
   const createAgent = () =>
-    agentsCreateAgent(workspace, {
+    agentsRegisterAgent(workspace, {
       name,
       description: source.description,
       config,

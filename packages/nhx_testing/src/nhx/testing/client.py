@@ -384,6 +384,42 @@ def _create_svc(
 
 _DEFAULT_WORKSPACES = ["default"]
 _DEFAULT_PROJECTS = ["default/test-project"]
+_AUTH_WARMUP_DEADLINE_SECONDS = 5.0
+_AUTH_WARMUP_PAUSE_SECONDS = 0.05
+
+
+class _AuthWarmupResponse(Protocol):
+    @property
+    def status_code(self) -> int: ...
+
+    @property
+    def text(self) -> str: ...
+
+
+class _AuthWarmupClient(Protocol):
+    def post(self, url: str, *, json: Mapping[str, str], headers: Mapping[str, str]) -> _AuthWarmupResponse: ...
+
+
+def _post_after_auth_warmup(
+    client: _AuthWarmupClient,
+    url: str,
+    *,
+    json: Mapping[str, str],
+    headers: Mapping[str, str],
+) -> None:
+    """POST until the seeded caller's authorization is visible.
+
+    The embedded PDP can deny the first request after role-binding seed. A 403
+    in that window is retried. A later non-success is raised instead of ignored.
+    """
+    deadline = time.monotonic() + _AUTH_WARMUP_DEADLINE_SECONDS
+    while True:
+        response = client.post(url, json=json, headers=headers)
+        if response.status_code in {200, 201, 409}:
+            return
+        if response.status_code != 403 or time.monotonic() >= deadline:
+            raise RuntimeError(f"POST {url} failed: {response.status_code} {response.text}")
+        time.sleep(_AUTH_WARMUP_PAUSE_SECONDS)
 
 
 @contextmanager
@@ -747,15 +783,18 @@ def create_test_client(
             # Create workspaces (with auth headers if auth is enabled)
             if auth_enabled:
                 auth_headers = {"X-NHX-Principal-Id": TEST_USER_EMAIL}
-                for ws_id in workspaces_to_create:
-                    # Skip role propagation - policy data may not be loaded yet
-                    client.post(
+                for ws_id in sorted(workspaces_to_create):
+                    # Skip role propagation. The PDP refresh can still 403 the
+                    # first call, so that denial is retried until the seed is visible.
+                    _post_after_auth_warmup(
+                        client,
                         "/apis/entities/v2/workspaces?wait_role_propagation=false",
                         json={"name": ws_id},
                         headers=auth_headers,
                     )
                 for ws_id, proj_name in parsed_projects:
-                    client.post(
+                    _post_after_auth_warmup(
+                        client,
                         f"/apis/entities/v2/workspaces/{ws_id}/projects",
                         json={"name": proj_name},
                         headers=auth_headers,

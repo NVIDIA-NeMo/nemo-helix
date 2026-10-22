@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Compose stack (Phase 1)
 
-The NeMo Helix API serving the scaled-evals plugin and the substrate it needs — Postgres, RustFS, BuildKit, and a
+The NeMo Helix API serving the scaled-evals plugin and the substrate it needs — RustFS, BuildKit, and a
 registry. Enough to take a task from `create` to a built, pushed image.
 
 ```bash
@@ -24,7 +24,6 @@ health verdict rather than reading `docker compose ps`.
 | Service | Image | Purpose |
 |---|---|---|
 | `api` | built here | `nemo services run --services scaled-evals` on `:8080`; its Jobs controller runs builds and evaluations as subprocess Platform Jobs |
-| `postgres` | `postgres:16` | platform database; scaled-evals lives in its `scaled_evals` schema |
 | `rustfs` | `rustfs/rustfs` | S3-compatible object store on `:9000` |
 | `buildkit` | `moby/buildkit` | builds task Dockerfiles; no published port |
 | `registry` | `registry:2` | local stand-in for NGC on `:5000` |
@@ -55,13 +54,12 @@ Three packages are installed that the plugin does not depend on:
 
 ## Differences from the standalone scaled-evals compose stack
 
-Four services are gone because the plugin now does the work itself:
+These services are gone because the plugin or the platform now does the work:
 
 | Dropped | Why |
 |---|---|
-| `schema-migrate` | the plugin migrates on startup |
+| `postgres`, `schema-migrate` | scaled-evals state lives in platform entities, in the platform's own default store |
 | `rustfs-init` (`mc mb`) | the plugin creates its bucket on startup |
-| Postgres TLS + `compose-certs` | Compose explicitly sets `DATABASE_SSL_MODE=disable` for its loopback-only plaintext Postgres |
 | `harbor-runner`, `gym-runner` | evaluation runtimes are out of Phase 1 scope |
 
 One deliberate substitution: **BuildKit runs privileged here, not rootless.**
@@ -73,29 +71,6 @@ installs an AppArmor profile on the host, which a dev stack should not require.
 
 The hosted-cluster, identity-provider, and Gym environment blocks are
 not carried over; none are part of Phase 1.
-
-## scaled-evals' own database
-
-The Postgres here belongs to scaled-evals. All three processes read one explicit
-`SCALED_EVALS_DATABASE_URL`; none of them consults the platform's `DATABASE_*`
-config, so the platform keeps its own default store even though the API serves
-the plugin in-process.
-
-```bash
-docker compose exec postgres psql -U scaled_evals -d scaled_evals -tAc \
-  "select table_schema, count(*) from information_schema.tables
-   where table_schema in ('public','scaled_evals') group by 1 order by 1;"
-# scaled_evals|19
-```
-
-Tables sit in a `scaled_evals` schema rather than `public`. That is redundant in a
-database of its own; it is kept because the vendored SQL is unqualified, so the
-schema is what makes the same code safe against a shared database later.
-
-**Upgrading an existing stack:** the database was previously named
-`nemo_helix`, so a volume from before this change has no `scaled_evals`
-database and the API will report that it does not exist. `docker compose down -v`
-for a clean start, or `createdb` it by hand.
 
 ## Configuration
 
@@ -113,7 +88,6 @@ that same `.env`; the notable knobs:
 | Variable | Default | Notes |
 |---|---|---|
 | `API_PORT` | `8080` | |
-| `DATABASE_SSL_MODE` | `disable` | Compose-only default for the local plaintext Postgres service |
 | `HARBOR_EXTRA_INDEX_URL` | *(required to build)* | index serving `sandbox-k8s`; unused once the image exists |
 | `IMAGE_BUILD_PLATFORM` | *(empty)* | empty builds for the host arch. The setting's own default is `linux/amd64`, which sends every build through QEMU on an arm64 laptop; set it when the image must run on amd64 nodes |
 | `IMAGE_REGISTRY` | `registry:5000` | point elsewhere with `REGISTRY_INSECURE=false` plus credentials |

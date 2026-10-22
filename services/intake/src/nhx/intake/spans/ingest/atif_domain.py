@@ -40,11 +40,29 @@ class AtifImageSource(BaseModel):
 AtifTimestamp = Annotated[str, Field(json_schema_extra={"format": "date-time"})]
 
 
+def _drop_unknown_content_fields(data: Any, known_fields: frozenset[str]) -> Any:
+    """Drop keys ATIF does not define on a content part.
+
+    Some producers copy provider fields such as Anthropic ``cache_control`` onto
+    text parts. The published schema stays closed. The text or image source is
+    kept, and the unknown key is not stored.
+    """
+    if not isinstance(data, dict):
+        return data
+    return {key: value for key, value in data.items() if key in known_fields}
+
+
 class AtifContentPartText(BaseModel):
     type: Literal["text"]
     text: str
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_unknown_fields(cls, data: Any) -> Any:
+        """Ignore non-spec siblings such as ``cache_control`` without dropping ``text``."""
+        return _drop_unknown_content_fields(data, frozenset({"type", "text"}))
 
 
 class AtifContentPartImage(BaseModel):
@@ -52,6 +70,12 @@ class AtifContentPartImage(BaseModel):
     source: AtifImageSource
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_unknown_fields(cls, data: Any) -> Any:
+        """Ignore non-spec siblings and keep the image source."""
+        return _drop_unknown_content_fields(data, frozenset({"type", "source"}))
 
 
 AtifContentPart = TypeAliasType(

@@ -34,6 +34,15 @@ class HarborSandboxProfileConfig(BaseModel):
             "running in the sandbox can call its model. Empty keeps no-network tasks fully closed."
         ),
     )
+    agent_setup_egress: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Hosts the sandbox may also reach while the agent's setup() runs (package registries, release "
+            "downloads), on top of the task's own policy in any network mode. They are removed before anything "
+            "else runs, and processes started during setup that still hold a connection outside the sandbox are "
+            "killed. Empty adds nothing to the task's policy during setup."
+        ),
+    )
     egress_verification: Literal["default_action", "strict"] = "strict"
     max_sandbox_lifetime_s: int = Field(
         default=8 * 3600 + 30 * 60, ge=1, description="OpenSandbox TTL backstop: longest trial plus margin."
@@ -81,9 +90,14 @@ class HarborTaskJobsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dispatcher_image: str = Field(
+    dispatcher_image: str | None = Field(
+        default=None,
         pattern=PINNED_IMAGE_REF_PATTERN,
-        description="Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment.",
+        description=(
+            "Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment. "
+            "Unset uses the platform's nhx-tasks image, the same release as the API: the run plan stores "
+            "nhx-tasks:<platform.image_tag> by tag, so image_tag must be immutable (a release tag, never re-pushed)."
+        ),
     )
     dispatcher_profiles: tuple[str, ...] = Field(
         min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."

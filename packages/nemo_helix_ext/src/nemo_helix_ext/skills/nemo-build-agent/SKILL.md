@@ -120,7 +120,7 @@ for transient failures and redacted errors. Never write credentials, customer
 data or production traces into source, YAML, fixtures or logs.
 
 Use `nemo-agent-config` to author the canonical
-`agents/<agent-name>/agent.yaml`, but do not run its `nemo agents create`
+`agents/<agent-name>/agent.yaml`, but do not run its `nemo agents register`
 registration step. This build workflow owns registration after every
 pre-registration gate has passed. Require:
 
@@ -173,7 +173,7 @@ exists, offer reuse, rename or replace. Never overwrite or delete it without
 explicit approval immediately before the state change.
 
 Show the exact create and deploy commands and ask for approval immediately
-before running them. `nemo agents create` is both the final Fabric plan and
+before running them. `nemo agents register` is both the final Fabric plan and
 doctor gate and the registration step; do not run it earlier solely to validate
 the config. Pass the confirmed workspace to both commands. If an
 AgentEnvironment was selected, pass its workspace-qualified reference to

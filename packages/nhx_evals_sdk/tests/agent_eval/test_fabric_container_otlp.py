@@ -20,6 +20,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_receiver import EXPORT_SUFFIX, READY_FILENAME
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import fold_exports, otlp_trace_path
 from nhx_evals_sdk.agent_eval.runtimes.fabric.skills import SkillSet
+from nhx_evals_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 
 from packages.nhx_evals_sdk.tests.agent_eval._otlp_testkit import export, post, span_names
@@ -31,7 +32,7 @@ _TASK = AgentEvalTask(id="t", intent="i", inputs={"instruction": "do it"})
 def _runtime() -> sandbox_execution.SandboxExecution:
     return sandbox_execution.SandboxExecution(
         config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-        provider=object(),  # type: ignore[arg-type]
+        provider=DockerSandboxProvider(),  # never started: these tests only read seeded files and commands
         image="img",
         env={},
         timeout_s=600,

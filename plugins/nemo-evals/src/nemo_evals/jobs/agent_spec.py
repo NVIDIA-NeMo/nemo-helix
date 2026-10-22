@@ -94,7 +94,7 @@ class FabricConfigSource(BaseModel):
 
 
 class RegisteredAgentSource(BaseModel):
-    """An agent registered on the platform (``nemo agents create``), resolved at submit.
+    """An agent registered on the platform (``nemo agents register``), resolved at submit.
 
     The model is part of what the agent is, so there is no model override; what an evaluation shapes is
     the ``environment`` the agent runs in.

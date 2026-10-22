@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { useInsightsGetInsight } from '@nemo/sdk/generated/insights/insights-insights';
+import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insights';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Badge, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
@@ -27,7 +27,7 @@ export const EvaluationDetailRoute: FC = () => {
   // Evaluations reach their originating insight through the owning group's insight_id.
   const { data: experiment } = useGetExperiment(workspace, experimentName);
   const insightId = experiment?.insight_id ?? '';
-  const { data: insight } = useInsightsGetInsight(workspace, insightId, {
+  const { data: insight } = useCompassGetInsight(workspace, insightId, {
     query: { enabled: OPTIMIZER_ENABLED && Boolean(insightId) },
   });
   const showInsightCard = Boolean(insight?.description);
