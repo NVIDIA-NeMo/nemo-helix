@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isNotFoundError } from '@nemo/common/src/api/common/utils';
-import { filesListFilesetFiles, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
+import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { retrieveFilesetIfPresent } from '@studio/components/filesets/filesetNames';
 
 /**
  * Storage backends whose `upload` is actually implemented server-side (see
@@ -63,16 +63,6 @@ const makeConflict =
     conflict: { workspace, name, filesetRef: `${workspace}/${name}`, target, reason, message },
   });
 
-/** Retrieves a fileset, or null when nothing holds the name. */
-const retrieveIfPresent = async (workspace: string, name: string) => {
-  try {
-    return await filesRetrieveFileset(workspace, name);
-  } catch (e) {
-    if (isNotFoundError(e)) return null;
-    throw e;
-  }
-};
-
 /** Reads the first line of a JSONL head, or null when it cannot be read or parsed. */
 const firstRow = (head: ArrayBuffer | null): Record<string, unknown> | null => {
   if (!head) return null;
@@ -102,7 +92,7 @@ export const preflightSourceFileset = async (
   name: string,
   hfRepoId: string
 ): Promise<FilesetPreflight> => {
-  const existing = await retrieveIfPresent(workspace, name);
+  const existing = await retrieveFilesetIfPresent(workspace, name);
   if (!existing) return { kind: 'absent' };
 
   const conflict = makeConflict(workspace, name, 'source');
@@ -140,7 +130,7 @@ export const preflightConvertedFileset = async ({
   name,
   readHead,
 }: ConvertedPreflightArgs): Promise<FilesetPreflight> => {
-  const existing = await retrieveIfPresent(workspace, name);
+  const existing = await retrieveFilesetIfPresent(workspace, name);
   if (!existing) return { kind: 'absent' };
 
   const conflict = makeConflict(workspace, name, 'converted');
@@ -187,24 +177,4 @@ export const preflightConvertedFileset = async ({
   }
 
   return { kind: 'reusable', filesetRef: `${workspace}/${name}` };
-};
-
-/**
- * First free `name-2`, `name-3`, … so "create under a different name" lands somewhere
- * predictable instead of a random suffix the user then has to recognise.
- *
- * Falls back to the last candidate rather than throwing: the create that follows reports a
- * collision far better than a bare "ran out of names" would.
- */
-export const findAvailableFilesetName = async (
-  workspace: string,
-  base: string,
-  limit = 20
-): Promise<string> => {
-  let candidate = base;
-  for (let suffix = 2; suffix <= limit; suffix += 1) {
-    candidate = `${base}-${suffix}`;
-    if (!(await retrieveIfPresent(workspace, candidate))) return candidate;
-  }
-  return candidate;
 };

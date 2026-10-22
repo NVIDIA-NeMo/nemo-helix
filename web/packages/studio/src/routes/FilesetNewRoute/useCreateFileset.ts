@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage as getApiErrorMessage } from '@nemo/common/src/api/common/utils';
+import {
+  getErrorMessage as getApiErrorMessage,
+  isConflictError,
+} from '@nemo/common/src/api/common/utils';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
@@ -16,6 +19,8 @@ import {
   FilesetPurpose,
   CreateFilesetRequest,
 } from '@nemo/sdk/generated/platform/schema';
+import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
+import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { DATASET_TYPE_SAMPLE } from '@studio/routes/FilesetNewRoute/constants';
 import {
@@ -31,7 +36,7 @@ import { getFilesetDetailRoute, getFilesetDetailsRoute } from '@studio/routes/ut
 import { storageConfigFromUrl } from '@studio/util/storageConfigFromUrl';
 import { QueryObserverResult, useQueryClient } from '@tanstack/react-query';
 import { MutableRefObject, useCallback } from 'react';
-import { UseFormGetValues } from 'react-hook-form';
+import type { UseFormGetValues, UseFormSetError } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 
 interface UseCreateFilesetParams {
@@ -39,9 +44,16 @@ interface UseCreateFilesetParams {
   activeTab: DatasetType;
   storageTab: 'local' | 'external';
   hasValidationErrors: boolean;
+  /** The name's uniqueness check found a fileset already using it. */
+  nameTaken: boolean;
   getValues: UseFormGetValues<DatasetFormFields>;
+  setError: UseFormSetError<DatasetFormFields>;
   sampleFilesRef: MutableRefObject<Promise<QueryObserverResult<File[], Error>> | null>;
   setIsSubmitPending: (value: boolean) => void;
+  /** A fileset this form created whose upload then failed. */
+  createdFileset?: FilesetOutput;
+  /** Called with the fileset once it exists, before its files upload. */
+  onCreated: (fileset: FilesetOutput) => void;
 }
 
 export function useCreateFileset({
@@ -49,9 +61,13 @@ export function useCreateFileset({
   activeTab,
   storageTab,
   hasValidationErrors,
+  nameTaken,
   getValues,
+  setError,
   sampleFilesRef,
   setIsSubmitPending,
+  createdFileset,
+  onCreated,
 }: UseCreateFilesetParams): (data: DatasetFormFields) => Promise<void> {
   const navigate = useNavigate();
   const toast = useToast();
@@ -120,6 +136,8 @@ export function useCreateFileset({
         return;
       }
 
+      if (nameTaken) return;
+
       setIsSubmitPending(true);
 
       // Step 1 (sample/local only): fetch sample files or read local file selection
@@ -183,17 +201,33 @@ export function useCreateFileset({
         }
       }
 
+      // A retry after a failed upload resumes the upload: creating the fileset again would 409
+      // on the one this form already made, and its files could never be uploaded.
       let fileset: FilesetOutput;
-      try {
-        fileset = await createFilesetStep(workspace, createPayload);
-      } catch (err) {
-        const message =
-          storageTab === 'external' && url?.trim()
-            ? getExternalStorageCreateErrorMessage(err, url.trim())
-            : getApiErrorMessage(err as Error, 'Failed to create fileset');
-        toast.error(message);
-        setIsSubmitPending(false);
-        return;
+      if (createdFileset?.name === createPayload.name) {
+        fileset = createdFileset;
+      } else {
+        try {
+          fileset = await createFilesetStep(workspace, createPayload);
+        } catch (err) {
+          setIsSubmitPending(false);
+          // The name check can lose a race with another create. The sample tab has no name
+          // field to put the error on, so it toasts; the recheck then moves it to a free name.
+          if (isConflictError(err)) {
+            void invalidateFilesetNameCheck(queryClient, workspace, createPayload.name);
+            const message = filesetNameTakenMessage(createPayload.name, workspace);
+            if (activeTab === DATASET_TYPE_SAMPLE) toast.error(message);
+            else setError('name', { message });
+            return;
+          }
+          const message =
+            storageTab === 'external' && url?.trim()
+              ? getExternalStorageCreateErrorMessage(err, url.trim())
+              : getApiErrorMessage(err as Error, 'Failed to create fileset');
+          toast.error(message);
+          return;
+        }
+        onCreated(fileset);
       }
 
       // Step 3: upload files to dataset
@@ -220,10 +254,15 @@ export function useCreateFileset({
     [
       activeTab,
       createFilesetStep,
+      createdFileset,
       getValues,
       hasValidationErrors,
+      nameTaken,
       navigate,
+      onCreated,
+      queryClient,
       sampleFilesRef,
+      setError,
       setIsSubmitPending,
       storageTab,
       toast,
