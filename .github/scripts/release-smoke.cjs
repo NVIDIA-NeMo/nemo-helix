@@ -82,12 +82,7 @@ function reportSmoke({ core, env, steps, fs }) {
   const directory = env.SMOKE_RESULTS;
   fs.mkdirSync(directory, { recursive: true });
   // Always sanitize before upload, even if the cleanup step was interrupted.
-  const values = [
-    "NVIDIA_INFERENCE_KEY",
-    "NVIDIA_INFERENCE_URL",
-    "NGC_REGISTRY_READ_TOKEN",
-    "GH_TOKEN",
-  ]
+  const values = ["NGC_REGISTRY_READ_TOKEN", "GH_TOKEN"]
     .map((key) => env[key])
     .filter(Boolean);
   function redact(path) {

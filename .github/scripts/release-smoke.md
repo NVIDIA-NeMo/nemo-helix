@@ -5,17 +5,15 @@
 
 `release-smoke.yaml` tests exact published artifacts on macOS (Intel/Colima) and
 Kubernetes (Kind). Each job checks startup, workspace CRUD, rendered Studio,
-real inference, and the sample agent bundled in that release. These are CPU
+mock-backed inference, and the sample agent bundled in that release. These are CPU
 checks; they do not validate GPU workloads or replace the QA suite.
 
 ## Configuration
 
-- Allow this repository to access organization secrets `NVIDIA_INFERENCE_URL`
-  and `NVIDIA_INFERENCE_KEY`. The endpoint must be reachable from GitHub-hosted
-  runners and return the configured model from its OpenAI-compatible models API.
-- Set repository variable `SMOKE_INFERENCE_MODEL` to a tool-calling chat model ID
-  served by that endpoint. Initial selection: `aws/anthropic/bedrock-claude-haiku-5-5`.
-  Use the provider's model ID, not the normalized model entity name shown in Studio.
+- Inference uses the published gateway's built-in `igw-mock-` provider, also used
+  by the CPU agent E2E tests. No external model, inference key, or model variable
+  is needed. This checks model discovery, routing and the running sample agent;
+  it does not validate an external provider, credentials, or model quality.
 - Existing `NGC_REGISTRY_READ_TOKEN` and the workflow's `GITHUB_TOKEN` authenticate
   published image/chart pulls. `SLACK_RELEASE_WEBHOOK` is used only when requested.
 
@@ -32,7 +30,7 @@ gh workflow run release-smoke.yaml -f release-version=0.8.1-nightly-YYYYMMDDHHMM
 
 Replace the nightly placeholder with a full published release. Verify both jobs
 pass, both diagnostic artifacts are uploaded, and resources are cleaned up.
-On a validation branch, temporarily use an unavailable model to check that the
+On a validation branch, temporarily return an error from the mock to check that the
 result is red, the failing stage and logs are retained, and cleanup still runs.
 Notification payloads and suppression are covered by mocked unit tests; do not
 send test failures to the release channel.
