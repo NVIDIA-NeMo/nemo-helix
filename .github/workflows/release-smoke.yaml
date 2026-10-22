@@ -32,7 +32,12 @@ permissions:
   contents: read
   packages: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
+  PYTHON_VERSION: "3.13"
   UV_VERSION: "0.13.4"
   RELEASE_VERSION: ${{ inputs.release-version }}
 
@@ -71,7 +76,7 @@ jobs:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: false
       # Native ARM Mac; package installation and CLI startup need no Docker VM.
       - name: Install published package and launch CLI
@@ -80,7 +85,7 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/smoke-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/smoke-bin
         run: |
-          uv tool install --python 3.12 --index "$WHEEL_INDEX" "nemo-helix[all]==$WHEEL_VERSION"
+          uv tool install --python "$PYTHON_VERSION" --index "$WHEEL_INDEX" "nemo-helix[all]==$WHEEL_VERSION"
           "$UV_TOOL_BIN_DIR/nemo" --version
 
   kubernetes:
@@ -109,12 +114,56 @@ jobs:
           image-tag: ${{ env.IMAGE_TAG }}
           kind-image-pull-user: ${{ github.actor }}
           kind-image-pull-token: ${{ github.token }}
-      - name: Pull released artifacts, install chart, and check readiness
-        timeout-minutes: 30
+      - name: Download published chart
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$CHART_REPOSITORY" == oci:* ]]; then
+            printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+            helm pull "$CHART_REPOSITORY" --version "$RELEASE_VERSION" --destination "$RUNNER_TEMP"
+          else
+            helm pull nemo-helix --repo "$CHART_REPOSITORY" --version "$RELEASE_VERSION" --destination "$RUNNER_TEMP"
+          fi
+      - name: Pull released API and tasks images
+        timeout-minutes: 10
         env:
           NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/release-smoke.sh
+        run: |
+          registry="${IMAGE_REGISTRY%%/*}"
+          if [[ "$registry" == ghcr.io ]]; then
+            printf '%s' "$GH_TOKEN" | docker login "$registry" --username "$GITHUB_ACTOR" --password-stdin
+          elif [[ -n "$NGC_REGISTRY_READ_TOKEN" ]]; then
+            printf '%s' "$NGC_REGISTRY_READ_TOKEN" | docker login "$registry" --username '$oauthtoken' --password-stdin
+          fi
+          docker pull "$IMAGE_REGISTRY/nhx-api:$IMAGE_TAG"
+          docker pull "$IMAGE_REGISTRY/nhx-tasks:$IMAGE_TAG"
+      - name: Load API image into Kind
+        timeout-minutes: 5
+        run: kind load docker-image --name "$KIND_CLUSTER_NAME" "$IMAGE_REGISTRY/nhx-api:$IMAGE_TAG"
+      - name: Install published chart
+        timeout-minutes: 10
+        run: |
+          helm upgrade --install release-smoke "$RUNNER_TEMP/nemo-helix-$RELEASE_VERSION.tgz" \
+            --namespace release-smoke --create-namespace --wait --timeout 8m \
+            -f .github/scripts/release-smoke-values.yaml \
+            --set-string "api.image.repository=$IMAGE_REGISTRY/nhx-api" \
+            --set-string "api.image.tag=$IMAGE_TAG" \
+            --set-string "core.image.repository=$IMAGE_REGISTRY/nhx-api" \
+            --set-string "core.image.tag=$IMAGE_TAG" \
+            --set-string "platformConfig.platform.image_registry=$IMAGE_REGISTRY" \
+            --set-string "platformConfig.platform.image_tag=$IMAGE_TAG"
+      - name: Check API readiness
+        timeout-minutes: 3
+        run: |
+          mkdir -p smoke-logs
+          kubectl -n release-smoke port-forward svc/release-smoke-api 8080:8080 > smoke-logs/port-forward.log 2>&1 &
+          forward_pid=$!
+          trap 'kill "$forward_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 2 \
+            --max-time 5 --retry-max-time 120 http://127.0.0.1:8080/health/ready \
+            | tee smoke-logs/readiness.json | jq -e '.status == "ready"'
       - name: Collect Kubernetes logs
         if: always()
         timeout-minutes: 2
