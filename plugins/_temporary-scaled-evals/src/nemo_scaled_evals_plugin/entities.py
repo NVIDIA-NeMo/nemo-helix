@@ -216,6 +216,25 @@ class ScaledEvalsEvaluation(NemoEntity, entity_type="scaled_evals_evaluation"):
         return self
 
 
+class ScaledEvalsBenchmarkArchive(BaseModel):
+    """A benchmark run's combined Harbor archive and its build lease."""
+
+    generation: str
+    status: str
+    members: list[dict[str, Any]] = Field(default_factory=list)
+    requested_at: datetime
+    claimed_at: datetime | None = None
+    claim_token: str | None = None
+    attempts: int = 0
+    object_key: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    partial: bool | None = None
+    built_at: datetime | None = None
+    error: str | None = None
+    cleanup_checked_at: datetime | None = None
+
+
 class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_run"):
     """A benchmark run's identity and config, named by its run id.
 
@@ -247,6 +266,9 @@ class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_ru
     visibility: str = "private"
     cancelled_at: datetime | None = None
     deleted_at: datetime | None = None
+    archive: ScaledEvalsBenchmarkArchive | None = None
+    # A top-level copy of archive.status, so the store can filter queue scans.
+    archive_status: str | None = None
 
 
 class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"):

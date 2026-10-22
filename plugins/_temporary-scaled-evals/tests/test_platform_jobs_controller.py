@@ -440,7 +440,7 @@ async def test_controller_owns_evidence_and_archive_queues(monkeypatch: pytest.M
 
     repo = MagicMock()
     repo.claim_cleanup.side_effect = ["run_1", None]
-    monkeypatch.setattr(controller_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    monkeypatch.setattr(controller_module, "BenchmarkArchiveStore", lambda: repo)
     await phases["cleanup_benchmark_archives"]()
     await asyncio.gather(*controller._background.values())
     dispatcher.cleanup_benchmark_archives.assert_called_once_with("run_1")

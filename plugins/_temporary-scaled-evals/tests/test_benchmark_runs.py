@@ -20,6 +20,8 @@ import pytest
 pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun
+from scaled_evals.api import entity_store
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore, derive_run_view
 from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import get_conn
@@ -53,6 +55,10 @@ def _use_conn(conn: MagicMock) -> None:
         yield conn
 
     v1.dependency_overrides[get_conn] = _gen
+
+
+def _stored_runs() -> list[ScaledEvalsBenchmarkRun]:
+    return entity_store.list_all(entity_store.entity_client(), ScaledEvalsBenchmarkRun)
 
 
 @pytest.fixture(autouse=True)
@@ -513,11 +519,7 @@ def test_preflight_run_reports_members_without_creating_run() -> None:
     qualification = next(check for check in body["checks"] if check["prerequisite"] == "benchmark_qualification")
     assert qualification["state"] == "ready"
     assert qualification["details"]["evidence_present"] is True
-    assert not any(
-        "INSERT INTO benchmark_runs" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
-    assert not conn.commit.called
+    assert _stored_runs() == []
 
 
 def test_preflight_run_reports_bounded_member_failure() -> None:
@@ -593,8 +595,7 @@ def test_create_run_rejects_member_with_missing_task_pack(
 
     assert resp.status_code == 409
     assert resp.json()["detail"]["error"]["code"] == "task_object_missing"
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    assert not any("INSERT INTO benchmark_runs" in call.args[0] for call in execs)
+    assert _stored_runs() == []
 
 
 def test_create_run_fans_out_full_member_execution_contract() -> None:
@@ -730,10 +731,7 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
         "member task task_0 rev 1: task image registry 'artifactory.nvidia.com' "
         "is not approved; allowed registries: us-central1-docker.pkg.dev"
     )
-    assert not any(
-        "INSERT INTO benchmark_runs" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
+    assert _stored_runs() == []
 
 
 def test_create_run_422_when_empty_benchmark() -> None:
