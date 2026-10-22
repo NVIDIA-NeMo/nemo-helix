@@ -1,9 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What reading a compose file raises: its error, and the collector of problems that becomes it."""
+"""What the compose parser returns and raises: the typed task, its error, and the collector of problems."""
 
 from __future__ import annotations
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ComposeError(ValueError):
@@ -66,3 +70,132 @@ class ComposeProblems:
         if unsupported:
             detail += "; and these can't run as sandbox services"
         raise ComposeError("compose_invalid", detail, compose_path=compose_path, paths=unsupported)
+
+
+class ComposeImage(BaseModel):
+    """A service that runs a published image, as ``image: postgres:18``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["image"] = "image"
+    reference: str = Field(description="The full reference, as Docker would pull it: `docker.io/library/postgres:18`.")
+
+
+class ComposeBuild(BaseModel):
+    """A service built from the archive, as ``build: {context: ./api}``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["build"] = "build"
+    context_path: str = Field(
+        description="The build context, relative to the task root and always under `environment/`: `environment/api`."
+    )
+    dockerfile: str = Field(default="Dockerfile", description="The Dockerfile, relative to `context_path`.")
+    args: dict[str, str] = Field(default_factory=dict, description="Compose `build.args`: the build's `ARG` values.")
+    target: str | None = Field(default=None, description="Compose `build.target`: the Dockerfile stage to build.")
+
+
+ComposeImageSource = Annotated[ComposeImage | ComposeBuild, Field(discriminator="kind")]
+
+
+class ComposePort(BaseModel):
+    """A container port, and the compose key it came from (for error messages)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    port: int = Field(description="The port the container listens on; in a pod, every container shares it.")
+    source: str = Field(description="The compose entry that declared it, such as `ports[0]`, to name it in errors.")
+
+
+class ComposeReadiness(BaseModel):
+    """A healthcheck command, and the longest Compose would let the service take to become healthy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    exec_: list[str] = Field(
+        alias="exec", min_length=1, description="The healthcheck's command, as an argument list run in the container."
+    )
+    budget_sec: float = Field(
+        description=(
+            "How long Compose would wait for the service to turn healthy, `start_period + interval * retries`. "
+            "The sandbox waits at least this long before giving up."
+        )
+    )
+
+
+class ComposeService(BaseModel):
+    """One service other than ``main``: its image source, how it starts, and how it runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(description="The service's compose name. Other containers in the pod reach it by this name.")
+    source: ComposeImageSource = Field(description="Where its image comes from: a published image or a build.")
+    role: Literal["sidecar", "run_once", "after_main"] = Field(
+        default="sidecar",
+        description=(
+            "When it runs, worked out from `depends_on`: `run_once` if something waits for it to finish, such as "
+            "a migration; `after_main` if it waits for `main`; otherwise `sidecar`, which starts before `main` and "
+            "keeps running."
+        ),
+    )
+    depends_on: dict[str, str] = Field(
+        default_factory=dict, description="Each service this one waits for, `main` included, and the compose condition."
+    )
+    command: list[str] | None = Field(default=None, description="Compose `entrypoint`; Kubernetes calls it `command`.")
+    args: list[str] | None = Field(default=None, description="Compose `command`; Kubernetes calls it `args`.")
+    env: dict[str, str] = Field(
+        default_factory=dict, description="Its environment: its `env_file` entries, overridden by `environment`."
+    )
+    ports: list[ComposePort] = Field(
+        default_factory=list, description="The ports it `expose`s or publishes, so the pod can check for clashes."
+    )
+    readiness: ComposeReadiness | None = Field(
+        default=None, description="Its healthcheck; None when it has none, or when it is `run_once`."
+    )
+
+
+class ComposeMainSettings(BaseModel):
+    """What the task's compose file and Dockerfile say about ``main``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    depends_on: dict[str, str] = Field(
+        default_factory=dict, description="Each service `main` waits for, and the condition."
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict, description="Variables the compose file adds to `main`'s environment."
+    )
+    readiness: ComposeReadiness | None = Field(
+        default=None, description="`main`'s healthcheck. The sandbox waits for it before the agent starts."
+    )
+    entrypoint: list[str] | None = Field(
+        default=None, description="The last exec-form `ENTRYPOINT` of `main`'s Dockerfile, or the compose override."
+    )
+
+
+class ComposeTask(BaseModel):
+    """A task's compose file, merged with Harbor's base and interpolated."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    compose_path: str = Field(description="`<task>/environment/docker-compose.yaml`.")
+    main_dockerfile: str | None = Field(
+        description=(
+            "`main`'s Dockerfile, relative to `environment/`: `Dockerfile` unless the task's `main.build` says "
+            "otherwise. None when the task runs a prebuilt image."
+        )
+    )
+    main_build: ComposeBuild | None = Field(
+        default=None,
+        description="What builds `main`: its context and Dockerfile. None when the task runs a prebuilt image.",
+    )
+    main_image: str | None = Field(
+        default=None,
+        description=(
+            "The image `main` runs, for a prebuilt task: `task.toml`'s `docker_image` unless `main.image` replaces it."
+        ),
+    )
+    services: dict[str, ComposeService] = Field(
+        description="Every service other than `main`, by name, in start order (each after what it depends on)."
+    )
+    main: ComposeMainSettings = Field(description="What the compose file changes about `main`.")
