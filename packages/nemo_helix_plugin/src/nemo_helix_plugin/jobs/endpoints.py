@@ -18,6 +18,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     E2EJobExecutionProfile,
     KubernetesJobExecutionProfile,
+    OpenShellJobExecutionProfile,
     SubprocessJobExecutionProfile,
     VolcanoJobExecutionProfile,
 )
@@ -56,6 +57,7 @@ ExecutionProfile = (
     | KubernetesJobExecutionProfile
     | VolcanoJobExecutionProfile
     | SubprocessJobExecutionProfile
+    | OpenShellJobExecutionProfile
     | E2EJobExecutionProfile
 )
 

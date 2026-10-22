@@ -36,6 +36,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_helix_plugin.agents.validation import require_agent_config
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoResponseValidationError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -319,6 +320,9 @@ class PackageAgentJob(NemoJob):
             profiles = (
                 await AsyncJobsClient.from_client(cast(AsyncNemoClient, async_sdk)).get_execution_profiles()
             ).data()
+        except NemoResponseValidationError:
+            # A response that does not match the client contract is not transient; retrying cannot fix it.
+            raise
         except Exception as exc:
             raise HelixJobDependencyUnavailableError(
                 f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "

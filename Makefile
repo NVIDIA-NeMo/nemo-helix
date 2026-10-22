@@ -588,15 +588,12 @@ test-agents-hermes: ## Run Hermes adapter integration tests with its isolated ha
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_hermes.py
 
 .PHONY: test-deployments-openshell
-test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
-	# The openshell extra is not part of the default sync (platform-restricted
-	# wheel), so the shared unit-test job skips these. Install it just here and
-	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
+test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the [openshell] extra installed
 	$(UV) run --frozen --all-packages --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
 
 .PHONY: test-jobs-openshell
-test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
+test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the [openshell] extra installed
 	$(UV) run --frozen --all-packages --extra openshell \
 		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
 		services/core/jobs/tests/integration/test_openshell_job_integration.py
