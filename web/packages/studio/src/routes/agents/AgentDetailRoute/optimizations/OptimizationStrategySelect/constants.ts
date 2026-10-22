@@ -31,14 +31,6 @@ const UPLOAD_CONFIG_OPTION: StartOption = {
   enabled: true,
 };
 
-// TODO: remove this override once config-tuning supports prompt optimization and its plugin-provided
-// title/description are accurate again. Until then the tile advertises only what it does: HPO.
-const CONFIG_TUNING_OVERRIDE = {
-  title: 'Hyperparameter optimization',
-  description:
-    "Search over your agent's hyperparameters, such as model and temperature, to find the best-scoring configuration.",
-};
-
 /**
  * One tile per strategy the platform has installed, titled and described by the plugin that ships
  * it, so installing a strategy is all it takes to offer it. Tile ids are the strategy names. The
@@ -51,7 +43,6 @@ export const strategyOptions = (strategies: readonly OptimizationStrategy[]): St
     description: strategy.description ?? '',
     icon: STRATEGY_ICONS[strategy.name] ?? Puzzle,
     enabled: true,
-    ...(strategy.name === STUDIO_OPTIMIZE_STRATEGY ? CONFIG_TUNING_OVERRIDE : {}),
   }));
   const canUpload = strategies.some((strategy) => strategy.name === STUDIO_OPTIMIZE_STRATEGY);
   return canUpload ? [UPLOAD_CONFIG_OPTION, ...options] : options;
