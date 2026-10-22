@@ -108,19 +108,19 @@ variable "BAKE_TAG" {
 # NHX_PYTHON_IMAGE (currently python:3.13.16-slim-trixie); this SHA is not
 # wired as a FROM pin. Rebuild the target in CI after changing NHX_PYTHON_IMAGE.
 variable "BASE_TAG_PYTHON" {
-  default = "d9e1851f309d3cf5389c0fc0e1049bd3c87593f8"
+  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
 }
 
 # Pin for nhx-automodel-base.
 variable "BASE_TAG_AUTOMODEL" {
-  default = "2c1a9ef2535a6648a272d9b74dae97fb672b8234"
+  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
 }
 
 # Pin for nhx-rl-base (prebuilt-base tag) + the NeMo-RL / NeMo-Gym source the base builds from.
 # Defaults point at the soluwalana/{RL,Gym} forks. If the RL fork's uv.lock and the Gym ref drift,
 # build with UV_SYNC_MODE= to relock.
 variable "BASE_TAG_RL" {
-  default = "local"
+  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
 }
 variable "NEMO_RL_REPO" {
   default = "https://github.com/soluwalana/RL.git"
@@ -846,6 +846,9 @@ target "nhx-gym-tasks-docker" {
   target     = "runtime"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
   contexts = {
     nhx-python-base = "target:nhx-python-base"
     nhx-tasks   = "target:nhx-tasks-docker"
@@ -863,6 +866,9 @@ target "nhx-gym-tasks-smoke-test" {
   target     = "smoke-test"
   context    = "."
   dockerfile = "docker/Dockerfile.nhx-gym-tasks"
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
   contexts = {
     nhx-python-base = "target:nhx-python-base"
     nhx-tasks   = "target:nhx-tasks-docker"
@@ -884,6 +890,7 @@ target "nhx-gym-host-docker" {
   }
   args = {
     NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-to   = maybe_registry_cache_to("nhx-gym-host")
   cache-from = maybe_registry_cache_from("nhx-gym-host")
@@ -902,6 +909,7 @@ target "nhx-gym-host-smoke-test" {
   }
   args = {
     NHX_PYTHON_IMAGE = NHX_PYTHON_IMAGE
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-from = maybe_registry_cache_from("nhx-gym-host")
   output     = ["type=cacheonly"]

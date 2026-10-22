@@ -16,6 +16,24 @@ ARG NHX_PYTHON_BASE=nhx-python-base
 
 FROM ghcr.io/osscontainertools/kaniko:${KANIKO_VERSION}-debug@sha256:d6d74217dc077acfd3094992e917c357080a2d3fdd1042a49e34e29a7e57c572 AS kaniko
 
+# Keep the pinned application's behavior, but rebuild every Go binary with the CA fix.
+FROM --platform=$BUILDPLATFORM golang:1.27.3 AS go-builder
+ARG TARGETOS TARGETARCH
+ENV CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOTOOLCHAIN=local
+WORKDIR /src
+ADD --checksum=sha256:37362cb5fb31c1b1f4de07d4c1150f158864b52aa85a9c9a93f145666fd6eef8 \
+    https://github.com/osscontainertools/kaniko/archive/refs/tags/v1.28.5.tar.gz /tmp/kaniko.tar.gz
+RUN tar -xzf /tmp/kaniko.tar.gz --strip-components=1 -C /src
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go build -mod=vendor -ldflags="-w -s" -o out/ github.com/GoogleCloudPlatform/docker-credential-gcr/v2 && \
+    go build -mod=vendor -ldflags="-w -s" -o out/ github.com/awslabs/amazon-ecr-credential-helper/ecr-login/cli/docker-credential-ecr-login && \
+    go build -mod=vendor -ldflags="-w -s" -o out/docker-credential-acr-env github.com/osscontainertools/docker-credential-acr && \
+    make out/executor out/warmer && \
+    go version -m out/executor | grep -q 'go1.27.3'
+
+FROM kaniko AS patched-kaniko
+COPY --from=go-builder /src/out/ /kaniko/
+
 # The image has no Python, so its sources are collected here. docker/sources/nhx-kaniko.json pins the
 # components its Go binaries don't record: kaniko itself; BusyBox with the patches and build script
 # Docker builds it with, and Alpine 3.23's musl package it links statically; tini's release binaries
@@ -26,11 +44,12 @@ FROM ${NHX_PYTHON_BASE} AS sources
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 COPY docker/sources/nhx-kaniko.json /tmp/nhx-kaniko.json
-COPY --from=kaniko /kaniko/executor /kaniko/warmer /kaniko/docker-credential-gcr \
+COPY --from=patched-kaniko /kaniko/executor /kaniko/warmer /kaniko/docker-credential-gcr \
     /kaniko/docker-credential-ecr-login /kaniko/docker-credential-acr-env /tmp/kaniko/
 RUN python3 /usr/local/bin/collect-pinned-sources.py \
         --manifest /tmp/nhx-kaniko.json \
         --output /source-distributions/nhx-kaniko && \
+    bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-kaniko/apt ca-certificates && \
     python3 /usr/local/bin/collect-go-module-sources.py \
         --binary /tmp/kaniko/executor \
         --binary /tmp/kaniko/warmer \
@@ -41,7 +60,8 @@ RUN python3 /usr/local/bin/collect-pinned-sources.py \
 
 # Under /kaniko, unlike other images: kaniko builds in its own root filesystem and never snapshots
 # /kaniko, so a build's RUN steps can't change the sources or copy them into the image they build.
-FROM kaniko AS runtime
+FROM patched-kaniko AS runtime
+COPY --from=sources /etc/ssl/certs/ca-certificates.crt /kaniko/ssl/certs/ca-certificates.crt
 COPY --from=sources /source-distributions/nhx-kaniko/ /kaniko/source-distributions/nhx-kaniko/
 
 # The binary runs on the image's platform, and `supervise`'s shell, /busybox/sh, is there.

@@ -4,9 +4,7 @@
     "schema-version": "1.14.0",
     "install": {
       "uv": {
-        "pkg-path": "uv",
-        "pkg-group": "uv",
-        "version": "0.10.10"
+        "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#uv"
       }
     },
     "vars": {
@@ -14,7 +12,8 @@
       "UV_MANAGED_PYTHON": "1",
       "UV_PYTHON": "3.13",
       "UV_PYTHON_INSTALL_DIR": "${FLOX_ENV_CACHE}/python",
-      "UV_VENV_SEED": "1"
+      "UV_VENV_SEED": "1",
+      "UV_VERSION": "0.13.4"
     },
     "hook": {
       "on-activate": "  set -euo pipefail\n\n  export VIRTUAL_ENV=\"$PWD/.venv\"\n  export PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n\n  if uv sync --frozen --all-packages --check; then\n    return 0\n  fi\n\n  echo \"Python environment is out of sync; synchronizing...\"\n  uv sync --frozen --all-packages\n"
@@ -23,93 +22,93 @@
   },
   "packages": [
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/ca4c5p52xg20k2ygh212fjl0sj027cns-uv-0.10.10.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
       "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "name": "uv-0.10.10",
-      "pname": "uv",
-      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "rev_count": 964859,
-      "rev_date": "2026-03-18T08:17:15Z",
-      "scrape_date": "2026-03-20T00:42:40.851800Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.10.10",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-darwin.uv",
+      "derivation": "/nix/store/q1a26xrb313ywl5d6za277f8vw409j1s-uv-0.13.4.drv",
+      "outputs": {
+        "out": "/nix/store/mqcqniddc12lm02ak6axyfn9y3h16myc-uv-0.13.4"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/ak82pfbm5lz4n4bgdqw4vi2mz2yjhzva-uv-0.10.10"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-darwin",
       "system": "aarch64-darwin",
-      "group": "uv",
+      "name": "uv-0.13.4",
+      "pname": "uv",
+      "version": "0.13.4",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/9wlmkw8d5azyg2skikr8d51adp86k2dg-uv-0.10.10.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
       "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "name": "uv-0.10.10",
-      "pname": "uv",
-      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "rev_count": 964859,
-      "rev_date": "2026-03-18T08:17:15Z",
-      "scrape_date": "2026-03-20T01:15:03.366659Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.10.10",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-linux.uv",
+      "derivation": "/nix/store/iny23xbn9xmwv0zbyv6nziin9chj0mfn-uv-0.13.4.drv",
+      "outputs": {
+        "out": "/nix/store/wqvfmp8v30wmn39h43gai7p2fy4x8bhi-uv-0.13.4"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/25wyj6wz00gr09kiv2gszh11j2ka2p26-uv-0.10.10"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-linux",
       "system": "aarch64-linux",
-      "group": "uv",
+      "name": "uv-0.13.4",
+      "pname": "uv",
+      "version": "0.13.4",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/z31wwa66jhm52hnvisy4lmqh9y5bx4dm-uv-0.10.10.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
       "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "name": "uv-0.10.10",
-      "pname": "uv",
-      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
-      "rev_count": 964859,
-      "rev_date": "2026-03-18T08:17:15Z",
-      "scrape_date": "2026-03-20T02:20:00.125246Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.10.10",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.x86_64-linux.uv",
+      "derivation": "/nix/store/j99d3cz8m58bz6bf7fpfq8rjcqjcvnmp-uv-0.13.4.drv",
+      "outputs": {
+        "out": "/nix/store/lgrjxh2j5dqvdifh2lhrj2w0c0g5i1jg-uv-0.13.4"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/lsifgwpalj0dgnjh6raal9gmvcn6m6s5-uv-0.10.10"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
       "system": "x86_64-linux",
-      "group": "uv",
+      "name": "uv-0.13.4",
+      "pname": "uv",
+      "version": "0.13.4",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "licenses": [
+        "Apache-2.0",
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     }
   ]

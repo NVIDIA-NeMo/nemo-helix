@@ -4,9 +4,11 @@
 schema-version = "1.14.0"
 
 [install]
-uv = { pkg-path = "uv", version = "0.10.10", pkg-group = "uv" }
+# Fixed releases are not in the Flox catalog yet; use the pinned Nixpkgs package.
+uv = { flake = "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#uv" }
 
 [vars]
+UV_VERSION="0.13.4"
 UV_VENV_SEED="1"
 UV_MANAGED_PYTHON="1"
 UV_PYTHON="3.13"

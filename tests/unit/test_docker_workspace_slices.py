@@ -188,7 +188,10 @@ def test_gym_host_lock_has_local_source_for_first_party_build_tools() -> None:
     uv_config = lock_project["tool"]["uv"]
     dockerfile_text = (ROOT / "docker/gym-host/Dockerfile").read_text(encoding="utf-8")
 
-    assert uv_config["sources"]["nhx-build-tools"] == {"path": "../../../packages/nhx_build_tools"}
+    assert uv_config["sources"]["nhx-build-tools"] == {
+        "path": "../../../packages/nhx_build_tools",
+        "editable": True,
+    }
     assert uv_config["extra-build-dependencies"]["nemo-sandboxed-gym"] == ["nhx-build-tools"]
     assert "COPY packages/nhx_build_tools /app/packages/nhx_build_tools" in dockerfile_text
 
