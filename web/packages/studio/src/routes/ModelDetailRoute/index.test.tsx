@@ -18,6 +18,11 @@ vi.mock('@studio/routes/ModelDetailRoute/DetailsTab', () => ({
   DetailsTab: () => <div>details content</div>,
 }));
 vi.mock('@studio/components/ModelChatTab', () => ({ ModelChatTab: () => <div /> }));
+vi.mock('@studio/components/dataViews/EvaluationResultsDataView', () => ({
+  EvaluationResultsDataView: ({ targetModelName }: { targetModelName?: string }) => (
+    <div>evaluations for {targetModelName}</div>
+  ),
+}));
 vi.mock('@studio/components/CustomizationOverview', () => ({
   CustomizationOverview: () => <div>training content</div>,
 }));
@@ -66,10 +71,10 @@ describe('ModelDetailRoute', () => {
     renderPage('/workspaces/ws/fine-tune/models/my-model');
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent('my-model');
-    for (const name of ['Details', 'Chat', 'Training', 'Logs']) {
+    for (const name of ['Details', 'Chat', 'Evaluations', 'Training', 'Logs']) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument();
     }
-    expect(screen.getAllByRole('tab')).toHaveLength(4);
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
     expect(screen.getByText('details content')).toBeInTheDocument();
   });
 
@@ -98,6 +103,25 @@ describe('ModelDetailRoute', () => {
 
     expect(await screen.findByText('details content')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Training' })).not.toBeInTheDocument();
+  });
+
+  it("lists only this model's evaluations, with a run action that pre-selects it", async () => {
+    mockLineage();
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=evaluations');
+
+    expect(await screen.findByText('evaluations for my-model')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
+      'href',
+      '/workspaces/ws/evaluation/new?model=ws%2Fmy-model'
+    );
+  });
+
+  it('drops the Evaluations tab for an adapter, which cannot be evaluated on its own', async () => {
+    mockLineage({ adapter });
+    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
+
+    expect(await screen.findByText('details content')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Evaluations' })).not.toBeInTheDocument();
   });
 
   it('shows an adapter under its own name', async () => {
