@@ -246,14 +246,7 @@ Read each model's `strong_at` and `watch_out_for` from `benchmark_cache.json` wh
 
 After explaining the recommendation, briefly note *how we know* — framed as "the test that simulates this" not "the score it got".
 
-Right framing:
-> "We know this because it consistently outperforms comparable models on tests
-> that simulate exactly this kind of multi-tool coordination — not toy examples,
-> but real scenarios where the model has to decide which tool to call, in what
-> order, with what arguments, and when to call nothing at all."
-
-Wrong framing (do not do this):
-> "It scored 0.91 on BFCL v4, which is top tier, and 1342 Arena Elo."
+Frame it as the test that simulates the agent's work, never as a score. Right and wrong examples: `references/evidence-framing.md`.
 
 If the user asks what benchmark was used or wants the raw number, tell them. Do not lead with it.
 
@@ -305,17 +298,7 @@ If they are explicitly maintaining a legacy NAT workflow YAML, emit the NAT comp
 
 End with:
 
-```txt
-These recommendations reflect benchmark data current as of this skill's last
-cache refresh. LLM rankings shift often. To pull fresh scores:
-
-    python scripts/refresh-benchmark-cache.py
-
-Raw leaderboards:
-  Tool calling:        https://gorilla.cs.berkeley.edu/leaderboard.html
-  Human preference:    https://lmarena.ai
-                       (live Elo data: huggingface.co/datasets/lmarena-ai/leaderboard-dataset)
-```
+End with a staleness notice: say the recommendations reflect the last cache refresh, give `python scripts/refresh-benchmark-cache.py` to refresh, and link the raw leaderboards. Exact text: `references/staleness-notice.md`.
 
 ## Verification
 
