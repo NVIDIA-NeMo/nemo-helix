@@ -47,6 +47,7 @@ PreparationErrorCode = Literal[
     "registry_not_allowed",
     "main_dockerfile_missing",
     "dockerfile_missing",
+    "unsupported_compose_build_option",
     # Task shape (M3 story 1)
     "invalid_task_config",
     "shared_verifier_unsupported",

@@ -20,6 +20,7 @@ from nemo_evals.image_builds.models import BuildImage
 from pydantic import ValidationError
 
 COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
+_SUPPORTED_BUILD_OPTIONS = frozenset({"context", "dockerfile"})
 
 
 class ImagePlanError(ValueError):
@@ -188,6 +189,12 @@ def _verifier_image(environment: EnvironmentConfig, archive: TaskArchive) -> Bui
 def _build_options(service: str, build: object) -> tuple[str, str]:
     if not isinstance(build, dict):
         raise ImagePlanError("invalid_compose_file", f"service {service} has an unreadable build section")
+    # Builder builds a context and a Dockerfile, nothing else: building without any other option makes another image.
+    if unsupported := sorted(set(build) - _SUPPORTED_BUILD_OPTIONS):
+        raise ImagePlanError(
+            "unsupported_compose_build_option",
+            f"service {service} sets build options the image builder can't apply: {', '.join(unsupported)}",
+        )
     context = build.get("context", ".")
     dockerfile = build.get("dockerfile", "Dockerfile")
     if not isinstance(context, str) or not isinstance(dockerfile, str):

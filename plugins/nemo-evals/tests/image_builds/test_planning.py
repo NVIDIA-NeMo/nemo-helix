@@ -178,6 +178,19 @@ def test_a_compose_service_named_like_the_separate_verifier_is_refused() -> None
     assert error.value.code == "invalid_compose_file"
 
 
+@pytest.mark.parametrize("service", ["main", "cache"])
+@pytest.mark.parametrize("option", ["target: test", "args: {MODE: fast}", "dockerfile_inline: FROM scratch"])
+def test_a_compose_build_option_builder_cannot_apply_fails_planning(service: str, option: str) -> None:
+    """Builder builds only a context and a Dockerfile; dropping any other option would build a different image."""
+    compose = f"services:\n  {service}:\n    build: {{context: ., {option}}}\n"
+
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({}, _archive("environment/Dockerfile", compose=compose), allowed_registries=[])
+
+    assert error.value.code == "unsupported_compose_build_option"
+    assert option.split(":")[0] in str(error.value)
+
+
 @pytest.mark.parametrize(
     ("config", "archive", "code"),
     [

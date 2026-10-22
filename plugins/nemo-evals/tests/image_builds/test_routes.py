@@ -13,12 +13,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
-from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.models import TaskImageBuildEntity, build_job_name
+from nemo_evals.entities import TaskEntity
+from nemo_evals.image_builds.models import TaskImageBuildEntity, build_entity_name, build_job_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
-from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -84,9 +83,8 @@ def _store(store_task, **kwargs) -> str:
 def _set_status(entity_store, digest: str, attempt: int, status: str) -> None:
     async def update() -> None:
         head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-        revision = await get_revision(entity_store, TaskRevisionEntity, head, digest)
         build = await entity_store.get(
-            TaskImageBuildEntity, name=f"build.{attempt}", workspace="default", parent=revision.id
+            TaskImageBuildEntity, name=build_entity_name(digest, attempt), workspace="default", parent=head.id
         )
         build.status = status
         await entity_store.update(build)

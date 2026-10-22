@@ -41,10 +41,20 @@ class ImageBuilder(Protocol):
         ...
 
 
-def builder_name(*, archive_digest: str, context_path: str, dockerfile: str) -> str:
-    """Builder build-set name for one image of one task archive."""
+def builder_name(*, archive: str, archive_digest: str, context_path: str, dockerfile: str) -> str:
+    """Builder build-set name for one image of the task archive at ``archive``, a fileset reference.
+
+    Builder fingerprints the whole request, archive location included, so one name for the same archive at two
+    locations would conflict there.
+    """
     key = json.dumps(
-        {"v": 1, "archive": archive_digest, "context": context_path, "dockerfile": dockerfile},
+        {
+            "v": 2,
+            "location": archive,
+            "archive": archive_digest,
+            "context": context_path,
+            "dockerfile": dockerfile,
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
