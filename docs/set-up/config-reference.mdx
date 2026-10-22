@@ -919,6 +919,8 @@ builder:
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''
   repository_prefix: ''
+  # The platform a build or copy is for when its request names none, as `os/architecture`. Set it to your nodes' architecture: `linux/arm64` for a cluster on Apple silicon, such as Docker Desktop on a Mac. Changing it doesn't rebuild task images evals already has: request their builds with `rebuild` set. | default: 'linux/amd64'
+  default_platform: linux/amd64
   # Registries a build may copy a published image from, as hosts. A copy from any other registry is refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy.
   import_registries:
   - docker.io

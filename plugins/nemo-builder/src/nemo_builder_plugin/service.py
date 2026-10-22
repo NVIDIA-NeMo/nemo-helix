@@ -122,7 +122,8 @@ def _build_router() -> APIRouter:
 
         try:
             # The sandbox runs where the build's profiles put its steps.
-            backend = load_backend(BuilderConfig.get(), await jobs_client.list_execution_profiles())
+            config = BuilderConfig.get()
+            backend = load_backend(config, await jobs_client.list_execution_profiles())
             result = await submit_build_set(
                 body,
                 backend=backend,
@@ -132,6 +133,7 @@ def _build_router() -> APIRouter:
                 get_job_fields=get_job_fields,
                 secret_readable=secret_readable,
                 resolve_upstream=resolve_upstream,
+                default_platform=config.default_platform,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

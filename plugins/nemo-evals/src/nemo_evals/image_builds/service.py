@@ -28,7 +28,7 @@ from nemo_evals.revisions import get_revision
 from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.dependencies import RequestAuthorizer
-from nemo_helix_plugin.entities import EntityClient, PaginationInfo
+from nemo_helix_plugin.entities import EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -38,6 +38,8 @@ from nemo_helix_plugin.schema import Page, PaginationData
 logger = logging.getLogger(__name__)
 
 _ENDED_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
+#: Builds read per page when looking one up.
+_LOOKUP_PAGE_SIZE = 100
 
 
 class ImageBuildJobConflictError(Exception):
@@ -119,8 +121,8 @@ class ImageBuildService:
     ) -> ImageBuild | None:
         """Start a build of a revision, or return the one already running or done.
 
-        A new attempt starts only when there is none yet or the newest one failed. Returns ``None``
-        when the task doesn't exist.
+        A new attempt starts only when none for the requested platform is pending, running or ready. Returns
+        ``None`` when the task doesn't exist.
 
         Raises:
             RevisionNotFoundError: ``revision`` names no revision of the task.
@@ -140,10 +142,13 @@ class ImageBuildService:
             )
         parse_task_config(task_revision.spec.config)
 
-        newest = await self._newest(head, task_revision.content_hash)
-        if newest is not None and newest.status == "ready":
+        first_page = await self._page(head, task_revision.content_hash, 1)
+        latest = first_page.data[0] if first_page.data else None
+        # Another platform's build is no answer to this request, so only builds for this one are reused.
+        newest = await self._newest_for(head, task_revision.content_hash, request.platform)
+        if newest is not None and newest.status == "ready" and not request.rebuild:
             return ImageBuild.from_entity(newest)
-        if newest is not None and newest.status != "failed":
+        if newest is not None and newest.status not in ("ready", "failed"):
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
                 await self._ensure_job(newest)
@@ -152,7 +157,7 @@ class ImageBuildService:
             if newest.status != "failed":
                 return ImageBuild.from_entity(newest)
 
-        attempt = 1 if newest is None else newest.attempt + 1
+        attempt = 1 if latest is None else latest.attempt + 1
         task = f"{workspace}/{name}"
         build = TaskImageBuildEntity(
             name=build_entity_name(task_revision.content_hash, attempt),
@@ -163,6 +168,7 @@ class ImageBuildService:
             attempt=attempt,
             job=build_job_name(task, task_revision.content_hash, attempt),
             allowed_registries=request.allowed_registries,
+            platform=request.platform,
         )
         build._parent = head.id
         try:
@@ -171,6 +177,10 @@ class ImageBuildService:
             build = await self.entity_client.get(
                 TaskImageBuildEntity, name=build.name, workspace=workspace, parent=head.id
             )
+            if build.platform != request.platform:
+                raise ImageBuildJobConflictError(
+                    f"attempt {attempt} of this revision was just started for another platform; request again"
+                )
         await self._ensure_job(build)
         return ImageBuild.from_entity(build)
 
@@ -217,15 +227,42 @@ class ImageBuildService:
             return None
         return head, await get_revision(self.entity_client, TaskRevisionEntity, head, revision)
 
-    async def _newest(self, head: TaskEntity, revision_digest: str) -> TaskImageBuildEntity | None:
-        result = await self.entity_client.list(
+    async def newest_build(
+        self, workspace: str, name: str, revision: str, *, platform: str | None = None
+    ) -> ImageBuild | None:
+        """The revision's newest build for ``platform``, or for the deployment's default when None.
+
+        Raises:
+            NemoEntityNotFoundError: The task doesn't exist.
+            RevisionNotFoundError: ``revision`` names no revision of the task.
+        """
+        head = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
+        task_revision = await get_revision(self.entity_client, TaskRevisionEntity, head, revision)
+        newest = await self._newest_for(head, task_revision.content_hash, platform)
+        return None if newest is None else ImageBuild.from_entity(newest)
+
+    async def _newest_for(
+        self, head: TaskEntity, revision_digest: str, platform: str | None
+    ) -> TaskImageBuildEntity | None:
+        """The task's newest build of these contents for ``platform``, reading pages until one turns up."""
+        page = 1
+        while True:
+            result = await self._page(head, revision_digest, page)
+            found = next((build for build in result.data if build.platform == platform), None)
+            if found is not None or page >= result.pagination.total_pages:
+                return found
+            page += 1
+
+    async def _page(self, head: TaskEntity, revision_digest: str, page: int) -> ListResponse[TaskImageBuildEntity]:
+        """One page of the task's builds of these contents, newest first."""
+        return await self.entity_client.list(
             TaskImageBuildEntity,
             workspace=head.workspace,
             filter_operation=_builds_of(head, revision_digest),
             sort="-created_at",
-            page_size=1,
+            page=page,
+            page_size=_LOOKUP_PAGE_SIZE,
         )
-        return result.data[0] if result.data else None
 
     async def _fail_abandoned(self, build: TaskImageBuildEntity, job_status: str) -> TaskImageBuildEntity:
         """Fail a build whose Job ended without recording a result, unless it just recorded one."""

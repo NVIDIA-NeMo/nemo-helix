@@ -38,6 +38,12 @@ class PlannedImage:
     upstream_digest: str | None = None
 
     @property
+    def platform(self) -> str:
+        if self.spec.platform is None:
+            raise ValueError(f"{self.name} names no platform; plan the set after with_default_platform()")
+        return self.spec.platform
+
+    @property
     def upstream(self) -> ImageReference | None:
         """For a copy, the image it copies; None for a build."""
         source = self.spec.source

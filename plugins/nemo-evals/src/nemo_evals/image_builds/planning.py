@@ -6,21 +6,26 @@
 from __future__ import annotations
 
 import posixpath
+import re
 import tarfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 from harbor.models.task.config import EnvironmentConfig, TaskConfig, TaskOS
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config, task_has_any_separate_verifier
-from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference, normalize_registry
+from nemo_builder_plugin.identity import ImageIdentityError, Platform, normalize_reference, normalize_registry
 from nemo_evals.image_builds.models import BuildImage
 from pydantic import ValidationError
 
 COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
 _SUPPORTED_BUILD_OPTIONS = frozenset({"context", "dockerfile"})
+_MAX_DOCKERFILE_BYTES = 1024 * 1024
+# `FROM [--platform=<p>] <image> [AS <name>]`, the flag spelled any way BuildKit accepts it.
+_FROM = re.compile(r"^\s*FROM\s+(?P<flags>(?:--\S+\s+)*)", re.IGNORECASE)
+_PLATFORM_FLAG = re.compile(r"--platform=(\S+)", re.IGNORECASE)
 
 
 class ImagePlanError(ValueError):
@@ -39,6 +44,8 @@ class TaskArchive:
     root: str
     files: frozenset[str]
     compose: str | None
+    #: The archive itself, to read a Dockerfile from; None when there is nothing to read.
+    path: Path | None = None
 
     @classmethod
     def read(cls, path: Path) -> TaskArchive:
@@ -55,10 +62,26 @@ class TaskArchive:
                 handle = archive.extractfile(compose_member)
                 if handle is not None:
                     compose = handle.read().decode()
-        return cls(root=root, files=frozenset(member.name for member in members), compose=compose)
+        return cls(root=root, files=frozenset(member.name for member in members), compose=compose, path=path)
 
     def has(self, relative_path: str) -> bool:
         return f"{self.root}/{relative_path}" in self.files
+
+    def text(self, relative_path: str) -> str | None:
+        """A file of the task as text, or None when the archive can't be read here or the file isn't text."""
+        if self.path is None:
+            return None
+        with tarfile.open(self.path, "r:*") as archive:
+            try:
+                handle = archive.extractfile(f"{self.root}/{relative_path}")
+            except KeyError:
+                return None
+            if handle is None:
+                return None
+            try:
+                return handle.read(_MAX_DOCKERFILE_BYTES).decode()
+            except UnicodeDecodeError:
+                return None
 
 
 def parse_task_config(config: Mapping[str, Any]) -> TaskConfig:
@@ -92,8 +115,13 @@ def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_regi
     """
     task_config = parse_task_config(config)
     services = _compose_services(archive)
-    images = [_main_image(task_config.environment, archive, services.get(MAIN_SERVICE) or {})]
-    images += [_service_image(name, service, archive) for name, service in services.items() if name != MAIN_SERVICE]
+    main = services.get(MAIN_SERVICE) or {}
+    images = [_pinned(_main_image(task_config.environment, archive, main), MAIN_SERVICE, main)]
+    images += [
+        _pinned(_service_image(name, service, archive), name, service)
+        for name, service in services.items()
+        if name != MAIN_SERVICE
+    ]
     verifier = resolve_effective_verifier_env_config(task_config, None)
     if verifier is not None:
         if VERIFIER_ROLE in services:
@@ -186,6 +214,48 @@ def _verifier_image(environment: EnvironmentConfig, archive: TaskArchive) -> Bui
     )
 
 
+def _pinned(image: BuildImage, service: str, options: dict) -> BuildImage:
+    """``image`` for the platform its compose service names, which compose builds or pulls for over any other pin."""
+    pin = _compose_pin(service, options)
+    return image if pin is None else image.model_copy(update={"platform": pin})
+
+
+def _compose_pin(service: str, options: dict) -> str | None:
+    """The platform a compose service names, when it names one plainly rather than through a variable."""
+    platform = options.get("platform")
+    if platform is None or (isinstance(platform, str) and "$" in platform):
+        return None
+    try:
+        return str(Platform.parse(platform)) if isinstance(platform, str) else _unreadable(service, platform)
+    except ImageIdentityError:
+        return _unreadable(service, platform)
+
+
+def _unreadable(service: str, platform: object) -> NoReturn:
+    raise ImagePlanError("invalid_compose_file", f"service {service} names an unreadable platform: {platform!r}")
+
+
+def dockerfile_pin(dockerfile: str) -> str | None:
+    """The platform a Dockerfile's final stage names plainly, as in ``FROM --platform=linux/amd64 ...``.
+
+    The final stage is the image. A platform given through a variable, such as ``$BUILDPLATFORM``, pins nothing.
+    """
+    # A comment line never continues an instruction, even ending in a backslash, and drops out of one it splits.
+    instructions = "\n".join(line for line in dockerfile.splitlines() if not line.lstrip().startswith("#"))
+    lines = re.sub(r"\\\n", " ", instructions).splitlines()
+    froms = [match for line in lines if (match := _FROM.match(line))]
+    if not froms:
+        return None
+    flag = _PLATFORM_FLAG.search(froms[-1].group("flags"))
+    if flag is None:
+        return None
+    try:
+        return str(Platform.parse(flag.group(1)))
+    except ImageIdentityError:
+        # A variable, such as `$BUILDPLATFORM`, isn't a platform.
+        return None
+
+
 def _build_options(service: str, build: object) -> tuple[str, str]:
     if not isinstance(build, dict):
         raise ImagePlanError("invalid_compose_file", f"service {service} has an unreadable build section")
@@ -203,8 +273,14 @@ def _build_options(service: str, build: object) -> tuple[str, str]:
 
 
 def _dockerfile_image(role: str, archive: TaskArchive, context_path: str, dockerfile: str) -> BuildImage:
-    if not archive.has(posixpath.normpath(posixpath.join(context_path, dockerfile))):
+    path = posixpath.normpath(posixpath.join(context_path, dockerfile))
+    if not archive.has(path):
         raise ImagePlanError("dockerfile_missing", f"{role} has no {context_path}/{dockerfile}")
+    text = archive.text(path)
     return BuildImage(
-        role=role, source="dockerfile", context_path=f"{archive.root}/{context_path}", dockerfile=dockerfile
+        role=role,
+        source="dockerfile",
+        context_path=f"{archive.root}/{context_path}",
+        dockerfile=dockerfile,
+        platform=dockerfile_pin(text) if text is not None else None,
     )

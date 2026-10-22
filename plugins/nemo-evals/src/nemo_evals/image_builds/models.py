@@ -9,7 +9,7 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar, Literal
 
-from nemo_builder_plugin.identity import ImageIdentityError, normalize_registry
+from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry, platform_name
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -49,6 +49,13 @@ class BuildImage(BaseModel):
         default=None, description="Dockerfile path relative to `context_path`, for a `dockerfile` image."
     )
     image: str | None = Field(default=None, description="The image the task names, for a `prebuilt` image.")
+    platform: str | None = Field(
+        default=None,
+        description=(
+            "The platform the image is built or copied for, once the build decides it: the request's `platform`, "
+            "the task's own pin, or a prebuilt image's only platform. None means the deployment's default."
+        ),
+    )
     status: ImageStatus = "pending"
     builder_image: str | None = Field(default=None, description="The Builder container image record.")
     build_job: str | None = Field(default=None, description="The Builder job building this image.")
@@ -73,6 +80,7 @@ class TaskImageBuildEntity(EntityBase):
     status: BuildStatus = "pending"
     job: str = Field(description="Name of the task-builder Job that runs this attempt.")
     allowed_registries: list[str] = Field(default_factory=list)
+    platform: str | None = Field(default=None, description="The platform the request asked for, if any.")
     images: list[BuildImage] = Field(default_factory=list)
     error: str | None = None
 
@@ -88,6 +96,29 @@ class ImageBuildRequest(BaseModel):
             "Registry hosts, such as `docker.io`, that a prebuilt image named by the task may be copied from. "
             "Narrows the registries the deployment allows; empty allows all of those. A prebuilt image from "
             "any other registry fails the build."
+        ),
+    )
+
+    platform: str | None = Field(
+        default=None,
+        pattern=PLATFORM_PATTERN,
+        description=(
+            "The platform to build every image for, as `os/architecture`, such as `linux/arm64`. Omit to follow the "
+            "task: an image whose Dockerfile or compose service pins a platform is built for it, a prebuilt image "
+            "published for one platform is copied for that one, and anything else follows the deployment's default. "
+            "An image pinned to another platform fails the build. BuildKit's spellings, such as `linux/x86_64`, are "
+            "taken and named as it names them."
+        ),
+    )
+
+    _platform_name = field_validator("platform", mode="before")(platform_name)
+
+    rebuild: bool = Field(
+        default=False,
+        description=(
+            "Start a new attempt even when the newest build is ready, so the request reaches Builder again: after "
+            "the deployment's default platform changes, this builds for the new one. A build still running is "
+            "returned as it is. Builder reuses any image it already has for an unchanged request."
         ),
     )
 
@@ -109,6 +140,7 @@ class ImageBuild(BaseModel):
     status: BuildStatus
     job: str
     allowed_registries: list[str]
+    platform: str | None = None
     images: list[BuildImage]
     error: str | None = None
     created_at: datetime | None = None
@@ -123,6 +155,7 @@ class ImageBuild(BaseModel):
             status=entity.status,
             job=entity.job,
             allowed_registries=entity.allowed_registries,
+            platform=entity.platform,
             images=entity.images,
             error=entity.error,
             created_at=entity.created_at,
