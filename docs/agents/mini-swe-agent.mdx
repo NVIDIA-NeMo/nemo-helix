@@ -3,225 +3,117 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Run Mini-SWE-Agent"
-description: "Install, register, invoke and chat with a Mini-SWE-Agent 2.x harness through NeMo Helix, with response, telemetry and capability boundaries."
+description: "Install, deploy and use Mini-SWE-Agent 2.x with NeMo Helix."
 ---
 
-Mini-SWE-Agent 2.x is an optional Fabric harness for shell-based tasks. Helix
-selects `nvidia.fabric.mini-swe-agent` from a managed `agent.yaml`; you do not
-need a NAT wrapper. This guide uses a trusted local subprocess deployment.
-For version and migration guidance, see
-[Fabric 0.5 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade).
+Mini-SWE-Agent 2.x runs shell tasks through `nvidia.fabric.mini-swe-agent`.
+This example needs a running Helix 0.9 platform, a configured
+[CLI context](/documentation/reference/cli-reference/connect-to-deployments),
+permission to create resources in `default`, and `NVIDIA_API_KEY` for the
+example's NVIDIA Build model. See [Setup](/documentation/get-started/setup) first.
 
 <Warning>
-Mini-SWE-Agent executes shell commands in its workspace with the platform
-process's permissions when deployed as a subprocess. Use a disposable directory
-and trusted tasks. This example does not provide a sandbox boundary for
-untrusted code.
+A subprocess agent executes shell commands with the platform process's
+permissions. Use a disposable workspace and trusted tasks; this is not a sandbox.
 </Warning>
 
-## Prerequisites and installation
+## Install and configure
 
-- A running Helix 0.9 platform and a CLI context selecting its workspace. Follow
-  [Setup](/documentation/get-started/setup) and
-  [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
-- Python 3.12–3.14 for Helix, the optional Mini-SWE runtime on the **platform
-  host**, and a shell available to the agent.
-- A model endpoint supporting the shell-tool calls the harness uses. The
-  example uses NVIDIA Build with `NVIDIA_API_KEY`; choose a model available to
-  your account.
-- Permission to create agent, environment and secret resources in the example's
-  `default` workspace. Change **every** workspace/ref consistently if you use
-  another one.
-
-For the standard published `all` installation, add the optional harness in the
-environment that runs the platform, then restart the platform if its environment
-changed. Reinstalling ensures an existing tool gets the added extra:
+Install the optional harness on the **platform host**, not just the CLI machine,
+and restart the platform if its environment changed. For the standard published
+installation:
 
 ```bash
 uv tool install --reinstall "nemo-helix[all,nemo-agents-plugin-mini-swe-agent]==0.9.0"
 ```
 
-If you use a custom set of extras instead of `all`, preserve that set and add
-`nemo-agents-plugin-mini-swe-agent`; do not unintentionally remove your other
-platform plugins.
+Preserve your existing extras if you use a custom installation instead of `all`.
+From a checkout, use `uv sync --frozen --package nemo-agents-plugin --extra mini-swe-agent`.
+[Agent packaging](/documentation/agents/deploy-agents#build-and-publish-agent-images)
+selects the same extra for a Mini-SWE container image.
 
-From a source checkout, run at the repository root instead:
+Save the shipped
+[`agent-mini-swe-agent.yaml`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/release/0.9/plugins/nemo-agents/examples/nemo-agent-config/agent-mini-swe-agent.yaml)
+as `mini-swe-demo/agent.yaml` in a new directory, so registration does not upload
+unrelated files. It uses a direct NVIDIA endpoint and disables ordinary
+telemetry export; credentials are bound below, not embedded in YAML.
 
-```bash
-uv sync --frozen --package nemo-agents-plugin --extra mini-swe-agent
-```
+## Register, deploy and invoke
 
-The base plugin supplies the adapter contract; the `mini-swe-agent` extra adds
-the harness. Installing the extra only in a remote CLI environment does not
-install it on your platform host or inside an agent image. For container
-execution, [agent packaging](/documentation/agents/deploy-agents#build-and-publish-agent-images)
-selects this same extra when Mini-SWE is the default harness.
-
-## Create the configuration
-
-Save this as `mini-swe-demo/agent.yaml` on the machine running registration.
-Use a new directory so unrelated files are not uploaded with the config.
-
-```yaml
-config_format: nemo-agents-spec-v1
-name: mini-swe-demo
-default_harness: mini-swe-agent
-harnesses:
-  mini-swe-agent:
-    kind: mini-swe-agent
-    settings:
-      timeout: 30
-instructions:
-  system:
-    content: Inspect the task, make the requested change, and verify the result.
-models:
-  default:
-    provider: nvidia
-    model: nvidia/nemotron-3.5-lightning-30b-a3b
-    api_key_env: NVIDIA_API_KEY
-    base_url: https://integrate.api.nvidia.com/v1
-runtime:
-  max_turns: 50
-  timeout_seconds: 1800
-environment:
-  workspace: ./workspace
-  artifacts: ./artifacts
-telemetry:
-  enabled: false
-```
-
-This endpoint is contacted directly; the agent environment below supplies its
-credential. Do not put the API-key value in YAML, instructions, or a plain
-`environment.env` field. The repository also ships the equivalent example at
-[`agent-mini-swe-agent.yaml`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/release/0.9/plugins/nemo-agents/examples/nemo-agent-config/agent-mini-swe-agent.yaml).
-
-## Register and deploy
-
-Set `NVIDIA_API_KEY` in your shell without recording its value in this guide.
-Create a Secrets-store reference and an agent environment that resolves it at
-runtime:
+With `NVIDIA_API_KEY` set in your shell, create uniquely named example resources:
 
 ```bash
 printf '%s' "$NVIDIA_API_KEY" | nemo secrets create mini-swe-model-key --from-file - --workspace default
-
 nemo agents environment-specs create mini-swe-env --workspace default \
   --spec '{"secrets":{"NVIDIA_API_KEY":"default/mini-swe-model-key"}}'
 nemo agents environments create mini-swe-env --workspace default \
   --environment-spec default/mini-swe-env
-
 nemo agents register --name mini-swe-demo --workspace default \
   --agent-config ./mini-swe-demo/agent.yaml
 nemo agents deploy --agent mini-swe-demo --name mini-swe-demo-deployment \
   --mode subprocess --environment default/mini-swe-env --workspace default
-```
-
-Wait for the deployment to become ready. Check it with:
-
-```bash
 nemo agents deployments get mini-swe-demo-deployment --workspace default
 ```
 
-An existing resource name is not a request to overwrite it. Choose unique
-names for repeated tests, or deliberately clean up the prior example first.
-
-## Invoke once
+Wait until the deployment is ready, then invoke it:
 
 ```bash
 nemo agents invoke --agent-deployment mini-swe-demo-deployment --workspace default \
   --input "Use the shell to print hello, then finish with hello as your final answer."
 ```
 
-A successful invocation has terminal status `succeeded` and a text `response`.
-Do not require an exact answer from a live model to establish API success.
-Helix preserves Fabric's structured `output`; if that mapping has no `response`
-field but has a string `output` field, Helix uses that string as the normalized
-`response` (including any trailing newline). Status and diagnostics remain
-separate from the text: an error result is not a successful answer merely
-because it contains output.
+Check terminal status `succeeded` and text `response`, not an exact live-model
+answer. Helix preserves structured `output`; when it lacks `response` but has
+a string `output`, that string becomes the normalized response, including any
+trailing newline. Output text alone does not make an error result successful.
 
-## Sessions and streaming
+## Sessions and telemetry
 
-For a persisted conversation, run in an **interactive terminal**:
+In an **interactive terminal**, start a conversation, then detach and resume:
 
 ```bash
 nemo agents chat --agent-deployment mini-swe-demo-deployment --workspace default \
   --session-name mini-swe-demo-session --input "Inspect the workspace and remember what you find."
-```
-
-Send a follow-up turn in that chat, leave the chat, and resume the saved session:
-
-```bash
-nemo agents sessions list --agent-deployment mini-swe-demo-deployment --workspace default
-nemo agents sessions get mini-swe-demo-session --workspace default
+# After leaving the chat:
 nemo agents chat --session mini-swe-demo-session --workspace default
 ```
 
-Turns in an open session reuse the Fabric runtime and conversation history;
-independent one-shot invocations do not share that history. Closing a session
-releases its runtime and it cannot be resumed. Do not infer that a session
-record can reconstruct an in-memory runtime after the hosting process restarts.
-Resuming retains runtime context but does not redisplay the prior messages.
-For scripted one-shot work, use `invoke`; `chat` rejects non-interactive use.
+Session turns reuse runtime/history; independent one-shot invocations do not.
+Resuming does not redisplay prior messages. Closing a session releases its
+runtime; a persisted record does not reconstruct it after a host restart.
+Use `invoke` for scripts: `chat` requires an interactive terminal.
 
-Helix enables serving-owned Relay support for streaming and sessions even when
-this example's ordinary invocation telemetry is disabled. Streamed scope events
-and the terminal Fabric result are separate: use the terminal result to decide
-success, rather than treating the first stream event as completion. Streaming
-does not imply token-by-token model responses; the Mini-SWE model integration
-can use non-streaming tool-call completions.
+Helix enables serving-owned Relay for sessions/streaming even with the example's
+ordinary export disabled. Correlate stream metadata `nemo_fabric_request_id`
+with the terminal result's `request_id`; each turn has its own ID. Use the
+terminal result for success, not the first scope event. This is not a guarantee
+of token-by-token model streaming or complete per-tool-result telemetry.
 
-## Response correlation and telemetry
+To export ordinary trajectories to Intake, remove the example's telemetry
+opt-out and follow [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
+For missing traces, see [gateway routing](/documentation/agents/fabric-upgrade#telemetry-routing-through-gateways).
+The optional-harness integration gate uses a local model stub; validate your
+own credentials, deployment network and collector separately.
 
-Each Fabric invocation has a request ID. Relay stream metadata uses
-`nemo_fabric_request_id`; it should match the terminal result's `request_id` for
-that turn. A resumed session keeps its runtime identity while each turn has its
-own request correlation. Use those IDs when debugging interleaved requests.
+## Limits and troubleshooting
 
-The integration tests cover final-response normalization, scope/request
-correlation and session history. They intentionally do **not** require complete
-per-tool-result Relay telemetry; do not treat complete tool spans as a 0.9
-release guarantee or assume an older degraded-telemetry observation was fixed
-merely by the Fabric upgrade. Inspect the actual result's telemetry/diagnostics
-and saved artifacts in your installed adapter version.
-
-The example opts out of automatic Intake export. To collect normal invocation
-trajectories, remove that opt-out or configure an explicit supported destination,
-then follow [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
-Relay-backed live serving and exporting a trajectory to Intake are different
-checks. For container/job destinations, see
-[gateway telemetry routing](/documentation/agents/fabric-upgrade#telemetry-routing-through-gateways).
-
-## Timeouts and unsupported capabilities
-
-| Setting | Scope |
+| Setting or symptom | Scope or action |
 | --- | --- |
-| `harnesses.mini-swe-agent.settings.timeout` | A shell command's timeout; `30` seconds in the example. |
-| `runtime.timeout_seconds` | Invocation runtime limit; `1800` seconds in the example. |
-| `runtime.max_turns` | Agent turn budget; `50` in the example. |
-| CLI `invoke` / `chat` `--timeout` | Client request/stream wait; independent of the shell-command timeout. |
+| `harnesses.mini-swe-agent.settings.timeout` | Per-shell-command timeout; example: 30 seconds. |
+| `runtime.timeout_seconds` / `runtime.max_turns` | Invocation limit / turn budget; example: 1800 seconds / 50 turns. |
+| CLI `invoke` / `chat` `--timeout` | Client wait, independent of the shell limit. |
+| Missing runtime | Install the harness on the platform host or selected-harness image. |
+| Model authentication error | Check secret access, `api_key_env` and endpoint/model; never log the key. |
+| Missing history or traces | Check session identity and telemetry export separately from invocation success. |
 
-Mini-SWE supports **replacement** system instructions. It does not support
-appended system instructions, skills, MCP servers, or tool policy through this
-adapter. Do not add those shared fields because another Fabric harness accepts
-them. A custom system prompt replaces the default rather than appending to it;
-ensure your replacement still allows the harness to finish its task correctly.
-
-## Troubleshooting
-
-| Symptom | Check |
-| --- | --- |
-| Missing Mini-SWE module or adapter runtime | Install the optional harness on the platform host or build the selected-harness image, not only on the CLI machine. |
-| Model authentication fails | Check the Secrets-store reference, permission to read it, `api_key_env`, and the endpoint/model pair. Do not log the secret value. |
-| A shell operation times out | Inspect the command timeout separately from the invocation/CLI limits. |
-| No expected prior-turn history | Confirm the request uses the open persisted session rather than a new one-shot invocation. |
-| Stream appears but result fails | Read terminal status/error diagnostics; scope events alone are not success. |
-| No Intake trajectory | This example explicitly disables normal export; review the destination, agent name and Intake health separately from live streaming. |
-| Tool telemetry is incomplete | Inspect adapter/Relay diagnostics and artifacts; complete per-tool spans are not guaranteed by the integration gate. |
+The adapter supports **replacement** system instructions, not appended
+instructions, skills, MCP servers or tool policy. A replacement prompt must
+still let the harness finish the task.
 
 ## Cleanup
 
-Close the session before removing its deployment. These commands affect only
-resources created with the example names above:
+Close the session before removing the deployment; skip that command if you only
+used one-shot invocation:
 
 ```bash
 nemo agents sessions close mini-swe-demo-session --workspace default
@@ -232,14 +124,4 @@ nemo agents environment-specs delete mini-swe-env --workspace default
 nemo secrets delete mini-swe-model-key --workspace default
 ```
 
-Skip session closure if you only ran one-shot invocation. Registration uploads
-companion files into an agent fileset; inspect any retained filesets before
-removing them, and do not delete resources used by other agents or jobs.
-
-## Validation boundary
-
-The repository's `make test-agents-mini-swe-agent` gate exercises the real
-optional harness against a local model stub. It does not prove your model
-credentials, deployment network, or telemetry collector work. Verify the
-ready → invoke → session → cleanup journey in your target environment before
-adopting the workflow.
+Inspect any retained agent filesets before deleting them; they may be shared.

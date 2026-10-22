@@ -81,45 +81,21 @@ stay the config's. Files the config refers to by relative path (`skills.paths`) 
 
 ## Preflight and custom adapters
 
-`fabric_config` must be a complete typed Fabric mapping with a nonempty
-`harness.adapter_id`. It is **not** the managed Helix `nemo-agents-spec-v1`
-format: registered-agent resolution translates that format for you. Keep agent
-description in the typed config; legacy flat description keywords such as
-`fabric_adapter_id`, `fabric_system_instruction`, and `fabric_max_turns` are
-rejected rather than merged. Install/run settings such as `fabric_package`,
-`fabric_workspace`, and `fabric_config_bundle` remain separate options.
+`fabric_config` must be a full typed Fabric mapping with a nonempty
+`harness.adapter_id`, not managed `nemo-agents-spec-v1` YAML. Registered-agent
+resolution translates the managed format for you.
 
-Before running trials, `NemoFabricAgent.preflight` parses the config, checks
-exact Fabric package pins against the installed host version, and inspects the
-adapter contract. You can call it directly after defining `fabric_config` above:
+`NemoFabricAgent.preflight` and `FabricInstalledAgent` check the config, adapter
+contract and exact `fabric_package` pins before trials. A mismatched pin fails
+with `fabric_package pins nemo-fabric to ... but the host runs ...`; match the
+host version. Ranges are left to the installer, not proven compatible.
+`harbor config validate` checks option schemas but does not replace preflight
+or a task-side invocation test.
 
-```python
-from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
-
-NemoFabricAgent.preflight({
-    "fabric_config": fabric_config,
-    "fabric_package": "nemo-fabric[deepagents]==0.5.0",
-    "fabric_workspace": "/app",
-})
-```
-
-`FabricInstalledAgent` performs these checks too. An exact pin to another
-release fails with `fabric_package pins nemo-fabric to ... but the host runs ...`;
-match the actual host version. Requirement ranges are left to the installer,
-not proven compatible by preflight. `harbor config validate` applies the option
-schema/flat-field validation, but is not a substitute for the full preflight
-and a task-side install/invocation test.
-
-For a catalog adapter, install `nemo-fabric[harbor]` in the host environment if
-the catalog/descriptor is missing. For a custom adapter, the host must be able
-to read its descriptor through `fabric_adapter_descriptor`, especially when
-skills, MCP or telemetry require capability inspection. The task must also have
-the adapter files and a discovery path; a readable host descriptor alone does
-not make the task-side runner available.
-
-For example, given a **user-supplied** bundle with a complete descriptor and its
-runner under `./bundle/adapters/acme/`, use the following install/run options
-alongside your full custom `fabric_config`:
+If a catalog descriptor is missing, install `nemo-fabric[harbor]` on the host.
+For a custom adapter, supply a host-readable `fabric_adapter_descriptor` and
+make the runner discoverable inside the task. For example, these options assume
+a **user-supplied** descriptor and runner under `./bundle/adapters/acme/`:
 
 ```json
 {
@@ -130,31 +106,14 @@ alongside your full custom `fabric_config`:
 }
 ```
 
-These example paths do not name a shipped adapter. Supply a descriptor whose
-ID matches `fabric_config.harness.adapter_id` and whose runner and declared
-capabilities are actually present. `fabric_discovery_paths` is merged with the
-typed config's `discovery.local_paths`; paths must resolve **inside the task
-container**, after the bundle is uploaded. Relative skill paths resolve against
-`fabric_config_target`. Install the custom adapter's dependencies in the task
-as well. If host preflight succeeds but runner lookup fails in the trial,
-inspect the uploaded bundle, task-side discovery paths and executable/package
-installation separately.
+The descriptor ID must match `harness.adapter_id`. `fabric_discovery_paths` is
+merged with `discovery.local_paths`; these paths must exist **inside the task**
+after upload. Install runner dependencies there too. A host-readable descriptor
+does not install a task-side runtime; inspect the bundle and discovery paths
+if preflight succeeds but runner lookup fails.
 
-### Persisted configurations and telemetry
-
-Helix upgrades known persisted registered-agent
-`relay.observability.version: 3` configurations to version 4 in memory when
-preparing evaluations under Fabric 0.5. This does not rewrite stored inputs,
-accept arbitrary incompatible schemas, or relax the host/task version check.
-Standalone typed configs must already validate against their installed Fabric.
-
-For a registered Harbor agent, Helix also rewrites platform-bound model URLs
-and ATIF/OTLP Intake endpoints to the container-reachable gateway origin. It
-recognizes the platform route path rather than a particular hostname;
-independent collectors are left alone. Relay file artifacts are collected
-separately under the Harbor trial artifact root. See
-[Fabric compatibility and gateway telemetry routing](/documentation/agents/fabric-upgrade)
-for upgrade boundaries, ATOF/WebSocket handling, and missing-trace diagnosis.
+For persisted Relay v3-to-v4 compatibility and ATIF/OTLP gateway rewriting, see
+[Fabric upgrade and telemetry routing](/documentation/agents/fabric-upgrade).
 
 ## Run on task images without Python
 
