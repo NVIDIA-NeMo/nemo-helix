@@ -243,6 +243,10 @@ def test_identical_create_while_the_first_is_populating_is_a_conflict() -> None:
     # The in-progress import is left alone for its creator to finish.
     existing = store.get(import_id, owner_id="usr_test")
     assert existing is not None and existing["populated"] is False
+    # A smoke publish adds a benchmark the manifest doesn't list; the import stays populated.
+    store.add_benchmark(import_id, position=0, slug="bench", name="Bench", task_slugs=["task"])
+    store.add_benchmark(import_id, position=1, slug="bench-smoke-1", name="Bench smoke", task_slugs=["task"])
+    assert (store.get(import_id, owner_id="usr_test") or {})["populated"] is True
 
 
 def test_public_import_promotes_reused_owned_task_visibility() -> None:

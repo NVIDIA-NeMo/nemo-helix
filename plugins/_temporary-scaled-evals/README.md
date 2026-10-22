@@ -53,7 +53,8 @@ The DSN resolves in this order:
 2. A `localhost:5432` development default, matching the standalone repo, so a local
    `docker run postgres:16` is the only setup step.
 
-**Postgres is required.** The claim queues need `FOR UPDATE SKIP LOCKED`, plus JSONB,
+**Postgres is required** until benchmark-run archives move to entities; it now holds
+only the archive queue. That queue needs `FOR UPDATE SKIP LOCKED`, plus JSONB,
 advisory locks, and enum types, so the platform's own SQLite default is not a usable
 target — which is a second reason not to inherit it. When the database is unreachable
 the plugin degrades rather than failing the boot: the platform starts normally, other
@@ -353,17 +354,16 @@ docker rm -f scaled-evals-pg
 
 The `scaled-evals-jobs` controller submits task builds and evaluation executions to
 Platform Jobs. Creating or retrying a single evaluation also submits its Job
-from the API right after the row commits, if the admission caps allow it; the
-controller submits anything that path misses, including benchmark-run members. Postgres remains the admission
-queue and metadata source of truth during this migration.
+from the API right after the evaluation is stored, if the admission caps allow it; the
+controller submits anything that path misses, including benchmark-run members.
 
 There is no separate worker process. The controller also runs execution cleanup,
 the evidence and archive backstops, and benchmark archive cleanup.
 
 Before creating an evaluation Job, the submitter writes that execution's
 immutable launch inputs to a `scaled_evals_execution` entity, and the Job
-launches from it. The Job reads only the changing run state from Postgres and
-writes status and results there. Because the inputs include prompt content and
+launches from it. The Job reads the changing run state from the evaluation
+entity and writes status and results there. Because the inputs include prompt content and
 the private execution snapshot, they are stored in
 `SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE` (default `scaled-evals-internal`).
 The service creates that workspace itself, so only the service has a role in
@@ -399,6 +399,26 @@ import. A create racing an identical one returns
 `409 benchmark_import_in_progress` until the first has finished populating it.
 A create that fails partway deletes its import; task revisions it already
 allocated remain as unused uploads.
+
+Evaluations are `scaled_evals_evaluation` entities with their status events,
+per-execution telemetry, resource usage, and cleanups embedded; benchmark runs
+are `scaled_evals_benchmark_run` entities. Every queue claims work by rewriting
+the entity under a compare-and-swap, and a write that keeps losing returns
+`409 evaluation_changed` or `409 benchmark_run_changed`. Differences from the
+Postgres version:
+
+- Admission caps are counted without a lock, so claimants running at the same
+  time can each admit one evaluation past a cap.
+- List endpoints, admin counts, and queue scans read every live evaluation or
+  run, and run status is derived from all members on each read.
+- A benchmark run and its members are separate writes. A failed create deletes
+  what it wrote; a crash in between can leave queued members of a missing run.
+  Cancelling a run likewise cancels members one at a time.
+- A superseded execution is detected with a check, not a lock, so it can
+  publish once more if a retry lands in between.
+- Cleanup ids are strings (`<evaluation>/<execution>`), not integers.
+- `SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED`, `_READS_ENABLED`,
+  `_WORKSPACE`, and `_PROJECTION_BATCH_SIZE` are gone with the projection.
 
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox

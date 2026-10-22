@@ -202,7 +202,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
     entities = MagicMock()
     entities.get.return_value.inputs = {"name": "eval"}
-    monkeypatch.setattr(evaluation_job_module, "platform_entities", lambda: entities)
+    monkeypatch.setattr(evaluation_job_module.entity_store, "entity_client", lambda: entities)
     spec = _evaluation_spec().model_copy(update={"inputs_workspace": "ws"})
     EvaluationExecutionJob().run(spec.model_dump())
     assert entities.get.call_args.args[1] == evaluation_execution_job_name("eval_1", 4)
