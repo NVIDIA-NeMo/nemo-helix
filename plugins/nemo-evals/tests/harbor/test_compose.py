@@ -138,6 +138,19 @@ def test_unset_variable_is_reported_with_its_path() -> None:
     )
 
 
+def test_an_invalid_value_does_not_hide_unsupported_features() -> None:
+    problems = ComposeProblems()
+    problems.unsupported("services.a.privileged")
+    problems.invalid("services.b.ports[0]", "expected a port")
+
+    with pytest.raises(ComposeError) as caught:
+        problems.raise_if_any("compose.yaml")
+
+    assert caught.value.code == "compose_invalid"
+    assert "services.b.ports[0]: expected a port" in caught.value.detail
+    assert caught.value.paths == ("services.a.privileged",)
+
+
 def test_unset_variable_fails_the_task(tmp_path: Path) -> None:
     error = _error(
         tmp_path,

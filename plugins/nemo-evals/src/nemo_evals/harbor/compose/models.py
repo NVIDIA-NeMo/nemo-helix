@@ -51,16 +51,27 @@ class ComposeProblems:
         self._invalid.append(f"{path}: {why}")
 
     def raise_if_any(self, compose_path: str) -> None:
-        """Raise one error for everything recorded, invalid values first; do nothing when nothing was."""
-        if self._invalid:
-            raise ComposeError("compose_invalid", "; ".join(self._invalid), compose_path=compose_path)
-        if self._unsupported:
+        """Raise one error for everything recorded; do nothing when nothing was.
+
+        Any invalid value makes the error ``compose_invalid``, since the file is broken whatever runs it. Unsupported
+        features found alongside are still listed in its paths, so the author sees every problem in one pass.
+        """
+        if not self._invalid and not self._unsupported:
+            return
+
+        unsupported = tuple(dict.fromkeys(self._unsupported))
+        if not self._invalid:
             raise ComposeError(
                 "compose_unsupported",
                 "these can't run as sandbox services",
                 compose_path=compose_path,
-                paths=tuple(dict.fromkeys(self._unsupported)),
+                paths=unsupported,
             )
+
+        detail = "; ".join(self._invalid)
+        if unsupported:
+            detail += "; and these can't run as sandbox services"
+        raise ComposeError("compose_invalid", detail, compose_path=compose_path, paths=unsupported)
 
 
 class ComposeImage(BaseModel):
