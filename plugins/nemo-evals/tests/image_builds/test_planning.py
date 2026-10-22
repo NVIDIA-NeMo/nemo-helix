@@ -113,8 +113,8 @@ services:
 
     assert _plan({}, archive, ["docker.io"]) == [
         ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
-        ("db", "dockerfile", "sort-task/environment/db", "Dockerfile.db", None),
-        ("cache", "prebuilt", None, None, "docker.io/library/redis:7"),
+        ("service/db", "dockerfile", "sort-task/environment/db", "Dockerfile.db", None),
+        ("service/cache", "prebuilt", None, None, "docker.io/library/redis:7"),
     ]
 
 
@@ -124,7 +124,7 @@ def test_a_compose_main_that_only_adjusts_main_is_built_from_the_environment_doc
 
     assert _plan({}, archive) == [
         ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
-        ("db", "dockerfile", "sort-task/environment/db", "Dockerfile", None),
+        ("service/db", "dockerfile", "sort-task/environment/db", "Dockerfile", None),
     ]
 
 
@@ -133,7 +133,7 @@ def test_a_compose_file_without_main_still_builds_main() -> None:
 
     assert _plan({}, _archive("environment/Dockerfile", compose=compose), ["docker.io"]) == [
         ("main", "dockerfile", "sort-task/environment", "Dockerfile", None),
-        ("cache", "prebuilt", None, None, "docker.io/library/redis:7"),
+        ("service/cache", "prebuilt", None, None, "docker.io/library/redis:7"),
     ]
 
 
@@ -149,7 +149,7 @@ def test_a_docker_image_task_still_plans_its_compose_services() -> None:
 
     assert _plan(config, _archive(compose=compose), ["ghcr.io", "docker.io"]) == [
         ("main", "prebuilt", None, None, "ghcr.io/org/sort:1"),
-        ("cache", "prebuilt", None, None, "docker.io/library/redis:7"),
+        ("service/cache", "prebuilt", None, None, "docker.io/library/redis:7"),
     ]
 
 
@@ -171,8 +171,12 @@ def test_the_planner_plans_the_images_the_parser_resolves(tmp_path: Path) -> Non
 
     images = plan_images({}, archive, allowed_registries=[])
 
-    assert [(image.role, image.image) for image in images[1:]] == [("cache", "mirror.example.com/library/redis:7")]
-    assert parsed is not None and [image.role for image in images[1:]] == list(parsed.services)
+    assert [(image.role, image.image) for image in images[1:]] == [
+        ("service/cache", "mirror.example.com/library/redis:7")
+    ]
+    assert parsed is not None and [image.role for image in images[1:]] == [
+        f"service/{name}" for name in parsed.services
+    ]
 
 
 def test_a_compose_file_that_was_not_parsed_is_refused() -> None:
@@ -225,14 +229,14 @@ def test_a_docker_image_wins_over_a_compose_main_build() -> None:
     assert _plan(config, archive, ["ghcr.io"]) == [("main", "prebuilt", None, None, "ghcr.io/org/sort:1")]
 
 
-def test_a_compose_service_named_like_the_separate_verifier_is_refused() -> None:
+def test_a_compose_service_named_verifier_runs_next_to_a_separate_verifier() -> None:
+    """kumo's game server is a service called `verifier`; its image's role can't be mistaken for the verifier's."""
     config = {"verifier": {"environment_mode": "separate"}}
     compose = "services:\n  verifier:\n    image: redis:7\n"
 
-    with pytest.raises(ImagePlanError) as error:
-        _plan_images(config, _archive("environment/Dockerfile", "tests/Dockerfile", compose=compose), [])
+    images = _plan_images(config, _archive("environment/Dockerfile", "tests/Dockerfile", compose=compose), [])
 
-    assert error.value.code == "invalid_compose_file"
+    assert [image.role for image in images] == ["main", "service/verifier", "verifier"]
 
 
 def test_a_compose_service_named_verifier_is_planned_without_a_separate_verifier() -> None:
@@ -240,7 +244,7 @@ def test_a_compose_service_named_verifier_is_planned_without_a_separate_verifier
 
     images = _plan_images({}, _archive("environment/Dockerfile", compose=compose), [])
 
-    assert [image.role for image in images] == ["main", "verifier"]
+    assert [image.role for image in images] == ["main", "service/verifier"]
 
 
 @pytest.mark.parametrize("service", ["main", "cache"])
@@ -413,8 +417,8 @@ services:
 
     assert [(image.role, image.platform) for image in images] == [
         ("main", "linux/amd64"),
-        ("cache", None),
-        ("db", "linux/arm64"),
+        ("service/cache", None),
+        ("service/db", "linux/arm64"),
     ]
 
 
@@ -434,7 +438,7 @@ def test_a_compose_main_platform_pins_main_built_from_the_environment() -> None:
 
     images = _plan_images({}, archive, [])
 
-    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("db", None)]
+    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("service/db", None)]
 
 
 def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> None:
@@ -442,4 +446,7 @@ def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> 
     compose = "services:\n  main:\n    build: .\n    platform: linux/x86_64\n  cache:\n    image: redis:7\n    platform: linux/aarch64\n"
     images = _plan_images({}, _archive("environment/Dockerfile", compose=compose), [])
 
-    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("cache", "linux/arm64")]
+    assert [(image.role, image.platform) for image in images] == [
+        ("main", "linux/amd64"),
+        ("service/cache", "linux/arm64"),
+    ]
