@@ -22,10 +22,14 @@ _TRAINER_STATE_FILE = "trainer_state.json"
 
 
 def _saved_step(checkpoint: Path) -> int | None:
-    """The step a checkpoint holds, or None when its trainer state is missing or unreadable."""
+    """The step a checkpoint holds, or None when its trainer state is missing or not valid JSON.
+
+    Other read errors, such as a permissions error or an I/O timeout, are raised: the checkpoint may
+    be complete, so it must not be removed.
+    """
     try:
         state = json.loads((checkpoint / _TRAINER_STATE_FILE).read_text())
-    except (OSError, ValueError):
+    except (FileNotFoundError, ValueError):
         return None
     step = state.get("global_step") if isinstance(state, dict) else None
     return step if isinstance(step, int) else None
@@ -34,9 +38,9 @@ def _saved_step(checkpoint: Path) -> int | None:
 def newest_complete_checkpoint(checkpoint_dir: Path) -> tuple[Path, int] | None:
     """Return the newest complete ``checkpoint-N`` and its step, after removing incomplete ones.
 
-    The trainer writes ``trainer_state.json`` last, so a checkpoint without a
-    readable one was interrupted mid-save. It cannot be resumed from, so it is
-    removed.
+    The trainer writes ``trainer_state.json`` last, so a checkpoint whose trainer
+    state is missing or not valid JSON was interrupted mid-save. It cannot be
+    resumed from, so it is removed.
     """
     if not checkpoint_dir.is_dir():
         return None

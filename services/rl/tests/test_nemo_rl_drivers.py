@@ -264,7 +264,7 @@ def test_grpo_driver_fails_a_run_that_saved_no_checkpoint() -> None:
 )
 def test_missing_checkpoint_messages_are_classified(message: str, expected_type: str, expected_detail: str) -> None:
     """The driver raises these as ValueError; the rules must map them for the user."""
-    from nhx.rl.tasks.training.errors.converter import create_error_details
+    from nhx.customization_common.training.errors.classifier import create_error_details
 
     details = create_error_details(ValueError(message))
     assert details["type"] == expected_type

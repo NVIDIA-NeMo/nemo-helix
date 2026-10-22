@@ -44,6 +44,25 @@ def test_the_newest_complete_checkpoint_is_resumed_and_incomplete_ones_are_remov
     assert not torn_state.exists()
 
 
+@pytest.mark.parametrize("error", [PermissionError(13, "Permission denied"), TimeoutError(110, "Timed out")])
+def test_a_trainer_state_that_cannot_be_read_fails_without_removing_the_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError
+) -> None:
+    checkpoint = _complete(tmp_path, 40)
+    read_text = Path.read_text
+
+    def failing_read(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path.name == "trainer_state.json":
+            raise error
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failing_read)
+
+    with pytest.raises(type(error)):
+        newest_complete_checkpoint(tmp_path)
+    assert checkpoint.exists()
+
+
 def test_without_a_checkpoint_training_starts_from_scratch(tmp_path: Path) -> None:
     assert newest_complete_checkpoint(tmp_path / "missing") is None
     assert newest_complete_checkpoint(tmp_path) is None
