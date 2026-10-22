@@ -250,13 +250,14 @@ tenant, so the server's service account needs `pods`, `pods/log` and `pods/exec`
 Kubernetes answers 403 on the extension's exec and services routes.
 
 `opensandbox-ext-rbac.yaml` is a Role and a RoleBinding for one namespace. Apply it to
-each tenant namespace, with that namespace in place of `REPLACE_WITH_RELEASE_NAMESPACE`.
-The `sed -i.bak` above replaced the placeholder in the file itself, so start from the
-unedited `.bak` copy it left:
+each tenant namespace, with that namespace in place of the one in the file: the
+`REPLACE_WITH_RELEASE_NAMESPACE` placeholder, or `${NHX_NAMESPACE}` if you already
+substituted it:
 
 ```bash
 for ns in sandbox-alpha sandbox-beta; do   # the namespace of each tenant in tenants.toml
-  sed "s/REPLACE_WITH_RELEASE_NAMESPACE/${ns}/g" "${EXAMPLES}/opensandbox-ext-rbac.yaml.bak" | kubectl apply -f -
+  sed -E "s/^  namespace: (REPLACE_WITH_RELEASE_NAMESPACE|${NHX_NAMESPACE})$/  namespace: ${ns}/" \
+    "${EXAMPLES}/opensandbox-ext-rbac.yaml" | kubectl apply -f -
 done
 ```
 
