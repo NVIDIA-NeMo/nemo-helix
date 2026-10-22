@@ -248,9 +248,9 @@ then point the target at it:
 
 | Target | Point it at the closed-book virtual model |
 |---|---|
-| `Model` | Use an inline `Model` whose `url` is the gateway's OpenAI route and whose `name` is the virtual model. A `ModelRef` names a model entity, so it cannot select a virtual model. |
+| `Model` | Use an inline `Model` whose `url` is the gateway's route for the virtual model. |
 | Registered agent (`source.agent`) | Register the agent with the virtual model as its model and the gateway's OpenAI route as that model's `base_url`. |
-| Harbor built-in agent | Set the agent's model and base URL; see [Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation). |
+| Harbor built-in agent | Name the virtual model with the source's `model`; see [Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation). |
 
 For a `Model` target:
 
@@ -258,8 +258,8 @@ For a `Model` target:
 from nhx_evals_sdk import Model
 
 target = Model(
-    url="<gateway-base-url>/apis/inference-gateway/v2/workspaces/my-workspace/openai/-/v1",
-    name="my-workspace/closed-book-model",
+    url="<gateway-base-url>/apis/inference-gateway/v2/workspaces/my-workspace/model/closed-book-model/-/v1",
+    name="closed-book-model",
 )
 ```
 
@@ -276,7 +276,8 @@ models:
 
 `<gateway-base-url>` is the platform's address as seen by whatever makes the model call: the
 evaluation job for a `Model` target or an agent run on the host, and the task container for an agent
-run inside one. A model or provider that cannot be served closed-book fails the call with `403`,
+run inside one. Row evaluations and LLM judges can name the virtual model with a `ModelRef` instead;
+see [Model Configuration](/documentation/evaluate-models/metrics/model-configuration). A model or provider that cannot be served closed-book fails the call with `403`,
 which fails the trial or the job, and the gateway logs each refusal with its reason.
 
 ## Choosing a target

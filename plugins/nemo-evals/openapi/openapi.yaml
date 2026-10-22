@@ -5905,6 +5905,13 @@ components:
           title: Model Name
           description: Optional model slug passed to the agent.
           type: string
+        model:
+          allOf:
+          - $ref: '#/components/schemas/ModelRef'
+          description: 'A model the Inference Gateway serves, as `workspace/name`:
+            a model or a VirtualModel. The agent calls it through the gateway, and
+            evals sets the agent''s model name, base URL and API key variables. Use
+            instead of `model_name`. Supported for `codex`, `claude-code` and `SandboxedCodex`.'
       additionalProperties: false
       type: object
       required:
@@ -5922,6 +5929,13 @@ components:
           title: Model Name
           description: Optional model slug passed to the agent.
           type: string
+        model:
+          allOf:
+          - $ref: '#/components/schemas/ModelRef'
+          description: 'A model the Inference Gateway serves, as `workspace/name`:
+            a model or a VirtualModel. The agent calls it through the gateway, and
+            evals sets the agent''s model name, base URL and API key variables. Use
+            instead of `model_name`. Supported for `codex`, `claude-code` and `SandboxedCodex`.'
       additionalProperties: false
       type: object
       required:

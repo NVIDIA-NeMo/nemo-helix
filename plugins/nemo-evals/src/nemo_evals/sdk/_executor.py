@@ -100,7 +100,7 @@ def _resolve_submit_target(
         except ClientNotFoundError as exc:
             raise ValueError(
                 f"Model reference '{target.root}' not found. "
-                f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
+                f"Ensure a model or VirtualModel named '{name}' exists in workspace '{workspace}', "
                 "or use an inline model definition instead."
             ) from exc
         return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)
@@ -120,7 +120,7 @@ async def _resolve_submit_target_async(
         except ClientNotFoundError as exc:
             raise ValueError(
                 f"Model reference '{target.root}' not found. "
-                f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
+                f"Ensure a model or VirtualModel named '{name}' exists in workspace '{workspace}', "
                 "or use an inline model definition instead."
             ) from exc
         return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)

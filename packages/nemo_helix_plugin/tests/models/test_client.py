@@ -289,6 +289,55 @@ def test_resolve_model_reference_ignores_missing_provider() -> None:
     assert result.host_url is None
 
 
+def test_resolve_model_reference_names_a_virtual_model_when_no_entity_has_the_name() -> None:
+    """A closed-book or routing VirtualModel is a model the gateway serves, on the same per-model route."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "missing"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"name": "cb-judge", "workspace": "default"}),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = client.resolve_model_reference("default/cb-judge")
+
+    assert [call.args[1] for call in http.request.call_args_list] == [
+        f"{BASE}/apis/models/v2/workspaces/default/models/cb-judge",
+        f"{BASE}/apis/inference-gateway/v2/workspaces/default/virtual-models/cb-judge",
+    ]
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/cb-judge/-/v1"
+    assert result.name == "cb-judge"
+    assert result.virtual_model
+    assert result.host_url is None
+    assert result.served_model_name is None
+
+
+def test_resolve_model_reference_raises_when_neither_a_model_nor_a_virtual_model_exists() -> None:
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "no model"}),
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "no virtual model"}),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(NotFoundError, match="no model"):
+        client.resolve_model_reference("default/missing")
+
+
+def test_resolve_model_reference_names_a_virtual_model_the_caller_can_read_but_not_its_entity() -> None:
+    """A token scoped to inference can read VirtualModels without reading the Models service."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        httpx.Response(403, request=httpx.Request("GET", BASE), json={"detail": "Forbidden"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"name": "cb-judge", "workspace": "default"}),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = client.resolve_model_reference("default/cb-judge")
+
+    assert result.virtual_model
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/cb-judge/-/v1"
+
+
 def test_provider_route_for_deployment_fetches_provider() -> None:
     http = MagicMock(spec=httpx.Client)
     http.request.return_value = httpx.Response(
@@ -555,6 +604,37 @@ async def test_async_resolve_model_reference_fetches_model_and_provider() -> Non
     assert result.name == "judge"
     assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_names_a_virtual_model_when_no_entity_has_the_name() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "missing"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"name": "cb-judge", "workspace": "default"}),
+    ]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = await client.resolve_model_reference("default/cb-judge")
+
+    assert http.request.call_args_list[1].args[1] == (
+        f"{BASE}/apis/inference-gateway/v2/workspaces/default/virtual-models/cb-judge"
+    )
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/cb-judge/-/v1"
+    assert result.virtual_model
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_raises_when_neither_exists() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "no model"}),
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "no virtual model"}),
+    ]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(NotFoundError, match="no model"):
+        await client.resolve_model_reference("default/missing")
 
 
 @pytest.mark.asyncio

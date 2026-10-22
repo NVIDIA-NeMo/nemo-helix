@@ -62,6 +62,21 @@ def validate_harbor_env(env_vars: Mapping[str, str], env_secrets: Mapping[str, o
     require_no_plaintext_credentials(env_vars, field="env_vars", alternative="env_secrets")
 
 
+#: The key a gateway agent gets when ``env_secrets`` supplies none. With platform auth off the gateway checks no key,
+#: but some agents won't start without one.
+GATEWAY_PLACEHOLDER_API_KEY = "inference-gateway-no-key"
+
+
+def validate_gateway_env(
+    base_url_env: str, api_key_env: str, env_vars: Mapping[str, str], env_secrets: Mapping[str, object]
+) -> None:
+    """Refuse a gateway agent whose base URL or key variable the caller also sets as a literal."""
+    if base_url_env in env_vars or base_url_env in env_secrets:
+        raise ValueError(f"{base_url_env} is set from the gateway model; remove it from env_vars and env_secrets")
+    if api_key_env in env_vars:
+        raise ValueError(f"{api_key_env} for a gateway model belongs in env_secrets, as a platform access key")
+
+
 def warn_unscrubbed_secret_keys(env_secrets: Mapping[str, object]) -> None:
     """Warn about ``env_secrets`` keys Harbor won't scrub from trial files.
 

@@ -26,15 +26,16 @@ from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskR
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.jobs.gateway_agents import GATEWAY_AGENTS, GatewayAgentEnv
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
-from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
+from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_gateway_env, validate_harbor_env
 from nhx_evals_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
-from nhx_evals_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nhx_evals_sdk.values import Agent, Model, ModelRef, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nhx_evals_sdk.values.agents import AgentBase
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
@@ -219,6 +220,19 @@ class HarborBuiltinAgentSource(BaseModel):
 
     name: str = Field(description="Built-in Harbor agent to run, e.g. `oracle`.")
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+    model: ModelRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="A model the Inference Gateway serves, as `workspace/name`: a model or a VirtualModel. The agent "
+        "calls it through the gateway, and evals sets the agent's model name, base URL and API key variables. "
+        "Use instead of `model_name`. Supported for `codex`, `claude-code` and `SandboxedCodex`.",
+    )
+
+    @model_validator(mode="after")
+    def _one_model_selector(self) -> Self:
+        if self.model is not None and self.model_name is not None:
+            raise ValueError("set `model` or `model_name`, not both")
+        return self
 
 
 class HarborImportedAgentSource(BaseModel):
@@ -231,6 +245,19 @@ class HarborImportedAgentSource(BaseModel):
         "importable in the run environment.",
     )
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+    model: ModelRef | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="A model the Inference Gateway serves, as `workspace/name`: a model or a VirtualModel. The agent "
+        "calls it through the gateway, and evals sets the agent's model name, base URL and API key variables. "
+        "Use instead of `model_name`. Supported for `codex`, `claude-code` and `SandboxedCodex`.",
+    )
+
+    @model_validator(mode="after")
+    def _one_model_selector(self) -> Self:
+        if self.model is not None and self.model_name is not None:
+            raise ValueError("set `model` or `model_name`, not both")
+        return self
 
 
 #: What Harbor runs in each task container. The three shapes share no required field, so a document is
@@ -348,6 +375,32 @@ class HarborRunnerTarget(BaseModel):
         validate_harbor_env(self.env_vars, self.env_secrets)
         return self
 
+    @model_validator(mode="after")
+    def _gateway_model_fits_the_agent(self) -> Self:
+        if self.gateway_model is None:
+            return self
+        agent = self.agent_import_path or self.agent_name
+        env = GATEWAY_AGENTS.get(agent or "")
+        if env is None:
+            raise ValueError(
+                f"`model` points the agent at the Inference Gateway, which evals can do for {sorted(GATEWAY_AGENTS)}; "
+                f"for {agent!r}, set `model_name` and the agent's own endpoint variables instead"
+            )
+        validate_gateway_env(env.base_url_env, env.api_key_env, self.env_vars, self.env_secrets)
+        return self
+
+    @property
+    def gateway_model(self) -> ModelRef | None:
+        """The Inference Gateway model the agent calls, when the source names one."""
+        return None if isinstance(self.source, RegisteredAgentSource) else self.source.model
+
+    @property
+    def gateway_agent_env(self) -> GatewayAgentEnv | None:
+        """The variables the agent reads its gateway endpoint and key from, when it calls a gateway model."""
+        if self.gateway_model is None:
+            return None
+        return GATEWAY_AGENTS[self.agent_import_path or self.agent_name or ""]
+
     @property
     def agent_name(self) -> str | None:
         """The built-in Harbor agent the source names, if it names one."""
@@ -364,8 +417,12 @@ class HarborRunnerTarget(BaseModel):
 
     @property
     def agent_model_name(self) -> str | None:
-        """The model slug handed to a built-in or imported agent."""
-        return None if isinstance(self.source, RegisteredAgentSource) else self.source.model_name
+        """The model slug handed to a built-in or imported agent: a gateway model's name, or ``model_name``."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return None
+        if self.source.model is not None:
+            return self.source.model.root.partition("/")[2]
+        return self.source.model_name
 
 
 class GymAgentSource(BaseModel):

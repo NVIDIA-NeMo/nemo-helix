@@ -38,7 +38,7 @@ from typing import Protocol
 
 import openai
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.client.method import method
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient, InferenceGatewayClient
 from nemo_helix_plugin.models import endpoints
@@ -48,10 +48,12 @@ from nemo_helix_plugin.models.refs import (
     model_entity_route_openai_url,
     parse_workspace_name_ref,
     resolved_model_reference,
+    resolved_virtual_model_reference,
     served_model_name_for_entity,
     warn_provider_host_url_resolution_failure,
 )
 from nemo_helix_plugin.models.types import ModelDeployment, ModelEntity, ModelProvider
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient, VirtualModelsClient
 
 _INFERENCE_GATEWAY_PREFIX = "/apis/inference-gateway/v2/workspaces"
 # Sent as the OpenAI API key when the platform client has no token provider; the
@@ -264,9 +266,23 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
     """Sync client for the Models service API."""
 
     def resolve_model_reference(self, ref: str) -> ResolvedModelReference:
-        """Resolve ``workspace/model`` to inference-gateway route details."""
+        """Resolve ``workspace/name`` to inference-gateway route details: a model entity, else a VirtualModel.
+
+        Raises:
+            NotFoundError: Neither a model entity nor a VirtualModel has that name.
+            PermissionDeniedError: The caller can read neither the model entity nor a VirtualModel of that name.
+        """
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
-        model_entity = self.get_model(name=name, workspace=workspace).data()
+        try:
+            model_entity = self.get_model(name=name, workspace=workspace).data()
+        except (NotFoundError, PermissionDeniedError):
+            try:
+                VirtualModelsClient.from_client(self).get_virtual_model(name=name, workspace=workspace)
+            except NotFoundError:
+                pass
+            else:
+                return resolved_virtual_model_reference(base_url=self.base_url, workspace=workspace, name=name)
+            raise
         provider = self._try_resolve_model_provider_with_warning(model_entity)
         return resolved_model_reference(
             base_url=self.base_url,
@@ -432,9 +448,23 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
     """Async client for the Models service API."""
 
     async def resolve_model_reference(self, ref: str) -> ResolvedModelReference:
-        """Resolve ``workspace/model`` to inference-gateway route details."""
+        """Resolve ``workspace/name`` to inference-gateway route details: a model entity, else a VirtualModel.
+
+        Raises:
+            NotFoundError: Neither a model entity nor a VirtualModel has that name.
+            PermissionDeniedError: The caller can read neither the model entity nor a VirtualModel of that name.
+        """
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
-        model_entity = (await self.get_model(name=name, workspace=workspace)).data()
+        try:
+            model_entity = (await self.get_model(name=name, workspace=workspace)).data()
+        except (NotFoundError, PermissionDeniedError):
+            try:
+                await AsyncVirtualModelsClient.from_client(self).get_virtual_model(name=name, workspace=workspace)
+            except NotFoundError:
+                pass
+            else:
+                return resolved_virtual_model_reference(base_url=self.base_url, workspace=workspace, name=name)
+            raise
         provider = await self._try_resolve_model_provider_with_warning(model_entity)
         return resolved_model_reference(
             base_url=self.base_url,
