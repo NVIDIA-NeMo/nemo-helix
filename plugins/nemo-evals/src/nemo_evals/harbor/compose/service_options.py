@@ -44,8 +44,8 @@ def _scalar(value: Any) -> str | None:
 def parse_environment(value: Any, path: str, problems: ComposeProblems) -> dict[str, str]:
     """Read ``environment`` (or a build's ``args``) as ``{name: value}`` from either of compose's forms.
 
-    ``{A: 1}`` and ``["A=1"]`` both give ``{"A": "1"}``. A name with no value, such as ``["A"]``, would be read
-    from the host's environment, which a sandbox doesn't have, so it is recorded as unsupported.
+    ``{A: 1}`` and ``["A=1"]`` both give ``{"A": "1"}``. A name with no value, such as ``["A"]``, is left out:
+    Compose copies it from the host's environment, and on a host that doesn't define it, the container doesn't get it.
     """
     if value is None:
         return {}
@@ -69,9 +69,12 @@ def parse_environment(value: Any, path: str, problems: ComposeProblems) -> dict[
 
     environment: dict[str, str] = {}
     for name, entry_value in pairs:
+        # The sandbox has no host environment to copy a value-less name from, so it is unset, as on a clean host.
+        if entry_value is None:
+            continue
         text = _scalar(entry_value)
         if text is None:
-            problems.unsupported(f"{path}.{name}: no value")
+            problems.invalid(f"{path}.{name}", "expected a string, number or boolean")
         else:
             environment[name] = text
     return environment

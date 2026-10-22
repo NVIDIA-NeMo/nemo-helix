@@ -115,6 +115,13 @@ def test_invalid_image_name_is_a_typed_error() -> None:
         ("${EMPTY-kept}", ""),
         ("${MISSING-fallback}", "fallback"),
         ("${MISSING:-${A}}", "one"),
+        ("${MISSING}/$MISSING", "/"),
+        ("${A:+alt}", "alt"),
+        ("${EMPTY:+alt}", ""),
+        ("${EMPTY+alt}", "alt"),
+        ("${MISSING+alt}", ""),
+        ("${A:?needed}", "one"),
+        ("${EMPTY?needed}", ""),
         ("[ $? -eq 28 ]", "[ $? -eq 28 ]"),
         ("cost: $5", "cost: $5"),
         ("end$", "end$"),
@@ -126,16 +133,17 @@ def test_interpolation_follows_compose(text: str, expected: str) -> None:
     problems.raise_if_any("compose.yaml")
 
 
-def test_unset_variable_is_reported_with_its_path() -> None:
+@pytest.mark.parametrize("text", ["${NOPE:?set NOPE}", "${EMPTY:?set EMPTY}", "${NOPE?set NOPE}"])
+def test_a_required_variable_that_is_missing_is_invalid(text: str) -> None:
     problems = ComposeProblems()
-    Interpolator({}, problems).string("${NOPE} and $ALSO", "services.a.environment.X")
+    Interpolator({"EMPTY": ""}, problems).string(text, "services.a.environment.X")
+
     with pytest.raises(ComposeError) as caught:
         problems.raise_if_any("compose.yaml")
-    assert caught.value.code == "compose_unsupported"
-    assert caught.value.paths == (
-        "services.a.environment.X: interpolation: NOPE",
-        "services.a.environment.X: interpolation: ALSO",
-    )
+
+    assert caught.value.code == "compose_invalid"
+    assert "services.a.environment.X:" in caught.value.detail
+    assert "is required: set" in caught.value.detail
 
 
 def test_an_invalid_value_does_not_hide_unsupported_features() -> None:
@@ -151,8 +159,8 @@ def test_an_invalid_value_does_not_hide_unsupported_features() -> None:
     assert caught.value.paths == ("services.a.privileged",)
 
 
-def test_unset_variable_fails_the_task(tmp_path: Path) -> None:
-    error = _error(
+def test_unset_variable_is_empty_as_under_compose(tmp_path: Path) -> None:
+    spec = _spec(
         tmp_path,
         """
         services:
@@ -160,10 +168,10 @@ def test_unset_variable_fails_the_task(tmp_path: Path) -> None:
             image: postgres:18
             environment:
               TOKEN: ${HOST_TOKEN}
+              TEST_DIR: ${TEST_DIR}
         """,
     )
-    assert error.code == "compose_unsupported"
-    assert "services.db.environment.TOKEN: interpolation: HOST_TOKEN" in error.paths
+    assert _service(spec, "db")["env"] == {"TOKEN": "", "TEST_DIR": ""}
 
 
 def test_task_toml_env_and_harbor_infra_variables_interpolate(tmp_path: Path) -> None:
@@ -597,10 +605,9 @@ def test_environment_forms_and_scalar_values(tmp_path: Path) -> None:
     assert _service(spec, "b")["env"] == {"K": "v=w", "EMPTY": ""}
 
 
-def test_environment_variable_without_a_value_is_rejected(tmp_path: Path) -> None:
-    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    environment:\n      - FROM_HOST\n")
-    assert error.code == "compose_unsupported"
-    assert error.paths == ("services.a.environment.FROM_HOST: no value",)
+def test_environment_variable_without_a_value_is_left_out(tmp_path: Path) -> None:
+    spec = _spec(tmp_path, "services:\n  a:\n    image: redis\n    environment:\n      - FROM_HOST\n      - KEPT=1\n")
+    assert _service(spec, "a")["env"] == {"KEPT": "1"}
 
 
 def test_env_file_is_read_from_the_archive_and_environment_wins(tmp_path: Path) -> None:
@@ -999,7 +1006,6 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
         "services.a.user",
         "services.a.deploy.replicas",
         "services.b.build.ssh",
-        "services.b.build.args.A: interpolation: NOPE",
         "secrets",
         "networks",
     }

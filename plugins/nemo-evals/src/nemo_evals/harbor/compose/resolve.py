@@ -73,19 +73,21 @@ class Interpolator:
     from ``task.toml`` and ``environment/.env``. Until those are filled in, an image name or a port is just a
     placeholder, so every value must pass through here before anything reads it. The variables are a fixed set that
     :func:`_interpolation_variables` builds; the dispatcher's own environment is never consulted.
+
+    A variable outside that set is empty, as it is when Compose runs on a machine that doesn't define it.
     """
 
     def __init__(self, variables: Mapping[str, str], problems: ComposeProblems) -> None:
-        """Substitute from ``variables``, and record in ``problems`` each reference that can't be filled in."""
+        """Substitute from ``variables``, and record in ``problems`` each reference Compose itself would refuse."""
         self._variables = variables
         self._problems = problems
 
     def string(self, text: str, path: str) -> str:
         """Apply compose's variable substitution to one string found at ``path``.
 
-        ``$$`` is a literal ``$``. ``$VAR`` and ``${VAR}`` take a value from the variables; ``${VAR:-d}`` and
-        ``${VAR-d}`` fall back to ``d``, which may itself use variables. A variable with no value is recorded
-        against ``path``, since Harbor would read it from the host's environment, which a sandbox doesn't have.
+        ``$$`` is a literal ``$``. ``$VAR`` and ``${VAR}`` take a value from the variables, or are empty when it has
+        none. ``${VAR:-d}`` and ``${VAR-d}`` fall back to ``d``, ``${VAR:+a}`` and ``${VAR+a}`` give ``a`` only when
+        the variable is set, and ``${VAR:?e}`` and ``${VAR?e}`` require it; ``d`` and ``a`` may use variables too.
         A ``$`` followed by anything else stays as written.
 
         With ``REGISTRY=mirror``: ``"${REGISTRY:-docker.io}/redis"`` becomes ``"mirror/redis"``.
@@ -107,7 +109,7 @@ class Interpolator:
                 pieces.append(self._expand_braced(text[index + 2 : end], text[index : end + 1], path))
                 index = end + 1
             elif next_character != "{" and (bare_name := _BARE_REFERENCE.match(text, index + 1)) is not None:
-                pieces.append(self._lookup(bare_name.group(0), text[index : bare_name.end()], path))
+                pieces.append(self._lookup(bare_name.group(0)))
                 index = bare_name.end()
             else:
                 pieces.append("$")
@@ -119,7 +121,7 @@ class Interpolator:
 
         Compose substitutes variables anywhere in a file, in keys' values at any depth, so a document is interpolated
         once, as a whole, before it is merged or read. ``path`` tracks where each string sits, such as
-        ``services.db.image``, so a variable that can't be filled in is reported against the key that used it.
+        ``services.db.image``, so a reference Compose would refuse is reported against the key that used it.
         """
         if isinstance(node, str):
             return self.string(node, path)
@@ -129,38 +131,44 @@ class Interpolator:
             return [self.tree(value, f"{path}[{index}]") for index, value in enumerate(node)]
         return node
 
-    def _lookup(self, name: str, written: str, path: str) -> str:
-        """Return the value of variable ``name``, the one step every form of reference ends in.
+    def _lookup(self, name: str) -> str:
+        """Return the value of variable ``name``, or an empty string when it has none.
 
-        A variable with no value is recorded against ``path`` rather than raised, so one error can list every missing
-        variable, and the reference is kept as ``written`` so later checks still see where it was.
+        Compose does the same (with a warning) for a variable the host doesn't define, and Harbor runs these files on
+        hosts that define none of a task's own variables. So a task that passes ``TEST_DIR=${TEST_DIR}`` gets an
+        empty ``TEST_DIR`` here, as it does under Harbor.
         """
-        value = self._variables.get(name)
-        if value is None:
-            self._problems.unsupported(f"{path}: interpolation: {name}")
-            return written
-        return value
+        return self._variables.get(name) or ""
 
     def _expand_braced(self, body: str, written: str, path: str) -> str:
-        """Expand the inside of one ``${...}``, which unlike a bare ``$NAME`` may carry a fallback or an operator.
+        """Expand the inside of one ``${...}``, which unlike a bare ``$NAME`` may carry an operator.
 
-        Compose files commonly write ``${REGISTRY:-docker.io}`` so they work without the variable set; the fallback
-        is itself interpolated. Text that isn't a variable reference stays as ``written``, as Compose leaves it. The
-        ``?`` and ``+`` operators (``${V:?error}``, ``${V:+alternate}``) are recorded as unsupported.
+        Compose files commonly write ``${REGISTRY:-docker.io}`` so they work without the variable set; the text after
+        an operator is itself interpolated. Text that isn't a variable reference stays as ``written``, as Compose
+        leaves it. A colon makes an empty variable count as unset: ``${V:-d}`` falls back when ``V`` is empty,
+        ``${V-d}`` only when it is undefined.
         """
         match = _BRACED_REFERENCE.fullmatch(body)
         if match is None:
             return written
 
-        name, operator, fallback = match.groups()
+        name, operator, operand = match.groups()
         value = self._variables.get(name)
-        if operator in ("?", ":?", "+", ":+"):
-            self._problems.unsupported(f"{path}: interpolation operator {operator!r} on {name}")
-            return written
+        # With a colon, an empty variable counts as unset.
+        if operator is not None and operator.startswith(":") and not value:
+            value = None
 
-        if (operator == ":-" and not value) or (operator == "-" and value is None):
-            return self.string(fallback, path)
-        return self._lookup(name, written, path)
+        if operator in (":-", "-"):
+            return value if value is not None else self.string(operand, path)
+        if operator in (":+", "+"):
+            return self.string(operand, path) if value is not None else ""
+        if operator in (":?", "?"):
+            if value is not None:
+                return value
+            # Compose itself refuses to run a file whose required variable is missing.
+            self._problems.invalid(path, f"{name} is required: {operand or 'it is not set'}")
+            return written
+        return value or ""
 
 
 def _closing_brace(text: str, start: int) -> int | None:
