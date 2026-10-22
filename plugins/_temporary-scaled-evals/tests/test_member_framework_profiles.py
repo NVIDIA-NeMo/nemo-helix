@@ -190,7 +190,6 @@ def test_create_routes_overrides_into_member_dispatch(monkeypatch: pytest.Monkey
         "cfg_member",
         None,
     ]
-    db.commit.assert_called_once()
 
 
 def test_reproduction_preserves_member_profiles_in_stable_order() -> None:

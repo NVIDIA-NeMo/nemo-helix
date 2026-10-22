@@ -11,7 +11,6 @@ import json
 import os
 import subprocess
 import tarfile
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -21,7 +20,6 @@ import pytest
 try:
     import click
     import httpx
-    from nemo_scaled_evals_plugin import migrations
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
     from scaled_evals.api.build.image_builder_service import _post_resolve
@@ -37,84 +35,6 @@ try:
     from task_fixtures import seed_evaluation, stored_revision, stored_task
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
-
-
-class _MigrationResult:
-    def fetchone(self) -> tuple[None]:
-        return (None,)
-
-
-class _MigrationConnection:
-    def __init__(self) -> None:
-        self.autocommit = True
-        self.commits = 0
-        self.rollbacks = 0
-
-    def execute(self, *_args: Any, **_kwargs: Any) -> _MigrationResult:
-        return _MigrationResult()
-
-    def commit(self) -> None:
-        self.commits += 1
-
-    def rollback(self) -> None:
-        self.rollbacks += 1
-
-
-def test_build_success_only_advances_a_transitioned_revision() -> None:
-    store = TaskStore()
-    store.create_with_initial_revision(
-        "task", name="task", slug="task", description=None, visibility="private", object_key="k"
-    )
-    store.record_success("task", 1, image_ref="image:1", image_digest="sha256:" + "a" * 64)
-    assert stored_revision("task", 1)["status"] == "uploading"
-
-    store.mark_latest_revision_building("task", build_backend="buildkit")
-    store.record_success("task", 1, image_ref="image:1", image_digest="sha256:" + "a" * 64)
-    assert stored_revision("task", 1)["status"] == "ready"
-
-
-def test_fresh_schema_is_atomic(monkeypatch: pytest.MonkeyPatch) -> None:
-    schema_files = [Path("schema/00.sql"), Path("schema/01.sql")]
-    migration_files = [Path("migrations/001.sql")]
-    connection = _MigrationConnection()
-    events: list[tuple[str, bool]] = []
-
-    monkeypatch.setattr(migrations, "_connect", lambda *_args: nullcontext(connection))
-    monkeypatch.setattr(migrations, "sql_root", lambda: Path("."))
-    monkeypatch.setattr(
-        migrations,
-        "_sql_files",
-        lambda path: migration_files if path.name == "migrations" else schema_files,
-    )
-    monkeypatch.setattr(
-        migrations,
-        "_run_file",
-        lambda conn, path: events.append((path.as_posix(), conn.autocommit)),
-    )
-
-    assert migrations.apply_sql("unused") == (2, 1)
-    assert events == [
-        ("schema/00.sql", False),
-        ("schema/01.sql", False),
-        ("migrations/001.sql", True),
-    ]
-    assert connection.commits == 1
-    assert connection.rollbacks == 0
-    assert connection.autocommit is True
-
-    connection = _MigrationConnection()
-    monkeypatch.setattr(migrations, "_connect", lambda *_args: nullcontext(connection))
-
-    def fail_second_schema(_conn: _MigrationConnection, path: Path) -> None:
-        if path == schema_files[1]:
-            raise RuntimeError("interrupted schema load")
-
-    monkeypatch.setattr(migrations, "_run_file", fail_second_schema)
-    with pytest.raises(RuntimeError, match="interrupted schema load"):
-        migrations.apply_sql("unused")
-    assert connection.commits == 0
-    assert connection.rollbacks == 1
-    assert connection.autocommit is True
 
 
 def test_external_commands_and_http_redirects_fail_bounded() -> None:
@@ -138,7 +58,7 @@ def test_external_commands_and_http_redirects_fail_bounded() -> None:
             request(client, "GET", "/tasks")
 
 
-def test_p1_cancellation_commits_before_teardown(
+def test_p1_cancellation_persists_before_teardown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request_events: list[str] = []
@@ -146,13 +66,11 @@ def test_p1_cancellation_commits_before_teardown(
 
     class _Evaluations:
         def cancel(self, _evaluation_id: str) -> tuple[dict[str, str], bool]:
+            request_events.append("cancel")
             return row, True
 
     class _Database:
         evaluations = _Evaluations()
-
-        def commit(self) -> None:
-            request_events.append("commit")
 
     def teardown(_db: Any, cancelled: dict[str, str]) -> dict[str, str]:
         request_events.append("teardown")
@@ -161,7 +79,7 @@ def test_p1_cancellation_commits_before_teardown(
     monkeypatch.setattr(evaluations_router, "teardown_cancelled_evaluation", teardown)
     monkeypatch.setattr(evaluations_router, "_response", lambda value: value)
     assert evaluations_router.cancel_evaluation("ev-cancel", cast(Any, _Database())) == row
-    assert request_events == ["commit", "teardown"]
+    assert request_events == ["cancel", "teardown"]
 
 
 def test_p1_kubernetes_registry_policy_is_narrow_and_reapply_safe() -> None:

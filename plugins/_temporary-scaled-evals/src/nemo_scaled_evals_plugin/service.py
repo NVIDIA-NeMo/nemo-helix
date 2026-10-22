@@ -15,9 +15,7 @@ from fastapi.responses import JSONResponse
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
 from nemo_scaled_evals_plugin.authz import scope, stamp_router_authz
-from nemo_scaled_evals_plugin.migrations import apply_sql
 from scaled_evals.api import artifacts
-from scaled_evals.api.db import close_pool, open_pool
 from scaled_evals.api.routers import (
     admin,
     agent_bundles,
@@ -31,7 +29,6 @@ from scaled_evals.api.routers import (
     teams,
     users,
 )
-from scaled_evals.api.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -111,51 +108,13 @@ class ScaledEvalsService(NemoService):
         lifespan and uvicorn exits with "Application startup failed", taking the
         whole platform API down over one plugin's misconfiguration.
         """
-        await asyncio.to_thread(self._apply_migrations)
         await asyncio.to_thread(self._ensure_object_store)
-        try:
-            # Resolves settings, so an unusable config raises here and not only
-            # in _apply_migrations. `get_conn` reopens lazily per request, so a
-            # failure now degrades the plugin rather than wedging it.
-            open_pool(wait=False)
-        except Exception:
-            logger.exception("scaled-evals: connection pool unavailable; /v1/readyz will report failure")
-
-    def _apply_migrations(self) -> None:
-        """Bring the plugin's database up to date before the pool serves traffic.
-
-        Failure is logged, not raised: a plugin must not take the whole platform
-        API down because its own Postgres is unreachable. That matches
-        ``open_pool(wait=False)``, and ``/v1/readyz`` already reports ``schema`` as
-        a required check, so a database that never migrated fails readiness
-        instead of serving 500s.
-        """
-        try:
-            # Reading settings has to be inside the guard too: it resolves lazily,
-            # so a bad setting raises here rather than at import.
-            if not settings.run_migrations:
-                logger.info("scaled-evals: SCALED_EVALS_RUN_MIGRATIONS is off, skipping migrations")
-                return
-            schema_count, migration_count = apply_sql(
-                settings.resolved_database_url(),
-                schema=settings.database_schema,
-                wait_seconds=settings.migration_wait_seconds,
-            )
-        except Exception:
-            logger.exception("scaled-evals: database migration failed; /v1/readyz will report schema failure")
-            return
-        logger.info(
-            "scaled-evals: database ready in schema %r (%s schema files, %s migrations)",
-            settings.database_schema,
-            schema_count,
-            migration_count,
-        )
 
     def _ensure_object_store(self) -> None:
         """Create the blob bucket before the API hands out upload URLs.
 
-        Same contract as `_apply_migrations`: logged, never raised, with
-        `/v1/readyz` reporting `object_store` as the authoritative check.
+        Logged, never raised, with `/v1/readyz` reporting `object_store` as the
+        authoritative check.
         """
         try:
             bucket = artifacts.ensure_bucket()
@@ -163,6 +122,3 @@ class ScaledEvalsService(NemoService):
             logger.exception("scaled-evals: object store unavailable; /v1/readyz will report object_store failure")
             return
         logger.info("scaled-evals: object store bucket %r ready", bucket)
-
-    async def on_shutdown(self) -> None:
-        close_pool()

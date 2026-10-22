@@ -6,11 +6,10 @@
 A benchmark run is identity + config in `benchmark_runs`; its members are
 ordinary `evaluations` rows carrying benchmark_run_id. Status/reward/per-task are
 derived on read from the members (derive_run_view) — nothing is materialized and
-the worker is not involved. Cluster-free: TestClient + mocked psycopg connection.
+the worker is not involved. Cluster-free: TestClient over the fake Entity Store.
 """
 
 import json
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
@@ -19,12 +18,9 @@ import pytest
 
 pytest.importorskip("scaled_evals")
 
-from api_test_fixture import client, v1
-from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun
-from scaled_evals.api import entity_store
+from api_test_fixture import client
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore, derive_run_view
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.db import get_conn
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.settings import settings
@@ -33,38 +29,10 @@ from task_fixtures import seed_benchmark, seed_benchmark_run, seed_evaluation, s
 NOW = datetime(2026, 6, 29, tzinfo=UTC)
 
 
-def _conn(*, members=None, fetchone=None, fetchall=None, **benchmark_fields) -> MagicMock:
-    """Mock connection. fetchone/fetchall accept a list used as side_effect.
-
-    `members` (load_members shape) are stored as revision 1 of benchmark `bm_suite`.
-    """
-    if members is not None:
-        refs = tuple((member["task_id"], member["task_revision"]) for member in members)
-        seed_benchmark("bm_suite", refs, **benchmark_fields)
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    if fetchone is not None:
-        cur.fetchone.side_effect = list(fetchone)
-    if fetchall is not None:
-        cur.fetchall.side_effect = list(fetchall)
-    return conn
-
-
-def _use_conn(conn: MagicMock) -> None:
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    v1.dependency_overrides[get_conn] = _gen
-
-
-def _stored_runs() -> list[ScaledEvalsBenchmarkRun]:
-    return entity_store.list_all(entity_store.entity_client(), ScaledEvalsBenchmarkRun)
-
-
-@pytest.fixture(autouse=True)
-def _clear_overrides() -> Iterator[None]:
-    yield
-    v1.dependency_overrides.pop(get_conn, None)
+def _seed_suite(*, members: list[dict], **benchmark_fields: Any) -> None:
+    """Store `members` (load_members shape) as revision 1 of benchmark `bm_suite`."""
+    refs = tuple((member["task_id"], member["task_revision"]) for member in members)
+    seed_benchmark("bm_suite", refs, **benchmark_fields)
 
 
 @pytest.fixture(autouse=True)
@@ -423,7 +391,7 @@ def test_benchmark_request_agent_bundle_runtimes(runtime: str, accepted: bool) -
 
 
 def test_create_run_spawns_run_and_members() -> None:
-    _use_conn(_conn(members=[_member(0), _member(1)]))
+    _seed_suite(members=[_member(0), _member(1)])
 
     resp = client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
 
@@ -444,7 +412,7 @@ def test_failed_create_withdraws_its_members_even_if_the_run_delete_fails(monkey
     from nemo_scaled_evals_plugin.entities import ScaledEvalsEvaluation
     from scaled_evals.api import entity_store
 
-    _use_conn(_conn(members=[_member(0), _member(1)]))
+    _seed_suite(members=[_member(0), _member(1)])
     create = EvaluationStore.create
     calls = iter([True, False])
 
@@ -471,7 +439,7 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
     overrides = {"task_0": "cfg_member"}
     for profile_id in ("cfg_default", "cfg_member"):
         ConfigProfileStore().create(profile_id, name=profile_id, type="harbor", config={})
-    _use_conn(_conn(members=[_member(0), _member(1)]))
+    _seed_suite(members=[_member(0), _member(1)])
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -493,13 +461,12 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
 
 
 def test_preflight_run_reports_members_without_creating_run() -> None:
-    conn = _conn(
+    _seed_suite(
         members=[_member(0), _member(1)],
         qualification_status="qualified",
         qualification_evidence={"receipt": "qe_1"},
         qualified_at=NOW,
     )
-    _use_conn(conn)
 
     response = client.post(
         "/v1/benchmark-runs/preflight",
@@ -519,14 +486,13 @@ def test_preflight_run_reports_members_without_creating_run() -> None:
     qualification = next(check for check in body["checks"] if check["prerequisite"] == "benchmark_qualification")
     assert qualification["state"] == "ready"
     assert qualification["details"]["evidence_present"] is True
-    assert _stored_runs() == []
+    assert client.get("/v1/benchmark-runs").json()["data"] == []
 
 
 def test_preflight_run_reports_bounded_member_failure() -> None:
-    conn = _conn(
+    _seed_suite(
         members=[_member(0, revision_status="building"), _member(1)],
     )
-    _use_conn(conn)
 
     response = client.post(
         "/v1/benchmark-runs/preflight",
@@ -543,8 +509,7 @@ def test_preflight_run_reports_bounded_member_failure() -> None:
 def test_preflight_run_blocks_a_soft_deleted_member_task() -> None:
     from scaled_evals.api.task_store import TaskStore
 
-    conn = _conn(members=[_member(0), _member(1)])
-    _use_conn(conn)
+    _seed_suite(members=[_member(0), _member(1)])
     # Task deletion doesn't check benchmark pins, so a ready member can be deleted under the benchmark.
     TaskStore().soft_delete("task_0")
 
@@ -565,8 +530,7 @@ def test_preflight_run_blocks_a_soft_deleted_member_task() -> None:
 
 def test_preflight_run_truncates_large_member_failure_details() -> None:
     members = [_member(i, revision_status="building") for i in range(52)]
-    conn = _conn(members=members)
-    _use_conn(conn)
+    _seed_suite(members=members)
 
     response = client.post(
         "/v1/benchmark-runs/preflight",
@@ -585,21 +549,20 @@ def test_create_run_rejects_member_with_missing_task_pack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     member = _member(0, tarball_object_key="task_0/rev/1/tarball.tar.gz")
-    conn = _conn(
+    _seed_suite(
         members=[member],
     )
-    _use_conn(conn)
     monkeypatch.setattr("scaled_evals.api.routers.benchmark_runs.artifacts.object_exists", lambda _key: False)
 
     resp = client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
 
     assert resp.status_code == 409
     assert resp.json()["detail"]["error"]["code"] == "task_object_missing"
-    assert _stored_runs() == []
+    assert client.get("/v1/benchmark-runs").json()["data"] == []
 
 
 def test_create_run_fans_out_full_member_execution_contract() -> None:
-    _use_conn(_conn(members=[_member(0)]))
+    _seed_suite(members=[_member(0)])
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -623,7 +586,7 @@ def test_create_run_fans_out_full_member_execution_contract() -> None:
 
 
 def test_create_run_persists_member_cap() -> None:
-    _use_conn(_conn(members=[_member(0)]))
+    _seed_suite(members=[_member(0)])
 
     resp = client.post(
         "/v1/benchmark-runs",
@@ -635,7 +598,7 @@ def test_create_run_persists_member_cap() -> None:
 
 
 def test_create_run_fans_out_network_policy() -> None:
-    _use_conn(_conn(members=[_member(0), _member(1)]))
+    _seed_suite(members=[_member(0), _member(1)])
 
     resp = client.post(
         "/v1/benchmark-runs",
@@ -654,7 +617,7 @@ def test_create_run_fans_out_network_policy() -> None:
 
 
 def test_create_run_resolves_version_once_for_run_and_members() -> None:
-    _use_conn(_conn(members=[_member(0)]))
+    _seed_suite(members=[_member(0)])
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -689,16 +652,14 @@ def test_create_run_resolves_version_once_for_run_and_members() -> None:
 
 
 def test_create_run_404_when_benchmark_unknown() -> None:
-    _use_conn(_conn(fetchone=[None]))
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_missing"})
     assert resp.status_code == 404, resp.text
 
 
 def test_create_run_409_when_member_not_ready() -> None:
-    conn = _conn(
+    _seed_suite(
         members=[_member(0, revision_status="building")],
     )
-    _use_conn(conn)
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_suite"})
     assert resp.status_code == 409, resp.text
 
@@ -708,7 +669,7 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
 ) -> None:
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
-    conn = _conn(
+    _seed_suite(
         members=[
             _member(
                 0,
@@ -717,7 +678,6 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
             )
         ],
     )
-    _use_conn(conn)
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -731,18 +691,16 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
         "member task task_0 rev 1: task image registry 'artifactory.nvidia.com' "
         "is not approved; allowed registries: us-central1-docker.pkg.dev"
     )
-    assert _stored_runs() == []
+    assert client.get("/v1/benchmark-runs").json()["data"] == []
 
 
 def test_create_run_422_when_empty_benchmark() -> None:
-    conn = _conn(members=[])
-    _use_conn(conn)
+    _seed_suite(members=[])
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_suite"})
     assert resp.status_code == 422, resp.text
 
 
 def test_create_run_422_on_bad_profile_id() -> None:
-    _use_conn(MagicMock())
     resp = client.post(
         "/v1/benchmark-runs",
         json={"name": "x", "benchmark_id": "bm_suite", "framework_profile_id": "nope"},
@@ -765,7 +723,6 @@ def test_create_run_422_on_bad_profile_id() -> None:
 
 def test_get_run_derives_succeeded() -> None:
     _seed_run(_member_eval(0), _member_eval(1))
-    _use_conn(_conn())
     resp = client.get("/v1/benchmark-runs/bmr_1")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -778,7 +735,6 @@ def test_get_run_derives_succeeded() -> None:
 
 def test_get_run_derives_running() -> None:
     _seed_run(_member_eval(0), _member_eval(1, status="running", reward=None))
-    _use_conn(_conn())
     body = client.get("/v1/benchmark-runs/bmr_1").json()
     assert body["status"] == "running"
 
@@ -818,7 +774,6 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         "visibility": "private",
     }
     _seed_run(member, **run)
-    _use_conn(_conn())
 
     response = client.get("/v1/benchmark-runs/bmr_1/reproduce")
 
@@ -840,7 +795,6 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
 
 
 def test_get_run_404() -> None:
-    _use_conn(_conn(fetchone=[None]))
     assert client.get("/v1/benchmark-runs/bmr_missing").status_code == 404
 
 
@@ -849,7 +803,6 @@ def test_get_run_404() -> None:
 
 def test_cancel_run_derives_cancelled() -> None:
     _seed_run(_member_eval(0, status="queued", reward=None))
-    _use_conn(_conn())
     resp = client.post("/v1/benchmark-runs/bmr_1/cancel")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
@@ -890,7 +843,6 @@ def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch)
             backend_handle=json.dumps({"backend": "sandbox_k8s", "external_id": "job-123"}),
         )
     )
-    _use_conn(_conn())
 
     response = client.post("/v1/benchmark-runs/bmr_1/cancel")
 

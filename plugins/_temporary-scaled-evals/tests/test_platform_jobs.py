@@ -99,7 +99,6 @@ def test_specs_and_deterministic_names() -> None:
 
 @pytest.mark.asyncio
 async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "platform_jobs_postgres_password_secret", "scaled-evals-postgres-password")
     monkeypatch.setattr(settings, "platform_jobs_registry_auth_secret", "scaled-evals-registry-auth")
     monkeypatch.setattr(settings, "platform_jobs_opensandbox_api_key_secret", "scaled-evals-opensandbox-api-key")
     build = await TaskImageBuildJob.compile(
@@ -131,7 +130,6 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
     assert {
         item.name: item.from_secret.name if item.from_secret else None for item in build_step.environment or []
     } == {
-        "PGPASSWORD": "scaled-evals-postgres-password",
         "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
     }
     assert build_step.config == _build_spec().model_dump(mode="json")
@@ -144,7 +142,6 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
     assert {
         item.name: item.from_secret.name if item.from_secret else None for item in evaluation_step.environment or []
     } == {
-        "PGPASSWORD": "scaled-evals-postgres-password",
         "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
         "SCALED_EVALS_CREDENTIAL_OPENAI": "team-a/openai-key",
     }
