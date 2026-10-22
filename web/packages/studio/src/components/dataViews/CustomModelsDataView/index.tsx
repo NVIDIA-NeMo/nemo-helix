@@ -28,7 +28,7 @@ import type {
   ModelEntitySortField,
   ModelsListModelsParams,
 } from '@nemo/sdk/generated/platform/schema';
-import { Button, type DropdownEntry, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Anchor, Button, type DropdownEntry, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import {
   DEFAULT_CUSTOM_MODELS_FILTER,
@@ -51,7 +51,7 @@ import {
 import { keepPreviousData } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 type SearchQuery = Record<string, unknown>;
 
@@ -277,7 +277,22 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
         accessor('name', {
           header: 'Name',
           enableSorting: true,
-          cell: ({ row }) => <Text className="truncate">{row.original.name}</Text>,
+          cell: ({ row }) => {
+            const jobName = jobsByOutputName.get(row.original.name);
+            return jobName ? (
+              <Anchor asChild>
+                <Link
+                  to={getWorkspaceCustomizationJobDetailsRoute(workspace, jobName)}
+                  className="truncate"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {row.original.name}
+                </Link>
+              </Anchor>
+            ) : (
+              <Text className="truncate">{row.original.name}</Text>
+            );
+          },
         }),
         accessor((row) => row.base_model || '-', {
           id: 'base_model',
