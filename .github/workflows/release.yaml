@@ -1259,4 +1259,5 @@ jobs:
       check-latest: ${{ needs.plan-release.outputs.release_type == 'stable' && !contains(needs.stage-helm.outputs.chart_version, '-') }}
       send-notifications: ${{ needs.plan-release.outputs.send_notifications == 'true' }}
     secrets:
+      AIRE_DOCKERHUB_ACCESS_TOKEN: ${{ secrets.AIRE_DOCKERHUB_ACCESS_TOKEN }}
       SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}

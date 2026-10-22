@@ -27,6 +27,8 @@ on:
         type: boolean
         default: false
     secrets:
+      AIRE_DOCKERHUB_ACCESS_TOKEN:
+        required: true
       SLACK_RELEASE_WEBHOOK:
         required: false
 
@@ -128,10 +130,16 @@ jobs:
       IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
       CHART_REPOSITORY: ${{ needs.prepare.outputs.chart_repository }}
       KIND_CLUSTER_NAME: release-smoke
+      DOCKER_CONFIG: /tmp/smoke-docker
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - name: Log in to Docker Hub
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ vars.AIRE_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.AIRE_DOCKERHUB_ACCESS_TOKEN }}
       - name: Create disposable Kind cluster
         uses: ./.github/actions/setup-kind-cluster
         with:
@@ -144,6 +152,13 @@ jobs:
           image-tag: ${{ env.IMAGE_TAG }}
           kind-image-pull-user: ${{ github.actor }}
           kind-image-pull-token: ${{ github.token }}
+      - name: Configure Docker Hub pulls in Kind
+        timeout-minutes: 2
+        # Copy before GHCR login so the secret contains only Docker Hub credentials.
+        run: |
+          kubectl -n release-smoke create secret generic dockerhub \
+            --type=kubernetes.io/dockerconfigjson \
+            --from-file=".dockerconfigjson=$DOCKER_CONFIG/config.json"
       - name: Download published chart
         timeout-minutes: 3
         env:
@@ -175,6 +190,7 @@ jobs:
           helm upgrade --install release-smoke "$RUNNER_TEMP/nemo-helix-$RELEASE_VERSION.tgz" \
             --namespace release-smoke --create-namespace --wait --timeout 8m \
             -f .github/scripts/release-smoke-values.yaml \
+            --set-string "imagePullSecrets[0].name=dockerhub" \
             --set-string "api.image.repository=$IMAGE_REGISTRY/nhx-api" \
             --set-string "api.image.tag=$IMAGE_TAG" \
             --set-string "core.image.repository=$IMAGE_REGISTRY/nhx-api" \
