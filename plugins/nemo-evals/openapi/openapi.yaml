@@ -6528,7 +6528,7 @@ components:
             BuildKit''s spellings, such as `linux/x86_64`, are taken and named as
             it names them.'
           type: string
-          pattern: ^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$
+          pattern: ^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$
         rebuild:
           type: boolean
           title: Rebuild

@@ -11,8 +11,9 @@ from dataclasses import dataclass
 
 #: Lowercase hex only, so that one digest has one spelling.
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
-#: An OCI platform as builds and pulls name it: ``os/architecture``, with an optional ``/variant``.
-PLATFORM_PATTERN = r"^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$"
+#: A platform as a request may spell it, ``os/architecture`` with an optional ``/variant``: in any case, and with
+#: BuildKit's aliases such as ``x86_64``. Requests name it as :class:`Platform` does before anything reads it.
+PLATFORM_PATTERN = r"^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$"
 
 _REGISTRY = re.compile(r"(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?")
 _REPOSITORY_COMPONENT = re.compile(r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*")
@@ -119,14 +120,12 @@ class Platform:
 
 
 def platform_name(value: object) -> object:
-    """``value`` as BuildKit names that platform, for a model's field validator; anything unreadable is left for the
-    field's own pattern to refuse."""
-    if not isinstance(value, str):
-        return value
-    try:
-        return str(Platform.parse(value))
-    except ImageIdentityError:
-        return value
+    """``value`` as BuildKit names that platform, for a model's field validator.
+
+    Raises:
+        ImageIdentityError: ``value`` names no platform.
+    """
+    return str(Platform.parse(value)) if isinstance(value, str) else value
 
 
 _DOCKER_HUB = "docker.io"
