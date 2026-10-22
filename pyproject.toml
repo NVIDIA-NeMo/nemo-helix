@@ -339,7 +339,7 @@ constraint-dependencies = [
   "langgraph>=1.2.6",
   "langsmith>=0.9.7",
   "json-repair>=0.60.1",
-  "litellm==1.106.2",
+  "litellm==1.95.1",
   "lxml>=6.1.0",
   "mistune>=3.3.2",
   "mcp>=1.28.1",
@@ -383,7 +383,7 @@ override-dependencies = [
   "ray; sys_platform == 'never'",       # ray has an unfixed critical CVE, as for why we're removing it this way see https://github.com/astral-sh/uv/issues/9174
   "fschat; sys_platform == 'never'",    # fschat is unmaintained with unfixed High/Medium CVEs; transitive via garak but never imported
   "diskcache; sys_platform == 'never'", # unfixed CVE-2025-69872; transitive via ragas but not imported
-  "botocore>=1.43.101,<1.43.107",       # Keep within aiobotocore 3.9.2's supported range.
+  "botocore>=1.40.46,<1.40.62",         # ngcsdk requires botocore>=1.37; upper bound required by aiobotocore 2.25.1 (aioboto3 15.5.0)
   # todo(dn-v2): unpin these. this was originally causing tests to fail.
   "aiodns==3.5.0",
   "pycares==4.11.0",
@@ -403,7 +403,7 @@ override-dependencies = [
   "wandb>=0.30.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
-  "litellm==1.106.2",         # Patched LiteLLM release; avoid compromised 1.107.0
+  "litellm==1.95.1",          # CVE-2026-84377 backport; retain aioboto3 compatibility and avoid compromised 1.107.0
   "python-dotenv>=1.2.2",
   "openai>=2.26.0",
   "nltk>=3.10.3",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}

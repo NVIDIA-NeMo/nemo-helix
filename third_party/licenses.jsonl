@@ -1,5 +1,6 @@
 {"name": "absl-py", "license": "APACHE-2.0", "compatible": true}
 {"name": "accelerate", "license": "APACHE-2.0", "compatible": true}
+{"name": "aioboto3", "license": "APACHE-2.0", "compatible": true}
 {"name": "aiobotocore", "license": "APACHE-2.0", "compatible": true}
 {"name": "aiofile", "license": "APACHE-2.0", "compatible": true}
 {"name": "aiofiles", "license": "APACHE-2.0", "compatible": true}
@@ -27,6 +28,7 @@
 {"name": "bitsandbytes", "license": "MIT", "compatible": true}
 {"name": "boto3", "license": "APACHE-2.0", "compatible": true}
 {"name": "botocore", "license": "APACHE-2.0", "compatible": true}
+{"name": "botocore-stubs", "license": "MIT", "compatible": true}
 {"name": "bracex", "license": "MIT", "compatible": true}
 {"name": "cachetools", "license": "MIT", "compatible": true}
 {"name": "caio", "license": "APACHE-2.0", "compatible": true}
@@ -426,7 +428,11 @@
 {"name": "trl", "license": "APACHE-2.0", "compatible": true}
 {"name": "typeguard", "license": "MIT", "compatible": true}
 {"name": "typer", "license": "MIT", "compatible": true}
+{"name": "types-aioboto3", "license": "MIT", "compatible": true}
+{"name": "types-aiobotocore", "license": "MIT", "compatible": true}
 {"name": "types-aiobotocore-s3", "license": "MIT", "compatible": true}
+{"name": "types-awscrt", "license": "MIT", "compatible": true}
+{"name": "types-s3transfer", "license": "MIT", "compatible": true}
 {"name": "typing-extensions", "license": "PSF-2.0", "compatible": true}
 {"name": "typing-inspect", "license": "MIT", "compatible": true}
 {"name": "typing-inspection", "license": "MIT", "compatible": true}

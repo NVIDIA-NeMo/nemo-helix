@@ -10,10 +10,10 @@ import hashlib
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, AsyncIterator, NoReturn
+from typing import Any, AsyncIterator, NoReturn
 
+import aioboto3
 import aiohttp
-from aiobotocore.session import AioSession, get_session
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 from nhx.common.files.storage_config import S3StorageConfig
@@ -32,7 +32,6 @@ from nhx.core.files.exceptions import (
     StorageUnavailableError,
 )
 from types_aiobotocore_s3 import S3Client
-from types_aiobotocore_s3.type_defs import DeleteTypeDef
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +105,11 @@ def _add_content_md5_header(params: dict[str, Any], **kwargs: Any) -> None:
 class S3StorageImpl(StorageImpl):
     config: S3StorageConfig
     secrets: dict[str, str]
-    _session: AioSession = field(init=False)
+    _session: aioboto3.Session = field(init=False)
 
     def __post_init__(self):
-        self._session = get_session()
-        self._session.register("before-call.s3.DeleteObjects", _add_content_md5_header)
+        self._session = aioboto3.Session()
+        self._session._session.register("before-call.s3.DeleteObjects", _add_content_md5_header)
 
     def _get_client_kwargs(self) -> dict[str, Any]:
         """Build kwargs for creating S3 client."""
@@ -147,9 +146,9 @@ class S3StorageImpl(StorageImpl):
         return path
 
     @asynccontextmanager
-    async def _client(self) -> AsyncGenerator[S3Client]:
+    async def _client(self) -> AsyncIterator[S3Client]:
         """Create an S3 client context manager."""
-        async with self._session.create_client("s3", **self._get_client_kwargs()) as client:
+        async with self._session.client("s3", **self._get_client_kwargs()) as client:
             yield client
 
     async def list_files(self, path: str | None = None) -> list[FileInfo]:
@@ -325,7 +324,7 @@ class S3StorageImpl(StorageImpl):
                 ):
                     objects = page.get("Contents", [])
                     if objects:
-                        delete_request: DeleteTypeDef = {"Objects": [{"Key": obj["Key"]} for obj in objects]}
+                        delete_request: dict[str, Any] = {"Objects": [{"Key": obj["Key"]} for obj in objects]}
                         await client.delete_objects(
                             Bucket=self.config.bucket,
                             Delete=delete_request,

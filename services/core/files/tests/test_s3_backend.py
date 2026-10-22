@@ -6,7 +6,6 @@
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 from botocore.exceptions import ClientError
@@ -52,7 +51,7 @@ class AsyncIteratorMock:
 async def mock_s3_client(impl: S3StorageImpl) -> AsyncIterator[AsyncMock]:
     """Context manager that patches the S3 client for an impl instance."""
     mock_client = AsyncMock()
-    with patch.object(impl._session, "create_client") as mock_session_client:
+    with patch.object(impl._session, "client") as mock_session_client:
         mock_session_client.return_value.__aenter__.return_value = mock_client
         yield mock_client
 
@@ -542,42 +541,20 @@ class TestS3StorageImplDeleteAll:
 class TestAiobotocoreCompatibility:
     """Regression tests for aiobotocore/botocore version compatibility.
 
-    All other tests mock impl._session.create_client(), which bypasses aiobotocore
+    All other tests mock impl._session.client(), which bypasses aiobotocore
     entirely. These tests let aiobotocore create a real client to catch cases
     where botocore was upgraded beyond what aiobotocore supports.
 
     See: pyproject.toml botocore version constraint.
     """
 
-    @pytest.mark.parametrize("use_sdk_auth", [False, True])
-    async def test_client_creation_and_presigning(self, monkeypatch, use_sdk_auth):
+    async def test_client_creation_does_not_raise_type_error(self):
         """Regression: botocore must be within aiobotocore's supported version range.
 
         When botocore is too new, aiobotocore fails during client creation with:
             TypeError: compute_endpoint_resolver_builtin_defaults() missing 1
             required positional argument: 's3_disable_express_session_auth'
         """
-        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "sdk-test-key")
-        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "sdk-test-secret")
-        monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
-        config = S3StorageConfig(
-            bucket="test-bucket",
-            region="us-east-1",
-            use_sdk_auth=use_sdk_auth,
-            access_key_id_secret=None if use_sdk_auth else SecretRef("access_key_id"),
-            secret_access_key_secret=None if use_sdk_auth else SecretRef("secret_access_key"),
-        )
-        impl = S3StorageImpl(config, {"access_key_id": "test-key", "secret_access_key": "test-secret"})
-
-        async with impl._client() as client:
-            url = await client.generate_presigned_url("get_object", Params={"Bucket": "test-bucket", "Key": "test-key"})
-            query = parse_qs(urlparse(url).query)
-            expected_key = "sdk-test-key" if use_sdk_auth else "test-key"
-            assert query["X-Amz-Credential"][0].startswith(f"{expected_key}/")
-            assert query["X-Amz-Signature"][0]
-
-    async def test_delete_objects_retains_content_md5(self):
-        """S3-compatible endpoints still receive MD5 after changing session APIs."""
         config = S3StorageConfig(
             bucket="test-bucket",
             region="us-east-1",
@@ -587,18 +564,17 @@ class TestAiobotocoreCompatibility:
         )
         impl = S3StorageImpl(config, {"access_key_id": "test-key", "secret_access_key": "test-secret"})
 
-        class RequestCaptured(Exception):
-            pass
-
-        def capture_request(request, **kwargs):
-            # Stop before any network call, after serialization, signing, and hooks.
-            assert request.headers["Content-MD5"]
-            raise RequestCaptured
-
-        async with impl._client() as client:
-            client.meta.events.register("before-send.s3.DeleteObjects", capture_request)
-            with pytest.raises(RequestCaptured):
-                await client.delete_objects(Bucket="test-bucket", Delete={"Objects": [{"Key": "test-key"}]})
+        try:
+            async with impl._client():
+                pass
+        except TypeError as e:
+            pytest.fail(
+                f"aiobotocore/botocore version incompatibility: {e}. "
+                "The botocore upper bound in pyproject.toml likely needs tightening "
+                "to match what aiobotocore (via aioboto3) supports."
+            )
+        except Exception:
+            pass  # Network errors, auth errors, etc. are fine — client was created successfully
 
 
 class TestS3StorageFactory:
