@@ -1171,6 +1171,8 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
             pull_policy: build
             networks: [default]
             labels: {a: b}
+            tty: true
+            stdin_open: true
           a:
             <<: *common
             image: redis

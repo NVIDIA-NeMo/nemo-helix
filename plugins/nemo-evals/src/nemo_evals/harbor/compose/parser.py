@@ -66,8 +66,11 @@ from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE
 
 _COMPLETED = "service_completed_successfully"
 
-# Service keys that a pod already behaves as, or that images prebuilt elsewhere make moot.
-_NO_EFFECT_KEYS = frozenset({"pull_policy", "restart", "container_name", "hostname", "labels", "logging"})
+# Service keys that a pod already behaves as, or that images prebuilt elsewhere make moot. `tty` and `stdin_open`
+# attach a terminal to the container's own process; Harbor runs every command through exec, which never uses it.
+_NO_EFFECT_KEYS = frozenset(
+    {"pull_policy", "restart", "container_name", "hostname", "labels", "logging", "tty", "stdin_open"}
+)
 
 _COMMON_KEYS = frozenset(
     {
