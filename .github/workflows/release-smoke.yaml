@@ -23,12 +23,12 @@ on:
         type: boolean
         default: false
       check-latest:
-        description: Verify an unpinned install selects this stable release
+        description: Verify an unpinned install does not select an older stable release
         type: boolean
         default: false
     secrets:
-      NGC_REGISTRY_READ_TOKEN:
-        required: false
+      AIRE_DOCKERHUB_ACCESS_TOKEN:
+        required: true
       SLACK_RELEASE_WEBHOOK:
         required: false
 
@@ -75,7 +75,6 @@ jobs:
     env:
       WHEEL_VERSION: ${{ needs.prepare.outputs.wheel_version }}
       WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
-      CHECK_LATEST: ${{ inputs.check-latest || false }}
       DO_NOT_TRACK: "1"
     steps:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -90,17 +89,36 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/smoke-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/smoke-bin
         run: |
-          requirement="nemo-helix[all]==$WHEEL_VERSION"
-          if [[ "$CHECK_LATEST" == true ]]; then
-            requirement="nemo-helix[all]"
-          fi
-          uv tool install --python "$PYTHON_VERSION" --index "$WHEEL_INDEX" "$requirement"
+          uv tool install --python "$PYTHON_VERSION" --index "$WHEEL_INDEX" "nemo-helix[all]==$WHEEL_VERSION"
           installed_version=$("$UV_TOOL_DIR/nemo-helix/bin/python" -c 'from importlib.metadata import version; print(version("nemo-helix"))')
           if [[ "$installed_version" != "$WHEEL_VERSION" ]]; then
             echo "::error::Expected nemo-helix $WHEEL_VERSION, installed $installed_version"
             exit 1
           fi
           "$UV_TOOL_BIN_DIR/nemo" --version
+
+      - name: Check default stable installation
+        if: ${{ inputs.check-latest }}
+        working-directory: ${{ runner.temp }}
+        env:
+          # Separate environment so the pinned install cannot influence resolution.
+          UV_TOOL_DIR: ${{ runner.temp }}/smoke-latest-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/smoke-latest-bin
+        run: |
+          uv tool install --python "$PYTHON_VERSION" --index "$WHEEL_INDEX" "nemo-helix[all]"
+          "$UV_TOOL_DIR/nemo-helix/bin/python" - <<'PYTHON'
+          import os
+          import re
+          from importlib.metadata import version
+
+          expected = os.environ["WHEEL_VERSION"]
+          installed = version("nemo-helix")
+          if not all(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v) for v in (expected, installed)):
+              raise SystemExit(f"::error::Expected stable versions, got {expected=} and {installed=}")
+          if tuple(map(int, installed.split("."))) < tuple(map(int, expected.split("."))):
+              raise SystemExit(f"::error::Expected at least nemo-helix {expected}, installed {installed}")
+          print(f"Default install selected {installed}; requested release {expected} was verified separately.")
+          PYTHON
 
   kubernetes:
     name: Published images and chart
@@ -112,10 +130,16 @@ jobs:
       IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
       CHART_REPOSITORY: ${{ needs.prepare.outputs.chart_repository }}
       KIND_CLUSTER_NAME: release-smoke
+      DOCKER_CONFIG: /tmp/smoke-docker
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - name: Log in to Docker Hub
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ vars.AIRE_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.AIRE_DOCKERHUB_ACCESS_TOKEN }}
       - name: Create disposable Kind cluster
         uses: ./.github/actions/setup-kind-cluster
         with:
@@ -128,6 +152,13 @@ jobs:
           image-tag: ${{ env.IMAGE_TAG }}
           kind-image-pull-user: ${{ github.actor }}
           kind-image-pull-token: ${{ github.token }}
+      - name: Configure Docker Hub pulls in Kind
+        timeout-minutes: 2
+        # Copy before GHCR login so the secret contains only Docker Hub credentials.
+        run: |
+          kubectl -n release-smoke create secret generic dockerhub \
+            --type=kubernetes.io/dockerconfigjson \
+            --from-file=".dockerconfigjson=$DOCKER_CONFIG/config.json"
       - name: Download published chart
         timeout-minutes: 3
         env:
@@ -142,14 +173,11 @@ jobs:
       - name: Pull released API and tasks images
         timeout-minutes: 10
         env:
-          NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
           registry="${IMAGE_REGISTRY%%/*}"
           if [[ "$registry" == ghcr.io ]]; then
             printf '%s' "$GH_TOKEN" | docker login "$registry" --username "$GITHUB_ACTOR" --password-stdin
-          elif [[ -n "$NGC_REGISTRY_READ_TOKEN" ]]; then
-            printf '%s' "$NGC_REGISTRY_READ_TOKEN" | docker login "$registry" --username '$oauthtoken' --password-stdin
           fi
           docker pull "$IMAGE_REGISTRY/nhx-api:$IMAGE_TAG"
           docker pull "$IMAGE_REGISTRY/nhx-tasks:$IMAGE_TAG"
@@ -162,6 +190,7 @@ jobs:
           helm upgrade --install release-smoke "$RUNNER_TEMP/nemo-helix-$RELEASE_VERSION.tgz" \
             --namespace release-smoke --create-namespace --wait --timeout 8m \
             -f .github/scripts/release-smoke-values.yaml \
+            --set-string "imagePullSecrets[0].name=dockerhub" \
             --set-string "api.image.repository=$IMAGE_REGISTRY/nhx-api" \
             --set-string "api.image.tag=$IMAGE_TAG" \
             --set-string "core.image.repository=$IMAGE_REGISTRY/nhx-api" \
