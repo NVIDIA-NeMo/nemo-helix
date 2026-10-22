@@ -931,7 +931,7 @@ async def stream_response_result(
     status_code: int,
     headers: CIMultiDict[str] | dict,
     *,
-    named_events: bool = False,
+    named_events: bool,
 ) -> StreamingResponse:
     """Convert a response result or envelope back into a :class:`StreamingResponse`.
 

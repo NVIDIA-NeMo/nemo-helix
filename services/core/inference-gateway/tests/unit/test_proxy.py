@@ -131,6 +131,7 @@ async def test_stream_response_result_prefers_typed_non_streaming_payload():
         InferenceResponse(result={"id": "raw"}, headers={}, typed_body=typed),
         200,
         {},
+        named_events=False,
     )
 
     body = await _read_streaming_response(response)
@@ -149,6 +150,7 @@ async def test_stream_response_result_strips_stale_upstream_body_headers():
             "transfer-encoding": "chunked",
             "x-upstream-header": "preserved",
         },
+        named_events=False,
     )
 
     assert "content-length" not in response.headers
@@ -225,7 +227,9 @@ async def test_response_annotations_noop_for_streaming():
 
     response = _build_inference_response_with_annotations(response)
 
-    body = (await _read_streaming_response(await stream_response_result(response, 200, {}))).decode()
+    body = (
+        await _read_streaming_response(await stream_response_result(response, 200, {}, named_events=False))
+    ).decode()
     assert "guardrails_data" not in body
     assert 'data: {"id": "raw-chunk"' in body
 
@@ -250,6 +254,7 @@ async def test_stream_response_result_uses_raw_stream_when_typed_stream_is_prese
         InferenceResponse(result=raw_chunks(), headers={}, typed_body=typed_chunks()),
         200,
         {},
+        named_events=False,
     )
 
     body = (await _read_streaming_response(response)).decode()
@@ -287,7 +292,7 @@ async def test_stream_response_result_replays_raw_stream_with_unrecognised_chunk
     # typed_body is NOT nulled — the typed view stays useful.
     assert response_envelope.typed_body is typed_stream_before
 
-    response = await stream_response_result(response_envelope, 200, {})
+    response = await stream_response_result(response_envelope, 200, {}, named_events=False)
 
     body = (await _read_streaming_response(response)).decode()
     # All three raw chunks are re-emitted via raw_chunks() for serialization.
