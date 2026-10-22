@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Adapt the published chart for a disposable, single-node CPU cluster.
+fullnameOverride: release-smoke
+rbac:
+  volcanoEnabled: false
+postgresql:
+  image:
+    repository: docker.io/library/postgres
+clickhouse:
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+core:
+  storage:
+    accessModes: [ReadWriteOnce]
+ingress:
+  enabled: false
+httpRoute:
+  enabled: false
