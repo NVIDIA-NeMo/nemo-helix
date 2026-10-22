@@ -254,6 +254,8 @@ for filename in (
         if '==' not in line or line.startswith('#'):
             continue
         requirement = Requirement(line)
+        if requirement.marker is not None and not requirement.marker.evaluate():
+            continue
         installed = version(requirement.name)
         if installed not in requirement.specifier:
             raise RuntimeError(f'{requirement.name}=={installed} does not satisfy {requirement}')

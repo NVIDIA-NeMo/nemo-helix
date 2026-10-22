@@ -60,4 +60,4 @@ torch==2.13.0+cu129
 torchaudio==2.11.0+cu129
 torchvision==0.28.0+cu129
 torchcodec==0.16.0+cu129
-torchao==0.17.0+cu129
+torchao==0.17.0+cu129 ; platform_machine == "x86_64"
