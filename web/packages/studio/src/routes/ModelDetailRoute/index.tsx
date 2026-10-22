@@ -182,7 +182,7 @@ export const ModelDetailRoute: FC = () => {
 
           <TabsContent
             value={ModelDetailTab.Files}
-            className="flex min-h-0 flex-1 flex-col items-stretch justify-center p-0 pt-6"
+            className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
           >
             <FilesTab fileset={fileset} />
           </TabsContent>

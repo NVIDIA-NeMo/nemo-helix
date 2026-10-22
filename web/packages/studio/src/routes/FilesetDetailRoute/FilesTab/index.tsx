@@ -27,6 +27,8 @@ export interface FilesTabProps {
   files: FilesetFileOutput[] | undefined;
   isFilesError: boolean;
   isFilesFetching: boolean;
+  /** Hides the previewed file's actions menu, for hosts that only browse the fileset. */
+  hideFileActions?: boolean;
 }
 
 /**
@@ -44,6 +46,7 @@ export const FilesTab: FC<FilesTabProps> = ({
   files,
   isFilesError,
   isFilesFetching,
+  hideFileActions,
 }) => {
   const { getQueryParam, setQueryParam, setQueryParams } = useQueryParams();
   const currentFolder = getQueryParam(QUERY_PARAMETERS.filesetFolder) ?? undefined;
@@ -143,6 +146,7 @@ export const FilesTab: FC<FilesTabProps> = ({
               onFolderClick={handleFolderChange}
               onDeleteSuccess={handleClosePreview}
               onRenameSuccess={(newPath) => setQueryParam(QUERY_PARAMETERS.file, newPath)}
+              hideFileActions={hideFileActions}
             />
           </div>
         ) : (
