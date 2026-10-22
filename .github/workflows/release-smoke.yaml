@@ -88,6 +88,8 @@ jobs:
           enable-cache: false
       - name: Install and smoke test published wheel
         id: smoke
+        # Reserve time for diagnostics and cleanup inside the 45-minute job.
+        timeout-minutes: 30
         run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py macos
       - name: Collect diagnostics and clean up
         id: cleanup
@@ -150,6 +152,7 @@ jobs:
           kind-image-pull-token: ${{ github.token }}
       - name: Install and smoke test published chart
         id: smoke
+        timeout-minutes: 30
         run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py kubernetes
       - name: Collect diagnostics and clean up
         id: cleanup
