@@ -39,7 +39,7 @@ def SFT_SCHEMA(prompt_template: str | None = None):
 
     Uses the SFTDatasetSchemaType union which supports:
     - SFTPromptTemplateDatasetItemSchema: Flexible prompt template format
-    - SFTPChatDatasetItemSchema: Chat format with messages and tools
+    - SFTChatDatasetItemSchema: Chat format with messages and tools
 
     Args:
         prompt_template: Optional template string with placeholders like "{input} {output}".

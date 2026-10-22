@@ -19,8 +19,14 @@
 export type TrainingType = 'sft' | 'dpo' | 'distillation' | 'grpo';
 
 export type CustomizerSchemaVariant =
-  /** SFT chat format: {"messages": [{"role": "...", ...}]} */
+  /** SFT chat format: {"messages": [{"role": "...", "content": "..."}]} */
   | 'sft-chat'
+  /**
+   * SFT multimodal chat. Same top-level messages list, but a content value is a
+   * text or image_url part, a list of those parts, or a nested chat message.
+   * String-only messages stay sft-chat.
+   */
+  | 'sft-multimodal-chat'
   /** SFT prompt-completion: {"prompt": "...", "completion": "..."} */
   | 'sft-prompt-completion'
   /** DPO native: {"context": [...], "completions": [...]} */
@@ -42,6 +48,7 @@ export type CustomizerSchemaVariant =
  */
 export const CUSTOMIZER_SCHEMA_LABELS: Record<CustomizerSchemaVariant, string> = {
   'sft-chat': 'Chat Completion',
+  'sft-multimodal-chat': 'Multimodal Chat',
   'sft-prompt-completion': 'Completion',
   'dpo-preference': 'Preference',
   'dpo-helpsteer3': 'HelpSteer3',
@@ -71,9 +78,31 @@ const isMessageList = (value: unknown): boolean => {
   return typeof first === 'object' && first !== null && 'role' in (first as object);
 };
 
+/**
+ * A content value is multimodal when it is a part, a list of parts, or a nested
+ * chat message. A string is one text part and stays on sft-chat.
+ */
+const isMultimodalContent = (content: unknown): boolean => {
+  if (Array.isArray(content)) return true;
+  if (typeof content !== 'object' || content === null) return false;
+  const value = content as Record<string, unknown>;
+  return 'type' in value || 'role' in value;
+};
+
+const hasMultimodalContent = (messages: unknown): boolean => {
+  if (!Array.isArray(messages)) return false;
+  return messages.some((message) => {
+    if (typeof message !== 'object' || message === null) return false;
+    return isMultimodalContent((message as Record<string, unknown>).content);
+  });
+};
+
 const detectSft = (row: Record<string, unknown>): CustomizerSchemaDetection | null => {
-  // Chat: literal top-level "messages" with role on first item.
-  if (isMessageList(row.messages)) return detection('sft-chat');
+  // Both chat formats use a top-level messages list. Part content selects the
+  // multimodal schema; string content stays chat so text training rejects images.
+  if (isMessageList(row.messages)) {
+    return detection(hasMultimodalContent(row.messages) ? 'sft-multimodal-chat' : 'sft-chat');
+  }
   // Prompt-completion: literal "prompt" + "completion".
   if ('prompt' in row && 'completion' in row) return detection('sft-prompt-completion');
   return null;
@@ -135,7 +164,7 @@ export const expectedSchemaCopy = (trainingType: TrainingType): string => {
   if (trainingType === 'grpo') {
     return 'Must contain responses_create_params and agent_ref (NeMo Gym format). Agent-specific fields such as vf_env_id are optional. Use pi-to-gym-conversion to prepare a verifiers dataset.';
   }
-  return 'Must contain messages (chat) or prompt and completion.';
+  return 'Must contain messages (chat or multimodal chat) or prompt and completion.';
 };
 
 // Encoding validation lives in the customizer validation hook, not here — it
@@ -194,6 +223,77 @@ const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v
 
 const isNonEmptyArray = (v: unknown): v is unknown[] => Array.isArray(v) && v.length > 0;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const unexpectedField = (value: Record<string, unknown>, allowed: string[]): string | null => {
+  const extra = Object.keys(value).find((key) => !allowed.includes(key));
+  return extra ?? null;
+};
+
+const validateMultimodalPart = (part: unknown, path: string): string | null => {
+  if (!isRecord(part)) return `${path} must be a text or image_url part`;
+  if (part.type !== 'text' && part.type !== 'image_url') {
+    return `${path}.type must be "text" or "image_url"`;
+  }
+  if (part.type === 'text') {
+    const extra = unexpectedField(part, ['type', 'text']);
+    if (extra) return `${path} has unexpected field ${extra}`;
+    if (!isNonEmptyString(part.text)) return `${path}.text is missing or empty`;
+    return null;
+  }
+  const extra = unexpectedField(part, ['type', 'image_url']);
+  if (extra) return `${path} has unexpected field ${extra}`;
+  if (!isRecord(part.image_url)) return `${path}.image_url must be an object with a url`;
+  const urlExtra = unexpectedField(part.image_url, ['url']);
+  if (urlExtra) return `${path}.image_url has unexpected field ${urlExtra}`;
+  if (!isNonEmptyString(part.image_url.url)) return `${path}.image_url.url is missing or empty`;
+  return null;
+};
+
+const validateMultimodalContent = (content: unknown, path: string): string | null => {
+  if (typeof content === 'string') {
+    if (!isNonEmptyString(content)) return `${path} is missing or empty`;
+    return null;
+  }
+  if (Array.isArray(content)) {
+    if (content.length === 0) return `${path} must contain at least one part`;
+    for (let i = 0; i < content.length; i++) {
+      const error = validateMultimodalPart(content[i], `${path}[${i}]`);
+      if (error) return error;
+    }
+    return null;
+  }
+  if (!isRecord(content)) {
+    return `${path} must be a string, a text or image_url part, a chat message, or a list of parts`;
+  }
+  if ('type' in content) return validateMultimodalPart(content, path);
+  if ('role' in content) {
+    if ('content' in content && content.content != null && typeof content.content !== 'string') {
+      return `${path}.content must be a string`;
+    }
+    const error = validateChatMessages([content]);
+    return error ? error.replace('messages[0]', path) : null;
+  }
+  return `${path} must be a string, a text or image_url part, a chat message, or a list of parts`;
+};
+
+const validateMultimodalMessages = (messages: unknown): string | null => {
+  if (!isNonEmptyArray(messages)) return 'messages must be a non-empty array';
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    if (!isRecord(message)) return `messages[${i}] is not an object`;
+    if (!isNonEmptyString(message.role)) return `messages[${i}].role is missing or empty`;
+    const extra = unexpectedField(message, ['role', 'content']);
+    if (extra) return `messages[${i}] has unexpected field ${extra}`;
+    if (!('content' in message) || message.content == null)
+      return `messages[${i}].content is missing`;
+    const error = validateMultimodalContent(message.content, `messages[${i}].content`);
+    if (error) return error;
+  }
+  return null;
+};
+
 const validateChatMessages = (messages: unknown): string | null => {
   if (!isNonEmptyArray(messages)) return 'messages must be a non-empty array';
   for (let i = 0; i < messages.length; i++) {
@@ -239,6 +339,9 @@ export const validateRowCompleteness = (
   switch (variant) {
     case 'sft-chat':
       return validateChatMessages(row.messages);
+
+    case 'sft-multimodal-chat':
+      return validateMultimodalMessages(row.messages);
 
     case 'sft-prompt-completion':
       if (!isNonEmptyString(row.prompt)) return 'prompt is missing or empty';
