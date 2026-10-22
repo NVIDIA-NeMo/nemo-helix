@@ -17,6 +17,9 @@ vi.mock('@studio/hooks/useCustomizationJob');
 vi.mock('@studio/routes/ModelDetailRoute/DetailsTab', () => ({
   DetailsTab: () => <div>details content</div>,
 }));
+vi.mock('@studio/routes/ModelDetailRoute/FilesTab', () => ({
+  FilesTab: () => <div>files content</div>,
+}));
 vi.mock('@studio/components/ModelChatTab', () => ({ ModelChatTab: () => <div /> }));
 vi.mock('@studio/components/CustomizationOverview', () => ({
   CustomizationOverview: () => <div>training content</div>,
@@ -66,10 +69,10 @@ describe('ModelDetailRoute', () => {
     renderPage('/workspaces/ws/fine-tune/models/my-model');
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent('my-model');
-    for (const name of ['Details', 'Chat', 'Training', 'Logs']) {
+    for (const name of ['Details', 'Chat', 'Files', 'Training', 'Logs']) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument();
     }
-    expect(screen.getAllByRole('tab')).toHaveLength(4);
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
     expect(screen.getByText('details content')).toBeInTheDocument();
   });
 
@@ -82,6 +85,25 @@ describe('ModelDetailRoute', () => {
       'href',
       expect.stringContaining('/fine-tune/job-1')
     );
+  });
+
+  it('links out to the fileset from the Files tab', async () => {
+    mockLineage({ fileset: { workspace: 'files-ws', name: 'weights' } });
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=files');
+
+    expect(await screen.findByText('files content')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Fileset' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('weights')
+    );
+  });
+
+  it('keeps the Files tab without a fileset, with nothing to open', async () => {
+    mockLineage({ fileset: null });
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=files');
+
+    expect(await screen.findByText('files content')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open Fileset' })).not.toBeInTheDocument();
   });
 
   it('disables the job tabs while the job lookup runs', async () => {

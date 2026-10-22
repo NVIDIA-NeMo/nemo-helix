@@ -31,8 +31,10 @@ import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
 import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
+import { FilesTab } from '@studio/routes/ModelDetailRoute/FilesTab';
 import {
   getCustomizationJobListRoute,
+  getFilesetRoute,
   getModelDetailRoute,
   getWorkspaceCustomizationJobDetailsRoute,
 } from '@studio/routes/utils';
@@ -47,7 +49,7 @@ export const ModelDetailRoute: FC = () => {
   const { getQueryParam, setQueryParam } = useQueryParams();
 
   const lineage = useModelLineage(workspace, modelName, adapterName);
-  const { model, adapter, job } = lineage;
+  const { model, adapter, job, fileset } = lineage;
   const name = adapterName ?? modelName;
 
   const { job: jobDetails } = useCustomizationJob(job.workspace, job.jobName ?? '', {
@@ -70,6 +72,7 @@ export const ModelDetailRoute: FC = () => {
   const tabs: { value: ModelDetailTab; label: string; disabled?: boolean }[] = [
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
+    { value: ModelDetailTab.Files, label: 'Files' },
     ...(hasJobTabs
       ? [
           { value: ModelDetailTab.Training, label: 'Training', disabled: job.isLoading },
@@ -82,6 +85,18 @@ export const ModelDetailRoute: FC = () => {
   const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
   const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
+  let headerAction: { label: string; to: string } | undefined;
+  if (isJobTab && job.jobName) {
+    headerAction = {
+      label: 'Open Job',
+      to: getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName),
+    };
+  } else if (selectedTab === ModelDetailTab.Files && fileset) {
+    headerAction = {
+      label: 'Open Fileset',
+      to: getFilesetRoute(fileset.workspace, `${fileset.workspace}/${fileset.name}`),
+    };
+  }
 
   if (lineage.isLoading) {
     return <Loading description="Loading model..." />;
@@ -131,12 +146,9 @@ export const ModelDetailRoute: FC = () => {
           }
           slotDescription={(adapter ?? model).description}
           slotActions={
-            isJobTab &&
-            job.jobName && (
+            headerAction && (
               <Button color="brand" asChild>
-                <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
-                  Open Job
-                </Link>
+                <Link to={headerAction.to}>{headerAction.label}</Link>
               </Button>
             )
           }
@@ -166,6 +178,13 @@ export const ModelDetailRoute: FC = () => {
             <Stack className="mx-auto h-full w-full max-w-[768px]">
               <ModelChatTab model={model} adapter={adapter} />
             </Stack>
+          </TabsContent>
+
+          <TabsContent
+            value={ModelDetailTab.Files}
+            className="flex min-h-0 flex-1 flex-col items-stretch justify-center p-0 pt-6"
+          >
+            <FilesTab fileset={fileset} />
           </TabsContent>
 
           {job.jobName && (

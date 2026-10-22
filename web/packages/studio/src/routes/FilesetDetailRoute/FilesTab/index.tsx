@@ -162,20 +162,22 @@ export const FilesTab: FC<FilesTabProps> = ({
           </div>
         )}
       </Flex>
-      <div
-        className="w-[480px] shrink-0 h-full min-h-0 flex flex-col px-density-lg pb-density-lg"
-        data-testid="fileset-files-tab-right-panel"
-      >
-        {showSchemaEditor && !(selectedFilePath && !isSchemaAssignableFile(selectedFilePath)) && (
-          <DatasetSchemaEditor
-            workspace={workspace}
-            datasetName={filesetName}
-            fileset={fileset}
-            filesList={files}
-            selectedFilePath={selectedFilePath}
-          />
-        )}
-      </div>
+      {showSchemaEditor && (
+        <div
+          className="w-[480px] shrink-0 h-full min-h-0 flex flex-col px-density-lg pb-density-lg"
+          data-testid="fileset-files-tab-right-panel"
+        >
+          {!(selectedFilePath && !isSchemaAssignableFile(selectedFilePath)) && (
+            <DatasetSchemaEditor
+              workspace={workspace}
+              datasetName={filesetName}
+              fileset={fileset}
+              filesList={files}
+              selectedFilePath={selectedFilePath}
+            />
+          )}
+        </div>
+      )}
     </Flex>
   );
 };
