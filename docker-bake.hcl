@@ -108,19 +108,19 @@ variable "BAKE_TAG" {
 # NHX_PYTHON_IMAGE (currently python:3.13.16-slim-trixie); this SHA is not
 # wired as a FROM pin. Rebuild the target in CI after changing NHX_PYTHON_IMAGE.
 variable "BASE_TAG_PYTHON" {
-  default = "d9e1851f309d3cf5389c0fc0e1049bd3c87593f8"
+  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
 }
 
 # Pin for nhx-automodel-base.
 variable "BASE_TAG_AUTOMODEL" {
-  default = "2c1a9ef2535a6648a272d9b74dae97fb672b8234"
+  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
 }
 
 # Pin for nhx-rl-base (prebuilt-base tag) + the NeMo-RL / NeMo-Gym source the base builds from.
 # Defaults point at the soluwalana/{RL,Gym} forks. If the RL fork's uv.lock and the Gym ref drift,
 # build with UV_SYNC_MODE= to relock.
 variable "BASE_TAG_RL" {
-  default = "local"
+  default = "658a648b8d821fbac9236bafad5c177b9af8789e"
 }
 variable "NEMO_RL_REPO" {
   default = "https://github.com/soluwalana/RL.git"

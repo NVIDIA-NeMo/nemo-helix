@@ -89,8 +89,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --output /app/.source-distributions/nhx-api
 
 FROM ${NHX_API_RUNTIME_BASE} AS runtime
-RUN ["python", "-c", "import shutil; shutil.rmtree('/etc/ssl/certs')"]
-COPY --from=builder /etc/ssl/certs/ /etc/ssl/certs/
 WORKDIR /app
 
 # Local subprocess jobs need a small POSIX command surface; distroless does not

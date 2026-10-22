@@ -72,8 +72,6 @@ COPY --from=builder /usr/bin/env /usr/bin/env
 COPY docker/scripts/cve-cleanup.sh /usr/bin/cve-cleanup.sh
 
 FROM ${NHX_CPU_TASKS_RUNTIME_BASE} AS runtime
-RUN ["python", "-c", "import shutil; shutil.rmtree('/etc/ssl/certs')"]
-COPY --from=builder /etc/ssl/certs/ /etc/ssl/certs/
 
 COPY --from=cpu-task-runtime-tools /usr/bin/ /usr/bin/
 
