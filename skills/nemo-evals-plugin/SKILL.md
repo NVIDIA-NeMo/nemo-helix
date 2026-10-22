@@ -8,6 +8,8 @@ metadata:
   maturity: active
   tags: [evaluation, metrics, agent-eval, nemo-helix]
 allowed-tools: Bash, Read
+permissions:
+  - file_write
 ---
 
 # Evals Plugin
