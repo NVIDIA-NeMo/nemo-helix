@@ -22,10 +22,12 @@ _services_log_key = pytest.StashKey[dict[str, Path] | Path]()
 
 _TAIL_LINES_ON_FAILURE = 100
 
-# Fixtures that lease a pooled platform. ``client`` and ``nemo_run`` reach the pool
-# through ``request.getfixturevalue``, so they are not in a test's static closure of
-# ``_services_instance`` and have to be listed by name.
-_POOL_FIXTURES = frozenset({"_services_instance", "_services", "services_pool_client", "client", "nemo_run"})
+# Fixtures that lease a pooled platform. ``client``, ``nemo_run`` and the notebooks'
+# ``nhx_base_url`` reach the pool through ``request.getfixturevalue``, so they are not
+# in a test's static closure of ``_services_instance`` and have to be listed by name.
+_POOL_FIXTURES = frozenset(
+    {"_services_instance", "_services", "services_pool_client", "client", "nemo_run", "nhx_base_url"}
+)
 
 
 def _read_services_log_tail(log_path: Path) -> list[str]:

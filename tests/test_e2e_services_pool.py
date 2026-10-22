@@ -596,7 +596,7 @@ def test_register_services_pool_items_groups_tests_by_pool_for_xdist() -> None:
 
     items = [
         make_item("e2e/test_a.py", ["client", "workspace"]),
-        make_item("e2e/test_b.py", ["nemo_run"]),
+        make_item("e2e/test_b.py", ["nhx_base_url"]),
         make_item("e2e/test_c.py", ["_services_instance"]),
         make_item("e2e/test_d.py", ["platform"]),
     ]
