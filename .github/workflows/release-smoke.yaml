@@ -27,8 +27,6 @@ on:
         type: boolean
         default: false
     secrets:
-      NGC_REGISTRY_READ_TOKEN:
-        required: false
       SLACK_RELEASE_WEBHOOK:
         required: false
 
@@ -160,14 +158,11 @@ jobs:
       - name: Pull released API and tasks images
         timeout-minutes: 10
         env:
-          NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
           registry="${IMAGE_REGISTRY%%/*}"
           if [[ "$registry" == ghcr.io ]]; then
             printf '%s' "$GH_TOKEN" | docker login "$registry" --username "$GITHUB_ACTOR" --password-stdin
-          elif [[ -n "$NGC_REGISTRY_READ_TOKEN" ]]; then
-            printf '%s' "$NGC_REGISTRY_READ_TOKEN" | docker login "$registry" --username '$oauthtoken' --password-stdin
           fi
           docker pull "$IMAGE_REGISTRY/nhx-api:$IMAGE_TAG"
           docker pull "$IMAGE_REGISTRY/nhx-tasks:$IMAGE_TAG"
