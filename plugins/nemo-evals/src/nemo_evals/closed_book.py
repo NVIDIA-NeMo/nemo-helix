@@ -164,23 +164,27 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
         middleware_config: ClosedBookConfig,
     ) -> InferenceRequest:
         model = request.body.get("model")
-        target = self._provider_target(model)
+        target = self._provider_target(ctx, model)
         if any(
             is_self_searching_model(name)
             for name in (model, target.served_model_name, target.required_extra_body.get("model"))
         ):
-            raise InferenceMiddlewareError(
+            raise _refusal(
+                ctx,
+                model,
+                "self_searching_model",
                 f"Model {model!r} searches the web on its own, so it cannot be served closed-book.",
-                status_code=403,
             )
         if any(
             strip_hosted_tools(copy.deepcopy(dict(policy)))
             for policy in (target.default_extra_body, target.required_extra_body)
         ):
-            raise InferenceMiddlewareError(
+            raise _refusal(
+                ctx,
+                model,
+                "provider_adds_hosted_tools",
                 f"The provider serving {model!r} adds provider-executed tools or features to requests, "
                 "so it cannot be served closed-book.",
-                status_code=403,
             )
         removed = strip_hosted_tools(request.body, anthropic=request.path.lstrip("/").startswith("v1/messages"))
         ctx.state(MIDDLEWARE_NAME).set(REMOVED_TOOLS_STATE_KEY, removed)
@@ -196,13 +200,29 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
             )
         return request
 
-    def _provider_target(self, model: object) -> ModelProviderInferenceTarget:
+    def _provider_target(self, ctx: InferenceMiddlewareContext, model: object) -> ModelProviderInferenceTarget:
         try:
             if isinstance(model, str):
                 return self.get_inference_url_and_model(model)
         except KeyError:
             pass
-        raise InferenceMiddlewareError(
+        raise _refusal(
+            ctx,
+            model,
+            "unresolved_model",
             f"Model {model!r} does not resolve to a model provider, so closed-book cannot check it.",
-            status_code=403,
         )
+
+
+def _refusal(ctx: InferenceMiddlewareContext, model: object, reason: str, detail: str) -> InferenceMiddlewareError:
+    logger.warning(
+        "Closed-book middleware refused a request",
+        extra={
+            "request_id": ctx.request_id,
+            "workspace": ctx.workspace,
+            "virtual_model": ctx.virtual_model_name,
+            "model": model,
+            "reason": reason,
+        },
+    )
+    return InferenceMiddlewareError(detail, status_code=403)

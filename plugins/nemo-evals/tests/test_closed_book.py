@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from importlib.metadata import entry_points
 from unittest.mock import MagicMock
 
@@ -360,6 +361,32 @@ async def test_provider_body_policy_without_hosted_tools_is_allowed() -> None:
     ctx, request = _request("v1/responses", {"model": "ws/luna", "input": "hi"})
 
     assert await middleware.process_request(ctx, request, ClosedBookConfig()) is request
+
+
+@pytest.mark.parametrize(
+    ("targets", "model", "reason"),
+    [
+        ({"ws/sonar": _target("perplexity/sonar")}, "ws/sonar", "self_searching_model"),
+        (
+            {"ws/luna": _target("azure/openai/gpt-5.6-luna", default_extra_body={"web_search_options": {}})},
+            "ws/luna",
+            "provider_adds_hosted_tools",
+        ),
+        ({}, "ws/unregistered", "unresolved_model"),
+    ],
+)
+async def test_refusal_is_logged_with_its_reason(
+    targets: dict[str, ModelProviderInferenceTarget], model: str, reason: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Refusals are the security events an operator needs to find in the gateway logs."""
+    ctx, request = _request("v1/responses", {"model": model, "input": "hi"})
+
+    with caplog.at_level(logging.WARNING, logger="nemo_evals.closed_book"), pytest.raises(InferenceMiddlewareError):
+        await _middleware(targets).process_request(ctx, request, ClosedBookConfig())
+
+    (record,) = [r for r in caplog.records if r.name == "nemo_evals.closed_book"]
+    assert record.levelno == logging.WARNING
+    assert (record.__dict__["reason"], record.__dict__["model"], record.__dict__["request_id"]) == (reason, model, "r1")
 
 
 @pytest.mark.parametrize("config", [None, {}])

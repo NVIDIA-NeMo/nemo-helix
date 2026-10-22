@@ -721,6 +721,41 @@ above is an explicit reproducibility pin, not a platform-wide default.
 For a complete runnable example, see the
 [Harbor taskset evaluation notebook](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-evals/examples/harbor_taskset/harbor_taskset_e2e.ipynb).
 
+### Run a closed-book evaluation
+
+Blocking a task's network stops the agent from reaching the internet, but the model provider can
+still search for it: Codex, for example, sends a hosted `web_search` tool with every request by
+default. To keep a run closed-book, send the agent's model calls through a virtual model that runs
+the `nemo-evals-closed-book` middleware. Create one as shown in
+[Keep Evaluations Closed-Book](/documentation/models-and-inference/virtual-models#keep-evaluations-closed-book),
+then point the agent at it. For the built-in Codex agent:
+
+```json
+{
+  "tasks": "default/suite",
+  "target": {
+    "kind": "harbor",
+    "source": {"name": "codex", "model_name": "default/closed-book-model"},
+    "agent_kwargs": {"version": "0.162.1"},
+    "env_vars": {
+      "OPENAI_BASE_URL": "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    },
+    "env_secrets": {"OPENAI_API_KEY": "default/gateway-key"},
+    "reward_key": "reward"
+  }
+}
+```
+
+- Codex sends the last segment of `model_name`, `closed-book-model`, as its model. The gateway
+  resolves it in the workspace named in `OPENAI_BASE_URL`.
+- Codex runs inside the task container, so `OPENAI_BASE_URL` must reach the gateway from there. On a
+  local Docker deployment, `host.docker.internal` is the host running the platform.
+- `OPENAI_API_KEY` goes to the gateway, which holds the provider's key itself. Use a credential your
+  gateway accepts; with platform authentication disabled, any value works.
+
+Every model call then reaches the provider without hosted tools. A model or provider that cannot be
+served closed-book fails the call with `403`.
+
 ## How scoring works
 
 1. Harbor runs each task in its sandbox and writes a `<task>__<hash>/result.json` per trial, including

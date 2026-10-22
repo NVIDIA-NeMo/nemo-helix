@@ -279,7 +279,9 @@ nemo inference virtual-models create closed-book-model \
   --request-middleware '[{"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]'
 ```
 
-Point the agent under evaluation at `closed-book-model`. The middleware covers Chat Completions,
+Point the agent under evaluation at `closed-book-model`; for a Harbor evaluation, see
+[Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation).
+The middleware covers Chat Completions,
 Responses, and Anthropic Messages requests, streaming or not. It does not cover model calls that
 another middleware makes on its own, such as the judge calls of the `nemo-switchyard`
 `llm_classifier` router.
