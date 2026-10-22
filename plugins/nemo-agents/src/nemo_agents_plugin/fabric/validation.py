@@ -114,7 +114,7 @@ async def doctor_fabric_config(
     base_dir: Path | str,
     fabric: Any | None = None,
 ) -> Any:
-    """Run Fabric environment preflight and require a passing report."""
+    """Run Fabric preflight, allowing only the workflow-only resolution warning."""
     fabric_client = fabric or Fabric()
 
     try:
@@ -127,7 +127,11 @@ async def doctor_fabric_config(
     except Exception as error:
         raise FabricValidationError(f"Fabric doctor failed: {error}") from error
 
-    _ensure_doctor_passed(_to_mapping(doctor_report))
+    _ensure_doctor_passed(
+        _to_mapping(doctor_report),
+        workflow_only=getattr(fabric_config, "workflow", None) is not None
+        and getattr(fabric_config, "harness", None) is None,
+    )
     return doctor_report
 
 
@@ -141,12 +145,13 @@ def _coerce_agent_config(config: AgentConfig | Mapping[str, Any]) -> AgentConfig
         raise FabricValidationError(f"Invalid Platform agent config: {error}") from error
 
 
-def _ensure_doctor_passed(report: dict[str, Any]) -> None:
+def _ensure_doctor_passed(report: dict[str, Any], *, workflow_only: bool = False) -> None:
     status = report.get("status")
     if status == "pass":
         return
 
     failed_checks: list[str] = []
+    skipped_workflow_resolution = False
     for check in report.get("checks", []):
         check_status = check.get("status")
         if check_status == "pass":
@@ -154,7 +159,22 @@ def _ensure_doctor_passed(report: dict[str, Any]) -> None:
 
         name = check.get("name", "unknown")
         message = check.get("message", "No diagnostic message provided.")
+        # Fabric resolves workflow.target_id through its target descriptor, but
+        # currently reads resolution only from harness.resolution. WorkflowConfig
+        # has no resolution field; adding one is rejected as an adapter extension.
+        # Do not block an otherwise healthy workflow on this unavoidable warning.
+        if (
+            workflow_only
+            and name == "resolution"
+            and check_status == "warn"
+            and message == "no resolution strategy selected"
+        ):
+            skipped_workflow_resolution = True
+            continue
         failed_checks.append(f"{name}: {check_status} - {message}")
+
+    if status == "warn" and skipped_workflow_resolution and not failed_checks:
+        return
 
     if not failed_checks:
         failed_checks.append("No failing subsection was reported.")

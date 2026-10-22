@@ -1748,8 +1748,9 @@ def test_sync_pausing_exit_gives_the_task_the_pause_outcome(
     ):
         update = kubernetes_job.sync(step)
 
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
     assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
     assert task_update["body"].status == update.status == expected
     assert task_update["body"].error_details == (update.error_details or {})
     assert bool(task_update["body"].error_stack) == (expected == HelixJobStatus.ERROR)
@@ -1769,8 +1770,9 @@ def test_sync_pausing_deadline_fails_the_task(kubernetes_job, mock_jobs_client, 
         update = kubernetes_job.sync(step)
 
     assert update.status == HelixJobStatus.ERROR
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
     assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
     assert task_update["body"].status == HelixJobStatus.ERROR
     assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 

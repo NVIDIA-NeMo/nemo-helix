@@ -2046,9 +2046,9 @@ def test_volcano_pausing_exit_gives_each_task_the_pause_outcome(volcano_job, moc
         update = volcano_job.sync(step)
 
     assert update.status == HelixJobStatus.PAUSED
-    task_updates = {
-        call.kwargs["name"]: call.kwargs["body"] for call in mock_jobs_client.update_job_step_task.call_args_list
-    }
+    calls = mock_jobs_client.update_attempt_step_task.call_args_list
+    assert all(call.kwargs["attempt"] == step.attempt_id for call in calls)
+    task_updates = {call.kwargs["name"]: call.kwargs["body"] for call in calls}
     assert set(task_updates) == {"task-uid-leader", "task-uid-worker"}
     for body in task_updates.values():
         assert body.status == HelixJobStatus.PAUSED
@@ -2072,8 +2072,9 @@ def test_volcano_pausing_deadline_fails_each_task(volcano_job, mock_jobs_client,
         update = volcano_job.sync(step)
 
     assert update.status == HelixJobStatus.ERROR
-    task_update = mock_jobs_client.update_job_step_task.call_args.kwargs
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
     assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
     assert task_update["body"].status == HelixJobStatus.ERROR
     assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 
