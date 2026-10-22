@@ -288,8 +288,10 @@ async def test_compose_service_images_are_prepared_by_service_name(clients, stor
     await prepare(task(digest), clients, sandbox_policy)
     images = [
         image("main", digest_ref("d")),
-        image("db", digest_ref("f"), source="prebuilt"),
-        image("seeder", digest_ref("a")),
+        image("service/db", digest_ref("f"), source="prebuilt"),
+        image("service/seeder", digest_ref("a")),
+        # A service may be called `verifier`; its image is still a service's, not the separate verifier's.
+        image("service/verifier", digest_ref("b"), source="prebuilt"),
     ]
     await settle(entity_store, digest, 1, "ready", images=images)
 
@@ -297,19 +299,26 @@ async def test_compose_service_images_are_prepared_by_service_name(clients, stor
 
     assert result.status == "ready" and result.environment is not None
     assert list(result.images) == ["agent"]
+    assert result.environment.verifier is None
     assert result.environment.compose_images == {
         "db": PreparedImage(
             image_ref=digest_ref("f"),
             preparation_key="sha256:" + "f" * 64,
-            builder_image="harbor-env-db",
+            builder_image="harbor-env-service/db",
             build_job="b",
         ),
         "seeder": PreparedImage(
             image_ref=digest_ref("a"),
             preparation_key="sha256:" + "a" * 64,
-            builder_image="harbor-env-seeder",
+            builder_image="harbor-env-service/seeder",
             build_job="b",
             source_archive_digest="a" * 64,
+        ),
+        "verifier": PreparedImage(
+            image_ref=digest_ref("b"),
+            preparation_key="sha256:" + "b" * 64,
+            builder_image="harbor-env-service/verifier",
+            build_job="b",
         ),
     }
 
@@ -319,12 +328,12 @@ async def test_a_compose_service_image_that_is_not_ready_is_reported_as_a_servic
 ):
     digest = await store_task(config=SEPARATE)
     await prepare(task(digest), clients, sandbox_policy)
-    pending = BuildImage(role="db", source="prebuilt", image="redis:7", status="pending")
+    pending = BuildImage(role="service/db", source="prebuilt", image="redis:7", status="pending")
     await settle(entity_store, digest, 1, "ready", images=[image("main", digest_ref("d")), pending])
     result = await prepare(task(digest), clients, sandbox_policy)
     assert result.error is not None
     assert (result.error.code, result.error.role) == ("image_unavailable", "service")
-    assert "no ready db image" in result.error.detail
+    assert "no ready service/db image" in result.error.detail
 
 
 @pytest.mark.parametrize("missing", ["task", "revision"])

@@ -32,8 +32,8 @@ class BuildImage(BaseModel):
 
     role: str = Field(
         description=(
-            "The container the image runs as, named as Harbor names it: `main`, the agent's container; a compose "
-            "service's own name; or `verifier`, for a separate verifier."
+            "The container the image runs as: `main`, the agent's container; `verifier`, for a separate verifier; "
+            "or `service/<name>`, for a compose service."
         )
     )
     source: BuildImageSource = Field(
