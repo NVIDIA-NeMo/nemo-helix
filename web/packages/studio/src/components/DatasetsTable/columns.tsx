@@ -21,6 +21,7 @@ import {
   type DatasetsTableProps,
   type ModalOpenState,
 } from '@studio/components/DatasetsTable/types';
+import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import { Cloud, Database } from 'lucide-react';
 import { type ComponentProps, type Dispatch, type SetStateAction } from 'react';
@@ -159,6 +160,17 @@ export function makeDatasetsTableColumns({
           return (
             <Text className="truncate" title={row.original?.description}>
               {row.original?.description}
+            </Text>
+          );
+        },
+      }),
+      accessor('created_by', {
+        header: 'Created By',
+        size: 150,
+        cell({ row }) {
+          return (
+            <Text className="truncate" title={row.original?.created_by ?? undefined}>
+              {row.original?.created_by ?? EMPTY_FIELD_VALUE}
             </Text>
           );
         },

@@ -5,6 +5,7 @@ import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyStat
 import { FilesetPurpose, type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { DatasetsTable } from '@studio/components/DatasetsTable';
+import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -219,7 +220,7 @@ describe('DatasetsTable', () => {
   });
 
   describe('Columns', () => {
-    it('renders the standard columns (Name, Purpose, Storage Backend, Path, Description, Created)', async () => {
+    it('renders the standard columns (Name, Purpose, Storage Backend, Path, Description, Created By, Created)', async () => {
       installListHandler();
       renderTable();
 
@@ -231,7 +232,35 @@ describe('DatasetsTable', () => {
       expect(screen.getAllByText('Storage Backend').length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('Path')).toBeInTheDocument();
       expect(screen.getByText('Description')).toBeInTheDocument();
+      expect(screen.getByText('Created By')).toBeInTheDocument();
       expect(screen.getByText('Created')).toBeInTheDocument();
+    });
+
+    it('renders created_by as returned by the API', async () => {
+      installListHandler([
+        makeDataset({ name: 'email-ds', created_by: 'someone@example.com' }),
+        makeDataset({ name: 'id-ds', created_by: 'a1b2c3d4-principal' }),
+      ]);
+      renderTable();
+
+      await screen.findByText('email-ds', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      expect(screen.getByText('someone@example.com')).toBeInTheDocument();
+      expect(screen.getByText('a1b2c3d4-principal')).toBeInTheDocument();
+    });
+
+    it('renders the empty placeholder when created_by is null or missing', async () => {
+      installListHandler([
+        makeDataset({ name: 'null-owner-ds', created_by: null }),
+        makeDataset({ name: 'missing-owner-ds' }),
+      ]);
+      renderTable();
+
+      await screen.findByText('null-owner-ds', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      expect(screen.getAllByText(EMPTY_FIELD_VALUE)).toHaveLength(2);
+      expect(screen.queryByText('null')).not.toBeInTheDocument();
+      expect(screen.queryByText('undefined')).not.toBeInTheDocument();
     });
 
     it('renders friendly purpose labels in the Purpose column cells', async () => {
