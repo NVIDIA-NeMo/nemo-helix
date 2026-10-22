@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -157,6 +158,19 @@ class TestCompile:
         step = next(iter(platform_spec["steps"]))
         assert step["executor"]["provider"] == "subprocess"
         assert step["executor"]["command"] == ["python", "-m", "nemo_agents_plugin.tasks.package"]
+
+    async def test_step_carries_platform_image_registry_and_tag(self) -> None:
+        platform_config = SimpleNamespace(image_registry="my-registry", image_tag="local")
+        with (
+            _patch_profiles([_subprocess_profile()]),
+            patch("nemo_agents_plugin.jobs.package_agent.get_platform_config", return_value=platform_config),
+        ):
+            platform_spec = await self._compile()
+
+        step = next(iter(platform_spec["steps"]))
+        env = {e["name"]: e["value"] for e in step["environment"]}
+        assert env["NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY"] == "my-registry"
+        assert env["NEMO_AGENTS_SANDBOX_IMAGE_TAG"] == "local"
 
     async def test_url_workspace_overwrites_spec_workspace(self) -> None:
         with _patch_profiles([_subprocess_profile()]):

@@ -15,6 +15,8 @@ import typer
 import yaml
 from click.exceptions import Exit as ClickExit
 from nemo_agents_plugin.container.errors import AgentConfigValidationError, ManagedFileConflictError
+from nemo_agents_plugin.container.template import render_fabric_dockerfile
+from nemo_helix_plugin.sandbox import SandboxImageFile, SandboxImageProfile
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -862,6 +864,46 @@ class TestRenderFabricDockerfile:
 
         grant = result.index("RUN chgrp sandbox /workspace && chmod g+w /workspace")
         assert result.index("chown -R agent:agent /workspace") < grant < result.index("USER agent")
+
+    def test_fabric_sandbox_profile_copies_image_files(
+        self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profile = SandboxImageProfile(
+            name="openshell",
+            files=(SandboxImageFile(image="nhx-tasks-openshell", source="/tools/launcher", dest="/tools/launcher"),),
+        )
+
+        monkeypatch.delenv("NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY", raising=False)
+        monkeypatch.setenv("NEMO_AGENTS_SANDBOX_IMAGE_TAG", "1.2")
+        with patch(
+            "nemo_agents_plugin.container.sandbox.discover_sandbox_profiles", return_value={"openshell": profile}
+        ):
+            result = render_fabric_dockerfile(fabric_agent_config, sandbox_runtime="openshell")
+
+        assert (
+            "COPY --from=nvcr.io/nvidia/nemo-helix/nhx-tasks-openshell:1.2 /tools/launcher /tools/launcher\n" in result
+        )
+
+    def test_fabric_sandbox_image_tag_from_dev_version_names_the_override(
+        self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profile = SandboxImageProfile(
+            name="openshell",
+            files=(SandboxImageFile(image="nhx-tasks-openshell", source="/tools/launcher", dest="/tools/launcher"),),
+        )
+
+        monkeypatch.delenv("NEMO_AGENTS_SANDBOX_IMAGE_TAG", raising=False)
+        with (
+            patch(
+                "nemo_agents_plugin.container.sandbox.discover_sandbox_profiles", return_value={"openshell": profile}
+            ),
+            patch(
+                "nemo_agents_plugin.container.template.get_contract_version",
+                return_value="0.8.0.post268.dev0+8ae774310",
+            ),
+            pytest.raises(ValueError, match="NEMO_AGENTS_SANDBOX_IMAGE_TAG"),
+        ):
+            render_fabric_dockerfile(fabric_agent_config, sandbox_runtime="openshell")
 
     def test_config_outside_project_context_is_rejected(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
