@@ -43,6 +43,7 @@ class Smoke:
                 "XDG_STATE_HOME": str(self.root / "state"),
                 "NHX_DATA_DIR": str(self.root / "data"),
                 "NHX_BASE_URL": "http://127.0.0.1:8080",
+                "NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX": "igw-mock-",
                 "DO_NOT_TRACK": "1",
             }
         )
@@ -223,10 +224,6 @@ class Smoke:
         self.env["SMOKE_AGENT_BASE_URL"] = "http://release-smoke-api.release-smoke.svc.cluster.local:8080"
 
     def run(self, target: str) -> None:
-        self.stage("configuration")
-        for key in ("NVIDIA_INFERENCE_URL", "NVIDIA_INFERENCE_KEY", "SMOKE_INFERENCE_MODEL"):
-            if not self.env.get(key):
-                raise RuntimeError(f"Missing CI setting: {key}")
         # Fail on incompatible published wheels before provisioning a Docker VM.
         self.stage("wheel-install")
         self.install("all" if target == "macos" else "all,nemo-agents-plugin-deepagents")
@@ -275,7 +272,7 @@ class Smoke:
                 "--name",
                 "smoke-agent",
                 "--agent-config",
-                str(self.root / "agent.yaml"),
+                str(self.root / "sample-agent/agent.yaml"),
             ]
         )
         self.stage("agent-deploy")

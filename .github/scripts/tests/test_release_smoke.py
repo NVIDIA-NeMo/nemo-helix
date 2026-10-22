@@ -48,8 +48,6 @@ def smoke(tmp_path, monkeypatch):
         "SMOKE_RESULTS": str(tmp_path / "results"),
         "RELEASE_VERSION": "0.8.0",
         "KIND_CLUSTER_NAME": "release-smoke",
-        "NVIDIA_INFERENCE_KEY": "private-test-key",
-        "NVIDIA_INFERENCE_URL": "https://private.test/v1",
     }.items():
         monkeypatch.setenv(name, value)
     return smoke_module.Smoke()

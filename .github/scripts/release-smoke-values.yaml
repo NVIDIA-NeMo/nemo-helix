@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Only local-cluster adaptations; application services use the published defaults.
+# Local-cluster adaptations and the same mock provider used by CPU agent E2E tests.
 fullnameOverride: release-smoke
 rbac:
   volcanoEnabled: false
@@ -23,6 +23,8 @@ ingress:
 httpRoute:
   enabled: false
 platformConfig:
+  inference_gateway:
+    mock_provider_prefix: igw-mock-
   agents:
     deployments:
       k8s_executor: smoke-k8s

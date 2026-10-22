@@ -24,10 +24,7 @@ test("report preserves the failing stage and redacts artifacts even without clea
   };
   try {
     fs.mkdirSync(`${directory}/logs`);
-    fs.writeFileSync(
-      `${directory}/logs/agent.log`,
-      "key123 https://private.test/v1",
-    );
+    fs.writeFileSync(`${directory}/logs/agent.log`, "registry-key github-key");
     fs.writeFileSync(
       `${directory}/result.json`,
       JSON.stringify({
@@ -41,8 +38,8 @@ test("report preserves the failing stage and redacts artifacts even without clea
       fs,
       env: {
         SMOKE_RESULTS: directory,
-        NVIDIA_INFERENCE_KEY: "key123",
-        NVIDIA_INFERENCE_URL: "https://private.test/v1",
+        NGC_REGISTRY_READ_TOKEN: "registry-key",
+        GH_TOKEN: "github-key",
       },
       steps: { smoke: { outcome: "failure" } },
     });
