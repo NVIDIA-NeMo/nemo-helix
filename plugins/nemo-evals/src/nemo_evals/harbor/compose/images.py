@@ -17,7 +17,7 @@ from nemo_evals.harbor.compose.models import ComposeBuild, ComposeError, Compose
 from nemo_evals.harbor.compose.resolve import ENVIRONMENT_DIR, path_in_environment
 from nemo_evals.harbor.compose.service_options import parse_environment
 
-_BUILD_KEYS = frozenset({"context", "dockerfile", "args", "target"})
+_BUILD_KEYS = frozenset({"context", "dockerfile", "args", "target", "no_cache"})
 
 # A build context that names a URL or a git remote instead of a directory.
 _REMOTE_CONTEXT = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://|^git@")
@@ -107,6 +107,7 @@ def parse_build_source(name: str, build: Any, problems: ComposeProblems) -> Comp
         dockerfile=dockerfile,
         args=parse_environment(build.get("args"), f"{path}.args", problems),
         target=target if isinstance(target, str) else None,
+        no_cache=build.get("no_cache") is True,
     )
 
 
