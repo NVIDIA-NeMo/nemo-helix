@@ -37,4 +37,5 @@ jobs:
     with:
       release-version: ${{ inputs.image_tag }}
       send-notifications: false
+      check-latest: true
     secrets: inherit

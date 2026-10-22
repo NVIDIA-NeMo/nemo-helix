@@ -54,12 +54,19 @@ async function finishSmoke({ env, fetchImpl }) {
     env.MACOS_RESULT,
     env.KUBERNETES_RESULT,
   ]);
+  const icons = {
+    passed: ":gitlab_ci_status_success:",
+    failed: ":gitlab_ci_status_failed:",
+    "cancelled/incomplete": ":gitlab_ci_status_canceled:",
+  };
   const text = [
-    `*Release smoke checks ${result}*`,
-    `Release: ${env.RELEASE_VERSION}`,
-    `macOS: ${env.MACOS_RESULT}`,
-    `Kubernetes: ${env.KUBERNETES_RESULT}`,
-    `:link: <${env.RUN_URL}|Smoke check results and diagnostics>`,
+    `${icons[result]} *Release smoke checks ${result}*`,
+    `Release: \`${env.RELEASE_VERSION}\``,
+    "",
+    `:macos: *macOS:* ${env.MACOS_RESULT}`,
+    `:kubernetes: *Kubernetes:* ${env.KUBERNETES_RESULT}`,
+    "",
+    `<${env.RUN_URL}|View run and diagnostics>`,
   ].join("\n");
   if (env.SEND_NOTIFICATIONS === "true") {
     if (!env.SLACK_RELEASE_WEBHOOK)

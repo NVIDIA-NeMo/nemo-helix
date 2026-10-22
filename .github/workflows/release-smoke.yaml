@@ -22,6 +22,10 @@ on:
       send-notifications:
         type: boolean
         default: false
+      check-latest:
+        description: Verify an unpinned install selects this stable release
+        type: boolean
+        default: false
     secrets:
       NGC_REGISTRY_READ_TOKEN:
         required: false
@@ -71,6 +75,7 @@ jobs:
     env:
       WHEEL_VERSION: ${{ needs.prepare.outputs.wheel_version }}
       WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
+      CHECK_LATEST: ${{ inputs.check-latest || false }}
       DO_NOT_TRACK: "1"
     steps:
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -85,7 +90,16 @@ jobs:
           UV_TOOL_DIR: ${{ runner.temp }}/smoke-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/smoke-bin
         run: |
-          uv tool install --python "$PYTHON_VERSION" --index "$WHEEL_INDEX" "nemo-helix[all]==$WHEEL_VERSION"
+          requirement="nemo-helix[all]==$WHEEL_VERSION"
+          if [[ "$CHECK_LATEST" == true ]]; then
+            requirement="nemo-helix[all]"
+          fi
+          uv tool install --python "$PYTHON_VERSION" --index "$WHEEL_INDEX" "$requirement"
+          installed_version=$("$UV_TOOL_DIR/nemo-helix/bin/python" -c 'from importlib.metadata import version; print(version("nemo-helix"))')
+          if [[ "$installed_version" != "$WHEEL_VERSION" ]]; then
+            echo "::error::Expected nemo-helix $WHEEL_VERSION, installed $installed_version"
+            exit 1
+          fi
           "$UV_TOOL_BIN_DIR/nemo" --version
 
   kubernetes:
