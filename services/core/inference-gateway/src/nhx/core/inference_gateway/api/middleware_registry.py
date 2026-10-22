@@ -38,7 +38,7 @@ from nemo_helix_plugin.inference_middleware_models import (
     VirtualModel as PluginVirtualModel,
 )
 from nhx.common.config import get_platform_config
-from nhx.common.entities.utils import parse_entity_ref
+from nhx.common.entities.utils import parse_entity_ref, parse_model_entity_ref
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
 from nhx.core.inference_gateway.api.provider_request import render_auth_header
 from nhx.core.inference_gateway.api.typed_request import parse_typed_request
@@ -71,7 +71,7 @@ class InferenceMiddlewareCacheAccessorImpl:
     def get_model_providers_for_model(self, model_entity_id: str) -> list:
         """Return all ModelProviders currently serving ``model_entity_id`` (``"ws/name"``)."""
         try:
-            ref = parse_entity_ref(model_entity_id)
+            ref = parse_model_entity_ref(model_entity_id)
         except ValueError:
             return []
         entity_info = self._model_cache.get_from_model_entity(ref.workspace, ref.name)
@@ -90,7 +90,7 @@ class InferenceMiddlewareCacheAccessorImpl:
         models service.
         """
         try:
-            ref = parse_entity_ref(model_entity_id)
+            ref = parse_model_entity_ref(model_entity_id)
         except ValueError:
             return None
         return self._model_cache.get_from_model_entity(ref.workspace, ref.name)
@@ -143,7 +143,7 @@ class InferenceMiddlewareCacheAccessorImpl:
             KeyError: If ``model_entity_id`` is not in the ModelCache.
         """
         try:
-            ref = parse_entity_ref(model_entity_id)
+            ref = parse_model_entity_ref(model_entity_id)
         except ValueError as exc:
             raise KeyError(f"Invalid model_entity_id format: {model_entity_id!r}") from exc
 
@@ -185,7 +185,7 @@ class InferenceMiddlewareCacheAccessorImpl:
             KeyError: If either ID is invalid or missing from the caches.
         """
         try:
-            ref = parse_entity_ref(model_entity_id)
+            ref = parse_model_entity_ref(model_entity_id)
         except ValueError as exc:
             raise KeyError(f"Invalid model_entity_id format: {model_entity_id!r}") from exc
 
