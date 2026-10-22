@@ -14,7 +14,7 @@ import {
   Flex,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Check } from 'lucide-react';
+import { Check } from '@nvidia/react-gui-icons/icons';
 import { memo, useState, type FC } from 'react';
 
 interface ModelDropdownItemProps {
@@ -90,7 +90,7 @@ const AdapterItem: FC<{
         <Flex className="w-full" align="center" justify="between" gap="density-md">
           <Flex align="center" gap="density-sm" className="min-w-0">
             {isSelected && (
-              <Check size={14} className="shrink-0" data-testid="model-dropdown-selected-check" />
+              <Check size="14" className="shrink-0" data-testid="model-dropdown-selected-check" />
             )}
             <Text className="truncate">{adapter.name}</Text>
           </Flex>
@@ -163,7 +163,7 @@ const ModelDropdownItemImpl: FC<ModelDropdownItemProps> = ({
               <Flex align="center" gap="density-sm">
                 {isBaseSelected && (
                   <Check
-                    size={14}
+                    size="14"
                     className="shrink-0"
                     data-testid="model-dropdown-selected-check"
                   />

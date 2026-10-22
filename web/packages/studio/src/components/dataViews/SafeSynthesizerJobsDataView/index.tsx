@@ -32,6 +32,7 @@ import {
   GenerateJobsSortField,
 } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Banner, Button, Stack } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { isCancellableJob } from '@studio/components/dataViews/SafeSynthesizerJobsDataView/utils';
 import { FilesetFilePreviewLink } from '@studio/components/SafeSynthesizerFilesetPreview/FilesetFilePreviewLink';
@@ -43,7 +44,6 @@ import {
   getGenerateJobRoute,
 } from '@studio/routes/utils';
 import { keepPreviousData, useQueries, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 

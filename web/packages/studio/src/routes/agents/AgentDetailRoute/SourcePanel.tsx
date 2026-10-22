@@ -6,6 +6,7 @@ import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
+import { Refresh } from '@nvidia/react-gui-icons/icons';
 import {
   agentSpecSource,
   useAgentSpecFileset,
@@ -13,7 +14,6 @@ import {
 } from '@studio/api/agents/useAgentSpecFileset';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
-import { RefreshCw } from 'lucide-react';
 import { type FC, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router';
 
@@ -88,7 +88,7 @@ export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
               onClick={onRefresh}
               disabled={isPending}
             >
-              <RefreshCw size={14} aria-hidden />
+              <Refresh size="14" aria-hidden />
               {isPending ? 'Updating…' : 'Update to latest'}
             </Button>
           ) : undefined
@@ -107,7 +107,7 @@ export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
               onClick={() => void refetch()}
               disabled={isFetching}
             >
-              <RefreshCw size={14} aria-hidden />
+              <Refresh size="14" aria-hidden />
               {isFetching ? 'Retrying…' : 'Retry'}
             </Button>
           </Stack>

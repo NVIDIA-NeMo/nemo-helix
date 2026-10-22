@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { truncateText } from '@nemo/common/src/utils/formatters';
-import { ExternalLink } from 'lucide-react';
+import { OpenExternal } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 import { Link } from 'react-router';
 
@@ -30,7 +30,7 @@ export const DatasetFileLink: FC<DatasetFileLinkProps> = ({ label, url, truncate
       className="inline-flex items-center gap-2 text-body-semibold-sm"
     >
       {displayLabel}
-      <ExternalLink />
+      <OpenExternal />
     </Link>
   );
 };

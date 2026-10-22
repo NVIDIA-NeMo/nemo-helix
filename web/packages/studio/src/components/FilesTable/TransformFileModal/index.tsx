@@ -6,6 +6,7 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Banner, Divider, Flex, Stack } from '@nvidia/foundations-react-core';
+import { ScmBranch } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import {
   isTransformableFilePath,
@@ -19,7 +20,6 @@ import { useTransformMapping } from '@studio/components/transform/useTransformMa
 import { ValueWithLabel } from '@studio/components/ValueWithLabel';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { getContentColumns } from '@studio/util/files';
-import { GitBranch } from 'lucide-react';
 import { useMemo, useState, type ComponentProps, type FC } from 'react';
 
 interface Props extends Pick<ComponentProps<typeof FormModal>, 'open' | 'onClose'> {
@@ -91,7 +91,7 @@ export const TransformFileModal: FC<Props> = ({ open, onClose, filepath, dataset
         open={open}
         title={
           <Flex gap="density-md" align="center">
-            <GitBranch />
+            <ScmBranch />
             Transform
           </Flex>
         }

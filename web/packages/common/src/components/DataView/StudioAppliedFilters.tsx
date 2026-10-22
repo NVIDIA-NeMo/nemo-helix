@@ -16,7 +16,7 @@ import {
 } from '@nemo/common/src/components/DataView/internal';
 import { formatDateRange } from '@nemo/common/src/utils/formatDateRange';
 import { Button, Flex, Tag } from '@nvidia/foundations-react-core';
-import { X } from 'lucide-react';
+import { Close } from '@nvidia/react-gui-icons/icons';
 
 type DataViewColumn = TanstackTable.Column<unknown>;
 
@@ -91,7 +91,7 @@ function FilterTag({ column }: { column: DataViewColumn }) {
     >
       <b>{label}: </b>
       {displayValue}
-      <X width={12} height={12} />
+      <Close width={12} height={12} />
     </Tag>
   );
 }
@@ -118,7 +118,7 @@ export function StudioAppliedFilters() {
         kind="tertiary"
       >
         <span className="hide-mobile">Clear Filters</span>
-        <X />
+        <Close />
       </Button>
     </Flex>
   );

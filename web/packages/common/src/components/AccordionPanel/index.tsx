@@ -8,7 +8,7 @@ import {
   PanelIcon,
   PanelRoot,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp } from '@nvidia/react-gui-icons/icons';
 import {
   type ComponentProps,
   type FC,

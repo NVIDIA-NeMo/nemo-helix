@@ -17,7 +17,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Trash } from 'lucide-react';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { FC, useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';

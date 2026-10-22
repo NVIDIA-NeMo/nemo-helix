@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, TableToolbar, TextInput } from '@nvidia/foundations-react-core';
+import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import { BulkActionsBar } from '@studio/components/filesets/FilesetFileExplorer/BulkActionsBar';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
-import { Search } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface FilesetFileExplorerToolbarProps {
@@ -69,8 +69,8 @@ export const FilesetFileExplorerToolbar: FC<FilesetFileExplorerToolbarProps> = (
       <TextInput
         value={searchQuery}
         onValueChange={(value) => handleSearchQueryChange(value, clearSelectedItems)}
-        placeholder="Search"
-        slotStart={<Search />}
+        placeholder="MagnifyingGlass"
+        slotStart={<MagnifyingGlass />}
         dismissible
         data-testid="dataset-details-search-input"
         className="min-w-0 flex-1"

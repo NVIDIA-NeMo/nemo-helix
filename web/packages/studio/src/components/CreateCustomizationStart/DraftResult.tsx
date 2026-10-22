@@ -12,11 +12,11 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { IconDocument, Pencil } from '@nvidia/react-gui-icons/icons';
 import type { DraftSetting } from '@studio/components/CreateCustomizationStart/aiDraft';
 import type { DraftResultProps } from '@studio/components/CreateCustomizationStart/types';
 import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';
 import { getFormattedTrainingType } from '@studio/util/customizations';
-import { FileJson, Pencil } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 const PICK_IN_FORM = 'Pick in the form';
@@ -104,11 +104,11 @@ export const DraftResult: FC<DraftResultProps> = ({ summary, config, onEdit }) =
         </Stack>
         <Flex gap="density-sm" className="shrink-0">
           <Button type="button" kind="tertiary" size="small" onClick={() => setIsConfigOpen(true)}>
-            <FileJson size={14} aria-hidden />
+            <IconDocument size="14" aria-hidden />
             View config
           </Button>
           <Button type="button" kind="secondary" size="small" onClick={onEdit}>
-            <Pencil size={14} aria-hidden />
+            <Pencil size="14" aria-hidden />
             Edit
           </Button>
         </Flex>

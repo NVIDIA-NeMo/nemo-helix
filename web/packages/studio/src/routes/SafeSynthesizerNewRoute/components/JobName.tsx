@@ -3,8 +3,8 @@
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { Stack } from '@nvidia/foundations-react-core';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
-import { Info } from 'lucide-react';
 import { useFormContext } from 'react-hook-form';
 
 export const JobName = () => {
@@ -20,7 +20,7 @@ export const JobName = () => {
         formFieldProps={{
           slotHelp: (
             <Stack direction="row" gap="density-sm" align="center">
-              <Info />
+              <InfoCircle />
               You can rename your job at any time
             </Stack>
           ),

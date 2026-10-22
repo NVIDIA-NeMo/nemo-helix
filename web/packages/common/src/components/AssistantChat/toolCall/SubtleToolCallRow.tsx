@@ -5,7 +5,7 @@ import { CODE_BLOCK_SURFACE_CLASS } from '@nemo/common/src/components/AssistantC
 import { summarizeRepeatedSubtleToolActions } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
 import type { SubtleToolAction } from '@nemo/common/src/components/AssistantChat/toolCall/types';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, Copy } from 'lucide-react';
+import { ChevronRight, CopyGeneric } from '@nvidia/react-gui-icons/icons';
 
 interface SubtleToolCallRowProps {
   readonly actions: readonly SubtleToolAction[];
@@ -36,13 +36,13 @@ const InvocationPanel = ({
   >
     <Stack className="relative w-full min-w-0 max-w-full">
       <button
-        aria-label={`Copy invocation${invocationCount === 1 ? '' : ` ${invocationIndex + 1}`}`}
+        aria-label={`CopyGeneric invocation${invocationCount === 1 ? '' : ` ${invocationIndex + 1}`}`}
         className="absolute right-density-xs top-density-xs z-10 rounded p-0.5 hover:bg-surface-sunken"
         onClick={() => copyInvocation(invocation)}
-        title="Copy invocation"
+        title="CopyGeneric invocation"
         type="button"
       >
-        <Copy aria-hidden className="size-3.5" />
+        <CopyGeneric aria-hidden className="size-3.5" />
       </button>
       <pre
         className={`max-h-72 w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-words rounded ${CODE_BLOCK_SURFACE_CLASS} p-density-sm pr-density-xl text-xs leading-relaxed text-secondary`}

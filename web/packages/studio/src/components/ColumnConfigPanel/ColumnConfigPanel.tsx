@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
+import { Trash, Close } from '@nvidia/react-gui-icons/icons';
 import { ICON_COLOR_CLASS } from '@studio/components/AddColumnPalette/constants';
 import { FieldControl } from '@studio/components/ColumnConfigPanel/FieldControl';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
@@ -10,7 +11,6 @@ import {
   getColumnFields,
   validateColumnName,
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
-import { Trash2, X } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface ColumnConfigPanelProps {
@@ -57,7 +57,7 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({
       >
         <Flex align="center" gap="density-sm" className="min-w-0">
           <CardIconBadge>
-            <Icon size={16} className={ICON_COLOR_CLASS[color]} aria-hidden />
+            <Icon size="16" className={ICON_COLOR_CLASS[color]} aria-hidden />
           </CardIconBadge>
           <Stack gap="density-xxs" className="min-w-0">
             <Text kind="body/bold/md" className="truncate">
@@ -75,7 +75,7 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({
           aria-label="Close column config"
           onClick={onClose}
         >
-          <X size={16} aria-hidden />
+          <Close size="16" aria-hidden />
         </Button>
       </Flex>
 
@@ -107,7 +107,7 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({
 
       <Flex align="center" justify="start" className="shrink-0 border-t border-base p-density-lg">
         <Button kind="tertiary" color="danger" size="small" onClick={onRemove}>
-          <Trash2 size={16} aria-hidden />
+          <Trash size="16" aria-hidden />
           Remove column
         </Button>
       </Flex>

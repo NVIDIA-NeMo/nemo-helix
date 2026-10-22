@@ -18,7 +18,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { CircleAlert } from 'lucide-react';
+import { IconError } from '@nvidia/react-gui-icons/icons';
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef } from 'react';
 
 type FileRow = {
@@ -195,7 +195,7 @@ export const SimpleFilesTable = () => {
       </RadioGroupRoot>
       {disabledFilesMessage ? (
         <Flex gap="density-sm" align="center">
-          <CircleAlert className="text-feedback-warning shrink-0" />
+          <IconError className="text-feedback-warning shrink-0" />
           <Text kind="label/regular/sm" className="text-feedback-warning">
             {disabledFilesMessage}
           </Text>

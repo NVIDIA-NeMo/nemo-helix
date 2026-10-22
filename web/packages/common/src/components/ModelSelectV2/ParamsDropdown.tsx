@@ -15,7 +15,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, Sliders } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 export interface ParamsDropdownProps {
@@ -45,9 +45,9 @@ export const ParamsDropdown: FC<ParamsDropdownProps> = ({
         className="shrink-0"
       >
         <Flex align="center" gap="density-sm">
-          <SlidersHorizontal size={16} />
+          <Sliders size="16" />
           <Text>Params</Text>
-          <ChevronDown size={16} />
+          <ChevronDown size="16" />
         </Flex>
       </Button>
     </DropdownTrigger>

@@ -5,9 +5,9 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
 import { BulkDeleteModal as GenericBulkDeleteModal } from '@studio/components/BulkDeleteModal';
-import { Trash } from 'lucide-react';
 import {
   cloneElement,
   isValidElement,

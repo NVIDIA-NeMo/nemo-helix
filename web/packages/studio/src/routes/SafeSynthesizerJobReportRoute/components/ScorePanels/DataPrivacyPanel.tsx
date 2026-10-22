@@ -15,6 +15,7 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { ScoreItem } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreItem';
 import { ScoreTable } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreTable';
 import { TitledDial } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/TitledDial';
@@ -24,7 +25,6 @@ import {
   isPassingGrade,
 } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
 import { tooltipClassName } from '@studio/styles/common';
-import { Info } from 'lucide-react';
 import { FC } from 'react';
 
 interface DataPrivacyPanelProps {
@@ -112,7 +112,7 @@ export const DataPrivacyPanel: FC<DataPrivacyPanelProps> = ({
                         side="bottom"
                         className={tooltipClassName}
                       >
-                        <Info className="inline shrink-0" />
+                        <InfoCircle className="inline shrink-0" />
                       </Tooltip>
                     </Flex>
                   </TableDataCell>

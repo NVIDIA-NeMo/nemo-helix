@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Text } from '@nvidia/foundations-react-core';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown } from '@nvidia/react-gui-icons/icons';
 import { type ReactNode } from 'react';
 
 interface FloatingPanelProps {

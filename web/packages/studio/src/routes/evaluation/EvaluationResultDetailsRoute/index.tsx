@@ -16,6 +16,7 @@ import {
   Spinner,
   Stack,
 } from '@nvidia/foundations-react-core';
+import { Beaker, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { EvalAggregateScoresTable } from '@studio/components/evaluation/EvalAggregateScoresTable';
 import { DatasetEvalRowResultsPanel } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useDatasetEvalResults } from '@studio/components/evaluation/Jobs/datasetEval/useDatasetEvalResults';
@@ -27,7 +28,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { FlaskConical, ScrollText } from 'lucide-react';
 import { FC } from 'react';
 
 const isTerminal = (status?: string) =>
@@ -122,12 +122,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
 
             <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
               <DetailsPanel evaluationJob={job} error={!!error} />
-              <Panel
-                slotHeading="Scores"
-                slotIcon={<FlaskConical />}
-                elevation="high"
-                density="compact"
-              >
+              <Panel slotHeading="Scores" slotIcon={<Beaker />} elevation="high" density="compact">
                 {isPending && (
                   <Block className="text-subtle">
                     Scores are computed once the job reaches a terminal state.
@@ -170,7 +165,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
               <Block className="text-subtle">Row results could not be loaded.</Block>
             )}
 
-            <AccordionPanel slotHeading="Logs" slotIcon={<ScrollText />}>
+            <AccordionPanel slotHeading="Logs" slotIcon={<IconDocument />}>
               <StatusLogsContent
                 workspace={workspace}
                 jobName={id}

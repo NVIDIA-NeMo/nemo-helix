@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Tag, Text } from '@nvidia/foundations-react-core';
-import { X } from 'lucide-react';
+import { Close } from '@nvidia/react-gui-icons/icons';
 import React, { ComponentProps } from 'react';
 
 import { OverflowGroup } from '../components/OverflowGroup';
@@ -35,7 +35,7 @@ export const renderMultipleSelectedValues = ({
       {values.map((value) => (
         <Tag key={value} color="gray" density="compact" {...tagProps}>
           {value}
-          <X className="text-secondary" />
+          <Close className="text-secondary" />
         </Tag>
       ))}
     </OverflowGroupTyped>

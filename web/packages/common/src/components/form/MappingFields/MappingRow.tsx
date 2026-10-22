@@ -17,8 +17,8 @@ import type {
   KeyValueTextInputPassthrough,
 } from '@nemo/common/src/components/form/MappingFields/types';
 import { Button, Flex } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
-import { Trash } from 'lucide-react';
 import { memo } from 'react';
 import { Control, FieldValues } from 'react-hook-form';
 

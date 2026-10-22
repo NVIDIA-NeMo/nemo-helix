@@ -9,11 +9,11 @@ import {
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { formatJsonlSampleCellValue } from '@nemo/common/src/utils/parseJsonlObjectSample';
 import { Banner, Button, Flex, Modal, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import { Stop } from '@nvidia/react-gui-icons/icons';
 import {
   orderPreviewColumns,
   type PreviewRecord,
 } from '@studio/components/NewDataDesignerJobForm/previewApi';
-import { CircleStop } from 'lucide-react';
 import {
   type ComponentProps,
   type FC,
@@ -173,7 +173,7 @@ export const PreviewResults: FC<PreviewResultsProps> = memo(function PreviewResu
             </Text>
           ) : null}
           <Button kind="tertiary" color="danger" onClick={onStop}>
-            <CircleStop size={16} aria-hidden />
+            <Stop size="16" aria-hidden />
             Stop
           </Button>
         </Stack>

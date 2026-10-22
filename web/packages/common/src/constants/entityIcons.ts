@@ -1,32 +1,31 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
 import {
-  Bot,
-  Boxes,
+  Robot,
+  CubeStack,
   ChartBar,
-  Database,
-  DatabaseCheck,
-  FileStack,
-  FlaskConical,
+  Db,
+  Layers,
+  Beaker,
   FolderOpen,
-  Form,
-  GitCompare,
+  ListCheckmark,
+  ScmCompare,
   Lightbulb,
-  ListChecks,
-  ListTree,
-  LockKeyhole,
-  Logs,
-  Metronome,
+  ChartTree,
+  LockClosed,
+  Pulse,
+  Ekg,
   Radar,
   Rocket,
-  ShieldCheck,
-  SlidersHorizontal,
-  UserPen,
-  UsersRound,
-  Waypoints,
-  type LucideIcon,
-} from 'lucide-react';
+  Shield,
+  Sliders,
+  Profile,
+  ProfileGroup,
+  Network,
+} from '@nvidia/react-gui-icons/icons';
+import type { FC } from 'react';
 
 /**
  * The single canonical glyph for every entity Studio represents.
@@ -49,52 +48,52 @@ import {
  */
 export const ENTITY_ICONS = {
   // Agents
-  agents: Bot,
+  agents: Robot,
   // Monitor runs are agent telemetry, so they share the span glyph.
-  agentMonitorRuns: Logs,
+  agentMonitorRuns: Pulse,
   // Every run that tunes an agent — parameter sweeps, insight loops.
-  agentOptimizations: SlidersHorizontal,
+  agentOptimizations: Sliders,
 
   // Models
-  baseModels: Boxes,
-  customModels: Metronome,
+  baseModels: CubeStack,
+  customModels: Ekg,
   deployments: Rocket,
-  virtualModels: Waypoints,
+  virtualModels: Network,
   inferenceProviders: Radar,
 
   // Data
-  datasets: Database,
-  filesets: FileStack,
+  datasets: Db,
+  filesets: Layers,
   filesetFiles: FolderOpen,
-  anonymizerJobs: UserPen,
-  dataDesignerJobs: Form,
-  safeSynthesizerJobs: DatabaseCheck,
+  anonymizerJobs: Profile,
+  dataDesignerJobs: ListCheckmark,
+  safeSynthesizerJobs: Db,
 
   // Governance. A config and its tests are one thing to the user, so the tests
   // take the config's glyph rather than a second shield.
-  guardrails: ShieldCheck,
-  guardrailChecks: ShieldCheck,
+  guardrails: Shield,
+  guardrailChecks: Shield,
 
   // Evaluation
   evaluationResults: ChartBar,
   agentEvaluations: ChartBar,
   evaluationSessions: ChartBar,
-  experiments: FlaskConical,
-  insightExperiments: FlaskConical,
-  evalComparison: GitCompare,
+  experiments: Beaker,
+  insightExperiments: Beaker,
+  evalComparison: ScmCompare,
 
   // Observability
   optimizerInsights: Lightbulb,
-  telemetryTraces: ListTree,
-  insightTraces: ListTree,
-  telemetrySpans: Logs,
+  telemetryTraces: ChartTree,
+  insightTraces: ChartTree,
+  telemetrySpans: Pulse,
 
   // System
-  jobs: ListChecks,
-  recentJobs: ListChecks,
-  secrets: LockKeyhole,
-  members: UsersRound,
-} as const satisfies Record<string, LucideIcon>;
+  jobs: ListCheckmark,
+  recentJobs: ListCheckmark,
+  secrets: LockClosed,
+  members: ProfileGroup,
+} as const satisfies Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>>;
 
 /** Every entity with a canonical icon. A superset of the empty-state registry. */
 export type EntityKey = keyof typeof ENTITY_ICONS;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Label, Stack, Text } from '@nvidia/foundations-react-core';
-import { TriangleAlert } from 'lucide-react';
+import { Warning } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 interface EmptyProps {
@@ -16,7 +16,7 @@ interface EmptyProps {
 export const Empty: FC<EmptyProps> = ({
   title = 'No Content Available',
   description = 'There is currently no content to display.',
-  icon = <TriangleAlert className="size-12" />,
+  icon = <Warning className="size-12" />,
   slotAction,
 }) => {
   return (

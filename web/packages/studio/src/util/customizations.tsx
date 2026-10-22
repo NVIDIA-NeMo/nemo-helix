@@ -7,6 +7,7 @@ import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
+import { Gpu } from '@nvidia/react-gui-icons/icons';
 import type {
   CustomizationMetricValue,
   CustomizationStatusDetailsWithMetrics,
@@ -22,7 +23,7 @@ import {
 import { formatElapsedTime } from '@studio/util/date';
 import { formatStepDuration, GRPO_METRIC, medianValue, readSeries } from '@studio/util/grpoMetrics';
 import { getTextWithCount } from '@studio/util/strings';
-import { Circle /* TODO: replace with a proper icon (was Circle) */, Gpu } from 'lucide-react';
+import { Circle } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export { formatFinetuningType };

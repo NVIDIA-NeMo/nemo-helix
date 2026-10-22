@@ -19,8 +19,8 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nvidia/react-gui-icons/icons';
 import classNames from 'classnames';
-import { ArrowUp, Copy, Download, WrapText } from 'lucide-react';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 
 const DEFAULT_ROW_COUNT = 30;
@@ -181,7 +181,7 @@ export const LogViewer: FC<LogViewerProps> = ({
                 aria-pressed={wrapLines}
                 onClick={() => setWrapLines((prev) => !prev)}
               >
-                <WrapText />
+                <Paragraph />
               </Button>
               {downloadFilename && (
                 <Button
@@ -198,11 +198,11 @@ export const LogViewer: FC<LogViewerProps> = ({
           </Flex>
           <CodeSnippetCopyButton
             value={logText}
-            title="Copy logs"
-            aria-label="Copy logs"
+            title="CopyGeneric logs"
+            aria-label="CopyGeneric logs"
             onClick={() => notify('Copied to clipboard!', 'success', { durationMs: 3000 })}
           >
-            <Copy />
+            <CopyGeneric />
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
         <CodeSnippetCode

@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { PageHeader, Stack, StatusMessage } from '@nvidia/foundations-react-core';
+import { IconError } from '@nvidia/react-gui-icons/icons';
 import { NoSpanSelected } from '@studio/components/IntakeDetail/NoSpanSelected';
 import { TraceDetailLayout } from '@studio/components/IntakeDetail/TraceDetailLayout';
 import { TraceSpanTree } from '@studio/components/IntakeDetail/TraceDetailSpanTree';
@@ -26,7 +27,6 @@ import {
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { getIntakeSessionRoute, getIntakeTracesRoute } from '@studio/routes/utils';
 import { getTraceDisplayName, type SessionTrajectory } from '@studio/util/intakeTelemetry';
-import { CircleAlert } from 'lucide-react';
 import { type FC, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -167,7 +167,7 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
       <StatusMessage
         className="mx-auto mt-density-2xl"
         size="medium"
-        slotMedia={<CircleAlert width={65} height={65} />}
+        slotMedia={<IconError width={65} height={65} />}
         slotHeading="Error loading session"
         slotSubheading={error.message}
       />

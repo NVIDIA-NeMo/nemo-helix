@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ActionsMenu, type ActionMenuItem } from '@nemo/common/src/components/ActionsMenu';
-import { EllipsisVertical } from 'lucide-react';
+import { MoreVert } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 export type QuickActionItem = ActionMenuItem;
@@ -17,7 +17,7 @@ interface QuickActionsMenuProps {
 export const QuickActionsMenuRoot: FC<QuickActionsMenuProps> = ({ actions }) => (
   <ActionsMenu
     actions={actions}
-    icon={<EllipsisVertical />}
+    icon={<MoreVert />}
     ariaLabel="Open quick actions menu"
     data-testid="quick-actions-menu"
   />

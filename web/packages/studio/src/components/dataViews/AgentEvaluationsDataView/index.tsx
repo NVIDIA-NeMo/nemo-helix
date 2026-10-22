@@ -31,6 +31,7 @@ import {
   AgentEvaluateJobsSortField,
 } from '@nemo/sdk/generated/evals/schema';
 import { Button, Flex } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { agentNameForJob, evalConfigName } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
@@ -40,7 +41,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentEvaluationDetailRoute, getFilesetRoute } from '@studio/routes/utils';
 import { getTextWithCount } from '@studio/util/strings';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 

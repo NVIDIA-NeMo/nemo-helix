@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
-import { CircleCheck, RefreshCw } from 'lucide-react';
+import { CheckCircle, Refresh } from '@nvidia/react-gui-icons/icons';
 import type { JSX } from 'react';
 
 /**
@@ -21,17 +21,17 @@ export function RefreshButton({
 } & Omit<ButtonProps, 'onClick'>): JSX.Element {
   return (
     <Button
-      aria-label={isFetching ? 'Loading data' : 'RefreshCw data'}
+      aria-label={isFetching ? 'Loading data' : 'Refresh data'}
       disabled={disabled || isFetching}
       kind="tertiary"
       {...props}
     >
       {isFetching ? (
-        <CircleCheck className="animate-spin" variant="fill" />
+        <CheckCircle className="animate-spin" variant="fill" />
       ) : (
-        <RefreshCw variant="fill" />
+        <Refresh variant="fill" />
       )}
-      <span className="hide-mobile">RefreshCw</span>
+      <span className="hide-mobile">Refresh</span>
     </Button>
   );
 }

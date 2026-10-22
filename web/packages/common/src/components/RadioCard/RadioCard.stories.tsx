@@ -11,8 +11,8 @@
  */
 import { RadioCard } from '@nemo/common/src/components/RadioCard/index';
 import { Flex, RadioGroupRoot, Stack } from '@nvidia/foundations-react-core';
+import { CubeStack } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
-import { Boxes } from 'lucide-react';
 import { useState } from 'react';
 
 const meta: Meta<typeof RadioCard> = {
@@ -41,13 +41,13 @@ export const Default: Story = {
             value="option-1"
             label="Radio Label"
             description="Lorem ipsum dolor sit amet."
-            icon={<Boxes width={24} height={24} />}
+            icon={<CubeStack width={24} height={24} />}
           />
           <RadioCard
             value="option-2"
             label="Second option"
             description="Another choice with a short description."
-            icon={<Boxes width={24} height={24} />}
+            icon={<CubeStack width={24} height={24} />}
           />
         </Stack>
       </RadioGroupRoot>
@@ -93,7 +93,7 @@ export const LabelSideLeft: Story = {
             value="option-1"
             label="Radio on the right"
             description="The radio control appears on the right when labelSide is left."
-            icon={<Boxes width={24} height={24} />}
+            icon={<CubeStack width={24} height={24} />}
             labelSide="left"
           />
           <RadioCard
@@ -161,7 +161,7 @@ export const RichDescription: Story = {
                 and <strong>bold text</strong> for emphasis.
               </>
             }
-            icon={<Boxes width={24} height={24} />}
+            icon={<CubeStack width={24} height={24} />}
           />
           <RadioCard
             value="option-2"

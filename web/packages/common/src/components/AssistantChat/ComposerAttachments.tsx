@@ -3,7 +3,7 @@
 
 import { type Attachment, AttachmentPrimitive, ComposerPrimitive } from '@assistant-ui/react';
 import { Flex, Tooltip } from '@nvidia/foundations-react-core';
-import { Image as ImageIcon, X } from 'lucide-react';
+import { IconImage as ImageIcon, Close } from '@nvidia/react-gui-icons/icons';
 import { useEffect, useState } from 'react';
 
 const useImagePreviewUrl = (file?: File): string | undefined => {
@@ -39,7 +39,7 @@ const ComposerAttachmentChip = ({ attachment }: { attachment: Attachment }) => {
           />
         ) : (
           <div className="flex size-full items-center justify-center text-fg-subtle">
-            <ImageIcon size={18} />
+            <ImageIcon size="18" />
           </div>
         )}
         <AttachmentPrimitive.Remove asChild>
@@ -48,7 +48,7 @@ const ComposerAttachmentChip = ({ attachment }: { attachment: Attachment }) => {
             aria-label={`Remove ${attachment.name}`}
             className="absolute right-0.5 top-0.5 flex size-5 cursor-pointer items-center justify-center rounded-full bg-[rgb(0_0_0/0.55)] text-white opacity-0 outline-none transition-opacity hover:bg-[rgb(0_0_0/0.75)] focus-visible:opacity-100 group-hover/attachment:opacity-100 [@media(hover:none)]:opacity-100"
           >
-            <X size={12} />
+            <Close size="12" />
           </button>
         </AttachmentPrimitive.Remove>
       </AttachmentPrimitive.Root>

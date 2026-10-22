@@ -5,8 +5,8 @@ import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/in
 import type { IntentionalAny } from '@nemo/common/src/components/DataView/internal/types';
 import { downloadFile, generateCSV } from '@nemo/common/src/components/DataView/internal/utils/csv';
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
+import { Download } from '@nvidia/react-gui-icons/icons';
 import type { Column, Row, Table } from '@tanstack/react-table';
-import { Download } from 'lucide-react';
 import { Fragment, type JSX } from 'react';
 
 export interface DownloadButtonFileContent {

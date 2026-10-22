@@ -14,7 +14,7 @@ import {
   Spinner,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Download as DownloadIcon, EllipsisVertical } from 'lucide-react';
+import { Download as DownloadIcon, MoreVert } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode } from 'react';
 
 interface CSVPreviewProps {
@@ -84,7 +84,7 @@ export const FilePreview: FC<CSVPreviewProps> = ({
               aria-label="Open file actions menu"
               className="absolute top-4 right-19"
             >
-              <EllipsisVertical />
+              <MoreVert />
             </Button>
           </DropdownTrigger>
           <DropdownContent align="end">

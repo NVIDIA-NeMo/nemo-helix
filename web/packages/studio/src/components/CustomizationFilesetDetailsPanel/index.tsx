@@ -16,9 +16,9 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { Db, Eye } from '@nvidia/react-gui-icons/icons';
 import { CUSTOMIZATION_TYPE_BADGES, CustomizationFileType } from '@studio/constants/customization';
 import { parseFilesetUri, useCustomizationFilesAsRows } from '@studio/hooks/useCustomizationFiles';
-import { Database, Eye } from 'lucide-react';
 import { ComponentProps, useState } from 'react';
 
 type Props = {
@@ -96,7 +96,7 @@ export const CustomizationFilesetDetailsPanel = ({ filesetUri }: Props) => {
   ];
   return (
     <>
-      <Panel elevation="high" slotHeading="Dataset" slotIcon={<Database />}>
+      <Panel elevation="high" slotHeading="Dataset" slotIcon={<Db />}>
         <Stack gap="density-lg">
           <Grid cols={{ sm: 2 }} gap="density-lg">
             <KVPair label="Name" value={filesetUri} orientation="vertical" />

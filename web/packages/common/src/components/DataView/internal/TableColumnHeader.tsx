@@ -8,9 +8,9 @@ import type { IntentionalAny } from '@nemo/common/src/components/DataView/intern
 import { getHeaderId } from '@nemo/common/src/components/DataView/internal/utils/header-utils';
 import { Button, TableHeaderCell } from '@nvidia/foundations-react-core';
 import { childrenToText } from '@nvidia/foundations-react-core/lib';
+import { ArrowUp, ArrowUpDown, GripEdgeVertical } from '@nvidia/react-gui-icons/icons';
 import { flexRender, type Header, type SortDirection } from '@tanstack/react-table';
 import classnames from 'classnames';
-import { ArrowUp, ArrowUpDown, GripVertical } from 'lucide-react';
 import type { ComponentProps, JSX, ReactNode, Ref } from 'react';
 
 interface DragProps {
@@ -100,7 +100,7 @@ function TableHeaderControlCell({
       {...dragProps.attributes}
       {...dragProps.listeners}
     >
-      <GripVertical size={14} />
+      <GripEdgeVertical size="14" />
     </button>
   ) : null;
 

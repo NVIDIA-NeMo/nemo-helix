@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { featureFlags } from '@studio/constants/featureFlags';
 import { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 import { PREVIEW } from '@studio/constants/featureFlags/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { Info } from 'lucide-react';
 import { FC } from 'react';
 
 interface FeatureFlagBadgeProps {
@@ -29,7 +29,7 @@ export const FeatureFlagBadge: FC<FeatureFlagBadgeProps> = ({ flag }) => {
       side="bottom"
     >
       <Badge color="gray" kind="solid" className="ml-2 align-middle">
-        <Info width="12px" height="12px" />
+        <InfoCircle width="12px" height="12px" />
         Early Preview
       </Badge>
     </Tooltip>

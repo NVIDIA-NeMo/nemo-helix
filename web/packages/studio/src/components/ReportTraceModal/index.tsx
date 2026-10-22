@@ -9,13 +9,13 @@ import {
   TraceSpan,
 } from '@nemo/common/src/utils/TraceQueue';
 import { Modal, Button, Flex, Stack, Text, Badge, Switch } from '@nvidia/foundations-react-core';
+import { CopyGeneric, Paperplane, ArrowLeft } from '@nvidia/react-gui-icons/icons';
 import {
   formatTags,
   formatTimestamp,
   makeReportAllTracesEmail,
   makeReportTraceEmail,
 } from '@studio/components/ReportTraceModal/utils';
-import { Copy, Send, ArrowLeft } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 
 // for direct consumption by User, do not depend on the return type of this function
@@ -189,12 +189,12 @@ export const ReportTraceModal = ({ open, onClose }: ReportTraceModalProps) => {
                 onClick={() => window.open(makeReportAllTracesEmail(traces, showErrorsOnly))}
                 disabled={traces.length === 0}
               >
-                <Send />
+                <Paperplane />
                 Email {showErrorsOnly ? 'Error' : 'All'} Traces
               </Button>
               <Button color="brand" onClick={handleCopyAllTraces} disabled={traces.length === 0}>
-                <Copy />
-                Copy {showErrorsOnly ? 'Error' : 'All'} Traces
+                <CopyGeneric />
+                CopyGeneric {showErrorsOnly ? 'Error' : 'All'} Traces
               </Button>
             </>
           )}
@@ -254,7 +254,7 @@ export const ReportTraceModal = ({ open, onClose }: ReportTraceModalProps) => {
                       </Stack>
                     </Button>
                     <Button kind="tertiary" size="small" onClick={() => handleCopyTrace(trace)}>
-                      <Copy />
+                      <CopyGeneric />
                     </Button>
                   </Flex>
                 ))}
@@ -280,12 +280,12 @@ export const ReportTraceModal = ({ open, onClose }: ReportTraceModalProps) => {
                 </Button>
                 <Flex gap="density-sm">
                   <Button onClick={() => window.open(makeReportTraceEmail(selectedTrace))}>
-                    <Send />
+                    <Paperplane />
                     Email Trace
                   </Button>
                   <Button onClick={() => handleCopyTrace(selectedTrace)}>
-                    <Copy />
-                    Copy Trace Data
+                    <CopyGeneric />
+                    CopyGeneric Trace Data
                   </Button>
                 </Flex>
               </Flex>

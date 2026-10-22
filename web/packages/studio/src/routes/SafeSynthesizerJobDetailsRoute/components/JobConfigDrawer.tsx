@@ -6,7 +6,7 @@ import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { SidePanel, Stack } from '@nvidia/foundations-react-core';
-import { Cog } from 'lucide-react';
+import { Cog } from '@nvidia/react-gui-icons/icons';
 import { FC, useMemo } from 'react';
 import yaml from 'yaml';
 

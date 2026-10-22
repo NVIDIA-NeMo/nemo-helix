@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, ButtonProps } from '@nvidia/foundations-react-core';
-import { Download } from 'lucide-react';
+import { Download } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 import { Link } from 'react-router';
 

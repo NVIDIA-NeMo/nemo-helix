@@ -35,6 +35,7 @@ import {
   Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
@@ -102,7 +103,6 @@ import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Info } from 'lucide-react';
 import { type FC, useEffect, useRef, useState } from 'react';
 import {
   FormProvider,
@@ -125,7 +125,7 @@ const startItems = (rerunDisabled: boolean) => [
           <Text kind="label/bold/md">Re-run an existing evaluation</Text>
           {rerunDisabled && (
             <Tooltip slotContent="No existing evaluations to re-run.">
-              <Info size={14} aria-label="Why is this option disabled?" />
+              <InfoCircle size="14" aria-label="Why is this option disabled?" />
             </Tooltip>
           )}
         </Flex>

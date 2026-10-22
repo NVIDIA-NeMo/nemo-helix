@@ -4,19 +4,19 @@
 import { isPluginIconName } from '@studio/plugins/iconMap';
 
 describe('isPluginIconName', () => {
-  it('accepts a multi-word kebab-case Lucide name', () => {
-    expect(isPluginIconName('flask-conical')).toBe(true);
+  it('accepts a multi-word kebab-case NVIDIA icon name', () => {
+    expect(isPluginIconName('cube-stack')).toBe(true);
   });
 
-  it('accepts a single-word Lucide name', () => {
-    expect(isPluginIconName('settings')).toBe(true);
+  it('accepts a single-word NVIDIA icon name', () => {
+    expect(isPluginIconName('beaker')).toBe(true);
   });
 
   it('rejects an unknown icon name', () => {
     expect(isPluginIconName('this-icon-does-not-exist')).toBe(false);
   });
 
-  it('rejects non-icon lucide exports like the generic Icon', () => {
+  it('rejects a generic non-icon name', () => {
     expect(isPluginIconName('icon')).toBe(false);
   });
 
@@ -24,7 +24,7 @@ describe('isPluginIconName', () => {
     expect(isPluginIconName('')).toBe(false);
   });
 
-  it('rejects a name with a trailing hyphen', () => {
-    expect(isPluginIconName('flask-')).toBe(false);
+  it('rejects a legacy Lucide-only name not in NVIDIA', () => {
+    expect(isPluginIconName('flask-conical')).toBe(false);
   });
 });

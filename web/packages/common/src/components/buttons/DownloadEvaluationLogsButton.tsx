@@ -7,7 +7,7 @@ import { triggerDownload } from '@nemo/common/src/utils/file';
 import { formatLogs } from '@nemo/common/src/utils/logs';
 import { useJobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import { Button, ButtonProps } from '@nvidia/foundations-react-core';
-import { Download } from 'lucide-react';
+import { Download } from '@nvidia/react-gui-icons/icons';
 import { FC, useCallback, useState } from 'react';
 
 interface Props {

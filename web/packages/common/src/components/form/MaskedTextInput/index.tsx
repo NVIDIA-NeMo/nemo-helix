@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, TextInput } from '@nvidia/foundations-react-core';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps, forwardRef, useState } from 'react';
 
 type TextInputProps = ComponentProps<typeof TextInput>;

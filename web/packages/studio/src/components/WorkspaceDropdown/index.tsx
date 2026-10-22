@@ -19,13 +19,13 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { Add, Filter } from '@nvidia/react-gui-icons/icons';
 import { dataTestIds } from '@studio/components/WorkspaceDropdown/constants';
 import { useRecentWorkspaces } from '@studio/components/WorkspaceDropdown/useRecentWorkspaces';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import cn from 'classnames';
-import { Plus, Filter } from 'lucide-react';
 import { ChangeEvent, FC, lazy, startTransition, Suspense, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
@@ -256,7 +256,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
             <div className="border-base border-t flex items-center w-full">
               <DropdownItem onSelect={() => startTransition(openModal)}>
                 <Flex gap="density-md">
-                  <Plus /> New Workspace
+                  <Add /> New Workspace
                 </Flex>
               </DropdownItem>
             </div>

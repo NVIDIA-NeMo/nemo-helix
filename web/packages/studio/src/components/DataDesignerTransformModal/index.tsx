@@ -19,6 +19,7 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { ScmBranch } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { buildTransformJobRequest } from '@studio/components/DataDesignerTransformModal/buildTransformJobRequest';
 import { DiscardTransformModal } from '@studio/components/transform/DiscardTransformModal';
@@ -30,7 +31,6 @@ import { TransformPreview } from '@studio/components/transform/TransformPreview'
 import { useTransformMapping } from '@studio/components/transform/useTransformMapping';
 import { getDataDesignerJobDetailsRoute } from '@studio/routes/utils';
 import { getContentColumns, getFileNameFromPath } from '@studio/util/files';
-import { GitBranch } from 'lucide-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -168,7 +168,7 @@ export const DataDesignerTransformModal: FC<DataDesignerTransformModalProps> = (
         open={open}
         title={
           <Flex gap="density-md" align="center">
-            <GitBranch />
+            <ScmBranch />
             Transform
           </Flex>
         }

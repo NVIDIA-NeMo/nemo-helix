@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Text } from '@nvidia/foundations-react-core';
+import { Equal, ShapeTriangle } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
-import { Equal, Triangle } from 'lucide-react';
 import type { ComponentProps, FC } from 'react';
 
 export type DeltaTone = 'improved' | 'regressed' | 'unchanged';
@@ -84,7 +84,7 @@ export const DeltaText: FC<DeltaTextProps> = ({
   const formattedValue = format(value);
   const roundedValue = Number.parseFloat(formattedValue.replace('−', '-'));
   const tone = deltaTone(roundedValue, higherIsBetter);
-  const Icon = roundedValue === 0 ? Equal : Triangle;
+  const Icon = roundedValue === 0 ? Equal : ShapeTriangle;
   const magnitude = formattedValue.replace(/^[+−-]/, '');
   const label =
     ariaLabel ??

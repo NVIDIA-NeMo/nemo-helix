@@ -25,6 +25,7 @@ import {
   TextArea,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { Add } from '@nvidia/react-gui-icons/icons';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { DefaultSortControl } from '@studio/components/DefaultSortControl';
 import { DEFAULT_SORT } from '@studio/components/DefaultSortControl/util';
@@ -35,7 +36,6 @@ import {
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { Plus } from 'lucide-react';
 import { type FC, type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 
@@ -268,7 +268,7 @@ export const AddToGroupModal: FC<AddToGroupModalProps> = ({
                 {/* "Create new" sits at the bottom of the list, matching the workspace dropdown. */}
                 <SelectItem value={CREATE_NEW}>
                   <Flex gap="density-sm" align="center">
-                    <Plus className="size-4" />
+                    <Add className="size-4" />
                     Create new experiment
                   </Flex>
                 </SelectItem>

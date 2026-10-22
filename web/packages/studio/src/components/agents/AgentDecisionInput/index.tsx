@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Text, TextInput } from '@nvidia/foundations-react-core';
-import { ArrowDown, ArrowUp, Send } from 'lucide-react';
+import { ArrowDown, ArrowUp, Paperplane } from '@nvidia/react-gui-icons/icons';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 export type AgentDecisionInputStatus = 'pending' | 'submitting';
@@ -310,8 +310,8 @@ export const AgentDecisionInput = ({
                   >
                     {selected ? (
                       <>
-                        <ArrowUp size={16} />
-                        <ArrowDown size={16} />
+                        <ArrowUp size="16" />
+                        <ArrowDown size="16" />
                       </>
                     ) : null}
                   </Flex>
@@ -368,7 +368,7 @@ export const AgentDecisionInput = ({
               </Button>
             ) : null}
             <Button
-              aria-label="Send"
+              aria-label="Paperplane"
               type="button"
               color="brand"
               size="small"
@@ -376,7 +376,7 @@ export const AgentDecisionInput = ({
               className={subduedButtonFocusClassName}
               onClick={() => void submitSelectedChoice()}
             >
-              <Send size={16} />
+              <Paperplane size="16" />
             </Button>
           </Flex>
         </Flex>

@@ -7,6 +7,13 @@ import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insigh
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import {
+  ChartPerformance,
+  ChartScatterplot,
+  Pencil,
+  Star,
+  LayoutDetail,
+} from '@nvidia/react-gui-icons/icons';
+import {
   isTrendChoiceCurrent,
   resolveTrendVisible,
   type TrendVisibilityChoice,
@@ -23,7 +30,6 @@ import { ExperimentMetrics } from '@studio/routes/ExperimentDetailRoute/Experime
 import { getExperimentRoute } from '@studio/routes/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { ChartLine, ChartScatter, Pencil, Star, Table2 } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 
 export const ExperimentDetailRoute: FC = () => {
@@ -83,7 +89,7 @@ export const ExperimentDetailRoute: FC = () => {
             group?.is_favorite ? (
               <Flex align="center" gap="density-sm">
                 <Star
-                  size={24}
+                  size="24"
                   className="text-brand shrink-0"
                   fill="currentColor"
                   aria-label="Favorite"
@@ -148,7 +154,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={trendVisible}
                       onClick={() => setTrendChoice({ visible: !trendVisible, flag: trendFlag })}
                     >
-                      <ChartLine width={12} height={12} className="text-brand" />
+                      <ChartPerformance width={12} height={12} className="text-brand" />
                       {trendVisible ? 'Hide over time' : 'Over time'}
                     </Button>
                     <Button
@@ -156,7 +162,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={paretoVisible}
                       onClick={() => setParetoVisible(!paretoVisible)}
                     >
-                      <ChartScatter width={12} height={12} className="text-brand" />
+                      <ChartScatterplot width={12} height={12} className="text-brand" />
                       {paretoVisible ? 'Hide Pareto' : 'Pareto view'}
                     </Button>
                     <Button
@@ -164,7 +170,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={compareVisible}
                       onClick={() => setCompareVisible(!compareVisible)}
                     >
-                      <Table2 width={12} height={12} className="text-brand" />
+                      <LayoutDetail width={12} height={12} className="text-brand" />
                       {compareVisible ? 'Hide scorecard' : 'Scorecard'}
                     </Button>
                   </>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flex, Stack, Switch, Text } from '@nvidia/foundations-react-core';
-import { Info } from 'lucide-react';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { type FC } from 'react';
 
 /**
@@ -55,7 +55,7 @@ export const ExperimentFlagSwitch: FC<ExperimentFlagSwitchProps> = ({
         slotLabel={label}
       />
       <Flex align="start" gap="density-md" className="text-fg-subdued">
-        <Info width={12} height={12} className="mt-0.5 shrink-0" />
+        <InfoCircle width={12} height={12} className="mt-0.5 shrink-0" />
         <Text kind="label/regular/md">{hint}</Text>
       </Flex>
     </Stack>

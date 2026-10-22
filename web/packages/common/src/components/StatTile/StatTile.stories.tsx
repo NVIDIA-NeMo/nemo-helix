@@ -7,8 +7,8 @@ import {
   type StatTileDiagnosticProps,
 } from '@nemo/common/src/components/StatTile/index';
 import { Grid } from '@nvidia/foundations-react-core';
+import { Beaker, Robot, Db, Lightbulb, Layers } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
-import { Beaker, Bot, Database, Lightbulb, Layers } from 'lucide-react';
 
 const meta: Meta<typeof StatTile> = {
   component: StatTile,
@@ -120,7 +120,7 @@ export const Actionable: Story = {
   args: {
     label: 'Agents',
     value: '1',
-    icon: <Bot width={16} height={16} />,
+    icon: <Robot width={16} height={16} />,
     to: '#',
     variant: 'actionable',
   },
@@ -140,7 +140,7 @@ export const ActionableWithOnClick: Story = {
   args: {
     label: 'Agents',
     value: '1',
-    icon: <Bot width={16} height={16} />,
+    icon: <Robot width={16} height={16} />,
     onClick: () => {},
     variant: 'actionable',
   },
@@ -178,7 +178,7 @@ const ACTIONABLE_TILES: StatTileActionableProps[] = [
   {
     label: 'Agents',
     value: '1',
-    icon: <Bot width={16} height={16} />,
+    icon: <Robot width={16} height={16} />,
     to: '#',
     variant: 'actionable',
   },
@@ -192,7 +192,7 @@ const ACTIONABLE_TILES: StatTileActionableProps[] = [
   {
     label: 'Test Cases',
     value: '120',
-    icon: <Database width={16} height={16} />,
+    icon: <Db width={16} height={16} />,
     to: '#',
     variant: 'actionable',
   },

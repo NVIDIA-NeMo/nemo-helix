@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner, Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { NO_CONFIG_DEPLOY_MESSAGE } from '@studio/api/agents/hasAgentConfig';
-import { Loader2 } from 'lucide-react';
 import type { FC } from 'react';
 
 interface NoHealthyDeploymentsBannerProps {
@@ -30,7 +30,7 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
     slotActions={
       isDeploying ? (
         <Flex align="center" className="h-full" gap="2">
-          <Loader2 size={14} className="animate-spin" aria-label="Deploying agent" />
+          <HourglassMid size="14" className="animate-spin" aria-label="Deploying agent" />
           <Text kind="label/regular/sm">Deploying…</Text>
         </Flex>
       ) : (

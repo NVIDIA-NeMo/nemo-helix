@@ -21,7 +21,7 @@ import {
   SegmentedControl,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, LoaderCircle } from 'lucide-react';
+import { ChevronDown, HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { useDebounce } from 'use-debounce';
 
@@ -163,14 +163,14 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
                 creatorToIcon(selectedWorkspace, { className: 'text-base flex-shrink-0' })}
               {loading && !selectedName ? (
                 <>
-                  <LoaderCircle size={16} className="animate-spin shrink-0" />
+                  <HourglassMid size="16" className="animate-spin shrink-0" />
                   <Text className="truncate">{placeholder}</Text>
                 </>
               ) : (
                 <Text className="truncate">{triggerLabel}</Text>
               )}
             </Flex>
-            <ChevronDown size={16} className="shrink-0" />
+            <ChevronDown size="16" className="shrink-0" />
           </Flex>
         </Button>
       </DropdownTrigger>

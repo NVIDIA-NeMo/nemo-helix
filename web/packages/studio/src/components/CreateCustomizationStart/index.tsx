@@ -3,6 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Banner, Flex, Spinner } from '@nvidia/foundations-react-core';
+import { Cube, Bookmark } from '@nvidia/react-gui-icons/icons';
 import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
@@ -28,7 +29,6 @@ import {
   templateToFormFields,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { Box, Bookmark } from 'lucide-react';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { Link } from 'react-router';
 
@@ -117,7 +117,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
           id: template.id,
           name: template.title,
           description: template.description,
-          icon: Box,
+          icon: Cube,
         })),
       },
     ],

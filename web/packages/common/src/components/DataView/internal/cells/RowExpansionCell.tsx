@@ -3,8 +3,13 @@
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
+import {
+  ChevronDown,
+  ChevronUp,
+  ChevronDoubleDown,
+  ChevronDoubleUp,
+} from '@nvidia/react-gui-icons/icons';
 import type { CellContext, HeaderContext } from '@tanstack/react-table';
-import { ChevronDown, ChevronUp, ChevronsDown, ChevronsUp } from 'lucide-react';
 import type { JSX } from 'react';
 
 export interface RowExpansionCellProps<TData> extends ButtonProps {
@@ -69,7 +74,7 @@ export function RowExpansionHeaderCell<TData>({
         onClick={ctx.table.getToggleAllRowsExpandedHandler()}
         {...props}
       >
-        {children ?? (isAllRowsExpanded ? <ChevronsUp /> : <ChevronsDown />)}
+        {children ?? (isAllRowsExpanded ? <ChevronDoubleUp /> : <ChevronDoubleDown />)}
       </Button>
     )
   );

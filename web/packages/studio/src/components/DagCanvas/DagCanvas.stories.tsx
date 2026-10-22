@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Db, Beaker, ChatSingle, Rocket, Sparkle, Wand } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DagCanvas } from '@studio/components/DagCanvas';
 import type { DagEdge, DagNode } from '@studio/components/DagCanvas/types';
-import { Database, FlaskConical, MessageSquare, Rocket, Sparkles, Wand2 } from 'lucide-react';
 
 const nodes: DagNode[] = [
   {
@@ -13,7 +13,7 @@ const nodes: DagNode[] = [
       title: 'Ingest',
       type: 'SOURCE',
       description: 'Load raw data',
-      icon: Database,
+      icon: Db,
       status: 'success',
     },
   },
@@ -23,7 +23,7 @@ const nodes: DagNode[] = [
       title: 'Clean',
       type: 'TRANSFORM',
       description: 'Dedupe & normalize',
-      icon: Wand2,
+      icon: Wand,
       status: 'success',
     },
   },
@@ -34,7 +34,7 @@ const nodes: DagNode[] = [
       type: 'LLM TEXT',
       description: 'Writes a question about the topic',
       tags: ['{{topic}}', '{{difficulty}}'],
-      icon: MessageSquare,
+      icon: ChatSingle,
       status: 'running',
     },
   },
@@ -44,7 +44,7 @@ const nodes: DagNode[] = [
       title: 'Train',
       type: 'GENERATE',
       description: 'Fit model',
-      icon: Sparkles,
+      icon: Sparkle,
       status: 'idle',
     },
   },
@@ -54,7 +54,7 @@ const nodes: DagNode[] = [
       title: 'Evaluate',
       type: 'VALIDATE',
       description: 'Score on holdout',
-      icon: FlaskConical,
+      icon: Beaker,
       status: 'idle',
     },
   },

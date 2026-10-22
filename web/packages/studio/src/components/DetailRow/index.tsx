@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { Eye, Trash2, Wrench } from 'lucide-react';
+import { Eye, Trash, Wrench } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 export interface DetailRowProps {
@@ -66,7 +66,7 @@ export const DetailRow: FC<DetailRowProps> = ({
             aria-label="Remove tool"
             disabled={disabled}
           >
-            <Trash2 />
+            <Trash />
           </Button>
         )}
       </Flex>

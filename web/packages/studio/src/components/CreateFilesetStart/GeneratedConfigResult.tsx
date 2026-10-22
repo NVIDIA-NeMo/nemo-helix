@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import { IconDocument, Sparkle, Wand } from '@nvidia/react-gui-icons/icons';
 import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';
 import type { GeneratedConfigResultProps } from '@studio/components/CreateFilesetStart/types';
-import { FileJson, Sparkles, Wand2 } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 const IssueList: FC<{ items: string[] }> = ({ items }) => (
@@ -21,7 +21,7 @@ const IssueList: FC<{ items: string[] }> = ({ items }) => (
 const FixButton: FC<{ label: string; onFix: () => void }> = ({ label, onFix }) => (
   <Flex justify="start" className="mt-density-sm">
     <Button kind="secondary" size="small" onClick={onFix}>
-      <Wand2 size={14} aria-hidden />
+      <Wand size="14" aria-hidden />
       {label}
     </Button>
   </Flex>
@@ -73,7 +73,7 @@ export const GeneratedConfigResult: FC<GeneratedConfigResultProps> = ({
         align="center"
         className="h-full min-h-[220px] justify-center rounded-md border border-dashed border-base p-density-xl text-center"
       >
-        <Sparkles size={18} className="text-secondary" aria-hidden />
+        <Sparkle size="18" className="text-secondary" aria-hidden />
         <Text kind="body/semibold/sm" className="text-primary">
           No draft yet
         </Text>
@@ -93,7 +93,7 @@ export const GeneratedConfigResult: FC<GeneratedConfigResultProps> = ({
         <>
           <Flex justify="end">
             <Button kind="tertiary" size="small" onClick={() => setIsConfigOpen(true)}>
-              <FileJson size={14} aria-hidden />
+              <IconDocument size="14" aria-hidden />
               View config
             </Button>
           </Flex>

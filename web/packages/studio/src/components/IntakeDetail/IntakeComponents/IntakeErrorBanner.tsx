@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner } from '@nvidia/foundations-react-core';
-import { TriangleAlert } from 'lucide-react';
+import { Warning } from '@nvidia/react-gui-icons/icons';
 import type { FC, ReactNode } from 'react';
 
 /**
@@ -18,7 +18,7 @@ export const IntakeErrorBanner: FC<{ heading: ReactNode; message?: ReactNode }> 
     status="error"
     kind="header"
     slotIcon={
-      <TriangleAlert
+      <Warning
         role="img"
         aria-hidden
         className="text-[color:var(--border-color-feedback-danger-subtle)]"

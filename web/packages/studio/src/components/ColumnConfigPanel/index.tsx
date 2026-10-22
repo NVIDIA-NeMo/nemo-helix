@@ -7,6 +7,7 @@ import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledT
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Trash, Close } from '@nvidia/react-gui-icons/icons';
 import { ICON_COLOR_CLASS } from '@studio/components/AddColumnPalette/constants';
 import { SeedDatasetConfig } from '@studio/components/ColumnConfigPanel/SeedDatasetConfig';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
@@ -16,7 +17,6 @@ import {
   validateColumnName,
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-import { Trash2, X } from 'lucide-react';
 import type { FC } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -156,7 +156,7 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({ columnId, onRemo
       >
         <Flex align="center" gap="density-sm" className="min-w-0">
           <CardIconBadge>
-            <Icon size={16} className={ICON_COLOR_CLASS[color]} aria-hidden />
+            <Icon size="16" className={ICON_COLOR_CLASS[color]} aria-hidden />
           </CardIconBadge>
           <Stack gap="density-xxs" className="min-w-0">
             <Text kind="body/bold/md" className="truncate">
@@ -174,7 +174,7 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({ columnId, onRemo
           aria-label="Close column config"
           onClick={onClose}
         >
-          <X size={16} aria-hidden />
+          <Close size="16" aria-hidden />
         </Button>
       </Flex>
 
@@ -192,7 +192,7 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({ columnId, onRemo
 
       <Flex align="center" justify="start" className="shrink-0 border-t border-base p-density-lg">
         <Button kind="tertiary" color="danger" size="small" onClick={onRemove}>
-          <Trash2 size={16} aria-hidden />
+          <Trash size="16" aria-hidden />
           Remove column
         </Button>
       </Flex>

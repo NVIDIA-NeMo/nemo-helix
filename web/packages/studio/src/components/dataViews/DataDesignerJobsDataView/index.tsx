@@ -27,13 +27,13 @@ import type {
   CreateJobsSortField as DataDesignerJobsSortField,
 } from '@nemo/sdk/generated/data-designer/schema';
 import { Banner, Button, Text } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { DataDesignerJobActionsMenu } from '@studio/components/DataDesignerJobActionsMenu';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getDataDesignerJobDetailsRoute, getNewDataDesignerJobRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 

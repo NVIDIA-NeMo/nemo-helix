@@ -19,6 +19,7 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { Package } from '@nvidia/react-gui-icons/icons';
 import {
   type DeploymentMode,
   enabledImageModes,
@@ -30,7 +31,6 @@ import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
-import { Package } from 'lucide-react';
 import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 

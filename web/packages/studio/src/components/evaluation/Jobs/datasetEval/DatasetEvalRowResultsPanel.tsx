@@ -9,8 +9,8 @@ import {
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
+import { LayoutRows } from '@nvidia/react-gui-icons/icons';
 import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
-import { Rows3 } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 export interface DatasetEvalRow {
@@ -154,7 +154,7 @@ export const DatasetEvalRowResultsPanel: FC<DatasetEvalRowResultsPanelProps> = (
   }
 
   return (
-    <AccordionPanel slotHeading={`Row Results (${rows.length})`} slotIcon={<Rows3 />}>
+    <AccordionPanel slotHeading={`Row Results (${rows.length})`} slotIcon={<LayoutRows />}>
       <Stack className="min-h-[400px] max-h-[640px]">
         <StudioDataView
           dataViewState={dataViewState}

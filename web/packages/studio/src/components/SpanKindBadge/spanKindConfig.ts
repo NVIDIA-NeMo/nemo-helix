@@ -3,40 +3,41 @@
 
 import { SpanKind } from '@nemo/sdk/generated/platform/schema';
 import type { BadgeProps } from '@nvidia/foundations-react-core';
+import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
 import {
   ArrowUpDown,
-  Bot,
-  Boxes,
-  CircleHelp,
-  ClipboardCheck,
-  Link2,
-  Search,
-  ShieldCheck,
-  Sparkles,
+  Robot,
+  CubeStack,
+  HelpCircle,
+  MagnifyingGlass,
+  Shield,
+  Sparkle,
   Wrench,
-  type LucideIcon,
-} from 'lucide-react';
+  IconClipboard,
+  Link,
+} from '@nvidia/react-gui-icons/icons';
+import type { FC } from 'react';
 
 type BadgeColor = Exclude<BadgeProps['color'], null | undefined>;
 
 export interface SpanKindConfig {
   label: string;
   color: BadgeColor;
-  icon: LucideIcon;
+  icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
 }
 
 /** Span-kind → badge color/icon/label, mirroring the Experiments design. */
 const SPAN_KIND_CONFIG: Record<SpanKind, SpanKindConfig> = {
-  [SpanKind.AGENT]: { label: 'Agent', color: 'teal', icon: Bot },
-  [SpanKind.LLM]: { label: 'LLM', color: 'purple', icon: Sparkles },
+  [SpanKind.AGENT]: { label: 'Agent', color: 'teal', icon: Robot },
+  [SpanKind.LLM]: { label: 'LLM', color: 'purple', icon: Sparkle },
   [SpanKind.TOOL]: { label: 'Tool', color: 'blue', icon: Wrench },
-  [SpanKind.RETRIEVER]: { label: 'Retriever', color: 'blue', icon: Search },
-  [SpanKind.EMBEDDING]: { label: 'Embedding', color: 'blue', icon: Boxes },
+  [SpanKind.RETRIEVER]: { label: 'Retriever', color: 'blue', icon: MagnifyingGlass },
+  [SpanKind.EMBEDDING]: { label: 'Embedding', color: 'blue', icon: CubeStack },
   [SpanKind.RERANKER]: { label: 'Reranker', color: 'blue', icon: ArrowUpDown },
-  [SpanKind.EVALUATOR]: { label: 'Evaluator', color: 'green', icon: ClipboardCheck },
-  [SpanKind.GUARDRAIL]: { label: 'Guardrail', color: 'yellow', icon: ShieldCheck },
-  [SpanKind.CHAIN]: { label: 'Chain', color: 'gray', icon: Link2 },
-  [SpanKind.UNKNOWN]: { label: 'Unknown', color: 'gray', icon: CircleHelp },
+  [SpanKind.EVALUATOR]: { label: 'Evaluator', color: 'green', icon: IconClipboard },
+  [SpanKind.GUARDRAIL]: { label: 'Guardrail', color: 'yellow', icon: Shield },
+  [SpanKind.CHAIN]: { label: 'Chain', color: 'gray', icon: Link },
+  [SpanKind.UNKNOWN]: { label: 'Unknown', color: 'gray', icon: HelpCircle },
 };
 
 const FALLBACK_CONFIG: SpanKindConfig = SPAN_KIND_CONFIG[SpanKind.UNKNOWN];

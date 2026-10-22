@@ -6,7 +6,7 @@ import {
   DebouncedTextInput,
   type DebouncedTextInputProps,
 } from '@nemo/common/src/components/DataView/internal/DebouncedTextInput';
-import { Search } from 'lucide-react';
+import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import { useCallback, type JSX } from 'react';
 
 export interface DataViewSearchBarProps extends Omit<
@@ -15,12 +15,12 @@ export interface DataViewSearchBarProps extends Omit<
 > {
   /**
    * Provide a placeholder that informs the user what they're able to search for.
-   * @defaultValue "Search table"
+   * @defaultValue "MagnifyingGlass table"
    */
   placeholder?: string;
 }
 
-const MagnifyingGlassIcon = <Search variant="line" />;
+const MagnifyingGlassIcon = <MagnifyingGlass variant="line" />;
 
 /**
  * A search bar for the data view. Should be rendered in `DataView.Toolbar`. Controls the
@@ -41,7 +41,7 @@ export function SearchBar(props: DataViewSearchBarProps): JSX.Element {
     <DebouncedTextInput
       dismissible
       onValueChange={handleChange}
-      placeholder="Search table"
+      placeholder="MagnifyingGlass table"
       slotStart={MagnifyingGlassIcon}
       value={state.searchBar.state}
       {...props}

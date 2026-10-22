@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatTile } from '@nemo/common/src/components/StatTile';
+import { Robot } from '@nvidia/react-gui-icons/icons';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Bot } from 'lucide-react';
 import { MemoryRouter } from 'react-router';
 
 describe('StatTile', () => {
@@ -167,7 +167,7 @@ describe('StatTile', () => {
         <StatTile
           label="Agents"
           value="1"
-          icon={<Bot data-testid="agents-icon" />}
+          icon={<Robot data-testid="agents-icon" />}
           to="/agents"
           variant="actionable"
         />

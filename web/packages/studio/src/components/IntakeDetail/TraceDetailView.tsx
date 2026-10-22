@@ -5,6 +5,7 @@ import { IntakeAccordion } from '@nemo/common/src/components/IntakeAccordion';
 import type { Trace } from '@nemo/sdk/generated/platform/schema';
 import { useGetTrace } from '@nemo/sdk/generated/platform/traces';
 import { Banner, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
+import { IconError } from '@nvidia/react-gui-icons/icons';
 import { KeyValueRows } from '@studio/components/IntakeDetail/IntakeComponents/KeyValueRows';
 import { RawJsonDebug } from '@studio/components/IntakeDetail/IntakeComponents/RawJsonDebug';
 import {
@@ -18,7 +19,6 @@ import {
   useBreadcrumbs,
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getTraceDisplayName } from '@studio/util/intakeTelemetry';
-import { CircleAlert } from 'lucide-react';
 import { type FC, type ReactNode, useEffect, useMemo } from 'react';
 
 const TRACE_SUMMARY_SECTION = 'trace-summary';
@@ -84,7 +84,7 @@ export const TraceDetailView: FC<TraceDetailViewProps> = ({
       <StatusMessage
         className="mx-auto mt-density-2xl"
         size="medium"
-        slotMedia={<CircleAlert width={65} height={65} />}
+        slotMedia={<IconError width={65} height={65} />}
         slotHeading="Error loading trace activity"
         slotSubheading={traceSummaryErrorMessage}
       />
@@ -105,7 +105,7 @@ export const TraceDetailView: FC<TraceDetailViewProps> = ({
       <StatusMessage
         className="mx-auto mt-density-2xl"
         size="medium"
-        slotMedia={<CircleAlert width={65} height={65} />}
+        slotMedia={<IconError width={65} height={65} />}
         slotHeading="Error loading trace"
         slotSubheading={error.message}
       />

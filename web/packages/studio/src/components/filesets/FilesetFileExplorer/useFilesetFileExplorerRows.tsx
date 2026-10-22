@@ -7,6 +7,7 @@ import {
   ProgressBar,
   type TableRowDefinition,
 } from '@nvidia/foundations-react-core';
+import { IconDocument, FolderClosed, FolderOpen } from '@nvidia/react-gui-icons/icons';
 import {
   INDENT_PER_LEVEL,
   PENDING_FILE_OID,
@@ -17,7 +18,6 @@ import { DirectoryQuickActions } from '@studio/components/FilesTable/DirectoryQu
 import { FileQuickActions } from '@studio/components/FilesTable/FileQuickActions';
 import type { FileSystemNode, TreeRow } from '@studio/components/FilesTable/utils';
 import { getFolderSize, getHumanReadableFileSize } from '@studio/util/files';
-import { File, FolderClosed, FolderOpen } from 'lucide-react';
 import { useMemo } from 'react';
 
 export interface UseFilesetFileExplorerRowsOptions {
@@ -94,7 +94,7 @@ export function useFilesetFileExplorerRows({
                         <FolderClosed className="shrink-0" />
                       )
                     ) : (
-                      <File className="shrink-0" />
+                      <IconDocument className="shrink-0" />
                     )}
                     <div>{searchQuery ? node.path : node.path.split('/').pop()}</div>
                   </Flex>

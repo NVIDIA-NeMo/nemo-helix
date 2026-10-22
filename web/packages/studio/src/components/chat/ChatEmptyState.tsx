@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
+import { Plugin, Workstation } from '@nvidia/react-gui-icons/icons';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { PlugZap, Server } from 'lucide-react';
 import { type FC } from 'react';
 import { generatePath, useNavigate } from 'react-router';
 
@@ -51,14 +51,14 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({ hasModels }) => {
                   navigate(generatePath(ROUTES.workspace.inferenceProviders, { workspace }))
                 }
               >
-                <PlugZap size={16} />
+                <Plugin size="16" />
                 Connect inference provider
               </Button>
               <Button
                 kind="secondary"
                 onClick={() => navigate(generatePath(ROUTES.workspace.deployments, { workspace }))}
               >
-                <Server size={16} />
+                <Workstation size="16" />
                 Create deployment
               </Button>
             </div>

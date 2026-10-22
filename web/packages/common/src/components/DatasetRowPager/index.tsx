@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 export interface DatasetRowPagerProps {
@@ -37,7 +37,7 @@ export const DatasetRowPager: FC<DatasetRowPagerProps> = ({
         disabled={disabled || rowIndex === 0}
         onClick={() => onChange(Math.max(0, rowIndex - 1))}
       >
-        <ChevronLeft size={16} />
+        <ChevronLeft size="16" />
       </Button>
       <Text kind="body/regular/sm" className="text-secondary">
         Preview Row {rowIndex + 1} of {rowCount}
@@ -49,7 +49,7 @@ export const DatasetRowPager: FC<DatasetRowPagerProps> = ({
         disabled={disabled || rowIndex >= rowCount - 1}
         onClick={() => onChange(rowIndex + 1)}
       >
-        <ChevronRight size={16} />
+        <ChevronRight size="16" />
       </Button>
     </Flex>
     {isPartial ? (

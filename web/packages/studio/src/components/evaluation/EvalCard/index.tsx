@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Scale } from 'lucide-react';
+import { ScaleBalance } from '@nvidia/react-gui-icons/icons';
 import { type FC, type ReactNode } from 'react';
 
 const METRIC_TYPE_LABELS: Record<string, string> = {
@@ -20,7 +20,7 @@ interface EvalCardProps {
   name: string;
   description?: string;
   type?: string | null;
-  /** Icon rendered inside the accent box. Defaults to a Scale icon. */
+  /** Icon rendered inside the accent box. Defaults to a ScaleBalance icon. */
   icon?: ReactNode;
 }
 
@@ -35,14 +35,14 @@ export const EvalCard: FC<EvalCardProps> = ({ name, description, type, icon }) =
           justify="center"
           className="size-6 rounded shrink-0 bg-accent-green text-accent-green"
         >
-          {icon ?? <Scale size={12} />}
+          {icon ?? <ScaleBalance size="12" />}
         </Flex>
         <Text kind="label/semibold/xl" className="flex-1 truncate min-w-0">
           {name}
         </Text>
         {typeLabel && (
           <Badge kind="solid" color="gray" className="shrink-0">
-            <Scale size={10} />
+            <ScaleBalance size="10" />
             {typeLabel}
           </Badge>
         )}

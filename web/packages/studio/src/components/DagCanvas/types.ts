@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { LucideIcon } from 'lucide-react';
+import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
+import type { FC } from 'react';
 
 /** Visual status of a node, used to tint the card's leading icon. */
 export type DagNodeStatus =
@@ -24,7 +25,7 @@ export interface DagNodeData {
   /** Variable/parameter tokens rendered as monospace pills (e.g. `"{{topic}}"`). */
   tags?: string[];
   /** Leading icon shown in the card's icon badge. */
-  icon?: LucideIcon;
+  icon?: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
   /** Optional status accent; defaults to `'idle'`. Tints the leading icon. */
   status?: DagNodeStatus;
   /**

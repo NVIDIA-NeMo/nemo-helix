@@ -14,9 +14,9 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { Code } from '@nvidia/react-gui-icons/icons';
 import type { OutputFormatField } from '@studio/components/transform/formats';
 import { columnReference } from '@studio/components/transform/template';
-import { Braces } from 'lucide-react';
 import { type FC } from 'react';
 
 export interface FieldMappingRowProps {
@@ -117,7 +117,7 @@ export const FieldMappingRow: FC<FieldMappingRowProps> = ({
           aria-label={`${isRaw ? 'Pick a column for' : 'Write a template for'} ${field.label}`}
           onClick={() => onToggleRaw(field.path)}
         >
-          <Braces size={14} aria-hidden />
+          <Code size="14" aria-hidden />
         </Button>
       </Flex>
 

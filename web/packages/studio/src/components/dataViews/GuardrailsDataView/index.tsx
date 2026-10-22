@@ -20,12 +20,12 @@ import type {
   GuardrailsListGuardrailConfigsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Button, type DropdownEntry, Flex, Text } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import {
   getMainModelName,
   getRailCounts,
 } from '@studio/components/dataViews/GuardrailsDataView/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback } from 'react';
 
 export interface GuardrailsDataViewProps {

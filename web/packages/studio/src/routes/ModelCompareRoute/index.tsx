@@ -8,6 +8,7 @@ import type { BroadcastSignal } from '@nemo/common/src/components/AssistantChat/
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { hasModelProvider } from '@nemo/common/src/utils/models';
 import { PageHeader, Tabs, Tooltip } from '@nvidia/foundations-react-core';
+import { ChatSingle, ChatMulti } from '@nvidia/react-gui-icons/icons';
 import { ChatEmptyState } from '@studio/components/chat/ChatEmptyState';
 import { CompareComposer } from '@studio/components/chat/CompareComposer';
 import { DEFAULT_SEED_QUESTIONS } from '@studio/components/chat/defaultSeedQuestions';
@@ -15,7 +16,6 @@ import { ModelCompareChat } from '@studio/components/ModelCompareChat';
 import { ModelComparePrompts } from '@studio/components/ModelComparePrompts';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type { ComposerSeed, SharedModelEntry } from '@studio/routes/ModelCompareRoute/types';
-import { MessageSquareShare, MessagesSquare } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -222,7 +222,7 @@ export const ModelCompareRoute: FC = () => {
                     className="flex cursor-pointer items-center justify-center rounded p-1.5 text-fg-subdued transition-colors hover:bg-surface-sunken hover:text-fg-base"
                     aria-label="Shared input"
                   >
-                    <MessageSquareShare size={15} />
+                    <ChatSingle size="15" />
                   </button>
                 </Tooltip>
               ) : undefined
@@ -263,7 +263,7 @@ export const ModelCompareRoute: FC = () => {
                         className="flex cursor-pointer items-center justify-center rounded border border-base bg-surface-raised p-1.5 text-fg-subdued transition-colors hover:bg-surface-sunken hover:text-fg-base"
                         aria-label="Per-panel input"
                       >
-                        <MessagesSquare size={15} />
+                        <ChatMulti size="15" />
                       </button>
                     </Tooltip>
                   }

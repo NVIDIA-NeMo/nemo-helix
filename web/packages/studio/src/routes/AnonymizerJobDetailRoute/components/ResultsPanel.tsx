@@ -5,7 +5,7 @@ import { triggerDownload } from '@nemo/common/src/utils/file';
 import { anonymizerDownloadRunJobResult } from '@nemo/sdk/generated/anonymizer/anonymizer';
 import type { HelixJobResultResponse } from '@nemo/sdk/generated/anonymizer/schema';
 import { Banner, Button, Flex, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { Download } from 'lucide-react';
+import { Download } from '@nvidia/react-gui-icons/icons';
 import { useState, type FC } from 'react';
 
 interface ResultsPanelProps {

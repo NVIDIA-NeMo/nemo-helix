@@ -11,6 +11,7 @@ import {
   GridItem,
   Text,
 } from '@nvidia/foundations-react-core';
+import { DocumentCheckmark } from '@nvidia/react-gui-icons/icons';
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
 import {
   invalidateFilesetNameCheck,
@@ -20,7 +21,6 @@ import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { SAMPLE_DATASETS, SampleDataset } from '@studio/constants/sampleDatasets';
 import type { DatasetFormFields } from '@studio/routes/FilesetNewRoute/types';
 import { useQueryClient } from '@tanstack/react-query';
-import { FileCheck } from 'lucide-react';
 import { FC } from 'react';
 import type { Control } from 'react-hook-form';
 
@@ -69,7 +69,7 @@ export const SampleDatasetSection: FC<SampleDatasetSectionProps> = ({
               className="cursor-pointer shadow-none!"
               slotHeader={
                 <Badge kind="solid" color="purple">
-                  <FileCheck />
+                  <DocumentCheckmark />
                   Sample Dataset
                 </Badge>
               }

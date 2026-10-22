@@ -4,7 +4,7 @@
 import { ListItem } from '@nemo/common/src/components/FileList/ListItem';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Divider, Text, Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { File, Eye, Trash2 } from 'lucide-react';
+import { IconDocument, Eye, Trash } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 const numberFormatter = new Intl.NumberFormat('en-US');
@@ -65,7 +65,7 @@ export const FileList: FC<FileListProps> = ({
             <Divider className="h-fit" />
             <ListItem
               value={filepath}
-              startIconSlot={<File />}
+              startIconSlot={<IconDocument />}
               endIconSlot={
                 <Flex align="center" gap="density-md">
                   {typeof file.rowCount === 'number' && (
@@ -94,7 +94,7 @@ export const FileList: FC<FileListProps> = ({
                         kind="tertiary"
                         size="small"
                       >
-                        <Trash2 width={16} height={16} />
+                        <Trash width={16} height={16} />
                       </Button>
                     )}
                   </Flex>

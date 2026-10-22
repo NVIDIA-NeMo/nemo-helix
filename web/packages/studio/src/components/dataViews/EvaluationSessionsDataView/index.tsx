@@ -25,6 +25,7 @@ import type {
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { LayoutColumns } from '@nvidia/react-gui-icons/icons';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
@@ -32,7 +33,6 @@ import { tooltipClassName } from '@studio/styles/common';
 import { formatInteger } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { Columns3 } from 'lucide-react';
 import { type ComponentProps, type FC, useMemo, useState } from 'react';
 
 type SessionRow = EvaluationSessionResponse & { _rowId: string };
@@ -355,7 +355,7 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
           slotContent={<div aria-hidden className="h-0 w-[230px]" />}
         >
           <>
-            <Columns3 />
+            <LayoutColumns />
             <span className="hide-mobile">Columns</span>
           </>
         </EditColumnsMenu>

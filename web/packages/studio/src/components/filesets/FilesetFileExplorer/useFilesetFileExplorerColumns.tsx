@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Checkbox } from '@nvidia/foundations-react-core';
+import { ArrowDown, ArrowUp } from '@nvidia/react-gui-icons/icons';
 import type { SortOrder } from '@studio/components/filesets/FilesetFileExplorer/hooks/useFileActions';
 import type { ExtraColumn } from '@studio/components/filesets/FilesetFileExplorer/types';
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';
-import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useMemo } from 'react';
 
 export interface UseFilesetFileExplorerColumnsOptions {

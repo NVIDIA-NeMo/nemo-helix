@@ -30,13 +30,13 @@ import {
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 

@@ -16,6 +16,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ArrowLeft } from '@nvidia/react-gui-icons/icons';
 import { DataDesignerJobActionsMenu } from '@studio/components/DataDesignerJobActionsMenu';
 import { DataDesignerTransformModal } from '@studio/components/DataDesignerTransformModal';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
@@ -31,7 +32,6 @@ import { useDataDesignerArtifactsFileset } from '@studio/routes/DataDesignerJobD
 import { useDataDesignerJobFromRoute } from '@studio/routes/DataDesignerJobDetailsRoute/useDataDesignerJobFromRoute';
 import { getDataDesignerJobListRoute } from '@studio/routes/utils';
 import { formatDateTime } from '@studio/util/date';
-import { ArrowLeft } from 'lucide-react';
 import { useRef, useState, type FC } from 'react';
 import { Link, useNavigate } from 'react-router';
 

@@ -17,8 +17,8 @@ import {
   Group,
   Tag,
 } from '@nvidia/foundations-react-core';
+import { Close } from '@nvidia/react-gui-icons/icons';
 import type { Column } from '@tanstack/react-table';
-import { X } from 'lucide-react';
 import type { JSX } from 'react';
 
 function truncateString(str: string, maxLength = 20): string {
@@ -50,7 +50,7 @@ export function AppliedFilters(props: Partial<FlexProps>): JSX.Element | null {
         size="small"
         kind="tertiary"
       >
-        <X variant="fill" />
+        <Close variant="fill" />
         <span className="hide-mobile">Clear Filters</span>
       </Button>
     </Flex>
@@ -118,7 +118,7 @@ export function ColumnFilterTag({
             column.setFilterValue(undefined);
           }}
         >
-          <X variant="fill" />
+          <Close variant="fill" />
         </Tag>
       </Group>
     </DropdownRoot>

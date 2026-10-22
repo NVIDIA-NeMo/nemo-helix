@@ -2,32 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
-import type { ColumnTypeColor, ColumnTypeGroup } from '@studio/components/AddColumnPalette/types';
 import {
-  Activity,
-  Binary,
-  Bot,
-  Braces,
-  CalendarDays,
-  ChartBarBig,
-  ChartLine,
-  ChartSpline,
-  CodeXml,
-  Database,
-  Dices,
-  Hash,
-  Image,
+  Robot,
+  Code,
+  ChartPerformance,
+  Db,
+  Numbers,
+  IconImage,
   LayoutGrid,
-  ListTree,
-  MessageSquare,
-  Network,
-  Scale,
-  ShieldCheck,
-  SquareFunction,
+  ChartTree,
+  ChatSingle,
+  ScaleBalance,
+  Shield,
   Timer,
-  ToggleLeft,
-  User,
-} from 'lucide-react';
+  Ekg,
+  Calendar,
+  ChartBar,
+  Die6,
+  Network,
+  IconFunction,
+  Power,
+  Profile,
+} from '@nvidia/react-gui-icons/icons';
+import type { ColumnTypeColor, ColumnTypeGroup } from '@studio/components/AddColumnPalette/types';
 
 /** Accent color → Tailwind text color utility for an option's icon. */
 export const ICON_COLOR_CLASS: Record<ColumnTypeColor, string> = {
@@ -59,7 +56,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.uuid,
         label: 'UUID',
         description: 'Unique identifiers',
-        icon: Hash,
+        icon: Numbers,
         color: 'gray',
       },
       {
@@ -77,7 +74,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.subcategory,
         label: 'Subcategory',
         description: 'Hierarchical categories',
-        icon: ListTree,
+        icon: ChartTree,
         color: 'gray',
       },
       {
@@ -86,7 +83,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.uniform,
         label: 'Uniform',
         description: 'Evenly distributed numbers',
-        icon: ChartBarBig,
+        icon: ChartBar,
         color: 'gray',
       },
       {
@@ -95,7 +92,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.gaussian,
         label: 'Gaussian',
         description: 'Normally distributed values',
-        icon: ChartSpline,
+        icon: ChartPerformance,
         color: 'gray',
       },
       {
@@ -104,7 +101,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.bernoulli,
         label: 'Bernoulli',
         description: 'Binary outcomes',
-        icon: ToggleLeft,
+        icon: Power,
         color: 'gray',
       },
       {
@@ -113,7 +110,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.bernoulli_mixture,
         label: 'Bernoulli Mixture',
         description: 'Mixed binary components',
-        icon: Binary,
+        icon: Code,
         color: 'gray',
       },
       {
@@ -122,7 +119,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.binomial,
         label: 'Binomial',
         description: 'Successes in n trials',
-        icon: Dices,
+        icon: Die6,
         color: 'gray',
       },
       {
@@ -131,7 +128,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.poisson,
         label: 'Poisson',
         description: 'Event counts & frequencies',
-        icon: Activity,
+        icon: Ekg,
         color: 'gray',
       },
       {
@@ -140,7 +137,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.scipy,
         label: 'Scipy',
         description: 'Any scipy.stats distribution',
-        icon: ChartLine,
+        icon: ChartPerformance,
         color: 'gray',
       },
       {
@@ -149,7 +146,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.person,
         label: 'Person',
         description: 'Synthetic people & demographics',
-        icon: User,
+        icon: Profile,
         color: 'gray',
       },
       {
@@ -158,7 +155,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         samplerType: SamplerType.datetime,
         label: 'Datetime',
         description: 'Timestamps in a range',
-        icon: CalendarDays,
+        icon: Calendar,
         color: 'gray',
       },
       {
@@ -181,7 +178,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'llm-text',
         label: 'LLM-Text',
         description: 'Free-form text from a prompt',
-        icon: MessageSquare,
+        icon: ChatSingle,
         color: 'blue',
       },
       {
@@ -189,7 +186,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'llm-code',
         label: 'LLM-Code',
         description: 'Code in 15+ languages',
-        icon: CodeXml,
+        icon: Code,
         color: 'green',
       },
       {
@@ -197,7 +194,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'llm-structured',
         label: 'LLM-Structured',
         description: 'JSON to a schema',
-        icon: Braces,
+        icon: Code,
         color: 'purple',
       },
       {
@@ -205,7 +202,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'llm-judge',
         label: 'LLM-Judge',
         description: 'Score content 0–N',
-        icon: Scale,
+        icon: ScaleBalance,
         color: 'yellow',
       },
       {
@@ -213,7 +210,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'image',
         label: 'Image',
         description: 'Images from text prompts',
-        icon: Image,
+        icon: IconImage,
         color: 'purple',
       },
       {
@@ -235,7 +232,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'expression',
         label: 'Expression',
         description: 'Jinja2 transform · no LLM',
-        icon: SquareFunction,
+        icon: IconFunction,
         color: 'green',
       },
     ],
@@ -249,7 +246,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'validation',
         label: 'Validation',
         description: 'Check against rules',
-        icon: ShieldCheck,
+        icon: Shield,
         color: 'red',
       },
     ],
@@ -263,7 +260,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'seed-dataset',
         label: 'Seed Dataset',
         description: 'Bootstrap from a file',
-        icon: Database,
+        icon: Db,
         color: 'gray',
       },
       {
@@ -271,7 +268,7 @@ export const COLUMN_TYPE_GROUPS: ColumnTypeGroup[] = [
         columnType: 'custom',
         label: 'Custom',
         description: 'Python function logic',
-        icon: Bot,
+        icon: Robot,
         color: 'gray',
       },
     ],

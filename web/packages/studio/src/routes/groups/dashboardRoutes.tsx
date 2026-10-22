@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { LayoutGrid } from '@nvidia/react-gui-icons/icons';
 import {
   ASSISTANT_STUDIO_ENABLED,
   DASHBOARD_ROUTE_ENABLED,
@@ -14,7 +15,6 @@ import {
   gateDashboardRoutes,
   getWorkspaceDashboardRoute,
 } from '@studio/routes/utils';
-import { LayoutDashboard } from 'lucide-react';
 import { lazy, type ReactNode } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -69,7 +69,7 @@ export const getDashboardSideNavItems = (workspace: string) =>
     ? [
         {
           id: 'dashboard',
-          slotIcon: <LayoutDashboard className={iconColorClass} />,
+          slotIcon: <LayoutGrid className={iconColorClass} />,
           slotLabel: 'Dashboard',
           href: getWorkspaceDashboardRoute(workspace),
         },

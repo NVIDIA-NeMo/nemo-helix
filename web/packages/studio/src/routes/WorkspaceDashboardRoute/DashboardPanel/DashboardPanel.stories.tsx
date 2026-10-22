@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Grid } from '@nvidia/foundations-react-core';
+import { Robot, ChartPerformance, Cog, Upload } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DashboardPanel } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
-import { Bot, Gauge, Settings, Upload } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 const meta = {
@@ -26,13 +26,13 @@ const cardDecorator = [
 export const Default: Story = {
   decorators: cardDecorator,
   args: {
-    icon: <Bot className="w-6 h-6" />,
+    icon: <Robot className="w-6 h-6" />,
     title: 'Connect an Agent',
     description: 'Register an agent you already run and route it through the gateway.',
     actions: [
-      { icon: <Upload size={14} />, label: 'Upload an Agent', href: '#' },
-      { icon: <Gauge size={14} />, label: 'Evaluate Performance', href: '#' },
-      { icon: <Settings size={14} />, label: 'Optimize', href: '#' },
+      { icon: <Upload size="14" />, label: 'Upload an Agent', href: '#' },
+      { icon: <ChartPerformance size="14" />, label: 'Evaluate Performance', href: '#' },
+      { icon: <Cog size="14" />, label: 'Optimize', href: '#' },
     ],
   },
 };
@@ -40,25 +40,25 @@ export const Default: Story = {
 export const SingleAction: Story = {
   decorators: cardDecorator,
   args: {
-    icon: <Bot className="w-6 h-6" />,
+    icon: <Robot className="w-6 h-6" />,
     title: 'Chat with a Model',
     description: 'Chat with base models and explore capabilities.',
-    actions: [{ icon: <Settings size={14} />, label: 'Chat', href: '#' }],
+    actions: [{ icon: <Cog size="14" />, label: 'Chat', href: '#' }],
   },
 };
 
 export const ManyActions: Story = {
   decorators: cardDecorator,
   args: {
-    icon: <Bot className="w-6 h-6" />,
+    icon: <Robot className="w-6 h-6" />,
     title: 'Automate a Workflow',
     description: 'An arbitrary number of quick actions can be attached to a card.',
     actions: [
-      { icon: <Upload size={14} />, label: 'Upload an Agent', href: '#' },
-      { icon: <Gauge size={14} />, label: 'Evaluate Performance', href: '#' },
-      { icon: <Settings size={14} />, label: 'Optimize', href: '#' },
-      { icon: <Bot size={14} />, label: 'Deploy', href: '#' },
-      { icon: <Upload size={14} />, label: 'Publish', href: '#' },
+      { icon: <Upload size="14" />, label: 'Upload an Agent', href: '#' },
+      { icon: <ChartPerformance size="14" />, label: 'Evaluate Performance', href: '#' },
+      { icon: <Cog size="14" />, label: 'Optimize', href: '#' },
+      { icon: <Robot size="14" />, label: 'Deploy', href: '#' },
+      { icon: <Upload size="14" />, label: 'Publish', href: '#' },
     ],
   },
 };
@@ -66,14 +66,14 @@ export const ManyActions: Story = {
 export const LongContent: Story = {
   decorators: cardDecorator,
   args: {
-    icon: <Bot className="w-6 h-6" />,
+    icon: <Robot className="w-6 h-6" />,
     title: 'An extremely long dashboard card title that should wrap',
     description:
       'This is a very long description that tests how the card handles overflow across multiple lines while keeping the actions aligned to the bottom.',
     actions: [
-      { icon: <Upload size={14} />, label: 'Upload an Agent', href: '#' },
-      { icon: <Gauge size={14} />, label: 'Evaluate Performance', href: '#' },
-      { icon: <Settings size={14} />, label: 'Optimize', href: '#' },
+      { icon: <Upload size="14" />, label: 'Upload an Agent', href: '#' },
+      { icon: <ChartPerformance size="14" />, label: 'Evaluate Performance', href: '#' },
+      { icon: <Cog size="14" />, label: 'Optimize', href: '#' },
     ],
   },
 };

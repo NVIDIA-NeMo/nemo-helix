@@ -4,8 +4,8 @@
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema';
 import { Button, Divider, Flex, Tooltip } from '@nvidia/foundations-react-core';
+import { Notes, ThumbDown, ThumbUp } from '@nvidia/react-gui-icons/icons';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
-import { NotebookPen, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { type FC, type MouseEvent, useEffect } from 'react';
 
 interface SpanFeedbackControlsProps {
@@ -76,8 +76,8 @@ export const SpanFeedbackControls: FC<SpanFeedbackControlsProps> = ({
           disabled={isMutating}
           onClick={withoutToggle(() => void submitFeedback(FeedbackAnnotationInputValue.positive))}
         >
-          <ThumbsUp
-            size={14}
+          <ThumbUp
+            size="14"
             aria-hidden
             className={positive ? 'text-[color:var(--text-color-accent-green)]' : undefined}
           />
@@ -94,8 +94,8 @@ export const SpanFeedbackControls: FC<SpanFeedbackControlsProps> = ({
           disabled={isMutating}
           onClick={withoutToggle(() => void submitFeedback(FeedbackAnnotationInputValue.negative))}
         >
-          <ThumbsDown
-            size={14}
+          <ThumbDown
+            size="14"
             aria-hidden
             className={negative ? 'text-[color:var(--text-color-accent-red)]' : undefined}
           />
@@ -110,8 +110,8 @@ export const SpanFeedbackControls: FC<SpanFeedbackControlsProps> = ({
           onClick={withoutToggle(onAddNote)}
         >
           {/* Tinted to match the Guardrail kind accent (var --text-color-accent-yellow). */}
-          <NotebookPen
-            size={14}
+          <Notes
+            size="14"
             aria-hidden
             className={hasNotes ? 'text-[color:var(--text-color-accent-yellow)]' : undefined}
           />

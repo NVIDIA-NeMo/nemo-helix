@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { ArrowLeft } from '@nvidia/react-gui-icons/icons';
 import { StartFooter } from '@studio/components/StartOptions/StartFooter';
 import { CONTENT_WIDTH } from '@studio/components/StartOptions/tile';
 import type { StartSubPageProps } from '@studio/components/StartOptions/types';
-import { ArrowLeft } from 'lucide-react';
 import type { FC } from 'react';
 
 /**
@@ -39,7 +39,7 @@ export const StartSubPage: FC<StartSubPageProps> = ({
       blockedHint={blockedHint}
       slotFooterStart={
         <Button kind="tertiary" onClick={onBack}>
-          <ArrowLeft size={16} aria-hidden />
+          <ArrowLeft size="16" aria-hidden />
           Back
         </Button>
       }

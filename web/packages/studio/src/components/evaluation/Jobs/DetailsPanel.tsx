@@ -18,6 +18,7 @@ import {
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { Banner, Button, Flex, Modal, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { ChartBar, CloseCircle } from '@nvidia/react-gui-icons/icons';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
 import { ButtonLaunchEvaluation } from '@studio/components/evaluation/ButtonLaunchEvaluation';
@@ -25,7 +26,6 @@ import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutco
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChartBar, CircleX } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
@@ -141,7 +141,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
                 size="small"
                 onClick={() => setCancelModalOpen(true)}
               >
-                <CircleX /> Cancel Job
+                <CloseCircle /> Cancel Job
               </Button>
             )}
           </Flex>
@@ -233,7 +233,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
         onOpenChange={(open) => !isCancelling && setCancelModalOpen(open)}
         slotHeading={
           <Flex align="center" gap="density-sm">
-            <CircleX />
+            <CloseCircle />
             Cancel Evaluation Job
           </Flex>
         }

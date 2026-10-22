@@ -3,7 +3,7 @@
 
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { FormField, TextInput } from '@nvidia/foundations-react-core';
-import { Search } from 'lucide-react';
+import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 
@@ -43,13 +43,13 @@ export const SearchBar = ({
     <form
       onSubmit={handleSubmit(
         handleOnSubmit,
-        handleFormErrorsGeneric({ title: 'Search Bar Form Errors' })
+        handleFormErrorsGeneric({ title: 'MagnifyingGlass Bar Form Errors' })
       )}
       className={`w-full${formClassName ? ` ${formClassName}` : ''}`}
     >
       <FormField slotLabel={label}>
         <TextInput
-          slotStart={<Search />}
+          slotStart={<MagnifyingGlass />}
           {...register('searchString')}
           {...inputProps}
           size="small"

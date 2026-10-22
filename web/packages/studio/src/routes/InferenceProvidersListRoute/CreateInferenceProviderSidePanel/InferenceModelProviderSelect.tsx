@@ -22,6 +22,7 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import {
   CUSTOM_ROW,
   getInferenceProviderPresetIcon,
@@ -29,7 +30,6 @@ import {
   MODEL_PROVIDER_ROWS,
   type InferenceProviderPresetId,
 } from '@studio/routes/InferenceProvidersListRoute/CreateInferenceProviderSidePanel/inferenceProviderPresets';
-import { Search } from 'lucide-react';
 import { type ChangeEvent, type FC, useCallback, useMemo, useRef, useState } from 'react';
 
 export interface InferenceModelProviderSelectProps {
@@ -109,8 +109,8 @@ export const InferenceModelProviderSelect: FC<InferenceModelProviderSelectProps>
             ref={searchInputRef}
             name="model-provider-search"
             className="overflow-hidden"
-            slotStart={<Search aria-hidden className="size-4 shrink-0 opacity-70" />}
-            placeholder="Search by name..."
+            slotStart={<MagnifyingGlass aria-hidden className="size-4 shrink-0 opacity-70" />}
+            placeholder="MagnifyingGlass by name..."
             value={localSearch}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setLocalSearch(e.target.value)}
             attributes={{

@@ -3,7 +3,7 @@
 
 import type { VariableDef } from '@nemo/common/src/components/form/VariableTextArea';
 import { Button, Popover, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Plus } from 'lucide-react';
+import { Add } from '@nvidia/react-gui-icons/icons';
 import { type ComponentProps, useState } from 'react';
 
 export interface VariableButtonProps {
@@ -38,7 +38,7 @@ export function VariableButton({
       className={className}
       {...attributes?.Button}
     >
-      <Plus className="size-3" aria-hidden />
+      <Add className="size-3" aria-hidden />
       Variable
     </Button>
   );

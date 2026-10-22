@@ -17,6 +17,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ShapeCircle } from '@nvidia/react-gui-icons/icons';
 import { CustomizationFilesetDetailsPanel } from '@studio/components/CustomizationFilesetDetailsPanel';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { Loading } from '@studio/components/Layouts/Loading';
@@ -43,7 +44,6 @@ import {
 } from '@studio/util/customizations';
 import { resolveCustomizationTransfer } from '@studio/util/customizationTransfer';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { Dot } from 'lucide-react';
 import { type FC, Fragment, useState } from 'react';
 
 export const CustomizationJobDetailsRoute: FC = () => {
@@ -112,7 +112,7 @@ export const CustomizationJobDetailsRoute: FC = () => {
                 <Flex align="center" gap="1">
                   {metadata.map((segment, index) => (
                     <Fragment key={segment}>
-                      {index > 0 && <Dot className="size-2" aria-hidden />}
+                      {index > 0 && <ShapeCircle className="size-2" aria-hidden />}
                       <Text kind="body/regular/sm" className="text-secondary">
                         {segment}
                       </Text>

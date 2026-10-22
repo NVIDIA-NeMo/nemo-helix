@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Theme, Tooltip, useTheme } from '@nvidia/foundations-react-core';
+import { Moon, SunHigh } from '@nvidia/react-gui-icons/icons';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { UI_THEME } from '@studio/util/localStorage';
-import { Moon, Sun } from 'lucide-react';
 
 /**
  * @remarks
@@ -28,7 +28,7 @@ export function ThemeSwitch() {
         kind="tertiary"
         size="medium"
       >
-        {theme === 'light' ? <Moon /> : <Sun />}
+        {theme === 'light' ? <Moon /> : <SunHigh />}
       </Button>
     </Tooltip>
   );

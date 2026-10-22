@@ -16,6 +16,7 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
 import { ConfigureStep } from '@studio/components/evaluation/ModelEvaluationWizard/ConfigureStep';
 import { EvaluationStep } from '@studio/components/evaluation/ModelEvaluationWizard/EvaluationStep';
@@ -40,7 +41,6 @@ import {
 import { MODEL_EVAL_CONFIG_DESCRIPTION } from '@studio/components/evaluation/submitEvaluationJob';
 import { LINK_EVAL_DOCS } from '@studio/constants/links';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
-import { Info } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form';
 
@@ -90,7 +90,7 @@ const startItems = (rerunDisabled: boolean) => [
           <Text kind="label/bold/md">Re-run an existing evaluation</Text>
           {rerunDisabled && (
             <Tooltip slotContent="No saved evaluation configurations to re-run.">
-              <Info size={14} aria-label="Why is this option disabled?" />
+              <InfoCircle size="14" aria-label="Why is this option disabled?" />
             </Tooltip>
           )}
         </Flex>

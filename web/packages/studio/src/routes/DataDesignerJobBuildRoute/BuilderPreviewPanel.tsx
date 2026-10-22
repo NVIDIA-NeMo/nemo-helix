@@ -13,6 +13,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ChevronDown, ChevronUp } from '@nvidia/react-gui-icons/icons';
 import {
   formatPreviewLogsForDisplay,
   type PreviewRecord,
@@ -20,7 +21,6 @@ import {
 import { PreviewResults } from '@studio/components/NewDataDesignerJobForm/PreviewResults';
 import { useResizableHeight } from '@studio/routes/DataDesignerJobBuildRoute/useResizableHeight';
 import cn from 'classnames';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type FC, memo, useMemo, useState } from 'react';
 
 type PreviewTab = 'rows' | 'logs';
@@ -134,9 +134,9 @@ export const BuilderPreviewPanel: FC<BuilderPreviewPanelProps> = memo(function B
             onClick={onToggleExpanded}
           >
             {isExpanded ? (
-              <ChevronDown size={16} aria-hidden />
+              <ChevronDown size="16" aria-hidden />
             ) : (
-              <ChevronUp size={16} aria-hidden />
+              <ChevronUp size="16" aria-hidden />
             )}
           </Button>
         </Flex>

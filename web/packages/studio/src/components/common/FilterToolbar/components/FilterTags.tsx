@@ -8,7 +8,7 @@ import {
   Stack,
   Tag,
 } from '@nvidia/foundations-react-core';
-import { X } from 'lucide-react';
+import { Close } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 interface Props {
@@ -33,7 +33,7 @@ export const FilterTags: FC<Props> = ({ filters, onRemoveAllFilters }) => {
                 color="gray"
               >
                 {filter.slotHeading}: {value}
-                <X fontSize="small" />
+                <Close fontSize="small" />
               </Tag>
             ));
           }
@@ -45,13 +45,13 @@ export const FilterTags: FC<Props> = ({ filters, onRemoveAllFilters }) => {
               color="gray"
             >
               {filter.slotHeading}: {filter.value?.toString()}
-              <X fontSize="small" />
+              <Close fontSize="small" />
             </Tag>
           );
         })}
       {hasAppliedFilter && (
         <Button kind="tertiary" size="small" onClick={onRemoveAllFilters}>
-          <X />
+          <Close />
           Clear All Filters
         </Button>
       )}

@@ -17,6 +17,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { Commit } from '@nvidia/react-gui-icons/icons';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
@@ -68,7 +69,6 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { getAgentRunEvaluationRoute, getAgentsListRoute } from '@studio/routes/utils';
-import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -279,7 +279,7 @@ export const AgentDetailRoute: FC = () => {
                   aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
                 >
                   <Badge kind="solid" color="gray" className="cursor-pointer">
-                    <GitCommitHorizontal size={12} aria-hidden />
+                    <Commit size="12" aria-hidden />
                     {shortRevision(specSource.revision)}
                   </Badge>
                 </Link>

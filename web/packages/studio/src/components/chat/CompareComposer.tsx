@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from '@nvidia/foundations-react-core';
+import { ArrowUp, Retry, ShapeSquare } from '@nvidia/react-gui-icons/icons';
 import { SeedQuestions } from '@studio/components/chat/SeedQuestions';
 import type { ComposerSeed } from '@studio/routes/ModelCompareRoute/types';
-import { ArrowUp, RotateCcw, Square } from 'lucide-react';
 import * as React from 'react';
 import {
   type FC,
@@ -127,7 +127,7 @@ export const CompareComposer: FC<CompareComposerProps> = ({
           title="Clear all panels"
           aria-label="Clear all panels"
         >
-          <RotateCcw />
+          <Retry />
         </Button>
         {isAnyRunning ? (
           <Button
@@ -138,7 +138,7 @@ export const CompareComposer: FC<CompareComposerProps> = ({
             title="Stop all panels"
             aria-label="Stop all panels"
           >
-            <Square size={14} />
+            <ShapeSquare size="14" />
           </Button>
         ) : (
           <Button
@@ -150,7 +150,7 @@ export const CompareComposer: FC<CompareComposerProps> = ({
             title="Broadcast to all panels"
             aria-label="Broadcast to all panels"
           >
-            <ArrowUp size={16} />
+            <ArrowUp size="16" />
           </Button>
         )}
       </div>

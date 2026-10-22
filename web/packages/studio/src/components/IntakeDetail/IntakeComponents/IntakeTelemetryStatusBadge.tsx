@@ -3,13 +3,13 @@
 
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
 import type { SpanStatus } from '@nemo/sdk/generated/platform/schema';
-import { Ban, CircleCheck, CircleHelp, CircleX } from 'lucide-react';
+import { Cancel, CheckCircle, HelpCircle, CloseCircle } from '@nvidia/react-gui-icons/icons';
 
 const STATUS_CONFIG: Record<SpanStatus, StatusConfigEntry> = {
-  success: { label: 'Completed', color: 'green', icon: CircleCheck },
-  error: { label: 'Error', color: 'red', icon: CircleX },
-  cancelled: { label: 'Cancelled', color: 'yellow', icon: Ban },
-  unknown: { label: 'Unknown', color: 'gray', icon: CircleHelp },
+  success: { label: 'Completed', color: 'green', icon: CheckCircle },
+  error: { label: 'Error', color: 'red', icon: CloseCircle },
+  cancelled: { label: 'Cancelled', color: 'yellow', icon: Cancel },
+  unknown: { label: 'Unknown', color: 'gray', icon: HelpCircle },
 };
 
 export interface IntakeTelemetryStatusBadgeProps {

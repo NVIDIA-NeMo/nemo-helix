@@ -10,9 +10,9 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 import { FilterTags } from '@studio/components/common/FilterToolbar/components/FilterTags';
 import { SearchBar } from '@studio/components/common/SearchBar';
-import { Filter } from 'lucide-react';
 import { ComponentProps, useMemo } from 'react';
 
 interface Props<K> {

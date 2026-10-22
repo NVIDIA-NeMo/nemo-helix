@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
-import { CircleAlert } from 'lucide-react';
+import { IconError } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -27,7 +27,7 @@ export const NotFound: FC<Props> = ({
 
   return (
     <Stack className="h-full justify-center mx-auto max-w-[640px]" gap="density-md">
-      <CircleAlert className="size-16 stroke-2" color="var(--text-color-feedback-danger)" />
+      <IconError className="size-16 stroke-2" color="var(--text-color-feedback-danger)" />
       <Text kind="display/xl">{header}</Text>
       <Text kind="title/lg">{subheader}</Text>
       <Text lineHeight="150">{message}</Text>

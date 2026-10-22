@@ -11,6 +11,7 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { Cog } from '@nvidia/react-gui-icons/icons';
 import { PromptScopeSection } from '@studio/routes/guardrails/rails/components/PromptScopeSection';
 import {
   findPrompt,
@@ -24,11 +25,10 @@ import {
   setSelfCheckScopeEnabled,
 } from '@studio/routes/guardrails/rails/selfCheck/bindings';
 import type { RailSettingsProps } from '@studio/routes/guardrails/rails/types';
-import { Settings } from 'lucide-react';
 import { Fragment, type FC, useState } from 'react';
 
 /**
- * Settings for the self-check rail: its trigger, its panel, and its body.
+ * Cog for the self-check rail: its trigger, its panel, and its body.
  *
  * The rail owns all three. There is no shared settings shell — what a rail needs to
  * configure varies too much for one to fit, and a rail with simpler needs can open a
@@ -57,7 +57,7 @@ export const SelfCheckSettings: FC<RailSettingsProps> = ({ data, onChange }) => 
           onClick={openPanel}
           aria-label="Configure Self Checks"
         >
-          <Settings size={16} />
+          <Cog size="16" />
         </Button>
       </Tooltip>
 

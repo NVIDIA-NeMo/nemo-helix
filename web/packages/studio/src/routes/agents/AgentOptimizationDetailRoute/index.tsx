@@ -24,6 +24,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { FolderOpen, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -46,7 +47,6 @@ import {
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
-import { FolderOpen, ScrollText } from 'lucide-react';
 import { type FC, useCallback, useEffect, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
@@ -253,7 +253,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             />
           </>
         )}
-        <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
+        <Panel slotHeading="Logs" slotIcon={<IconDocument />} elevation="high" density="compact">
           {logsError && logs.length === 0 ? (
             <Banner
               kind="inline"

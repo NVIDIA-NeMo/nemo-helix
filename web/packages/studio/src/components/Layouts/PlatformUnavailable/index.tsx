@@ -3,7 +3,7 @@
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { Anchor, CodeSnippet, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
-import { GlobeX } from 'lucide-react';
+import { WorldOff } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 interface PlatformUnavailableProps {
@@ -22,7 +22,7 @@ export const PlatformUnavailable: FC<PlatformUnavailableProps> = ({
     <Stack gap="density-xl" align="center" justify="center" className="h-screen px-density-lg">
       <StatusMessage
         className="max-w-[640px]"
-        slotMedia={<GlobeX className="size-16 stroke-2" />}
+        slotMedia={<WorldOff className="size-16 stroke-2" />}
         slotHeading="Studio can't connect to NeMo Helix"
         slotSubheading={
           <>

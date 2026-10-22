@@ -8,7 +8,7 @@ import {
   Stack,
   Button,
 } from '@nvidia/foundations-react-core';
-import { CircleAlert as ErrorIcon } from 'lucide-react';
+import { IconError as ErrorIcon } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 

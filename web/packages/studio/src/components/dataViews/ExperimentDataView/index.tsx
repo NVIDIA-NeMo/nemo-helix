@@ -23,6 +23,7 @@ import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import type { EvaluationFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { ChartBar, FolderClosed, LayoutColumns, Pin, Sync } from '@nvidia/react-gui-icons/icons';
 import { EVAL_DURATION_METADATA_KEY, evalDurationMs } from '@studio/api/evaluation/utils';
 import { ChangesetBadge } from '@studio/components/ChangesetBadge';
 import { EvaluationCompareChart } from '@studio/components/charts/EvaluationCompareChart';
@@ -51,7 +52,6 @@ import { evaluationFilesetName } from '@studio/components/evaluation/experimentE
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentRunEvaluationRoute, getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { ChartColumn, Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -580,7 +580,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 ? [
                     {
                       label: 'New evaluation from this configuration',
-                      icon: <Repeat2 className="fill-none" size={16} />,
+                      icon: <Sync className="fill-none" size="16" />,
                       onSelect: () => rerun(row.original),
                     },
                   ]
@@ -589,13 +589,13 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 // `fill-none` overrides the menu's cloned `fill: 'solid'`, which would otherwise paint
                 // the folder body over the "+"/"-" (they're drawn before the folder shape).
                 label: 'Add to experiment',
-                icon: <FolderPlus className="fill-none" size={16} />,
+                icon: <FolderClosed className="fill-none" size="16" />,
                 onSelect: () =>
                   setAddToGroupState({ evaluations: [row.original], clearSelection: () => {} }),
               },
               {
                 label: 'Remove from experiment',
-                icon: <FolderMinus className="fill-none" size={16} />,
+                icon: <FolderClosed className="fill-none" size="16" />,
                 onSelect: () => removeFromGroup(row.original),
               },
             ]}
@@ -688,7 +688,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 })
               }
             >
-              <ChartColumn />
+              <ChartBar />
               Compare selected
             </Button>
             <Button
@@ -702,7 +702,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
                 })
               }
             >
-              <FolderPlus />
+              <FolderClosed />
               Add to experiment
             </Button>
           </>
@@ -728,7 +728,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
             slotContent={<div aria-hidden className="h-0 w-[230px]" />}
           >
             <>
-              <Columns3 />
+              <LayoutColumns />
               <span className="hide-mobile">Columns</span>
             </>
           </EditColumnsMenu>

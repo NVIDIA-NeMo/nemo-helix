@@ -4,7 +4,7 @@
 import { ComposerPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
 import { Button, Flex, Text, TextArea, Tooltip } from '@nvidia/foundations-react-core';
-import { ImagePlus, X } from 'lucide-react';
+import { IconImage, Close } from '@nvidia/react-gui-icons/icons';
 
 export const UserEditComposer = ({
   enableImageAttachments = true,
@@ -36,7 +36,7 @@ export const UserEditComposer = ({
                 type="button"
                 className="mr-auto"
               >
-                <ImagePlus size={16} />
+                <IconImage size="16" />
               </Button>
             </ComposerPrimitive.AddAttachment>
           </Tooltip>
@@ -46,7 +46,7 @@ export const UserEditComposer = ({
             aria-label="Cancel edit"
             className="cursor-pointer flex size-8 items-center justify-center rounded border border-base bg-surface-raised hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <X />
+            <Close />
           </ComposerPrimitive.Cancel>
         </Tooltip>
         <ComposerPrimitive.Send asChild>

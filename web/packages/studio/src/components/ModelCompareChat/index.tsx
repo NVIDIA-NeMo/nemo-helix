@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Tooltip } from '@nvidia/foundations-react-core';
+import { Add } from '@nvidia/react-gui-icons/icons';
 import { ModelChatPanel } from '@studio/components/ModelChatPanel';
 import {
   PANEL_ROLE_COLORS,
@@ -10,7 +11,6 @@ import {
   type PanelState,
   type SharedModelEntry,
 } from '@studio/routes/ModelCompareRoute/types';
-import { Plus } from 'lucide-react';
 import { useCallback, useState, type FC, type ReactNode } from 'react';
 
 interface ModelCompareChatProps extends PanelChatControls {
@@ -86,7 +86,7 @@ export const ModelCompareChat: FC<ModelCompareChatProps> = ({
             className="flex cursor-pointer items-center justify-center rounded border border-base bg-surface-raised p-1.5 text-fg-subdued transition-colors hover:bg-surface-sunken hover:text-fg-base"
             aria-label="Add model"
           >
-            <Plus size={16} />
+            <Add size="16" />
           </button>
         </Tooltip>
       ) : (
@@ -94,7 +94,7 @@ export const ModelCompareChat: FC<ModelCompareChatProps> = ({
           aria-hidden
           className="invisible flex items-center justify-center rounded border border-base p-1.5"
         >
-          <Plus size={16} />
+          <Add size="16" />
         </span>
       )}
     </div>
@@ -132,7 +132,7 @@ export const ModelCompareChat: FC<ModelCompareChatProps> = ({
           {/* Invisible gutter copy keeps the composer's right edge aligned to the panels. */}
           <div className="invisible flex shrink-0 items-start pr-6" aria-hidden>
             <span className="flex items-center justify-center rounded border border-base p-1.5">
-              <Plus size={16} />
+              <Add size="16" />
             </span>
           </div>
         </div>

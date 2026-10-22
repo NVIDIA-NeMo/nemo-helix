@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
 import { PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { IconError } from '@nvidia/react-gui-icons/icons';
 import { Loading } from '@studio/components/Layouts/Loading';
 import {
   type BreadcrumbsItemProps,
@@ -11,7 +12,6 @@ import {
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { SessionCompareColumn } from '@studio/routes/EvaluationSessionDetailRoute/SessionCompareColumn';
 import { getExperimentDetailRoute, getExperimentRoute } from '@studio/routes/utils';
-import { CircleAlert } from 'lucide-react';
 import { type FC, type ReactNode, useEffect } from 'react';
 
 interface TestCaseCompareProps {
@@ -32,7 +32,7 @@ interface TestCaseCompareProps {
 
 const CompareEmpty: FC<{ heading: string; message: string }> = ({ heading, message }) => (
   <div className="flex h-full flex-col items-center justify-center gap-3 p-density-2xl text-center">
-    <CircleAlert className="h-10 w-10 text-feedback-warning" aria-hidden />
+    <IconError className="h-10 w-10 text-feedback-warning" aria-hidden />
     <p className="font-semibold text-primary">{heading}</p>
     <p className="max-w-sm text-sm text-secondary">{message}</p>
   </div>

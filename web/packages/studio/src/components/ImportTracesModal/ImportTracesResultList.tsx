@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { CheckCircle, CloseCircle, InfoCircle } from '@nvidia/react-gui-icons/icons';
 import type { InsightsTriggerResult } from '@studio/api/insightsAnalysis';
 import type { ImportTraceResult } from '@studio/components/ImportTracesModal/types';
-import { CircleCheck, CircleX, Info } from 'lucide-react';
 import type { FC, ReactNode } from 'react';
 
 export interface ImportTracesResultListProps {
@@ -34,9 +34,9 @@ const ResultRow: FC<RowProps> = ({ slotIcon, title, message }) => (
   </Flex>
 );
 
-const successIcon = <CircleCheck className="size-4 shrink-0 text-status-success" aria-hidden />;
-const errorIcon = <CircleX className="size-4 shrink-0 text-status-error" aria-hidden />;
-const infoIcon = <Info className="size-4 shrink-0 text-status-info" aria-hidden />;
+const successIcon = <CheckCircle className="size-4 shrink-0 text-status-success" aria-hidden />;
+const errorIcon = <CloseCircle className="size-4 shrink-0 text-status-error" aria-hidden />;
+const infoIcon = <InfoCircle className="size-4 shrink-0 text-status-info" aria-hidden />;
 
 const insightsIcon = (status: InsightsTriggerResult['status']) => {
   if (status === 'started') return successIcon;

@@ -6,6 +6,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Button, Flex, FormField, Tag, Text } from '@nvidia/foundations-react-core';
+import { Eye } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPanel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -18,7 +19,6 @@ import {
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
 import { getContentColumns, getFileExtension } from '@studio/util/files';
-import { Eye } from 'lucide-react';
 import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -136,7 +136,7 @@ export const SeedDatasetConfig: FC<SeedDatasetConfigProps> = ({ columnIndex }) =
                 onClick={() => setIsPreviewOpen(true)}
                 className="h-auto p-0"
               >
-                <Eye size={14} aria-hidden />
+                <Eye size="14" aria-hidden />
               </Button>
             </Flex>
           ),

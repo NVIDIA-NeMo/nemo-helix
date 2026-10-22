@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Button, Flex, Panel, SegmentedControl, Stack, Text } from '@nvidia/foundations-react-core';
+import { Add } from '@nvidia/react-gui-icons/icons';
 import { useUpdateGuardrailCheck } from '@studio/api/guardrail-checks/hooks';
 import type {
   GuardrailCheckEntity,
@@ -14,7 +15,6 @@ import {
   type GuardrailMessageFormRow,
   GuardrailMessageRow,
 } from '@studio/routes/guardrails/GuardrailChecksTab/GuardrailMessageRow';
-import { Plus } from 'lucide-react';
 import { type FC, type FocusEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useFieldArray, useForm, useWatch } from 'react-hook-form';
 
@@ -211,7 +211,7 @@ export const GuardrailTestCard: FC<GuardrailTestCardProps> = ({
                 onClick={handleAddMessage}
                 className="w-fit"
               >
-                <Plus size={14} />
+                <Add size="14" />
                 Add Message
               </Button>
             </Stack>

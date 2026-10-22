@@ -16,7 +16,7 @@ import {
   TextInputProps,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { Info, RotateCcw } from 'lucide-react';
+import { InfoCircle, Retry } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps, ReactNode, useState } from 'react';
 import { FieldValues } from 'react-hook-form';
 
@@ -125,7 +125,7 @@ export const SliderWithTextInput = ({
       </Text>
       {formFieldProps.slotInfo && (
         <Tooltip slotContent={formFieldProps.slotInfo} side="top">
-          <Info size="12" className="shrink-0" />
+          <InfoCircle size="12" className="shrink-0" />
         </Tooltip>
       )}
     </Flex>
@@ -140,7 +140,7 @@ export const SliderWithTextInput = ({
           </Text>
           {formFieldProps?.slotInfo && (
             <Tooltip slotContent={formFieldProps.slotInfo} side="top">
-              <Info size="12" className="shrink-0" />
+              <InfoCircle size="12" className="shrink-0" />
             </Tooltip>
           )}
         </Flex>
@@ -198,7 +198,7 @@ export const SliderWithTextInput = ({
           className="shrink-0"
           type="button"
         >
-          <RotateCcw />
+          <Retry />
         </Button>
       )}
       {slotEnd}

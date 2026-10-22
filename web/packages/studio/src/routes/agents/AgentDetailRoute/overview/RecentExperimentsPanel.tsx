@@ -13,6 +13,7 @@ import {
   StatusMessage,
   Text,
 } from '@nvidia/foundations-react-core';
+import { Beaker } from '@nvidia/react-gui-icons/icons';
 import { MetricTrendPanel } from '@studio/components/charts/MetricTrendPanel';
 import { StackedSkeleton } from '@studio/components/StackedSkeleton';
 import { LINK_DOCS_EXPERIMENTS_CLI } from '@studio/constants/links';
@@ -21,7 +22,6 @@ import {
   DELTA_COMPARISON_LABEL,
   type RecentExperiment,
 } from '@studio/routes/agents/AgentDetailRoute/overview/recentExperiments';
-import { FlaskConical } from 'lucide-react';
 import type { FC } from 'react';
 
 interface RecentExperimentsPanelProps {
@@ -115,7 +115,7 @@ export const RecentExperimentsPanel: FC<RecentExperimentsPanelProps> = ({
               slotFooter={
                 onRunEvaluation ? (
                   <Button kind="tertiary" onClick={onRunEvaluation}>
-                    <FlaskConical size={16} className="text-brand" aria-hidden />
+                    <Beaker size="16" className="text-brand" aria-hidden />
                     Run Evaluation
                   </Button>
                 ) : null

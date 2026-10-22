@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Anchor, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { ArrowRight, IconDocument, Wrench } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { cleanAssistantArtifactText } from '@studio/routes/agents/AssistantChatRoute/artifacts';
 import { ASSISTANT_STUDIO_LINK_CLASS } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
@@ -14,7 +15,6 @@ import type {
   AssistantChatSelectionArtifact,
 } from '@studio/routes/agents/AssistantChatRoute/types';
 import { getJobProgressDetailRoute } from '@studio/routes/agents/AssistantChatRoute/utils/jobProgress';
-import { ArrowRight, File, Wrench } from 'lucide-react';
 import { type ReactNode } from 'react';
 import { Link } from 'react-router';
 
@@ -23,7 +23,7 @@ export const ToolCallSummary = ({ toolCalls }: { toolCalls: string[] }) => {
 
   return (
     <Flex className="min-w-0 text-secondary" align="center" gap="density-xs">
-      <Wrench size={12} className="shrink-0" />
+      <Wrench size="12" className="shrink-0" />
       <Text kind="body/regular/sm" className="truncate">
         {toolCalls.join(', ')}
       </Text>
@@ -79,7 +79,7 @@ export const FileArtifacts = ({ files }: { files: AssistantChatFileArtifact[] })
             className="min-w-0 py-density-xs"
             title={file.path}
           >
-            <File aria-hidden="true" size={14} className="shrink-0 text-secondary" />
+            <IconDocument aria-hidden="true" size="14" className="shrink-0 text-secondary" />
             <Text kind="label/bold/sm" className="shrink-0">
               {file.action}
             </Text>

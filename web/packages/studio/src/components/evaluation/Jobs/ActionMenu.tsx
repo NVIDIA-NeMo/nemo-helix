@@ -16,9 +16,9 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ArrowRight, MoreVert, Trash } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationJobName } from '@studio/selectors/evaluationJob';
-import { ArrowRight, EllipsisVertical, Trash } from 'lucide-react';
 import { FC, useState } from 'react';
 
 interface ActionMenuProps {
@@ -66,7 +66,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({ job, onNavigateToDetails, onJo
             aria-label="Open evaluation job actions menu"
             data-testid={`action-menu-${jobName}`}
           >
-            <EllipsisVertical />
+            <MoreVert />
           </Button>
         </DropdownTrigger>
         <DropdownContent align="end" className="w-[180px]">

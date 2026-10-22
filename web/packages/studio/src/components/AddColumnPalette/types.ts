@@ -3,7 +3,8 @@
 
 import type { DataDesignerConfig, SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import type { TagProps } from '@nvidia/foundations-react-core';
-import type { LucideIcon } from 'lucide-react';
+import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
+import type { FC } from 'react';
 
 /**
  * The Data Designer `column_type` discriminators, matching the SDK column config
@@ -28,7 +29,7 @@ export interface ColumnTypeOption {
   /** One-line description of what the column does. */
   description: string;
   /** Leading icon. */
-  icon: LucideIcon;
+  icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
   /** Accent color for the icon, by column family. */
   color: ColumnTypeColor;
 }

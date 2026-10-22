@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Spinner, Stack, Tag, Text } from '@nvidia/foundations-react-core';
+import { Download, IconDocument, FolderOpen, Add, Floppy } from '@nvidia/react-gui-icons/icons';
 import { FILE_FORMAT_TAG_COLOR } from '@studio/components/FileRowEditor/constants';
 import type { DataFileFormat } from '@studio/components/FileRowEditor/parse';
-import { Download, FileSpreadsheet, FolderOpen, Plus, Save } from 'lucide-react';
 import { type ChangeEvent, type FC, type ReactNode, type RefObject } from 'react';
 
 export interface FileHeaderProps {
@@ -26,15 +26,15 @@ export interface FileHeaderProps {
   /** Disables the Download action (e.g. when there are no rows to export). */
   downloadDisabled: boolean;
   /**
-   * Persists the current rows to the backing store. When provided, a "Save File" action
+   * Persists the current rows to the backing store. When provided, a "Floppy File" action
    * is shown; when omitted, the editor stays in-memory only (e.g. the standalone demo).
    */
   onSaveFile?: () => void;
-  /** Whether a save is in flight — shows a spinner and disables the Save action. */
+  /** Whether a save is in flight — shows a spinner and disables the Floppy action. */
   isSaving?: boolean;
-  /** Disables the Save action (e.g. when there are no unsaved changes). */
+  /** Disables the Floppy action (e.g. when there are no unsaved changes). */
   saveDisabled?: boolean;
-  /** When set, disables the Save action and shows this text as its tooltip. */
+  /** When set, disables the Floppy action and shows this text as its tooltip. */
   saveDisabledReason?: string;
   /** Whether there are staged edits not yet persisted — shows an "Unsaved changes" chip. */
   hasUnsavedChanges?: boolean;
@@ -64,7 +64,7 @@ export const FileHeader: FC<FileHeaderProps> = ({
 }) => (
   <Flex align="center" gap="density-md" className="w-full shrink-0">
     <Flex align="center" justify="center" className="size-10 shrink-0 rounded-md bg-surface-sunken">
-      <FileSpreadsheet className="size-20 text-secondary" />
+      <IconDocument className="size-20 text-secondary" />
     </Flex>
     <Stack gap="density-xs" className="min-w-0 flex-1">
       <Flex align="center" gap="density-sm" className="min-w-0">
@@ -108,13 +108,13 @@ export const FileHeader: FC<FileHeaderProps> = ({
             onChange={onFileSelected}
           />
           <Button kind="secondary" color="neutral" onClick={onOpenFileClick}>
-            <FolderOpen size={16} />
+            <FolderOpen size="16" />
             Open File
           </Button>
         </>
       )}
       <Button kind="secondary" color="neutral" onClick={onDownload} disabled={downloadDisabled}>
-        <Download size={16} />
+        <Download size="16" />
         Download
       </Button>
       <Button
@@ -122,7 +122,7 @@ export const FileHeader: FC<FileHeaderProps> = ({
         color={onSaveFile ? 'neutral' : 'brand'}
         onClick={onAddRow}
       >
-        <Plus size={16} />
+        <Add size="16" />
         Add Row
       </Button>
       {onSaveFile && (
@@ -134,8 +134,8 @@ export const FileHeader: FC<FileHeaderProps> = ({
             disabled={saveDisabled || isSaving || Boolean(saveDisabledReason)}
             title={saveDisabledReason}
           >
-            {isSaving ? <Spinner size="small" aria-label="Saving" /> : <Save size={16} />}
-            Save File
+            {isSaving ? <Spinner size="small" aria-label="Saving" /> : <Floppy size="16" />}
+            Floppy File
           </Button>
           {hasUnsavedChanges && (
             <span

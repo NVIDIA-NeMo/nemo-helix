@@ -4,9 +4,9 @@
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { Badge, Text } from '@nvidia/foundations-react-core';
+import { ArrowRight } from '@nvidia/react-gui-icons/icons';
 import type { EntityReplacement } from '@studio/components/AnonymizerRecordView/types';
 import { entityTagColor } from '@studio/routes/AnonymizerBuilderRoute/constants';
-import { ArrowRight } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, type ComponentProps, type FC } from 'react';
 
 const REPLACEMENTS_PAGE_SIZE = 20;
@@ -57,7 +57,7 @@ export const ReplacementMapTable: FC<ReplacementMapTableProps> = memo(({ replace
         id: 'arrow',
         header: '',
         size: ARROW_COLUMN_SIZE,
-        cell: () => <ArrowRight aria-hidden size={14} />,
+        cell: () => <ArrowRight aria-hidden size="14" />,
       }),
       col.accessor('synthetic', {
         header: 'Replacement',

@@ -3,7 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Button } from '@nvidia/foundations-react-core';
-import { Copy } from 'lucide-react';
+import { CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps, FC } from 'react';
 
 interface Props extends ComponentProps<typeof Button> {
@@ -24,7 +24,7 @@ export const CopyButton: FC<Props> = ({ text, ...buttonProps }) => {
 
   return (
     <Button onClick={copyText} size="small" color="brand" type="button" {...buttonProps}>
-      <Copy />
+      <CopyGeneric />
     </Button>
   );
 };

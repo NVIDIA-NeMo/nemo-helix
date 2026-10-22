@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Tag, TagProps } from '@nvidia/foundations-react-core';
-import { CircleCheck, X, RefreshCw, CircleAlert as ErrorIcon } from 'lucide-react';
+import { CheckCircle, Close, Refresh, IconError as ErrorIcon } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode, MouseEventHandler } from 'react';
 
 export type FileTagStatus = 'success' | 'pending' | 'error' | 'idle';
@@ -43,9 +43,9 @@ export const FileTag: FC<FileTagProps> = ({
   return (
     <Flex gap="density-xs" align="center" className={className}>
       {status === 'success' && (
-        <CircleCheck color="var(--text-color-feedback-success)" width="16" height="16" />
+        <CheckCircle color="var(--text-color-feedback-success)" width="16" height="16" />
       )}
-      {status === 'pending' && <RefreshCw width="16" height="16" />}
+      {status === 'pending' && <Refresh width="16" height="16" />}
       {status === 'error' && (
         <ErrorIcon color="var(--text-color-feedback-danger)" width="16" height="16" />
       )}
@@ -61,7 +61,7 @@ export const FileTag: FC<FileTagProps> = ({
         >
           {slotStart}
           <Flex gap="density-sm">{fileName}</Flex>
-          {onClick && <X />}
+          {onClick && <Close />}
         </Tag>
       ) : onNoFileClick ? (
         <Button kind="tertiary" onClick={onNoFileClick} className="h-auto p-0">

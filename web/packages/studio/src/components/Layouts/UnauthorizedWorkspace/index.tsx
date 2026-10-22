@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { Lock } from 'lucide-react';
+import { LockClosed } from '@nvidia/react-gui-icons/icons';
 
 export const UnauthorizedWorkspace = () => (
   <ErrorMessage
     header="You don't have access to this workspace"
     message="You don't have permission to view this workspace. Contact the workspace owner to request access."
-    slotMedia={<Lock className="size-16 stroke-2" />}
+    slotMedia={<LockClosed className="size-16 stroke-2" />}
   />
 );

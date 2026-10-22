@@ -11,7 +11,7 @@ import {
   DropdownTrigger,
   Flex,
 } from '@nvidia/foundations-react-core';
-import { Sparkles } from 'lucide-react';
+import { Sparkle } from '@nvidia/react-gui-icons/icons';
 import React, { type FC, type ReactElement, type ReactNode } from 'react';
 
 export interface ActionMenuItem {
@@ -49,7 +49,7 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
   ariaLabel = 'Open actions menu',
   'data-testid': testId = 'actions-menu',
 }) => {
-  const triggerIcon = icon ?? (label ? <Sparkles /> : undefined);
+  const triggerIcon = icon ?? (label ? <Sparkle /> : undefined);
 
   return (
     <DropdownRoot>

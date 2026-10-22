@@ -8,6 +8,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { makeDatasetsTableColumns } from '@studio/components/DatasetsTable/columns';
@@ -19,7 +20,6 @@ import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
 import { getNewFilesetRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
-import { Trash } from 'lucide-react';
 import { type FC } from 'react';
 import { useNavigate } from 'react-router';
 

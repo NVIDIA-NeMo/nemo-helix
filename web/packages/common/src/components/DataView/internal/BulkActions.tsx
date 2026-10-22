@@ -3,8 +3,8 @@
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
 import { Button, Divider, Flex, Text } from '@nvidia/foundations-react-core';
+import { Close } from '@nvidia/react-gui-icons/icons';
 import type { Row, Table } from '@tanstack/react-table';
-import { X } from 'lucide-react';
 import { Fragment, type JSX, type ReactNode } from 'react';
 
 export interface DataViewBulkActionsProps<TData> {
@@ -48,7 +48,7 @@ export function BulkActions<TData>({
           }}
         >
           <span className="only-mobile">
-            <X variant="line" />
+            <Close variant="line" />
           </span>
           <span className="hide-mobile">Cancel</span>
         </Button>

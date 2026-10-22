@@ -15,6 +15,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ChartTree } from '@nvidia/react-gui-icons/icons';
 import { TraceStatisticsChart } from '@studio/components/AgentTraceStatistics/TraceStatisticsChart';
 import { TraceStatisticsEmptyState } from '@studio/components/AgentTraceStatistics/TraceStatisticsEmptyState';
 import { TraceStatisticsTiles } from '@studio/components/AgentTraceStatistics/TraceStatisticsTiles';
@@ -25,7 +26,6 @@ import type {
 } from '@studio/components/AgentTraceStatistics/types';
 import { RANGE_LABELS } from '@studio/components/AgentTraceStatistics/utils';
 import { AxiosError } from 'axios';
-import { ListTree } from 'lucide-react';
 import { type FC } from 'react';
 
 const RANGE_OPTIONS: TraceStatisticsRange[] = ['day', 'week', 'month', 'max'];
@@ -98,7 +98,7 @@ export const AgentTraceStatistics: FC<AgentTraceStatisticsProps> = ({
           <Flex gap="2" align="center">
             {onViewTraces && !isEmpty ? (
               <Button kind="tertiary" onClick={onViewTraces}>
-                <ListTree size={16} aria-hidden />
+                <ChartTree size="16" aria-hidden />
                 View traces
               </Button>
             ) : null}

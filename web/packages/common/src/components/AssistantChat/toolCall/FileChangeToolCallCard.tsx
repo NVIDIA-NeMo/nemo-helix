@@ -7,7 +7,7 @@ import {
   FILE_CHANGE_DELETION_CLASS,
 } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import { Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, FilePenLine, FilePlus2 } from 'lucide-react';
+import { ChevronRight, Rename, DocumentNew } from '@nvidia/react-gui-icons/icons';
 
 interface FileChangeToolCallCardProps {
   readonly summary: {
@@ -20,7 +20,7 @@ interface FileChangeToolCallCardProps {
 }
 
 export const FileChangeToolCallCard = ({ summary }: FileChangeToolCallCardProps) => {
-  const Icon = summary.action === 'Wrote' ? FilePlus2 : FilePenLine;
+  const Icon = summary.action === 'Wrote' ? DocumentNew : Rename;
 
   return (
     <div
@@ -30,7 +30,7 @@ export const FileChangeToolCallCard = ({ summary }: FileChangeToolCallCardProps)
       <details className="group/write" data-testid="assistant-tool-call-file-change-details">
         <summary className="flex cursor-pointer list-none items-center gap-density-sm px-density-sm py-density-xs marker:hidden">
           <div className="flex size-8 shrink-0 items-center justify-center rounded bg-surface-sunken text-secondary">
-            <Icon size={16} />
+            <Icon size="16" />
           </div>
           <div className="min-w-0 flex-1">
             <Text kind="label/bold/md" className="block">
@@ -43,7 +43,7 @@ export const FileChangeToolCallCard = ({ summary }: FileChangeToolCallCardProps)
           </div>
           <span className="flex shrink-0 items-center gap-density-xs rounded border border-base px-density-sm py-density-xs text-secondary group-open/write:bg-surface-sunken">
             <Text kind="label/regular/sm">Review</Text>
-            <ChevronRight size={14} className="transition-transform group-open/write:rotate-90" />
+            <ChevronRight size="14" className="transition-transform group-open/write:rotate-90" />
           </span>
         </summary>
         <div className="border-t border-base px-density-sm py-density-xs">

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Card, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { ChevronRight } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
-import { ChevronRight } from 'lucide-react';
 import type { ComponentProps, FC, ReactNode } from 'react';
 import { Link } from 'react-router';
 

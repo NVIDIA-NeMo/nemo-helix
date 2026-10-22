@@ -13,9 +13,9 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { RAIL_DEFINITIONS } from '@studio/routes/guardrails/rails/registry';
 import type { RailDefinition, RailScope } from '@studio/routes/guardrails/rails/types';
-import { Trash2 } from 'lucide-react';
 import type { FC } from 'react';
 
 const SCOPE_LABELS: Record<RailScope, string> = {
@@ -107,7 +107,7 @@ const RailRow: FC<RailRowProps> = ({ rail, data, onChange }) => {
                   onClick={() => onChange(rail.clearSettings(data))}
                   aria-label={`Discard saved ${rail.label} settings`}
                 >
-                  <Trash2 size={16} />
+                  <Trash size="16" />
                 </Button>
               </Tooltip>
             ) : null}

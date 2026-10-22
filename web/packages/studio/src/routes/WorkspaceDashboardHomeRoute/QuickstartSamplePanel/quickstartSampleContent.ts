@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
+import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
+import { ChatMulti } from '@nvidia/react-gui-icons/icons';
 import { AGENT_OPTIMIZATIONS_ENABLED, INTAKE_ENABLED } from '@studio/constants/environment';
 import {
   getAgentDetailRoute,
@@ -11,7 +13,7 @@ import {
   getAgentRunEvaluationRoute,
   getIntakeTracesRoute,
 } from '@studio/routes/utils';
-import { MessagesSquare, type LucideIcon } from 'lucide-react';
+import type { FC } from 'react';
 
 export type QuickstartSampleView = 'studio' | 'cli';
 
@@ -42,7 +44,7 @@ interface QuickstartSampleStepCopy {
 
 export interface QuickstartSampleStep {
   readonly id: string;
-  readonly icon: LucideIcon;
+  readonly icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
   readonly studio: QuickstartSampleStepCopy & {
     readonly actions: readonly QuickstartSampleAction[];
   };
@@ -103,7 +105,7 @@ export const buildQuickstartSampleSteps = ({
   return [
     {
       id: 'try-the-agent',
-      icon: MessagesSquare,
+      icon: ChatMulti,
       studio: {
         title: 'Try the agent',
         description: 'Chat with the sample agent to see how it responds.',

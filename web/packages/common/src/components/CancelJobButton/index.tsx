@@ -12,8 +12,8 @@ import {
 } from '@nemo/sdk/generated/platform/jobs';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { Close } from '@nvidia/react-gui-icons/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react';
 import { FC, MouseEvent, useState } from 'react';
 
 interface CancelJobButtonProps {
@@ -84,7 +84,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
           onClick={handleClick}
           disabled={isPending || isCancelling}
         >
-          <X className="w-3 h-3" />
+          <Close className="w-3 h-3" />
           Cancel
         </Button>
       ) : (

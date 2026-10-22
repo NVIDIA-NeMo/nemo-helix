@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AppBar, Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Collapse, Expand } from '@nvidia/react-gui-icons/icons';
 import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/components/DocumentationLink';
 import { ThemeSwitch } from '@studio/components/Layouts/GlobalNav/components/ThemeSwitch';
@@ -12,7 +13,6 @@ import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath
 import { AssistantTopBarChat } from '@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useSidebarState } from '@studio/util/hooks/useSidebarState';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { lazy, Suspense, type FC, type ReactNode } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
 
@@ -57,7 +57,7 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
         onClick={toggle}
         disabled={!sideNav}
       >
-        {expanded ? <PanelLeftClose /> : <PanelLeftOpen />}
+        {expanded ? <Collapse /> : <Expand />}
       </Button>
     </Tooltip>
   );

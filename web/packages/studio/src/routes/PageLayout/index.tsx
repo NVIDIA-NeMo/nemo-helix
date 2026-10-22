@@ -3,6 +3,7 @@
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { Button, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
+import { IconError, Enter, Refresh } from '@nvidia/react-gui-icons/icons';
 import { GlobalNav } from '@studio/components/Layouts/GlobalNav';
 import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
@@ -12,7 +13,6 @@ import { useAuthTokenStatus } from '@studio/providers/auth/useAuthTokenStatus';
 import { useSelectedWorkspace } from '@studio/providers/workspace';
 import { AssistantChatProvider } from '@studio/routes/agents/AssistantChatRoute/context/AssistantChatProvider';
 import { WorkspaceGuard } from '@studio/routes/RootLayout/WorkspaceGuard';
-import { CircleAlert, LogIn, RefreshCw } from 'lucide-react';
 import { ReactNode } from 'react';
 
 const SignedOutView = ({ onSignIn }: { onSignIn: () => void }) => (
@@ -25,7 +25,7 @@ const SignedOutView = ({ onSignIn }: { onSignIn: () => void }) => (
         Your Studio session has ended.
       </Text>
       <Button color="brand" onClick={onSignIn}>
-        <LogIn size={16} />
+        <Enter size="16" />
         Sign in
       </Button>
     </Flex>
@@ -38,10 +38,10 @@ const AuthErrorView = () => (
       height="100vh"
       header="Unable to verify session"
       message="Studio couldn't check your sign-in status. Refresh the page to try again."
-      slotMedia={<CircleAlert className="size-16 stroke-2 text-feedback-danger" />}
+      slotMedia={<IconError className="size-16 stroke-2 text-feedback-danger" />}
       slotFooter={
         <Button color="brand" onClick={() => window.location.reload()}>
-          <RefreshCw size={16} />
+          <Refresh size="16" />
           Refresh Page
         </Button>
       }

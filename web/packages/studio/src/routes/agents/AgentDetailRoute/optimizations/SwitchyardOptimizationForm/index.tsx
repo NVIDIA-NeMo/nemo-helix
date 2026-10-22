@@ -17,6 +17,7 @@ import {
   Stepper,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ChevronLeft } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 import {
@@ -31,7 +32,6 @@ import {
   DEFAULT_THRESHOLD,
   RoutingStrategiesSection,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/RoutingStrategiesSection';
-import { ChevronLeft } from 'lucide-react';
 import { type FC, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 

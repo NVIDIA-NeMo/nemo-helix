@@ -15,6 +15,7 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { Flag } from '@nvidia/react-gui-icons/icons';
 import { featureFlags, flagDefaults } from '@studio/constants/featureFlags';
 import { flagDefinitions } from '@studio/constants/featureFlags/featureFlags';
 import {
@@ -24,7 +25,6 @@ import {
   writeStoredOverrides,
 } from '@studio/constants/featureFlags/overrides';
 import { PREVIEW } from '@studio/constants/featureFlags/utils';
-import { Flag } from 'lucide-react';
 import { useMemo, useState, type FC } from 'react';
 
 /**

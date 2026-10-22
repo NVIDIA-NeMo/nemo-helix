@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Stack, Text, TextInput } from '@nvidia/foundations-react-core';
+import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import { ColumnTypeGroupSection } from '@studio/components/AddColumnPalette/ColumnTypeGroupSection';
 import { COLUMN_TYPE_GROUPS } from '@studio/components/AddColumnPalette/constants';
 import type {
   AddColumnSelection,
   ColumnTypeOption,
 } from '@studio/components/AddColumnPalette/types';
-import { Search } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 
 /** Matches an option against a lowercased search query (name + description). */
@@ -67,10 +67,10 @@ export const AddColumnPalette: FC<AddColumnPaletteProps> = ({
       <TextInput
         value={search}
         onValueChange={setSearch}
-        placeholder="Search column types…"
-        slotStart={<Search size={14} className="text-secondary" />}
+        placeholder="MagnifyingGlass column types…"
+        slotStart={<MagnifyingGlass size="14" className="text-secondary" />}
         className="shrink-0"
-        attributes={{ Input: { 'aria-label': 'Search column types' } }}
+        attributes={{ Input: { 'aria-label': 'MagnifyingGlass column types' } }}
       />
 
       <Stack gap="density-lg" className="min-h-0 flex-1 overflow-y-auto" paddingX="1">

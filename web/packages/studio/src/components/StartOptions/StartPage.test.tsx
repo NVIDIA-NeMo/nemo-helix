@@ -1,20 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Add, Sparkle } from '@nvidia/react-gui-icons/icons';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Plus, Sparkles } from 'lucide-react';
 
 const OPTIONS = [
   {
     id: 'scratch',
     title: 'Build from scratch',
     description: 'Start with an empty form.',
-    icon: Plus,
+    icon: Add,
     tag: { label: 'Advanced', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
@@ -22,7 +22,7 @@ const OPTIONS = [
     id: 'ai',
     title: 'Describe with AI',
     description: 'Say what you need.',
-    icon: Sparkles,
+    icon: Sparkle,
     tag: { label: 'Beginner', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
@@ -63,8 +63,8 @@ const GROUPS = [
     id: 'recipes',
     title: 'Recipes',
     templates: [
-      { id: 'sft', name: 'SFT recipe', description: 'Supervised.', icon: Plus },
-      { id: 'mine', name: 'My recipe', description: 'Saved.', icon: Plus },
+      { id: 'sft', name: 'SFT recipe', description: 'Supervised.', icon: Add },
+      { id: 'mine', name: 'My recipe', description: 'Saved.', icon: Add },
     ],
   },
 ];

@@ -16,12 +16,12 @@ import {
   SelectRoot,
   SelectTrigger,
 } from '@nvidia/foundations-react-core';
+import { Add } from '@nvidia/react-gui-icons/icons';
 import {
   FeedbackAddToDatasetFileSource,
   LOADING_FILES_OPTION,
 } from '@studio/components/DatasetFileSelect/constants';
 import { MultiselectOption } from '@studio/constants/mutliselect';
-import { Plus } from 'lucide-react';
 import { FC, ReactNode, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -141,7 +141,7 @@ export const DatasetFileSelect: FC<Props> = ({
                         value="Other"
                       >
                         <Flex gap="density-md">
-                          <Plus /> Create New File
+                          <Add /> Create New File
                         </Flex>
                       </SelectItem>
                     )}

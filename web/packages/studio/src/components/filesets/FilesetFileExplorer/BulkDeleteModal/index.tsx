@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFilesDelete } from '@studio/api/datasets/useDatasetFilesDelete';
 import { BulkDeleteModal as GenericBulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { extractFilePathsFromDirectory } from '@studio/components/filesets/FilesetFileExplorer/extractFilePathsFromDirectory';
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';
-import { Trash } from 'lucide-react';
 import {
   cloneElement,
   isValidElement,

@@ -7,6 +7,7 @@ import {
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
 } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import { Stack } from '@nvidia/foundations-react-core';
+import { CheckmarkBadge, IconDocument, LockClosed } from '@nvidia/react-gui-icons/icons';
 import { SafeSynthesizerNavigation } from '@studio/components/SafeSynthesizerNavigation';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -18,7 +19,6 @@ import { SyntheticQualityPanel } from '@studio/routes/SafeSynthesizerJobReportRo
 import { getSafeSynthesizerRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { BadgeCheck, File, Lock } from 'lucide-react';
 import { FC, useRef } from 'react';
 
 export type ReportSection = 'overview' | 'synthetic-quality' | 'data-privacy';
@@ -89,17 +89,17 @@ export const GenerateJobReportRoute: FC = () => {
     {
       id: 'overview',
       label: 'Overview',
-      icon: <File />,
+      icon: <IconDocument />,
     },
     {
       id: 'synthetic-quality',
       label: 'Synthetic Quality',
-      icon: <BadgeCheck />,
+      icon: <CheckmarkBadge />,
     },
     {
       id: 'data-privacy',
       label: 'Data Privacy',
-      icon: <Lock />,
+      icon: <LockClosed />,
     },
   ];
 

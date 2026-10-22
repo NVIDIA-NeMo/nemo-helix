@@ -7,10 +7,10 @@ import {
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
 } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import { Button, Panel } from '@nvidia/foundations-react-core';
+import { Download } from '@nvidia/react-gui-icons/icons';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { Download } from 'lucide-react';
 import { FC } from 'react';
 
 interface OverviewPanelProps {

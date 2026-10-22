@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { HelpCircle } from '@nvidia/react-gui-icons/icons';
 import { tooltipClassName } from '@studio/styles/common';
-import { HelpCircle } from 'lucide-react';
 import { FC } from 'react';
 
 const PatternsTooltipContent: FC = () => (

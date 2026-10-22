@@ -15,9 +15,9 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { LockClosed } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceMembers } from '@studio/api/entity-store/useWorkspaceMembers';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { Lock } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo } from 'react';
 
 export interface MembersDataViewProps {
@@ -144,7 +144,7 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
       <ErrorMessage
         header="You don't have permission to view members"
         message="Managing members and access requires workspace admin permissions. Contact your workspace administrator to request access."
-        slotMedia={<Lock className="size-16 stroke-2" />}
+        slotMedia={<LockClosed className="size-16 stroke-2" />}
         slotFooter={<></>}
       />
     );

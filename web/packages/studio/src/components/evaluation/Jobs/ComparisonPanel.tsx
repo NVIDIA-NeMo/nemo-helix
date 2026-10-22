@@ -16,9 +16,9 @@ import {
   StatusMessage,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ChartPerformance, ChartHierarchy, Warning } from '@nvidia/react-gui-icons/icons';
 import { prettifyName } from '@studio/util/evaluations';
 import { useQuery } from '@tanstack/react-query';
-import { ChartLine, ChartNetwork, TriangleAlert } from 'lucide-react';
 import { useState, ReactNode } from 'react';
 
 interface AggregateScores {
@@ -133,7 +133,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
       <StatusMessage
         className="mx-auto"
         size="medium"
-        slotMedia={<TriangleAlert width={65} height={65} />}
+        slotMedia={<Warning width={65} height={65} />}
         slotHeading="Job Failed"
         slotSubheading="The evaluation job failed. No comparison data available."
       />
@@ -145,7 +145,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
       <TableEmptyState
         header="No Results"
         emptyMessage="No evaluation results available for comparison"
-        icon={<ChartNetwork />}
+        icon={<ChartHierarchy />}
       />
     );
   } else {
@@ -194,7 +194,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
   return (
     <Panel
       elevation="high"
-      slotIcon={<ChartLine />}
+      slotIcon={<ChartPerformance />}
       slotHeading={
         <Flex align="center" justify="between" gap="density-lg">
           Detailed Metrics

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cube, LayoutDetail, Add, Sparkle } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
-import { Box, LayoutTemplate, Plus, Sparkles } from 'lucide-react';
 
 const meta: Meta<typeof StartPage> = {
   component: StartPage,
@@ -20,7 +20,7 @@ const OPTIONS = [
     id: 'ai',
     title: 'Describe with AI',
     description: 'Say what you want in a sentence and start from the draft.',
-    icon: Sparkles,
+    icon: Sparkle,
     tag: { label: 'Beginner', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
@@ -28,7 +28,7 @@ const OPTIONS = [
     id: 'template',
     title: 'Start from a template',
     description: 'Begin from a ready-made recipe and adjust it.',
-    icon: LayoutTemplate,
+    icon: LayoutDetail,
     tag: { label: 'Intermediate', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
@@ -36,7 +36,7 @@ const OPTIONS = [
     id: 'scratch',
     title: 'Build from scratch',
     description: 'Open the full form and choose everything yourself.',
-    icon: Plus,
+    icon: Add,
     tag: { label: 'Advanced', color: 'gray', kind: 'solid' } as const,
     enabled: true,
   },
@@ -49,7 +49,7 @@ const group = (id: string, title: string, names: string[]) => ({
     id: `${id}-${name}`,
     name,
     description: 'What this template sets up, in a line.',
-    icon: Box,
+    icon: Cube,
   })),
 });
 

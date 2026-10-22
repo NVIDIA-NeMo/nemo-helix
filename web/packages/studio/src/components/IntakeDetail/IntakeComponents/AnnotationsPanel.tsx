@@ -20,9 +20,9 @@ import {
   Text,
   TextArea,
 } from '@nvidia/foundations-react-core';
+import { ChatNew, Trash } from '@nvidia/react-gui-icons/icons';
 import { ThumbButton } from '@studio/components/buttons/ThumbButton';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
-import { MessageSquarePlus, Trash2 } from 'lucide-react';
 import { type FC, useEffect, useMemo, useRef } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -203,7 +203,7 @@ export const AnnotationsPanel: FC<AnnotationsPanelProps> = ({
                 onClick={() => void deleteAnnotation(annotation.annotation_id)}
                 className="shrink-0"
               >
-                <Trash2 />
+                <Trash />
               </Button>
             </Flex>
           ))
@@ -239,7 +239,7 @@ export const AnnotationsPanel: FC<AnnotationsPanelProps> = ({
             </FormField>
             <Flex justify="end">
               <Button type="submit" disabled={isMutating || !isValid}>
-                <MessageSquarePlus />
+                <ChatNew />
                 Add Note
               </Button>
             </Flex>

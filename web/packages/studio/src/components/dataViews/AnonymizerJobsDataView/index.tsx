@@ -27,13 +27,13 @@ import type {
   RunJobsSortField as AnonymizerJobsSortField,
 } from '@nemo/sdk/generated/anonymizer/schema';
 import { Banner, Button, Text } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { AnonymizerJobActionsMenu } from '@studio/components/AnonymizerJobActionsMenu';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAnonymizerJobRoute, getNewAnonymizerRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 

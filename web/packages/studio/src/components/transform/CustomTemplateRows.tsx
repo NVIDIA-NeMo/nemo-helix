@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Button, Flex, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
+import { Trash } from '@nvidia/react-gui-icons/icons';
 import { columnReference, type CustomTemplateRow } from '@studio/components/transform/template';
-import { Trash2 } from 'lucide-react';
 import { type FC } from 'react';
 
 export interface CustomTemplateRowsProps {
@@ -66,7 +66,7 @@ export const CustomTemplateRows: FC<CustomTemplateRowsProps> = ({ rows, columns,
             disabled={isBlank(row) && index === rows.length - 1}
             onClick={() => remove(index)}
           >
-            <Trash2 size={14} aria-hidden />
+            <Trash size="14" aria-hidden />
           </Button>
         </Flex>
       ))}

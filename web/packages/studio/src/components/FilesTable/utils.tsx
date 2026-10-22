@@ -4,10 +4,10 @@
 import { GridColDef } from '@mui/x-data-grid';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { Flex } from '@nvidia/foundations-react-core';
+import { FolderClosed, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { DirectoryQuickActions } from '@studio/components/FilesTable/DirectoryQuickActions';
 import { FileQuickActions } from '@studio/components/FilesTable/FileQuickActions';
 import { getHumanReadableFileSize } from '@studio/util/files';
-import { FolderClosed, File } from 'lucide-react';
 
 /**
  * Base file entry interface that works with both HuggingFace ListFileEntry and v2 FilesetFileOutput.
@@ -16,7 +16,7 @@ import { FolderClosed, File } from 'lucide-react';
 export interface FileEntry {
   path: string;
   size: number;
-  /** File identifier - maps to `oid` from HF or `file_ref` from v2 API */
+  /** IconDocument identifier - maps to `oid` from HF or `file_ref` from v2 API */
   oid: string;
 }
 
@@ -207,7 +207,7 @@ export const getFilesTablesColumns = ({
       headerName: 'Name',
       flex: 3,
       renderCell: ({ row: file }) => {
-        const icon = file.type === 'directory' ? <FolderClosed /> : <File />;
+        const icon = file.type === 'directory' ? <FolderClosed /> : <IconDocument />;
         const filename = file.path.split('/').pop();
         return (
           <Flex gap="density-sm" align="center">

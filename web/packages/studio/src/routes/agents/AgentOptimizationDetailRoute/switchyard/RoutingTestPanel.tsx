@@ -16,6 +16,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ChatMulti } from '@nvidia/react-gui-icons/icons';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
 import {
@@ -36,7 +37,6 @@ import {
   type SwitchyardRoute,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/switchyardResults';
 import { getVirtualModelDetailRoute } from '@studio/routes/utils';
-import { MessagesSquare } from 'lucide-react';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -152,7 +152,7 @@ export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }
   return (
     <Panel
       slotHeading="Test routing"
-      slotIcon={<MessagesSquare />}
+      slotIcon={<ChatMulti />}
       elevation="high"
       density="compact"
       data-testid="routing-test-panel"

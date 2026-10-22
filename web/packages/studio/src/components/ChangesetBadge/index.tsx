@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Anchor, Badge } from '@nvidia/foundations-react-core';
-import { SquareArrowOutUpRight } from 'lucide-react';
+import { OpenExternal } from '@nvidia/react-gui-icons/icons';
 import { type FC } from 'react';
 
 interface ChangesetBadgeProps {
@@ -19,7 +19,7 @@ interface ChangesetBadgeProps {
 export const ChangesetBadge: FC<ChangesetBadgeProps> = ({ href }) => (
   <Anchor href={href} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
     <Badge color="blue" kind="solid">
-      Changeset <SquareArrowOutUpRight width={14} height={14} aria-hidden />
+      Changeset <OpenExternal width={14} height={14} aria-hidden />
     </Badge>
   </Anchor>
 );

@@ -15,11 +15,11 @@ import {
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
+import { ChartTree, Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import type { AgentExperimentRow } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { FolderTree, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 interface ExperimentsTableProps {
@@ -133,7 +133,7 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
             renderEmptyState: () => (
               <TableEmptyState
                 className="py-density-3xl"
-                icon={<FolderTree className="size-16" />}
+                icon={<ChartTree className="size-16" />}
                 header="No experiments yet"
                 emptyMessage="An experiment appears here once one of its evaluations publishes results for this agent."
               />

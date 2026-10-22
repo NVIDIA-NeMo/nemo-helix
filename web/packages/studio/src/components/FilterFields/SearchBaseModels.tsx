@@ -11,8 +11,8 @@ import {
   ComboboxListbox,
   ComboboxItem,
 } from '@nvidia/foundations-react-core';
+import { Close } from '@nvidia/react-gui-icons/icons';
 import { keepPreviousData } from '@tanstack/react-query';
-import { X } from 'lucide-react';
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { useDebounce } from 'use-debounce';
 
@@ -109,7 +109,7 @@ export const SearchBaseModels = ({ workspace, selectedModels, setSelectedModels 
                 setSelectedModels(selectedModels.filter((selectedModel) => selectedModel !== model))
               }
             >
-              <X />
+              <Close />
             </Button>
           </li>
         ))}

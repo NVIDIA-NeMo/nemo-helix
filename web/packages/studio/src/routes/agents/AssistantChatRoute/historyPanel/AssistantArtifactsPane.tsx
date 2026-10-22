@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Divider, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Collapse } from '@nvidia/react-gui-icons/icons';
 import { Empty } from '@studio/components/Empty';
 import {
   ArtifactRow,
@@ -13,7 +14,6 @@ import {
 } from '@studio/routes/agents/AssistantChatRoute/historyPanel/ArtifactSections';
 import { getSelectedArtifactModel } from '@studio/routes/agents/AssistantChatRoute/historyPanel/helpers';
 import type { AssistantChatArtifacts } from '@studio/routes/agents/AssistantChatRoute/types';
-import { PanelRightClose } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
 
 interface ArtifactPaneSection {
@@ -101,7 +101,7 @@ export const AssistantArtifactsPane = ({
             type="button"
             onClick={onCollapse}
           >
-            <PanelRightClose size={18} />
+            <Collapse size="18" />
           </Button>
         </Tooltip>
       </Flex>

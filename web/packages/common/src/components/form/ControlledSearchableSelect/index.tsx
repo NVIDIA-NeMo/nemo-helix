@@ -19,7 +19,7 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { Filter } from 'lucide-react';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 import {
   ChangeEvent,
   FC,

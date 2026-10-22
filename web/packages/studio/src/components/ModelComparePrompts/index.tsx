@@ -3,11 +3,11 @@
 
 import { UploadModal } from '@nemo/common/src/components/UploadModal';
 import { Button, Flex, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Add } from '@nvidia/react-gui-icons/icons';
 import { StatsBadge } from '@studio/components/chat/StatsBadge';
 import { ModelCompareTable } from '@studio/components/ModelComparePrompts/ModelCompareTable';
 import type { ModelComparePromptsProps } from '@studio/components/ModelComparePrompts/types';
 import { useModelComparePrompts } from '@studio/components/ModelComparePrompts/useModelComparePrompts';
-import { Plus } from 'lucide-react';
 import { type FC } from 'react';
 
 export const ModelComparePrompts: FC<ModelComparePromptsProps> = ({
@@ -92,7 +92,7 @@ export const ModelComparePrompts: FC<ModelComparePromptsProps> = ({
                 className="flex cursor-pointer items-center justify-center rounded border border-base bg-surface-raised p-1.5 text-fg-subdued transition-colors hover:bg-surface-sunken hover:text-fg-base"
                 aria-label="Add model"
               >
-                <Plus size={16} />
+                <Add size="16" />
               </button>
             </Tooltip>
           </div>

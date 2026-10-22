@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { BadgeProps, Flex } from '@nvidia/foundations-react-core';
-import type { LucideIcon } from 'lucide-react';
-import type { ComponentProps, ReactNode } from 'react';
+import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
+import type { ComponentProps, ReactNode, FC } from 'react';
 
 export interface StartOptionTag {
   label: string;
@@ -19,7 +19,7 @@ export interface StartOption<Id extends string = string> {
   id: Id;
   title: string;
   description: string;
-  icon: LucideIcon;
+  icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
   tag?: StartOptionTag;
   /**
    * Whether this option is wired up. Disabled options still render (so the full set
@@ -34,7 +34,7 @@ export interface StartTemplate {
   id: string;
   name: string;
   description: string;
-  icon: LucideIcon;
+  icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
 }
 
 export interface StartTemplateGroup {

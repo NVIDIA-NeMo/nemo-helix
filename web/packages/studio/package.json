@@ -49,6 +49,7 @@
     "@nemo/common": "workspace:*",
     "@nemo/sdk": "workspace:*",
     "@nvidia/foundations-react-core": "catalog:",
+    "@nvidia/react-gui-icons": "catalog:",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.219.0",
     "@opentelemetry/auto-instrumentations-web": "^0.64.0",

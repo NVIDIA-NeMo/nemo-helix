@@ -9,6 +9,7 @@ import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { Banner, Divider, Flex, Label, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import { Split } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { useSplitDatasetFile } from '@studio/api/datasets/useSplitDatasetFile';
 import {
@@ -27,7 +28,6 @@ import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { tooltipClassName } from '@studio/styles/common';
 import { getContentSchema } from '@studio/util/files';
 import { getTextWithCount } from '@studio/util/strings';
-import { Split } from 'lucide-react';
 import { ComponentProps, FC, useMemo } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 

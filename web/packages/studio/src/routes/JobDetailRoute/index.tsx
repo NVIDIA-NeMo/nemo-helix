@@ -11,6 +11,7 @@ import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import { useJobsGetJob, useJobsListJobResults } from '@nemo/sdk/generated/platform/jobs';
 import { Flex, Grid, PageHeader, Panel, Spinner, Stack } from '@nvidia/foundations-react-core';
+import { IconClipboard, FolderOpen, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -18,7 +19,6 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { ArtifactFilesPanel } from '@studio/routes/JobDetailRoute/components/ArtifactFilesPanel';
 import { getWorkspaceJobsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { ClipboardList, FolderOpen, ScrollText } from 'lucide-react';
 import { FC } from 'react';
 
 export const JobDetailRoute: FC = () => {
@@ -77,7 +77,7 @@ export const JobDetailRoute: FC = () => {
         <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
           <Panel
             slotHeading="Job Details"
-            slotIcon={<ClipboardList />}
+            slotIcon={<IconClipboard />}
             elevation="high"
             density="compact"
           >
@@ -120,7 +120,12 @@ export const JobDetailRoute: FC = () => {
           </Panel>
         </Grid>
 
-        <Panel slotHeading="Progress" slotIcon={<ScrollText />} elevation="high" density="compact">
+        <Panel
+          slotHeading="Progress"
+          slotIcon={<IconDocument />}
+          elevation="high"
+          density="compact"
+        >
           <LogViewer
             logs={logs ?? []}
             isLoading={isLoadingLogs}

@@ -7,10 +7,10 @@ import {
   formatSignedDelta,
 } from '@nemo/common/src/components/DeltaText';
 import { Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
+import { ShapeTriangle } from '@nvidia/react-gui-icons/icons';
 import { SeriesButtonGroup } from '@studio/components/charts/MetricTrend/SeriesButtonGroup';
 import { useNvColorMode } from '@studio/components/DagCanvas/useNvColorMode';
 import { StackedSkeleton } from '@studio/components/StackedSkeleton';
-import { Triangle } from 'lucide-react';
 import { FC, useId, useMemo, useState } from 'react';
 import {
   Area,
@@ -135,8 +135,8 @@ export const MetricTrend: FC<MetricTrendProps> = ({
           <Flex align="center" gap="density-sm">
             <Tag readOnly color={deltaColor} density="compact">
               {!isZero && (
-                <Triangle
-                  size={12}
+                <ShapeTriangle
+                  size="12"
                   className={`fill-current ${isNegative ? 'rotate-180' : ''}`}
                   aria-hidden
                 />

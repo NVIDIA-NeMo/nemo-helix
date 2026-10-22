@@ -14,10 +14,10 @@ import {
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Banner, Button, Divider, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { Cog, Play } from '@nvidia/react-gui-icons/icons';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { JobConfigDrawer } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/JobConfigDrawer';
-import { Cog, Play } from 'lucide-react';
 import { FC, useState } from 'react';
 
 interface JobDetailsPanelProps {

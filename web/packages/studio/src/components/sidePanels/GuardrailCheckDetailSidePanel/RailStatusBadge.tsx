@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge } from '@nvidia/foundations-react-core';
+import { Shield } from '@nvidia/react-gui-icons/icons';
 import type { Verdict } from '@studio/api/guardrail-checks/types';
-import { ShieldCheck } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface RailStatusBadgeProps {
@@ -22,7 +22,7 @@ export const RailStatusBadge: FC<RailStatusBadgeProps> = ({ status }) => {
   if (status === 'blocked') {
     return (
       <Badge color="yellow" kind="solid">
-        <ShieldCheck size={10} />
+        <Shield size="10" />
         Blocked
       </Badge>
     );

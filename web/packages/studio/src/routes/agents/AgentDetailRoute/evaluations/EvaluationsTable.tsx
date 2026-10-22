@@ -18,6 +18,7 @@ import {
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { Beaker, Trash } from '@nvidia/react-gui-icons/icons';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
@@ -36,7 +37,6 @@ import {
   getWorkspaceJobDetailRoute,
 } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { FlaskConical, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
@@ -401,7 +401,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             renderEmptyState: () => (
               <TableEmptyState
                 className="py-density-3xl"
-                icon={<FlaskConical className="size-16" />}
+                icon={<Beaker className="size-16" />}
                 header="No evaluations yet"
                 emptyMessage="Runs appear here as soon as they are submitted, before any results are published."
               />

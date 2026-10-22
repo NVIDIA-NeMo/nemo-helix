@@ -12,7 +12,7 @@ import {
   DropdownTrigger,
   type DropdownTriggerProps,
 } from '@nvidia/foundations-react-core';
-import { Filter } from 'lucide-react';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 import { Fragment, useEffect, useState, type JSX, type ReactNode } from 'react';
 
 /**

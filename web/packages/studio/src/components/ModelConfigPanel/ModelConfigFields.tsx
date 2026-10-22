@@ -7,6 +7,7 @@ import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/
 import { SliderWithTextInput } from '@nemo/common/src/components/SliderWithTextInput';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
+import { Cpu, Trash, Close } from '@nvidia/react-gui-icons/icons';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
 import {
   DEFAULT_MAX_PARALLEL_REQUESTS,
@@ -18,7 +19,6 @@ import {
   validateModelAlias,
 } from '@studio/routes/DataDesignerJobBuildRoute/models';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-import { Cpu, Trash2, X } from 'lucide-react';
 import type { FC } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 
@@ -94,7 +94,7 @@ export const ModelConfigFields: FC<ModelConfigFieldsProps> = ({
       >
         <Flex align="center" gap="density-sm" className="min-w-0">
           <CardIconBadge>
-            <Cpu size={16} className="text-accent-teal" aria-hidden />
+            <Cpu size="16" className="text-accent-teal" aria-hidden />
           </CardIconBadge>
           <Stack gap="density-xxs" className="min-w-0">
             <Text kind="body/bold/md" className="truncate">
@@ -112,7 +112,7 @@ export const ModelConfigFields: FC<ModelConfigFieldsProps> = ({
           aria-label="Close model config"
           onClick={onClose}
         >
-          <X size={16} aria-hidden />
+          <Close size="16" aria-hidden />
         </Button>
       </Flex>
 
@@ -174,7 +174,7 @@ export const ModelConfigFields: FC<ModelConfigFieldsProps> = ({
 
       <Flex align="center" justify="start" className="shrink-0 border-t border-base p-density-lg">
         <Button kind="tertiary" color="danger" size="small" onClick={onRemove}>
-          <Trash2 size={16} aria-hidden />
+          <Trash size="16" aria-hidden />
           Remove model
         </Button>
       </Flex>

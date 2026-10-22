@@ -4,8 +4,8 @@
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { Badge, Button, Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { ArrowDown, ArrowUp, Close } from '@nvidia/react-gui-icons/icons';
 import type { SwitchyardFormValues } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
-import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { type FC } from 'react';
 import { useController } from 'react-hook-form';
 
@@ -73,7 +73,7 @@ export const ModelOrderField: FC<ModelOrderFieldProps> = ({ workspace, disabled 
                     aria-label={`Move ${model} up`}
                     onClick={() => onChange(move(value, index, index - 1))}
                   >
-                    <ArrowUp size={16} />
+                    <ArrowUp size="16" />
                   </Button>
                   <Button
                     type="button"
@@ -83,7 +83,7 @@ export const ModelOrderField: FC<ModelOrderFieldProps> = ({ workspace, disabled 
                     aria-label={`Move ${model} down`}
                     onClick={() => onChange(move(value, index, index + 1))}
                   >
-                    <ArrowDown size={16} />
+                    <ArrowDown size="16" />
                   </Button>
                   <Divider orientation="vertical" className="mx-1 h-5" />
                   <Button
@@ -94,7 +94,7 @@ export const ModelOrderField: FC<ModelOrderFieldProps> = ({ workspace, disabled 
                     aria-label={`Remove ${model}`}
                     onClick={() => onChange(value.filter((_, other) => other !== index))}
                   >
-                    <X size={16} />
+                    <Close size="16" />
                   </Button>
                 </Flex>
               </li>

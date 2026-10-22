@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, TextInput } from '@nvidia/foundations-react-core';
-import { Filter } from 'lucide-react';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 import { ChangeEvent, FC } from 'react';
 
 interface ModelDropdownSearchProps {

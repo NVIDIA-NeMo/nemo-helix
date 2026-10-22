@@ -12,7 +12,7 @@ import { InlineUploadPicker } from '@nemo/common/src/components/UploadModal/Inli
 import type { SubmitUploadType } from '@nemo/common/src/components/UploadModal/types';
 import type { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen } from '@nvidia/react-gui-icons/icons';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 
 export type AcceptedFileType = '.json' | '.jsonl' | '.csv' | '.parquet' | '.yml' | '.yaml';

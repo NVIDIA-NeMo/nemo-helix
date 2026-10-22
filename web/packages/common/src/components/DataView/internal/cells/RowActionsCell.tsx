@@ -3,8 +3,8 @@
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
 import { Dropdown, type DropdownProps } from '@nvidia/foundations-react-core';
+import { MoreVert } from '@nvidia/react-gui-icons/icons';
 import type { CellContext } from '@tanstack/react-table';
-import { EllipsisVertical } from 'lucide-react';
 import type { JSX } from 'react';
 
 export interface RowActionsCellProps<TData> extends Omit<DropdownProps, 'items'> {
@@ -43,7 +43,7 @@ export function RowActionsCell<TData>({
       side="left"
       {...props}
     >
-      {children ?? <EllipsisVertical variant="fill" />}
+      {children ?? <MoreVert variant="fill" />}
     </Dropdown>
   ) : null;
 }

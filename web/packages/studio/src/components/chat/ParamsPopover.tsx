@@ -11,8 +11,8 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { InfoCircle, Retry, Sliders } from '@nvidia/react-gui-icons/icons';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
-import { Info, RotateCcw, Sliders } from 'lucide-react';
 import { type FC } from 'react';
 
 interface ParamsPopoverProps {
@@ -70,7 +70,7 @@ export const ParamsPopover: FC<ParamsPopoverProps> = ({ value, onChange }) => {
                     {s.label}
                   </Text>
                   <Tooltip slotContent={s.hint} side="top">
-                    <Info size={12} className="shrink-0 text-fg-subdued" />
+                    <InfoCircle size="12" className="shrink-0 text-fg-subdued" />
                   </Tooltip>
                 </Flex>
                 <div className="min-w-0 flex-1">
@@ -107,7 +107,7 @@ export const ParamsPopover: FC<ParamsPopoverProps> = ({ value, onChange }) => {
                   className="shrink-0"
                   type="button"
                 >
-                  <RotateCcw size={14} />
+                  <Retry size="14" />
                 </Button>
               </Flex>
             );
@@ -116,7 +116,7 @@ export const ParamsPopover: FC<ParamsPopoverProps> = ({ value, onChange }) => {
       }
     >
       <Button kind="secondary" aria-label="Inference parameters" title="Inference parameters">
-        <Sliders size={14} />
+        <Sliders size="14" />
       </Button>
     </Popover>
   );

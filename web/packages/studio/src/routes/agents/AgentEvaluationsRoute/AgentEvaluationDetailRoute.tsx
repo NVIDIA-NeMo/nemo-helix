@@ -26,6 +26,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { CloseCircle, IconClipboard, Beaker, IconDocument } from '@nvidia/react-gui-icons/icons';
 import {
   aggregateScoresOf,
   agentNameForJob,
@@ -53,7 +54,6 @@ import {
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CircleX, ClipboardList, FlaskConical, ScrollText } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -215,7 +215,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
             slotHeading={
               <Flex align="center" justify="between" className="w-full">
                 <Flex align="center" gap="2">
-                  <ClipboardList />
+                  <IconClipboard />
                   Details
                 </Flex>
                 {canCancelJob && (
@@ -225,7 +225,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
                     size="small"
                     onClick={() => setCancelModalOpen(true)}
                   >
-                    <CircleX /> Cancel Job
+                    <CloseCircle /> Cancel Job
                   </Button>
                 )}
               </Flex>
@@ -299,12 +299,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
             </Stack>
           </Panel>
 
-          <Panel
-            slotHeading="Scores"
-            slotIcon={<FlaskConical />}
-            elevation="high"
-            density="compact"
-          >
+          <Panel slotHeading="Scores" slotIcon={<Beaker />} elevation="high" density="compact">
             {!isJobTerminal && (
               <Block className="text-subtle">
                 Scores are computed once the job reaches a terminal state.
@@ -350,7 +345,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
           <AgentEvalTaskResultsPanel tasks={taskDetails} />
         )}
 
-        <AccordionPanel slotHeading="Logs" slotIcon={<ScrollText />}>
+        <AccordionPanel slotHeading="Logs" slotIcon={<IconDocument />}>
           <StatusLogsContent
             workspace={workspace}
             jobName={jobName}
@@ -364,7 +359,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
         onOpenChange={(open) => !isCancelling && setCancelModalOpen(open)}
         slotHeading={
           <Flex align="center" gap="density-sm">
-            <CircleX />
+            <CloseCircle />
             Cancel Evaluation Job
           </Flex>
         }

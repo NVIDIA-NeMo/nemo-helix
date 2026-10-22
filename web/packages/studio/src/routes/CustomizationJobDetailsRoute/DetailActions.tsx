@@ -12,13 +12,13 @@ import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer
 import { getJobsGetJobQueryKey } from '@nemo/sdk/generated/platform/jobs';
 import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { Flex } from '@nvidia/foundations-react-core';
+import { Cancel, Bookmark, CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { SaveTemplateModal } from '@studio/routes/CustomizationJobDetailsRoute/SaveTemplateModal';
 import { getNewCustomizationFormRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
-import { Ban, Bookmark, Copy } from 'lucide-react';
 import { FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -94,7 +94,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
         actions={[
           {
             label: 'Clone',
-            icon: <Copy />,
+            icon: <CopyGeneric />,
             onSelect: () =>
               navigate(getNewCustomizationFormRoute(workspace), { state: { cloneFromJob: job } }),
           },
@@ -112,7 +112,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
             ? [
                 {
                   label: isCancelling ? 'Cancelling…' : 'Cancel Job',
-                  icon: <Ban />,
+                  icon: <Cancel />,
                   danger: !isCancelling,
                   disabled: isCancelling || !backend,
                   onSelect: cancelJob,

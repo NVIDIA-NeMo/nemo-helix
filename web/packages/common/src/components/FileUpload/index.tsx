@@ -9,7 +9,7 @@ import {
 } from '@nemo/common/src/components/FileUpload/util';
 import { InputErrorText } from '@nemo/common/src/components/InputErrorText';
 import { Block, Flex, Label, Stack, Text } from '@nvidia/foundations-react-core';
-import { FilePlus, FileText } from 'lucide-react';
+import { DocumentNew, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { FC, MouseEvent, MouseEventHandler, ReactNode, useCallback, useState } from 'react';
 import { DropEvent, DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone';
 
@@ -19,7 +19,7 @@ const defaultRenderFileTag: RenderFileTagFn = (file, disabled, onRemove) => {
       key={file.name + file.size}
       fileName={file.name}
       disabled={disabled}
-      slotStart={<FileText />}
+      slotStart={<IconDocument />}
       onClick={onRemove}
       required
     />
@@ -146,7 +146,7 @@ export const FileUpload: FC<FileUploadProps> = ({
           </Stack>
         ) : (
           <Flex gap="density-xs" align="center" justify="center" className="w-full">
-            <FilePlus />
+            <DocumentNew />
             <Text className="text-secondary">{getDropBoxText()}</Text>
           </Flex>
         )}

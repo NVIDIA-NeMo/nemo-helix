@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Panel } from '@nvidia/foundations-react-core';
-import { Filter } from 'lucide-react';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 import type { PropsWithChildren } from 'react';
 
 export const FilterPanel = ({

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
-const ICON_SIZE = 16;
+const ICON_SIZE = '16';
 
 interface RecordPagerProps {
   readonly index: number;

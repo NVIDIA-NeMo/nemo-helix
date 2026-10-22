@@ -3,7 +3,7 @@
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal';
 import { Button } from '@nvidia/foundations-react-core';
-import { Filter } from 'lucide-react';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 
 interface FilterPanelToggleProps {
   showFilters: boolean;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flex, StatusMessage } from '@nvidia/foundations-react-core';
-import { MousePointerClick } from 'lucide-react';
+import { HandPoint } from '@nvidia/react-gui-icons/icons';
 import { type FC } from 'react';
 
 export const NoSpanSelected: FC = () => (
@@ -13,7 +13,7 @@ export const NoSpanSelected: FC = () => (
   >
     <StatusMessage
       size="medium"
-      slotMedia={<MousePointerClick aria-hidden className="h-12 w-12 text-secondary" />}
+      slotMedia={<HandPoint aria-hidden className="h-12 w-12 text-secondary" />}
       slotHeading="No span selected"
       slotSubheading="Select a span in the tree to see its input, output and timing."
     />

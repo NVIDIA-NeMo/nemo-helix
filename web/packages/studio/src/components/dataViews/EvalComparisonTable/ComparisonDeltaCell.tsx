@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Flex, Text } from '@nvidia/foundations-react-core';
+import { Equal, Subtract, Add } from '@nvidia/react-gui-icons/icons';
 import type { ComparisonMetricDelta } from '@studio/components/dataViews/EvalComparisonTable/types';
 import { formatScore } from '@studio/components/evaluation/utils';
-import { Equal, Minus, Plus } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface ComparisonDeltaCellProps {
@@ -45,13 +45,13 @@ const DeltaBadge: FC<{ difference: number; higherIsBetter: boolean }> = ({
         aria-label="No change versus baseline"
         data-delta="unchanged"
       >
-        <Equal aria-hidden size={12} />
+        <Equal aria-hidden size="12" />
       </Badge>
     );
   }
 
   const improved = higherIsBetter ? difference > 0 : difference < 0;
-  const DeltaIcon = difference > 0 ? Plus : Minus;
+  const DeltaIcon = difference > 0 ? Add : Subtract;
 
   return (
     <Badge
@@ -60,7 +60,7 @@ const DeltaBadge: FC<{ difference: number; higherIsBetter: boolean }> = ({
       aria-label={`${improved ? 'Improved' : 'Regressed'} by ${Math.abs(difference).toFixed(3)} versus baseline`}
       data-delta={improved ? 'improved' : 'regressed'}
     >
-      <DeltaIcon aria-hidden size={12} />
+      <DeltaIcon aria-hidden size="12" />
       <span className="tabular-nums">{Math.abs(difference).toFixed(3)}</span>
     </Badge>
   );

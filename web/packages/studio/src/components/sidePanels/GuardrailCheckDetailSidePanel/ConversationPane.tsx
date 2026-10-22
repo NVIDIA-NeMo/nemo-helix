@@ -9,11 +9,11 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { ChatSingle } from '@nvidia/react-gui-icons/icons';
 import type { GuardrailCheckEntity } from '@studio/api/guardrail-checks/types';
 import { textFromContent } from '@studio/components/dataViews/GuardrailChecksDataView/checkMessages';
 import { getHumanReadableFileSize, getTextSizeInBytes } from '@studio/util/files';
 import cn from 'classnames';
-import { MessageSquare } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 /** Whether the conversation renders as chat bubbles or as the raw message array. */
@@ -69,7 +69,7 @@ export const ConversationPane: FC<ConversationPaneProps> = ({ check, className }
                   chevronPosition: 'end',
                   slotTrigger: (
                     <Flex align="center" gap="density-sm">
-                      <MessageSquare size={16} aria-hidden />
+                      <ChatSingle size="16" aria-hidden />
                       <Text kind="label/bold/md">System Prompt</Text>
                       <Text kind="body/regular/md" className="text-secondary">
                         (

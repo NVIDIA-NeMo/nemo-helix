@@ -16,8 +16,8 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
+import { Eye, Trash } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
-import { Eye, Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback } from 'react';
 
 // ---------------------------------------------------------------------------

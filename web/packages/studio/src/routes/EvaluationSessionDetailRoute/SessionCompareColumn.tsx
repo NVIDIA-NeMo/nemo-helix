@@ -11,13 +11,13 @@ import {
   type FeedbackAnnotationInputValue,
 } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import { ChevronUpDown, IconError } from '@nvidia/react-gui-icons/icons';
 import { SpanListView } from '@studio/components/IntakeDetail/TraceSpanListView';
 import { type NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';
 import { useSessionTrajectories } from '@studio/components/IntakeDetail/useSessionTrajectories';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { runLabel } from '@studio/routes/EvaluationSessionDetailRoute/runLabel';
 import { buildSpanHierarchyRows } from '@studio/util/intakeTelemetry';
-import { ChevronsDownUp, ChevronsUpDown, CircleAlert } from 'lucide-react';
 import { type FC, useCallback, useMemo, useState } from 'react';
 
 const ANNOTATIONS_PAGE_SIZE = 1000;
@@ -149,7 +149,7 @@ export const SessionCompareColumn: FC<SessionCompareColumnProps> = ({
             onClick={collapseAll}
             disabled={spanRows.length === 0}
           >
-            <ChevronsDownUp size={14} aria-hidden />
+            <ChevronUpDown size="14" aria-hidden />
           </Button>
           <Button
             kind="tertiary"
@@ -160,7 +160,7 @@ export const SessionCompareColumn: FC<SessionCompareColumnProps> = ({
             onClick={expandAll}
             disabled={spanRows.length === 0}
           >
-            <ChevronsUpDown size={14} aria-hidden />
+            <ChevronUpDown size="14" aria-hidden />
           </Button>
         </Flex>
       </Flex>
@@ -180,7 +180,7 @@ export const SessionCompareColumn: FC<SessionCompareColumnProps> = ({
   } else if (sessionError?.response?.status === 404 || !session) {
     body = (
       <div className="flex flex-col items-center gap-2 p-density-2xl text-center">
-        <CircleAlert className="h-8 w-8 text-feedback-warning" aria-hidden />
+        <IconError className="h-8 w-8 text-feedback-warning" aria-hidden />
         <p className="text-sm text-secondary">This run’s session could not be loaded.</p>
       </div>
     );

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Sparkle } from '@nvidia/react-gui-icons/icons';
 import { DagCanvas } from '@studio/components/DagCanvas';
 import {
   CardNode,
@@ -13,7 +14,6 @@ import type { DagNode } from '@studio/components/DagCanvas/types';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type Edge, type Node, type NodeProps, Position } from '@xyflow/react';
-import { Sparkles } from 'lucide-react';
 
 // React Flow reads from an internal store/context that only exists inside a fully
 // measured <ReactFlow> (needs ResizeObserver + real layout, absent in jsdom). Stub
@@ -227,7 +227,7 @@ describe('CardNode', () => {
       title: 'Summarize',
       type: 'LLM',
       status: 'error',
-      icon: Sparkles,
+      icon: Sparkle,
       colorClassName: 'text-[color:var(--text-color-accent-purple)]',
     });
 

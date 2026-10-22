@@ -13,8 +13,8 @@ import {
   type DropdownTriggerProps,
 } from '@nvidia/foundations-react-core';
 import { childrenToText } from '@nvidia/foundations-react-core/lib';
+import { Sliders } from '@nvidia/react-gui-icons/icons';
 import { flexRender } from '@tanstack/react-table';
-import { SlidersHorizontal } from 'lucide-react';
 import { Fragment, type JSX, type ReactNode } from 'react';
 
 export interface EditColumnsMenuProps
@@ -41,7 +41,7 @@ export function EditColumnsMenu({
       <DropdownTrigger aria-label="Toggle column visibility" {...props}>
         {children ?? (
           <Fragment>
-            <SlidersHorizontal variant="fill" />
+            <Sliders variant="fill" />
             <span className="hide-mobile">View</span>
           </Fragment>
         )}

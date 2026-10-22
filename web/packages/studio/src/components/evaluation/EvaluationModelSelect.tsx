@@ -19,13 +19,13 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { Filter } from '@nvidia/react-gui-icons/icons';
 import { useAutofillFromSearchParams } from '@studio/hooks/evaluation/useAutofillFromSearchParams';
 import {
   type EvaluationModelItem,
   useEvaluationModels,
 } from '@studio/hooks/evaluation/useEvaluationModels';
 import { useSetFieldErrorOnApiError } from '@studio/hooks/evaluation/useSetFieldErrorOnApiError';
-import { Filter } from 'lucide-react';
 import { type ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import { type FieldValues, type Path, useController, useFormContext } from 'react-hook-form';
 

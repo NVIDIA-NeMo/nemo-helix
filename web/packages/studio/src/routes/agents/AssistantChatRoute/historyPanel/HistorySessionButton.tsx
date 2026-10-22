@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { ChatSingle, Trash } from '@nvidia/react-gui-icons/icons';
 import { ToolCallSummary } from '@studio/routes/agents/AssistantChatRoute/historyPanel/ArtifactSections';
 import {
   getCompactRelativeTime,
@@ -9,7 +10,6 @@ import {
 } from '@studio/routes/agents/AssistantChatRoute/historyPanel/helpers';
 import type { AssistantHistorySession } from '@studio/routes/agents/AssistantChatRoute/types';
 import cn from 'classnames';
-import { MessageSquare, Trash2 } from 'lucide-react';
 import React from 'react';
 
 interface HistorySessionButtonProps {
@@ -55,7 +55,7 @@ export const HistorySessionButton = ({
                 active && 'text-accent'
               )}
             >
-              <MessageSquare size={12} />
+              <ChatSingle size="12" />
             </span>
             <Flex align="center" justify="between" gap="density-sm" className="min-w-0 flex-1">
               <Text kind="body/regular/sm" className="min-w-0 flex-1 line-clamp-2">
@@ -82,7 +82,7 @@ export const HistorySessionButton = ({
           type="button"
           onClick={onDelete}
         >
-          <Trash2 size={16} />
+          <Trash size="16" />
         </Button>
       </Tooltip>
     </Flex>

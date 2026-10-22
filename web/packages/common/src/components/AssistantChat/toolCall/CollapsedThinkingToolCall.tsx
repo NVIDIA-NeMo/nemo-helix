@@ -3,7 +3,7 @@
 
 import { splitCollapsedThinkingParagraphs } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
 import { Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, ClipboardList } from 'lucide-react';
+import { ChevronRight, IconClipboard } from '@nvidia/react-gui-icons/icons';
 
 export const CollapsedThinkingToolCall = ({
   label = 'Earlier thinking',
@@ -26,7 +26,7 @@ export const CollapsedThinkingToolCall = ({
             aria-hidden
             className="size-3 shrink-0 transition-transform group-open/thinking:rotate-90"
           />
-          <ClipboardList aria-hidden className="size-3.5 shrink-0" />
+          <IconClipboard aria-hidden className="size-3.5 shrink-0" />
           <span>{label}</span>
         </summary>
         <div

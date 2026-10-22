@@ -8,7 +8,7 @@ import {
   StatusMessage,
   type StatusMessageProps,
 } from '@nvidia/foundations-react-core';
-import { CircleAlert as ErrorIcon, Filter, RefreshCw } from 'lucide-react';
+import { IconError as ErrorIcon, Filter, Refresh } from '@nvidia/react-gui-icons/icons';
 import type { JSX } from 'react';
 
 export type TableStatusState = Pick<
@@ -47,7 +47,7 @@ export function StatusResult({
           slotSubheading="There was an error loading the data. If the problem persists, please contact support."
           slotFooter={
             <Button onClick={() => window.location.reload()} kind="secondary" size="small">
-              <RefreshCw />
+              <Refresh />
             </Button>
           }
           {...props}

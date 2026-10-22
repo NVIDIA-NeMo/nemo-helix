@@ -3,7 +3,7 @@
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
-import { LayoutGrid, LayoutList } from 'lucide-react';
+import { LayoutGrid, LayoutList } from '@nvidia/react-gui-icons/icons';
 import type { JSX, ReactElement } from 'react';
 
 interface ViewToggleItem {

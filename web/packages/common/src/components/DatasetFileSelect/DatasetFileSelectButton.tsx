@@ -3,7 +3,7 @@
 
 import { ListItem } from '@nemo/common/src/components/FileList/ListItem';
 import { Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { Database } from 'lucide-react';
+import { Db } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 interface DatasetFileSelectButtonProps {
@@ -34,7 +34,7 @@ export const DatasetFileSelectButton: FC<DatasetFileSelectButtonProps> = ({
   return (
     <Flex gap="density-md" align="end" className="mb-density-md min-h-[40px]">
       <Stack className="flex-1 h-full">
-        <ListItem outlined value={datasetName} startIconSlot={<Database />} />
+        <ListItem outlined value={datasetName} startIconSlot={<Db />} />
       </Stack>
       <Flex gap="density-sm">
         <Button type="button" kind="secondary" onClick={onChangeClick || onSelectClick}>

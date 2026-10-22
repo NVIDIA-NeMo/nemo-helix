@@ -5,6 +5,7 @@ import type { AssistantToolArgs } from '@nemo/common/src/components/AssistantCha
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
 import { Banner, Button, Card, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import { IconClipboard } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   getJobProgressDetailRoute,
@@ -13,7 +14,6 @@ import {
   isJobProgressNotFoundError,
 } from '@studio/routes/agents/AssistantChatRoute/utils/jobProgress';
 import { useQuery } from '@tanstack/react-query';
-import { ClipboardList } from 'lucide-react';
 import { type FC } from 'react';
 import { Link } from 'react-router';
 
@@ -67,7 +67,7 @@ export const JobProgressToolCall: FC<JobProgressToolCallProps> = ({ args }) => {
               justify="center"
               className="size-8 shrink-0 rounded bg-surface-sunken text-secondary"
             >
-              <ClipboardList aria-hidden className="size-4" />
+              <IconClipboard aria-hidden className="size-4" />
             </Flex>
             <Stack gap="density-xs" className="min-w-0">
               <Text kind="label/bold/md" className="truncate">

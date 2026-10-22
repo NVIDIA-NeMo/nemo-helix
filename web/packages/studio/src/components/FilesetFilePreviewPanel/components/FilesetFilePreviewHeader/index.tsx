@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flex } from '@nvidia/foundations-react-core';
+import { FolderOpen } from '@nvidia/react-gui-icons/icons';
 import { FileActions } from '@studio/components/FilesetFilePreviewPanel/components/FileActions';
 import { FileBreadcrumbs } from '@studio/components/FilesetFilePreviewPanel/components/FileBreadcrumbs';
 import type { FileSystemFile } from '@studio/components/FilesTable/utils';
-import { FolderOpen } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface FilesetFilePreviewHeaderProps {

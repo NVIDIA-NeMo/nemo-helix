@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
-import { MessageSquareText } from 'lucide-react';
+import { ChatSingle } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 interface GetStartedOptionProps {
@@ -33,7 +33,7 @@ export const GetStartedOption: FC<GetStartedOptionProps> = ({
         {description}
       </Text>
       <Button kind="tertiary" aria-label={actionLabel} onClick={onGetPrompt}>
-        <MessageSquareText size={16} className="text-brand" aria-hidden />
+        <ChatSingle size="16" className="text-brand" aria-hidden />
         Get coding agent prompt
       </Button>
     </Stack>

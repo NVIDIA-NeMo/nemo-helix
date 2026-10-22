@@ -13,10 +13,10 @@ import {
   DropdownRoot,
   DropdownTrigger,
 } from '@nvidia/foundations-react-core';
+import { MoreVert } from '@nvidia/react-gui-icons/icons';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
-import { EllipsisVertical } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 export interface FilesetActionMenuProps {
@@ -69,7 +69,7 @@ export const FilesetActionMenu: FC<FilesetActionMenuProps> = ({
       <DropdownRoot>
         <DropdownTrigger asChild showChevron={false} data-testid="quick-actions-menu-trigger">
           <Button kind="tertiary" aria-label="Open fileset actions menu">
-            <EllipsisVertical />
+            <MoreVert />
           </Button>
         </DropdownTrigger>
         <DropdownContent align="end" className="w-[180px]">

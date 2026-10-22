@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { CUSTOMIZER_AUTO_VAL_SPLIT_RATIO } from '@studio/constants/customization';
-import { Info } from 'lucide-react';
 import { FC } from 'react';
 
 const numberFormatter = new Intl.NumberFormat('en-US');
@@ -31,7 +31,7 @@ export const AutoSplitNotice: FC<AutoSplitNoticeProps> = ({ trainingRowCount }) 
       gap="density-md"
       className="border-y border-base py-density-md text-fg-subdued"
     >
-      <Info width={16} height={16} className="mt-1 flex-shrink-0" />
+      <InfoCircle width={16} height={16} className="mt-1 flex-shrink-0" />
       <Stack gap="density-xs">
         <Text kind="body/regular/md">
           No Validation Data found. Training data will be automatically split.

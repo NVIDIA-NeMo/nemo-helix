@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatusMessage, Flex } from '@nvidia/foundations-react-core';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 interface Props {

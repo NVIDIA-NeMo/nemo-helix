@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { Play } from '@nvidia/react-gui-icons/icons';
 import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { gateModelCompareRoutes, getModelCompareRoute } from '@studio/routes/utils';
-import { CirclePlay } from 'lucide-react';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -31,7 +31,7 @@ export const getModelCompareSideNavItems = (workspace: string) =>
     ? [
         {
           id: 'playground',
-          slotIcon: <CirclePlay className={iconColorClass} />,
+          slotIcon: <Play className={iconColorClass} />,
           slotLabel: 'Playground',
           href: getModelCompareRoute(workspace),
         },

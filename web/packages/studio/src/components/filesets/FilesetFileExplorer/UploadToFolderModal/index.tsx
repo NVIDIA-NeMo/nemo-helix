@@ -17,8 +17,8 @@ import {
   Upload,
   type UploadRootProps,
 } from '@nvidia/foundations-react-core';
+import { FolderClosed, Upload as UploadIcon } from '@nvidia/react-gui-icons/icons';
 import { collectFolderPathsFromDatasetFiles } from '@studio/util/files';
-import { FolderClosed, Upload as UploadIcon } from 'lucide-react';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 
 // `FileUploadItem` isn't re-exported from the package root, so derive it.

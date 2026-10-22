@@ -21,6 +21,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { FolderOpen, InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFilesMove } from '@studio/api/datasets/useDatasetFilesMove';
 import {
   getParentFolder,
@@ -30,7 +31,6 @@ import { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useDatasetNavigator } from '@studio/hooks/useDatasetNavigator';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetDetailsRoute } from '@studio/routes/utils';
-import { FolderOpen, Info } from 'lucide-react';
 import { type FC, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -339,7 +339,7 @@ export const AddToFolderModal: FC<AddToFolderModalProps> = ({
             {showFolderDeletionWarning && (
               <Text fontSize="12" role="alert">
                 <Flex gap="density-xs" align="center">
-                  <Info />
+                  <InfoCircle />
                   {FOLDER_DELETION_WARNING}
                 </Flex>
               </Text>

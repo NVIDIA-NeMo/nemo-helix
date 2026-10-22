@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Sparkle } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { EvalCard } from '@studio/components/evaluation/EvalCard';
-import { Sparkles } from 'lucide-react';
 
 const meta = {
   component: EvalCard,
@@ -62,7 +62,7 @@ export const CustomIcon: Story = {
     name: 'custom-metric',
     type: 'llm-judge',
     description: 'A metric with a custom icon.',
-    icon: <Sparkles size={12} />,
+    icon: <Sparkle size="12" />,
   },
 };
 

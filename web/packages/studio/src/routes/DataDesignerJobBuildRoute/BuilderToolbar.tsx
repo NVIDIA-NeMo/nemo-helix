@@ -4,9 +4,9 @@
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { Button, Flex, SegmentedControl, Tag, Text } from '@nvidia/foundations-react-core';
+import { Stop, IconDocument, ChartTree, Pencil, HandPoint } from '@nvidia/react-gui-icons/icons';
 import type { StartOptionTag } from '@studio/components/CreateFilesetStart/types';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-import { CircleStop, FileJson, ListTree, Pencil, SplinePointer } from 'lucide-react';
 import { type FC, memo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -53,7 +53,7 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
       className="shrink-0 border-b border-base bg-surface-base px-density-2xl py-density-md"
     >
       <Flex align="center" gap="density-sm" className="min-w-0">
-        <FileJson size={20} className="shrink-0 text-secondary" aria-hidden />
+        <IconDocument size="20" className="shrink-0 text-secondary" aria-hidden />
         {isEditingName ? (
           <ControlledTextInput
             autoFocus
@@ -75,7 +75,7 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
           aria-label="Rename fileset"
           onClick={() => setIsEditingName(true)}
         >
-          <Pencil size={14} aria-hidden />
+          <Pencil size="14" aria-hidden />
         </Button>
         {templateTag && (
           <Tag color={templateTag.color} kind={templateTag.kind} readOnly>
@@ -96,8 +96,8 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
           value={viewMode}
           onValueChange={(value) => onViewModeChange(value as BuilderViewMode)}
           items={[
-            { value: 'list', children: <ListTree /> },
-            { value: 'canvas', children: <SplinePointer /> },
+            { value: 'list', children: <ChartTree /> },
+            { value: 'canvas', children: <HandPoint /> },
           ]}
         />
         <Flex align="center" gap="density-sm">
@@ -126,7 +126,7 @@ export const BuilderToolbar: FC<BuilderToolbarProps> = memo(function BuilderTool
         >{`Preview ${previewRows} rows`}</LoadingButton>
         {isPreviewing && (
           <Button kind="tertiary" color="danger" aria-label="Stop preview" onClick={onStopPreview}>
-            <CircleStop size={16} aria-hidden />
+            <Stop size="16" aria-hidden />
             Stop
           </Button>
         )}

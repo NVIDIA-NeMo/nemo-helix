@@ -11,8 +11,8 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { IconDocument } from '@nvidia/react-gui-icons/icons';
 import type { GeneratedConfigPanelProps } from '@studio/components/CreateFilesetStart/types';
-import { FileJson } from 'lucide-react';
 import type { FC } from 'react';
 
 const DEFAULT_DESCRIPTION =
@@ -34,7 +34,7 @@ export const GeneratedConfigPanel: FC<GeneratedConfigPanelProps> = ({
       <SidePanelContent className="w-[720px]" bordered>
         <SidePanelHeading>
           <Flex gap="density-md" align="center">
-            <FileJson size={20} aria-hidden />
+            <IconDocument size="20" aria-hidden />
             Generated config
           </Flex>
         </SidePanelHeading>

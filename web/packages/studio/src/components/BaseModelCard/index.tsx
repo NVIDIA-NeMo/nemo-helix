@@ -16,7 +16,7 @@ import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Button, Card, Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
-import { MessagesSquare, File, Globe } from 'lucide-react';
+import { ChatMulti, IconDocument, World } from '@nvidia/react-gui-icons/icons';
 import React, { useMemo } from 'react';
 
 export interface BaseModelCardProps {
@@ -141,19 +141,19 @@ export const BaseModelCard = ({
           <Flex gap="3" align="center">
             {parameters && (
               <Flex gap="1" align="center">
-                <File className="w-4 h-4 text-secondary" />
+                <IconDocument className="w-4 h-4 text-secondary" />
                 <Text kind="label/regular/sm">{parameters}</Text>
               </Flex>
             )}
             {contextSize && (
               <Flex gap="1" align="center">
-                <Globe className="w-4 h-4 text-secondary" />
+                <World className="w-4 h-4 text-secondary" />
                 <Text kind="label/regular/sm">{contextSize}</Text>
               </Flex>
             )}
             {isChatAvailable && (
               <Flex gap="1" align="center">
-                <MessagesSquare className="w-4 h-4 text-secondary" />
+                <ChatMulti className="w-4 h-4 text-secondary" />
                 <Text kind="label/regular/sm">Chat</Text>
               </Flex>
             )}

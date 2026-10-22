@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { CopyGeneric, Download, FolderOpen, Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/filesets/FilesetFileExplorer/BulkDeleteModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { getTextWithCount } from '@studio/util/strings';
-import { Copy, Download, FolderOpen, Trash } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface BulkActionsBarProps {
@@ -76,7 +76,7 @@ export const BulkActionsBar: FC<BulkActionsBarProps> = ({
                 }}
                 data-testid="dataset-files-bulk-duplicate"
               >
-                <Copy />
+                <CopyGeneric />
                 Duplicate
               </Button>
               <Button kind="tertiary" onClick={onMove} data-testid="dataset-files-bulk-move">

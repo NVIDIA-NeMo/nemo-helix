@@ -4,7 +4,7 @@
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { Copy } from 'lucide-react';
+import { CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { type FC, lazy, Suspense, useState } from 'react';
 
 const CodeEditor = lazy(() =>
@@ -62,10 +62,10 @@ export const CodingAgentPromptEditor: FC<CodingAgentPromptEditorProps> = ({
             <Button
               kind="tertiary"
               size="tiny"
-              aria-label="Copy to clipboard"
+              aria-label="CopyGeneric to clipboard"
               onClick={copyToClipboard}
             >
-              <Copy size={16} className="text-brand" aria-hidden />
+              <CopyGeneric size="16" className="text-brand" aria-hidden />
             </Button>
           }
         />

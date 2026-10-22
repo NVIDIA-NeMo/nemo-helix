@@ -12,6 +12,13 @@ import {
   DropdownTrigger,
   Flex,
 } from '@nvidia/foundations-react-core';
+import {
+  Download as DownloadIcon,
+  Pencil,
+  Trash,
+  Split,
+  MoreVert,
+} from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
@@ -19,7 +26,6 @@ import { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/ut
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import LargeFileWorker from '@studio/workers/LargeFileWorker?worker';
-import { Download as DownloadIcon, Pencil, Trash, Split, EllipsisVertical } from 'lucide-react';
 import { FC, useState } from 'react';
 
 type ModalType = 'createSplit' | 'rename' | 'delete';
@@ -116,7 +122,7 @@ export const FileActions: FC<Props> = ({
             aria-label="Open file actions menu"
             className="absolute top-4 right-19"
           >
-            <EllipsisVertical />
+            <MoreVert />
           </Button>
         </DropdownTrigger>
         <DropdownContent align="end">

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Tooltip } from '@nvidia/foundations-react-core';
+import { Collapse, Expand } from '@nvidia/react-gui-icons/icons';
 import { AssistantArtifactsPane } from '@studio/routes/agents/AssistantChatRoute/historyPanel/AssistantArtifactsPane';
 import { FloatingPanel } from '@studio/routes/agents/AssistantChatRoute/historyPanel/FloatingPanel';
 import { HistoryPanelContents } from '@studio/routes/agents/AssistantChatRoute/historyPanel/HistoryPanelContents';
@@ -12,7 +13,6 @@ import {
   ASSISTANT_HISTORY_OPEN_KEY,
   ASSISTANT_OPEN_FLOATING_PANEL_KEY,
 } from '@studio/util/localStorage';
-import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { type FC } from 'react';
 
 type OpenFloatingPanel = 'history' | 'skills';
@@ -45,7 +45,7 @@ export const AssistantHistoryPanel: FC<AssistantHistoryPanelProps> = ({
             type="button"
             onClick={() => setHistoryOpen('true')}
           >
-            <PanelRightOpen size={18} />
+            <Expand size="18" />
           </Button>
         </Tooltip>
       </aside>
@@ -71,7 +71,7 @@ export const AssistantHistoryPanel: FC<AssistantHistoryPanelProps> = ({
               type="button"
               onClick={() => setHistoryOpen('false')}
             >
-              <PanelRightClose size={18} />
+              <Collapse size="18" />
             </Button>
           </Tooltip>
         </Flex>

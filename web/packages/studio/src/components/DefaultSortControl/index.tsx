@@ -14,6 +14,7 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import { Add, Close } from '@nvidia/react-gui-icons/icons';
 import {
   DEFAULT_SORT,
   EVALUATOR_PREFIX,
@@ -24,7 +25,6 @@ import {
   isEvaluatorField,
   parseSortList,
 } from '@studio/components/DefaultSortControl/util';
-import { Plus, X } from 'lucide-react';
 import type { FC } from 'react';
 
 /**
@@ -123,7 +123,7 @@ const SortFieldRow: FC<SortFieldRowProps> = ({
         onClick={onRemove}
         disabled={disabled || !canRemove}
       >
-        <X className="size-4" />
+        <Close className="size-4" />
       </Button>
     </div>
   );
@@ -191,7 +191,7 @@ export const DefaultSortControl: FC<DefaultSortControlProps> = ({
         </Stack>
         <div>
           <Button kind="tertiary" color="neutral" size="small" onClick={addRow} disabled={disabled}>
-            <Plus className="size-4" />
+            <Add className="size-4" />
             Add sort field
           </Button>
         </div>
