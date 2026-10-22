@@ -90,9 +90,13 @@ class HarborTaskJobsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dispatcher_image: str = Field(
+    dispatcher_image: str | None = Field(
+        default=None,
         pattern=PINNED_IMAGE_REF_PATTERN,
-        description="Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment.",
+        description=(
+            "Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment. "
+            "Unset uses the platform's nhx-tasks image, the same release as the API."
+        ),
     )
     dispatcher_profiles: tuple[str, ...] = Field(
         min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."

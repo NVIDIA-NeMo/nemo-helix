@@ -112,6 +112,17 @@ async def test_accept_freezes_resolved_harbor_content(
     assert not (await entity_store.list(TasksetRunMemberEntity, workspace="default")).data
 
 
+async def test_accept_defaults_dispatcher_image_to_platform_nhx_tasks(
+    service, published, request_body, run_store, run_config, sandbox_platform
+):
+    run_config.runs.harbor.dispatcher_image = None
+    result = await service.submit(
+        TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
+    )
+    plan = await run_store.load_plan(await run_store.find("default", result.status.run_id))
+    assert plan.dispatcher_image == f"{sandbox_platform.image_registry}/nhx-tasks:{sandbox_platform.image_tag}"
+
+
 async def test_authorized_replay_preserves_original_run_without_resolution(
     service, published, request_body, monkeypatch, files_client, files_service, entity_store
 ):

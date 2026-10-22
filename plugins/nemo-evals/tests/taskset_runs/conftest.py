@@ -30,6 +30,7 @@ def plan(
     The returned plan has explicit unlimited caps and a fail-on-missing-image
     policy, providing deterministic input for serialization and acceptance tests.
     """
+    assert harbor_config.dispatcher_image is not None
     return TasksetRunPlan(
         run_id=derive_run_id("default", "user:alice", "key"),
         workspace="default",
