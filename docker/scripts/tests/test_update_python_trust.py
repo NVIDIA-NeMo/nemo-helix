@@ -150,9 +150,12 @@ def test_updates_bootstrap_wheel_as_well_as_ensurepip_version(tmp_path: Path, mo
 
 
 @pytest.mark.parametrize("referenced", [False, True])
-def test_archive_cleanup_removes_only_obsolete_index_links(tmp_path: Path, monkeypatch, referenced: bool) -> None:
+@pytest.mark.parametrize("index_version", ["wheels-v6", "wheels-v7"])
+def test_archive_cleanup_removes_only_obsolete_index_links(
+    tmp_path: Path, monkeypatch, referenced: bool, index_version: str
+) -> None:
     cache = tmp_path / "cache"
-    index = cache / "wheels-v6/pypi/certifi"
+    index = cache / index_version / "pypi/certifi"
     index.mkdir(parents=True)
     archives = {}
     for key, version in (("old", "2026.7.22"), ("fixed", "2026.10.19")):

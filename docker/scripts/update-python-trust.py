@@ -262,9 +262,10 @@ def main() -> None:
             archive = metadata.parent.parent
             if any(link.resolve().is_relative_to(archive) for link in links):
                 raise RuntimeError(f"An environment still references obsolete {name}: {archive}")
-            for link in (cache / "wheels-v6").rglob("*"):
-                if link.is_symlink() and link.resolve().is_relative_to(archive):
-                    link.unlink()
+            for index in cache.glob("wheels-v*"):
+                for link in index.rglob("*"):
+                    if link.is_symlink() and link.resolve().is_relative_to(archive):
+                        link.unlink()
             shutil.rmtree(archive)
 
 

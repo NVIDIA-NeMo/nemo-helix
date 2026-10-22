@@ -442,12 +442,20 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
         continue
     fi
     if compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
-        find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
+        for index in "${UV_CACHE_DIR}"/wheels-v*/; do
+            if [ -d "${index}" ]; then
+                find "${index}" -type l -lname "*$(basename "${d}")*" -delete
+            fi
+        done
         rm -rf "${d}"
         continue
     fi
     find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
-    find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
+    for index in "${UV_CACHE_DIR}"/wheels-v*/; do
+        if [ -d "${index}" ]; then
+            find "${index}" -type l -lname "*$(basename "${d}")*" -delete
+        fi
+    done
     rm -rf "${d}"
 done
 set -x
@@ -473,7 +481,11 @@ RUN <<"EOF" bash -eu
 for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
     ls "${d}"setuptools-*.dist-info >/dev/null 2>&1 || continue
     find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
-    find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
+    for index in "${UV_CACHE_DIR}"/wheels-v*/; do
+        if [ -d "${index}" ]; then
+            find "${index}" -type l -lname "*$(basename "${d}")*" -delete
+        fi
+    done
     rm -rf "${d}"
 done
 EOF
