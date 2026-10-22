@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import math
+import re
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -67,14 +69,16 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
 
     # One wait budget covers every service, since the sandbox waits for them together.
     wait_budget_sec = _wait_budget_sec(task)
+    volume_names = _pod_volume_names(task.volumes, task.compose_path)
     spec: dict[str, Any] = {
         "services": [
-            _service_spec(name, service, images or {}, task.compose_path) for name, service in task.services.items()
+            _service_spec(name, service, images or {}, volume_names, task.compose_path)
+            for name, service in task.services.items()
         ],
-        "main": _main_spec(task.main, wait_budget_sec),
+        "main": _main_spec(task.main, wait_budget_sec, volume_names),
     }
     if task.volumes:
-        spec["volumes"] = task.volumes
+        spec["volumes"] = [volume_names[volume] for volume in task.volumes]
     if task.main.readiness is None and wait_budget_sec > MIN_READY_TIMEOUT_SEC:
         # With no readiness check on ``main`` there is nowhere else to carry the services' wait.
         spec["services_timeout_sec"] = _clamped_timeout_sec(wait_budget_sec)
@@ -167,12 +171,33 @@ def _clamped_timeout_sec(seconds: float) -> int:
     return min(MAX_READY_TIMEOUT_SEC, max(MIN_READY_TIMEOUT_SEC, math.ceil(seconds)))
 
 
-def _mount_spec(mount: ComposeVolumeMount) -> dict[str, Any]:
-    """Render a volume mount as the plain data ``ComposeServices`` takes."""
-    return {"name": mount.name, "mount_path": mount.mount_path, "read_only": mount.read_only}
+def _pod_volume_names(volumes: list[str], compose_path: str) -> dict[str, str]:
+    """Give each compose volume a name the pod accepts: lowercase, with ``_`` and ``.`` as ``-``.
+
+    Compose allows names like ``agent1_out``, but a pod volume's name is a Kubernetes DNS label, so ``agent1_out``
+    becomes ``agent1-out``. Returns each compose name's pod name.
+
+    Raises:
+        ComposeError: Two volumes would end up with the same name, as ``data_1`` and ``data.1`` would.
+    """
+    names = {volume: re.sub(r"[_.]", "-", volume.lower()) for volume in volumes}
+    clashing = [name for name, count in Counter(names.values()).items() if count > 1]
+    if clashing:
+        raise ComposeError(
+            "compose_invalid",
+            "these volumes would have the same name in the pod",
+            compose_path=compose_path,
+            paths=tuple(volume for volume, name in names.items() if name in clashing),
+        )
+    return names
 
 
-def _main_spec(main: ComposeMainSettings, wait_budget_sec: float) -> dict[str, Any]:
+def _mount_spec(mount: ComposeVolumeMount, volume_names: Mapping[str, str]) -> dict[str, Any]:
+    """Render a volume mount as the plain data ``ComposeServices`` takes, naming its volume as the pod does."""
+    return {"name": volume_names[mount.name], "mount_path": mount.mount_path, "read_only": mount.read_only}
+
+
+def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: Mapping[str, str]) -> dict[str, Any]:
     """Render ``main``'s part of the spec; ``wait_budget_sec`` becomes its readiness timeout when it has a readiness check."""
     spec: dict[str, Any] = {}
     if main.entrypoint:
@@ -180,7 +205,7 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float) -> dict[str, A
     if main.env:
         spec["env"] = main.env
     if main.volume_mounts:
-        spec["volume_mounts"] = [_mount_spec(mount) for mount in main.volume_mounts]
+        spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in main.volume_mounts]
     if main.add_capabilities:
         spec["add_capabilities"] = main.add_capabilities
     if main.readiness is not None:
@@ -188,7 +213,13 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float) -> dict[str, A
     return spec
 
 
-def _service_spec(name: str, service: ComposeService, images: Mapping[str, str], compose_path: str) -> dict[str, Any]:
+def _service_spec(
+    name: str,
+    service: ComposeService,
+    images: Mapping[str, str],
+    volume_names: Mapping[str, str],
+    compose_path: str,
+) -> dict[str, Any]:
     """Render one service as the plain data ``ComposeServices`` takes, on the image ``images`` names for it.
 
     Raises:
@@ -222,7 +253,7 @@ def _service_spec(name: str, service: ComposeService, images: Mapping[str, str],
             key: value for key, value in (("limits", service.limits), ("requests", service.requests)) if value
         }
     if service.volume_mounts:
-        spec["volume_mounts"] = [_mount_spec(mount) for mount in service.volume_mounts]
+        spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in service.volume_mounts]
     if service.shm_size is not None:
         spec["shm_size"] = service.shm_size
     return spec

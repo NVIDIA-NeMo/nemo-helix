@@ -701,6 +701,45 @@ def test_named_volumes_and_mounts(tmp_path: Path) -> None:
     ]
 
 
+def test_volume_names_become_names_a_pod_accepts(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes: [agent1_out:/shared/agent1]
+          agent1:
+            image: redis
+            volumes: [agent1_out:/agent_output, Cache.V2:/cache]
+        volumes:
+          agent1_out:
+          Cache.V2:
+        """,
+    )
+    assert spec["volumes"] == ["agent1-out", "cache-v2"]
+    assert spec["main"]["volume_mounts"] == [{"name": "agent1-out", "mount_path": "/shared/agent1"}]
+    assert [mount["name"] for mount in _service(spec, "agent1")["volume_mounts"]] == ["agent1-out", "cache-v2"]
+
+
+def test_volumes_whose_pod_names_would_clash_are_invalid(tmp_path: Path) -> None:
+    task = _parsed(
+        tmp_path,
+        """
+        services:
+          a:
+            image: redis
+            volumes: [data_1:/one, data.1:/two]
+        volumes:
+          data_1:
+          data.1:
+        """,
+    )
+    with pytest.raises(ComposeError) as caught:
+        to_compose_services(task)
+    assert caught.value.code == "compose_invalid"
+    assert caught.value.paths == ("data_1", "data.1")
+
+
 def test_harbor_log_mounts_on_main_need_nothing(tmp_path: Path) -> None:
     spec = _spec(
         tmp_path,
