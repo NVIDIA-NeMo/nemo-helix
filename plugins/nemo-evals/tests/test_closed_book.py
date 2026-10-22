@@ -2,9 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import re
+import typing
 from importlib.metadata import entry_points
 from unittest.mock import MagicMock
 
+import anthropic.types as anthropic_types
+import anthropic.types.beta as anthropic_beta
+import openai.types.chat as openai_chat
+import openai.types.responses as openai_responses
 import pytest
 from nemo_evals.closed_book import (
     CONFIG_TYPE,
@@ -34,6 +40,8 @@ from nemo_helix_plugin.inference_middleware import (
         {"type": "local_shell"},
         {"type": "bash_20250124", "name": "bash"},
         {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
+        {"type": "computer_use_preview", "display_width": 1024, "display_height": 768, "environment": "linux"},
+        {"type": "computer_20250124", "name": "computer", "display_width_px": 1024, "display_height_px": 768},
         {"name": "lookup", "input_schema": {"type": "object"}},
     ],
 )
@@ -324,6 +332,14 @@ async def test_self_searching_model_is_refused_by_entity_or_served_name(model: s
     assert exc_info.value.status_code == 403
 
 
+async def test_workspace_name_does_not_make_a_model_self_searching() -> None:
+    """Only the model's own name says what it does; a workspace called `research` must not refuse its models."""
+    middleware = _middleware({"research/luna": _target("azure/openai/gpt-5.6-luna")})
+    ctx, request = _request("v1/responses", {"model": "research/luna", "input": "hi"})
+
+    assert await middleware.process_request(ctx, request, ClosedBookConfig()) is request
+
+
 @pytest.mark.parametrize("model", ["ws/unregistered", "ws/base&adapters/ws/adapter", None])
 async def test_model_without_a_resolvable_provider_is_refused(model: object) -> None:
     """Closed-book cannot vouch for a model whose served name it cannot see, so it fails closed."""
@@ -429,3 +445,65 @@ def test_registered_as_inference_middleware() -> None:
 
     assert entries
     assert all(entry.load() is ClosedBookMiddleware for entry in entries)
+
+
+#: Tool families the provider runs itself. A new version of one of these is stripped as expected; a tool type in
+#: neither this list nor the client allowlist fails the drift test below until someone classifies it.
+_PROVIDER_EXECUTED_TOOL_FAMILY = re.compile(
+    r"^(?:web_search|web_search_preview|web_fetch|code_execution|code_interpreter|programmatic_tool_calling|file_search"
+    r"|image_generation|mcp|mcp_toolset|tool_search|tool_search_tool_(?:bm25|regex)|advisor)(?:_[0-9_]+)?$"
+)
+
+
+def _declared_tool_types(union: object) -> set[str]:
+    types: set[str] = set()
+
+    def literals(annotation: object) -> None:
+        if typing.get_origin(annotation) is typing.Literal:
+            types.update(str(value) for value in typing.get_args(annotation))
+        for arg in typing.get_args(annotation):
+            literals(arg)
+
+    for member in typing.get_args(union) or (union,):
+        literals(typing.get_type_hints(member, include_extras=True).get("type"))
+    return types
+
+
+@pytest.mark.parametrize(
+    "union",
+    [
+        openai_responses.ToolParam,
+        openai_chat.ChatCompletionToolUnionParam,
+        anthropic_types.ToolUnionParam,
+        anthropic_beta.BetaToolUnionParam,
+    ],
+    ids=["openai-responses", "openai-chat", "anthropic", "anthropic-beta"],
+)
+def test_every_sdk_tool_type_is_classified(union: object) -> None:
+    """An SDK upgrade that adds a tool type fails here, so it is classified on purpose rather than by default.
+
+    The middleware strips any type it doesn't recognise, so an unclassified client-executed tool would quietly
+    vanish from closed-book runs.
+    """
+    declared = _declared_tool_types(union)
+
+    unclassified = {
+        tool_type
+        for tool_type in declared
+        if client_tool_label({"type": tool_type}) is not None and not _PROVIDER_EXECUTED_TOOL_FAMILY.match(tool_type)
+    }
+
+    assert declared
+    assert not unclassified, f"classify these tool types as client- or provider-executed: {sorted(unclassified)}"
+
+
+def test_no_tool_type_is_both_client_and_provider_executed() -> None:
+    sdk_types = {
+        tool_type
+        for union in (openai_responses.ToolParam, anthropic_types.ToolUnionParam, anthropic_beta.BetaToolUnionParam)
+        for tool_type in _declared_tool_types(union)
+    }
+
+    assert not {
+        t for t in sdk_types if client_tool_label({"type": t}) is None and _PROVIDER_EXECUTED_TOOL_FAMILY.match(t)
+    }

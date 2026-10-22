@@ -34,8 +34,8 @@ CONFIG_TYPE = "closed_book"
 REMOVED_TOOLS_STATE_KEY = "removed_tools"
 
 _CLIENT_TOOL_TYPE = re.compile(
-    r"^(?:function|custom|namespace|local_shell|shell|apply_patch"
-    r"|(?:bash|text_editor|str_replace_based_edit_tool|memory)_\d{8})$"
+    r"^(?:function|custom|namespace|local_shell|shell|apply_patch|computer|computer_use_preview"
+    r"|(?:bash|text_editor|str_replace_based_edit_tool|memory|computer)_\d{8})$"
 )
 _TOOL_CHOICE_MODES = frozenset({"auto", "any", "none", "required"})
 _PROVIDER_FEATURE_KEYS = (
@@ -166,10 +166,12 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
         middleware_config: ClosedBookConfig,
     ) -> InferenceRequest:
         model = request.body.get("model")
+        if not isinstance(model, str):
+            raise _unresolved_model(ctx, model)
         target = self._provider_target(ctx, model)
         if any(
             is_self_searching_model(name)
-            for name in (model, target.served_model_name, target.required_extra_body.get("model"))
+            for name in (model.split("/", 1)[-1], target.served_model_name, target.required_extra_body.get("model"))
         ):
             raise _refusal(
                 ctx,
@@ -202,18 +204,20 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
             )
         return request
 
-    def _provider_target(self, ctx: InferenceMiddlewareContext, model: object) -> ModelProviderInferenceTarget:
+    def _provider_target(self, ctx: InferenceMiddlewareContext, model: str) -> ModelProviderInferenceTarget:
         try:
-            if isinstance(model, str):
-                return self.get_inference_url_and_model(model)
+            return self.get_inference_url_and_model(model)
         except KeyError:
-            pass
-        raise _refusal(
-            ctx,
-            model,
-            "unresolved_model",
-            f"Model {model!r} does not resolve to a model provider, so closed-book cannot check it.",
-        )
+            raise _unresolved_model(ctx, model) from None
+
+
+def _unresolved_model(ctx: InferenceMiddlewareContext, model: object) -> InferenceMiddlewareError:
+    return _refusal(
+        ctx,
+        model,
+        "unresolved_model",
+        f"Model {model!r} does not resolve to a model provider, so closed-book cannot check it.",
+    )
 
 
 def _refusal(ctx: InferenceMiddlewareContext, model: object, reason: str, detail: str) -> InferenceMiddlewareError:

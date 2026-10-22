@@ -261,8 +261,8 @@ models search on every call.
 The `nemo-evals-closed-book` middleware closes that path for the request the gateway forwards:
 
 - It removes every tool the provider would execute, and keeps client-executed tools such as
-  functions, custom tools, a `shell` tool without a provider container, and Anthropic's `bash` and
-  `text_editor`. A tool type it does not recognize counts as provider-executed and is removed.
+  functions, custom tools, a `shell` tool without a provider container, computer use, and
+  Anthropic's `bash` and `text_editor`. A tool type it does not recognize counts as provider-executed and is removed.
 - It removes provider-side features such as `web_search_options` and `mcp_servers`, and resets a
   `tool_choice` that pointed at a removed tool to `auto`.
 - It refuses with `403` models that search on their own, such as Perplexity Sonar and
