@@ -1212,7 +1212,7 @@ wheels = [
 
 [[package]]
 name = "data-designer"
-version = "0.9.5"
+version = "0.9.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "data-designer-config" },
@@ -1231,16 +1231,17 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/28/6e/3643c727402315f4a7b6384e56cc24e9a6c6254b61dcf422f03b1f25ed6a/data_designer-0.9.5.tar.gz", hash = "sha256:d67dea7de6b21659f65eb6fe2b28d4b2ffae52ed408d5d83b59e2ee8f78aa8ff", size = 241965, upload-time = "2026-10-13T20:26:49.623Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/5b/775137cf838d1c06635ae8fb03a6732a47db808cbd06f6aee8f17e01ab7a/data_designer-0.9.7.tar.gz", hash = "sha256:c1358fb5e1ccad7140148788cd36302672b1b8b7d529b86e5e01e3c29d69ad77", size = 248195, upload-time = "2026-10-22T02:00:20.094Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/62/e290a6ab3e271f7d44c3c13c7a9631590bdeaf92dcc7112690f6265400d1/data_designer-0.9.5-py3-none-any.whl", hash = "sha256:c1ffe0267d873e3de84433fdf1b044d198a65f2c1bff2464da6be83327268518", size = 160239, upload-time = "2026-10-13T20:26:48.248Z" },
+    { url = "https://files.pythonhosted.org/packages/12/f3/75c578f1286f052d18967b9d27a5c68ad8d566c9309aba95ca0981a7dc9a/data_designer-0.9.7-py3-none-any.whl", hash = "sha256:7a8fe33d88b8927e103d585dc9129a3c335191440e73a0e451f13702b4b08410", size = 160876, upload-time = "2026-10-22T02:00:18.759Z" },
 ]
 
 [[package]]
 name = "data-designer-config"
-version = "0.9.5"
+version = "0.9.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "certifi" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "numpy" },
@@ -1254,14 +1255,14 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/63/bb140989c16184b8a21623679a2c1e61d49dc78b98984473ff579c68c607/data_designer_config-0.9.5.tar.gz", hash = "sha256:980d3ac13428be69d97f56eea552fcd4a5f47812499c25946d98534225cf526a", size = 152846, upload-time = "2026-10-13T20:26:41.22Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/f9/a2a1c3e1abe4e5d2cf1c8d55ed5609a95082da4c166cb5fc041298445192/data_designer_config-0.9.7.tar.gz", hash = "sha256:fc6a72f6ea9223e11222f513796be8df3cdf0e67d528524c14840c98cadf3e7a", size = 153073, upload-time = "2026-10-22T02:00:11.926Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/2f/345ff529de8f4ed3fa2656c0ce34d8d68a1469b2ed773c5837ce3f33fdac/data_designer_config-0.9.5-py3-none-any.whl", hash = "sha256:4e6b861d461bf7bf2a247f4c95c21eb502aca094e365aaf4671f9a7903730f43", size = 129907, upload-time = "2026-10-13T20:26:39.883Z" },
+    { url = "https://files.pythonhosted.org/packages/96/87/90ebf0662a80e5be2d0ae18e3817e2a0f5fcb59d9c8fa4ded7b88c9b7a56/data_designer_config-0.9.7-py3-none-any.whl", hash = "sha256:b17913a76cad92672d2350aa10399899aabf3b04783d61d5f8ebd7210cb145d1", size = 129938, upload-time = "2026-10-22T02:00:10.207Z" },
 ]
 
 [[package]]
 name = "data-designer-engine"
-version = "0.9.5"
+version = "0.9.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyascii" },
@@ -1292,9 +1293,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "wcwidth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/40/38604a2dc96888f72de688ccd0be8994ee005227477479a5e492033c79c4/data_designer_engine-0.9.5.tar.gz", hash = "sha256:a2475816d98b35fed1df65b170483fc002537be2282ad0e725d51d1a203f5596", size = 930354, upload-time = "2026-10-13T20:26:46.011Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/e1/9225b78bb2c049fee24dda80eeb1d52821ea91e559aefcc571d2692ae189/data_designer_engine-0.9.7.tar.gz", hash = "sha256:ba9578c13abb278ce2b0e1ecb63dc2b9da0b2ca7c8198e3db66b37aa756d53c9", size = 939761, upload-time = "2026-10-22T02:00:16.221Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/f9/5adfcf3588569338ab3767ba7786db83bce83c2c5ee85d9fb72ed1a0afc0/data_designer_engine-0.9.5-py3-none-any.whl", hash = "sha256:ae14b424e91eacbe9ae23125d142032f8163844715d329caa8fd04cdcd79bd06", size = 710035, upload-time = "2026-10-13T20:26:44.093Z" },
+    { url = "https://files.pythonhosted.org/packages/58/a7/d5d9023a39ad970f5bc8d862ba5ba5af64606680542f11ff11a48fc65378/data_designer_engine-0.9.7-py3-none-any.whl", hash = "sha256:2a1f4f7f1717adee4bb4447b6636d397d0ee1a7edba8bf6081c8bbefc8cd6936", size = 711961, upload-time = "2026-10-22T02:00:13.994Z" },
 ]
 
 [[package]]
@@ -1318,7 +1319,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
-    { name = "data-designer", specifier = "==0.9.5" },
+    { name = "data-designer", specifier = "==0.9.7" },
     { name = "duckdb" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "pydantic", specifier = ">=2" },
@@ -3707,7 +3708,7 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.29.0"
+version = "1.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -3724,9 +3725,9 @@ dependencies = [
     { name = "typing-inspection" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/d3/f9acc21dfc886e4f78e2add1a47db46ce16884346afde53f8a064c02c891/mcp-1.29.0.tar.gz", hash = "sha256:52d01f334de1868cc3bb2d6604931126a67631f99a6c5d3b82ba47290315ec36", size = 643148, upload-time = "2026-07-28T13:41:41.939Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/93/0142dc84a666daf8ad51a34268f34c12fd6fda4f3810c4be2504eecc8212/mcp-1.30.0.tar.gz", hash = "sha256:445414625fce5c295faa505bb11bacece661ab6f4028d57c935db57820b7a3e4", size = 680511, upload-time = "2026-09-07T14:34:15.845Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/c8/248b201f6d753d69fd5d6506011abbb35a946d9142b2ae311a948fd0be3d/mcp-1.29.0-py3-none-any.whl", hash = "sha256:f5a075bb611f23d6f4d080c6a1699fa62772eebc562ba9e66b306ddde1c755f7", size = 223436, upload-time = "2026-07-28T13:41:40.337Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/f4/e58bc33317c92a0203664daaf00bf6f41166cc0149e5d6870a03f7cd004a/mcp-1.30.0-py3-none-any.whl", hash = "sha256:666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0", size = 234581, upload-time = "2026-09-07T14:34:14.266Z" },
 ]
 
 [[package]]
@@ -4280,7 +4281,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "data-designer", specifier = "==0.9.5" },
+    { name = "data-designer", specifier = "==0.9.7" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
     { name = "fastapi" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
@@ -4516,8 +4517,8 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
     { name = "anyio", marker = "extra == 'data-designer-nemo'", specifier = ">=4.0" },
     { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
-    { name = "data-designer", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.5" },
+    { name = "data-designer", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.7" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
     { name = "data-designer-retrieval-sdg", marker = "extra == 'retrieval-sdg'", specifier = "==0.2.1", index = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/" },
     { name = "duckdb", marker = "extra == 'data-designer-nemo'" },
@@ -5990,12 +5991,12 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'nemo-builder-plugin'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'plugins'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'services'", specifier = ">=42.0.0" },
-    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.5" },
+    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.7" },
     { name = "data-designer-nemo", marker = "extra == 'all'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-anonymizer-plugin'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-data-designer-plugin'", editable = "packages/data_designer_nemo" },

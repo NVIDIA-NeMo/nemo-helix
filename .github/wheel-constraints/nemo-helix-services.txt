@@ -17,7 +17,7 @@ boto3==1.40.61
 botocore==1.40.61
 clickhouse-connect==1.10.1
 cloudpickle==3.1.2
-data-designer==0.9.5
+data-designer==0.9.7
 datasets==5.1.0
 deepagents==0.7.9
 distro==1.9.0
