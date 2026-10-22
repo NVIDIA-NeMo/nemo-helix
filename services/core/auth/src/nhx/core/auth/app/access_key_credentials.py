@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
@@ -13,14 +14,18 @@ from nemo_helix_plugin.auth.access_keys.types import AccessKeyEntityType
 from nhx.common.auth.access_keys import SERVICE_ACCOUNT_PRINCIPAL_PREFIX
 from nhx.core.auth.entities import AccessKeyEntity
 from nhx.core.entities.app.repository import (
+    SERVICE_ACCOUNT_IDENTITY_ISSUER,
     AccountCredentialRecord,
     AccountCredentialStatus,
     AccountCredentialStore,
     AccountCredentialType,
+    AccountIdentityRecord,
     AccountIdentityStore,
+    AccountIdentityUnavailableError,
 )
 
 ACCESS_KEY_CREDENTIAL_TYPE: AccountCredentialType = "access_key"
+_SUBJECT_PAGE_SIZE = 500
 
 
 class AccessKeyCredentialAdapter:
@@ -41,7 +46,7 @@ class AccessKeyCredentialAdapter:
         if record.is_service_account():
             subject_principal = record.subject_principal or ""
             identity = await self.identity_store.resolve_or_materialize(
-                issuer="nemo:service-account",
+                issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER,
                 subject=subject_principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX),
                 subject_claim="service_account_id",
                 account_type="service",
@@ -95,6 +100,7 @@ class AccessKeyCredentialAdapter:
         owner_account_id: str,
         *,
         include_service_accounts: bool,
+        service_bound_workspace_ids: Sequence[str] = (),
         offset: int,
         limit: int,
     ) -> tuple[list[AccessKeyEntity], bool]:
@@ -102,10 +108,58 @@ class AccessKeyCredentialAdapter:
             ACCESS_KEY_CREDENTIAL_TYPE,
             owner_account_id,
             include_service_subjects=include_service_accounts,
+            service_subject_metadata_contains=(
+                ("bound_workspace_ids", list(service_bound_workspace_ids)) if service_bound_workspace_ids else None
+            ),
             offset=offset,
             limit=limit,
         )
         return [self._entity(record) for record in records], has_more
+
+    async def _service_account_identity(self, service_account_principal: str) -> AccountIdentityRecord | None:
+        """The service account's active identity, or None if it has never been issued a key.
+
+        Raises AccountIdentityUnavailableError if the identity is disabled.
+        """
+        return await self.identity_store.get_active_identity(
+            issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER,
+            subject=service_account_principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX),
+        )
+
+    async def is_service_account_disabled(self, service_account_principal: str) -> bool:
+        """Whether the service account has an identity that is not active (an unknown account is not disabled)."""
+        try:
+            await self._service_account_identity(service_account_principal)
+        except AccountIdentityUnavailableError:
+            return True
+        return False
+
+    async def service_account_keys(
+        self, service_account_principal: str
+    ) -> tuple[AccountIdentityRecord | None, list[AccessKeyEntity]]:
+        """The service account's identity and every key whose subject it is, in any status.
+
+        Resolves the account through the identity store without creating it, so one that has never
+        been issued a key has no identity and no keys. Its keys also authenticate as the identity's
+        account ID, so role bindings may be keyed by it. Raises AccountIdentityUnavailableError for
+        a disabled account, whose keys can't be listed.
+        """
+        identity = await self._service_account_identity(service_account_principal)
+        if identity is None:
+            return None, []
+        keys: list[AccessKeyEntity] = []
+        after_id = None
+        while True:
+            records, has_more = await self.credential_store.list_for_subject(
+                ACCESS_KEY_CREDENTIAL_TYPE,
+                identity.account_id,
+                after_id=after_id,
+                limit=_SUBJECT_PAGE_SIZE,
+            )
+            keys.extend(self._entity(record) for record in records)
+            if not has_more or not records:
+                return identity, keys
+            after_id = records[-1].id
 
     @staticmethod
     def _metadata(record: AccessKeyEntity) -> dict[str, Any]:
@@ -115,6 +169,7 @@ class AccessKeyCredentialAdapter:
             "description": record.description,
             "owner_principal": record.principal,
             "subject_principal": record.subject_principal,
+            "bound_workspace_ids": list(record.bound_workspace_ids),
             "entity_type": record.entity_type,
             "issuer": record.issuer,
             "audiences": list(record.audiences),
@@ -133,6 +188,7 @@ class AccessKeyCredentialAdapter:
             description=AccessKeyCredentialAdapter._optional_string(metadata.get("description")),
             principal=str(metadata["owner_principal"]),
             subject_principal=AccessKeyCredentialAdapter._optional_string(metadata.get("subject_principal")),
+            bound_workspace_ids=AccessKeyCredentialAdapter._string_list(metadata.get("bound_workspace_ids")),
             entity_type=AccessKeyCredentialAdapter._entity_type(metadata.get("entity_type")),
             issuer=str(metadata["issuer"]),
             audiences=AccessKeyCredentialAdapter._string_list(metadata.get("audiences")),

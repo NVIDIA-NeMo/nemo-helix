@@ -284,9 +284,9 @@ nemo auth access-keys [OPTIONS] COMMAND [ARGS]...
 
 * `create`: Create a user-bound or service-bound Scoped Access Key.
 * `list`: List Scoped Access Keys owned by the currently...
-* `revoke`: Revoke a Scoped Access Key owned by the currently...
-* `suspend`: Temporarily suspend a Scoped Access Key owned by the...
-* `unsuspend`: Restore a suspended Scoped Access Key owned by the...
+* `revoke`: Revoke a Scoped Access Key you own, or a service-bound...
+* `suspend`: Temporarily suspend a Scoped Access Key you own, or a...
+* `unsuspend`: Restore a suspended Scoped Access Key you own, or a...
 * `rotate`: Mint a successor Scoped Access Key and start the old...
 
 ##### nemo auth access-keys create
@@ -304,10 +304,11 @@ nemo auth access-keys create [OPTIONS]
 * `--name, -n`: Optional human-readable label for the Scoped Access Key.
 * `--description, -d`: Optional description for the Scoped Access Key.
 * `--expires-in`: Scoped Access Key lifetime in seconds. Use 'none' to request no expiration.
-* `--service-account`: Bind the key to a non-human service account (HelixAdmin only).
+* `--service-account`: Bind the key to a non-human service account (HelixAdmin, or an Admin of every --workspace for an account named '&lt;workspace>--&lt;name>' after one of them).
 * `--scope`: Comma-separated service names to scope this key to, e.g. 'intake,entities'. Omit for an unscoped key.
 * `--rotate`: JTI of a previous Scoped Access Key owned by the caller to revoke once this key is created. Primarily for rotating personal keys, which have no service-account identity to correlate rotations against automatically.
-* `--workspace`: Grant the key's principal workspace membership, formatted '&lt;workspace>' or '&lt;workspace>:&lt;role1>,&lt;role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call.
+* `--workspace`: Grant the key's principal workspace membership, formatted '&lt;workspace>' or '&lt;workspace>:&lt;role1>,&lt;role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call. With --service-account named '&lt;workspace>--&lt;name>' after one of them, the key is also bound to each workspace, so their Admins can manage it (Admins of all of them, for several); any other service-bound key is managed by HelixAdmins only.
+* `--yes, -y`: With --service-account: create the key without asking when the account already has keys bound to workspaces and this key grants it a role it doesn't hold yet.
 
 **Help:**
 
@@ -318,7 +319,8 @@ nemo auth access-keys create [OPTIONS]
 List Scoped Access Keys owned by the currently authenticated user.
 
 HelixAdmins also see every service-bound Scoped Access Key, not just the
-ones they personally created.
+ones they personally created; workspace Admins also see the service-bound
+keys bound to workspaces they administer, whoever created them.
 
 **Usage:**
 
@@ -337,7 +339,7 @@ nemo auth access-keys list [OPTIONS]
 
 ##### nemo auth access-keys revoke
 
-Revoke a Scoped Access Key owned by the currently authenticated user.
+Revoke a Scoped Access Key you own, or a service-bound key you administer.
 
 **Usage:**
 
@@ -355,7 +357,7 @@ nemo auth access-keys revoke [OPTIONS] JTI
 
 ##### nemo auth access-keys suspend
 
-Temporarily suspend a Scoped Access Key owned by the current user.
+Temporarily suspend a Scoped Access Key you own, or a service-bound key you administer.
 
 Unlike revocation, suspension is reversible until the key expires.
 
@@ -375,7 +377,7 @@ nemo auth access-keys suspend [OPTIONS] JTI
 
 ##### nemo auth access-keys unsuspend
 
-Restore a suspended Scoped Access Key owned by the current user.
+Restore a suspended Scoped Access Key you own, or a service-bound key you administer.
 
 **Usage:**
 

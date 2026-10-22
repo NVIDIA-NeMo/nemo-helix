@@ -246,3 +246,14 @@ def test_degraded_plugin_fences_both_key_and_mount_name(monkeypatch):
     bundle = _patch_failmode(monkeypatch, [degraded], "deny_route")
     merged = bundle.merge_plugin_authz_contributions({"authz": {}})
     assert merged["authz"]["config"]["denied_plugin_prefixes"] == ["/apis/bad", "/apis/bad-actual"]
+
+
+@pytest.mark.asyncio
+async def test_role_inclusions_follow_includes_transitively():
+    from nhx.core.auth.app.bundle import role_inclusions
+
+    inclusions = await role_inclusions()
+
+    assert inclusions["Viewer"] == {"Viewer"}
+    assert inclusions["Editor"] == {"Editor", "Viewer"}
+    assert inclusions["Admin"] == {"Admin", "Editor", "Viewer"}

@@ -5,9 +5,11 @@ from __future__ import annotations
 
 from nemo_helix_plugin.auth.access_keys import endpoints
 from nemo_helix_plugin.auth.access_keys.issuer import (
+    AccessKeyBoundWorkspacesNotAdministeredError,
     AccessKeyFeatureDisabledError,
     AccessKeyIssuer,
     AccessKeyOperationNotImplementedError,
+    AccessKeyWorkspaceBoundKeysError,
 )
 from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
@@ -98,3 +100,11 @@ def _raise_known_domain_error_from_http(exc: NemoHTTPError) -> None:
         legacy_disabled_detail = exc.detail == "Scoped Access Keys are not enabled"
         if disabled_code or legacy_disabled_detail:
             raise AccessKeyFeatureDisabledError(exc.detail) from exc
+    if exc.status_code == 409 and isinstance(exc.body, dict) and exc.body.get("code") == "workspace_bound_keys_exist":
+        raise AccessKeyWorkspaceBoundKeysError(exc.http_response) from exc
+    if (
+        exc.status_code == 403
+        and isinstance(exc.body, dict)
+        and exc.body.get("code") == "bound_workspaces_not_administered"
+    ):
+        raise AccessKeyBoundWorkspacesNotAdministeredError(exc.http_response) from exc

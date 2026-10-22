@@ -11,7 +11,9 @@ import json
 import logging
 import tarfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Optional, Tuple
 
 import yaml
@@ -25,9 +27,13 @@ from nhx.core.auth.entities import RoleBindingEntity
 
 logger = logging.getLogger(__name__)
 
+_STATIC_AUTHZ_DATA_PATH = Path(__file__).parent.parent / "assets" / "static-authz.yaml"
+
 # Bundle cache configuration
 _bundle_cache: Optional[Tuple[bytes, str, float]] = None  # (bundle_bytes, etag, timestamp)
 _bundle_lock = asyncio.Lock()
+# See role_inclusions.
+_role_inclusions: Optional[Mapping[str, frozenset[str]]] = None
 
 
 def get_bundle_cache_seconds() -> int:
@@ -206,17 +212,7 @@ async def _build_authorization_data_internal(entities_client: Optional[EntityCli
     Returns:
         dict: The authorization data structure
     """
-    # Get the app directory path (where policies/data are located)
-    app_dir = Path(__file__).parent
-
-    # Read and convert the static authorization data
-    # The assets directory is at the package level (nhx/auth/assets)
-    static_data_path = app_dir.parent / "assets" / "static-authz.yaml"
-    with open(static_data_path, "r") as f:
-        static_data = yaml.safe_load(f)
-
-    static_data = merge_plugin_authz_contributions(static_data)
-    validate_static_authz_data(static_data)
+    static_data = _load_static_authz_data()
 
     # Initialize workspaces and principals if not present
     if "workspaces" not in static_data["authz"]:
@@ -377,3 +373,44 @@ def build_opa_bundle() -> bytes:
     This is for backward compatibility and when database is not available.
     """
     return asyncio.run(build_opa_bundle_async(entities_client=None))
+
+
+def _read_static_authz_yaml() -> dict:
+    # The assets directory is at the package level (nhx/auth/assets)
+    with open(_STATIC_AUTHZ_DATA_PATH, "r") as f:
+        return yaml.safe_load(f)
+
+
+def _load_static_authz_data() -> dict:
+    """The static authorization data (roles, permissions, endpoints), with installed plugins' rules merged in."""
+    static_data = merge_plugin_authz_contributions(_read_static_authz_yaml())
+    validate_static_authz_data(static_data)
+    return static_data
+
+
+def _role_inclusions_from(roles: dict[str, dict]) -> Mapping[str, frozenset[str]]:
+    def included(role: str) -> frozenset[str]:
+        found = {role}
+        pending = [role]
+        while pending:
+            for child in (roles.get(pending.pop()) or {}).get("includes", []):
+                if child not in found:
+                    found.add(child)
+                    pending.append(child)
+        return frozenset(found)
+
+    return MappingProxyType({role: included(role) for role in roles})
+
+
+async def role_inclusions() -> Mapping[str, frozenset[str]]:
+    """Each role, mapped to itself and every role it includes, directly or through another.
+
+    As the PDP resolves them: holding Admin in a workspace grants Editor and Viewer there too.
+    Plugins only add permissions to roles (see merge_plugin_authz_contributions), never includes,
+    so the static data has all of them. Read off the event loop, once.
+    """
+    global _role_inclusions
+    if _role_inclusions is None:
+        static_data = await asyncio.to_thread(_read_static_authz_yaml)
+        _role_inclusions = _role_inclusions_from(static_data["authz"]["roles"])
+    return _role_inclusions

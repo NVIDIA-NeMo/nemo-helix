@@ -7,12 +7,23 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Literal
+
+from nhx.common.datetime_utils import ensure_utc
 
 MAX_PRINCIPAL_ID_LENGTH = 256
 PRINCIPAL_ID_ALLOWED_CHARACTERS = "alphanumeric, @, ., -, _, :, +, /"
 SERVICE_PRINCIPAL_PREFIX = "service:"
 SERVICE_ACCOUNT_PRINCIPAL_PREFIX = "service-account:"
+# Separates the workspace a workspace Admin's service account is named after from the rest of its
+# ID ('<workspace>--<name>'). Workspace names can't contain it, so the part before the first one
+# names exactly one workspace.
+SERVICE_ACCOUNT_NAMESPACE_SEPARATOR = "--"
+# How much earlier than the workspace it's named after a service account may have been first issued a
+# key and still count as that workspace's: the auth and entities services stamp the two times with
+# their own clocks.
+SERVICE_ACCOUNT_CLOCK_SKEW = timedelta(minutes=5)
 
 PrincipalIdentifierKind = Literal["principal", "service_principal", "service_account"]
 CallerKind = Literal["principal", "service_principal"]
@@ -133,3 +144,21 @@ def is_service_principal(value: str) -> bool:
         return parse_principal_identifier(value).is_service_principal()
     except InvalidPrincipalIdentifier:
         return False
+
+
+def service_account_namespace(service_account_id: str) -> str | None:
+    """The workspace a '<workspace>--<name>' service account ID is named after, or None if it isn't one."""
+    workspace, separator, name = service_account_id.partition(SERVICE_ACCOUNT_NAMESPACE_SEPARATOR)
+    return workspace if separator and workspace and name else None
+
+
+def service_account_predates_namespace(linked_at: datetime | None, workspace_created_at: datetime) -> bool:
+    """Whether a '<workspace>--<name>' account was first issued a key before that workspace was created.
+
+    Then it belongs to an earlier workspace of that name, whose Admins may still hold its keys, so
+    the current workspace's Admins mustn't manage it or grant it roles. ``linked_at`` is None for an
+    account never issued a key. Allows for SERVICE_ACCOUNT_CLOCK_SKEW; a naive time is taken as UTC.
+    """
+    if linked_at is None:
+        return False
+    return ensure_utc(linked_at) < ensure_utc(workspace_created_at) - SERVICE_ACCOUNT_CLOCK_SKEW

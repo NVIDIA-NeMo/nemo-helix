@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateRequest, AccessKeyWorkspaceGrant
+from nemo_helix_plugin.auth.access_keys.types import (
+    AccessKeyCreateRequest,
+    AccessKeyWorkspaceGrant,
+)
 
 
 def test_access_key_create_request_omits_unset_expiry_from_json() -> None:
@@ -29,3 +32,28 @@ def test_access_key_create_request_rejects_normalized_duplicate_workspace_grants
                 AccessKeyWorkspaceGrant(workspace="team-a", roles=["Editor"]),
             ]
         )
+
+
+def test_access_key_create_request_normalizes_the_workspace_grants() -> None:
+    request = AccessKeyCreateRequest(
+        service_account_id="otel",
+        workspaces=[
+            AccessKeyWorkspaceGrant(workspace=" team-a ", roles=[" Viewer "]),
+            AccessKeyWorkspaceGrant(workspace="team-b", roles=["Editor"]),
+        ],
+    )
+
+    assert [(grant.workspace, grant.roles) for grant in request.workspaces or []] == [
+        ("team-a", ["Viewer"]),
+        ("team-b", ["Editor"]),
+    ]
+
+
+def test_access_key_workspace_grant_defaults_to_editor() -> None:
+    assert AccessKeyWorkspaceGrant.model_validate({"workspace": "team-a"}).roles == ["Editor"]
+
+
+@pytest.mark.parametrize("roles", [[], [" "]])
+def test_access_key_workspace_grant_rejects_blank_roles(roles) -> None:
+    with pytest.raises(ValueError, match="roles, if provided, must contain at least one non-empty role"):
+        AccessKeyWorkspaceGrant.model_validate({"workspace": "team-a", "roles": roles})
