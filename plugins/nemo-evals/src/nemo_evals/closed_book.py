@@ -42,7 +42,6 @@ _PROVIDER_FEATURE_KEYS = (
     "container",
     "mcp_servers",
     "plugins",
-    "prompt",
     "search_parameters",
     "web_search_options",
 )
@@ -88,6 +87,9 @@ def strip_hosted_tools(body: MutableMapping[str, Any], *, anthropic: bool = Fals
         if key in body:
             del body[key]
             removed.append(key)
+    if isinstance(body.get("prompt"), dict):
+        del body["prompt"]
+        removed.append("prompt")
     choice = body.get("tool_choice")
     if isinstance(choice, dict) and not _tool_choice_survives(choice, kept, removed):
         body["tool_choice"] = {"type": "auto"} if anthropic else "auto"

@@ -109,6 +109,15 @@ def test_provider_feature_keys_are_removed(key: str) -> None:
     assert body == {"model": "m"}
 
 
+@pytest.mark.parametrize("prompt", ["hello", ["hello", "world"], [[1, 2, 3]]])
+def test_completions_prompt_is_kept(prompt: object) -> None:
+    """A Completions ``prompt`` is the caller's input; only a Responses stored-prompt object can add tools."""
+    body = {"model": "m", "prompt": prompt}
+
+    assert strip_hosted_tools(body) == []
+    assert body == {"model": "m", "prompt": prompt}
+
+
 def test_forced_hosted_tool_choice_falls_back_to_auto_per_wire_format() -> None:
     openai = {"tools": [{"type": "web_search_preview"}], "tool_choice": {"type": "web_search_preview"}}
     anthropic = {
@@ -354,7 +363,11 @@ async def test_provider_that_adds_provider_side_search_is_refused(
 async def test_provider_body_policy_without_hosted_tools_is_allowed() -> None:
     target = _target(
         "azure/openai/gpt-5.6-luna",
-        default_extra_body={"temperature": 0.2, "tools": [{"type": "function", "name": "f"}]},
+        default_extra_body={
+            "temperature": 0.2,
+            "prompt": "Answer briefly.",
+            "tools": [{"type": "function", "name": "f"}],
+        },
         required_extra_body={"max_output_tokens": 128},
     )
     middleware = _middleware({"ws/luna": target})
