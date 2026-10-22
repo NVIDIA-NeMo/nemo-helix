@@ -37,23 +37,23 @@ describe('getToolParameters', () => {
 });
 
 describe('ToolCard', () => {
-  it('renders the tool summary, parameters and metadata', () => {
+  it('renders the tool summary, parameters and stats', () => {
     render(<ToolCard tool={tool} />);
 
     expect(screen.getByText('get_weather')).toBeInTheDocument();
     expect(screen.getByText('Function')).toBeInTheDocument();
     expect(screen.getByText('Returns the current weather for a location.')).toBeInTheDocument();
-    expect(screen.getByText('location')).toBeInTheDocument();
-    expect(screen.getByText('City name.')).toBeInTheDocument();
-    expect(screen.getAllByText('required')).toHaveLength(1);
-    expect(screen.getByText('true')).toBeInTheDocument();
-    expect(screen.getByText('2 (1 required)')).toBeInTheDocument();
+    expect(screen.getByText('Strict')).toBeInTheDocument();
+    expect(screen.getAllByTitle('string · required · City name.')[0]).toHaveTextContent('location');
+    expect(screen.getByText('2 params')).toBeInTheDocument();
+    expect(screen.getByText('1 required')).toBeInTheDocument();
   });
 
-  it('shows an empty state when the tool takes no parameters', () => {
+  it('omits strict and required indicators when absent', () => {
     render(<ToolCard tool={{ type: 'function', function: { name: 'ping' } }} />);
 
-    expect(screen.getByText('No parameters')).toBeInTheDocument();
-    expect(screen.getByText('0 (0 required)')).toBeInTheDocument();
+    expect(screen.getByText('0 params')).toBeInTheDocument();
+    expect(screen.queryByText('Strict')).not.toBeInTheDocument();
+    expect(screen.queryByText(/required/)).not.toBeInTheDocument();
   });
 });

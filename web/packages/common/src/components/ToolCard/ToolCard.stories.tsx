@@ -7,7 +7,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 const meta: Meta<typeof ToolCard> = {
   component: ToolCard,
   title: 'Studio Common/ToolCard',
-  decorators: [(Story) => <div className="w-[440px]">{Story()}</div>],
+  decorators: [(Story) => <div className="w-[360px]">{Story()}</div>],
 };
 
 export default meta;

@@ -1,19 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
+import { EntityCard } from '@nemo/common/src/components/EntityCard';
+import type { ToolParameter } from '@nemo/common/src/components/ToolCard/types';
 import type { ChatCompletionTool } from '@nemo/sdk/generated/platform/schema';
-import { Badge, Card, Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import cn from 'classnames';
-import { Wrench } from 'lucide-react';
+import { Badge } from '@nvidia/foundations-react-core';
+import { Asterisk, Braces, Wrench } from 'lucide-react';
 import type { FC } from 'react';
-
-export interface ToolParameter {
-  readonly name: string;
-  readonly type?: string;
-  readonly description?: string;
-  readonly required: boolean;
-}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -47,96 +40,59 @@ export const getToolParameters = (parameters: unknown): ToolParameter[] => {
   }));
 };
 
-const ParameterRow: FC<{ parameter: ToolParameter }> = ({ parameter }) => (
-  <Stack gap="density-xs" className="rounded-md bg-surface-sunken p-density-md">
-    <Flex align="center" gap="density-sm" wrap="wrap">
-      <Text kind="mono/sm">{parameter.name}</Text>
-      {parameter.type && (
-        <Badge kind="outline" color="gray" size="small">
-          {parameter.type}
-        </Badge>
-      )}
-      {parameter.required && (
-        <Badge kind="outline" color="red" size="small">
-          required
-        </Badge>
-      )}
-    </Flex>
-    {parameter.description && (
-      <Text kind="body/regular/sm" className="text-secondary">
-        {parameter.description}
-      </Text>
-    )}
-  </Stack>
-);
+const parameterTitle = ({ type, description, required }: ToolParameter): string =>
+  [type, required ? 'required' : undefined, description].filter(Boolean).join(' · ');
 
 interface ToolCardProps {
   tool: ChatCompletionTool;
+  onClick?: () => void;
   className?: string;
 }
 
+const STAT_ICON = 'w-4 h-4 text-secondary';
+
 /**
- * Summarizes an OpenAI-compatible tool definition: name, description,
- * parameters from its JSON Schema, and strict mode.
+ * Summarizes an OpenAI-compatible tool definition in the same layout as model cards:
+ * name, type, description, strict mode, and its JSON Schema parameters.
  */
-export const ToolCard: FC<ToolCardProps> = ({ tool, className }) => {
+export const ToolCard: FC<ToolCardProps> = ({ tool, onClick, className }) => {
   const { name, description, parameters, strict } = tool.function;
   const params = getToolParameters(parameters);
   const requiredCount = params.filter((p) => p.required).length;
 
   return (
-    <Card className={cn('h-fit', className)}>
-      <Stack gap="density-lg">
-        <Flex align="center" gap="density-md">
-          <Flex
-            align="center"
-            justify="center"
-            className="shrink-0 rounded-md bg-surface-sunken p-density-sm"
-          >
-            <Wrench width={20} height={20} aria-hidden />
-          </Flex>
-          <Text kind="mono/md" className="min-w-0 flex-1 truncate">
-            {name}
-          </Text>
-          <Badge kind="outline" color="green" size="small">
-            {tool.type === 'function' ? 'Function' : tool.type}
+    <EntityCard
+      title={name}
+      titleKind="mono/md"
+      subtitle={{
+        icon: <Wrench className="w-4 h-4 flex-shrink-0" aria-hidden />,
+        label: tool.type === 'function' ? 'Function' : tool.type,
+        trailing: strict && (
+          <Badge color="green" kind="solid" size="small">
+            Strict
           </Badge>
-        </Flex>
-        {description && <Text kind="body/regular/md">{description}</Text>}
-        <Divider />
-        <Stack gap="density-sm">
-          <Text kind="label/bold/sm" className="text-secondary">
-            Parameters
-          </Text>
-          {params.length > 0 ? (
-            params.map((p) => <ParameterRow key={p.name} parameter={p} />)
-          ) : (
-            <Text kind="body/regular/sm" className="text-secondary">
-              No parameters
-            </Text>
-          )}
-        </Stack>
-        <Divider />
-        <Stack gap="density-sm">
-          <Text kind="label/bold/sm" className="text-secondary">
-            Metadata
-          </Text>
-          <KeyValueGrid
-            items={[
+        ),
+      }}
+      description={description}
+      tags={params.map((p) => ({ key: p.name, label: p.name, title: parameterTitle(p) }))}
+      stats={[
+        {
+          key: 'parameters',
+          icon: <Braces className={STAT_ICON} />,
+          label: `${params.length} ${params.length === 1 ? 'param' : 'params'}`,
+        },
+        ...(requiredCount > 0
+          ? [
               {
-                key: 'strict',
-                label: 'Strict',
-                value: strict === undefined ? '—' : String(strict),
+                key: 'required',
+                icon: <Asterisk className={STAT_ICON} />,
+                label: `${requiredCount} required`,
               },
-              {
-                key: 'parameters',
-                label: 'Parameters',
-                value: `${params.length} (${requiredCount} required)`,
-              },
-            ]}
-          />
-        </Stack>
-      </Stack>
-    </Card>
+            ]
+          : []),
+      ]}
+      onClick={onClick}
+      className={className}
+    />
   );
 };
