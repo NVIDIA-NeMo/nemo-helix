@@ -57,6 +57,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     TERMINAL_EXIT_CODES,
@@ -1352,6 +1353,9 @@ def reclaim_job_persistent_storage(
             pod_metadata=pod_metadata,
             pod_security_context=pod_security_context,
         )
+        # Finished reclaim Jobs are deleted here. A TTL could delete one before it is seen to
+        # succeed, and the next call would start another.
+        cleanup_job.spec.ttl_seconds_after_finished = None
         batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
         logger.info(
             "Created storage reclaim job",
@@ -1485,6 +1489,7 @@ def create_pod_template_spec(
                 value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.uid")),
             ),
             client.V1EnvVar(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value=DEFAULT_TASK_STORAGE_PATH),
+            *([client.V1EnvVar(name=NEMO_JOB_UID_ENVVAR, value=step.job_id)] if step.job_id else []),
             client.V1EnvVar(
                 name=NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
                 value=get_logs_endpoint_from_fileset(
@@ -1796,10 +1801,11 @@ def update_tasks_with_pause_outcome(
     for pod in pods:
         pod_status = map_pod_to_pod_status(pod)
         pod_details, _, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
-        JobsClient.from_client(nemo_client).update_job_step_task(
+        JobsClient.from_client(nemo_client).update_attempt_step_task(
             name=pod_status.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,

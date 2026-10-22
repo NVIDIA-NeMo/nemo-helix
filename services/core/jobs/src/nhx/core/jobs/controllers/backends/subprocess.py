@@ -31,6 +31,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
@@ -490,6 +491,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                **({NEMO_JOB_UID_ENVVAR: step.job_id} if step.job_id else {}),
                 EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: str(ephemeral_dir),
                 CONFIG_TASK_STORAGE_PATH_ENVVAR: str(config_dir),
                 PERSISTENT_JOB_STORAGE_PATH_ENVVAR: str(persistent_dir),

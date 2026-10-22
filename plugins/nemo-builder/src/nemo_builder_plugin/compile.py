@@ -74,7 +74,7 @@ def _fetch_step(plan: BuildPlan, config: BuilderConfig, *, step_image: str) -> H
         config=FetchStepConfig(
             sources=_fetch_sources(plan),
             imports=[
-                FetchImport(image=image.name, ref=image.pinned_upstream, platform=image.spec.platform)
+                FetchImport(image=image.name, ref=image.pinned_upstream, platform=image.platform)
                 for image in plan.copies
             ],
         ).model_dump(),
@@ -98,7 +98,7 @@ def _build_step(
         SandboxGroup(
             source=source,
             images=[
-                SandboxImage(image=image.name, platform=image.spec.platform, dockerfile=image.spec.dockerfile)
+                SandboxImage(image=image.name, platform=image.platform, dockerfile=image.spec.dockerfile)
                 for image in images
             ],
         )

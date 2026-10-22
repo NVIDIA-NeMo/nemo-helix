@@ -154,11 +154,13 @@ class BenchmarkStore:
         description: str | None,
         visibility: str,
         revision: ScaledEvalsBenchmarkRevision,
+        owner_id: str | None,
     ) -> dict[str, Any]:
         self._ensure_slug_free(slug)
         entity = ScaledEvalsBenchmark(
             name=benchmark_id,
             workspace=entity_store.private_workspace(),
+            owner_id=owner_id,
             display_name=name,
             slug=slug,
             description=description,
@@ -183,12 +185,19 @@ class BenchmarkStore:
         description: str | None,
         visibility: str,
         tasks: builtins.list[TaskRef],
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         revision = ScaledEvalsBenchmarkRevision(
             revision=1, description=description, members=_validated_members(tasks), created_at=_now()
         )
         return self._create(
-            benchmark_id, name=name, slug=slug, description=description, visibility=visibility, revision=revision
+            benchmark_id,
+            name=name,
+            slug=slug,
+            description=description,
+            visibility=visibility,
+            revision=revision,
+            owner_id=owner_id,
         )
 
     def create_variant(
@@ -202,6 +211,7 @@ class BenchmarkStore:
         description: str | None,
         visibility: str,
         operational_policy: dict[str, Any],
+        owner_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Derive a new benchmark that copies base member pins and stores policy.
 
@@ -234,7 +244,13 @@ class BenchmarkStore:
             created_at=_now(),
         )
         row = self._create(
-            variant_id, name=name, slug=slug, description=description, visibility=visibility, revision=revision
+            variant_id,
+            name=name,
+            slug=slug,
+            description=description,
+            visibility=visibility,
+            revision=revision,
+            owner_id=owner_id,
         )
         return {
             **row,

@@ -47,6 +47,7 @@ from nhx.core.jobs.app.constants import (
     IMAGE_DIGEST,
     IMAGE_DIGEST_AT_SAVE,
     IMAGE_DIGEST_STEP,
+    IMAGE_DIGEST_WARNING,
     JOB_TASK_CLEANUP_PENDING_KEY,
 )
 from nhx.core.jobs.app.dispatcher import (
@@ -1145,6 +1146,97 @@ async def test_create_or_update_task_keeps_the_task_phase_when_the_controller_re
     }
 
 
+CLASSIFIED_ERROR = {
+    "message": "A GPU ran out of memory.",
+    "type": "GpuOutOfMemoryError",
+    "detail": "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB",
+    "cause": "gpu_out_of_memory",
+}
+
+# A failure no rule matched. The task still reported it, with the traceback the controller never sees.
+UNMATCHED_ERROR = {
+    "message": "An internal error occurred during training. (ValueError: something new)",
+    "type": "InternalError",
+    "detail": "ValueError: something new",
+    "cause": None,
+}
+
+TASK_ERRORS = pytest.mark.parametrize("reported", [CLASSIFIED_ERROR, UNMATCHED_ERROR], ids=["matched", "unmatched"])
+
+
+async def _set_running(store: EntityClient, attempt_id: str, step_id: str, task_id: str) -> None:
+    for entity_type, entity_id in ((HelixJobAttempt, attempt_id), (HelixJobStep, step_id), (HelixJobTask, task_id)):
+        entity = await store.get_by_id(entity_type, entity_id)
+        entity.status = HelixJobStatus.ACTIVE
+        await store.update(entity)
+
+
+@TASK_ERRORS
+@pytest.mark.asyncio
+async def test_a_task_keeps_the_error_it_reported_when_the_controller_reports_the_failure(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, reported: dict
+):
+    """The controller only sees the process exit, so its error adds to the task's own instead of replacing it."""
+    _, job_name, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "classified-task-job")
+    await _set_running(mock_store, attempt_id, step_id, task_id)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+
+    for error_details in (reported, {"message": "Pod pod-1 is in error state", "failed": "Back-off"}):
+        await mock_dispatcher.create_or_update_task(
+            job_name,
+            task.name,
+            DEFAULT_WORKSPACE,
+            HelixJobTaskUpdate(status=HelixJobStatus.ERROR, error_details=error_details),
+            step,
+        )
+
+    stored_task = await mock_store.get_by_id(HelixJobTask, task_id)
+    assert stored_task.error_details == {**reported, "failed": "Back-off"}
+
+
+@TASK_ERRORS
+@pytest.mark.asyncio
+async def test_a_failed_step_reports_the_error_its_task_classified(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, reported: dict
+):
+    _, _, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "classified-step-job")
+    await _set_running(mock_store, attempt_id, step_id, task_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+    task.status = HelixJobStatus.ERROR
+    task.error_details = dict(reported)
+    await mock_store.update(task)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+
+    saved_step, attempt = await mock_dispatcher.update_job_status_from_step(
+        step, HelixJobStatus.ERROR, error_details={"message": "Job failed; One or more tasks are in error state"}
+    )
+
+    assert saved_step.error_details == reported
+    assert attempt.error_details == reported
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_keeps_the_controller_error_when_no_task_classified_its_failure(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+):
+    _, _, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "unclassified-step-job")
+    await _set_running(mock_store, attempt_id, step_id, task_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+    task.status = HelixJobStatus.ERROR
+    task.error_details = {"message": "Pod pod-1 is in error state"}
+    await mock_store.update(task)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+    controller_error = {"message": "Job timed out after reaching max TTL of 3600 seconds"}
+
+    saved_step, attempt = await mock_dispatcher.update_job_status_from_step(
+        step, HelixJobStatus.ERROR, error_details=controller_error
+    )
+
+    assert saved_step.error_details == controller_error
+    assert attempt.error_details == controller_error
+
+
 @pytest.mark.asyncio
 async def test_create_or_update_task_ignores_statusless_poll_after_error(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient
@@ -1817,6 +1909,37 @@ async def test_resume_job_success(
 
 
 @pytest.mark.asyncio
+async def test_resume_clears_the_previous_image_comparison(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The resumed pod is compared with this pause's digest, not left behind by an earlier resume's result."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step.status = HelixJobStatus.PAUSED
+    step.status_details = {
+        IMAGE_DIGEST: "sha256:b",
+        IMAGE_DIGEST_AT_SAVE: "sha256:b",
+        IMAGE_DIGEST_WARNING: "The training image changed since this state was saved (was sha256:a, now sha256:b).",
+    }
+    await mock_store.update(step)
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt is not None
+    attempt.status = HelixJobStatus.PAUSED
+    await mock_store.update(attempt)
+
+    await mock_dispatcher.resume_job(job.name, DEFAULT_WORKSPACE)
+
+    resumed = await mock_store.get_by_id(HelixJobStep, step.id)
+    assert resumed is not None
+    assert resumed.status == HelixJobStatus.RESUMING
+    assert IMAGE_DIGEST_WARNING not in resumed.status_details
+    assert resumed.status_details[IMAGE_DIGEST_AT_SAVE] == "sha256:b"
+
+
+@pytest.mark.asyncio
 async def test_resume_job_no_paused_step(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
@@ -2054,6 +2177,7 @@ async def test_list_steps_across_multiple_workspaces(
 
         # Verify the steps belong to jobs in default workspace
         job_names_default = {step.job for step in steps_default}
+        assert {step.job_id for step in steps_default} == {job1.id, job2.id}
         assert job1.name in job_names_default
         assert job2.name in job_names_default
         assert job3.name not in job_names_default
@@ -3476,11 +3600,11 @@ async def test_delete_queues_storage_the_sweep_already_marked(
     assert [r.job_name for r in reclaims.data] == [job.name]
 
 
-def _failing_for_reclaims(method):
-    """Fail store calls on storage reclaim records only, as a store outage would."""
+def _failing_for(entity_type, method):
+    """Fail store calls on one entity type only, as a store outage would."""
 
     async def call(entity_or_type, *args, **kwargs):
-        if entity_or_type is HelixJobStorageReclaim or isinstance(entity_or_type, HelixJobStorageReclaim):
+        if entity_or_type is entity_type or isinstance(entity_or_type, entity_type):
             raise RuntimeError("store unavailable")
         return await method(entity_or_type, *args, **kwargs)
 
@@ -3501,7 +3625,7 @@ async def test_delete_fails_when_storage_reclaim_cannot_be_queued(
     await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ERROR)
 
     with (
-        patch.object(mock_store, "create", side_effect=_failing_for_reclaims(mock_store.create)),
+        patch.object(mock_store, "create", side_effect=_failing_for(HelixJobStorageReclaim, mock_store.create)),
         pytest.raises(RuntimeError, match="store unavailable"),
     ):
         await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
@@ -3517,7 +3641,7 @@ async def test_create_refuses_a_name_when_pending_reclaims_cannot_be_checked(
 ):
     """A record may still exist, and its reclaim would delete the new job's storage."""
     with (
-        patch.object(mock_store, "list", side_effect=_failing_for_reclaims(mock_store.list)),
+        patch.object(mock_store, "list", side_effect=_failing_for(HelixJobStorageReclaim, mock_store.list)),
         pytest.raises(JobStorageReclaimPendingError, match="Could not confirm"),
     ):
         await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
@@ -3833,3 +3957,104 @@ async def test_resolve_attempt_rejects_internal_name(
     attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
 
     assert await mock_dispatcher.resolve_attempt(job.name, attempt.name, DEFAULT_WORKSPACE) is None
+
+
+STORAGE_MARK = {"storage_reclaimed_at": "2026-10-08T00:00:00+00:00"}
+
+
+async def _fail_current_step(dispatcher: JobDispatcher, job_name: str) -> HelixJobStep:
+    step = await dispatcher.get_current_job_step_by_name(job_name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step, _ = await dispatcher.update_job_status_from_step(step, HelixJobStatus.ACTIVE)
+    step, _ = await dispatcher.update_job_status_from_step(step, HelixJobStatus.ERROR)
+    return step
+
+
+@pytest.mark.asyncio
+async def test_storage_mark_applies_only_while_the_step_is_current_and_stopped(
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The storage sweep marks a job this way, so a resume or rerun that took the job first refuses the mark."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    failed = await _fail_current_step(mock_dispatcher, job.name)
+
+    with pytest.raises(JobOperationConflictError, match="no longer"):
+        await mock_dispatcher.update_attempt_status_details(
+            job.name,
+            failed.attempt_id,
+            DEFAULT_WORKSPACE,
+            STORAGE_MARK,
+            expected_step_id=failed.id,
+            expected_step_status=HelixJobStatus.PAUSED,
+        )
+
+    # A rerun replaced the attempt after the sweep listed the failed step. The mark must not land on the rerun.
+    await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+    with pytest.raises(JobOperationConflictError, match="no longer"):
+        await mock_dispatcher.update_attempt_status_details(
+            job.name,
+            failed.attempt_id,
+            DEFAULT_WORKSPACE,
+            STORAGE_MARK,
+            expected_step_id=failed.id,
+            expected_step_status=HelixJobStatus.ERROR,
+        )
+    rerun = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    assert rerun is not None
+    assert "storage_reclaimed_at" not in (rerun.status_details or {})
+
+    failed_again = await _fail_current_step(mock_dispatcher, job.name)
+    marked = await mock_dispatcher.update_attempt_status_details(
+        job.name,
+        failed_again.attempt_id,
+        DEFAULT_WORKSPACE,
+        STORAGE_MARK,
+        expected_step_id=failed_again.id,
+        expected_step_status=HelixJobStatus.ERROR,
+    )
+    assert marked is not None
+    assert marked.status_details["storage_reclaimed_at"] == STORAGE_MARK["storage_reclaimed_at"]
+
+
+@pytest.mark.asyncio
+async def test_resume_refuses_storage_marked_after_its_check(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The sweep marks under the job's lock, and resume checks again under it before moving the step."""
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    paused, _ = await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.PAUSED)
+    await mock_dispatcher.update_attempt_status_details(job.name, "current", DEFAULT_WORKSPACE, STORAGE_MARK)
+
+    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
+        await mock_dispatcher.update_job_status_from_step(paused, HelixJobStatus.RESUMING)
+
+    assert (await mock_store.get_by_id(HelixJobStep, paused.id)).status == HelixJobStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_a_delete_that_fails_after_queueing_leaves_a_job_rerun_refuses(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """The controller reclaims queued storage even when the rest of the delete fails."""
+    job = await mock_dispatcher.create_job(
+        _download_and_train_request(sample_platform_job_request, "partial-delete"), DEFAULT_WORKSPACE
+    )
+    download = await mock_dispatcher.get_current_job_step_by_name(job.name, "download", DEFAULT_WORKSPACE)
+    assert download is not None
+    await mock_dispatcher.update_job_status_from_step(download, HelixJobStatus.ERROR)
+
+    with (
+        patch.object(mock_store, "list", side_effect=_failing_for(HelixJobResult, mock_store.list)),
+        pytest.raises(RuntimeError, match="store unavailable"),
+    ):
+        await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
+
+    with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
+        await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)

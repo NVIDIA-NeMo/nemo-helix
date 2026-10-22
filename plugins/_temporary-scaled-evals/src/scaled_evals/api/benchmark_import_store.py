@@ -40,8 +40,9 @@ def _row(entity: ScaledEvalsBenchmarkImport) -> dict[str, Any]:
         "visibility": entity.visibility,
         "description": entity.description,
         # Benchmarks are written last and a manifest has at least one, so this
-        # is False until the creator has finished populating the import.
-        "populated": len(entity.benchmarks) == len(entity.manifest.get("benchmarks") or []),
+        # is False until the creator has finished populating the import. Smoke
+        # publishes add benchmarks beyond the manifest's.
+        "populated": len(entity.benchmarks) >= len(entity.manifest.get("benchmarks") or []),
         "created_at": entity.created_at,
         "updated_at": entity.updated_at,
     }

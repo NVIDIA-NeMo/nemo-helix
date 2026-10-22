@@ -4,8 +4,7 @@
     "schema-version": "1.14.0",
     "install": {
       "go_1_26": {
-        "pkg-path": "go_1_26",
-        "version": "1.26.5"
+        "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#go_1_26"
       }
     },
     "options": {
@@ -18,90 +17,90 @@
   },
   "packages": [
     {
-      "attr_path": "go_1_26",
-      "broken": false,
-      "derivation": "/nix/store/l4h5brja9krijg49rjgqqwl41gallzyk-go-1.26.5.drv",
-      "description": "Go Programming language",
       "install_id": "go_1_26",
-      "license": "BSD-3-Clause",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=ec2d622de0773551768cf98f3fc50cbcc003b9c5",
-      "name": "go-1.26.5",
-      "pname": "go_1_26",
-      "rev": "ec2d622de0773551768cf98f3fc50cbcc003b9c5",
-      "rev_count": 1057119,
-      "rev_date": "2026-08-17T21:16:21Z",
-      "scrape_date": "2026-08-19T04:55:22.028599Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "1.26.5",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-darwin.go_1_26",
+      "derivation": "/nix/store/rabbvmmrs2yknqg3qq8ib4bfd6i6qndm-go-1.26.10.drv",
+      "outputs": {
+        "out": "/nix/store/zm3sm3zv21c2jz90bh16jc7rgqfcnivs-go-1.26.10"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/4im44k446822ixjai0mdaizqskc90qxr-go-1.26.5"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-darwin",
       "system": "aarch64-darwin",
-      "group": "toplevel",
+      "name": "go-1.26.10",
+      "pname": "go",
+      "version": "1.26.10",
+      "description": "Go Programming language",
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "go_1_26",
-      "broken": false,
-      "derivation": "/nix/store/0gbv4dwd20dvc1ld7v7vmbym3wh5lvkp-go-1.26.5.drv",
-      "description": "Go Programming language",
       "install_id": "go_1_26",
-      "license": "BSD-3-Clause",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=ec2d622de0773551768cf98f3fc50cbcc003b9c5",
-      "name": "go-1.26.5",
-      "pname": "go_1_26",
-      "rev": "ec2d622de0773551768cf98f3fc50cbcc003b9c5",
-      "rev_count": 1057119,
-      "rev_date": "2026-08-17T21:16:21Z",
-      "scrape_date": "2026-08-19T05:25:27.776775Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "1.26.5",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-linux.go_1_26",
+      "derivation": "/nix/store/6py5pwyazb6fx2ai40s08qyc1w2zzvdg-go-1.26.10.drv",
+      "outputs": {
+        "out": "/nix/store/k2vfr5rajk1gjpsdzgqdfz1gkadrc7v7-go-1.26.10"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/yjifjy7qjzm9jli8xhzwy3y6fzw84405-go-1.26.5"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-linux",
       "system": "aarch64-linux",
-      "group": "toplevel",
+      "name": "go-1.26.10",
+      "pname": "go",
+      "version": "1.26.10",
+      "description": "Go Programming language",
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "go_1_26",
-      "broken": false,
-      "derivation": "/nix/store/11w7bm3ywzxmqw9cczv44gxcfiws472f-go-1.26.5.drv",
-      "description": "Go Programming language",
       "install_id": "go_1_26",
-      "license": "BSD-3-Clause",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=ec2d622de0773551768cf98f3fc50cbcc003b9c5",
-      "name": "go-1.26.5",
-      "pname": "go_1_26",
-      "rev": "ec2d622de0773551768cf98f3fc50cbcc003b9c5",
-      "rev_count": 1057119,
-      "rev_date": "2026-08-17T21:16:21Z",
-      "scrape_date": "2026-08-19T05:58:56.139006Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "1.26.5",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.x86_64-linux.go_1_26",
+      "derivation": "/nix/store/mxqlh07a9kdcabldzlwwrpacvf4qnnzq-go-1.26.10.drv",
+      "outputs": {
+        "out": "/nix/store/fkz7zn1a0yiryf9kri2yh1s12k1sv557-go-1.26.10"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/xrgn6m0c5vbz06467q06zdwnk6qqdl7z-go-1.26.5"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
       "system": "x86_64-linux",
-      "group": "toplevel",
+      "name": "go-1.26.10",
+      "pname": "go",
+      "version": "1.26.10",
+      "description": "Go Programming language",
+      "licenses": [
+        "BSD-3-Clause"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     }
   ]

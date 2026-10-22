@@ -202,7 +202,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
     entities = MagicMock()
     entities.get.return_value.inputs = {"name": "eval"}
-    monkeypatch.setattr(evaluation_job_module, "platform_entities", lambda: entities)
+    monkeypatch.setattr(evaluation_job_module.entity_store, "entity_client", lambda: entities)
     spec = _evaluation_spec().model_copy(update={"inputs_workspace": "ws"})
     EvaluationExecutionJob().run(spec.model_dump())
     assert entities.get.call_args.args[1] == evaluation_execution_job_name("eval_1", 4)
@@ -229,7 +229,7 @@ async def test_benchmark_archive_job_claims_only_its_own_run(monkeypatch: pytest
     assert name != benchmark_archive_job_name("run_1", "fedcba9876543210", 1)
 
     repo = MagicMock()
-    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveStore", lambda: repo)
     dispatcher = MagicMock(claim_timeout=30.0)
     monkeypatch.setattr(benchmark_archive_job_module, "Dispatcher", lambda: dispatcher)
     claimed = {"benchmark_run_id": "run_1", "status": "building", "claim_token": "t"}

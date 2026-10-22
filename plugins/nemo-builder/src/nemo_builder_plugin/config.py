@@ -11,8 +11,10 @@ from __future__ import annotations
 from typing import Any, ClassVar, Self
 
 from nemo_builder_plugin.identity import (
+    PLATFORM_PATTERN,
     ImageIdentityError,
     normalize_registry,
+    platform_name,
     validate_registry_host,
     validate_repository,
 )
@@ -142,6 +144,16 @@ class BuilderConfig(NemoConfig):
         value = value.strip("/")
         return validate_repository(value) if value else value
 
+    default_platform: str = Field(
+        default="linux/amd64",
+        pattern=PLATFORM_PATTERN,
+        description=(
+            "The platform a build or copy is for when its request names none, as `os/architecture`. Set it to your "
+            "nodes' architecture: `linux/arm64` for a cluster on Apple silicon, such as Docker Desktop on a Mac. "
+            "Changing it doesn't rebuild task images evals already has: request their builds with `rebuild` set."
+        ),
+    )
+
     import_registries: list[str] = Field(
         default_factory=lambda: ["docker.io", "ghcr.io", "nvcr.io", "quay.io"],
         description=(
@@ -149,6 +161,8 @@ class BuilderConfig(NemoConfig):
             "refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy."
         ),
     )
+
+    _default_platform_name = field_validator("default_platform", mode="before")(platform_name)
 
     @field_validator("import_registries")
     @classmethod

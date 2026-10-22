@@ -13,8 +13,8 @@ import {
   StorageConfigType,
   type FilesetOutput as Dataset,
 } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Flex, Text } from '@nvidia/foundations-react-core';
-import { PURPOSE_LABELS } from '@studio/components/DatasetsTable/constants';
+import { type DropdownEntry, Flex, Tag, Text } from '@nvidia/foundations-react-core';
+import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/DatasetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/DatasetsTable/helpers';
 import {
   type DatasetWithId,
@@ -114,19 +114,30 @@ export function makeDatasetsTableColumns({
         meta: {
           filter: {
             label: 'Purpose',
-            type: 'single-select',
+            type: 'multi-select',
             options: [
-              { value: '', label: 'All' },
-              { value: FilesetPurpose.generic, label: 'Generic' },
               { value: FilesetPurpose.dataset, label: 'Dataset' },
               { value: FilesetPurpose.environment, label: 'Environment' },
               { value: FilesetPurpose.model, label: 'Model' },
+              { value: FilesetPurpose.generic, label: 'Generic' },
             ],
           },
         },
         cell({ row }) {
           const purpose = row.original?.purpose;
-          return purpose ? <Text>{PURPOSE_LABELS[purpose] ?? purpose}</Text> : null;
+          if (!purpose) return null;
+          const color = PURPOSE_TAG_COLORS[purpose];
+          return (
+            <Tag
+              color={color}
+              kind="outline"
+              density="compact"
+              readOnly
+              data-testid={`purpose-pill-${purpose}`}
+            >
+              {PURPOSE_LABELS[purpose] ?? purpose}
+            </Tag>
+          );
         },
       }),
       accessor((row) => getStoragePath(row.storage), {

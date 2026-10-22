@@ -3,10 +3,11 @@
 
 """Entity Store entities for scaled-evals metadata.
 
-Tasks, benchmarks, benchmark imports, config profiles and agent bundles live only here. `ScaledEvaluation` is a derived
-read model with exactly one writer (the controller's projection phase), which is
-what makes it safe on a store that offers per-entity optimistic locking but no
-multi-entity transaction and no atomic dequeue.
+Every scaled-evals resource lives only here. The store offers per-entity
+optimistic locking but no multi-entity transaction and no atomic dequeue, so
+each evaluation carries its own children (status history, per-execution
+telemetry, resource usage and runtime cleanups) and queues are claimed by a
+compare-and-swap on the evaluation itself.
 """
 
 from __future__ import annotations
@@ -15,68 +16,268 @@ from datetime import datetime
 from typing import Any
 
 from nemo_helix_plugin.entity import NemoEntity
-from pydantic import BaseModel, Field
-from scaled_evals.api.schemas.evaluations import Evaluation
-
-# Columns the SQL `q` filter matches with ILIKE. Projected into one lowercased
-# blob so `$like` matches case-insensitively regardless of the store's own
-# collation, which ILIKE would otherwise decide for us.
-SEARCHABLE_COLUMNS = ("id", "name", "task_id", "status", "framework", "runtime")
-
-# Exactly the columns the evaluation responses read, and nothing else. Derived
-# from the response model so a new field follows automatically: `outcome` is
-# computed rather than selected, `reward_value` feeds the typed-reward
-# validator, and `result` is the detail-only envelope.
-#
-# Everything outside this set stays in Postgres on purpose. The detail read
-# selects prompt content (`instruction_prefix`, `instruction_postfix`,
-# `initial_user_turns`) that no response returns, and copying it into a second
-# store would widen where that content lives for no read we serve.
-PROJECTED_COLUMNS = (frozenset(Evaluation.model_fields) | {"reward_value", "result"}) - {"outcome"}
+from pydantic import BaseModel, Field, model_validator
 
 
-class ScaledEvaluation(NemoEntity, entity_type="scaled_evals_evaluation"):
-    """One `evaluations` row, projected for reads.
+class ScaledEvalsEvaluationEvent(BaseModel):
+    """One status transition or retry note, numbered from 1 within its evaluation."""
 
-    Fields promoted to the top level are exactly the ones the evaluations list
-    endpoint filters, searches, or orders by; the rest of `PROJECTED_COLUMNS`
-    rides in `detail` so the existing response schemas can be rebuilt without
-    restating ~50 column types. `detail` is JSON-coerced, so timestamps are ISO
-    strings that Pydantic re-parses on the way out.
+    id: int
+    type: str = "status"
+    status: str
+    detail: str | None = None
+    created_at: datetime
+
+
+class ScaledEvalsExecutionTelemetry(BaseModel):
+    """Portable facts about one execution of an evaluation."""
+
+    execution_number: int
+    provisioning_started_at: datetime | None = None
+    running_started_at: datetime | None = None
+    terminal_at: datetime | None = None
+    terminal_status: str | None = None
+    failure_phase: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    usage_source: str = "unknown"
+    turn_count: int | None = None
+    tool_call_count: int | None = None
+    cost_usd: float | None = None
+    cost_source: str = "unknown"
+    raw_artifact_refs: list[Any] = Field(default_factory=list)
+    intake_experiment_ref: str | None = None
+    intake_run_refs: list[str] = Field(default_factory=list)
+    intake_status: str = "disabled"
+    intake_expected_records: int | None = None
+    intake_uploaded_records: int | None = None
+    intake_error: str | None = None
+    artifact_sync_status: str = "pending"
+    artifact_sync_file_count: int | None = None
+    artifact_sync_error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScaledEvalsResourceUsage(BaseModel):
+    """Running sums and peaks of one component's samples within one execution."""
+
+    execution_number: int
+    component: str
+    source: str
+    collection_status: str = "sampled"
+    collection_error: str | None = None
+    sample_count: int = 0
+    first_observed_at: datetime
+    last_observed_at: datetime
+    cpu_sample_count: int = 0
+    cpu_usage_cores_sum: float = 0
+    cpu_usage_cores_max: float = 0
+    memory_sample_count: int = 0
+    memory_usage_bytes_sum: float = 0
+    memory_usage_bytes_max: int = 0
+    cpu_request_cores: float | None = None
+    cpu_limit_cores: float | None = None
+    memory_request_bytes: int | None = None
+    memory_limit_bytes: int | None = None
+    gpu_request: float | None = None
+    gpu_sample_count: int = 0
+    gpu_usage_percent_sum: float = 0
+    gpu_usage_percent_max: float = 0
+    gpu_memory_sample_count: int = 0
+    gpu_memory_usage_bytes_sum: float = 0
+    gpu_memory_usage_bytes_max: int = 0
+
+
+class ScaledEvalsExecutionCleanup(BaseModel):
+    """Teardown of the runtime an execution left behind when its runner was lost."""
+
+    execution_number: int
+    runtime: str
+    backend_handle: str
+    dispatch_job_name: str
+    failure_code: str
+    failure_detail: str
+    retry_after_cleanup: bool
+    status: str = "pending"
+    next_attempt_at: datetime
+    teardown_claimed_at: datetime | None = None
+    teardown_claimed_by: str | None = None
+    teardown_attempts: int = 0
+    delete_error: str | None = None
+    deleted_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ScaledEvalsEvaluation(NemoEntity, entity_type="scaled_evals_evaluation"):
+    """One logical evaluation, named by its evaluation id.
+
+    `changed_at` is the evaluation's own `updated_at`: telemetry and resource
+    samples also write the entity, and they must not make a stuck run look
+    fresh or delay its artifact builds.
     """
 
-    evaluation_id: str
     owner_id: str | None = None
-    task_id: str
-    benchmark_run_id: str | None = None
-    # `benchmark_run_id IS NULL` as a positive boolean. The default listing hides
-    # benchmark members, and filtering a JSON null for equality is not a
-    # guarantee the store makes, so the predicate is materialized instead.
-    standalone: bool = True
-    status: str
-    visibility: str
+    display_name: str
     framework: str
+    requested_framework_version: str | None = None
+    framework_version: str | None = None
+    runner_image_ref: str | None = None
+    runner_image_digest: str | None = None
+    framework_adapter_version: str | None = None
+    sandbox_k8s_version: str | None = None
+    runner_metadata: dict[str, Any] = Field(default_factory=dict)
+    task_id: str
+    task_revision: int
+    benchmark_run_id: str | None = None
+    framework_profile_id: str | None = None
+    harbor_profile_id: str | None = None
+    switchyard_profile_id: str | None = None
+    intake_profile_id: str | None = None
+    credentials: dict[str, str] = Field(default_factory=dict)
+    extra_skill_object_keys: list[str] = Field(default_factory=list)
+    instruction_prefix: str | None = None
+    instruction_postfix: str | None = None
+    initial_user_turns: list[str] = Field(default_factory=list)
     runtime: str
-    # `deleted_at IS NULL` in SQL. Soft-deleted rows stay projected so reads can
-    # answer 404 from the projection alone instead of falling back to Postgres.
+    network_policy: str = "unrestricted"
+    network_policy_config: dict[str, Any] = Field(default_factory=dict)
+    n_attempts: int = 1
+    parallelism: int
+    visibility: str = "private"
+    status: str
+    status_detail: str | None = None
+    cancel_teardown_status: str = "not_requested"
+    cancel_teardown_error: str | None = None
+    cancel_teardown_updated_at: datetime | None = None
+    backend_handle: str | None = None
+    dispatch_job_name: str | None = None
+    dispatch_job_uid: str | None = None
+    dispatch_claimed_at: datetime | None = None
+    dispatch_claimed_by: str | None = None
+    dispatch_attempts: int = 0
+    dispatch_reconcile_claimed_at: datetime | None = None
+    dispatch_reconcile_claimed_by: str | None = None
+    current_execution: int = 1
+    max_executions: int = 3
+    infrastructure_retries: int = 0
+    max_infrastructure_retries: int = 2
+    next_retry_at: datetime | None = None
+    last_failure_code: str | None = None
+    last_failure_category: str | None = None
+    result: dict[str, Any] | None = None
+    reward: float | None = None
+    reward_value: Any = None
+    n_trials: int | None = None
+    n_completed: int | None = None
+    n_errored: int | None = None
+    n_failed_solve: int | None = None
+    exception_counts: dict[str, int] = Field(default_factory=dict)
+    finished_at: datetime | None = None
+    evidence_status: str = "missing"
+    evidence_requested_at: datetime | None = None
+    evidence_built_at: datetime | None = None
+    evidence_error: str | None = None
+    evidence_claimed_at: datetime | None = None
+    evidence_claimed_by: str | None = None
+    evidence_build_attempts: int = 0
+    archive_status: str = "missing"
+    archive_object_key: str | None = None
+    archive_size_bytes: int | None = None
+    archive_requested_at: datetime | None = None
+    archive_built_at: datetime | None = None
+    archive_error: str | None = None
+    archive_claimed_at: datetime | None = None
+    archive_claimed_by: str | None = None
+    archive_build_attempts: int = 0
+    execution_snapshot: dict[str, Any] | None = None
+    deleted_at: datetime | None = None
+    changed_at: datetime
+    # Whether any cleanup is not yet deleted, so the cleanup queue lists only
+    # evaluations that have work instead of every evaluation ever run.
+    cleanup_open: bool = False
+    # Filterable mirrors of `benchmark_run_id is None` and `deleted_at is not
+    # None`: the store does not promise to match a JSON null. Derived on every
+    # load; code that sets `deleted_at` on a loaded entity sets `deleted` too.
+    standalone: bool = True
     deleted: bool = False
-    # The evaluation's own timestamps, not the projection's. The list cursor is
-    # keyed on `row_created_at`, and the projection watermark on
-    # `row_updated_at`; `EntityBase.created_at` only records when we last wrote.
-    row_created_at: datetime
-    row_updated_at: datetime
-    search_blob: str = ""
-    detail: dict[str, Any] = Field(default_factory=dict)
+    events: list[ScaledEvalsEvaluationEvent] = Field(default_factory=list)
+    telemetry: list[ScaledEvalsExecutionTelemetry] = Field(default_factory=list)
+    resource_usage: list[ScaledEvalsResourceUsage] = Field(default_factory=list)
+    cleanups: list[ScaledEvalsExecutionCleanup] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _derive_filter_flags(self) -> ScaledEvalsEvaluation:
+        self.standalone = self.benchmark_run_id is None
+        self.deleted = self.deleted_at is not None
+        return self
+
+
+class ScaledEvalsBenchmarkArchive(BaseModel):
+    """A benchmark run's combined Harbor archive and its build lease."""
+
+    generation: str
+    status: str
+    members: list[dict[str, Any]] = Field(default_factory=list)
+    requested_at: datetime
+    claimed_at: datetime | None = None
+    claim_token: str | None = None
+    attempts: int = 0
+    object_key: str | None = None
+    size_bytes: int | None = None
+    sha256: str | None = None
+    partial: bool | None = None
+    built_at: datetime | None = None
+    error: str | None = None
+    cleanup_checked_at: datetime | None = None
+
+
+class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_run"):
+    """A benchmark run's identity and config, named by its run id.
+
+    Status, reward and the per-task breakdown are derived from the member
+    evaluations on read, never stored here.
+    """
+
+    owner_id: str | None = None
+    display_name: str
+    framework: str
+    requested_framework_version: str | None = None
+    framework_version: str | None = None
+    runner_image_ref: str | None = None
+    runner_image_digest: str | None = None
+    framework_adapter_version: str | None = None
+    sandbox_k8s_version: str | None = None
+    runner_metadata: dict[str, Any] = Field(default_factory=dict)
+    benchmark_id: str
+    benchmark_revision: int
+    framework_profile_id: str | None = None
+    harbor_profile_id: str | None = None
+    intake_profile_id: str | None = None
+    credentials: dict[str, str] = Field(default_factory=dict)
+    runtime: str
+    network_policy: str = "unrestricted"
+    network_policy_config: dict[str, Any] = Field(default_factory=dict)
+    parallelism: int
+    max_concurrent_members: int | None = None
+    visibility: str = "private"
+    cancelled_at: datetime | None = None
+    deleted_at: datetime | None = None
+    archive: ScaledEvalsBenchmarkArchive | None = None
+    # A top-level copy of archive.status, so the store can filter queue scans.
+    archive_status: str | None = None
 
 
 class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"):
     """The immutable launch inputs of one evaluation execution.
 
     Named after the execution's Platform Job and written once, before that Job
-    is created, so the Job launches from here rather than from Postgres. Unlike
-    `ScaledEvaluation`, this carries prompt content and the private execution
-    snapshot, because launching needs them, so it lives in a workspace only the
-    scaled-evals service can read. Credentials appear only as provider to
+    is created, so the Job launches from inputs a later retry cannot change. It
+    carries prompt content and the private execution snapshot, so it lives in a
+    workspace only the scaled-evals service can read. Credentials appear only as provider to
     platform-secret references; the Job resolves the values at launch.
     """
 
@@ -238,8 +439,3 @@ class ScaledEvalsBenchmarkImport(NemoEntity, entity_type="scaled_evals_benchmark
     description: str | None = None
     tasks: list[ScaledEvalsBenchmarkImportTask] = Field(default_factory=list)
     benchmarks: list[ScaledEvalsBenchmarkImportBenchmark] = Field(default_factory=list)
-
-
-def searchable_blob(row: dict[str, Any]) -> str:
-    """Return the lowercased haystack matching the SQL `q` ILIKE predicate."""
-    return " ".join(str(row.get(column) or "") for column in SEARCHABLE_COLUMNS).lower()

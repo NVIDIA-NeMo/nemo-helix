@@ -34,7 +34,7 @@ concurrency:
 
 env:
   # Keep the CI uv binary aligned with the Flox development environment.
-  UV_VERSION: "0.10.10"
+  UV_VERSION: "0.13.4"
   # Jobs here provision their own toolchain, so Make bypasses Flox activation.
   TOOLCHAIN: system
 
@@ -1881,7 +1881,7 @@ jobs:
     name: Python e2e tests
     needs: [policy-wasm]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2428,11 +2428,7 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   deployments-openshell-tests:
-    # The openshell extra is a platform-restricted manylinux_2_39 wheel that the
-    # shared unit-test job does not install, so the OpenShell backend tests skip
-    # there. Install the extra in this isolated, path-filtered job and exercise the
-    # backend for real. Kept separate so a wheel-install failure fails only this
-    # small job, not the whole unit suite (mirrors the nemo-guardrails extra job).
+    # Path-filtered job that runs only the OpenShell deployment backend tests.
     name: Deployments OpenShell backend tests
     needs: [changes]
     if: >

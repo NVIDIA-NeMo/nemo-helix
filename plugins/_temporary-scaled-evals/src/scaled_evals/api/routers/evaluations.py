@@ -80,20 +80,6 @@ StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]]
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
 
-def _evaluation_reads(db: Database) -> Any:
-    """Return the source for evaluation list/get reads.
-
-    Entity Store reads are served by the plugin's projection. The import is
-    deferred so this package keeps working without the plugin installed, and
-    Postgres stays both the default and the fallback.
-    """
-    if not settings.entity_store_reads_enabled:
-        return db.evaluations
-    from nemo_scaled_evals_plugin.projection import evaluation_reader  # noqa: PLC0415
-
-    return evaluation_reader()
-
-
 def _submit_now(evaluation_id: str) -> None:
     """Start a just-committed evaluation instead of waiting for the controller's next pass."""
     try:
@@ -595,7 +581,7 @@ def list_evaluations(
     more rows exist.
     """
     _ = team_id  # Teams are deliberately deferred.
-    rows = _evaluation_reads(db).list(
+    rows = db.evaluations.list(
         limit=limit,
         cursor=cursor,
         order=order,
@@ -618,7 +604,7 @@ def get_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
     `result` JSON once the run has reached a terminal state (all null/None until
     then). 404 if not found or soft-deleted.
     """
-    row = _evaluation_reads(db).get(evaluation_id)
+    row = db.evaluations.get(evaluation_id)
     if row is None:
         raise _http_error(404, "not_found", "evaluation not found")
     return _response(row)
@@ -702,7 +688,7 @@ def get_evaluation_telemetry(evaluation_id: str, db: Db) -> EvaluationTelemetryR
         raise _http_error(404, "not_found", "evaluation not found")
     links = _eval_links(evaluation_id)
     intake_profile_id = row.get("intake_profile_id")
-    execution_rows = db.execution_telemetry.list_for_evaluation(evaluation_id)
+    execution_rows = db.evaluations.telemetry_for(evaluation_id)
     current_execution = int(row.get("current_execution") or 1)
     current = next(
         (item for item in execution_rows if int(item["execution_number"]) == current_execution),
@@ -729,7 +715,7 @@ def get_evaluation_telemetry(evaluation_id: str, db: Db) -> EvaluationTelemetryR
             cancellation_status=row.get("cancel_teardown_status") or "not_requested",
             error=row.get("cancel_teardown_error"),
             updated_at=row.get("cancel_teardown_updated_at"),
-            executions=db.execution_cleanups.list_for_evaluation(evaluation_id),
+            executions=db.evaluations.cleanups_for(evaluation_id),
         ),
         intake=EvaluationTelemetryIntake(
             enabled=intake_profile_id is not None,
@@ -763,7 +749,7 @@ def get_evaluation_telemetry(evaluation_id: str, db: Db) -> EvaluationTelemetryR
             ),
         ),
         executions=_execution_telemetry(evaluation_id, execution_rows),
-        resource_usage=db.resource_usage.list_for_evaluation(evaluation_id),
+        resource_usage=db.evaluations.resource_usage_for(evaluation_id),
     )
 
 

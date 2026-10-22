@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import httpx
 import pytest
@@ -13,12 +14,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
-from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.models import TaskImageBuildEntity, build_job_name
+from nemo_evals.entities import TaskEntity
+from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
-from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -84,9 +84,8 @@ def _store(store_task, **kwargs) -> str:
 def _set_status(entity_store, digest: str, attempt: int, status: str) -> None:
     async def update() -> None:
         head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-        revision = await get_revision(entity_store, TaskRevisionEntity, head, digest)
         build = await entity_store.get(
-            TaskImageBuildEntity, name=f"build.{attempt}", workspace="default", parent=revision.id
+            TaskImageBuildEntity, name=build_entity_name(digest, attempt), workspace="default", parent=head.id
         )
         build.status = status
         await entity_store.update(build)
@@ -275,3 +274,81 @@ def test_list_and_get_builds(client, store_task, entity_store) -> None:
     assert (one.status_code, one.json()["status"]) == (200, "failed")
     assert client.get(f"{_BASE}/{digest}/image-builds/3").status_code == 404
     assert client.get(f"{_BASE}/{digest}/image-builds/latest").status_code == 404
+
+
+def test_a_build_for_another_platform_is_not_reused(client, store_task, entity_store) -> None:
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/amd64"})
+    _set_status(entity_store, digest, 1, "ready")
+
+    arm = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+    amd = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/amd64"}).json()
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+
+    assert (arm["id"], arm["platform"], arm["status"]) == ("2", "linux/arm64", "pending")
+    assert (amd["id"], amd["platform"], amd["status"]) == ("1", "linux/amd64", "ready")
+    assert again["id"] == "2"
+
+
+@pytest.mark.parametrize("platform", ["arm64", "linux/arm64/v8/x", "linux/x_y", ""])
+def test_a_platform_that_is_not_os_and_architecture_is_rejected(client, store_task, platform: str) -> None:
+    digest = _store(store_task)
+
+    response = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": platform})
+
+    assert response.status_code == 422
+
+
+def test_rebuild_starts_a_new_attempt_over_a_ready_build(client, store_task, entity_store) -> None:
+    """A ready build may be for a previous default platform; ``rebuild`` takes the request to Builder again."""
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds")
+    _set_status(entity_store, digest, 1, "ready")
+
+    rebuilt = client.post(f"{_BASE}/{digest}/image-builds", json={"rebuild": True}).json()
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"rebuild": True}).json()
+    plain = client.post(f"{_BASE}/{digest}/image-builds").json()
+
+    assert (rebuilt["id"], rebuilt["status"]) == ("2", "pending")
+    # A rebuild that's still running is the answer: it isn't started twice.
+    assert again["id"] == "2" and plain["id"] == "2"
+
+
+def test_a_platforms_build_older_than_a_page_of_other_builds_is_reused(
+    client, store_task, entity_store, monkeypatch
+) -> None:
+    """A page holds 2 builds here: the arm64 build is on the second page, behind newer builds for other platforms."""
+    monkeypatch.setattr("nemo_evals.image_builds.service._LOOKUP_PAGE_SIZE", 2)
+    digest = _store(store_task)
+    client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"})
+    _set_status(entity_store, digest, 1, "ready")
+    for attempt, platform in enumerate(("linux/amd64", "linux/riscv64", "linux/s390x"), start=2):
+        client.post(f"{_BASE}/{digest}/image-builds", json={"platform": platform})
+        _set_status(entity_store, digest, attempt, "failed")
+
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+
+    assert (again["id"], again["status"]) == ("1", "ready")
+
+
+def test_a_platform_is_named_as_buildkit_names_it_before_builds_are_looked_up(client, store_task, entity_store) -> None:
+    digest = _store(store_task)
+    first = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+    _set_status(entity_store, digest, 1, "ready")
+
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64/v8"}).json()
+
+    assert (first["platform"], again["id"], again["status"]) == ("linux/arm64", "1", "ready")
+
+
+@pytest.mark.parametrize("platform", ["linux/x86_64", "linux/x86-64", "Linux/AARCH64", "linux/arm64/v8"])
+def test_the_request_schema_takes_every_spelling_the_route_does(platform: str) -> None:
+    """A client validating against the published schema must not refuse what the API accepts."""
+    pattern = _string_pattern(ImageBuildRequest.model_json_schema()["properties"]["platform"])
+
+    assert re.fullmatch(pattern, platform)
+    assert ImageBuildRequest(platform=platform).platform in ("linux/amd64", "linux/arm64")
+
+
+def _string_pattern(schema: dict) -> str:
+    return next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)

@@ -9,7 +9,17 @@
 ARG NHX_PYTHON_BASE=nhx-python-base
 ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
 
-FROM gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1 AS crane
+FROM --platform=$BUILDPLATFORM golang:1.27.3 AS crane
+ARG TARGETOS TARGETARCH
+ENV CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOTOOLCHAIN=local
+WORKDIR /src
+ADD --checksum=sha256:a52cc7d61f8b2f043b7f0be1febecead5fceb791543c4790d699440f12d6b370 \
+    https://github.com/google/go-containerregistry/archive/refs/tags/v0.22.1.tar.gz /tmp/crane.tar.gz
+RUN tar -xzf /tmp/crane.tar.gz --strip-components=1 -C /src
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -trimpath -ldflags="-s -w -X github.com/google/go-containerregistry/cmd/crane/cmd.Version=v0.22.1" -o /ko-app/crane ./cmd/crane && \
+    go version -m /ko-app/crane | grep -q 'go1.27.3'
 
 FROM ${NHX_PYTHON_BASE} AS builder
 COPY --from=nhx-workspace . .
@@ -49,6 +59,10 @@ RUN python3 /usr/local/bin/collect-pinned-sources.py \
 
 # The runtime's own Debian packages, not the builder's build tools.
 FROM ${NHX_PYTHON_IMAGE} AS apt-sources
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1"
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 COPY docker/scripts/collect-apt-sources.sh /usr/local/bin/
@@ -56,7 +70,14 @@ RUN bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-builder
 
 # nhx-python-base's venv is on this image's interpreter, at the same path.
 FROM ${NHX_PYTHON_IMAGE} AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1"
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /app/.venv /app/.venv
+RUN --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    python3 /tmp/update-python-trust.py --root /usr/local --root /app/.venv --bundles-only
 COPY --from=crane /ko-app/crane /usr/local/bin/crane
 COPY --from=builder /app/.source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/
 COPY --from=apt-sources /source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/

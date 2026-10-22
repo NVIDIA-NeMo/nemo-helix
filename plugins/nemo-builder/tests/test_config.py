@@ -71,3 +71,17 @@ class TestTheSandbox:
     def test_a_misspelt_setting_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="imgae"):
             BuilderConfig.model_validate({"sandbox": {"imgae": "kaniko:1"}})
+
+
+class TestTheDefaultArchitecture:
+    def test_it_is_amd64_unless_set(self) -> None:
+        assert BuilderConfig().default_platform == "linux/amd64"
+        assert BuilderConfig(default_platform="linux/arm64").default_platform == "linux/arm64"
+
+    def test_it_is_named_as_buildkit_names_it(self) -> None:
+        assert BuilderConfig(default_platform="Linux/AARCH64").default_platform == "linux/arm64"
+
+    @pytest.mark.parametrize("bad", ["arm64", "linux/", "linux/arm64/v8/x", "linux/x_y"])
+    def test_it_must_be_os_and_architecture(self, bad: str) -> None:
+        with pytest.raises(ValidationError):
+            BuilderConfig(default_platform=bad)

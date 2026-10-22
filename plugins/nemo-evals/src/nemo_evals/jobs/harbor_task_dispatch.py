@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
-from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT
+from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -205,7 +205,11 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
         logger.info("Agent %s runs setup without the agent setup egress window: %s", agent, reason)
     elif policy.agent_setup_egress:
         update["agent_import_path"] = SETUP_EGRESS_AGENT
-        update["agent_kwargs"] = {**config.agent_kwargs, INNER_AGENT_KWARG: agent}
+        update["agent_kwargs"] = {
+            **config.agent_kwargs,
+            INNER_AGENT_KWARG: agent,
+            SETUP_HOSTS_KWARG: list(policy.agent_setup_egress),
+        }
     return config.model_copy(update=update)
 
 

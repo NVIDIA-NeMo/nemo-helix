@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 from nemo_builder_plugin.identity import (
     ImageIdentityError,
+    Platform,
     compose_system_tag,
     normalize_reference,
     validate_caller_tag,
@@ -87,3 +88,29 @@ class TestNormalizeReference:
     def test_anything_else_is_refused(self, bad: str) -> None:
         with pytest.raises(ImageIdentityError):
             normalize_reference(bad)
+
+
+class TestPlatform:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("linux/amd64", "linux/amd64"),
+            ("linux/x86_64", "linux/amd64"),
+            ("Linux/X86-64", "linux/amd64"),
+            ("linux/aarch64", "linux/arm64"),
+            ("linux/arm64/v8", "linux/arm64"),
+            ("linux/arm/v7", "linux/arm/v7"),
+        ],
+    )
+    def test_is_named_as_buildkit_names_it(self, value: str, expected: str) -> None:
+        assert str(Platform.parse(value)) == expected
+
+    @pytest.mark.parametrize("value", ["", "arm64", "linux/", "linux/arm64/v8/x", "linux/$TARGETARCH"])
+    def test_refuses_anything_but_os_and_architecture(self, value: str) -> None:
+        with pytest.raises(ImageIdentityError):
+            Platform.parse(value)
+
+    def test_reads_an_oci_platform(self) -> None:
+        assert Platform.from_oci({"os": "linux", "architecture": "arm64", "variant": "v8"}) == Platform.parse(
+            "linux/arm64"
+        )

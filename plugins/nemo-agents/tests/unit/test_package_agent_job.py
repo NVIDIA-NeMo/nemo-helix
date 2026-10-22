@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 import yaml
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT, Agent
@@ -17,6 +18,7 @@ from nemo_agents_plugin.jobs.package_agent import (
     PackageAgentJob,
     PackageAgentSpec,
 )
+from nemo_helix_plugin.client.errors import NemoResponseValidationError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
@@ -187,6 +189,12 @@ class TestCompile:
     async def test_unreachable_jobs_service_is_retryable(self) -> None:
         with _patch_profiles(RuntimeError("connection refused")):
             with pytest.raises(HelixJobDependencyUnavailableError, match="Retry the submission"):
+                await self._compile()
+
+    async def test_invalid_profiles_response_is_not_reported_as_unavailable(self) -> None:
+        error = NemoResponseValidationError(httpx.Response(200, json=[{"backend": "unknown"}]), ValueError("bad"))
+        with _patch_profiles(error):
+            with pytest.raises(NemoResponseValidationError):
                 await self._compile()
 
     async def test_missing_sdk_does_not_promise_a_retry(self) -> None:

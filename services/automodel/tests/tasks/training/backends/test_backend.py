@@ -261,3 +261,34 @@ class TestExecuteTrainingWallClock:
 
         assert progress.training_duration_seconds == 15.0
         assert any(item.get("training_duration_seconds") == 15.0 for item in progress.sent)
+
+
+class TestExecuteTrainingTrackerRun:
+    def test_torchrun_continues_the_jobs_mlflow_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MLflow starts its run inside the workers, so the run ID reaches them through the environment."""
+        mlflow_config = {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "uid"}}
+        launched: dict[str, dict[str, str]] = {}
+        proc = Proc()
+
+        def popen(*_args: object, env: dict[str, str], **_kwargs: object) -> Proc:
+            launched["env"] = env
+            return proc
+
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", popen)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+        monkeypatch.setattr(
+            "nhx.automodel.tasks.training.backends.backend.find_mlflow_run_id",
+            lambda config: "run-1" if config == mlflow_config else None,
+        )
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        config = MagicMock()
+        config.parallelism.num_nodes = 1
+        config.training_timeout = None
+        library = LibraryConfig(config_dict={"mlflow": mlflow_config}, config_path=Path("/tmp/automodel_config.yaml"))
+        try:
+            AutomodelBackend(job_ctx=MagicMock()).execute_training(config, library, RecordingProgress(1.0, 2.0))
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+
+        assert launched["env"]["MLFLOW_RUN_ID"] == "run-1"

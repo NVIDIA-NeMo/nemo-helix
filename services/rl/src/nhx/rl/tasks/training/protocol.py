@@ -26,6 +26,14 @@ class LibraryConfig:
     config_path: Path  # Path to the config file (managed by runner)
 
 
+class TrainingPaused(Exception):
+    """Training stopped for a pause after saving its checkpoint.
+
+    Raised by ``execute_training`` on the node that ran the training loop. Nothing
+    is published, and the task exits with ``PAUSE_EXIT_CODE``.
+    """
+
+
 @runtime_checkable
 class SupportsPreprocessing(Protocol):
     """Protocol for backends that need pre-training preprocessing.
@@ -100,6 +108,9 @@ class TrainingBackend(Protocol):
     ) -> TrainingMetrics:
         """
         Execute training using library-specific wrappers.
+
+        Raises:
+            TrainingPaused: Training stopped for a pause after saving its checkpoint.
         """
         ...
 

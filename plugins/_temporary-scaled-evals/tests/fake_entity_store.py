@@ -5,13 +5,37 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 from nemo_helix_plugin.entities.base import EntityConflictError, EntityNotFoundError
+from nemo_helix_plugin.filter_ops import FilterOperator
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _json_text(value: Any) -> str:
+    return json.dumps(value).strip('"')
+
+
+def _matches(entity: Any, operation: Any) -> bool:
+    """Evaluate the `$eq`, `$in` and `$and` filters `entity_store.list_all` builds.
+
+    Like the real store, `$in` compares a JSON field's text with `str(value)`,
+    so it never matches a boolean.
+    """
+    if operation is None:
+        return True
+    if operation.operator == FilterOperator.AND:
+        return all(_matches(entity, item) for item in operation.operations)
+    value = getattr(entity, operation.field.removeprefix("data."))
+    if operation.operator == FilterOperator.EQ:
+        return value == operation.value
+    if operation.operator == FilterOperator.IN:
+        return _json_text(value) in [str(item) for item in operation.value]
+    raise NotImplementedError(operation.operator)
 
 
 class FakeEntityStore:
@@ -82,12 +106,21 @@ class FakeEntityStore:
         del self.stored[key]
 
     def list(
-        self, entity_type: Any, *, workspace: str = "default", page: int = 1, page_size: int = 100, **_: Any
+        self,
+        entity_type: Any,
+        *,
+        workspace: str = "default",
+        page: int = 1,
+        page_size: int = 100,
+        filter_operation: Any = None,
+        **_: Any,
     ) -> Any:
         matches = [
             self._copy(entity)
             for (kind, entity_workspace, _name), entity in self.stored.items()
-            if kind == entity_type.__entity_type__ and entity_workspace == workspace
+            if kind == entity_type.__entity_type__
+            and entity_workspace == workspace
+            and _matches(entity, filter_operation)
         ]
         total_pages = max(1, -(-len(matches) // page_size))
         data = matches[(page - 1) * page_size : page * page_size]

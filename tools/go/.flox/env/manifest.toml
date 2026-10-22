@@ -7,5 +7,5 @@ schema-version = "1.14.0"
 systems = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]
 
 [install]
-go_1_26.pkg-path = "go_1_26"
-go_1_26.version = "1.26.5"
+# Fixed releases are not in the Flox catalog yet; use the pinned Nixpkgs package.
+go_1_26.flake = "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#go_1_26"

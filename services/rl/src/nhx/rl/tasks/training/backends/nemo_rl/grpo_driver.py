@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
+import nemo_rl.algorithms.grpo as grpo_algorithm
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data.utils import setup_response_data
@@ -20,10 +21,12 @@ from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.pause import exit_paused
 from nhx.rl.tasks.training.backends.nemo_rl.nemo_rl_logger import (
     GRPO_DEFAULT_TIME_SERIES_METRICS,
     NemoRLLogger,
 )
+from nhx.rl.tasks.training.backends.nemo_rl.pause import planned_steps, stop_for_pause
 from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import assemble_master_egress_allow
 from omegaconf import OmegaConf
 
@@ -146,6 +149,7 @@ def main() -> None:
     init_ray()
 
     task_to_env = None
+    customizer_logger: NemoRLLogger | None = None
     try:
         (
             policy,
@@ -183,31 +187,51 @@ def main() -> None:
                 default_time_series_metrics=GRPO_DEFAULT_TIME_SERIES_METRICS,
                 run_facts=_run_facts(config),
             )
+            # setup() restored the newest complete checkpoint. A rerun after a crash can restore an
+            # earlier step than the last one reported, and those steps are about to run again.
+            customizer_logger.rewind_to(grpo_state.total_steps)
             if hasattr(logger_inst, "loggers"):
                 logger_inst.loggers.append(customizer_logger)
 
         logger_inst.log_hyperparams(config.model_dump())
 
-        grpo_train(
-            policy,
-            policy_generation,
-            dataloader,
-            val_dataloader,
-            tokenizer,
-            loss_fn,
-            task_to_env,
-            val_task_to_env,
-            logger_inst,
-            checkpointer,
-            grpo_state,
-            master_config,
-        )
+        with stop_for_pause(grpo_algorithm, job_ctx) as pause:
+            grpo_train(
+                policy,
+                policy_generation,
+                dataloader,
+                val_dataloader,
+                tokenizer,
+                loss_fn,
+                task_to_env,
+                val_task_to_env,
+                logger_inst,
+                checkpointer,
+                grpo_state,
+                master_config,
+            )
     finally:
+        # Flushes the final training step. NeMo-RL never closes the loggers it is handed, and
+        # after a pause the resumed run continues the curves from what was stored.
+        if customizer_logger is not None:
+            customizer_logger.close()
         # grpo_train shuts the same set down on the way out, including a
         # max-steps stop. NemoGymShardSet.shutdown ignores the second call.
         # This one covers a failure after setup() returns and before grpo_train.
         if task_to_env is not None:
             shutdown_environments(task_to_env, timeout=300)
+
+    planned = planned_steps(
+        config.grpo.max_num_steps,
+        config.grpo.max_num_epochs,
+        # With several dataloaders NeMo-RL ignores epochs. Dynamic sampling can use more than one
+        # batch a step, so a pause on an epoch-ending last step reads as a pause; resume then finishes.
+        None if config.data["use_multiple_dataloader"] else len(dataloader),
+    )
+    if pause.stopped_training(grpo_state.total_steps, planned):
+        # Before the checkpoint check: the run is not finished, so there is nothing to select yet.
+        print(f"Training paused at step {grpo_state.total_steps}", flush=True)
+        exit_paused()
 
     if config.checkpointing["enabled"] and checkpointer.get_best_checkpoint_path() is None:
         if config.grpo.use_dynamic_sampling:

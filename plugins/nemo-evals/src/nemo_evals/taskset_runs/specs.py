@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Self
 
 from nemo_evals.harbor.remote.images import PreparedHarborEnvironment
-from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, ResolvedHarborSandboxPolicy
+from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -87,7 +87,7 @@ class TasksetRunPlan(BaseModel):
         description="The operator sandbox profile execution.sandbox.profile named (or the default), frozen at submit."
     )
     dispatcher_image: str = Field(
-        pattern=PINNED_IMAGE_REF_PATTERN, description="Task Job image, pinned by digest, from evals.runs.harbor."
+        min_length=1, description="Task Job image from evals.runs.harbor, or the platform's nhx-tasks image."
     )
     dispatcher_profile: str = Field(
         min_length=1, description="Jobs execution profile every task Job of this run uses (CPU class)."

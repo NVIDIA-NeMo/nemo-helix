@@ -17,6 +17,7 @@ from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.tenancy import caller_is_admin
+from task_fixtures import seed_evaluation
 
 _VALID_GYM_CONFIG = {
     "command": "run_and_collect",
@@ -94,10 +95,10 @@ def test_profile_crud_is_owner_scoped_and_searchable() -> None:
     assert client.patch(f"/v1/config-profiles/{harbor['id']}", json={"name": "gone"}).status_code == 404
 
 
-def test_profile_referenced_by_an_active_evaluation_cannot_change(in_use: MagicMock) -> None:
+def test_profile_referenced_by_an_active_evaluation_cannot_change() -> None:
     _act_as("user-1")
     profile = _create()
-    in_use.cursor.return_value.__enter__.return_value.fetchone.return_value = {"id": "ev_active"}
+    seed_evaluation({"id": "ev_active", "status": "running", "intake_profile_id": profile["id"]})
 
     # A non-owner gets 404 and does not learn the profile is in use.
     _act_as("user-2")
@@ -111,8 +112,6 @@ def test_profile_referenced_by_an_active_evaluation_cannot_change(in_use: MagicM
         assert response.json()["detail"]["error"]["code"] == "profile_in_use"
     # Renaming does not change what a run executes, so it is allowed.
     assert client.patch(f"/v1/config-profiles/{profile['id']}", json={"name": "renamed"}).status_code == 200
-    query = in_use.cursor.return_value.__enter__.return_value.execute.call_args.args[0]
-    assert "intake_profile_id" in query and "status NOT IN" in query
 
 
 def test_dispatch_loads_unsnapshotted_profiles_from_the_entity_store() -> None:
