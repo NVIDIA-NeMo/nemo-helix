@@ -44,11 +44,18 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
     Target,
     registered_agent_files,
     validate_task_collection,
 )
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
+from nemo_evals.jobs.gateway_models import (
+    agent_gateway_origin,
+    check_gateway_model,
+    harbor_gateway_access,
+    rebase_registered_agent_config,
+)
 from nemo_evals.jobs.gym_sandbox import (
     SandboxUnavailableError,
     has_staged_environment,
@@ -250,6 +257,7 @@ class _AgentEvalJobBase(NemoJob):
         validate_task_collection(resolved_tasks)
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
+            await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -527,6 +535,13 @@ class _AgentEvalJobBase(NemoJob):
                 harbor_config.n_concurrent_trials = target.n_concurrent_trials
             if configure_harbor is not None:
                 harbor_config = configure_harbor(harbor_config)
+            if target.gateway_model is not None or isinstance(target.source, RegisteredAgentSource):
+                origin = agent_gateway_origin(sandboxed=harbor_config.environment is not None)
+                agent_kwargs = dict(harbor_config.agent_kwargs)
+                rebase_registered_agent_config(target, agent_kwargs, origin)
+                harbor_config = harbor_config.model_copy(
+                    update={"agent_kwargs": agent_kwargs, "gateway": harbor_gateway_access(target, origin)}
+                )
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),

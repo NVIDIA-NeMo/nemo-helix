@@ -66,7 +66,9 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.archive import (
     private_directory,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.env import (
+    GATEWAY_PLACEHOLDER_API_KEY,
     harbor_env_templates,
+    validate_gateway_env,
     validate_harbor_env,
     warn_unscrubbed_secret_keys,
 )
@@ -157,6 +159,20 @@ class HarborEnvironmentConfig(BaseModel):
         return self
 
 
+class HarborGatewayAccess(BaseModel):
+    """Points a Harbor agent at an Inference Gateway model route.
+
+    The runtime sets ``base_url_env`` to ``base_url`` and, unless ``env_secrets`` supplies a platform key under
+    ``api_key_env``, sets that to :data:`GATEWAY_PLACEHOLDER_API_KEY`. Model keys stay in the gateway.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_url: str = Field(min_length=1, description="Gateway URL the agent calls, reachable from its container.")
+    base_url_env: str = Field(min_length=1, description="Variable the agent reads its base URL from.")
+    api_key_env: str = Field(min_length=1, description="Variable the agent reads its API key from.")
+
+
 class HarborRuntimeConfig(BaseModel):
     """Declarative config for running a Harbor job natively through the SDK.
 
@@ -238,6 +254,11 @@ class HarborRuntimeConfig(BaseModel):
     environment: HarborEnvironmentConfig | None = Field(
         default=None, description="Installed custom environment; omitted uses Harbor's default environment."
     )
+    gateway: HarborGatewayAccess | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Inference Gateway route the agent calls instead of a provider endpoint.",
+    )
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
@@ -250,10 +271,23 @@ class HarborRuntimeConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _gateway_variables_are_not_set_twice(self) -> HarborRuntimeConfig:
+        if self.gateway is not None:
+            validate_gateway_env(self.gateway.base_url_env, self.gateway.api_key_env, self.env_vars, self.env_secrets)
+        return self
+
+    @model_validator(mode="after")
     def _agent_dir_needs_import_path(self) -> HarborRuntimeConfig:
         if self.agent_dir is not None and self.agent_import_path is None:
             raise ValueError("agent_dir only applies to a custom agent_import_path")
         return self
+
+
+def gateway_env(gateway: HarborGatewayAccess | None) -> dict[str, str]:
+    """The agent variables ``gateway`` sets: its base URL and a placeholder key, which an ``env_secrets`` key overrides."""
+    if gateway is None:
+        return {}
+    return {gateway.base_url_env: gateway.base_url, gateway.api_key_env: GATEWAY_PLACEHOLDER_API_KEY}
 
 
 def _effective_harbor_agent(config: HarborRuntimeConfig | None) -> str | None:
@@ -348,6 +382,7 @@ class HarborAgentTaskRunner:
                 if config is not None
                 else None,
                 "env_vars": redact_credentials(config.env_vars) if config is not None else None,
+                "gateway": config.gateway.model_dump() if config is not None and config.gateway is not None else None,
                 "effective_agent": _effective_harbor_agent(config),
                 "n_attempts": config.n_attempts if config is not None else None,
                 # Native mode resolves the concrete job directory inside run_tasks (the name defaults
@@ -1028,6 +1063,10 @@ def _build_native_job(
                 config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
             )
         validate_harbor_env(config.env_vars, config.env_secrets)
+        if config.gateway is not None:
+            validate_gateway_env(
+                config.gateway.base_url_env, config.gateway.api_key_env, config.env_vars, config.env_secrets
+            )
         # Warn rather than refuse: some agents read a fixed variable name the caller can't rename.
         warn_unscrubbed_secret_keys(config.env_secrets)
         try:
@@ -1206,7 +1245,7 @@ def _build_native_job(
             "kwargs": dict(config.agent_kwargs),
             # Secret templates merged last, so a secret always wins over a same-named literal. Literal
             # env_vars reach only the agent: nothing here is written to os.environ.
-            "env": {**config.env_vars, **env_templates},
+            "env": {**config.env_vars, **gateway_env(config.gateway), **env_templates},
         }
         if config.agent_import_path is None:
             await _create_and_run(AgentConfig(name=config.agent_name or "oracle", **agent_options))

@@ -20,10 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
+from nemo_evals.jobs.gateway_models import check_tasks_reach_the_gateway
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_evals.taskset_runs.identifiers import task_job_name
@@ -102,6 +104,7 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Fails before any sandbox if the run's execution deadline has passed: the controller only cancels the
       Jobs it sees when it expires the run, so a Job a submit retry creates after that must stop itself.
     - Fails before any sandbox if the platform's OpenSandbox server isn't the one the run was accepted for.
+    - Fails before any sandbox if a no-network task's sandbox couldn't reach the gateway model its agent calls.
     - Binds the materialized task to its prepared image digests.
     - Never deletes the agent-files snapshot: sibling task Jobs and Jobs retries still stage it.
     - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
@@ -118,6 +121,11 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         spec = HarborTaskJobSpec.model_validate(config)
         check_execution_deadline(spec)
         check_sandbox_server(spec)
+        check_tasks_reach_the_gateway(
+            spec.spec.target,
+            [(t.id, t.spec.config) for t in spec.spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)],
+            spec.sandbox_policy.agent_channel,
+        )
         self._task_spec = spec
         return self._run_with_client(
             spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client

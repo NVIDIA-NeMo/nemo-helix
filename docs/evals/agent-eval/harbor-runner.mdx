@@ -729,31 +729,34 @@ default. To keep a run closed-book, send the agent's model calls through a virtu
 the `nemo-evals-closed-book` middleware. Create one as shown in
 [Keep Evaluations Closed-Book](/documentation/models-and-inference/virtual-models#keep-evaluations-closed-book),
 then point the agent at it ([Closed-book evaluations](/documentation/evaluate-models/agent-eval/targets-and-runners#closed-book-evaluations)
-covers the other targets). For the built-in Codex agent:
+covers the other targets). Name it with `model`:
 
 ```python
 from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
-from nhx_evals_sdk import SecretRef
+from nhx_evals_sdk.values import ModelRef
 
 target = HarborRunnerTarget(
-    source=HarborBuiltinAgentSource(name="codex", model_name="my-workspace/closed-book-model"),
+    source=HarborBuiltinAgentSource(name="codex", model=ModelRef("my-workspace/closed-book-model")),
     agent_kwargs={"version": "0.162.1"},
-    env_vars={
-        "OPENAI_BASE_URL": "<gateway-base-url>/apis/inference-gateway/v2/workspaces/my-workspace/openai/-/v1",
-    },
-    env_secrets={
-        "OPENAI_API_KEY": SecretRef(root="my-workspace/gateway-key"),
-    },
 )
 ```
 
-- Codex sends the last segment of `model_name`, `closed-book-model`, as its model. The gateway
-  resolves it in the workspace named in `OPENAI_BASE_URL`.
-- Codex runs inside the task container, so `<gateway-base-url>` must be the platform's address as
-  that container sees it. With a local Docker deployment, that is the platform URL with `localhost`
-  replaced by `host.docker.internal`, for example `http://host.docker.internal:8080`.
-- `OPENAI_API_KEY` goes to the gateway, which holds the provider's key itself. Use a credential your
-  gateway accepts; with platform authentication disabled, any value works.
+`model` names any model the gateway serves, a model or a virtual model, in place of `model_name`.
+It works for `codex`, `claude-code` and `nemo_evals.harbor.agents:SandboxedCodex`. Evals then sets:
+
+| Agent | Model name | Base URL variable | Key variable |
+|---|---|---|---|
+| `codex`, `SandboxedCodex` | `closed-book-model` | `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
+| `claude-code` | `closed-book-model` | `ANTHROPIC_BASE_URL` | `ANTHROPIC_API_KEY` |
+
+- The base URL is the gateway's route for that model, at the platform address the task container
+  reaches: `host.docker.internal` for a local Docker run, the in-cluster address for a taskset run on
+  Kubernetes. Don't set the base URL variable yourself; a target that does is refused.
+- The gateway holds the provider's key, so the agent needs none. With platform authentication
+  disabled, evals sets a placeholder key. With it enabled, put a Helix access key scoped to
+  `inference` in `env_secrets` under the key variable; a target without one is refused.
+- With platform authentication enabled, `claude-code` can't call the gateway yet: it sends its key
+  as `x-api-key`, and the gateway accepts only bearer tokens.
 
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.
