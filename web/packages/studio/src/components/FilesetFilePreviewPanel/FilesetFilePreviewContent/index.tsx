@@ -39,7 +39,6 @@ export interface FilesetFilePreviewContentProps {
    */
   hideHeader?: boolean;
 
-  /** Hides the file actions menu (split, download, rename, delete), leaving the breadcrumbs. */
   hideFileActions?: boolean;
 
   /** Whether the host considers this content active for fetching purposes. Defaults to true. */

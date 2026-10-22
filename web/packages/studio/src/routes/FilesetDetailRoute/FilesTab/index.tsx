@@ -27,7 +27,6 @@ export interface FilesTabProps {
   files: FilesetFileOutput[] | undefined;
   isFilesError: boolean;
   isFilesFetching: boolean;
-  /** Hides the previewed file's actions menu, for hosts that only browse the fileset. */
   hideFileActions?: boolean;
 }
 

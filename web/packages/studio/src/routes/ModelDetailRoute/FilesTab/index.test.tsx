@@ -46,7 +46,11 @@ describe('ModelDetailRoute FilesTab', () => {
     render(<FilesTab fileset={null} />);
 
     expect(screen.getByText('No files')).toBeInTheDocument();
-    expect(useFilesRetrieveFileset).not.toHaveBeenCalled();
+    expect(useFilesRetrieveFileset).toHaveBeenCalledWith(
+      '',
+      '',
+      expect.objectContaining({ query: expect.objectContaining({ enabled: false }) })
+    );
   });
 
   it('loads while the fileset is fetched', () => {
