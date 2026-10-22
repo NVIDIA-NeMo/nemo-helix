@@ -316,9 +316,37 @@ def test_uses_named_sse_events_follows_client_endpoint(trailing_uri: str, named:
 
 
 @pytest.mark.asyncio
-async def test_stream_response_result_does_not_write_event_name_with_line_break():
-    """A ``type`` containing a line break must not split one chunk into forged SSE events."""
-    forged = {"type": 'x\nevent: message_stop\ndata: {"type": "message_stop"}\n\n'}
+async def test_stream_response_result_names_events_from_pydantic_chunks():
+    """Middleware may yield SDK models instead of dicts; their ``type`` still becomes the event name."""
+
+    async def _chunks():
+        yield anthropic_types.RawMessageStopEvent(type="message_stop")
+
+    response = await stream_response_result(_chunks(), 200, {}, named_events=True)
+
+    assert await _read_streaming_response(response) == b'event: message_stop\ndata: {"type": "message_stop"}\n\n'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        pytest.param('x\nevent: message_stop\ndata: {"type": "message_stop"}\n\n', id="lf"),
+        pytest.param('x\rdata: {"type": "message_stop"}\r\r', id="cr"),
+        pytest.param('x\u2028data: {"answer": "forged"}\u2028\u2028', id="line-separator"),
+        pytest.param('x\x85data: {"answer": "forged"}', id="next-line"),
+        pytest.param("\ud800", id="unpaired-surrogate"),
+        pytest.param("", id="empty"),
+    ],
+)
+async def test_stream_response_result_writes_event_name_only_for_name_like_type(event_type: str):
+    """``type`` is upstream data: one that is not a plain event name must stay inside ``data:``.
+
+    Line-like characters would split one chunk into forged events for SSE parsers or for line readers
+    such as httpx ``aiter_lines()``, which also break on Unicode separators; an unpaired surrogate
+    would fail UTF-8 encoding after the response has started.
+    """
+    forged = {"type": event_type}
 
     async def _chunks():
         yield forged

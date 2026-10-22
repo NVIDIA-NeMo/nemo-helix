@@ -98,6 +98,7 @@ PROXY_OPENAPI_EXTRA: dict = {
 }
 
 _NAMED_EVENT_STREAM_PATH = re.compile(r"(?:^|/)(?:messages|responses(?:/[^/]+)?)/?$")
+_SSE_EVENT_NAME = re.compile(r"[A-Za-z0-9_.-]+")
 
 REQUEST_HEADERS_TO_DROP = frozenset(
     {
@@ -939,8 +940,8 @@ async def stream_response_result(
     - ``AsyncIterator`` → re-encoded as SSE (``data: {...}\\n\\n`` per chunk,
       terminated with ``data: [DONE]\\n\\n``). Pydantic chunks are dumped with
       ``mode="json"`` before serialization. With *named_events* (Anthropic Messages,
-      OpenAI Responses), each chunk is preceded by ``event: <chunk["type"]>`` and no
-      ``[DONE]`` sentinel is sent.
+      OpenAI Responses), a chunk whose ``type`` is a plain event name is preceded by
+      ``event: <type>``, and no ``[DONE]`` sentinel is sent.
 
     Body-framing headers (``content-length``, ``content-encoding``,
     ``transfer-encoding``, ``content-type``) are stripped from *headers* and
@@ -970,7 +971,7 @@ async def stream_response_result(
                 event_type = payload.get("type") if named_events and isinstance(payload, dict) else None
                 event_line = (
                     f"event: {event_type}\n"
-                    if isinstance(event_type, str) and "\n" not in event_type and "\r" not in event_type
+                    if isinstance(event_type, str) and _SSE_EVENT_NAME.fullmatch(event_type)
                     else ""
                 )
                 yield f"{event_line}data: {json.dumps(payload)}\n\n".encode()
