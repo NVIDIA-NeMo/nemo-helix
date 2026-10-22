@@ -20,7 +20,7 @@ from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
-from nemo_evals.harbor.compose import ComposeError
+from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource

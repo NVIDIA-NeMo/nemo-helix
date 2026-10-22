@@ -18,7 +18,8 @@ from typing import Literal, Protocol, Self, get_args
 
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
-from nemo_evals.harbor.compose import ComposeError, ComposeTask, check_compose_task
+from nemo_evals.harbor.compose.models import ComposeError, ComposeTask
+from nemo_evals.harbor.compose.spec import check_compose_task
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
 from nemo_evals.harbor.remote.sandbox_policy import compose_resources_violation, task_resources_violation
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest

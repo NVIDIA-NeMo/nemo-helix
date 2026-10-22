@@ -12,7 +12,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from nemo_evals.harbor.compose import ComposeError, parse_compose
+from nemo_evals.harbor.compose.models import ComposeError
+from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, dockerfile_pin, plan_images
 
 

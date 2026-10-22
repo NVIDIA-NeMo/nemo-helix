@@ -20,7 +20,8 @@ from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTa
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.archive import MAX_ARCHIVE_BYTES, extract_task, run_blocking_archive_operation
 from nemo_evals.harbor.archive_io import download_verified_async
-from nemo_evals.harbor.compose import ComposeError, parse_compose
+from nemo_evals.harbor.compose.models import ComposeError
+from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.builder import (
     ENDED_JOB_STATUSES,
     ImageBuilder,

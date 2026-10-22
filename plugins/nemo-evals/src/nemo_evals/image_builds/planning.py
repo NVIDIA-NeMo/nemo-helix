@@ -16,7 +16,7 @@ from typing import Any, NoReturn
 from harbor.models.task.config import EnvironmentConfig, TaskConfig, TaskOS
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config, task_has_any_separate_verifier
 from nemo_builder_plugin.identity import ImageIdentityError, Platform, normalize_reference, normalize_registry
-from nemo_evals.harbor.compose import ComposeBuild, ComposeService, ComposeTask
+from nemo_evals.harbor.compose.models import ComposeBuild, ComposeService, ComposeTask
 from nemo_evals.image_builds.models import BuildImage
 from pydantic import ValidationError
 

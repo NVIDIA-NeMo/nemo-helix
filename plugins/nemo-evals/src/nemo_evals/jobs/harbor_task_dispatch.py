@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
-from nemo_evals.harbor.compose import compose_services_kwarg
+from nemo_evals.harbor.compose.spec import compose_services_kwarg
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob

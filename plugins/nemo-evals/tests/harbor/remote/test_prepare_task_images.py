@@ -11,8 +11,9 @@ import httpx
 import pytest
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
-from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.harbor.compose import ComposeError, parse_compose
+from nemo_evals.entities import TaskEntity
+from nemo_evals.harbor.compose.models import ComposeError
+from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.harbor.remote import preparation
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparationUnavailableError,
