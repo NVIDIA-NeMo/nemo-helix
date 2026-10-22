@@ -1248,5 +1248,6 @@ jobs:
     uses: ./.github/workflows/release-smoke.yaml
     with:
       release-version: ${{ needs.stage-helm.outputs.chart_version }}
+      check-latest: ${{ needs.plan-release.outputs.release_type == 'stable' && !contains(needs.stage-helm.outputs.chart_version, '-') }}
       send-notifications: ${{ needs.plan-release.outputs.send_notifications == 'true' }}
     secrets: inherit
