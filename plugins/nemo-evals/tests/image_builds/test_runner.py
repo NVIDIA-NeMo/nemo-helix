@@ -15,11 +15,11 @@ import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
-from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
+from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.builder import builder_name, copy_builder_name
 from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
-from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
+from nemo_evals.image_builds.runner import TaskImageBuildSpec, read_task_archive, run_task_image_build
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
 from nemo_evals.revisions import apply_tag, get_revision, publish_revision
@@ -467,3 +467,14 @@ async def test_a_prebuilt_image_published_for_several_platforms_follows_the_defa
     await _run(entity_store, spec, builder)
 
     assert builder.platforms == {copy_builder_name(reference): None}
+
+
+async def test_an_archive_read_for_its_listing_does_not_point_at_its_deleted_download(monkeypatch) -> None:
+    _serve_archive(monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n"})
+
+    archive = await read_task_archive(
+        Mock(), HarborArchiveSource(fileset_ref="default/f#a/task_archive", files_hash="a" * 64)
+    )
+
+    assert archive.has("environment/Dockerfile")
+    assert archive.text("environment/Dockerfile") is None

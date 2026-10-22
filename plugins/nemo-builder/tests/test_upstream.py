@@ -66,6 +66,22 @@ def test_an_index_resolves_to_its_child_for_the_platform() -> None:
     assert resolved.manifest_digest == arm64
 
 
+def test_an_index_resolves_an_architecture_alias() -> None:
+    amd64, arm64 = "sha256:" + "a" * 64, "sha256:" + "b" * 64
+    index = json.dumps(
+        {
+            "manifests": [
+                {"digest": amd64, "platform": {"os": "linux", "architecture": "amd64"}},
+                {"digest": arm64, "platform": {"os": "linux", "architecture": "arm64", "variant": "v8"}},
+            ]
+        }
+    ).encode()
+    registry = _registry({f"{BASE}/manifests/24.04": (index, INDEX)})
+
+    assert registry.resolve(normalize_reference("ubuntu:24.04"), platform="linux/aarch64").manifest_digest == arm64
+    assert registry.resolve(normalize_reference("ubuntu:24.04"), platform="linux/x86_64").manifest_digest == amd64
+
+
 def test_a_single_image_resolves_to_itself_when_its_config_is_for_the_platform() -> None:
     manifest, config = _single("amd64")
     registry = _registry(

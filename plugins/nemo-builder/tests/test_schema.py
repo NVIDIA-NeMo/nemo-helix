@@ -255,6 +255,10 @@ class TestImageSources:
         spec = BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "platform": "linux/arm64"})
         assert spec.source == ImageSource(image="ubuntu:24.04")
 
+    def test_a_spec_names_its_platform_as_buildkit_does(self) -> None:
+        spec = BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "platform": "linux/x86_64"})
+        assert spec.platform == "linux/amd64"
+
     def test_a_fileset_request_reads_and_serializes_as_before(self) -> None:
         """Its request digest must not change, or resubmitting an earlier request would conflict."""
         spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}})

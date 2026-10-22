@@ -295,6 +295,7 @@ def test_task_archive_with_two_task_directories_is_rejected(tmp_path: Path) -> N
     [
         ("FROM python:3.12\n", None),
         ("FROM --platform=linux/amd64 python:3.12\n", "linux/amd64"),
+        ("FROM --platform=linux/x86_64 python:3.12\n", "linux/amd64"),
         ("from --platform=LINUX/ARM64/v8 python:3.12 AS app\n", "linux/arm64"),
         ("FROM --platform=$BUILDPLATFORM golang AS build\nFROM --platform=linux/arm64 alpine\n", "linux/arm64"),
         ("FROM --platform=linux/amd64 golang AS build\nFROM alpine\n", None),
@@ -358,3 +359,11 @@ def test_a_compose_main_platform_pins_main_built_from_the_environment() -> None:
     images = plan_images({}, archive, allowed_registries=[])
 
     assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("db", None)]
+
+
+def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> None:
+    """BuildKit takes `x86_64` and `aarch64` for `amd64` and `arm64`; a task that names one still builds."""
+    compose = "services:\n  main:\n    build: .\n    platform: linux/x86_64\n  cache:\n    image: redis:7\n    platform: linux/aarch64\n"
+    images = plan_images({}, _archive("environment/Dockerfile", compose=compose), allowed_registries=[])
+
+    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("cache", "linux/arm64")]

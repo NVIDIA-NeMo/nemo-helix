@@ -289,7 +289,7 @@ def test_a_build_for_another_platform_is_not_reused(client, store_task, entity_s
     assert again["id"] == "2"
 
 
-@pytest.mark.parametrize("platform", ["arm64", "linux/ARM64", ""])
+@pytest.mark.parametrize("platform", ["arm64", "linux/arm64/v8/x", ""])
 def test_a_platform_that_is_not_os_and_architecture_is_rejected(client, store_task, platform: str) -> None:
     digest = _store(store_task)
 
@@ -328,3 +328,13 @@ def test_a_platforms_build_older_than_a_page_of_other_builds_is_reused(
     again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
 
     assert (again["id"], again["status"]) == ("1", "ready")
+
+
+def test_a_platform_is_named_as_buildkit_names_it_before_builds_are_looked_up(client, store_task, entity_store) -> None:
+    digest = _store(store_task)
+    first = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64"}).json()
+    _set_status(entity_store, digest, 1, "ready")
+
+    again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64/v8"}).json()
+
+    assert (first["platform"], again["id"], again["status"]) == ("linux/arm64", "1", "ready")
