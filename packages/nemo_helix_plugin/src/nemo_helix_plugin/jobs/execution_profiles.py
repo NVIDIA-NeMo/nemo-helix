@@ -571,7 +571,7 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
         description=(
             "Entrypoint for job steps that do not declare one. The OpenShell supervisor ignores "
             "the image ENTRYPOINT, so the sandbox command must name the binary explicitly. "
-            "When unset, defaults to the nhx-tasks entrypoint (/app/.venv/bin/nemo-helix)."
+            "When unset, defaults to `nemo-helix`, resolved on the PATH from the image ENV."
         ),
     )
     egress_proxy: str | None = Field(

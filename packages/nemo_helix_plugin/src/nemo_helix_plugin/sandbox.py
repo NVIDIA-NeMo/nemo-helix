@@ -50,6 +50,17 @@ class SandboxUser:
 
 
 @dataclass(frozen=True)
+class SandboxImageFile:
+    """A file a sandbox runtime needs in the image, copied from another image."""
+
+    image: str
+    """Image holding the file. A bare name (no registry, tag, or digest) is qualified
+    with the platform image registry and tag at package time."""
+    source: str
+    dest: str
+
+
+@dataclass(frozen=True)
 class SandboxImageProfile:
     """Declarative image requirements for running under a sandbox runtime.
 
@@ -68,3 +79,5 @@ class SandboxImageProfile:
     For runtimes whose supervisor requires the workload identity to be able to
     create entries in the WORKDIR. ``None`` leaves the WORKDIR permissions alone.
     """
+    files: tuple[SandboxImageFile, ...] = ()
+    """Files copied into the image from other images, e.g. a job launcher."""
