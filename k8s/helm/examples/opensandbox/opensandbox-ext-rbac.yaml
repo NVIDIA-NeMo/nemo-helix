@@ -5,11 +5,10 @@
 #
 # The extension's exec route runs commands in a sandbox's service containers, and
 # its services route reads a failed service's last log lines. The upstream server
-# ClusterRole grants neither pods/exec nor pods/log, so this adds them. The rules are a
-# ClusterRole, which grants nothing by itself; a RoleBinding then gives them to the server's
-# service account in one namespace only. Platform job pods get no new permissions.
+# ClusterRole grants neither pods/exec nor pods/log, so this Role adds them in the
+# sandbox namespace only. Platform job pods get no new permissions.
 #
-# RBAC can't limit pods/exec to sandbox pods, so this covers every pod in a bound
+# RBAC can't limit pods/exec to sandbox pods, so this covers every pod in the
 # namespace; the extension itself only execs into service containers it added.
 # The stock server ClusterRole already allows creating pods and reading secrets
 # in all namespaces, so this adds little beyond what the server can already do.
@@ -20,18 +19,15 @@
 # second subject named opensandbox-server-kata.
 #
 # Multi-tenant server ([tenants] in the server config): each tenant's sandboxes are in the
-# tenant's own namespace, so the server needs these permissions in every one of them. Keep the
-# ClusterRole as it is and repeat the RoleBinding below once per tenant namespace, with that
-# namespace in place of REPLACE_WITH_RELEASE_NAMESPACE. A tenant namespace with no RoleBinding
-# gets a 403 from Kubernetes on the extension's exec and services routes.
-#
-# Upgrading from the earlier version of this file, which had a Role of the same name: a
-# RoleBinding's roleRef can't change in place, so delete that RoleBinding and Role first:
-#   kubectl delete rolebinding,role nemo-opensandbox-ext -n <namespace>
+# tenant's own namespace, so the server needs these permissions in every one of them. Apply
+# this file once per tenant namespace, with that namespace in place of
+# REPLACE_WITH_RELEASE_NAMESPACE. A tenant namespace without it gets a 403 from Kubernetes on
+# the extension's exec and services routes.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: nemo-opensandbox-ext
+  namespace: REPLACE_WITH_RELEASE_NAMESPACE
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -52,7 +48,7 @@ metadata:
   namespace: REPLACE_WITH_RELEASE_NAMESPACE
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: nemo-opensandbox-ext
 subjects:
   - kind: ServiceAccount
