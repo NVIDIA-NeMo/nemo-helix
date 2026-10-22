@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import httpx
 import pytest
@@ -14,7 +15,7 @@ from fastapi.testclient import TestClient
 from nemo_evals.api.dependencies import get_image_build_service
 from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.entities import TaskEntity
-from nemo_evals.image_builds.models import TaskImageBuildEntity, build_entity_name, build_job_name
+from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
@@ -289,7 +290,7 @@ def test_a_build_for_another_platform_is_not_reused(client, store_task, entity_s
     assert again["id"] == "2"
 
 
-@pytest.mark.parametrize("platform", ["arm64", "linux/arm64/v8/x", ""])
+@pytest.mark.parametrize("platform", ["arm64", "linux/arm64/v8/x", "linux/x_y", ""])
 def test_a_platform_that_is_not_os_and_architecture_is_rejected(client, store_task, platform: str) -> None:
     digest = _store(store_task)
 
@@ -338,3 +339,16 @@ def test_a_platform_is_named_as_buildkit_names_it_before_builds_are_looked_up(cl
     again = client.post(f"{_BASE}/{digest}/image-builds", json={"platform": "linux/arm64/v8"}).json()
 
     assert (first["platform"], again["id"], again["status"]) == ("linux/arm64", "1", "ready")
+
+
+@pytest.mark.parametrize("platform", ["linux/x86_64", "linux/x86-64", "Linux/AARCH64", "linux/arm64/v8"])
+def test_the_request_schema_takes_every_spelling_the_route_does(platform: str) -> None:
+    """A client validating against the published schema must not refuse what the API accepts."""
+    pattern = _string_pattern(ImageBuildRequest.model_json_schema()["properties"]["platform"])
+
+    assert re.fullmatch(pattern, platform)
+    assert ImageBuildRequest(platform=platform).platform in ("linux/amd64", "linux/arm64")
+
+
+def _string_pattern(schema: dict) -> str:
+    return next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)

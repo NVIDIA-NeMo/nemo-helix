@@ -81,7 +81,7 @@ class TestTheDefaultArchitecture:
     def test_it_is_named_as_buildkit_names_it(self) -> None:
         assert BuilderConfig(default_platform="Linux/AARCH64").default_platform == "linux/arm64"
 
-    @pytest.mark.parametrize("bad", ["arm64", "linux/", "linux/arm64/v8/x"])
+    @pytest.mark.parametrize("bad", ["arm64", "linux/", "linux/arm64/v8/x", "linux/x_y"])
     def test_it_must_be_os_and_architecture(self, bad: str) -> None:
         with pytest.raises(ValidationError):
             BuilderConfig(default_platform=bad)

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import (
@@ -272,3 +274,12 @@ class TestImageSources:
     def test_an_image_that_is_not_a_reference_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="image reference"):
             BuildSpec.model_validate({"source": {"image": "not a reference"}})
+
+
+@pytest.mark.parametrize("platform", ["linux/x86_64", "linux/x86-64", "Linux/AARCH64", "linux/arm64/v8"])
+def test_the_spec_schema_takes_every_spelling_a_spec_does(platform: str) -> None:
+    """A client validating against the published schema must not refuse what the API accepts."""
+    schema = BuildSpec.model_json_schema()["properties"]["platform"]
+    pattern = next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)
+
+    assert re.fullmatch(pattern, platform)
