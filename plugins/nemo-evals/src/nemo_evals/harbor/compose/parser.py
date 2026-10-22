@@ -44,6 +44,7 @@ from nemo_evals.harbor.compose.models import (
 from nemo_evals.harbor.compose.resolve import (
     COMPOSE_FILENAME,
     ENVIRONMENT_DIR,
+    HARBOR_LOG_DIRECTORIES,
     find_compose_file,
     read_env_files,
     resolve_compose,
@@ -118,6 +119,8 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
 
     # Volumes are declared once at the top level, so read them before any service mounts one.
     declared_volumes = _declared_volumes(resolved.document, problems)
+    for name in sorted(declared_volumes & {volume for _path, volume in HARBOR_LOG_DIRECTORIES.values()}):
+        problems.invalid(f"volumes.{name}", "this name is reserved for Harbor's log directories")
     _check_networks(resolved.document, problems)
 
     # Parse every service before raising, so a task with several problems reports all of them.
@@ -135,6 +138,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         main.depends_on,
         compose_path=compose_path,
     )
+    services, main, log_volumes = _share_harbor_log_mounts(services, main, resolved.harbor_log_mounts)
 
     # Only a prebuilt task runs the image named in the compose file; a built `main` comes from its Dockerfile.
     main_image = resolved.main.get("image")
@@ -145,7 +149,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         main_image=str(main_image) if resolved.prebuilt and main_image else None,
         services=services,
         main=main,
-        volumes=_mounted_volumes(resolved.document, services, main),
+        volumes=[*_mounted_volumes(resolved.document, services, main), *log_volumes],
     )
 
 
@@ -279,6 +283,38 @@ def _check_networks(document: Mapping[str, Any], problems: ComposeProblems) -> N
     networks = document.get("networks")
     if isinstance(networks, dict) and set(networks) - {"default"}:
         problems.unsupported("networks")
+
+
+def _share_harbor_log_mounts(
+    services: dict[str, ComposeService], main: ComposeMainSettings, log_mounts: Mapping[str, Mapping[str, bool]]
+) -> tuple[dict[str, ComposeService], ComposeMainSettings, list[str]]:
+    """Give each service that mounted a Harbor log directory a pod volume there, shared with ``main``.
+
+    Under Harbor such a mount binds one host directory into several containers, so what a service writes there (kumo's
+    game server writes the agent's step log to ``/logs/verifier``) reaches ``main``, where the verifier and Harbor
+    read it. A shared pod volume keeps that. ``main``'s own log mounts need nothing: the sandbox creates the
+    directories in it.
+
+    Returns the services, ``main``, and the names of the volumes added, in :data:`HARBOR_LOG_DIRECTORIES` order.
+    """
+    shared: set[str] = set()
+    for name, directories in log_mounts.items():
+        service = services.get(name)
+        if service is None:
+            continue
+        mounts = [
+            ComposeVolumeMount(name=volume, mount_path=path, read_only=read_only)
+            for directory, read_only in directories.items()
+            for path, volume in [HARBOR_LOG_DIRECTORIES[directory]]
+        ]
+        services[name] = service.model_copy(update={"volume_mounts": [*service.volume_mounts, *mounts]})
+        shared.update(mount.name for mount in mounts)
+
+    # `main` mounts each shared volume read-write, where its own directory would be.
+    added = [(path, volume) for path, volume in HARBOR_LOG_DIRECTORIES.values() if volume in shared]
+    main_mounts = [ComposeVolumeMount(name=volume, mount_path=path) for path, volume in added]
+    main = main.model_copy(update={"volume_mounts": [*main.volume_mounts, *main_mounts]})
+    return services, main, [volume for _path, volume in added]
 
 
 def _mounted_volumes(

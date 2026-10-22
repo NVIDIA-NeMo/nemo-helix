@@ -701,6 +701,75 @@ def test_named_volumes_and_mounts(tmp_path: Path) -> None:
     ]
 
 
+def test_harbor_log_mounts_on_main_need_nothing(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes:
+              - ${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}
+              - ${HOST_AGENT_LOGS_PATH}:${ENV_AGENT_LOGS_PATH}
+          db:
+            image: redis
+        """,
+    )
+    assert "volume_mounts" not in spec.get("main", {})
+    assert "volumes" not in spec
+
+
+def test_a_harbor_log_mount_on_a_service_is_shared_with_main(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            volumes:
+              - ${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}
+          game:
+            image: redis
+            volumes:
+              - ${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}
+        """,
+    )
+    assert spec["volumes"] == ["harbor-verifier-logs"]
+    assert _service(spec, "game")["volume_mounts"] == [{"name": "harbor-verifier-logs", "mount_path": "/logs/verifier"}]
+    assert spec["main"]["volume_mounts"] == [{"name": "harbor-verifier-logs", "mount_path": "/logs/verifier"}]
+
+
+@pytest.mark.parametrize(
+    "volume",
+    [
+        "$HOST_AGENT_LOGS_PATH:$ENV_AGENT_LOGS_PATH:ro",
+        {"type": "bind", "source": "${HOST_AGENT_LOGS_PATH}", "target": "${ENV_AGENT_LOGS_PATH}", "read_only": True},
+    ],
+)
+def test_harbor_log_mounts_are_recognized_in_every_spelling(tmp_path: Path, volume: Any) -> None:
+    task = _parsed(tmp_path, json.dumps({"services": {"game": {"image": "redis", "volumes": [volume]}}}))
+    assert task.services["game"].volume_mounts[0].model_dump() == {
+        "name": "harbor-agent-logs",
+        "mount_path": "/logs/agent",
+        "read_only": True,
+    }
+
+
+def test_only_harbor_log_mounts_written_exactly_are_recognized(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    volumes: ['${HOST_AGENT_LOGS_PATH}:/elsewhere']\n")
+    assert error.code == "compose_unsupported"
+    assert any(path.startswith("services.a.volumes[0]") for path in error.paths)
+
+
+def test_a_volume_named_like_a_harbor_log_volume_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\nvolumes:\n  harbor-agent-logs: {}\n")
+    assert error.code == "compose_invalid"
+    assert "volumes.harbor-agent-logs: this name is reserved" in error.detail
+
+
+def test_harbor_log_directory_variables_fill_in(tmp_path: Path) -> None:
+    spec = _spec(tmp_path, "services:\n  a:\n    image: redis\n    environment: {LOGS: '${ENV_VERIFIER_LOGS_PATH}'}\n")
+    assert _service(spec, "a")["env"] == {"LOGS": "/logs/verifier"}
+
+
 @pytest.mark.parametrize(
     "volume",
     ["./data:/data", "/host:/data", "~/x:/data", "/anonymous", {"type": "bind", "source": "/h", "target": "/t"}],
