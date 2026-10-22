@@ -20,6 +20,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
+import { EvaluationResultsDataView } from '@studio/components/dataViews/EvaluationResultsDataView';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
@@ -36,19 +37,21 @@ import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
 import { FilesTab } from '@studio/routes/ModelDetailRoute/FilesTab';
 import {
   getCustomizationJobListRoute,
+  getEvaluationNewRoute,
   getFilesetRoute,
   getModelDetailRoute,
   getWorkspaceCustomizationJobDetailsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 
 export const ModelDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { modelName } = useRequiredPathParams([ROUTE_PARAMS.modelName]);
   const { [ROUTE_PARAMS.adapterName]: adapterName } = useParams();
   const { getQueryParam, setQueryParam } = useQueryParams();
+  const navigate = useNavigate();
 
   const lineage = useModelLineage(workspace, modelName, adapterName);
   const { model, adapter, job, fileset } = lineage;
@@ -71,9 +74,15 @@ export const ModelDetailRoute: FC = () => {
 
   // The job tabs stay visible but disabled while the lookup runs, and go away if there is no job.
   const hasJobTabs = job.isLoading || Boolean(job.jobName);
+  // Models only. An evaluation targets a model endpoint by name, and the wizard's
+  // picker keeps only the model half of a selection -- so an adapter cannot be
+  // evaluated on its own today, and a tab on one would list its base model's runs
+  // under the adapter's name.
+  const hasEvaluationsTab = !adapterName;
   const tabs: { value: ModelDetailTab; label: string; disabled?: boolean }[] = [
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
+    ...(hasEvaluationsTab ? [{ value: ModelDetailTab.Evaluations, label: 'Evaluations' }] : []),
     { value: ModelDetailTab.Files, label: 'Files' },
     { value: ModelDetailTab.Deployment, label: 'Deployment' },
     ...(hasJobTabs
@@ -88,12 +97,20 @@ export const ModelDetailRoute: FC = () => {
   const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
   const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
+  // The wizard takes a model ref, and the page's own path names the workspace and
+  // model that the lineage was looked up by.
+  const runEvaluationRoute = getEvaluationNewRoute(workspace, {
+    model: `${workspace}/${modelName}`,
+  });
+
   let headerAction: { label: string; to: string } | undefined;
   if (isJobTab && job.jobName) {
     headerAction = {
       label: 'Open Job',
       to: getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName),
     };
+  } else if (selectedTab === ModelDetailTab.Evaluations) {
+    headerAction = { label: 'Run Evaluation', to: runEvaluationRoute };
   } else if (selectedTab === ModelDetailTab.Files && fileset) {
     headerAction = {
       label: 'Open Fileset',
@@ -193,6 +210,18 @@ export const ModelDetailRoute: FC = () => {
               adapter={adapter}
             />
           </TabsContent>
+
+          {hasEvaluationsTab && (
+            <TabsContent
+              value={ModelDetailTab.Evaluations}
+              className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
+            >
+              <EvaluationResultsDataView
+                targetModelName={modelName}
+                onCreate={() => navigate(runEvaluationRoute)}
+              />
+            </TabsContent>
+          )}
 
           <TabsContent
             value={ModelDetailTab.Files}
