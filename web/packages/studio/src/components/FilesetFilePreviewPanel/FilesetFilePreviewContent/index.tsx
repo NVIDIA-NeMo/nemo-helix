@@ -39,6 +39,8 @@ export interface FilesetFilePreviewContentProps {
    */
   hideHeader?: boolean;
 
+  hideFileActions?: boolean;
+
   /** Whether the host considers this content active for fetching purposes. Defaults to true. */
   enabled?: boolean;
 }
@@ -63,6 +65,7 @@ export const FilesetFilePreviewContent: FC<FilesetFilePreviewContentProps> = ({
   isLoading: externalLoading,
   error: externalError,
   hideHeader = false,
+  hideFileActions = false,
   enabled = true,
 }) => {
   const { isBinary: binary, isLoading: isBinaryLoading } = useIsBinaryFile(filePath);
@@ -137,7 +140,7 @@ export const FilesetFilePreviewContent: FC<FilesetFilePreviewContentProps> = ({
         workspace={workspace}
         filesetName={filesetName}
         filePath={filePath}
-        file={file}
+        file={hideFileActions ? undefined : file}
         onFilesetClick={onFilesetClick}
         onFolderClick={onFolderClick}
         onDeleteSuccess={onDeleteSuccess}
