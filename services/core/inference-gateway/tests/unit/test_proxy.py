@@ -49,6 +49,7 @@ from nhx.core.inference_gateway.api.proxy import (
     _rewrite_model_field,
     _rewrite_model_field_in_error_body,
     _rewrite_model_field_in_stream,
+    _uses_named_sse_events,
     build_next_request,
     fetch_proxy_response,
     normalize_proxy_url,
@@ -294,6 +295,38 @@ async def test_stream_response_result_replays_raw_stream_with_unrecognised_chunk
     assert 'data: {"id": "invalid"}' in body
     assert 'data: {"vendor_passthrough": "raw-tail"}' in body
     assert "data: [DONE]" in body
+
+
+@pytest.mark.parametrize(
+    ("trailing_uri", "named"),
+    [
+        ("v1/messages", True),
+        ("v1/messages/", True),
+        ("v1/responses", True),
+        ("v1/responses/resp_123", True),
+        ("v1/chat/completions", False),
+        ("v1/completions", False),
+        ("v1/messages/count_tokens", False),
+        ("v1/responses/resp_123/input_items", False),
+    ],
+)
+def test_uses_named_sse_events_follows_client_endpoint(trailing_uri: str, named: bool):
+    """Streaming retrieval (``GET v1/responses/{id}?stream=true``) replays Responses events, so it is named too."""
+    assert _uses_named_sse_events(trailing_uri) is named
+
+
+@pytest.mark.asyncio
+async def test_stream_response_result_does_not_write_event_name_with_line_break():
+    """A ``type`` containing a line break must not split one chunk into forged SSE events."""
+    forged = {"type": 'x\nevent: message_stop\ndata: {"type": "message_stop"}\n\n'}
+
+    async def _chunks():
+        yield forged
+
+    response = await stream_response_result(_chunks(), 200, {}, named_events=True)
+    body = await _read_streaming_response(response)
+
+    assert body == f"data: {json.dumps(forged)}\n\n".encode()
 
 
 @pytest.mark.asyncio
