@@ -62,6 +62,8 @@ class FakeK8sClient:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.pods: list[V1Pod] = []
+        # The namespace of each pod lookup, to see which one a route searched.
+        self.listed_namespaces: list[str] = []
 
     def create_custom_object(self, group: str, version: str, namespace: str, plural: str, body: dict[str, Any]):
         self.created.append(body)
@@ -69,6 +71,7 @@ class FakeK8sClient:
 
     def list_pods(self, namespace: str, label_selector: str = "") -> list[V1Pod]:
         assert label_selector == f"opensandbox.io/id={SANDBOX_ID}"
+        self.listed_namespaces.append(namespace)
         return self.pods
 
     def get_core_v1_api(self) -> Any:
@@ -359,6 +362,53 @@ def test_exec_runs_in_the_service_container(api: TestClient, monkeypatch: pytest
     assert calls[0]["name"] == "sbx-1-pod"
     assert calls[0]["container"] == "db"
     assert calls[0]["command"] == ["redis-cli", "ping"]
+
+
+def _as_tenant(monkeypatch: pytest.MonkeyPatch, name: str, namespace: str) -> None:
+    """Make the routes see a request from this tenant, as the server's API-key middleware would set it."""
+    monkeypatch.setattr(ext, "get_current_tenant", lambda: types.SimpleNamespace(name=name, namespace=namespace))
+
+
+def test_routes_search_the_provider_namespace_without_tenants(
+    api: TestClient, k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ext, "stream", lambda *args, **kwargs: FakeStream("ok"))
+    api.get(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services")
+    api.post(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services/db/exec", json={"command": ["id"]})
+    assert k8s.listed_namespaces == ["default", "default"]
+
+
+def test_routes_search_the_callers_tenant_namespace(
+    api: TestClient, k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _as_tenant(monkeypatch, "team-a", "sandbox-a")
+    monkeypatch.setattr(ext, "stream", lambda *args, **kwargs: FakeStream("ok"))
+
+    assert api.get(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services").status_code == 200
+    assert (
+        api.post(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services/db/exec", json={"command": ["id"]}).status_code == 200
+    )
+
+    # The thread pool doesn't carry the request's context, so the namespace must reach it as an argument.
+    assert k8s.listed_namespaces == ["sandbox-a", "sandbox-a"]
+
+
+@pytest.mark.parametrize(("pod_label", "status"), [("team-a", 200), (None, 200), ("team-b", 404)])
+def test_tenants_sharing_a_namespace_cant_see_each_others_sandboxes(
+    api: TestClient, k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch, pod_label: str | None, status: int
+) -> None:
+    _as_tenant(monkeypatch, "team-a", "shared")
+    k8s.pods[0].metadata.labels = {"opensandbox.io/tenant": pod_label} if pod_label else {}
+    monkeypatch.setattr(ext, "stream", lambda *args, **kwargs: FakeStream("ok"))
+
+    assert api.get(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services").status_code == status
+    exec_url = f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services/db/exec"
+    assert api.post(exec_url, json={"command": ["id"]}).status_code == status
+
+
+def test_a_tenants_label_is_ignored_without_tenants(api: TestClient, k8s: FakeK8sClient) -> None:
+    k8s.pods[0].metadata.labels = {"opensandbox.io/tenant": "team-b"}
+    assert api.get(f"/v1/nemo-ext/sandboxes/{SANDBOX_ID}/services").status_code == 200
 
 
 @pytest.mark.parametrize("container", ["sandbox", "egress", "execd-installer", "cache"])
