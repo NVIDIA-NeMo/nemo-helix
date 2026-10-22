@@ -7,8 +7,9 @@ Every lease change rewrites the run under a compare-and-swap; claims,
 heartbeats and publication are fenced by the claim token.
 """
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, TypeVar
 from uuid import uuid4
 
 from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkArchive, ScaledEvalsBenchmarkRun
@@ -20,6 +21,8 @@ from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.models.benchmark_archives import BenchmarkArchiveMember
 
 _MAX_ATTEMPTS = 3
+_STATUSES = ("queued", "building", "ready", "failed")
+T = TypeVar("T")
 
 
 def _now() -> datetime:
@@ -62,11 +65,23 @@ class BenchmarkArchiveStore:
     def __init__(self) -> None:
         self._runs = BenchmarkRunStore()
 
-    def _all_runs(self) -> list[ScaledEvalsBenchmarkRun]:
-        # ponytail: every queue scan lists every run, deleted ones included so
-        # cleanup still reaches their objects. Upgrade path: an indexed archive
-        # status field on the run.
-        return entity_store.list_all(self._runs._client, ScaledEvalsBenchmarkRun)
+    def _runs_with_archive(self, *statuses: str) -> list[ScaledEvalsBenchmarkRun]:
+        """Return runs whose archive has one of `statuses`, deleted runs included."""
+        return entity_store.list_all(self._runs._client, ScaledEvalsBenchmarkRun, {"archive_status": statuses})
+
+    def _mutate(
+        self,
+        run_id: str,
+        change: Callable[[ScaledEvalsBenchmarkRun], tuple[T, bool]],
+        *,
+        include_deleted: bool = False,
+    ) -> T | None:
+        def synced(entity: ScaledEvalsBenchmarkRun) -> tuple[T, bool]:
+            result, write = change(entity)
+            entity.archive_status = None if entity.archive is None else entity.archive.status
+            return result, write
+
+        return self._runs._mutate(run_id, synced, include_deleted=include_deleted)
 
     def get(self, run_id: str) -> dict | None:
         entity = self._runs._get(run_id)
@@ -114,7 +129,7 @@ class BenchmarkArchiveStore:
             )
             return _row(entity), True
 
-        row = self._runs._mutate(run_id, change)
+        row = self._mutate(run_id, change)
         if row is None:
             raise NotFound("benchmark_run", "benchmark run not found")
         return row
@@ -124,7 +139,7 @@ class BenchmarkArchiveStore:
         now = _now()
         rows = [
             row
-            for entity in self._all_runs()
+            for entity in self._runs_with_archive("queued", "building")
             if entity.deleted_at is None
             and _claimable(entity.archive, now, claim_timeout)
             and (row := _row(entity)) is not None
@@ -145,7 +160,7 @@ class BenchmarkArchiveStore:
             archive.attempts += 1
             return _row(entity), True
 
-        return self._runs._mutate(run_id, change)
+        return self._mutate(run_id, change)
 
     def skip_attempt(self, run_id: str, *, generation: str, attempts: int) -> None:
         """Count an attempt whose builder ended before claiming it, failing the third."""
@@ -164,7 +179,7 @@ class BenchmarkArchiveStore:
                 archive.status, archive.error = "failed", "archive build job ended before claiming"
             return None, True
 
-        self._runs._mutate(run_id, change)
+        self._mutate(run_id, change)
 
     def claim_cleanup(self, *, interval_seconds: float) -> str | None:
         """Schedule another bounded sweep, including failed or soft-deleted runs.
@@ -184,7 +199,7 @@ class BenchmarkArchiveStore:
         candidates = sorted(
             (
                 (entity.archive.cleanup_checked_at or epoch, entity.archive.requested_at, entity.name)
-                for entity in self._all_runs()
+                for entity in self._runs_with_archive(*_STATUSES)
                 if entity.archive is not None and due(entity.archive, now)
             ),
         )
@@ -197,14 +212,17 @@ class BenchmarkArchiveStore:
             return True, True
 
         for *_, run_id in candidates:
-            if self._runs._mutate(run_id, change, include_deleted=True):
+            if self._mutate(run_id, change, include_deleted=True):
                 return run_id
         return None
 
     def for_cleanup(self, run_id: str) -> dict | None:
         """Return the archive's current references, deleted runs included."""
         entity = self._runs._get(run_id, include_deleted=True)
-        return None if entity is None else _row(entity)
+        row = None if entity is None else _row(entity)
+        if entity is None or row is None:
+            return None
+        return {**row, "run_deleted": entity.deleted_at is not None}
 
     def heartbeat(self, run_id: str, token: str) -> bool:
         def change(entity: ScaledEvalsBenchmarkRun) -> tuple[bool, bool]:
@@ -214,7 +232,7 @@ class BenchmarkArchiveStore:
             archive.claimed_at = _now()
             return True, True
 
-        return bool(self._runs._mutate(run_id, change))
+        return bool(self._mutate(run_id, change))
 
     def validate_members(self, run_id: str, members: list[dict]) -> None:
         """Called before reading sources and again just before publication."""
@@ -248,7 +266,7 @@ class BenchmarkArchiveStore:
             archive.error, archive.claimed_at = None, None
             return True, True
 
-        return bool(self._runs._mutate(job["benchmark_run_id"], change))
+        return bool(self._mutate(job["benchmark_run_id"], change))
 
     def fail(self, job: dict, error: str) -> None:
         def change(entity: ScaledEvalsBenchmarkRun) -> tuple[None, bool]:
@@ -258,4 +276,4 @@ class BenchmarkArchiveStore:
             archive.status, archive.error, archive.claimed_at = "failed", error, None
             return None, True
 
-        self._runs._mutate(job["benchmark_run_id"], change)
+        self._mutate(job["benchmark_run_id"], change)

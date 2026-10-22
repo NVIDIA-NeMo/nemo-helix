@@ -8,9 +8,12 @@ import pytest
 
 pytest.importorskip("scaled_evals")
 
+from scaled_evals.api import artifacts
 from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.repositories.base_repository import Conflict
+from scaled_evals.archive_validation import benchmark_archive_object_key
+from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives
 from task_fixtures import seed_benchmark_run, seed_evaluation, seed_task_revision
 
 _RUN = {"framework": "harbor", "runtime": "sandbox_k8s", "parallelism": 1, "benchmark_id": "bm_1"}
@@ -32,6 +35,12 @@ def _seed_run(**member_fields) -> None:  # noqa: ANN003
     seed_benchmark_run({**_RUN, "id": "bmr_1", "name": "run", "benchmark_revision": 1})
     seed_task_revision("task_1")
     seed_evaluation({**_READY_MEMBER, "id": "ev_1", **member_fields})
+
+
+def _stored_status() -> str | None:
+    """Return the run's top-level archive status, the field queue scans filter on."""
+    entity = BenchmarkRunStore()._get("bmr_1")
+    return None if entity is None else entity.archive_status
 
 
 def _publish(store: BenchmarkArchiveStore, job: dict) -> bool:
@@ -90,6 +99,8 @@ def test_lease_is_bounded_and_fences_stale_workers() -> None:
     store.request("bmr_1")
     assert [row["benchmark_run_id"] for row in store.list_claimable(claim_timeout=30, limit=10)] == ["bmr_1"]
 
+    assert _stored_status() == "queued"
+
     first = store.claim(claim_timeout=30, run_id="bmr_1")
     assert first is not None and (first["status"], first["attempts"]) == ("building", 1)
     assert store.claim(claim_timeout=30, run_id="bmr_1") is None
@@ -113,6 +124,7 @@ def test_lease_is_bounded_and_fences_stale_workers() -> None:
     exhausted = store.get("bmr_1")
     assert exhausted is not None and (exhausted["status"], exhausted["attempts"]) == ("failed", 3)
     assert exhausted["error"] == "archive build job ended before claiming"
+    assert _stored_status() == "failed"
 
 
 def test_finish_refuses_changed_members() -> None:
@@ -127,14 +139,23 @@ def test_finish_refuses_changed_members() -> None:
     assert current is not None and current["status"] == "building"
 
 
-def test_cleanup_sweep_is_throttled_and_reaches_deleted_runs() -> None:
+def test_cleanup_sweep_is_throttled_and_reaches_deleted_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_run()
     store = BenchmarkArchiveStore()
     store.request("bmr_1")
+    job = store.claim(claim_timeout=30, run_id="bmr_1")
+    assert job is not None
     assert BenchmarkRunStore().soft_delete("bmr_1")
     assert store.get("bmr_1") is None and store.list_claimable(claim_timeout=30, limit=10) == []
+    assert not store.heartbeat("bmr_1", job["claim_token"])
     assert store.claim_cleanup(interval_seconds=300) == "bmr_1"
     assert store.claim_cleanup(interval_seconds=300) is None
     assert store.claim_cleanup(interval_seconds=-1) == "bmr_1"
     row = store.for_cleanup("bmr_1")
-    assert row is not None and row["status"] == "queued"
+    assert row is not None and row["status"] == "building" and row["run_deleted"]
+
+    # The deleted run's claim can never publish, so its upload is reclaimed.
+    key = benchmark_archive_object_key("bmr_1", job["generation"], job["claim_token"])
+    deleted: list[str] = []
+    monkeypatch.setattr(artifacts, "delete_object", deleted.append)
+    assert cleanup_benchmark_archives("bmr_1", object_keys=[key]) == 1 and deleted == [key]

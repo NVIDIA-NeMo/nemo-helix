@@ -48,7 +48,8 @@ def cleanup_benchmark_archives(
     if row is None:
         return 0
     protected = {row.get("object_key")}
-    if row["status"] == "building" and row.get("claim_token"):
+    # A deleted run's claim can never publish, so its upload is not protected.
+    if row["status"] == "building" and row.get("claim_token") and not row.get("run_deleted"):
         protected.add(benchmark_archive_object_key(run_id, row["generation"], row["claim_token"]))
     for key in candidates:
         if key not in protected:

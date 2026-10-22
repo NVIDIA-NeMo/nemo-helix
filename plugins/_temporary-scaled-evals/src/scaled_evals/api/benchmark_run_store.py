@@ -35,7 +35,7 @@ _MAX_WRITE_ATTEMPTS = 5
 _RUN_FIELDS = tuple(
     field
     for field in ScaledEvalsBenchmarkRun.model_fields
-    if field not in set(NemoEntity.model_fields) | {"display_name", "archive"}
+    if field not in set(NemoEntity.model_fields) | {"display_name", "archive", "archive_status"}
 )
 
 

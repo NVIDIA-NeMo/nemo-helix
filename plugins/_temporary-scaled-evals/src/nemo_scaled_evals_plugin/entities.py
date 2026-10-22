@@ -267,6 +267,8 @@ class ScaledEvalsBenchmarkRun(NemoEntity, entity_type="scaled_evals_benchmark_ru
     cancelled_at: datetime | None = None
     deleted_at: datetime | None = None
     archive: ScaledEvalsBenchmarkArchive | None = None
+    # A top-level copy of archive.status, so the store can filter queue scans.
+    archive_status: str | None = None
 
 
 class ScaledEvaluationExecution(NemoEntity, entity_type="scaled_evals_execution"):

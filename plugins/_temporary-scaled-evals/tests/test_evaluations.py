@@ -22,6 +22,8 @@ import pytest
 pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_scaled_evals_plugin.entities import ScaledEvalsEvaluation
+from scaled_evals.api import entity_store
 from scaled_evals.api.config_profile_store import ConfigProfileStore
 from scaled_evals.api.db import Database, get_conn, get_stream_database_factory
 from scaled_evals.api.evaluation_store import EvaluationStore
@@ -175,6 +177,10 @@ def _conn(fetchone=(), fetchall=()) -> MagicMock:  # noqa: ANN001
     return conn
 
 
+def _stored_evaluations() -> list[ScaledEvalsEvaluation]:
+    return entity_store.list_all(entity_store.entity_client(), ScaledEvalsEvaluation)
+
+
 def _override_conn(conn: MagicMock) -> None:
     def _gen() -> Iterator[MagicMock]:
         yield conn
@@ -298,11 +304,7 @@ def test_preflight_reports_runnable_without_creating_evaluation() -> None:
     assert response.status_code == 200, response.text
     assert response.json()["runnable"] is True
     assert response.json()["kind"] == "evaluation"
-    assert not any(
-        "INSERT INTO evaluations" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
-    assert not conn.commit.called
+    assert _stored_evaluations() == []
 
 
 def test_preflight_reports_create_blocker_with_http_200() -> None:
@@ -437,10 +439,7 @@ def test_create_409_when_ready_revision_pack_missing_local_rustfs(
 
     assert response.status_code == 409
     assert response.json()["detail"]["error"]["code"] == "task_object_missing"
-    assert not any(
-        "INSERT INTO evaluations" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
+    assert _stored_evaluations() == []
 
 
 def test_create_404_when_revision_missing() -> None:
@@ -481,10 +480,7 @@ def test_create_rejects_task_image_from_unapproved_registry(
     assert error["message"] == (
         "task image registry 'artifactory.nvidia.com' is not approved; allowed registries: us-central1-docker.pkg.dev"
     )
-    assert not any(
-        "INSERT INTO evaluations" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
+    assert _stored_evaluations() == []
 
 
 def test_create_422_on_malformed_profile_id() -> None:
