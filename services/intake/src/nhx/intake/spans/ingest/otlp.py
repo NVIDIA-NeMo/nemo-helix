@@ -13,6 +13,7 @@ from nhx.intake.config import IntakeConfig
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
 from nhx.intake.spans.domain import (
     IntakeSpan,
+    SpanKind,
     SpanStatus,
     TraceBatch,
 )
@@ -30,6 +31,16 @@ API_TAG = "Ingest"
 # Bag key the evaluation id lands under on a built span (from the attribute catalog). The ingest loop
 # reads it back off each span to learn which evaluations a batch touched, for the denormalizer.
 _EVALUATION_NAME_BAG_KEY = spec_for_field(SpanAttributeField.EVALUATION_NAME).bag_key
+
+# OTel GenAI operation names, used only when the span has no OpenInference kind. Names that are not
+# listed stay UNKNOWN, so a non-root execute_tool still counts as a model call.
+_SPAN_KIND_BY_GEN_AI_OPERATION = {
+    "chat": SpanKind.LLM,
+    "generate_content": SpanKind.LLM,
+    "text_completion": SpanKind.LLM,
+    "embeddings": SpanKind.EMBEDDING,
+    "invoke_agent": SpanKind.AGENT,
+}
 
 # Ordered by precedence. Keep direct input.value/output.value first so existing
 # OpenInference/LangChain payloads continue to win over framework-specific fallbacks.
@@ -230,6 +241,10 @@ def _span_to_domain(
     parent_source_id = parent_span_id.hex()
     original_kind = _as_str(source_attributes.get("openinference.span.kind"))
     kind = normalize_span_kind(original_kind)
+    if kind is SpanKind.UNKNOWN:
+        operation = _as_str(source_attributes.get("gen_ai.operation.name"))
+        if operation is not None:
+            kind = _SPAN_KIND_BY_GEN_AI_OPERATION.get(operation, SpanKind.UNKNOWN)
     status_message = _as_str(getattr(span.status, "message", None))
     if status_message and "exception.message" not in attribute_bags.string:
         attribute_bags.put_field(SpanAttributeField.ERROR_MESSAGE, status_message)

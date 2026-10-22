@@ -13256,19 +13256,19 @@ components:
           type: string
         input_tokens:
           title: Input Tokens
-          description: Sum of input tokens across this session's spans.
+          description: Session input tokens, counting each model call once.
           type: integer
         output_tokens:
           title: Output Tokens
-          description: Sum of output tokens across this session's spans.
+          description: Session output tokens, counting each model call once.
           type: integer
         cached_tokens:
           title: Cached Tokens
-          description: Sum of cached tokens across this session's spans.
+          description: Session cached tokens, counting each model call once.
           type: integer
         cost_total_usd:
           title: Cost Total Usd
-          description: Sum of cost across this session's spans.
+          description: Session cost, counting each model call once.
           type: number
         evaluator_scores:
           additionalProperties:
