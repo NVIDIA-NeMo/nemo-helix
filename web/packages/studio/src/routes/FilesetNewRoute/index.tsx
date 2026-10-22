@@ -10,17 +10,13 @@ import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { type FilesetOutput, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button, SegmentedControl, SidePanel, Stack } from '@nvidia/foundations-react-core';
 import { useSampleDatasetFiles } from '@studio/api/datasets/useSampleDatasetFiles';
-import { findFreeFilesetName } from '@studio/components/filesets/filesetNames';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { SAMPLE_DATASETS, SampleDataset } from '@studio/constants/sampleDatasets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { DATASET_TYPE_CUSTOM, DATASET_TYPE_SAMPLE } from '@studio/routes/FilesetNewRoute/constants';
 import { CustomFilesetForm } from '@studio/routes/FilesetNewRoute/CustomFilesetForm';
 import { getSampleDatasetName } from '@studio/routes/FilesetNewRoute/helpers';
-import {
-  SampleDatasetSection,
-  type SampleNameLookup,
-} from '@studio/routes/FilesetNewRoute/SampleDatasetSection';
+import { SampleDatasetSection } from '@studio/routes/FilesetNewRoute/SampleDatasetSection';
 import {
   DatasetCreateFilesetFormSchema,
   DatasetFormFields,
@@ -48,10 +44,6 @@ export const FilesetNewRoute: FC = () => {
   // Reported by whichever tab shows the name, so typing does not re-render the whole panel.
   const [nameStatus, setNameStatus] = useState<NameCheckStatus>();
   const nameTaken = nameStatus === 'conflict';
-  // The Sample tab has no name field, so its generated name is moved to a free one before it
-  // is used. Each lookup is numbered so a slower, older one never overwrites a newer pick.
-  const [sampleNameLookup, setSampleNameLookup] = useState<SampleNameLookup>('resolved');
-  const sampleNameLookupId = useRef(0);
   const [qualityReports, setQualityReports] = useState<DatasetQualityReport[]>([]);
   const [isValidating, setIsValidating] = useState(false);
   const qualityReportRef = useRef<HTMLDivElement>(null);
@@ -92,6 +84,7 @@ export const FilesetNewRoute: FC = () => {
 
   const url = watch('url');
   const purpose = watch('purpose');
+
   useEffect(() => {
     if (purpose !== FilesetPurpose.dataset) {
       setQualityReports([]);
@@ -143,50 +136,14 @@ export const FilesetNewRoute: FC = () => {
     [purpose, setValue]
   );
 
-  /** Names the sample after the first free `{sample}-{workspace}`, `…-2`, `…-3`, so importing
-   *  the same sample twice gets a new fileset rather than a name the user cannot change. */
-  const applySampleName = useCallback(
-    (dataset: SampleDataset) => {
-      const lookup = ++sampleNameLookupId.current;
-      setValue('name', '', { shouldValidate: false });
-      setSampleNameLookup('resolving');
-      findFreeFilesetName(workspace, getSampleDatasetName(workspace, dataset.id)).then(
-        (name) => {
-          if (lookup !== sampleNameLookupId.current) return;
-          if (name === null) {
-            setSampleNameLookup('exhausted');
-            return;
-          }
-          setValue('name', name, { shouldValidate: false });
-          setSampleNameLookup('resolved');
-        },
-        () => {
-          if (lookup === sampleNameLookupId.current) setSampleNameLookup('failed');
-        }
-      );
-    },
-    [workspace, setValue]
-  );
-
-  // Another create can take the picked name first; with no field to rename it in, move on to
-  // the next free name. Once per name, so a lookup that disagrees with the check cannot loop.
-  const reResolvedSampleName = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (activeTab !== DATASET_TYPE_SAMPLE || !nameTaken || sampleNameLookup !== 'resolved') return;
-    const name = getValues('name');
-    if (!name || reResolvedSampleName.current === name) return;
-    reResolvedSampleName.current = name;
-    applySampleName(selectedSampleDataset);
-  }, [activeTab, nameTaken, sampleNameLookup, getValues, applySampleName, selectedSampleDataset]);
-
   // Sync hidden name/description when a sample is selected (sample tab = simulated local form)
   const handleSelectSample = useCallback(
     (dataset: SampleDataset) => {
       setSelectedSampleDataset(dataset);
-      applySampleName(dataset);
+      setValue('name', getSampleDatasetName(workspace, dataset.id), { shouldValidate: false });
       setValue('description', dataset.description ?? '', { shouldValidate: false });
     },
-    [applySampleName, setValue]
+    [workspace, setValue]
   );
 
   // When switching tabs, reset the opposite tab's form state so we don't leak values
@@ -195,14 +152,14 @@ export const FilesetNewRoute: FC = () => {
       setActiveTab(value);
       setQualityReports([]);
       if (value === DATASET_TYPE_CUSTOM) {
-        sampleNameLookupId.current += 1;
-        setSampleNameLookup('resolved');
         setValue('name', '', { shouldValidate: false });
         setValue('description', '', { shouldValidate: false });
         setValue('files', undefined, { shouldValidate: false });
         sampleFilesRef.current = null;
       } else {
-        applySampleName(selectedSampleDataset);
+        setValue('name', getSampleDatasetName(workspace, selectedSampleDataset.id), {
+          shouldValidate: false,
+        });
         setValue('description', selectedSampleDataset.description ?? '', {
           shouldValidate: false,
         });
@@ -210,7 +167,13 @@ export const FilesetNewRoute: FC = () => {
         sampleFilesRef.current = fetchSampleFiles();
       }
     },
-    [setValue, applySampleName, selectedSampleDataset, fetchSampleFiles]
+    [
+      setValue,
+      workspace,
+      selectedSampleDataset.id,
+      selectedSampleDataset.description,
+      fetchSampleFiles,
+    ]
   );
 
   const hasValidationErrors =
@@ -259,12 +222,7 @@ export const FilesetNewRoute: FC = () => {
             <Button
               type="button"
               color="brand"
-              disabled={
-                isSubmitPending ||
-                hasValidationErrors ||
-                nameTaken ||
-                (activeTab === DATASET_TYPE_SAMPLE && sampleNameLookup !== 'resolved')
-              }
+              disabled={isSubmitPending || hasValidationErrors || nameTaken}
               onClick={handleSubmit(
                 onSubmit,
                 handleFormErrorsGeneric({ title: 'Fileset New Form Errors' })
@@ -319,8 +277,6 @@ export const FilesetNewRoute: FC = () => {
               selectedSampleDataset={selectedSampleDataset}
               onSelectSample={handleSelectSample}
               workspace={workspace}
-              nameLookup={sampleNameLookup}
-              onRetryNameLookup={() => applySampleName(selectedSampleDataset)}
               ownName={createdFileset?.name}
               onNameStatusChange={setNameStatus}
             />

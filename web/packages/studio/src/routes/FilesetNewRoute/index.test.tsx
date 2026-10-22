@@ -9,7 +9,6 @@ import {
   getFilesListFilesetsQueryKey,
   getFilesRetrieveFilesetQueryKey,
 } from '@nemo/sdk/generated/platform/files';
-import { FILESET_NAME_SUFFIX_LIMIT } from '@studio/components/filesets/filesetNames';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { dataset } from '@studio/mocks/datasets';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -259,87 +258,13 @@ describe('FilesetNewRoute', () => {
       expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeEnabled();
     });
 
-    /** Answers single-fileset lookups as found only for `taken`, and 404 otherwise. */
-    const retrieveFinds = (taken: string[] | (() => string[])) =>
-      http.get(FILESET_URL, ({ params }) =>
-        (typeof taken === 'function' ? taken() : taken).includes(String(params.name))
-          ? HttpResponse.json({ ...dataset, name: String(params.name) })
-          : HttpResponse.json({ detail: 'not found' }, { status: 404 })
-      );
-
-    it('imports a sample under the first free name when its usual name is taken', async () => {
-      server.use(retrieveFinds([SAMPLE_NAME, `${SAMPLE_NAME}-2`]));
-      const user = userEvent.setup();
-      renderRoute();
-
-      await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
-
-      expect(await screen.findByText(/^Imports as/)).toHaveTextContent(
-        `Imports as ${SAMPLE_NAME}-3 in the default workspace`
-      );
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeEnabled()
-      );
-    });
-
-    it('says why a sample cannot be imported when every copy of its name is taken', async () => {
+    it('flags a sample whose name is already taken and blocks submit', async () => {
       server.use(
-        retrieveFinds([
-          SAMPLE_NAME,
-          ...Array.from(
-            { length: FILESET_NAME_SUFFIX_LIMIT - 1 },
-            (_, i) => `${SAMPLE_NAME}-${i + 2}`
-          ),
-        ])
-      );
-      const user = userEvent.setup();
-      renderRoute();
-
-      await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
-
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        `${SAMPLE_NAME} and every copy up to ${SAMPLE_NAME}-${FILESET_NAME_SUFFIX_LIMIT} already exist in the default workspace. Delete one of them to import this sample again.`
-      );
-      expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeDisabled();
-    });
-
-    it('offers a retry when the sample name lookup fails', async () => {
-      let lookupFails = true;
-      server.use(
-        http.get(FILESET_URL, () =>
-          lookupFails
-            ? HttpResponse.json({ detail: 'unavailable' }, { status: 503 })
-            : HttpResponse.json({ detail: 'not found' }, { status: 404 })
-        )
-      );
-      const user = userEvent.setup();
-      renderRoute();
-
-      await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
-
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        "Couldn't check for existing sample datasets."
-      );
-      expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeDisabled();
-
-      lookupFails = false;
-      await user.click(screen.getByRole('button', { name: 'Retry' }));
-
-      expect(await screen.findByText(/^Imports as/)).toHaveTextContent(
-        `Imports as ${SAMPLE_NAME} in the default workspace`
-      );
-    });
-
-    it('moves a sample to the next free name when another create takes its name', async () => {
-      // The lookup finds the name free, then the live check sees a create raced it.
-      let raced = false;
-      server.use(
-        retrieveFinds(() => (raced ? [SAMPLE_NAME] : [])),
         http.get(FILESETS_URL, ({ request }) => {
-          raced = new URL(request.url).searchParams.get('filter[name]') === SAMPLE_NAME;
+          const taken = new URL(request.url).searchParams.get('filter[name]') === SAMPLE_NAME;
           return HttpResponse.json({
-            data: raced ? [{ ...dataset, name: SAMPLE_NAME }] : [],
-            pagination: { total_results: raced ? 1 : 0 },
+            data: taken ? [{ ...dataset, name: SAMPLE_NAME }] : [],
+            pagination: { total_results: taken ? 1 : 0 },
           });
         })
       );
@@ -348,14 +273,10 @@ describe('FilesetNewRoute', () => {
 
       await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
 
-      await waitFor(() =>
-        expect(screen.getByText(/^Imports as/)).toHaveTextContent(
-          `Imports as ${SAMPLE_NAME}-2 in the default workspace`
-        )
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        `A fileset named ${SAMPLE_NAME} already exists in the default workspace`
       );
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeEnabled()
-      );
+      expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeDisabled();
     });
 
     it('puts a 409 on submit on the name field and rechecks the name', async () => {

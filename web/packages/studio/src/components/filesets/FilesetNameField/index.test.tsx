@@ -13,7 +13,6 @@ vi.mock('@nemo/sdk/generated/platform/files');
 
 const mockListFilesets = vi.mocked(useFilesListFilesets);
 
-/** The list check finds exactly the names in `taken`. */
 const takenNames = (...taken: string[]) =>
   mockListFilesets.mockImplementation(
     (_workspace, params) =>

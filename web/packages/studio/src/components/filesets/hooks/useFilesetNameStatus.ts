@@ -64,7 +64,6 @@ interface UseWatchedFilesetNameStatusOptions<T extends FieldValues> {
   name: Path<T>;
   workspace: string;
   ownName?: string;
-  /** Receives each new status, for the form to block submit on a conflict. */
   onStatusChange: (status: NameCheckStatus) => void;
 }
 

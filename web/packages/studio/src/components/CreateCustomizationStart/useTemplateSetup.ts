@@ -15,11 +15,11 @@ import {
 } from '@nemo/sdk/generated/platform/models';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import {
+  findAvailableFilesetName,
   preflightConvertedFileset,
   preflightSourceFileset,
   type TemplateFilesetConflict,
 } from '@studio/components/CreateCustomizationStart/templatePreflight';
-import { findAvailableFilesetName } from '@studio/components/filesets/filesetNames';
 import { useDownloadFileHead } from '@studio/components/filesets/hooks/useDownloadFileHead';
 import type { CustomizationTemplate } from '@studio/constants/customizationTemplates';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';

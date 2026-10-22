@@ -44,7 +44,6 @@ interface UseCreateFilesetParams {
   activeTab: DatasetType;
   storageTab: 'local' | 'external';
   hasValidationErrors: boolean;
-  /** The name's uniqueness check found a fileset already using it. */
   nameTaken: boolean;
   getValues: UseFormGetValues<DatasetFormFields>;
   setError: UseFormSetError<DatasetFormFields>;
@@ -212,7 +211,7 @@ export function useCreateFileset({
         } catch (err) {
           setIsSubmitPending(false);
           // The name check can lose a race with another create. The sample tab has no name
-          // field to put the error on, so it toasts; the recheck then moves it to a free name.
+          // field to put the error on, so it toasts; the recheck then flags the name there.
           if (isConflictError(err)) {
             void invalidateFilesetNameCheck(queryClient, workspace, createPayload.name);
             const message = filesetNameTakenMessage(createPayload.name, workspace);

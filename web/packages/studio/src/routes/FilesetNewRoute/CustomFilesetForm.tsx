@@ -4,7 +4,7 @@
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import type { DatasetQualityReport } from '@nemo/common/src/utils/datasetQuality';
+import { type DatasetQualityReport } from '@nemo/common/src/utils/datasetQuality';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import {
   Flex,

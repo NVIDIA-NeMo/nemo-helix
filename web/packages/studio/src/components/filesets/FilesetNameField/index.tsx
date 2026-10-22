@@ -13,7 +13,6 @@ interface FilesetNameFieldProps<T extends FieldValues> {
   workspace: string;
   /** A fileset this form already created, which the check must not count as a conflict. */
   ownName?: string;
-  /** Receives the uniqueness check's status, for the form to block submit on a conflict. */
   onStatusChange: (status: NameCheckStatus) => void;
   label?: string;
   disabled?: boolean;
