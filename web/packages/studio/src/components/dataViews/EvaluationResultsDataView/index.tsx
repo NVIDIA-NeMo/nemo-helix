@@ -50,8 +50,17 @@ const NOT_AGENT_TRIGGERED: FilterTree<EvaluateJobsListFilter> = {
   ],
 };
 
-const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobsListFilter => {
+const buildFilter = (
+  apiFilter: ApiFilter<EvaluateJobsListFilter>,
+  targetModelName?: string
+): EvaluateJobsListFilter => {
   const conditions: FilterTree<EvaluateJobsListFilter>[] = [NOT_AGENT_TRIGGERED];
+  // The wizard writes the bare entity name to `spec.target.name`, so that is
+  // what a model-scoped list matches on -- the gateway URL alongside it also
+  // carries the name, but only as one segment of a path.
+  if (targetModelName) {
+    conditions.push({ 'spec.target.name': { $eq: targetModelName } });
+  }
   if (apiFilter.filter && Object.keys(apiFilter.filter).length > 0) {
     conditions.push(apiFilter.filter);
   }
@@ -63,7 +72,23 @@ const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobs
   );
 };
 
-export const EvaluationResultsDataView = () => {
+export interface EvaluationResultsDataViewProps {
+  /**
+   * Narrows the list to runs that evaluated this model, named as the bare model
+   * entity. Omitted lists every model evaluation in the workspace.
+   */
+  targetModelName?: string;
+  /**
+   * Create action offered by the first-use empty state. Omitted renders the
+   * state without one, which is what the workspace-wide list does today.
+   */
+  onCreate?: () => void;
+}
+
+export const EvaluationResultsDataView = ({
+  targetModelName,
+  onCreate,
+}: EvaluationResultsDataViewProps = {}) => {
   const workspace = useWorkspaceFromPath();
   const openRow = useRowNavigation();
   const queryClient = useQueryClient();
@@ -82,7 +107,7 @@ export const EvaluationResultsDataView = () => {
       page: dataViewState.pagination.state.pageIndex + 1,
       page_size: dataViewState.pagination.state.pageSize,
       sort: getSortParamWithWhitelist(dataViewState.sorting.state, SORTABLE_FIELDS, DEFAULT_SORT),
-      filter: buildFilter(dataViewState.apiFilter),
+      filter: buildFilter(dataViewState.apiFilter, targetModelName),
     },
     {
       query: {
@@ -190,7 +215,11 @@ export const EvaluationResultsDataView = () => {
         DataViewTableContent: {
           renderEmptyState: () =>
             isInitialEmpty ? (
-              <EntityEmptyState entity="evaluationResults" variant="first-use" />
+              <EntityEmptyState
+                entity="evaluationResults"
+                variant="first-use"
+                onCreate={onCreate}
+              />
             ) : (
               <EntityEmptyState
                 entity="evaluationResults"

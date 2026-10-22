@@ -20,6 +20,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
+import { EvaluationResultsDataView } from '@studio/components/dataViews/EvaluationResultsDataView';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChatTab } from '@studio/components/ModelChatTab';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -33,18 +34,20 @@ import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
 import {
   getCustomizationJobListRoute,
+  getEvaluationNewRoute,
   getModelDetailRoute,
   getWorkspaceCustomizationJobDetailsRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 
 export const ModelDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { modelName } = useRequiredPathParams([ROUTE_PARAMS.modelName]);
   const { [ROUTE_PARAMS.adapterName]: adapterName } = useParams();
   const { getQueryParam, setQueryParam } = useQueryParams();
+  const navigate = useNavigate();
 
   const lineage = useModelLineage(workspace, modelName, adapterName);
   const { model, adapter, job } = lineage;
@@ -67,9 +70,15 @@ export const ModelDetailRoute: FC = () => {
 
   // The job tabs stay visible but disabled while the lookup runs, and go away if there is no job.
   const hasJobTabs = job.isLoading || Boolean(job.jobName);
+  // Models only. An evaluation targets a model endpoint by name, and the wizard's
+  // picker keeps only the model half of a selection -- so an adapter cannot be
+  // evaluated on its own today, and a tab on one would list its base model's runs
+  // under the adapter's name.
+  const hasEvaluationsTab = !adapterName;
   const tabs: { value: ModelDetailTab; label: string; disabled?: boolean }[] = [
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
+    ...(hasEvaluationsTab ? [{ value: ModelDetailTab.Evaluations, label: 'Evaluations' }] : []),
     ...(hasJobTabs
       ? [
           { value: ModelDetailTab.Training, label: 'Training', disabled: job.isLoading },
@@ -107,6 +116,27 @@ export const ModelDetailRoute: FC = () => {
     );
   }
 
+  // The wizard takes a model ref, and the model's own workspace is the one that
+  // resolves -- not the path's, when a model is shown from another workspace.
+  const runEvaluationRoute = getEvaluationNewRoute(workspace, {
+    model: `${model.workspace ?? workspace}/${model.name}`,
+  });
+
+  // One action, chosen by the open tab -- the header is shared by every tab, so
+  // nothing is offered that does not belong to what is on screen.
+  const headerAction =
+    selectedTab === ModelDetailTab.Evaluations ? (
+      <Button color="brand" asChild>
+        <Link to={runEvaluationRoute}>Run Evaluation</Link>
+      </Button>
+    ) : isJobTab && job.jobName ? (
+      <Button color="brand" asChild>
+        <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
+          Open Job
+        </Link>
+      </Button>
+    ) : undefined;
+
   const finetuningType = adapter?.finetuning_type ?? model.finetuning_type;
   const tags = [
     finetuningType ? formatFinetuningType(finetuningType) : undefined,
@@ -130,16 +160,7 @@ export const ModelDetailRoute: FC = () => {
             </Flex>
           }
           slotDescription={(adapter ?? model).description}
-          slotActions={
-            isJobTab &&
-            job.jobName && (
-              <Button color="brand" asChild>
-                <Link to={getWorkspaceCustomizationJobDetailsRoute(job.workspace, job.jobName)}>
-                  Open Job
-                </Link>
-              </Button>
-            )
-          }
+          slotActions={headerAction}
         />
 
         <TabsRoot
@@ -167,6 +188,18 @@ export const ModelDetailRoute: FC = () => {
               <ModelChatTab model={model} adapter={adapter} />
             </Stack>
           </TabsContent>
+
+          {hasEvaluationsTab && (
+            <TabsContent
+              value={ModelDetailTab.Evaluations}
+              className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
+            >
+              <EvaluationResultsDataView
+                targetModelName={model.name}
+                onCreate={() => navigate(runEvaluationRoute)}
+              />
+            </TabsContent>
+          )}
 
           {job.jobName && (
             <>

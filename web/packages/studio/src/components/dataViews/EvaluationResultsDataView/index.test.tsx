@@ -8,6 +8,7 @@ import { server } from '@studio/mocks/node';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import type { ComponentProps } from 'react';
 
 vi.mock('use-debounce', () => ({
   useDebounce: (value: unknown) => [value, { cancel: () => {}, flush: () => {} }],
@@ -37,10 +38,15 @@ const NOT_AGENT_TRIGGERED = {
   ],
 };
 
-const renderDataView = () =>
+const renderDataView = (props: ComponentProps<typeof EvaluationResultsDataView> = {}) =>
   renderRoute(undefined, {
     history: `/workspaces/${WORKSPACE}/evaluation/results`,
-    routes: [{ path: ROUTES.workspace.evaluationResults, element: <EvaluationResultsDataView /> }],
+    routes: [
+      {
+        path: ROUTES.workspace.evaluationResults,
+        element: <EvaluationResultsDataView {...props} />,
+      },
+    ],
   });
 
 describe('EvaluationResultsDataView filter', () => {
@@ -65,6 +71,15 @@ describe('EvaluationResultsDataView filter', () => {
 
     await waitFor(() => expect(sentFilters.length).toBeGreaterThan(0));
     expect(JSON.parse(sentFilters[0] as string)).toEqual(NOT_AGENT_TRIGGERED);
+  });
+
+  it('narrows to one model when scoped to a target', async () => {
+    renderDataView({ targetModelName: 'my-model' });
+
+    await waitFor(() => expect(sentFilters.length).toBeGreaterThan(0));
+    expect(JSON.parse(sentFilters[0] as string)).toEqual({
+      $and: [NOT_AGENT_TRIGGERED, { 'spec.target.name': { $eq: 'my-model' } }],
+    });
   });
 
   it('keeps the exclusion when the user searches by name', async () => {

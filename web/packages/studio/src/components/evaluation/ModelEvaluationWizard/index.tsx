@@ -250,6 +250,11 @@ const WizardBody: FC<{
 
 export interface ModelEvaluationWizardProps {
   workspace: string;
+  /**
+   * Model to evaluate, pre-selected on the last step. Set when the wizard is
+   * opened from a model's own page, where the answer is already known.
+   */
+  initialModel?: string;
 }
 
 /**
@@ -259,13 +264,18 @@ export interface ModelEvaluationWizardProps {
  * saved one. Authoring walks through the configuration and its metrics before
  * the model is picked; reusing skips straight to the model.
  */
-export const ModelEvaluationWizard: FC<ModelEvaluationWizardProps> = ({ workspace }) => {
+export const ModelEvaluationWizard: FC<ModelEvaluationWizardProps> = ({
+  workspace,
+  initialModel,
+}) => {
   const [step, setStep] = useState<WizardStep>('start');
   /** Wizard navigation, not part of the spec: known before a configuration is
    *  named, so it cannot live on `configSource`. */
   const [mode, setMode] = useState<string>(NEW_CONFIG);
   const form = useForm<EvaluationFormValues>({
-    defaultValues: EVALUATION_FORM_DEFAULTS,
+    // A seeded model survives the resets in `StartStep` and `SavedConfigLoader`:
+    // both carry `model` over from the current values rather than defaulting it.
+    defaultValues: { ...EVALUATION_FORM_DEFAULTS, model: initialModel ?? '' },
     resolver: zodResolver(evaluationSchema),
     mode: 'onChange',
   });
