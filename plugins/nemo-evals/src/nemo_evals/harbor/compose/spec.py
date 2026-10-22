@@ -29,9 +29,6 @@ from pydantic import ValidationError
 MIN_READY_TIMEOUT_SEC = 300
 MAX_READY_TIMEOUT_SEC = 3600
 
-# Names that image planning gives to images besides ``main``'s, so a service can't take them.
-_IMAGE_ROLE_NAMES = frozenset({"verifier"})
-
 # The digest that stands in for a built service's image before the image exists.
 _PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 
@@ -128,7 +125,7 @@ def compose_provenance(services: ComposeServices) -> dict[str, str]:
 
 
 def _check_reserved(task: ComposeTask) -> None:
-    """Raise if a service exposes a port the sandbox pod uses, or takes a name the pod or image planning uses."""
+    """Raise if a service exposes a port the sandbox pod uses, or takes the name of one of the pod's containers."""
     reserved_ports = [
         f"{name}.{port.source} = {port.port}"
         for name, service in task.services.items()
@@ -143,10 +140,10 @@ def _check_reserved(task: ComposeTask) -> None:
             paths=tuple(reserved_ports),
         )
 
-    if reserved_names := [name for name in task.services if name in RESERVED_NAMES | _IMAGE_ROLE_NAMES]:
+    if reserved_names := [name for name in task.services if name in RESERVED_NAMES]:
         raise ComposeError(
             "compose_reserved_name",
-            "these names are reserved by the sandbox pod and the run's images",
+            "these names are reserved by the sandbox pod",
             compose_path=task.compose_path,
             paths=tuple(reserved_names),
         )

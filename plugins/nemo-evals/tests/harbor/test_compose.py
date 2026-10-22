@@ -1485,14 +1485,10 @@ def test_a_dotenv_value_quoted_across_lines_is_refused(tmp_path: Path) -> None:
         parse_compose(task)
 
 
-def test_a_service_named_like_the_separate_verifiers_image_role_is_refused(tmp_path: Path) -> None:
-    task = _parsed(tmp_path, "services:\n  verifier:\n    image: redis\n")
-
-    with pytest.raises(ComposeError) as caught:
-        to_compose_services(task)
-
-    assert caught.value.code == "compose_reserved_name"
-    assert caught.value.paths == ("verifier",)
+def test_a_service_may_be_named_verifier(tmp_path: Path) -> None:
+    """kumo's game server is a service named `verifier`; the agent reaches it by that name."""
+    spec = _spec(tmp_path, "services:\n  verifier:\n    image: redis\n")
+    assert [service["name"] for service in spec["services"]] == ["verifier"]
 
 
 @pytest.mark.parametrize("entrypoint", ["[]", "''"])
