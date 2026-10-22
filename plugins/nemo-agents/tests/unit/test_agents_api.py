@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -553,3 +554,173 @@ class TestDeleteAgent:
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
         assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# GET /agents/{name}/tools — MCP tool listing
+# ---------------------------------------------------------------------------
+
+_TOOLS_URL = "/apis/agents/v2/workspaces/default/agents/calc/tools"
+
+
+def _mcp_agent(servers: dict[str, Any] | None = None) -> Agent:
+    config = _fabric_agent_config()
+    config["mcp"] = {"servers": servers or {"calculator": {"transport": "stdio", "url": "calculator-server"}}}
+    return _make_agent("calc", config=config, config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+
+
+def _running_deployment(name: str = "calc-dep") -> AgentDeployment:
+    dep = _make_deployment(name=name, status="running")
+    dep.endpoint = "http://127.0.0.1:9000"
+    return dep
+
+
+@pytest.fixture
+def runtime_requests(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    """Route the handler's httpx client to a fake runtime that reports one calculator tool."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "servers": [
+                    {
+                        "name": "calculator",
+                        "transport": "stdio",
+                        "status": "discovered",
+                        "tools": [{"name": "add", "description": "Add numbers.", "enabled": True}],
+                    }
+                ]
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        agents_router_module.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    return requests
+
+
+class TestListAgentTools:
+    def test_returns_runtime_tools_in_one_call(
+        self, client: TestClient, mock_entity_client: AsyncMock, runtime_requests: list[httpx.Request]
+    ) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_mcp_agent())
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_deployment()]))
+
+        resp = client.get(_TOOLS_URL)
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "deployment": "calc-dep",
+            "servers": [
+                {
+                    "name": "calculator",
+                    "transport": "stdio",
+                    "status": "discovered",
+                    "error": None,
+                    "tools": [
+                        {
+                            "name": "add",
+                            "title": None,
+                            "description": "Add numbers.",
+                            "input_schema": {},
+                            "enabled": True,
+                        }
+                    ],
+                }
+            ],
+        }
+        assert [str(request.url) for request in runtime_requests] == ["http://127.0.0.1:9000/v1/tools"]
+
+    def test_refresh_is_forwarded_to_runtime(
+        self, client: TestClient, mock_entity_client: AsyncMock, runtime_requests: list[httpx.Request]
+    ) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_mcp_agent())
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_deployment()]))
+
+        client.get(_TOOLS_URL, params={"refresh": "true"})
+
+        assert [str(request.url) for request in runtime_requests] == ["http://127.0.0.1:9000/v1/tools?refresh=true"]
+
+    def test_declared_servers_are_not_deployed_without_a_running_deployment(
+        self, client: TestClient, mock_entity_client: AsyncMock, runtime_requests: list[httpx.Request]
+    ) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_mcp_agent())
+        mock_entity_client.list = AsyncMock(
+            return_value=_list_response(
+                [_make_deployment(status="failed"), _make_deployment(name="other", agent="other", status="running")]
+            )
+        )
+
+        resp = client.get(_TOOLS_URL)
+
+        assert resp.status_code == 200
+        assert resp.json()["deployment"] is None
+        assert [(s["name"], s["status"], s["tools"]) for s in resp.json()["servers"]] == [
+            ("calculator", "not_deployed", [])
+        ]
+        assert runtime_requests == []
+
+    def test_agent_without_mcp_servers_skips_the_runtime(
+        self, client: TestClient, mock_entity_client: AsyncMock, runtime_requests: list[httpx.Request]
+    ) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_deployment()]))
+
+        resp = client.get(_TOOLS_URL)
+
+        assert resp.json() == {"deployment": None, "servers": []}
+        assert runtime_requests == []
+
+    @pytest.mark.parametrize(
+        ("status_code", "error"),
+        [
+            (404, "This deployment predates tool listing; redeploy the agent to list its tools."),
+            (502, "Deployment 'calc-dep' did not report its tools."),
+        ],
+    )
+    def test_runtime_failure_marks_every_declared_server_errored(
+        self,
+        client: TestClient,
+        mock_entity_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+        status_code: int,
+        error: str,
+    ) -> None:
+        real_client = httpx.AsyncClient
+        monkeypatch.setattr(
+            agents_router_module.httpx,
+            "AsyncClient",
+            lambda **kwargs: real_client(
+                transport=httpx.MockTransport(lambda request: httpx.Response(status_code)), **kwargs
+            ),
+        )
+        mock_entity_client.get = AsyncMock(
+            return_value=_mcp_agent(
+                {
+                    "calculator": {"transport": "stdio", "url": "calculator-server"},
+                    "search": {"transport": "streamable-http", "url": "http://search"},
+                }
+            )
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_deployment()]))
+
+        resp = client.get(_TOOLS_URL)
+
+        assert resp.status_code == 200
+        assert [(s["name"], s["transport"], s["status"], s["error"]) for s in resp.json()["servers"]] == [
+            ("calculator", "stdio", "error", error),
+            ("search", "streamable-http", "error", error),
+        ]
+
+    def test_unknown_agent_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(side_effect=NemoEntityNotFoundError("not found"))
+
+        resp = client.get(_TOOLS_URL)
+
+        assert resp.status_code == 404

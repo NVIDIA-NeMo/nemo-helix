@@ -20,6 +20,8 @@ Naming conventions:
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from nemo_agents_plugin.entities import (
     Agent,
     AgentComputeSpec,
@@ -115,6 +117,50 @@ class DeploymentModeList(BaseModel):
     """Response for ``GET /v2/workspaces/{workspace}/deployment-modes``."""
 
     data: list[DeploymentModeAvailability]
+
+
+# ---------------------------------------------------------------------------
+# Agent tools — what an agent's MCP servers expose
+# ---------------------------------------------------------------------------
+
+McpServerToolsStatus = Literal["discovered", "error", "not_deployed"]
+
+
+class AgentTool(BaseModel):
+    """One tool an MCP server reports through ``tools/list``."""
+
+    name: str
+    title: str | None = Field(default=None, description="Human-readable display name, when the server sets one.")
+    description: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict, description="JSON Schema for the tool's arguments.")
+    enabled: bool = Field(
+        description="False when the agent's allowed/blocked tool policy hides this tool from the model.",
+    )
+
+
+class AgentMcpServerTools(BaseModel):
+    """The tools one declared MCP server exposes, or why they could not be listed."""
+
+    name: str = Field(description="Server name, as declared under the agent config's ``mcp.servers``.")
+    transport: str
+    status: McpServerToolsStatus = Field(
+        description=(
+            "``discovered`` when ``tools`` came from the running server; ``error`` when listing failed "
+            "(see ``error``); ``not_deployed`` when the agent has no running deployment to ask."
+        ),
+    )
+    error: str | None = None
+    tools: list[AgentTool] = Field(default_factory=list)
+
+
+class AgentToolsResponse(BaseModel):
+    """Response for ``GET /v2/workspaces/{workspace}/agents/{name}/tools``."""
+
+    deployment: str | None = Field(
+        default=None,
+        description="The running deployment the tools were listed from; null when none is running.",
+    )
+    servers: list[AgentMcpServerTools]
 
 
 # ---------------------------------------------------------------------------

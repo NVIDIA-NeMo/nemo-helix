@@ -33,6 +33,8 @@ from nemo_agents_plugin.fabric.session_manager import (
     FabricSessionStopError,
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
+from nemo_agents_plugin.fabric.tool_discovery import McpToolCatalog
+from nemo_agents_plugin.schema import AgentMcpServerTools
 from starlette.requests import ClientDisconnect
 
 
@@ -1060,3 +1062,31 @@ async def test_idle_cleanup_runs_periodically_until_shutdown() -> None:
     await cleanup
 
     assert cleanup_calls == [30.0]
+
+
+def test_list_tools_returns_catalog_servers(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_agent_config(tmp_path)
+    app = create_fabric_serving_app(config_path)
+    refresh_calls: list[bool] = []
+
+    async def list_servers(*, refresh: bool = False) -> list[AgentMcpServerTools]:
+        refresh_calls.append(refresh)
+        return [AgentMcpServerTools(name="calculator", transport="stdio", status="discovered")]
+
+    with TestClient(app) as client:
+        assert isinstance(app.state.tool_catalog, McpToolCatalog)
+        monkeypatch.setattr(app.state.tool_catalog, "list_servers", list_servers)
+        response = client.get("/v1/tools")
+        refreshed = client.get("/v1/tools", params={"refresh": "true"})
+
+    assert response.status_code == 200
+    assert refreshed.status_code == 200
+    assert response.json() == {
+        "deployment": None,
+        "servers": [{"name": "calculator", "transport": "stdio", "status": "discovered", "error": None, "tools": []}],
+    }
+    assert refresh_calls == [False, True]

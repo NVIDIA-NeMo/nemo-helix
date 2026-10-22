@@ -186,6 +186,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/agents/{name}/tools:
+    get:
+      tags:
+      - Agents
+      summary: List Agent Tools
+      description: 'List the tools each of the agent''s MCP servers exposes, in one
+        call.
+
+
+        The agent''s first running deployment lists every declared server concurrently
+        and caches the
+
+        result, so this costs one runtime round-trip however many servers the agent
+        declares. Without a
+
+        running deployment, the declared servers come back as ``not_deployed`` with
+        no tools.'
+      operationId: list_agent_tools_apis_agents_v2_workspaces__workspace__agents__name__tools_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: refresh
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Re-list every server instead of using the runtime's cache.
+          default: false
+          title: Refresh
+        description: Re-list every server instead of using the runtime's cache.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentToolsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/compute-specs:
     post:
       tags:
@@ -3382,6 +3435,41 @@ components:
         \ than this model narrowing them for everyone. The\n``agents.execute`` job,\
         \ for example, accepts only ``nemo-agents-spec-v1``\nand rejects a config\
         \ that is not a valid agent spec."
+    AgentMcpServerTools:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Server name, as declared under the agent config's ``mcp.servers``.
+        transport:
+          type: string
+          title: Transport
+        status:
+          type: string
+          enum:
+          - discovered
+          - error
+          - not_deployed
+          title: Status
+          description: '``discovered`` when ``tools`` came from the running server;
+            ``error`` when listing failed (see ``error``); ``not_deployed`` when the
+            agent has no running deployment to ask.'
+        error:
+          title: Error
+          type: string
+        tools:
+          items:
+            $ref: '#/components/schemas/AgentTool'
+          type: array
+          title: Tools
+      type: object
+      required:
+      - name
+      - transport
+      - status
+      title: AgentMcpServerTools
+      description: The tools one declared MCP server exposes, or why they could not
+        be listed.
     AgentSession:
       properties:
         name:
@@ -3486,6 +3574,51 @@ components:
         The session entity owns Platform-level conversation identity only. Live
 
         harness state remains process-local to the deployment''s serving runtime.'
+    AgentTool:
+      properties:
+        name:
+          type: string
+          title: Name
+        title:
+          title: Title
+          description: Human-readable display name, when the server sets one.
+          type: string
+        description:
+          title: Description
+          type: string
+        input_schema:
+          additionalProperties: true
+          type: object
+          title: Input Schema
+          description: JSON Schema for the tool's arguments.
+        enabled:
+          type: boolean
+          title: Enabled
+          description: False when the agent's allowed/blocked tool policy hides this
+            tool from the model.
+      type: object
+      required:
+      - name
+      - enabled
+      title: AgentTool
+      description: One tool an MCP server reports through ``tools/list``.
+    AgentToolsResponse:
+      properties:
+        deployment:
+          title: Deployment
+          description: The running deployment the tools were listed from; null when
+            none is running.
+          type: string
+        servers:
+          items:
+            $ref: '#/components/schemas/AgentMcpServerTools'
+          type: array
+          title: Servers
+      type: object
+      required:
+      - servers
+      title: AgentToolsResponse
+      description: Response for ``GET /v2/workspaces/{workspace}/agents/{name}/tools``.
     AgentWorkdir:
       properties:
         base_workdir:
