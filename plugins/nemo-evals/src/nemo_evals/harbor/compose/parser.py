@@ -121,7 +121,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
     declared_volumes = _declared_volumes(resolved.document, problems)
     for name in sorted(declared_volumes & {volume for _path, volume in HARBOR_LOG_DIRECTORIES.values()}):
         problems.invalid(f"volumes.{name}", "this name is reserved for Harbor's log directories")
-    _check_networks(resolved.document, problems)
+    _check_networks(resolved.document, {MAIN_SERVICE: resolved.main, **resolved.services}, problems)
 
     # Parse every service before raising, so a task with several problems reports all of them.
     service_parser = ServiceParser(task_dir, declared_volumes, problems)
@@ -248,19 +248,16 @@ class ServiceParser:
         )
 
     def _check_keys(self, name: str, raw_service: Mapping[str, Any], allowed_keys: frozenset[str]) -> None:
-        """Record every key of service ``name`` that a pod can't honor: unknown keys, other networks, other network modes."""
+        """Record every key of service ``name`` that a pod can't honor: unknown keys and other network modes.
+
+        Its ``networks`` are checked across all services, by :func:`_check_networks`.
+        """
         for key in raw_service:
             if key not in allowed_keys and key not in _NO_EFFECT_KEYS and not str(key).startswith("x-"):
                 self._problems.unsupported(f"services.{name}.{key}")
 
-        network_mode = raw_service.get("network_mode")
-        if network_mode is not None and not (isinstance(network_mode, str) and network_mode.startswith("service:")):
+        if _shares_a_network_namespace(raw_service) is False:
             self._problems.unsupported(f"services.{name}.network_mode")
-
-        networks = raw_service.get("networks")
-        network_names = {str(network) for network in networks} if isinstance(networks, (list, dict)) else set()
-        if network_names - {"default"}:
-            self._problems.unsupported(f"services.{name}.networks")
 
 
 def _declared_volumes(document: Mapping[str, Any], problems: ComposeProblems) -> set[str]:
@@ -278,11 +275,86 @@ def _declared_volumes(document: Mapping[str, Any], problems: ComposeProblems) ->
     return {str(name) for name in volumes}
 
 
-def _check_networks(document: Mapping[str, Any], problems: ComposeProblems) -> None:
-    """Record any top-level network besides the default: a pod has one network."""
-    networks = document.get("networks")
-    if isinstance(networks, dict) and set(networks) - {"default"}:
-        problems.unsupported("networks")
+def _shares_a_network_namespace(raw_service: Mapping[str, Any]) -> bool | None:
+    """Whether a service sets ``network_mode: service:<other>``; None without a ``network_mode``, False for any other.
+
+    Sharing another service's network namespace is what every container in a pod already does.
+    """
+    network_mode = raw_service.get("network_mode")
+    if network_mode is None:
+        return None
+    return isinstance(network_mode, str) and network_mode.startswith("service:")
+
+
+def _check_networks(
+    document: Mapping[str, Any], raw_services: Mapping[str, Mapping[str, Any]], problems: ComposeProblems
+) -> None:
+    """Record any use of networks that a pod, which has exactly one network, couldn't reproduce.
+
+    Every container in a pod shares one network, so a file is accepted only when Compose would also connect every
+    service to every other: when they all, ``main`` included, join the same set of networks, and those networks are
+    plain bridges. Separate network sets would isolate services from each other, and per-service settings (a fixed
+    ``ipv4_address``, extra ``aliases``) have no meaning in a pod, so both are refused.
+
+    ``raw_services`` holds every service by name, ``main`` included.
+    """
+    declared = document.get("networks") or {}
+    if not isinstance(declared, dict):
+        problems.invalid("networks", "expected a mapping")
+        declared = {}
+
+    for network, options in declared.items():
+        if options is None:
+            continue
+        if not isinstance(options, dict):
+            problems.invalid(f"networks.{network}", "expected a mapping")
+            continue
+        for option, value in options.items():
+            # A plain bridge is what a pod's one network behaves as; anything else (a fixed subnet, an internal-only
+            # network, an external one) changes what the services can reach.
+            if (option, value) not in (("driver", "bridge"), ("internal", False)) and option != "name":
+                problems.unsupported(f"networks.{network}.{option}")
+
+    network_sets: dict[str, frozenset[str]] = {}
+    for name, raw_service in raw_services.items():
+        # A service in another's network namespace has no networks of its own.
+        if _shares_a_network_namespace(raw_service):
+            continue
+        networks = _service_networks(name, raw_service.get("networks"), problems)
+        for network in networks - {"default"} - set(declared):
+            problems.invalid(f"services.{name}.networks", f"network {network!r} is not declared")
+        network_sets[name] = networks
+
+    reference = network_sets.get(MAIN_SERVICE, frozenset({"default"}))
+    for name, networks in network_sets.items():
+        if networks != reference:
+            problems.unsupported(f"services.{name}.networks: not the same networks as main")
+
+
+def _service_networks(name: str, value: Any, problems: ComposeProblems) -> frozenset[str]:
+    """Read the networks a service joins: ``default`` when it names none, as in Compose.
+
+    ``[backend]`` and ``{backend: {}}`` both give ``{"backend"}``. A per-network setting such as ``ipv4_address`` is
+    recorded as unsupported.
+    """
+    path = f"services.{name}.networks"
+    if value is None:
+        return frozenset({"default"})
+    if isinstance(value, dict):
+        for network, settings in value.items():
+            if settings is None:
+                continue
+            if not isinstance(settings, dict):
+                problems.invalid(f"{path}.{network}", "expected a mapping")
+                continue
+            for setting in settings:
+                problems.unsupported(f"{path}.{network}.{setting}")
+        return frozenset(str(network) for network in value)
+    if isinstance(value, list) and all(isinstance(network, str) for network in value):
+        return frozenset(value)
+
+    problems.unsupported(path)
+    return frozenset()
 
 
 def _share_harbor_log_mounts(

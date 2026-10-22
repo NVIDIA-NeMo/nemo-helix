@@ -1054,7 +1054,7 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
             image: redis
             build: {context: ., args: {A: "${NOPE}"}, ssh: [default]}
         secrets: {s: {file: ./s}}
-        networks: {backend: {}}
+        networks: {backend: {ipam: {config: []}}}
         """,
     )
 
@@ -1076,7 +1076,7 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
         "services.a.deploy.replicas",
         "services.b.build.ssh",
         "secrets",
-        "networks",
+        "networks.backend.ipam",
     }
 
 
@@ -1219,6 +1219,78 @@ def test_a_file_nested_too_deeply_is_refused(tmp_path: Path) -> None:
 )
 def test_malformed_values_are_a_typed_error_not_a_crash(tmp_path: Path, compose: str) -> None:
     assert _error(tmp_path, compose).code == "compose_invalid"
+
+
+def test_networks_every_service_joins_are_accepted(tmp_path: Path) -> None:
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          main:
+            networks: [internal]
+          game:
+            image: redis
+            networks: {internal: {}}
+        networks:
+          internal: {driver: bridge, internal: false}
+        """,
+    )
+    assert [service["name"] for service in spec["services"]] == ["game"]
+
+
+def test_services_on_different_networks_are_unsupported(tmp_path: Path) -> None:
+    error = _error(
+        tmp_path,
+        """
+        services:
+          main:
+            networks: [outside]
+          bastion:
+            image: redis
+            networks: [outside, inside]
+          db:
+            image: redis
+            networks: [inside]
+        networks:
+          outside: {}
+          inside: {}
+        """,
+    )
+    assert error.code == "compose_unsupported"
+    assert set(error.paths) == {
+        "services.bastion.networks: not the same networks as main",
+        "services.db.networks: not the same networks as main",
+    }
+
+
+def test_fixed_addresses_and_network_options_are_unsupported(tmp_path: Path) -> None:
+    error = _error(
+        tmp_path,
+        """
+        services:
+          main:
+            networks: {corp: {ipv4_address: 10.0.0.2}}
+          a:
+            image: redis
+            networks: {corp: {aliases: [db]}}
+        networks:
+          corp:
+            internal: true
+            ipam: {config: [{subnet: 10.0.0.0/24}]}
+        """,
+    )
+    assert set(error.paths) == {
+        "services.main.networks.corp.ipv4_address",
+        "services.a.networks.corp.aliases",
+        "networks.corp.internal",
+        "networks.corp.ipam",
+    }
+
+
+def test_a_network_that_is_not_declared_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  main:\n    networks: [nope]\n  a:\n    image: redis\n    networks: [nope]\n")
+    assert error.code == "compose_invalid"
+    assert "network 'nope' is not declared" in error.detail
 
 
 def test_networks_that_are_not_names_are_unsupported_not_a_crash(tmp_path: Path) -> None:
