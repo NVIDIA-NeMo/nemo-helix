@@ -171,6 +171,27 @@ def test_result_json_keeps_the_recorded_duration_when_training_fails(
     assert written_duration(tmp_path) == 9.25
 
 
+def test_a_failure_reports_whether_a_rerun_would_repeat_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = _ScriptedRunner(
+        tmp_path,
+        duration=1.0,
+        compile_config=MagicMock,
+        train=MagicMock(side_effect=RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")),
+        backend=MagicMock(),
+    )
+    report_error = MagicMock()
+    monkeypatch.setattr(runner._progress, "report_error", report_error)
+
+    result = runner.run()
+
+    error_details, status_details = report_error.call_args.args
+    assert error_details["cause"] == "gpu_out_of_memory"
+    assert error_details["type"] == "GpuOutOfMemoryError"
+    assert status_details["resumable"] is False
+    assert status_details["non_resumable_reason"] == error_details["message"] == result.error_message
+
+
 def test_result_json_omits_duration_when_training_never_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

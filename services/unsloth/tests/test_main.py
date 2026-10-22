@@ -234,3 +234,56 @@ def test_a_paused_run_exits_with_the_pause_code(tmp_path: Path, monkeypatch: pyt
 
     assert main() == 75
     assert captured["checkpoint_path"] == str(storage / "training" / "checkpoints")
+
+
+class TestEntrypointFailureReport:
+    """A failed step reports its classified cause, so a rerun can warn when it would fail the same way."""
+
+    def _run_failing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: Exception, *, reporting_fails: bool = False
+    ) -> tuple[int, list]:
+        from nhx.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+        from nhx.unsloth.tasks.training import progress
+        from nhx.unsloth.tasks.training.backends import unsloth_sft
+
+        config_file = tmp_path / "step.json"
+        config_file.write_text(json.dumps(_step_config().model_dump(mode="json")))
+        monkeypatch.setenv("NEMO_JOB_STEP_CONFIG_FILE_PATH", str(config_file))
+        monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, str(tmp_path / "job"))
+
+        def _fail(*_args: object, **_kwargs: object) -> dict[str, object]:
+            raise error
+
+        reports: list = []
+
+        class _Reporter:
+            def __init__(self, _job_ctx: object) -> None:
+                if reporting_fails:
+                    raise RuntimeError("Jobs service unreachable")
+
+            def report_error(self, error_details: dict, status_details: dict) -> None:
+                reports.append((error_details, status_details))
+
+            def close(self) -> None: ...
+
+        monkeypatch.setattr(unsloth_sft, "train_sft", _fail)
+        monkeypatch.setattr(progress, "JobsServiceProgressReporter", _Reporter)
+        return main(), reports
+
+    def test_an_out_of_memory_failure_is_reported_as_not_rerunnable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rc, reports = self._run_failing(
+            tmp_path, monkeypatch, RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
+        )
+
+        assert rc == 1
+        ((error_details, status_details),) = reports
+        assert error_details["cause"] == "gpu_out_of_memory"
+        assert status_details["resumable"] is False
+
+    def test_a_failure_to_report_still_fails_the_step(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rc, reports = self._run_failing(tmp_path, monkeypatch, RuntimeError("boom"), reporting_fails=True)
+
+        assert rc == 1
+        assert reports == []

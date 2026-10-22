@@ -10,11 +10,6 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from nhx.automodel.tasks.training.errors.parser import (
-    MAX_OUTPUT_LINES,
-    parse_error_from_output,
-    read_subprocess_output,
-)
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
 from nhx.automodel.tasks.training.protocol import LibraryConfig
 from nhx.automodel.tasks.training.schemas import (
@@ -27,6 +22,8 @@ from nhx.automodel.tasks.training.utils import generate_torchrun_flags_from_env
 from nhx.customization_common.integrations import find_mlflow_run_id
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.errors.classifier import classify_output
+from nhx.customization_common.training.errors.parser import MAX_OUTPUT_LINES, read_subprocess_output
 from nhx.customization_common.training.nccl import get_nccl_ib_env
 
 from .checkpoints import (
@@ -167,8 +164,7 @@ class AutomodelBackend:
                     reader_thread.join(timeout=5)
 
                 if training_process.returncode != 0:
-                    parsed = parse_error_from_output(output_lines, training_process.returncode)
-                    raise parsed.to_exception()
+                    raise classify_output(output_lines, training_process.returncode)
         finally:
             # Covers timeout, nonzero exit, and SIGTERM.
             duration = progress.training_duration_seconds

@@ -30,12 +30,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
 
+from nhx.customization_common.training.errors.exceptions import format_exception_string
+from nhx.customization_common.training.errors.parser import MAX_OUTPUT_LINES, read_subprocess_output
 from nhx.customization_common.training.progress import JobsServiceProgressReporter
-from nhx.rl.tasks.training.errors.exceptions import format_exception_string
-from nhx.rl.tasks.training.errors.parser import (
-    MAX_OUTPUT_LINES,
-    read_subprocess_output,
-)
 
 logger = logging.getLogger(__name__)
 
