@@ -1012,9 +1012,6 @@ def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabase
         object_key = artifacts.evaluation_artifact_key(evaluation_id, path)
     except ValueError:
         raise _http_error(404, "not_found", "not found") from None
-    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
-    # connection for the entire stream, and enough concurrent slow downloads then
-    # exhaust the pool and stall unrelated requests.
     with database_factory() as db:
         _ensure_evaluation_exists(db, evaluation_id)
     # stream_object is a lazy generator, so a missing object would only raise once

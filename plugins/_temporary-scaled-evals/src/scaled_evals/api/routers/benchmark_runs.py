@@ -426,8 +426,6 @@ def request_benchmark_archive(run_id: str, body: BenchmarkArchiveRequest, db: Db
 
 @router.get("/{run_id}/archive/download")
 def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
-    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
-    # connection for the entire archive stream and can exhaust the pool.
     with database_factory() as db:
         row = db.benchmark_archives.get(run_id)
     if row is None or row["status"] != "ready" or not row["object_key"]:
