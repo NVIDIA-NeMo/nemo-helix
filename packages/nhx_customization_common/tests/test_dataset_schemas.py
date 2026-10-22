@@ -6,8 +6,10 @@
 import json
 from typing import get_args
 
+import jsonschema
 import pytest
 from nhx.customization_common.schemas.datasets import (
+    MULTIMODAL_SCHEMA,
     SFTChatDatasetItemSchema,
     SFTChatMessage,
     SFTDatasetSchemaType,
@@ -15,6 +17,7 @@ from nhx.customization_common.schemas.datasets import (
     SFTMultimodalChatMessage,
     SFTMultimodalImagePart,
     SFTMultimodalTextPart,
+    row_has_multimodal_content,
 )
 from pydantic import TypeAdapter, ValidationError
 
@@ -102,3 +105,25 @@ def test_chat_message_content_stays_a_string() -> None:
     content = json.dumps(SFTChatMessage.model_json_schema()["properties"]["content"])
     assert "image_url" not in content
     assert "array" not in content
+
+
+def test_row_has_multimodal_content_ignores_string_messages() -> None:
+    assert row_has_multimodal_content({"messages": [{"role": "user", "content": "Describe this image."}]}) is False
+    assert row_has_multimodal_content(CORD_ROW) is True
+    assert row_has_multimodal_content(
+        {"messages": [{"role": "user", "content": {"type": "text", "text": "Describe this image."}}]}
+    )
+    assert row_has_multimodal_content(
+        {"messages": [{"role": "assistant", "content": {"role": "assistant", "content": "<s_menu>"}}]}
+    )
+
+
+def test_multimodal_json_schema_accepts_a_part_list_and_rejects_an_unknown_part() -> None:
+    schema = MULTIMODAL_SCHEMA()
+    jsonschema.validate(CORD_ROW, schema)
+    jsonschema.validate({"messages": [{"role": "user", "content": "Describe this image."}]}, schema)
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            {"messages": [{"role": "user", "content": [{"type": "image", "image": "images/receipt.png"}]}]},
+            schema,
+        )

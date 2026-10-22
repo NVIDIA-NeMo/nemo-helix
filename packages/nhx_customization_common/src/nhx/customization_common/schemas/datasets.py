@@ -13,12 +13,12 @@
 Automodel and RL import this module. Studio mirrors the chat and multimodal
 shapes in ``web/packages/studio/src/util/customizerSchema.ts``. ``SFTChatMessage``
 stays string content. ``SFTMultimodalChatDatasetItemSchema`` is not a member of
-``SFTDatasetSchemaType``.
+``SFTDatasetSchemaType``. ``MULTIMODAL_SCHEMA`` validates a fileset against that class.
 """
 
 from typing import Annotated, Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, TypeAdapter, model_validator
 
 # Discriminator tags. The returned string must match the Tag on the union.
 PREFERENCE_DATASET = "PreferenceDataset"
@@ -444,6 +444,45 @@ class SFTMultimodalChatDatasetItemSchema(BaseModel):
     )
 
     model_config = ConfigDict(extra="allow")
+
+
+# Fileset key for MULTIMODAL_SCHEMA. Not a TrainingType: an SFT job still validates with SFT_SCHEMA.
+MULTIMODAL_DATASET = "multimodal"
+
+
+def content_is_multimodal(content: Any) -> bool:
+    """A part, a list of parts, or a nested chat message.
+
+    A string is one text part and stays on the chat schema.
+    """
+    if isinstance(content, list):
+        return True
+    if isinstance(content, dict) and ("type" in content or "role" in content):
+        return True
+    return False
+
+
+def row_has_multimodal_content(row: Any) -> bool:
+    """True when any message content is a part, a part list, or a nested chat message."""
+    if not isinstance(row, dict):
+        return False
+    messages = row.get("messages")
+    if not isinstance(messages, list):
+        return False
+    return any(isinstance(message, dict) and content_is_multimodal(message.get("content")) for message in messages)
+
+
+def MULTIMODAL_SCHEMA(prompt_template: str | None = None) -> dict[str, Any]:
+    """JSON schema for one ``SFTMultimodalChatDatasetItemSchema`` row.
+
+    ``prompt_template`` matches ``SFT_SCHEMA`` and is unused: these rows are chat.
+    """
+    del prompt_template
+    adapter = TypeAdapter(SFTMultimodalChatDatasetItemSchema)
+    schema = adapter.json_schema()
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["title"] = "Multimodal Schema"
+    return schema
 
 
 # Embedding Dataset Schemas

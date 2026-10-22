@@ -811,6 +811,7 @@ def _configure_datasets(
     - SFT format (prompt/completion): Uses ColumnMappedTextInstructionDataset
     - Custom format (via prompt_template): Uses ColumnMappedTextInstructionDataset with custom columns
     - Embedding format (query/pos_doc/neg_doc): Uses inline retrieval dataset
+    - Multimodal chat is detected and left for the vision-tower recipe to select.
 
     Args:
         cfg: Configuration dictionary to populate.
@@ -863,6 +864,10 @@ def _configure_datasets(
     elif schema == DatasetSchema.CHAT:
         # Chat dataset (OpenAI messages format)
         _configure_chat_dataset(cfg, customizer_config, train_file, validation_file, seq_length)
+    elif schema == DatasetSchema.MULTIMODAL:
+        raise ValueError(
+            "Dataset is multimodal chat. A vision-tower model selects that schema when the VLM recipe is compiled."
+        )
     else:
         # SFT/Custom dataset (prompt/completion or custom columns)
         assert column_keys is not None, "column_keys must be set for SFT/CUSTOM schema"
