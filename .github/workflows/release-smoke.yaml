@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release-version:
-        description: "Full published chart version (e.g. 0.8.0 or 0.8.0-nightly-20261021000000)"
+        description: "Published chart version (e.g. 0.8.0 or 0.8.0-nightly-20261021000000)"
         required: true
         type: string
       send-notifications:
@@ -35,7 +35,6 @@ permissions:
 env:
   UV_VERSION: "0.10.10"
   RELEASE_VERSION: ${{ inputs.release-version }}
-  SMOKE_RESULTS: ${{ github.workspace }}/smoke-results
 
 jobs:
   prepare:
@@ -60,75 +59,45 @@ jobs:
             }
 
   macos:
-    name: macOS installation
+    name: Published wheel (macOS)
     needs: prepare
-    runs-on: macos-15-intel
-    timeout-minutes: 45
-    outputs:
-      stage: ${{ steps.report.outputs.stage }}
+    runs-on: macos-15
+    timeout-minutes: 20
     env:
       WHEEL_VERSION: ${{ needs.prepare.outputs.wheel_version }}
       WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
+      DO_NOT_TRACK: "1"
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - id: uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           python-version: "3.12"
           enable-cache: false
-      - name: Install and smoke test published wheel
-        id: smoke
-        # Reserve time for diagnostics and cleanup inside the 45-minute job.
-        timeout-minutes: 30
-        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py macos
-      - name: Collect diagnostics and clean up
-        id: cleanup
-        if: always()
-        timeout-minutes: 7
-        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py finalize macos
-      - name: Record result
-        id: report
-        if: always()
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      # Native ARM Mac; package installation and CLI startup need no Docker VM.
+      - name: Install published package and launch CLI
+        working-directory: ${{ runner.temp }}
         env:
-          STEP_RESULTS: ${{ toJSON(steps) }}
-        with:
-          script: |
-            const { reportSmoke } = require("./.github/scripts/release-smoke.cjs");
-            await reportSmoke({ core, env: process.env, steps: JSON.parse(process.env.STEP_RESULTS), fs: require("node:fs") });
-      - name: Upload macOS results
-        if: always() && steps.report.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: smoke-macos-${{ github.run_id }}-${{ github.run_attempt }}
-          path: smoke-results/
-          retention-days: 7
+          UV_TOOL_DIR: ${{ runner.temp }}/smoke-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/smoke-bin
+        run: |
+          uv tool install --python 3.12 --index "$WHEEL_INDEX" "nemo-helix[all]==$WHEEL_VERSION"
+          "$UV_TOOL_BIN_DIR/nemo" --version
 
   kubernetes:
-    name: Kubernetes installation
+    name: Published images and chart
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    outputs:
-      stage: ${{ steps.report.outputs.stage }}
     env:
-      WHEEL_VERSION: ${{ needs.prepare.outputs.wheel_version }}
-      WHEEL_INDEX: ${{ needs.prepare.outputs.wheel_index }}
       IMAGE_REGISTRY: ${{ needs.prepare.outputs.image_registry }}
       IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
       CHART_REPOSITORY: ${{ needs.prepare.outputs.chart_repository }}
-      NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
-      GH_TOKEN: ${{ github.token }}
       KIND_CLUSTER_NAME: release-smoke
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - name: Create disposable Kind cluster
-        id: kind
         uses: ./.github/actions/setup-kind-cluster
         with:
           kind-cluster-name: release-smoke
@@ -140,31 +109,25 @@ jobs:
           image-tag: ${{ env.IMAGE_TAG }}
           kind-image-pull-user: ${{ github.actor }}
           kind-image-pull-token: ${{ github.token }}
-      - name: Install and smoke test published chart
-        id: smoke
+      - name: Pull released artifacts, install chart, and check readiness
         timeout-minutes: 30
-        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py kubernetes
-      - name: Collect diagnostics and clean up
-        id: cleanup
-        if: always()
-        timeout-minutes: 7
-        run: uv run --no-project --python 3.12 python .github/scripts/release_smoke.py finalize kubernetes
-      - name: Record result
-        id: report
-        if: always()
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          STEP_RESULTS: ${{ toJSON(steps) }}
+          NGC_REGISTRY_READ_TOKEN: ${{ secrets.NGC_REGISTRY_READ_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/release-smoke.sh
+      - name: Collect Kubernetes logs
+        if: always()
+        timeout-minutes: 2
+        run: bash e2e/k8s/scripts/collect_k8s_logs.sh smoke-logs
+      - name: Delete Kind cluster
+        if: always()
+        timeout-minutes: 2
+        run: kind delete cluster --name "$KIND_CLUSTER_NAME"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
-          script: |
-            const { reportSmoke } = require("./.github/scripts/release-smoke.cjs");
-            await reportSmoke({ core, env: process.env, steps: JSON.parse(process.env.STEP_RESULTS), fs: require("node:fs") });
-      - name: Upload Kubernetes results
-        if: always() && steps.report.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: smoke-kubernetes-${{ github.run_id }}-${{ github.run_attempt }}
-          path: smoke-results/
+          name: smoke-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-logs/
           retention-days: 7
 
   result:
@@ -185,8 +148,6 @@ jobs:
           PREPARE_RESULT: ${{ needs.prepare.result }}
           MACOS_RESULT: ${{ needs.macos.result }}
           KUBERNETES_RESULT: ${{ needs.kubernetes.result }}
-          MACOS_STAGE: ${{ needs.macos.outputs.stage }}
-          KUBERNETES_STAGE: ${{ needs.kubernetes.outputs.stage }}
           SEND_NOTIFICATIONS: ${{ inputs.send-notifications }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

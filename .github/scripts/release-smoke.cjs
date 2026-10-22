@@ -57,8 +57,8 @@ async function finishSmoke({ env, fetchImpl }) {
   const text = [
     `*Release smoke checks ${result}*`,
     `Release: ${env.RELEASE_VERSION}`,
-    `macOS: ${env.MACOS_RESULT}${env.MACOS_STAGE ? ` (${env.MACOS_STAGE})` : ""}`,
-    `Kubernetes: ${env.KUBERNETES_RESULT}${env.KUBERNETES_STAGE ? ` (${env.KUBERNETES_STAGE})` : ""}`,
+    `macOS: ${env.MACOS_RESULT}`,
+    `Kubernetes: ${env.KUBERNETES_RESULT}`,
     `:link: <${env.RUN_URL}|Smoke check results and diagnostics>`,
   ].join("\n");
   if (env.SEND_NOTIFICATIONS === "true") {
@@ -78,55 +78,4 @@ async function finishSmoke({ env, fetchImpl }) {
   return { result, text };
 }
 
-function reportSmoke({ core, env, steps, fs }) {
-  const directory = env.SMOKE_RESULTS;
-  fs.mkdirSync(directory, { recursive: true });
-  // Always sanitize before upload, even if the cleanup step was interrupted.
-  const values = ["NGC_REGISTRY_READ_TOKEN", "GH_TOKEN"]
-    .map((key) => env[key])
-    .filter(Boolean);
-  function redact(path) {
-    for (const entry of fs.readdirSync(path, { withFileTypes: true })) {
-      const file = `${path}/${entry.name}`;
-      if (entry.isDirectory()) redact(file);
-      else if (entry.isFile() && !file.endsWith(".png")) {
-        let contents = fs.readFileSync(file, "utf8");
-        for (const value of values)
-          contents = contents.replaceAll(value, "[REDACTED]");
-        fs.writeFileSync(file, contents);
-      }
-    }
-  }
-  redact(directory);
-  const file = `${directory}/result.json`;
-  const report = fs.existsSync(file)
-    ? JSON.parse(fs.readFileSync(file, "utf8"))
-    : {
-        release: env.RELEASE_VERSION,
-        result: "incomplete",
-        stage: "setup",
-      };
-  const failed = Object.entries(steps).find(([, step]) =>
-    ["failure", "cancelled"].includes(step.outcome),
-  );
-  if (failed) {
-    if (report.result !== "failed") report.stage = failed[0];
-    report.result =
-      failed[1].outcome === "failure" ? "failed" : "cancelled/incomplete";
-  }
-  fs.writeFileSync(file, JSON.stringify(report, null, 2));
-  core.setOutput("stage", report.stage);
-  return core.summary
-    .addRaw(
-      `Release ${report.release}: ${report.result}; stage: ${report.stage}`,
-    )
-    .write();
-}
-
-module.exports = {
-  resolveRelease,
-  smokeEligible,
-  summarize,
-  finishSmoke,
-  reportSmoke,
-};
+module.exports = { resolveRelease, smokeEligible, summarize, finishSmoke };

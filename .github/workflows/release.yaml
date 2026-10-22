@@ -959,7 +959,7 @@ jobs:
         id: smoke
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          # Enable after stable and nightly manual validation (see release-smoke.md).
+          # Enable after stable and nightly manual validation.
           SMOKE_ENABLED: ${{ vars.RELEASE_SMOKE_ENABLED }}
           RELEASE_SCOPE: ${{ needs.plan-release.outputs.release_scope }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}

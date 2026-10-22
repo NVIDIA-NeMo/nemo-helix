@@ -3,68 +3,12 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const fs = require("node:fs");
-const os = require("node:os");
 const {
   resolveRelease,
   smokeEligible,
   summarize,
   finishSmoke,
-  reportSmoke,
 } = require("../release-smoke.cjs");
-
-test("report preserves the failing stage and redacts artifacts even without cleanup", async () => {
-  const directory = fs.mkdtempSync(`${os.tmpdir()}/release-smoke-test-`);
-  const outputs = {};
-  const core = {
-    setOutput: (key, value) => {
-      outputs[key] = value;
-    },
-    summary: { addRaw: () => core.summary, write: async () => {} },
-  };
-  try {
-    fs.mkdirSync(`${directory}/logs`);
-    fs.writeFileSync(`${directory}/logs/agent.log`, "registry-key github-key");
-    fs.writeFileSync(
-      `${directory}/result.json`,
-      JSON.stringify({
-        release: "0.8.0",
-        stage: "agent-invoke",
-        result: "failed",
-      }),
-    );
-    await reportSmoke({
-      core,
-      fs,
-      env: {
-        SMOKE_RESULTS: directory,
-        NGC_REGISTRY_READ_TOKEN: "registry-key",
-        GH_TOKEN: "github-key",
-      },
-      steps: { smoke: { outcome: "failure" } },
-    });
-    assert.equal(outputs.stage, "agent-invoke");
-    assert.equal(
-      fs.readFileSync(`${directory}/logs/agent.log`, "utf8"),
-      "[REDACTED] [REDACTED]",
-    );
-    fs.unlinkSync(`${directory}/result.json`);
-    await reportSmoke({
-      core,
-      fs,
-      env: { SMOKE_RESULTS: directory, RELEASE_VERSION: "0.8.0" },
-      steps: { kind: { outcome: "cancelled" } },
-    });
-    const report = JSON.parse(
-      fs.readFileSync(`${directory}/result.json`, "utf8"),
-    );
-    assert.equal(report.result, "cancelled/incomplete");
-    assert.equal(report.stage, "kind");
-    assert.equal(report.release, "0.8.0");
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-});
 
 test("resolves exact stable, prerelease and nightly artifacts", () => {
   assert.deepEqual(resolveRelease("0.8.0"), {
@@ -158,7 +102,6 @@ test("one combined release-channel notification for each terminal outcome", asyn
         PREPARE_RESULT: "success",
         MACOS_RESULT: macos,
         KUBERNETES_RESULT: "success",
-        MACOS_STAGE: "agent-invoke",
         RELEASE_VERSION: "0.8.0",
         SEND_NOTIFICATIONS: "true",
         SLACK_RELEASE_WEBHOOK: "https://example.test/release",
@@ -173,7 +116,6 @@ test("one combined release-channel notification for each terminal outcome", asyn
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "https://example.test/release");
     assert.match(calls[0].body.text, /0\.8\.0/);
-    assert.match(calls[0].body.text, /agent-invoke/);
     assert.match(calls[0].body.text, /https:\/\/example.test\/run/);
   }
 });
