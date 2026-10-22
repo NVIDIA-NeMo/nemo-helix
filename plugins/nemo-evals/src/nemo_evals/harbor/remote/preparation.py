@@ -23,7 +23,13 @@ from nemo_evals.harbor.compose.spec import check_compose_task
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
 from nemo_evals.harbor.remote.sandbox_policy import compose_resources_violation, task_resources_violation
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
-from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config
+from nemo_evals.image_builds.planning import (
+    MAIN_SERVICE,
+    SERVICE_ROLE_PREFIX,
+    VERIFIER_ROLE,
+    ImagePlanError,
+    parse_task_config,
+)
 from nemo_evals.image_builds.runner import read_task_archive
 from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildJobConflictError, ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
@@ -316,7 +322,8 @@ def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> 
             source_archive_digest=definition.source.files_hash if built else None,
         )
         if role is None:
-            compose_images[image.role] = prepared
+            # The task Job looks up a service's image by the service's own name.
+            compose_images[image.role.removeprefix(SERVICE_ROLE_PREFIX)] = prepared
             continue
         source: Literal["prebuilt", "built"] = "built" if built else "prebuilt"
         images[role] = ImagePreparation(

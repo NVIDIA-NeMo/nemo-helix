@@ -106,13 +106,21 @@ def parse_task_config(config: Mapping[str, Any]) -> TaskConfig:
 #: Harbor's name for the agent's container, the one service every Docker task has.
 MAIN_SERVICE = "main"
 VERIFIER_ROLE = "verifier"
+#: Prefixes a compose service's name in its image's role. Compose service names can't contain `/`, so no service's
+#: role can collide with `main` or `verifier`, whatever the service is called.
+SERVICE_ROLE_PREFIX = "service/"
+
+
+def service_role(name: str) -> str:
+    """The role of compose service ``name``'s image: ``db`` gives ``service/db``."""
+    return f"{SERVICE_ROLE_PREFIX}{name}"
 
 
 def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_registries: list[str]) -> list[BuildImage]:
     """Every image the task needs, in the order ``main``, its compose services, then a separate verifier.
 
-    Images are named as Harbor names the containers: ``main``, each compose service by its own name, and
-    ``verifier``.
+    Each image's role says which container runs it: ``main``, ``verifier`` for a separate verifier, and
+    ``service/<name>`` for each compose service, so a service may have any name, ``verifier`` included.
     """
     task_config = parse_task_config(config)
     compose = _compose_task(archive)
@@ -125,10 +133,6 @@ def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_regi
         ]
     verifier = resolve_effective_verifier_env_config(task_config, None)
     if verifier is not None:
-        if compose is not None and VERIFIER_ROLE in compose.services:
-            raise ImagePlanError(
-                "invalid_compose_file", "a compose service named verifier can't run next to a separate verifier"
-            )
         images.append(_verifier_image(verifier, archive))
     allowed = {normalize_registry(host) for host in allowed_registries}
     for image in images:
@@ -183,8 +187,8 @@ def _service_image(name: str, service: ComposeService, archive: TaskArchive) -> 
     source = service.source
     if isinstance(source, ComposeBuild):
         _check_build_options(name, source)
-        return _dockerfile_image(name, archive, source.context_path, source.dockerfile)
-    return BuildImage(role=name, source="prebuilt", image=source.ref)
+        return _dockerfile_image(service_role(name), archive, source.context_path, source.dockerfile)
+    return BuildImage(role=service_role(name), source="prebuilt", image=source.ref)
 
 
 def _check_build_options(service: str, build: ComposeBuild) -> None:
