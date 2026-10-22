@@ -73,15 +73,29 @@ RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
     && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
       -path '*/ray/jars/*' -print -quit)"
 
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 FROM ${NHX_PYTHON_IMAGE} AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1"
 
 # Copy uv because Gym uses it to launch component environments.
 COPY --from=builder /bin/uv /bin/uv
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+RUN --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    python3 /tmp/update-python-trust.py --root /usr/local --bundles-only
 # Copy the locked host Python environment; this supplies Gym and sandboxed_gym.
+COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
 # Copy Gym's prebuilt per-component environments to avoid runtime installation.
 COPY --from=builder /opt/gym_venvs /opt/gym_venvs

@@ -9,7 +9,7 @@ ARG DISTROLESS_BASE=nvcr.io/nvidia/distroless/python:3.11-v4.0.8
 ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
 
 #root-uv-binary-base
-    FROM ghcr.io/astral-sh/uv:0.10.10 AS root-uv-binary-base
+    FROM ghcr.io/astral-sh/uv:0.13.4 AS root-uv-binary-base
 
 #root-lib-source-artifacts
     FROM scratch AS root-lib-source-artifacts
@@ -47,7 +47,8 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
         postgresql-client \
         postgresql-common \
         && apt-get clean \
-        && rm -rf /var/lib/apt/lists/*
+        && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419~deb12u2"
 
     WORKDIR /app
     COPY --from=root-uv-binary-base /uv /bin/uv
@@ -62,7 +63,7 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     FROM ${DISTROLESS_BASE_3_13} AS root-distroless-base-3-13
 
 #root-golang-base:
-    FROM golang:1.23 AS root-golang-base
+    FROM golang:1.26.10 AS root-golang-base
     RUN curl -sSfL https://github.com/golangci/golangci-lint/releases/download/v1.61.0/golangci-lint-1.61.0-linux-amd64.tar.gz -o golangci-lint.tar.gz \
         && echo "77cb0af99379d9a21d5dc8c38364d060e864a01bd2f3e30b5e8cc550c3a54111  golangci-lint.tar.gz" | sha256sum -c - \
         && tar -xzf golangci-lint.tar.gz \
@@ -70,7 +71,7 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
         && rm -rf golangci-lint.tar.gz golangci-lint-1.61.0-linux-amd64
 
 #root-golang-base-1-24:
-    FROM golang:1.24 AS root-golang-base-1-24
+    FROM golang:1.26.10 AS root-golang-base-1-24
     RUN curl -sSfL https://github.com/golangci/golangci-lint/releases/download/v1.61.0/golangci-lint-1.61.0-linux-amd64.tar.gz -o golangci-lint.tar.gz \
         && echo "77cb0af99379d9a21d5dc8c38364d060e864a01bd2f3e30b5e8cc550c3a54111  golangci-lint.tar.gz" | sha256sum -c - \
         && tar -xzf golangci-lint.tar.gz \
@@ -78,7 +79,7 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
         && rm -rf golangci-lint.tar.gz golangci-lint-1.61.0-linux-amd64
 
 #root-golang-base-1-25:
-    FROM golang:1.25 AS root-golang-base-1-25
+    FROM golang:1.26.10 AS root-golang-base-1-25
     RUN curl -sSfL https://github.com/golangci/golangci-lint/releases/download/v2.11.4/golangci-lint-2.11.4-linux-amd64.tar.gz -o golangci-lint.tar.gz \
         && echo "200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1  golangci-lint.tar.gz" | sha256sum -c \
         && tar -xzf golangci-lint.tar.gz \

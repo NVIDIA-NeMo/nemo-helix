@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-node_version="$(yq '.install.nodejs.version' tools/nodejs/.flox/env/manifest.toml)"
+node_version="$(yq '.install.nodejs.version // .vars.NODE_VERSION' tools/nodejs/.flox/env/manifest.toml)"
 pnpm_version="$(yq -r '.vars.PNPM_VERSION' tools/nodejs/.flox/env/manifest.toml)"
 make_node_version="$(sed -n 's/^NODE_VERSION[[:space:]]*:=[[:space:]]*\([^[:space:]#]*\).*/\1/p' Makefile)"
 make_pnpm_version="$(sed -n 's/^PNPM_VERSION[[:space:]]*:=[[:space:]]*\([^[:space:]#]*\).*/\1/p' Makefile)"

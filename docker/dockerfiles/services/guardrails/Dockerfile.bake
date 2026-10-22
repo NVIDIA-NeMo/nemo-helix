@@ -66,6 +66,8 @@
 
 #docker-guardrails:
     FROM root-distroless-base-3-11 AS docker
+    RUN ["python", "-c", "import shutil; shutil.rmtree('/etc/ssl/certs')"]
+    COPY --from=build /etc/ssl/certs/ /etc/ssl/certs/
     ENV GUARDRAILS_HOST="0.0.0.0"
     ENV GUARDRAILS_PORT="7331"
     ENV NIM_ENDPOINT_URL="https://integrate.api.nvidia.com/v1"

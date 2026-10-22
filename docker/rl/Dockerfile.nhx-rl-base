@@ -25,10 +25,10 @@ ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.09-cuda13.4-devel-ubuntu24.04
 ARG NEMO_RL_REPO=https://github.com/soluwalana/RL.git
 ARG NEMO_RL_REF=
 
-# Stay on uv 0.11.x: 0.11.18's quinn-proto is vulnerable, and 0.12 breaks us.
+# Use uv with the updated CA bundle for the eMudhra key compromise.
 # Copy CPython from bookworm rather than uv; a trixie build
 # needs OpenSSL 3.3, which this Ubuntu 24.04 base does not have.
-ARG UV_VERSION=0.11.33
+ARG UV_VERSION=0.13.4
 ARG PYTHON_VERSION=3.13.16
 ARG CPYTHON_IMAGE=python:${PYTHON_VERSION}-slim-bookworm
 ARG CMAKE_VERSION=4.0.3
@@ -59,7 +59,8 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-apt-packages.sh,target
     libibverbs-dev libsqlite3-0 && \
     apt-get install -y --only-upgrade openssl libssl3t64 && \
     bash /tmp/remove-listed-apt-packages.sh /tmp/apt-package-removals.txt && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.24.04.1"
 
 # CMake (CUDA extension builds: transformer-engine, mamba-ssm, ...).
 ARG CMAKE_VERSION
@@ -440,12 +441,20 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
         continue
     fi
     if compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
-        find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
+        for index in "${UV_CACHE_DIR}"/wheels-v*/; do
+            if [ -d "${index}" ]; then
+                find "${index}" -type l -lname "*$(basename "${d}")*" -delete
+            fi
+        done
         rm -rf "${d}"
         continue
     fi
     find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
-    find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
+    for index in "${UV_CACHE_DIR}"/wheels-v*/; do
+        if [ -d "${index}" ]; then
+            find "${index}" -type l -lname "*$(basename "${d}")*" -delete
+        fi
+    done
     rm -rf "${d}"
 done
 set -x
@@ -471,7 +480,11 @@ RUN <<"EOF" bash -eu
 for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
     ls "${d}"setuptools-*.dist-info >/dev/null 2>&1 || continue
     find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
-    find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
+    for index in "${UV_CACHE_DIR}"/wheels-v*/; do
+        if [ -d "${index}" ]; then
+            find "${index}" -type l -lname "*$(basename "${d}")*" -delete
+        fi
+    done
     rm -rf "${d}"
 done
 EOF
@@ -522,6 +535,13 @@ EOF
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 RUN --mount=type=cache,target=/root/.cache/uv <<'EOF' bash -eu
 source_dir=/usr/share/nemo-helix/source-distributions/nhx-rl-base
 bash /usr/local/bin/collect-apt-sources.sh "${source_dir}/apt" \

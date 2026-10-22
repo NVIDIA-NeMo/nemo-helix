@@ -28,11 +28,15 @@ RUN git clone --branch ${AUTOMODEL_BRANCH} https://github.com/NVIDIA-NeMo/Automo
     rm -rf /opt/Automodel/.git
 
 FROM ${PYTORCH_BASE} AS nhx-automodel-base-builder
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.24.04.1" && \
+    rm -rf /var/lib/apt/lists/*
 ARG PYTORCH_BASE
 
 WORKDIR /opt
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
 COPY docker/scripts/collect-python-sdists.py /usr/local/bin/
 
 ENV VIRTUAL_ENV=/opt/venv \
@@ -144,6 +148,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     python /usr/local/bin/collect-python-sdists.py \
         --python /opt/venv/bin/python \
@@ -157,8 +168,9 @@ ARG PYTORCH_BASE
 COPY --from=nhx-automodel-base-builder /opt/venv /opt/venv
 COPY --from=nhx-automodel-base-builder /opt/Automodel /opt/Automodel
 COPY --from=nhx-automodel-base-builder /source-distributions/nhx-automodel-base/ /usr/share/nemo-helix/source-distributions/nhx-automodel-base/
-# Builder pins uv 0.9.14 but does not ship it in the venv layer; PyTorch base may ship 0.10.x.
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+# Replace the uv inherited from the PyTorch base with the patched CA bundle.
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
 COPY docker/scripts/collect-apt-sources.sh \
     docker/scripts/collect-python-sdists.py \
     /usr/local/bin/
@@ -170,10 +182,11 @@ RUN dpkg-query -W -f='${binary:Package}\t${Version}\n' > /tmp/base-dpkg-packages
 RUN --mount=type=bind,source=docker/scripts/remove-listed-apt-packages.sh,target=/tmp/remove-listed-apt-packages.sh,readonly \
     --mount=type=bind,source=docker/removals/apt/nhx-automodel-base.txt,target=/tmp/apt-package-removals.txt,readonly \
     apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade openssl libssl3t64 && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade openssl libssl3t64 ca-certificates && \
     bash /tmp/remove-listed-apt-packages.sh /tmp/apt-package-removals.txt && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20260816ubuntu0.24.04.1"
 
 # NGC ships Nsight Systems (~585 MB); not used by nhx-automodel training.
 # Cleanup stale NGC image files and shadowed system packages.
@@ -189,6 +202,13 @@ RUN pip install --no-cache-dir "nvidia-nvshmem-cu13==${NVSHMEM_VERSION}"
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 RUN bash /usr/local/bin/collect-apt-sources.sh \
     /usr/share/nemo-helix/source-distributions/nhx-automodel-base/apt \
     --changed-from /tmp/base-dpkg-packages.txt
