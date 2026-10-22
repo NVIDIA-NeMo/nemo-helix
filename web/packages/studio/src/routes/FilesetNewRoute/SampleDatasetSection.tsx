@@ -1,12 +1,25 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Badge, Block, Card, Flex, Grid, GridItem, Text } from '@nvidia/foundations-react-core';
+import {
+  Badge,
+  Block,
+  Button,
+  Card,
+  Flex,
+  Grid,
+  GridItem,
+  Text,
+} from '@nvidia/foundations-react-core';
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
-import { useWatchedFilesetNameStatus } from '@studio/components/filesets/hooks/useFilesetNameStatus';
+import {
+  invalidateFilesetNameCheck,
+  useWatchedFilesetNameStatus,
+} from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { SAMPLE_DATASETS, SampleDataset } from '@studio/constants/sampleDatasets';
 import type { DatasetFormFields } from '@studio/routes/FilesetNewRoute/types';
+import { useQueryClient } from '@tanstack/react-query';
 import { FileCheck } from 'lucide-react';
 import { FC } from 'react';
 import type { Control } from 'react-hook-form';
@@ -29,6 +42,7 @@ export const SampleDatasetSection: FC<SampleDatasetSectionProps> = ({
   ownName,
   onNameStatusChange,
 }) => {
+  const queryClient = useQueryClient();
   // This tab has no name field, so a conflict with the name it imports under is reported here.
   const { candidate: importName, status } = useWatchedFilesetNameStatus({
     control,
@@ -72,6 +86,21 @@ export const SampleDatasetSection: FC<SampleDatasetSectionProps> = ({
         <Text kind="body/regular/md" className="text-feedback-danger" role="alert">
           {filesetNameTakenMessage(importName, workspace)}
         </Text>
+      )}
+      {/* There is no name to edit here, so a failed check can only be rerun from this button. */}
+      {status === 'failed' && (
+        <Flex gap="density-sm" align="center">
+          <Text kind="body/regular/md" role="status">
+            Couldn't check name availability.
+          </Text>
+          <Button
+            type="button"
+            kind="tertiary"
+            onClick={() => void invalidateFilesetNameCheck(queryClient, workspace, importName)}
+          >
+            Retry
+          </Button>
+        </Flex>
       )}
     </>
   );

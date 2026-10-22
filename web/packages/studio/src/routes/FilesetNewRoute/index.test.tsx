@@ -279,6 +279,32 @@ describe('FilesetNewRoute', () => {
       expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeDisabled();
     });
 
+    it('reports a failed sample name check and reruns it on retry', async () => {
+      let checkFails = true;
+      server.use(
+        http.get(FILESETS_URL, () =>
+          checkFails
+            ? HttpResponse.json({ detail: 'unavailable' }, { status: 500 })
+            : HttpResponse.json({ data: [], pagination: { total_results: 0 } })
+        )
+      );
+      const user = userEvent.setup();
+      renderRoute();
+
+      await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
+
+      expect(await screen.findByText("Couldn't check name availability.")).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeEnabled();
+
+      checkFails = false;
+      await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+      await waitFor(() =>
+        expect(screen.queryByText(/Couldn't check name availability/)).not.toBeInTheDocument()
+      );
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    });
+
     it('puts a 409 on submit on the name field and rechecks the name', async () => {
       // The check first sees `raced` as free; another create lands before ours.
       let createAttempted = false;
