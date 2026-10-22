@@ -8,6 +8,7 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from nhx.customization_common.training.errors.classifier import classify_output
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nhx.rl.app.jobs.training.schemas import TrainingResult, TrainingStepConfig
 from nhx.rl.tasks.training.distributed import DistributedContext
@@ -59,6 +60,24 @@ def test_a_paused_run_releases_workers_and_skips_publication(tmp_path: Path, mon
     written = json.loads((tmp_path / DEFAULT_TRAINING_RESULT_FILE_NAME).read_text())
     assert written["paused"] is True
     assert written["training_duration_seconds"] == 3.0
+
+
+def test_a_failure_reports_whether_a_rerun_would_repeat_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nhx.rl.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = _runner(tmp_path, [], [])
+    report_error = MagicMock()
+    runner._progress.report_error = report_error
+    driver_output = [
+        "RuntimeError: unable to allocate shared memory(shm) for file </torch_1_2_3>: No space left on device (28)",
+        "torch.distributed.DistBackendError: NCCL error in: ProcessGroupNCCL.cpp:3866, remote process exited",
+    ]
+    runner._training_phase = MagicMock(side_effect=classify_output(driver_output, 1))  # type: ignore[method-assign]
+
+    result = runner.run()
+
+    error_details, status_details = report_error.call_args.args
+    assert error_details["cause"] == "shared_memory_exhausted"
+    assert status_details == {"resumable": False, "non_resumable_reason": result.error_message}
 
 
 def test_a_paused_run_exits_with_the_pause_code(monkeypatch: pytest.MonkeyPatch) -> None:

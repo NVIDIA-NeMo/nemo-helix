@@ -16,6 +16,7 @@ from typing import Any, cast
 
 import pytest
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.errors.exceptions import CustomizerTrainingError
 from nhx.rl.entities.values import TrainingType
 from nhx.rl.tasks.training.protocol import LibraryConfig, TrainingPaused
 
@@ -87,8 +88,11 @@ def test_a_driver_that_exits_for_a_pause_raises_training_paused(
 
 
 def test_any_other_failure_is_still_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    with pytest.raises(RuntimeError, match="driver failed"):
+    """The failure is classified from the driver's output and keeps the original error."""
+    with pytest.raises(CustomizerTrainingError) as raised:
         _execute(tmp_path, monkeypatch, 1)
+
+    assert raised.value.detail == "RuntimeError: driver failed"
 
 
 @pytest.mark.parametrize("num_nodes", [1, 2])
