@@ -1084,12 +1084,15 @@ def test_platform_is_read_for_services_and_main(tmp_path: Path) -> None:
           main: {platform: linux/arm64}
           a: {image: redis, platform: linux/amd64}
           b: {image: redis}
+          c: {image: redis, platform: "${UNSET_PLATFORM}"}
         """,
     )
 
     assert task.main.platform == "linux/arm64"
     assert task.services["a"].platform == "linux/amd64"
     assert task.services["b"].platform is None
+    # An unset variable leaves the platform empty, which names none.
+    assert task.services["c"].platform is None
 
 
 def test_a_platform_that_is_not_a_string_is_invalid(tmp_path: Path) -> None:

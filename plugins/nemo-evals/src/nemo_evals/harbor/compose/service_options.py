@@ -436,17 +436,18 @@ def parse_volume_mounts(
 
 
 def parse_platform(value: Any, path: str, problems: ComposeProblems) -> str | None:
-    """Read a service's ``platform``, such as ``linux/amd64``, as written.
+    """Read a service's ``platform``, such as ``linux/amd64``, as written; None when it names none.
 
     Image planning pins the service's image to it, so the image is built or pulled for the platform Compose would
-    use. Planning also checks that it names a real platform.
+    use. Planning also checks that it names a real platform. An empty value, as ``platform: ${PLATFORM}`` gives
+    when the variable is unset, names none: Compose then uses its default platform.
     """
     if value is None:
         return None
     if not isinstance(value, str):
         problems.invalid(path, "expected a platform such as linux/amd64")
         return None
-    return value
+    return value or None
 
 
 def parse_capabilities(
