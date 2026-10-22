@@ -88,7 +88,7 @@ _COMMON_KEYS = frozenset(
     }
 )
 _SERVICE_KEYS = _COMMON_KEYS | {"shm_size", "cpus", "mem_limit", "deploy"}
-_MAIN_KEYS = _COMMON_KEYS | {"cap_add"}
+_MAIN_KEYS = _COMMON_KEYS | {"cap_add", "cpus", "mem_limit", "deploy"}
 
 
 def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTask | None:
@@ -127,7 +127,11 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
     service_parser = ServiceParser(task_dir, declared_volumes, problems)
     parsed_services = {name: service_parser.service(name, raw) for name, raw in resolved.services.items()}
     main, main_build = service_parser.main(
-        resolved.main, resolved.harbor_main, prebuilt=resolved.prebuilt, read_entrypoint=read_entrypoint
+        resolved.main,
+        resolved.harbor_main,
+        prebuilt=resolved.prebuilt,
+        read_entrypoint=read_entrypoint,
+        task_limits=resolved.task_limits,
     )
 
     # Roles and start order read `depends_on`, which is only meaningful once every service parsed cleanly.
@@ -198,18 +202,21 @@ class ServiceParser:
         *,
         prebuilt: bool,
         read_entrypoint: bool,
+        task_limits: Mapping[str, str],
     ) -> tuple[ComposeMainSettings, ComposeBuild | None]:
         """Read ``main`` as the task's file lays it over Harbor's own, as its settings and what builds it.
 
         What builds ``main`` is None for a prebuilt task. ``main``'s entrypoint is the compose override if there is
         one, otherwise (for a built ``main``, and when ``read_entrypoint`` is set) the last ``ENTRYPOINT`` of its
-        Dockerfile, since the sandbox would otherwise replace it.
+        Dockerfile, since the sandbox would otherwise replace it. ``task_limits`` are ``task.toml``'s CPUs and
+        memory, which ``main``'s own limits may only repeat.
         """
         path = f"services.{MAIN_SERVICE}"
         self._check_keys(MAIN_SERVICE, raw_main, _MAIN_KEYS)
         if raw_main.get("command") != harbor_main.get("command"):
             # The sandbox keeps ``main`` alive itself; a task's own ``command`` for it would be dropped.
             self._problems.unsupported(f"{path}.command")
+        self._check_main_limits(raw_main, task_limits, path)
 
         environment = self._environment(raw_main, path)
         entrypoint = parse_entrypoint(raw_main.get("entrypoint"), f"{path}.entrypoint", self._problems)
@@ -233,6 +240,21 @@ class ServiceParser:
             platform=parse_platform(raw_main.get("platform"), f"{path}.platform", self._problems),
         )
         return settings, build
+
+    def _check_main_limits(self, raw_main: Mapping[str, Any], task_limits: Mapping[str, str], path: str) -> None:
+        """Record resources on ``main`` that the sandbox wouldn't apply.
+
+        The sandbox sizes ``main`` from ``task.toml``, and many files set ``main``'s limits from Harbor's ``${CPUS}``
+        and ``${MEMORY}``, which only repeats it. Limits that say something else, and reservations (requests, GPUs),
+        would be silently ignored, so they are unsupported.
+        """
+        limits, requests = parse_resources(raw_main, path, self._problems)
+        # Read `task.toml`'s values the same way, so `2048M` and `memory_mb = 2048` compare equal.
+        expected, _ = parse_resources(task_limits, path, self._problems)
+        if requests:
+            self._problems.unsupported(f"{path}.deploy.resources.reservations")
+        if any(expected.get(resource) != quantity for resource, quantity in limits.items()):
+            self._problems.unsupported(f"{path}: resource limits {limits} differ from task.toml's {expected}")
 
     def _environment(self, raw_service: Mapping[str, Any], path: str) -> dict[str, str]:
         """Read a service's variables: its ``env_file`` entries, overridden by its ``environment``, as compose does."""

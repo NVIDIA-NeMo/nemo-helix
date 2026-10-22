@@ -85,6 +85,10 @@ class ResolvedCompose:
     """The Harbor log directories each service mounted itself, taken out of its ``volumes``: by service, each
     directory's key in :data:`HARBOR_LOG_DIRECTORIES` and whether the mount was read-only."""
 
+    task_limits: dict[str, str]
+    """``task.toml``'s CPUs and memory as compose would write them on ``main`` (``cpus``, ``mem_limit``); the
+    sandbox already sizes ``main`` from them."""
+
 
 class Interpolator:
     """Fills in ``${VAR}`` references the way ``docker compose`` does before it reads a file.
@@ -274,7 +278,23 @@ def resolve_compose(
         main=merge_documents(harbor_main, task_services.get(MAIN_SERVICE, {})),
         services={name: service for name, service in task_services.items() if name != MAIN_SERVICE},
         harbor_log_mounts=harbor_log_mounts,
+        task_limits=_task_limits(task_environment),
     )
+
+
+def _task_limits(task_environment: Mapping[str, Any]) -> dict[str, str]:
+    """Write ``task.toml``'s ``cpus`` and ``memory_mb`` as compose service options, the way Harbor passes them.
+
+    Harbor gives them to compose as ``CPUS`` and ``MEMORY`` (``2048M``), so a file that sets ``main``'s limits from
+    those variables is only repeating them. ``{cpus = 2, memory_mb = 2048}`` gives ``{"cpus": "2", "mem_limit":
+    "2048M"}``.
+    """
+    limits: dict[str, str] = {}
+    if task_environment.get("cpus") is not None:
+        limits["cpus"] = str(task_environment["cpus"])
+    if task_environment.get("memory_mb") is not None:
+        limits["mem_limit"] = f"{task_environment['memory_mb']}M"
+    return limits
 
 
 def _take_harbor_log_mounts(task_document: dict[str, Any]) -> dict[str, dict[str, bool]]:
@@ -561,10 +581,11 @@ def _interpolation_variables(task_dir: Path, task_environment: Mapping[str, Any]
     variables.update({f"ENV_{key}_PATH": path for key, (path, _volume) in HARBOR_LOG_DIRECTORIES.items()})
     if task_environment.get("docker_image"):
         variables["PREBUILT_IMAGE_NAME"] = str(task_environment["docker_image"])
-    if task_environment.get("cpus") is not None:
-        variables["CPUS"] = str(task_environment["cpus"])
-    if task_environment.get("memory_mb") is not None:
-        variables["MEMORY"] = f"{task_environment['memory_mb']}M"
+    limits = _task_limits(task_environment)
+    if "cpus" in limits:
+        variables["CPUS"] = limits["cpus"]
+    if "mem_limit" in limits:
+        variables["MEMORY"] = limits["mem_limit"]
     return variables
 
 

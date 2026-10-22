@@ -802,6 +802,46 @@ def test_shm_size_becomes_a_kubernetes_quantity(tmp_path: Path, raw: str, quanti
     assert _service(spec, "a")["shm_size"] == quantity
 
 
+@pytest.mark.parametrize(
+    ("limits", "task_toml"),
+    [
+        ("{cpus: '${CPUS}', memory: '${MEMORY}'}", "[environment]\ncpus = 1\nmemory_mb = 2048\n"),
+        ("{cpus: '${CPUS:-4}', memory: '${MEMORY:-16G}'}", "[environment]\ncpus = 4\nmemory_mb = 16384\n"),
+    ],
+)
+def test_limits_on_main_that_repeat_task_toml_are_accepted(tmp_path: Path, limits: str, task_toml: str) -> None:
+    compose = f"services:\n  main:\n    deploy:\n      resources:\n        limits: {limits}\n  a:\n    image: redis\n"
+    spec = _spec(tmp_path, compose, task_toml=task_toml)
+    assert "resources" not in spec.get("main", {})
+
+
+def test_limits_on_main_that_differ_from_task_toml_are_unsupported(tmp_path: Path) -> None:
+    error = _error(
+        tmp_path,
+        "services:\n  main:\n    cpus: 2\n  a:\n    image: redis\n",
+        task_toml="[environment]\ncpus = 1\n",
+    )
+    assert error.code == "compose_unsupported"
+    assert error.paths == ("services.main: resource limits {'cpu': '2'} differ from task.toml's {'cpu': '1'}",)
+
+
+@pytest.mark.parametrize(
+    ("reservations", "path"),
+    [
+        (
+            "{devices: [{driver: nvidia, count: all, capabilities: [gpu]}]}",
+            "services.main.deploy.resources.reservations.devices",
+        ),
+        ("{cpus: '1'}", "services.main.deploy.resources.reservations"),
+    ],
+)
+def test_reservations_on_main_are_unsupported(tmp_path: Path, reservations: str, path: str) -> None:
+    compose = f"services:\n  main:\n    deploy:\n      resources:\n        reservations: {reservations}\n  a:\n    image: redis\n"
+    error = _error(tmp_path, compose)
+    assert error.code == "compose_unsupported"
+    assert path in error.paths
+
+
 def test_resources_from_cpus_mem_limit_and_deploy(tmp_path: Path) -> None:
     spec = _spec(
         tmp_path,
