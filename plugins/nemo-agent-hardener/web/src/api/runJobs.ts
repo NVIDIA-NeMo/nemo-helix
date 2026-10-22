@@ -38,14 +38,20 @@ export const deleteRunWithJob = async (
   workspace: string,
   run: { name: string; job_id?: string }
 ): Promise<void> => {
-  // Keep the run record (and its job ID) if job cleanup fails, so the operator
-  // sees the error and still has a record to investigate rather than an orphan.
+  // Keep the run record on auth/server/network failures, but allow retries after
+  // successful job cleanup followed by failed run deletion (or a purged job).
   if (run.job_id) {
-    await inJobCollection(
-      { workspace, name: run.job_id },
-      agentHardenerDeleteJob,
-      agentHardenerDeleteSynthBenignJob
-    );
+    try {
+      await inJobCollection(
+        { workspace, name: run.job_id },
+        agentHardenerDeleteJob,
+        agentHardenerDeleteSynthBenignJob
+      );
+    } catch (error) {
+      // A 404 escapes inJobCollection only after both job collections return 404.
+      // Treat that as completed cleanup for deletion only, never cancellation.
+      if (!isAxiosError(error) || error.response?.status !== 404) throw error;
+    }
   }
   await agentHardenerDeleteRun(workspace, run.name);
 };

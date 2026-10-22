@@ -65,13 +65,58 @@ it('deletes a synthesis job before its run record without swallowing the first 4
   ]);
 });
 
-it.each([403, 404, 500])('keeps the run record and reports synthesis deletion failure %s', async (status) => {
+it.each([403, 500])('keeps the run record and reports synthesis deletion failure %s', async (status) => {
   const error = { isAxiosError: true, response: { status } };
   request.mockRejectedValueOnce(missing).mockRejectedValueOnce(error);
   await expect(deleteRunWithJob('default', run)).rejects.toBe(error);
   expect(request).toHaveBeenCalledTimes(2);
   expect(request.mock.calls.some(([config]) => config.url.includes('/runs/'))).toBe(false);
 });
+
+it('deletes the run record when both job collections report it already missing', async () => {
+  request.mockRejectedValueOnce(missing).mockRejectedValueOnce(missing).mockResolvedValueOnce(undefined);
+  await deleteRunWithJob('default', run);
+  expect(request.mock.calls.map(([config]) => [config.method, config.url])).toEqual([
+    ['DELETE', `${base}/jobs/${job}`],
+    ['DELETE', `${base}/synth-benign/jobs/${job}`],
+    ['DELETE', `${base}/runs/run`],
+  ]);
+});
+
+it('retries run deletion after job cleanup succeeded but run deletion failed', async () => {
+  const runError = { isAxiosError: true, response: { status: 500 } };
+  request
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(runError)
+    .mockRejectedValueOnce(missing)
+    .mockRejectedValueOnce(missing)
+    .mockResolvedValueOnce(undefined);
+  await expect(deleteRunWithJob('default', run)).rejects.toBe(runError);
+  await deleteRunWithJob('default', run);
+  expect(request.mock.calls.map(([config]) => [config.method, config.url])).toEqual([
+    ['DELETE', `${base}/jobs/${job}`],
+    ['DELETE', `${base}/runs/run`],
+    ['DELETE', `${base}/jobs/${job}`],
+    ['DELETE', `${base}/synth-benign/jobs/${job}`],
+    ['DELETE', `${base}/runs/run`],
+  ]);
+});
+
+it('still reports cancellation failure when both job collections return 404', async () => {
+  request.mockRejectedValueOnce(missing).mockRejectedValueOnce(missing);
+  await expect(cancelRunJob({ workspace: 'default', name: job })).rejects.toBe(missing);
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it.each([new Error('connection reset'), { isAxiosError: true, response: { status: 500 } }])(
+  'preserves primary job deletion failures without trying the sibling or deleting the run', async (error) => {
+    request.mockRejectedValueOnce(error);
+    await expect(deleteRunWithJob('default', run)).rejects.toBe(error);
+    expect(request.mock.calls.map(([config]) => [config.method, config.url])).toEqual([
+      ['DELETE', `${base}/jobs/${job}`],
+    ]);
+  }
+);
 
 it('deletes a local run with no linked platform job', async () => {
   request.mockResolvedValue(undefined);

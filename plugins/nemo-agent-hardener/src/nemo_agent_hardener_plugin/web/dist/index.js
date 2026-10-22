@@ -18941,10 +18941,15 @@ var Bb = "mitigations", Vb = (e) => {
 		await r(e, t);
 	}
 }, Gx = (e) => Wx(e, Ja, qo), Kx = async (e, t) => {
-	t.job_id && await Wx({
-		workspace: e,
-		name: t.job_id
-	}, qa, Ko), await Fo(e, t.name);
+	if (t.job_id) try {
+		await Wx({
+			workspace: e,
+			name: t.job_id
+		}, qa, Ko);
+	} catch (e) {
+		if (!Oi(e) || e.response?.status !== 404) throw e;
+	}
+	await Fo(e, t.name);
 }, qx = {
 	running: {
 		label: "Running",
