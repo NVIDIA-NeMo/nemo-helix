@@ -85,18 +85,6 @@ Iterate on insight generation by re-running `analyze` as often as you like; `run
 again only when you want fresh traces. (A benchmark `analyze --live` follows the
 base_url recorded at `run` time, so set `--base` on `run`.)
 
-## Breaking changes (2026-07-07)
-
-- **Deleted flags:** `--pinned` (it's the default), `--latest` (storage-latest
-  is cross-subject and unsafe under per-subject pins), `--ref` and its `""`
-  sentinel, analyze's `--from` (folded into `--state FILE`), `--local`
-  everywhere (localhost is the default wherever a fixture is the target;
-  `--base` overrides).
-- **Fresh by default:** the old seed flag (`none|keep`) is gone — the seed flag became
-  `--update-insights` (the not-fresh flow), and bundles no longer carry insight
-  YAMLs at all (pure data fixtures; restore seeds run records only).
-- **The `insights` command alias is gone** — one name: `analyze`.
-
 ## State bundles
 
 Immutable per-subject fixtures live in NVIDIA Core Storage Service (CSS), using
@@ -107,8 +95,6 @@ state_s3_endpoint = "https://pdx.s8k.io"
 state_s3_region = "us-east-1"
 state_s3_bucket = "insights-analyst-evaluation-dataset"
 ```
-
-The bucket keeps its original name so existing fixture pins remain usable.
 
 Each subject's `state = "state-vN"` key in `evaluations.toml` pins the exact object
 that bare `analyze <subject>` downloads. The corresponding object key is
@@ -249,17 +235,17 @@ ports, run sizes) lives in the subject's `evaluations.toml` stanza.
 
 ## Benchmark prereqs (tau2-airline / tau2-retail / tau2-telecom)
 
-Clone tau2-bench as a sibling of this repo and install it once:
+From `plugins/nemo-compass`, clone tau2-bench alongside the plugin and install it:
 
 ```bash
-git clone https://github.com/sierra-research/tau2-bench   # sibling of nemo-compass plugin
-cd tau2-bench && uv sync          # Python 3.12+; installs the `tau2` CLI into .venv
+git clone https://github.com/sierra-research/tau2-bench ../tau2-bench
+cd ../tau2-bench && uv sync          # Python 3.12+; installs the `tau2` CLI into .venv
 uv run tau2 check-data            # verify the shipped domain data
 ```
 
 The `[tau2-airline]`, `[tau2-retail]`, and `[tau2-telecom]` stanzas then need
 (all non-secret, committed):
-- `tau2_repo` — the checkout above; relative to this repo's root (`../tau2-bench`, the
+- `tau2_repo` — the checkout above; relative to `plugins/nemo-compass` (`../tau2-bench`, the
   sibling default) or absolute. Both the CLI (`<repo>/.venv/bin/tau2`) and the data dir
   (`<repo>/data`) are derived from it (`tau2_bin`/`tau2_data_dir` override if needed).
 - `agent_llm`/`user_llm` — models your proxy key serves (`GET {OPENAI_API_BASE}/v1/models`);

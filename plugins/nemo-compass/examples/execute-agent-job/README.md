@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Compass as ExecuteAgentJob Demo
+# Run Compass on sample traces
 
 This directory demonstrates running Compass through AnalysisRuns
 backed by the generic `agents.execute` job.
@@ -17,9 +17,9 @@ backed by the generic `agents.execute` job.
 
 ## Prerequisites
 
-- A running local platform with Intake, Agents, Jobs, and Insights, and a
+- A running local platform with Intake, Agents, Jobs, and Compass, and a
   running ClickHouse for Intake (see `services/intake/README.md`).
-- `nemo setup` completed, so a default/fast Model Entity pair exists. The
+- `nemo setup` completed, so a default/fast Model Entity pair exists.
   Compass resolves its models as Platform Model Entities. Each ref is a
   workspace-qualified entity name such as
   `default/nvidia-nemotron-3-super-120b-a12b`, not a raw provider model id.
@@ -67,12 +67,9 @@ uv run plugins/nemo-compass/examples/execute-agent-job/seed_intake.py \
 This posts to `POST .../ingest/spans` and `POST .../annotations`, then reads
 both back.
 
-**The corpus is sized against Compass's own bar, not for brevity.** The
-Compass files an Insight only for patterns it can evidence with at least
-three representative traces, and it ranks issues recurring across many
-sessions above one-offs — so a handful of sessions reliably produces "no
-high-impact failure patterns detected". The spec expands to 84 spans across
-28 sessions spanning ~3.6 hours:
+The sample includes recurring failures across multiple sessions so Compass can
+find patterns supported by at least three traces. It contains 84 spans across
+28 sessions spanning about 3.6 hours:
 
 | Scenario | Sessions | Failure |
 |---|---|---|
@@ -81,11 +78,9 @@ high-impact failure patterns detected". The spec expands to 84 spans across
 | `billing` | 5 | `billing_lookup` times out at 30s |
 | `healthy` | 9 | none — grounded, cited answers |
 
-Plus 12 negative and 6 positive `feedback` annotations and 18 numeric
-`helpfulness` labels. Feedback matters: Compass's method says to start
-there, because it is the strongest signal of a real problem. Annotations are
-attached at session level, which is both the realistic shape for an end-user
-thumbs-down and the id Compass correlates back to spans with.
+The sample also includes 12 negative and 6 positive `feedback` annotations and
+18 numeric `helpfulness` labels. Annotations attach to sessions so Compass can
+correlate them with spans.
 
 Re-running is safe. Intake's span table sorts on `start_time`, so a repeat
 post only updates a span in place when its timestamp is unchanged. The
