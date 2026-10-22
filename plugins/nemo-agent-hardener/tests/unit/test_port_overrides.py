@@ -82,6 +82,8 @@ def test_invalid_worker_port_is_atomic(port: Any) -> None:
         {"port": 8000, "start_command": "python app.py\n--port $PORT", "env": {"PORT": "8000"}},
         {"port": 8000, "start_command": "python app.py --port $PORT\nother-command", "env": {"PORT": "8000"}},
         {"port": 8000, "start_command": "python app.py --port 8000 --port 8001"},
+        {"port": 8000, "start_command": "python app.py -- --port 8000"},
+        {"port": 8000, "start_command": "python app.py -- --port=8000"},
         {"port": 8000, "start_command": "python app.py --port"},
         {"port": 8000, "start_command": "python app.py --port 8000; other-command"},
         {"port": 8000, "start_command": "python -c 'text --port 8000 other'"},
@@ -98,6 +100,12 @@ def test_unsupported_listener_is_atomic(agent: dict[str, Any]) -> None:
     assert manifest == before
 
 
+def test_listener_before_option_terminator_is_updated() -> None:
+    agent = {"port": 8000, "start_command": "python app.py --port 8000 -- positional-argument"}
+    manifest_mod._apply_agent_port(agent, 9100)
+    assert agent == {"port": 9100, "start_command": "python app.py --port 9100 -- positional-argument"}
+
+
 def test_env_only_listener() -> None:
     agent = {"port": 8000, "start_command": "python app.py", "env": {"PORT": "8000"}}
     manifest_mod._apply_agent_port(agent, 9100)
@@ -109,6 +117,51 @@ def test_same_port_preserves_custom_listener(stored_port: int | str) -> None:
     agent = {"port": stored_port, "start_command": "custom-launcher"}
     manifest_mod._apply_agent_port(agent, 8000)
     assert agent == {"port": 8000, "start_command": "custom-launcher"}
+
+
+@pytest.mark.parametrize("stored_port", [8000, "8000", "08000"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python app.py --port $PORT",
+        "python app.py --port ${PORT:-8000}",
+        'sh -c "cd app && python main.py --port 8000"',
+    ],
+)
+def test_unchanged_port_preserves_uninterpretable_listener(stored_port: int | str, command: str) -> None:
+    agent = {"port": stored_port, "start_command": command}
+    manifest = {"agent": agent}
+    # Saved ports are reapplied on every run; this must not require interpreting
+    # a command that worked before port overrides were introduced.
+    manifest_mod._apply_manifest_overrides(manifest, {"port": 8000})
+    assert agent == {"port": 8000, "start_command": command}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python app.py --port $PORT",
+        "python app.py --port ${PORT:-8000}",
+        'sh -c "cd app && python main.py --port 8000"',
+    ],
+)
+def test_changed_port_still_rejects_uninterpretable_listener(command: str) -> None:
+    agent = {"port": 8000, "start_command": command}
+    before = deepcopy(agent)
+    with pytest.raises(AgentHardenerRunError):
+        manifest_mod._apply_agent_port(agent, 9100)
+    assert agent == before
+
+
+def test_unchanged_opaque_listener_does_not_partially_update_env() -> None:
+    agent = {
+        "port": "8000",
+        "start_command": "python app.py --port ${PORT:-8000}",
+        "env": {"PORT": "9100", "OTHER": "keep"},
+    }
+    before = deepcopy(agent)
+    manifest_mod._apply_agent_port(agent, 8000)
+    assert agent == {**before, "port": 8000}
 
 
 @pytest.mark.parametrize("option", ["--port $PORT", "--port=${PORT}", '--port "$PORT"', '--port="${PORT}"'])

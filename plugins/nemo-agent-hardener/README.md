@@ -361,12 +361,15 @@ probe destination and the listener's literal numeric `--port` argument and/or
 `agent.env.PORT`. `--port $PORT`, `--port=${PORT}`, and their double-quoted forms
 are supported when `agent.env.PORT` is declared: the command stays unchanged and
 only the environment value is updated. Generated Fabric commands are supported,
-including non-default original ports. Custom listeners must declare one of those
-conventions; ambiguous arguments, other shell expressions, and unsupported changes
-are rejected rather than silently probing a port where nothing listens. Quoted
-numeric YAML ports are normalized; an unchanged routing port still repairs stale
-numeric listener/env declarations, while an opaque unchanged custom command is
-preserved. Run-level overrides do not change the saved target. PATCH and Studio's
+including non-default original ports. Changing a listener port requires one of
+those conventions; ambiguous arguments, other shell expressions, and unsupported
+changes are rejected rather than silently probing a port where nothing listens.
+Quoted numeric YAML ports are normalized. When the routing port is unchanged, we
+try to repair stale listener/env declarations; if the command cannot be safely
+interpreted, only `agent.port` is normalized and the command and env are preserved.
+This also permits existing shell commands and externally supplied `$PORT` values
+to survive create, PATCH, refresh, and run materialization without a port change.
+Run-level overrides do not change the saved target. PATCH and Studio's
 **Save as default** synchronize the saved routing port, listener command, and PORT
 override together so subsequent runs use the same listener.
 

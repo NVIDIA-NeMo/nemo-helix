@@ -209,6 +209,48 @@ def test_patch_saved_default_synchronizes_listener_and_next_run(
     assert restored["agent"]["env"]["PORT"] == "9100"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python app.py --port $PORT",
+        "python app.py --port ${PORT:-8000}",
+        'sh -c "cd app && python main.py --port 8000"',
+    ],
+)
+def test_unchanged_opaque_port_survives_create_patch_refresh_and_run(
+    client, mock_entity_client, monkeypatch, tmp_path, command
+) -> None:
+    resolved = _resolved()
+    resolved.manifest["agent"]["start_command"] = command
+    monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", lambda *_args, **_kwargs: resolved)
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+    response = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "agent": "clockbot", "port": 8000},
+    )
+    assert response.status_code == 201, response.text
+    stored = response.json()
+    assert yaml.safe_load(stored["manifest_yaml"])["agent"]["start_command"] == command
+
+    for method, suffix, kwargs in [
+        (client.patch, "", {"json": {"port": 8000}}),
+        (client.post, "/refresh", {}),
+    ]:
+        mock_entity_client.get = AsyncMock(return_value=AgentHardenerManifest.model_validate(stored))
+        response = method(f"/apis/agent-hardener/v2/workspaces/default/manifests/m1{suffix}", **kwargs)
+        assert response.status_code == 200, response.text
+        stored = response.json()
+        assert yaml.safe_load(stored["manifest_yaml"])["agent"]["start_command"] == command
+        assert stored["port"] == 8000
+
+    monkeypatch.setattr(job_manifest, "download_and_extract_project", lambda *_args: tmp_path)
+    monkeypatch.setattr(job_manifest, "gateway_backend", lambda _url: None)
+    restored = job_manifest._materialize_from_bundle(None, "m1", stored, tmp_path, "default/bundle")
+    assert restored["agent"]["start_command"] == command
+    assert restored["agent"]["port"] == 8000
+
+
 def test_patch_unsupported_listener_does_not_persist_partial_changes(client, mock_entity_client) -> None:
     existing = AgentHardenerManifest(
         name="m1",

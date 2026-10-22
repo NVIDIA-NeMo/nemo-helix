@@ -155,7 +155,7 @@ _START_COMMAND_PORT_OPTION = re.compile(r"(?:^|\s)--port(?:=|\s|$)")
 
 
 def _apply_agent_port(agent: dict[str, Any], port: Any) -> None:
-    """Update routing and explicit listener declarations together, or leave the agent untouched."""
+    """Repair supported listeners; preserve opaque commands when routing is unchanged."""
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim port must be an integer between 1 and 65535.")
     # YAML may quote the stored routing port. Equal routing metadata is not enough
@@ -164,18 +164,21 @@ def _apply_agent_port(agent: dict[str, Any], port: Any) -> None:
     if isinstance(stored_port, str) and re.fullmatch(r"[0-9]+", stored_port.strip()):
         stored_port = int(stored_port)
     same_port = type(stored_port) is int and stored_port == port
+    try:
+        _synchronize_agent_listener_port(agent, port)
+    except AgentHardenerRunError:
+        if not same_port:
+            raise
+        # Reapplying a saved port must not newly reject an opaque listener.
+        # Synchronization validates before mutating, so only normalize routing.
+        agent["port"] = port
+
+
+def _synchronize_agent_listener_port(agent: dict[str, Any], port: int) -> None:
+    """Validate the listener completely before updating routing, command, or env."""
     command = agent.get("start_command")
     env = agent.get("env")
     has_port_env = isinstance(env, dict) and "PORT" in env
-    # An opaque custom listener needs no reinterpretation when routing is unchanged.
-    if (
-        same_port
-        and isinstance(command, (str, type(None)))
-        and not _START_COMMAND_PORT_OPTION.search(command or "")
-        and not has_port_env
-    ):
-        agent["port"] = port
-        return
     if env is not None and not isinstance(env, dict):
         raise AgentHardenerRunError(CATEGORY_MANIFEST, "Victim agent.env must be an object to override its port.")
     if command is not None and not isinstance(command, str):
@@ -184,6 +187,12 @@ def _apply_agent_port(agent: dict[str, Any], port: Any) -> None:
         tokens = shlex.split(command or "")
     except ValueError as exc:
         raise AgentHardenerRunError(CATEGORY_MANIFEST, "Cannot override victim port in a malformed command.") from exc
+    if "--" in tokens and any(
+        token == "--port" or token.startswith("--port=") for token in tokens[tokens.index("--") + 1 :]
+    ):
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST, "Cannot override victim port: --port after -- is not a listener option."
+        )
     token_options = [token for token in tokens if token == "--port" or token.startswith("--port=")]
     command_ports = list(_START_COMMAND_PORT.finditer(command or ""))
     env_ports = list(_START_COMMAND_PORT_ENV.finditer(command or ""))
