@@ -21,7 +21,9 @@ metrics, and a per-trial container would add nothing.
 
 <Warning>
 
-Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` extra) plus:
+Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` extra),
+Harbor `>=0.23,<0.24`, and Fabric `>=0.5.0,<0.6.0` (the Helix 0.9 checkout locks
+`0.5.0`), plus:
 
 - **`NVIDIA_API_KEY`** for build.nvidia.com, exported in the process that runs the evaluation.
 - A task image with **CPython and bash**. `NemoFabricAgent` installs Fabric and the harness into the
@@ -31,8 +33,10 @@ Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` ext
   [`FabricInstalledAgent`](#run-on-task-images-without-python) instead, which brings its own
   Python.
 
-Nothing Fabric-related needs to be installed on the host: the agent class below is part of the SDK,
-and the harness is installed inside the container.
+The host needs the Fabric SDK and its Harbor integration, including
+`nemo-fabric-adapter-catalog` for adapter inspection; the SDK's `harbor` extra
+installs these. The selected harness runtime is installed inside the task
+container. A host-side descriptor is not a task-side harness installation.
 
 </Warning>
 
@@ -74,6 +78,42 @@ The install/run keywords (`fabric_package`, `fabric_workspace`, `fabric_config_b
 `agent_model_name`, when given, swaps `models.default.model` only; the endpoint and credential wiring
 stay the config's. Files the config refers to by relative path (`skills.paths`) resolve against
 `fabric_config_target` when a `fabric_config_bundle` directory is uploaded.
+
+## Preflight and custom adapters
+
+`fabric_config` must be a full typed Fabric mapping with a nonempty
+`harness.adapter_id`, not managed `nemo-agents-spec-v1` YAML. Registered-agent
+resolution translates the managed format for you.
+
+`NemoFabricAgent.preflight` and `FabricInstalledAgent` check the config, adapter
+contract and exact `fabric_package` pins before trials. A mismatched pin fails
+with `fabric_package pins nemo-fabric to ... but the host runs ...`; match the
+host version. Ranges are left to the installer, not proven compatible.
+`harbor config validate` checks option schemas but does not replace preflight
+or a task-side invocation test.
+
+If a catalog descriptor is missing, install `nemo-fabric[harbor]` on the host.
+For a custom adapter, supply a host-readable `fabric_adapter_descriptor` and
+make the runner discoverable inside the task. For example, these options assume
+a **user-supplied** descriptor and runner under `./bundle/adapters/acme/`:
+
+```json
+{
+  "fabric_config_bundle": "./bundle",
+  "fabric_config_target": "/tmp/helix-agent",
+  "fabric_discovery_paths": ["/tmp/helix-agent/adapters"],
+  "fabric_adapter_descriptor": "./bundle/adapters/acme/fabric-adapter.json"
+}
+```
+
+The descriptor ID must match `harness.adapter_id`. `fabric_discovery_paths` is
+merged with `discovery.local_paths`; these paths must exist **inside the task**
+after upload. Install runner dependencies there too. A host-readable descriptor
+does not install a task-side runtime; inspect the bundle and discovery paths
+if preflight succeeds but runner lookup fails.
+
+For persisted Relay v3-to-v4 compatibility and ATIF/OTLP gateway rewriting, see
+[Fabric upgrade and telemetry routing](/documentation/agents/fabric-upgrade).
 
 ## Run on task images without Python
 
@@ -121,7 +161,7 @@ Four differences from `NemoFabricAgent`:
 
 - `fabric_package` is required — the harness extra cannot be derived from the config. Its shape is
   `nemo-fabric[<harness extra>,relay]==<version>`: the extra is the harness the config's
-  `adapter.id` names (`deepagents`, `hermes-agent`, `codex`, ...), `relay` is the piece that talks to
+  `harness.adapter_id` selects (`deepagents`, `hermes-agent`, `codex`, ...), `relay` is the piece that talks to
   the platform gateway, and the version should match the Fabric the platform ships so the config
   it translated is one the harness accepts. When you evaluate a registered agent through the
   platform instead, the resolver derives this value for you.
