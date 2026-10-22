@@ -8,6 +8,15 @@ description: "Register an agent on NeMo Helix from code, a container image, a re
 
 <a id="register-agents"></a>
 
+<Warning>
+**Upgrading to 0.9:** `nemo agents create` was renamed to `nemo agents register`.
+There is no compatibility alias; the legacy command fails with
+`No such command 'create'`. Update scripts and CI to use `register` with the same
+arguments, and Python callers from `AgentsResource.create` to
+`AgentsResource.register`. See [Fabric 0.5 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
+for the version, preflight and telemetry migration checklist.
+</Warning>
+
 Registering an agent creates an `agent` entity in a workspace. Choose the method that matches what you have:
 
 | Method | You provide | Use when |
@@ -129,7 +138,10 @@ strategies require it.
 </Note>
 
 For the built-in Mini-SWE-Agent 2.x harness, install `nemo-helix[nemo-agents-plugin-mini-swe-agent]`
-or, from a source checkout, `nemo-agents-plugin[mini-swe-agent]`.
+or, from a source checkout, `nemo-agents-plugin[mini-swe-agent]`. The public
+[Mini-SWE lifecycle guide](/documentation/agents/mini-swe-agent) covers model
+credentials, deployment, invocation, sessions, telemetry, timeouts and unsupported
+shared capabilities.
 
 ### Bring Your Own Harness
 

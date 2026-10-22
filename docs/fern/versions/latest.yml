@@ -44,6 +44,12 @@ navigation:
         contents:
           - page: Register Agents
             path: ../../agents/register-agents.mdx
+          - page: Fabric 0.5 Upgrade and Adapter Support
+            slug: fabric-upgrade
+            path: ../../agents/fabric-upgrade.mdx
+          - page: Run Mini-SWE-Agent
+            slug: mini-swe-agent
+            path: ../../agents/mini-swe-agent.mdx
           - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
             contents:

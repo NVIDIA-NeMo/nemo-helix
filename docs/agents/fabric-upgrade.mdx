@@ -1,0 +1,230 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Fabric 0.5 Upgrade and Adapter Support"
+description: "Migrate agent automation for NeMo Helix 0.9, check Fabric and Harbor compatibility, and troubleshoot adapter and telemetry setup."
+---
+
+NeMo Helix 0.9 uses the Fabric 0.5 family and Harbor `>=0.23,<0.24`.
+The release checkout locks Fabric to `0.5.0`; package declarations allow
+`nemo-fabric>=0.5.0,<0.6.0`. Keep the host and task-side Fabric release aligned,
+not just within the same declared range.
+
+## Migrate agent registration
+
+<Warning>
+In NeMo Helix 0.9, `nemo agents create` was renamed to `nemo agents register`.
+There is **no compatibility alias**. The old command exits with
+`No such command 'create'`; it does not register an agent.
+</Warning>
+
+Update scripts, CI jobs, notebooks, and saved coding-agent prompts. Replace the
+command name while preserving its arguments:
+
+```bash
+nemo agents register --name my-agent --agent-config ./agent.yaml
+```
+
+For Python automation, replace `AgentsResource.create(...)` with
+`AgentsResource.register(...)`. Registration without a config is a trace-only
+identity; it does not acquire a runnable configuration during this migration.
+See [Register Agents](/documentation/agents/register-agents).
+
+## Check host and Harbor task versions
+
+A Harbor `fabric_package` exact pin, such as
+`nemo-fabric[deepagents]==0.5.0`, is checked against the host's installed Fabric
+version during `NemoFabricAgent.preflight`. A different exact pin is rejected
+before trials start with a message naming both versions. `FabricInstalledAgent`
+uses the same preflight. A requirement range is left to the installer: passing
+preflight with a range is **not** a guarantee that it will resolve to the host's
+version. Prefer an exact matching pin for reproducible evaluations.
+
+For a registered agent, Helix derives the harness package and matching version
+unless you override `agent_kwargs.fabric_package`. An override must retain the
+host/task protocol compatibility. Check the host with:
+
+```bash
+uv run python -c 'from importlib.metadata import version; print(version("nemo-fabric"))'
+```
+
+The host needs Fabric and its Harbor integration, including the adapter catalog
+used for inspection; the task needs the chosen harness and its runtime
+requirements. Installing an adapter descriptor on the host does not install the
+harness in the task container. See
+[Harbor preflight and custom adapters](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#preflight-and-custom-adapters).
+
+## Persisted Relay observability v3 to v4
+
+Fabric 0.4 wrote translated `relay.observability.version: 3` configurations.
+When Helix 0.9 prepares a persisted registered-agent evaluation configuration
+for the Fabric, Harbor, or Gym runner, it upgrades this known shape to
+`relay.observability.version: 4` **in memory**. New translations use version 4.
+The stored input is not rewritten, and no manual bulk data migration is needed
+for this version-number change.
+
+This compatibility step recognizes version 3 only. It is not a translator for
+arbitrary old/new Fabric schemas, a change to all stored agent YAML, or a promise
+that an older task-side Fabric can parse a new run payload. Standalone typed
+`fabric_config` inputs must already satisfy the installed Fabric schema. If a
+replayed job still fails schema validation, check the full configuration and the
+host/task package versions rather than repeatedly changing the version number.
+
+## Telemetry routing through gateways
+
+Helix rewrites platform-bound URLs when preparing container deployments and
+registered-agent Harbor task containers. Job gateway handling also rebases
+platform Intake exporters when the job uses its local authentication proxy.
+This lets the container reach Helix with the deployment/job identity instead of
+calling a host-only `localhost` URL or an unsuitable public ingress.
+
+The rewrite recognizes platform **route paths**, not a particular hostname:
+
+| Destination | Behavior |
+| --- | --- |
+| Model `base_url` containing `/apis/inference-gateway/` | Uses the selected reachable gateway origin. |
+| HTTP ATIF storage `endpoint` whose path starts with `/apis/intake/` | Uses the gateway scheme and host, retaining the Intake path and query. |
+| OTLP trace, log, and metric `endpoint` entries under that Intake path | Uses the same gateway origin. |
+| ATOF endpoint or stream-sink URL under that Intake path | HTTP(S) follows the gateway scheme. WebSocket URLs keep their transport: `ws` for an HTTP gateway, `wss` for HTTPS. |
+| Independent collector/model URL without the platform route path | Keeps its own destination; Helix does not make that collector reachable for you. |
+| Local-file and S3 telemetry storage | Not a platform HTTP endpoint rewrite. |
+
+Both authoring `telemetry` and translated `relay.observability` exporters are
+recognized. The configuration is copied for execution; rewriting does not edit
+the user's source file. The automatic Relay version upgrade is a separate step.
+
+For Harbor, Relay file output is placed under the per-trial artifact root so
+Harbor can collect it. A file in the trial bundle and an export to Intake are
+different delivery paths; inspect both when diagnosing telemetry.
+
+### Troubleshoot missing traces
+
+1. Check that the harness supports the requested telemetry and that it is not
+   explicitly disabled. DeepAgents does not support Fabric's Relay observability
+   configuration; do not add Relay settings simply because another harness uses
+   them.
+2. Inspect the **resolved execution config**, not only the registered source:
+   verify the gateway origin, workspace path, protocol and query. Check that
+   the gateway is reachable from inside the actual container. `localhost` there
+   is the container itself unless a local job proxy intentionally listens there.
+3. For an independent collector, verify its network route, credentials and
+   protocol separately. Its URL is intentionally not sent to Helix's gateway.
+4. Confirm Intake is available and can reach ClickHouse, then look in the same
+   workspace and under the expected agent name. Do not infer success from a
+   deployment's readiness alone. See
+   [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
+5. Inspect deployment/job logs and Harbor's saved Relay artifacts. Record the
+   Fabric request ID when correlating streamed scope events with a terminal
+   result; missing tool-level telemetry is not by itself proof that invocation
+   failed.
+
+## Adapter availability is not runtime installation
+
+The base Agents plugin supplies the Python adapter contracts. Harness extras
+install the corresponding runtimes where available. Install on the **platform
+host** for subprocess execution and in the **task/agent image** for container
+execution; installing only on the machine running the CLI is insufficient.
+
+| Harness | NeMo Helix installation path | Important boundary |
+| --- | --- | --- |
+| Claude, Codex, DeepAgents | `nemo-helix[nemo-agents-plugin-claude]`, `nemo-helix[nemo-agents-plugin-codex]`, `nemo-helix[nemo-agents-plugin-deepagents]` | The respective CLI/model credentials and adapter capabilities still apply. |
+| Mini-SWE-Agent 2.x | `nemo-helix[nemo-agents-plugin-mini-swe-agent]` | Has an optional-harness integration gate; follow the [lifecycle guide](/documentation/agents/mini-swe-agent). |
+| NOOA | `nemo-helix[nemo-agents-plugin-nooa]` | Harness runtime requires Python 3.12 or 3.13. |
+| Hermes | Separately managed environment | Dependencies conflict with the main Helix environment; follow the [harness example](https://github.com/NVIDIA-NeMo/nemo-helix/tree/release/0.9/plugins/nemo-agents/examples/nemo-agent-config#hermes). |
+| Remote agent | Base plugin and a separately running HTTP agent | The remote endpoint owns its harness/runtime installation. |
+| Pi | Shipped host descriptor and generated-image integration; **opt-in, not end-to-end release-gated** | Requires the JavaScript runtime and adapter, not a Python harness extra. See below. |
+
+An upstream Fabric adapter inventory is not a statement that every adapter has
+an end-to-end NeMo Helix release gate. In 0.9, Pi has translation and
+container-template coverage, but no dedicated real-Pi execution gate in the
+Helix CI harness matrix. Validate its runtime and telemetry in your target
+environment before relying on it; do not treat descriptor discovery as a
+successful invocation test.
+
+### Pi packaging and prerequisites
+
+Helix recognizes `kind: pi` and `kind: nvidia.fabric.pi`, both selecting
+`nvidia.fabric.pi`. The Agents plugin wheel and bundled `nemo-helix` wheel ship a
+host-side `pi.fabric-adapter.json` under
+`share/nemo-fabric/adapters/pi/`. This mirror permits contract inspection; it is
+**not** the Node runner or the Pi SDK.
+
+For a Pi-selected config, the generated agent Dockerfile adds:
+
+- Node 22 (Pi 1.x requires **Node >=22.19.0**).
+- `nemo-fabric-adapters-pi@^0.5.0` and explicit `@earendil-works/pi-ai`,
+  `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-mcp` peers at `^1.0.0`.
+- The npm adapter's real descriptor linked into Fabric's preinstalled discovery
+  tree, and the npm bin directory on `PATH`.
+- `nemo-relay-cli-bin>=0.9.0,<0.10.0` and the Pi extension from NeMo Relay's
+  `0.9.0` source ref at `/opt/pi-relay-extension`.
+
+Use [Build and Publish Agent Images](/documentation/agents/deploy-agents#build-and-publish-agent-images)
+with a Pi-selected config rather than assuming a plain Python install includes
+these components. From a source checkout, follow that page's local-wheel
+instructions before building. For subprocess execution, you must provision the
+same Node/adapter/SDK components yourself on the platform host and make the real
+adapter discoverable; there is no `nemo-agents-plugin-pi` Python extra.
+
+A minimal selection in a managed agent config is:
+
+```yaml
+config_format: nemo-agents-spec-v1
+name: pi-agent
+default_harness: pi
+harnesses:
+  pi:
+    kind: pi
+models:
+  default:
+    provider: nvidia
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
+    api_key_env: NVIDIA_API_KEY
+    base_url: https://integrate.api.nvidia.com/v1
+    extensions:
+      api: openai-completions
+```
+
+Supply the model credential through the agent environment/Secrets store, not
+literal config values. `models.default.extensions.api` supplies Pi's wire
+protocol for a model absent from Pi's built-in catalog; choose the protocol the
+endpoint actually serves. After building an image and registering the config,
+use the normal deployment and one-shot invocation commands:
+
+```bash
+nemo agents deploy --agent pi-agent --name pi-agent-deployment --mode docker --image pi-agent:0.9.0
+nemo agents invoke --agent-deployment pi-agent-deployment --input "Describe the task workspace."
+```
+
+These are opt-in integration steps, not a claim of a release-validated Pi
+session/streaming workflow. The shipped descriptor declares native streaming,
+cancellation, updates and service capabilities false; do not infer support for
+those native capabilities from the shared Agents API.
+
+For a missing descriptor, distinguish the host mirror from the actual npm
+adapter installation. For `node` or runner startup errors, inspect the container
+logs and npm installation. For Relay-enabled execution, check the CLI and
+`harnesses.pi.settings.relay_extension_path`: its default is the in-image path
+above, which a subprocess host does not acquire automatically. Missing model
+protocol metadata and a missing Relay extension are different failures from
+model authentication or Intake delivery.
+
+## Release documentation coverage
+
+This table maps the agent-related 0.9 contract changes to public guidance. Keep
+it current when changing the corresponding release behavior; a command listing
+alone is not migration or troubleshooting documentation.
+
+| Change | User guidance or rationale |
+| --- | --- |
+| Registration rename/removal | [Migration notice](#migrate-agent-registration) and [Register Agents](/documentation/agents/register-agents). |
+| Fabric/Harbor versions, full typed config, preflight and discovery | [Version checks](#check-host-and-harbor-task-versions) and [Harbor Fabric guide](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#preflight-and-custom-adapters). |
+| Persisted Relay schema and gateway routing | [v3-to-v4 compatibility](#persisted-relay-observability-v3-to-v4) and [telemetry routing](#telemetry-routing-through-gateways). |
+| Mini-SWE runtime and capabilities | [Mini-SWE lifecycle](/documentation/agents/mini-swe-agent). |
+| Pi descriptor versus runtime/release-gate status | [Pi packaging and prerequisites](#pi-packaging-and-prerequisites). |
+| Removed hidden improvement prototype | No current user documentation required: it was not a supported workflow. Do not restore its obsolete commands or examples. |
+
+The documentation regression tests validate this coverage map, navigation,
+migration notice and lifecycle anchors. They do not replace runtime harness,
+package-install or telemetry acceptance tests.

@@ -21,7 +21,9 @@ metrics, and a per-trial container would add nothing.
 
 <Warning>
 
-Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` extra) plus:
+Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` extra),
+Harbor `>=0.23,<0.24`, and Fabric `>=0.5.0,<0.6.0` (the Helix 0.9 checkout locks
+`0.5.0`), plus:
 
 - **`NVIDIA_API_KEY`** for build.nvidia.com, exported in the process that runs the evaluation.
 - A task image with **CPython and bash**. `NemoFabricAgent` installs Fabric and the harness into the
@@ -31,8 +33,10 @@ Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` ext
   [`FabricInstalledAgent`](#run-on-task-images-without-python) instead, which brings its own
   Python.
 
-Nothing Fabric-related needs to be installed on the host: the agent class below is part of the SDK,
-and the harness is installed inside the container.
+The host needs the Fabric SDK and its Harbor integration, including
+`nemo-fabric-adapter-catalog` for adapter inspection; the SDK's `harbor` extra
+installs these. The selected harness runtime is installed inside the task
+container. A host-side descriptor is not a task-side harness installation.
 
 </Warning>
 
@@ -74,6 +78,83 @@ The install/run keywords (`fabric_package`, `fabric_workspace`, `fabric_config_b
 `agent_model_name`, when given, swaps `models.default.model` only; the endpoint and credential wiring
 stay the config's. Files the config refers to by relative path (`skills.paths`) resolve against
 `fabric_config_target` when a `fabric_config_bundle` directory is uploaded.
+
+## Preflight and custom adapters
+
+`fabric_config` must be a complete typed Fabric mapping with a nonempty
+`harness.adapter_id`. It is **not** the managed Helix `nemo-agents-spec-v1`
+format: registered-agent resolution translates that format for you. Keep agent
+description in the typed config; legacy flat description keywords such as
+`fabric_adapter_id`, `fabric_system_instruction`, and `fabric_max_turns` are
+rejected rather than merged. Install/run settings such as `fabric_package`,
+`fabric_workspace`, and `fabric_config_bundle` remain separate options.
+
+Before running trials, `NemoFabricAgent.preflight` parses the config, checks
+exact Fabric package pins against the installed host version, and inspects the
+adapter contract. You can call it directly after defining `fabric_config` above:
+
+```python
+from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
+
+NemoFabricAgent.preflight({
+    "fabric_config": fabric_config,
+    "fabric_package": "nemo-fabric[deepagents]==0.5.0",
+    "fabric_workspace": "/app",
+})
+```
+
+`FabricInstalledAgent` performs these checks too. An exact pin to another
+release fails with `fabric_package pins nemo-fabric to ... but the host runs ...`;
+match the actual host version. Requirement ranges are left to the installer,
+not proven compatible by preflight. `harbor config validate` applies the option
+schema/flat-field validation, but is not a substitute for the full preflight
+and a task-side install/invocation test.
+
+For a catalog adapter, install `nemo-fabric[harbor]` in the host environment if
+the catalog/descriptor is missing. For a custom adapter, the host must be able
+to read its descriptor through `fabric_adapter_descriptor`, especially when
+skills, MCP or telemetry require capability inspection. The task must also have
+the adapter files and a discovery path; a readable host descriptor alone does
+not make the task-side runner available.
+
+For example, given a **user-supplied** bundle with a complete descriptor and its
+runner under `./bundle/adapters/acme/`, use the following install/run options
+alongside your full custom `fabric_config`:
+
+```json
+{
+  "fabric_config_bundle": "./bundle",
+  "fabric_config_target": "/tmp/helix-agent",
+  "fabric_discovery_paths": ["/tmp/helix-agent/adapters"],
+  "fabric_adapter_descriptor": "./bundle/adapters/acme/fabric-adapter.json"
+}
+```
+
+These example paths do not name a shipped adapter. Supply a descriptor whose
+ID matches `fabric_config.harness.adapter_id` and whose runner and declared
+capabilities are actually present. `fabric_discovery_paths` is merged with the
+typed config's `discovery.local_paths`; paths must resolve **inside the task
+container**, after the bundle is uploaded. Relative skill paths resolve against
+`fabric_config_target`. Install the custom adapter's dependencies in the task
+as well. If host preflight succeeds but runner lookup fails in the trial,
+inspect the uploaded bundle, task-side discovery paths and executable/package
+installation separately.
+
+### Persisted configurations and telemetry
+
+Helix upgrades known persisted registered-agent
+`relay.observability.version: 3` configurations to version 4 in memory when
+preparing evaluations under Fabric 0.5. This does not rewrite stored inputs,
+accept arbitrary incompatible schemas, or relax the host/task version check.
+Standalone typed configs must already validate against their installed Fabric.
+
+For a registered Harbor agent, Helix also rewrites platform-bound model URLs
+and ATIF/OTLP Intake endpoints to the container-reachable gateway origin. It
+recognizes the platform route path rather than a particular hostname;
+independent collectors are left alone. Relay file artifacts are collected
+separately under the Harbor trial artifact root. See
+[Fabric compatibility and gateway telemetry routing](/documentation/agents/fabric-upgrade)
+for upgrade boundaries, ATOF/WebSocket handling, and missing-trace diagnosis.
 
 ## Run on task images without Python
 
@@ -121,7 +202,7 @@ Four differences from `NemoFabricAgent`:
 
 - `fabric_package` is required — the harness extra cannot be derived from the config. Its shape is
   `nemo-fabric[<harness extra>,relay]==<version>`: the extra is the harness the config's
-  `adapter.id` names (`deepagents`, `hermes-agent`, `codex`, ...), `relay` is the piece that talks to
+  `harness.adapter_id` selects (`deepagents`, `hermes-agent`, `codex`, ...), `relay` is the piece that talks to
   the platform gateway, and the version should match the Fabric the platform ships so the config
   it translated is one the harness accepts. When you evaluate a registered agent through the
   platform instead, the resolver derives this value for you.
