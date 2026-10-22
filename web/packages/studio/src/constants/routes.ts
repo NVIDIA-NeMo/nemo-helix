@@ -22,6 +22,7 @@ export const ROUTE_PARAMS = {
   workspace: 'workspace',
   modelNamespace: 'modelNamespace',
   modelName: 'modelName',
+  adapterName: 'adapterName',
   evalConfigNamespace: 'configNamespace',
   evalConfigName: 'configName',
   safeSynthesizerJobName: 'safeSynthesizerJobName',
@@ -92,6 +93,9 @@ export const ROUTES = {
     evaluationSessionDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}/:${P.evaluationName}/sessions/:${P.sessionId}`,
     customizationJobList: `/workspaces/:${P.workspace}/fine-tune`,
     customizationJobDetails: `/workspaces/:${P.workspace}/fine-tune/:${P.customizationJobName}`,
+    /** Nested under fine-tune so the Fine-tuning nav item stays active. */
+    modelDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}`,
+    modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
     filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,

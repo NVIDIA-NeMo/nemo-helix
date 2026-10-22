@@ -27,6 +27,7 @@ import {
   JOBS_ENABLED,
   MEMBERS_ENABLED,
   MODEL_COMPARE_ENABLED,
+  MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
   PLUGINS_ENABLED,
@@ -39,6 +40,7 @@ import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
+import type { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { createSearchParams, generatePath, RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
@@ -51,6 +53,9 @@ export const gateBaseModelsRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateCustomizationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(CUSTOMIZER_ENABLED, routes);
+
+export const gateModelDetailsRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(MODEL_DETAILS_ENABLED, routes);
 
 export const gateDashboardRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(DASHBOARD_ROUTE_ENABLED, routes);
@@ -206,6 +211,21 @@ export const getWorkspaceCustomizationJobDetailsRoute = (
     workspace,
     customizationJobName,
   });
+};
+
+export const getModelDetailRoute = (
+  workspace: string,
+  modelName: string,
+  options?: { adapterName?: string; tab?: ModelDetailTab }
+) => {
+  const base = options?.adapterName
+    ? generatePath(ROUTES.workspace.modelAdapterDetail, {
+        workspace,
+        modelName,
+        adapterName: options.adapterName,
+      })
+    : generatePath(ROUTES.workspace.modelDetail, { workspace, modelName });
+  return options?.tab ? `${base}?${QUERY_PARAMETERS.tab}=${options.tab}` : base;
 };
 
 export const getWorkspaceCustomizationJobListRoute = (workspace: string) => {
