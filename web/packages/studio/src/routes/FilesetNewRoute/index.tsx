@@ -168,9 +168,8 @@ export const FilesetNewRoute: FC = () => {
     [workspace, setValue]
   );
 
-  // Another create can take the picked name first, which the live check or a 409 on submit
-  // reveals. With no field to rename it in, move on to the next free name. Once per name, so
-  // a lookup that disagrees with the check cannot loop.
+  // Another create can take the picked name first; with no field to rename it in, move on to
+  // the next free name. Once per name, so a lookup that disagrees with the check cannot loop.
   const reResolvedSampleName = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (activeTab !== DATASET_TYPE_SAMPLE || !nameTaken || sampleNameLookup !== 'resolved') return;

@@ -6,11 +6,9 @@ import { filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { nameTakenMessage } from '@studio/components/form/entityNameCheck';
 
-/** The error for a fileset name already used in `workspace`. */
 export const filesetNameTakenMessage = (name: string, workspace: string): string =>
   nameTakenMessage('fileset', name, workspace);
 
-/** Retrieves a fileset, or null when nothing holds the name. */
 export const retrieveFilesetIfPresent = async (
   workspace: string,
   name: string

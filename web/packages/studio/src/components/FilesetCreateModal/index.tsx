@@ -188,7 +188,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
           },
         });
       } catch (err) {
-        // The check above can lose a race with another create; say so on the field, not a toast.
+        // The live check can lose a race with another create; say so on the field.
         if (isConflictError(err)) {
           void invalidateFilesetNameCheck(queryClient, workspace, data.name);
           setError('name', { message: filesetNameTakenMessage(data.name, workspace) });

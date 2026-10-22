@@ -68,9 +68,8 @@ interface UseWatchedFilesetNameStatusOptions<T extends FieldValues> {
   onStatusChange: (status: NameCheckStatus) => void;
 }
 
-/** Checks a form's fileset name field as it changes. Watching the field here rather than at the
- *  form root means a keystroke re-renders only the caller; the form re-renders only when the
- *  status it blocks submit on changes. */
+/** Checks a form's fileset name field as it changes. Watching it here, not at the form root,
+ *  re-renders only the caller per keystroke; the form re-renders only when the status changes. */
 export function useWatchedFilesetNameStatus<T extends FieldValues>({
   control,
   name,

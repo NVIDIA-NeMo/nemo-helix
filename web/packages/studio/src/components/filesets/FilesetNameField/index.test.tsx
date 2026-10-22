@@ -52,7 +52,6 @@ const Harness = ({
   );
 };
 
-/** Renders the field and lets the check's debounce settle. */
 const renderSettled = (props: HarnessProps) => {
   render(<Harness {...props} />);
   act(() => {

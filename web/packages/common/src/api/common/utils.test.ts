@@ -308,7 +308,6 @@ describe('getErrorMessage', () => {
   });
 });
 
-/** What axios raises for a response with `status`. */
 const axiosErrorWithStatus = (status: number): AxiosError => {
   const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
   return new AxiosError('Request failed', String(status), config, undefined, {
