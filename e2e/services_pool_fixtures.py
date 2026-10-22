@@ -22,6 +22,11 @@ _services_log_key = pytest.StashKey[dict[str, Path] | Path]()
 
 _TAIL_LINES_ON_FAILURE = 100
 
+# Fixtures that lease a pooled platform. ``client`` and ``nemo_run`` reach the pool
+# through ``request.getfixturevalue``, so they are not in a test's static closure of
+# ``_services_instance`` and have to be listed by name.
+_POOL_FIXTURES = frozenset({"_services_instance", "_services", "services_pool_client", "client", "nemo_run"})
+
 
 def _read_services_log_tail(log_path: Path) -> list[str]:
     with log_path.open() as log_file:
@@ -41,8 +46,24 @@ def configure_services_pool(config: pytest.Config, *, configure_mock_provider: b
 
 
 def register_services_pool_items(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Register collected modules that may use the service pool."""
-    config.stash[_services_pool_manager_key].register_collected_items(items)
+    """Register collected modules that may use the service pool.
+
+    Also assigns each test an ``xdist_group`` for ``pytest -n N --dist loadgroup``.
+    Tests that lease a pooled platform share one group per pool, so each pool, with
+    its data directory and Docker resource scope, runs on exactly one worker. Other
+    tests are grouped by module.
+    """
+    manager = config.stash[_services_pool_manager_key]
+    manager.register_collected_items(items)
+    for item in items:
+        module = item.getparent(pytest.Module)
+        if module is None:
+            continue
+        if _POOL_FIXTURES & set(getattr(item, "fixturenames", ())):
+            group = f"e2e-pool-{manager.config_hash_for_module(module.nodeid)}"
+        else:
+            group = module.nodeid
+        item.add_marker(pytest.mark.xdist_group(name=group))
 
 
 def append_services_pool_report_sections(

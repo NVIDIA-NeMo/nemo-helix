@@ -570,3 +570,39 @@ def test_read_services_log_tail_streams_last_failure_lines(tmp_path, monkeypatch
         services_pool_fixtures._read_services_log_tail(log_path)
         == lines[-services_pool_fixtures._TAIL_LINES_ON_FAILURE :]
     )
+
+
+def test_register_services_pool_items_groups_tests_by_pool_for_xdist() -> None:
+    pool = services_pool.E2EServicesPool()
+    for module_id, config_hash in (("e2e/test_a.py", "aaa"), ("e2e/test_b.py", "aaa"), ("e2e/test_c.py", "ccc")):
+        pool._module_states[module_id] = services_pool.ModuleConfigState(
+            module_id=module_id,
+            key=services_pool.ServicesPoolKey(config_hash=config_hash),
+            config_path=None,
+            config_data={},
+            harness_config={"backend": "subprocess"},
+            config_layers=(),
+            auth_enabled=False,
+        )
+    config = SimpleNamespace(stash=pytest.Stash())
+    config.stash[services_pool_fixtures._services_pool_manager_key] = pool
+
+    def make_item(module_id: str, fixturenames: list[str]) -> SimpleNamespace:
+        module = SimpleNamespace(nodeid=module_id)
+        item = SimpleNamespace(fixturenames=fixturenames, markers=[])
+        item.getparent = lambda cls: module
+        item.add_marker = item.markers.append
+        return item
+
+    items = [
+        make_item("e2e/test_a.py", ["client", "workspace"]),
+        make_item("e2e/test_b.py", ["nemo_run"]),
+        make_item("e2e/test_c.py", ["_services_instance"]),
+        make_item("e2e/test_d.py", ["platform"]),
+    ]
+    pool._module_states["e2e/test_d.py"] = pool._module_states["e2e/test_c.py"]
+
+    services_pool_fixtures.register_services_pool_items(cast(pytest.Config, config), cast(list[pytest.Item], items))
+
+    groups = [item.markers[0].kwargs["name"] for item in items]
+    assert groups == ["e2e-pool-aaa", "e2e-pool-aaa", "e2e-pool-ccc", "e2e/test_d.py"]
