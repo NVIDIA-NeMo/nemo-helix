@@ -26,6 +26,8 @@ import os
 import sys
 from pathlib import Path
 
+from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,11 +126,16 @@ def main() -> int:
             dataset_path=_storage_path(config.dataset_path),
             validation_path=_storage_path(config.validation_path),
             output_path=_storage_path(config.output_path),
+            checkpoint_path=_storage_path(config.checkpoint_path),
         )
     except Exception:
         logger.exception("Unsloth training step failed")
         return 1
 
+    if result.get("paused"):
+        logger.info(f"Training stopped for a pause: {json.dumps(result, default=str)}")
+        # Tells the Jobs service the pause checkpoint is written.
+        return PAUSE_EXIT_CODE
     logger.info(f"Training step completed: {json.dumps(result, default=str)}")
     return 0
 

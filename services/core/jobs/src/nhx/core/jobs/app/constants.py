@@ -47,6 +47,9 @@ IMAGE_DIGEST_AT_SAVE = "image_digest_at_save"
 # Step spec name whose image produced ``image_digest_at_save``. A rerun compares on that step only.
 IMAGE_DIGEST_STEP = "image_digest_step"
 IMAGE_DIGEST_WARNING = "image_digest_warning"
+IMAGE_DIGEST_COMPARISON_SKIPPED = "image_digest_comparison_skipped"
+# The result of comparing the resumed pod's image with the saved one, written once per resume.
+IMAGE_COMPARISON_DETAILS = (IMAGE_DIGEST_WARNING, IMAGE_DIGEST_COMPARISON_SKIPPED)
 RERUN_WARNING = "rerun_warning"
 RESUMABLE = "resumable"
 NON_RESUMABLE_REASON = "non_resumable_reason"
@@ -62,6 +65,7 @@ RERUN_EXCLUDED_STATUS_DETAILS = frozenset(
         STOPPED_AT,
         IMAGE_DIGEST,
         IMAGE_DIGEST_WARNING,
+        IMAGE_DIGEST_COMPARISON_SKIPPED,
         RERUN_WARNING,
         "events",
         "containers",

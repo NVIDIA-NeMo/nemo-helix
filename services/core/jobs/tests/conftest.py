@@ -391,6 +391,7 @@ def create_step_with_status(status: HelixJobStatus) -> HelixJobStepWithContext:
     return HelixJobStepWithContext(
         id="test-step-id",
         job="test-job-id",
+        job_id="platform-job-test-uid",
         workspace="default",
         attempt_id="test-job-attempt-id",
         name="test-step",

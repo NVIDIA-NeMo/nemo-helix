@@ -167,10 +167,16 @@ class JobsServiceProgressReporter:
         """Read back every stored metric series, to seed a new process.
 
         The only read this reporter makes, and it happens once per process. The
-        accumulator lives in memory, so a process taking over a task would report
-        from empty and replace what the task had stored; reading it back is what
-        keeps the curves continuous. Predates the per-metric series -- the two
-        loss curves were seeded the same way.
+        accumulator lives in memory, so a new process would report from empty and
+        replace what was stored; reading it back is what keeps the curves
+        continuous. Predates the per-metric series -- the two loss curves were
+        seeded the same way.
+
+        The read is of the job, which returns the current attempt's
+        ``status_details``, not of this process's task. A resume starts a new pod,
+        which is a new and empty task, and a rerun starts a new attempt that the
+        Jobs service seeds with the failed attempt's series. The task would be
+        empty in both cases, and its first report would erase the curves.
 
         Because the server merges, no write path needs to know what is already
         stored -- a report that omits a field leaves it standing.
@@ -202,17 +208,10 @@ class JobsServiceProgressReporter:
             return {}
 
         try:
-            task = self._jobs.get_attempt_step_task(
-                name=self._job_ctx.normalized_task,
-                workspace=self._job_ctx.workspace,
-                job=self._job_ctx.job_id,
-                attempt=self._job_ctx.attempt_id,
-                step=self._job_ctx.step,
-            ).data()
-            stored = task.status_details or {}
+            job = self._jobs.get_job(name=self._job_ctx.job_id, workspace=self._job_ctx.workspace).data()
+            stored = job.status_details or {}
         except NotFoundError:
-            # Expected on a first run, where the task has no stored details yet.
-            logger.info("No stored status details to seed from: task not found")
+            logger.info("No stored status details to seed from: job not found")
             return {}
         except Exception as e:
             logger.warning(f"Could not read stored metric series to seed from: {e}")

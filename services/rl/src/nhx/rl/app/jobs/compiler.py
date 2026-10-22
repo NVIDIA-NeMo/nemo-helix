@@ -678,6 +678,7 @@ def _build_training_step(
         environment=environment,
         config=step_config.model_dump(mode="json"),
         network=network,
+        lifecycle=StepLifecycle(pause_deadline_seconds=config.training_pause_deadline_seconds),
     )
 
 

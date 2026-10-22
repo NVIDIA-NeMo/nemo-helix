@@ -24,6 +24,7 @@ from nhx.automodel.tasks.training.schemas import (
     TrainingStepConfig,
 )
 from nhx.automodel.tasks.training.utils import generate_torchrun_flags_from_env
+from nhx.customization_common.integrations import find_mlflow_run_id
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.nccl import get_nccl_ib_env
@@ -123,6 +124,9 @@ class AutomodelBackend:
                 training_env = os.environ.copy()
                 if customizer_config.parallelism.num_nodes > 1:
                     training_env.update(get_nccl_ib_env())
+                # Continue this job's MLflow run after a resume or rerun, instead of starting another.
+                if mlflow_run_id := find_mlflow_run_id(library_config.config_dict.get("mlflow")):
+                    training_env["MLFLOW_RUN_ID"] = mlflow_run_id
                 training_process = subprocess.Popen(
                     command,
                     stdout=subprocess.PIPE,

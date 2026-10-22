@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from nhx.customization_common.integrations.runtime import MLFLOW_JOB_UID_TAG, find_mlflow_run_id
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.rl.app.jobs.training.schemas import TrainingStepConfig
 
@@ -48,6 +49,7 @@ def build_mlflow_config(
     Run naming strategy (same as WandB):
     - run_name uses job_id (stable across pause/resume)
     - task_id is added to tags for granular execution tracking
+    - the job_uid tag lets a resume or rerun find and continue the run
 
     Missing tracking URI disables integration with a warning.
     """
@@ -85,6 +87,8 @@ def build_mlflow_config(
         # MLflow run description is stored in the reserved `mlflow.note.content` tag.
         # See: https://mlflow.org/docs/latest/ml/tracking/#how-to-include-additional-description-texts-about-the-run
         tags["mlflow.note.content"] = user_config.description
+    if job_ctx.job_uid:
+        tags[MLFLOW_JOB_UID_TAG] = job_ctx.job_uid
 
     experiment_name = _resolve_with_fallback(
         user_config.experiment_name,
@@ -118,10 +122,6 @@ def build_wandb_config(
 
     The resulting dict is passed to wandb.init() as kwargs.
     See: https://docs.wandb.ai/ref/python/init
-
-    TODO: Add pause/resume support:
-    - 'name' and 'id' use job_id (stable across pause/resume)
-    - 'resume="allow"' enables continuing runs after pause/resume
     """
     user_config = customizer_config.integrations.wandb
     if not user_config:
@@ -164,5 +164,21 @@ def build_wandb_config(
         # (wandb.init accepts settings as Union[Settings, Dict[str, Any], None]).
         logger.info(f"Using self-hosted W&B server: {user_config.base_url}")
         wandb_config["settings"] = {"base_url": user_config.base_url}
+    if job_ctx.job_uid:
+        # One W&B run per platform job: "allow" creates it on the first start and
+        # continues it after a resume or rerun, instead of starting another run.
+        wandb_config["id"] = job_ctx.job_uid
+        wandb_config["resume"] = "allow"
 
     return wandb_config
+
+
+def find_logger_mlflow_run_id(logger_config: dict[str, Any]) -> str | None:
+    """Return this job's existing MLflow run ID for a NeMo-RL ``logger`` config.
+
+    NeMo-RL's config always carries an ``mlflow`` section, filled with
+    placeholders when MLflow is off, so the lookup runs only when it is on.
+    """
+    if not logger_config.get("mlflow_enabled"):
+        return None
+    return find_mlflow_run_id(logger_config.get("mlflow"))

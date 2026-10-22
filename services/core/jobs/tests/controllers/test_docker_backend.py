@@ -201,6 +201,7 @@ def test_job_step():
     return HelixJobStepWithContext(
         id="test-step-id",
         job="job-test-job-id",
+        job_id="platform-job-test-uid",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
@@ -311,6 +312,7 @@ def test_docker_job_schedule(docker_job, docker_client_mock, test_job_step):
     assert NEMO_JOB_WORKSPACE_ENVVAR in env
     assert NEMO_JOB_FILESET_ENVVAR in env
     assert env[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
+    assert env["NEMO_JOB_UID"] == "platform-job-test-uid"
     assert "ENV_VAR" in env
     assert env["ENV_VAR"] == "test_value"
     assert PERSISTENT_JOB_STORAGE_PATH_ENVVAR not in env

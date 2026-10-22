@@ -18,6 +18,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
 )
 from nhx.customization_common.service.constants import (
@@ -64,6 +65,10 @@ class NHXJobContext:
     # Storage paths
     storage_path: Path
     config_path: Path
+    #: The platform job's entity ID. ``job_id`` is the job name, which a later job
+    #: can reuse after this one is deleted, so anything that must identify this
+    #: job for good, such as a tracker run, uses this instead.
+    job_uid: str | None = None
 
     @property
     def normalized_task(self) -> str:
@@ -100,4 +105,5 @@ class NHXJobContext:
             files_url=os.environ.get(NHX_FILES_URL_ENVVAR),
             storage_path=get_job_storage_path_from_env(),
             config_path=get_job_step_config_path_from_env(),
+            job_uid=os.environ.get(NEMO_JOB_UID_ENVVAR) or None,
         )
