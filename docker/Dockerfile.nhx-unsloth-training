@@ -7,7 +7,7 @@
 # model_entity).
 #
 # Install steps:
-#   1. `uv pip install unsloth --torch-backend=auto` plus explicit
+#   1. `uv pip install unsloth` from PyPI plus explicit
 #      `transformers==5.17.0` and `huggingface-hub==1.33.0` pins.
 #      Published unsloth 2026.9.14 still declares transformers<=5.5.0; the
 #      install override forces 5.17.0, the newest release unsloth-zoo 2026.9.9
@@ -79,7 +79,7 @@ ENV PATH="/opt/venv/bin:/root/.local/bin:${PATH}"
 ENV UNSLOTH_SKIP_TORCHVISION_CHECK=1
 
 # --system-site-packages lets the venv inherit the NGC base's pre-built torch.
-# Without this, `uv pip install unsloth --torch-backend=auto` would download a
+# Without this, `uv pip install unsloth` would download a
 # fresh torch wheel from PyPI, ballooning image size.
 RUN uv venv ${UV_PROJECT_ENVIRONMENT} --system-site-packages
 
@@ -105,9 +105,9 @@ COPY docker/unsloth/no_override_requirements.txt /opt/docker/no_override_require
 RUN mkdir -p /home/${USERNAME}/.cache && \
     chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}
 
-# Step 1: install unsloth + pinned transformers. --torch-backend=auto tells uv
-# to detect the existing torch's CUDA build (from --system-site-packages
-# inheritance) and pick the matching xformers / bitsandbytes wheels.
+# Step 1: install unsloth + pinned transformers from PyPI. GPU autodetection
+# selects the CPU index on builders without a GPU, where the available xformers
+# versions cannot satisfy unsloth. It does not inspect the inherited torch build.
 # preserve_base_torch.txt prevents uv from replacing the NGC torch stack.
 # hf-stack-overrides.txt replaces unsloth 2026.9.14's transformers<=5.5.0 cap
 # so the resolver can install the zoo-tested 5.17.0 ceiling.
@@ -117,7 +117,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     cat /opt/docker/preserve_base_torch.txt /opt/docker/hf-stack-overrides.txt \
       > /opt/docker/unsloth-install-overrides.txt && \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
-    --torch-backend=auto \
     --overrides /opt/docker/unsloth-install-overrides.txt \
     unsloth==${UNSLOTH_VERSION} \
     transformers==${TRANSFORMERS_VERSION} \

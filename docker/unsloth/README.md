@@ -57,7 +57,7 @@ docker buildx bake \
 
 The build pulls the NGC PyTorch base, then:
 
-1. `uv pip install unsloth==2026.9.14 --torch-backend=auto transformers==5.17.0 huggingface-hub==1.33.0` with
+1. `uv pip install unsloth==2026.9.14 transformers==5.17.0 huggingface-hub==1.33.0` from PyPI with
    `preserve_base_torch.txt` overrides so the NGC base's PyTorch + CUDA are not
    replaced. Unsloth's resolver still pulls `unsloth_zoo`, trl, peft,
    accelerate, datasets, bitsandbytes, and xformers. **transformers is pinned
