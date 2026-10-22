@@ -54,11 +54,12 @@ async function finishSmoke({ env, fetchImpl }) {
     env.MACOS_RESULT,
     env.KUBERNETES_RESULT,
   ]);
+  const icons = { passed: "✅", success: "✅", failed: "❌", failure: "❌" };
   const text = [
-    `*Release smoke checks ${result}*`,
+    `*${icons[result] || "⚠️"} Release smoke checks ${result}*`,
     `Release: ${env.RELEASE_VERSION}`,
-    `macOS: ${env.MACOS_RESULT}`,
-    `Kubernetes: ${env.KUBERNETES_RESULT}`,
+    `${icons[env.MACOS_RESULT] || "⚠️"} macOS: ${env.MACOS_RESULT}`,
+    `${icons[env.KUBERNETES_RESULT] || "⚠️"} Kubernetes: ${env.KUBERNETES_RESULT}`,
     `:link: <${env.RUN_URL}|Smoke check results and diagnostics>`,
   ].join("\n");
   if (env.SEND_NOTIFICATIONS === "true") {
