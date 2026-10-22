@@ -183,6 +183,8 @@ ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 #
 # --no-install-project installs dependencies but not nemo-rl itself; the root package is added
 # editable in a cheap step after the full-source COPY.
+# Skip Mooncake here as well as removing it below: a later uninstall leaves its bundled
+# Go libraries in the earlier image layers.
 #
 # Then drop ray's vendored aiohttp and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
 # can symlink a venv at them. The package stays cached, so uv does not re-download it.
@@ -201,6 +203,7 @@ SKIP=(
     --no-install-package deep-gemm
     --no-install-package flash-attn
     --no-install-package transformer-engine-torch
+    --no-install-package mooncake-transfer-engine-cuda13
 )
 uv venv --seed
 
@@ -284,6 +287,7 @@ SKIP=(
     --no-install-package deep-gemm
     --no-install-package flash-attn
     --no-install-package transformer-engine-torch
+    --no-install-package mooncake-transfer-engine-cuda13
 )
 # Same wrapper prefetch_venvs.py writes, into the driver bin (on PATH) rather
 # than /usr/local/bin, which the build user cannot write.
