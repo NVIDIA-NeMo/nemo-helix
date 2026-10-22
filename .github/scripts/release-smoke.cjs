@@ -63,8 +63,8 @@ async function finishSmoke({ env, fetchImpl }) {
     `${icons[result]} *Release smoke checks ${result}*`,
     `Release: \`${env.RELEASE_VERSION}\``,
     "",
-    `*macOS:* ${env.MACOS_RESULT}`,
-    `*Kubernetes:* ${env.KUBERNETES_RESULT}`,
+    `:macos: *macOS:* ${env.MACOS_RESULT}`,
+    `:kubernetes: *Kubernetes:* ${env.KUBERNETES_RESULT}`,
     "",
     `<${env.RUN_URL}|View run and diagnostics>`,
   ].join("\n");
