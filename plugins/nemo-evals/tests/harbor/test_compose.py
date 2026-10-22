@@ -894,18 +894,40 @@ def test_build_sources(tmp_path: Path) -> None:
         """
         services:
           a: {build: ./api}
-          b: {build: {context: ., dockerfile: odoo/Dockerfile, args: {V: 1}, target: prod}}
+          b: {build: {context: ., dockerfile: odoo/Dockerfile, args: {V: 1}, target: prod, no_cache: true}}
           c: {image: acme/c:1, build: {context: ./c}}
         """,
     )
 
     assert task.services["a"].source == ComposeBuild(context_path="environment/api")
     assert task.services["b"].source == ComposeBuild(
-        context_path="environment", dockerfile="odoo/Dockerfile", args={"V": "1"}, target="prod"
+        context_path="environment", dockerfile="odoo/Dockerfile", args={"V": "1"}, target="prod", no_cache=True
     )
     # Compose builds when both are given, and names the result by `image`.
     assert isinstance(task.services["c"].source, ComposeBuild)
     assert task.services["c"].source.context_path == "environment/c"
+
+
+def test_platform_is_read_for_services_and_main(tmp_path: Path) -> None:
+    task = _parsed(
+        tmp_path,
+        """
+        services:
+          main: {platform: linux/arm64}
+          a: {image: redis, platform: linux/amd64}
+          b: {image: redis}
+        """,
+    )
+
+    assert task.main.platform == "linux/arm64"
+    assert task.services["a"].platform == "linux/amd64"
+    assert task.services["b"].platform is None
+
+
+def test_a_platform_that_is_not_a_string_is_invalid(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    platform: [linux/amd64]\n")
+    assert error.code == "compose_invalid"
+    assert "services.a.platform" in error.detail
 
 
 def test_published_image_source(tmp_path: Path) -> None:

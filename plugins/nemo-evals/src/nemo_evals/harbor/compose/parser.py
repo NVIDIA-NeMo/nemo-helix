@@ -55,6 +55,7 @@ from nemo_evals.harbor.compose.service_options import (
     parse_entrypoint,
     parse_environment,
     parse_memory_quantity,
+    parse_platform,
     parse_ports,
     parse_readiness,
     parse_resources,
@@ -82,6 +83,7 @@ _COMMON_KEYS = frozenset(
         "volumes",
         "network_mode",
         "networks",
+        "platform",
     }
 )
 _SERVICE_KEYS = _COMMON_KEYS | {"shm_size", "cpus", "mem_limit", "deploy"}
@@ -108,7 +110,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
 
     compose_path = f"{task_dir.name}/{ENVIRONMENT_DIR}/{COMPOSE_FILENAME}"
 
-    # ComposeProblems are collected through every step below and raised together, so one error lists all of them.
+    # Problems are collected through every step below and raised together, so one error lists all of them.
     problems = ComposeProblems()
 
     # Merge the task's file over Harbor's base file and interpolate it, as `docker compose` would.
@@ -172,6 +174,7 @@ class ServiceParser:
         return ComposeService(
             name=name,
             source=source,
+            platform=parse_platform(raw_service.get("platform"), f"{path}.platform", self._problems),
             depends_on=parse_dependency_conditions(raw_service.get("depends_on"), f"{path}.depends_on", self._problems),
             command=parse_entrypoint(raw_service.get("entrypoint"), f"{path}.entrypoint", self._problems),
             args=parse_argument_list(raw_service.get("command"), f"{path}.command", self._problems),
@@ -223,6 +226,7 @@ class ServiceParser:
             add_capabilities=parse_capabilities(raw_main, path, self._problems),
             volume_mounts=self._volume_mounts(raw_main, path),
             entrypoint=entrypoint,
+            platform=parse_platform(raw_main.get("platform"), f"{path}.platform", self._problems),
         )
         return settings, build
 

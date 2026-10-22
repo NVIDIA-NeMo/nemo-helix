@@ -432,6 +432,20 @@ def parse_volume_mounts(
     return [mount for mount in mounts if mount is not None]
 
 
+def parse_platform(value: Any, path: str, problems: ComposeProblems) -> str | None:
+    """Read a service's ``platform``, such as ``linux/amd64``, as written.
+
+    Image planning pins the service's image to it, so the image is built or pulled for the platform Compose would
+    use. Planning also checks that it names a real platform.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        problems.invalid(path, "expected a platform such as linux/amd64")
+        return None
+    return value
+
+
 def parse_capabilities(
     raw_service: Mapping[str, Any], path: str, problems: ComposeProblems
 ) -> list[Literal["SYS_PTRACE"]]:

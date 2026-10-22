@@ -84,6 +84,7 @@ class ComposeBuild(BaseModel):
     dockerfile: str = Field(default="Dockerfile", description="The Dockerfile, relative to `context_path`.")
     args: dict[str, str] = Field(default_factory=dict, description="Compose `build.args`: the build's `ARG` values.")
     target: str | None = Field(default=None, description="Compose `build.target`: the Dockerfile stage to build.")
+    no_cache: bool = Field(default=False, description="Compose `build.no_cache`: build without the layer cache.")
 
 
 ComposeImageSource = Annotated[ComposeImage | ComposeBuild, Field(discriminator="kind")]
@@ -131,6 +132,9 @@ class ComposeService(BaseModel):
 
     name: str = Field(description="The service's compose name. Other containers in the pod reach it by this name.")
     source: ComposeImageSource = Field(description="Where its image comes from: a published image or a build.")
+    platform: str | None = Field(
+        default=None, description="Compose `platform`, as written: the platform its image is built or pulled for."
+    )
     role: Literal["sidecar", "run_once", "after_main"] = Field(
         default="sidecar",
         description=(
@@ -191,6 +195,9 @@ class ComposeMainSettings(BaseModel):
     )
     entrypoint: list[str] | None = Field(
         default=None, description="The last exec-form `ENTRYPOINT` of `main`'s Dockerfile, or the compose override."
+    )
+    platform: str | None = Field(
+        default=None, description="Compose `platform` on `main`, as written: the platform its image is built for."
     )
 
 

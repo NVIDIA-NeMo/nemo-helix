@@ -108,6 +108,7 @@ def parse_build_source(name: str, build: Any, problems: ComposeProblems) -> Comp
         dockerfile=dockerfile,
         args=parse_environment(build.get("args"), f"{path}.args", problems),
         target=target if isinstance(target, str) else None,
+        no_cache=build.get("no_cache") is True,
     )
 
 
