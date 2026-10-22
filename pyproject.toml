@@ -339,7 +339,7 @@ constraint-dependencies = [
   "langgraph>=1.2.6",
   "langsmith>=0.9.7",
   "json-repair>=0.60.1",
-  "litellm>=1.83.10",
+  "litellm==1.95.1",
   "lxml>=6.1.0",
   "mistune>=3.3.2",
   "mcp>=1.28.1",
@@ -403,7 +403,7 @@ override-dependencies = [
   "wandb>=0.30.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
-  "litellm>=1.83.10",         # CVE-2026-42208 (Critical SQL injection), CVE-2026-40217, and 5 other High CVEs
+  "litellm==1.95.1",          # CVE-2026-84377 backport; retain aioboto3 compatibility and avoid compromised 1.107.0
   "python-dotenv>=1.2.2",
   "openai>=2.26.0",
   "nltk>=3.10.3",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}
