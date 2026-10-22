@@ -161,6 +161,17 @@ def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  #
     assert checks["buildkit"] == "skipped: disabled"
     assert checks["registry"] == "skipped: disabled"
     assert checks.keys().isdisjoint({"postgres", "schema", "platform_jobs_controller"})
+    assert checks["entity_store"] == "ok"
+
+    # Every route keeps its state in Entity Store, so readiness fails without it.
+    def store_down(*_args: object, **_kwargs: object) -> None:
+        raise ConnectionError("entities unavailable")
+
+    monkeypatch.setattr(ops.entity_store.entity_client(), "list", store_down)
+    checks, required_ok = ops._run_dependency_checks()
+    assert required_ok is False and checks["entity_store"] == "fail: ConnectionError"
+    assert ops._dependency_is_required("entity_store")
+    assert client.get("/v1/readyz").status_code == 503
 
 
 def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001

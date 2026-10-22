@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 from time import monotonic, perf_counter
 
 from fastapi import APIRouter, Request, Response
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from scaled_evals.api import artifacts, dispatch_health
+from scaled_evals.api import artifacts, dispatch_health, entity_store
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.build import buildkit, registry
 from scaled_evals.api.evaluation_store import EvaluationStore
@@ -343,9 +344,16 @@ def _route_template(request: Request) -> str | None:
     return path
 
 
+def _entity_store_probe() -> None:
+    entity_store.entity_client().list(
+        ScaledEvalsBenchmarkRun, workspace=entity_store.private_workspace(), page=1, page_size=1
+    )
+
+
 def _run_dependency_checks() -> tuple[dict[str, str], bool]:
     checks: dict[str, str] = {}
     required_ok = True
+    required_ok &= _required_check(checks, "entity_store", _entity_store_probe)
     required_ok &= _required_check(checks, "object_store", artifacts.check_bucket)
     required_ok &= _enabled_required_check(checks, "buildkit", settings.buildkit_enabled, buildkit.check_buildkit)
     required_ok &= _enabled_required_check(checks, "registry", settings.registry_enabled, registry.check_registry)
@@ -359,7 +367,7 @@ def _dependency_is_required(name: str) -> bool:
         return settings.buildkit_enabled
     if name == "registry":
         return settings.registry_enabled
-    return name == "object_store"
+    return name in {"entity_store", "object_store"}
 
 
 def _dependency_state(status: str) -> str:
