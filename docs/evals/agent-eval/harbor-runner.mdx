@@ -728,7 +728,8 @@ still search for it: Codex, for example, sends a hosted `web_search` tool with e
 default. To keep a run closed-book, send the agent's model calls through a virtual model that runs
 the `nemo-evals-closed-book` middleware. Create one as shown in
 [Keep Evaluations Closed-Book](/documentation/models-and-inference/virtual-models#keep-evaluations-closed-book),
-then point the agent at it. For the built-in Codex agent:
+then point the agent at it ([Closed-book evaluations](/documentation/evaluate-models/agent-eval/targets-and-runners#closed-book-evaluations)
+covers the other targets). For the built-in Codex agent:
 
 ```python
 from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
