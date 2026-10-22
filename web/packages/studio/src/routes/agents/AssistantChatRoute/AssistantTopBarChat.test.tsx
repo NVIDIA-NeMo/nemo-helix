@@ -83,7 +83,9 @@ describe('AssistantTopBarChat', () => {
     expect(await screen.findByTestId('compact-chat-thread')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Close NeMo Assistant chat' }));
-    await waitFor(() => expect(screen.getByTestId('compact-chat-thread')).not.toBeVisible());
+    await waitFor(() =>
+      expect(screen.queryByTestId('compact-chat-thread')).not.toBeInTheDocument()
+    );
   });
 
   it('darkens the screen with a backdrop and closes the chat when it is clicked', async () => {
@@ -129,7 +131,9 @@ describe('AssistantTopBarChat', () => {
     expect(await screen.findByTestId('compact-chat-thread')).toBeVisible();
 
     await user.click(screen.getByRole('link', { name: 'Job details' }));
-    await waitFor(() => expect(screen.getByTestId('compact-chat-thread')).not.toBeVisible());
+    await waitFor(() =>
+      expect(screen.queryByTestId('compact-chat-thread')).not.toBeInTheDocument()
+    );
   });
 
   it('shows a thinking indicator while the agent is running', () => {
