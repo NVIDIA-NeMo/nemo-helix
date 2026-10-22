@@ -16,20 +16,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_evals.harbor.compose import (
-    ComposeBuild,
-    ComposeError,
-    ComposeImage,
-    ComposeTask,
-    _Problems,
-    compose_provenance,
-    compose_services_kwarg,
-    dockerfile_entrypoint,
-    interpolate,
-    normalize_image,
-    parse_compose,
-    to_compose_services,
-)
+from nemo_evals.harbor.compose.images import dockerfile_entrypoint, normalize_image
+from nemo_evals.harbor.compose.models import ComposeBuild, ComposeError, ComposeImage, ComposeProblems, ComposeTask
+from nemo_evals.harbor.compose.parser import parse_compose
+from nemo_evals.harbor.compose.resolve import Interpolator, merge_documents
+from nemo_evals.harbor.compose.spec import compose_provenance, compose_services_kwarg, to_compose_services
 from nhx_sandbox.harbor_opensandbox_services import ComposeServices
 
 DOCKERFILE = "FROM python:3.12-slim\n"
@@ -130,16 +121,16 @@ def test_invalid_image_name_is_a_typed_error() -> None:
     ],
 )
 def test_interpolation_follows_compose(text: str, expected: str) -> None:
-    problems = _Problems()
-    assert interpolate(text, {"A": "one", "EMPTY": ""}, path="x", problems=problems) == expected
-    problems.raise_any("compose.yaml")
+    problems = ComposeProblems()
+    assert Interpolator({"A": "one", "EMPTY": ""}, problems).string(text, "x") == expected
+    problems.raise_if_any("compose.yaml")
 
 
 def test_unset_variable_is_reported_with_its_path() -> None:
-    problems = _Problems()
-    interpolate("${NOPE} and $ALSO", {}, path="services.a.environment.X", problems=problems)
+    problems = ComposeProblems()
+    Interpolator({}, problems).string("${NOPE} and $ALSO", "services.a.environment.X")
     with pytest.raises(ComposeError) as caught:
-        problems.raise_any("compose.yaml")
+        problems.raise_if_any("compose.yaml")
     assert caught.value.code == "compose_unsupported"
     assert caught.value.paths == (
         "services.a.environment.X: interpolation: NOPE",
@@ -419,9 +410,7 @@ def test_missing_mains_dockerfile_is_invalid(tmp_path: Path) -> None:
     ],
 )
 def test_merge_follows_compose_rules(merge_base: dict, merge_over: dict, expected: dict) -> None:
-    from nemo_evals.harbor.compose import _merge
-
-    assert _merge(merge_base, merge_over) == expected
+    assert merge_documents(merge_base, merge_over) == expected
 
 
 # ---------------------------------------------------------------------------------------------------------------------
