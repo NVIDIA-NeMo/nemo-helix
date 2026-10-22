@@ -382,7 +382,7 @@ def run_agent_deploy_and_invoke(
     )
 
     agents = agents_resource(client)
-    agents.create(
+    agents.register(
         workspace=workspace,
         name=agent_name,
         config=_mock_backed_agent_config(

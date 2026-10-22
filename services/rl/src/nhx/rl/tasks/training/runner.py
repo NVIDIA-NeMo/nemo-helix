@@ -19,6 +19,7 @@ from typing import Self
 import yaml
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.errors.classifier import classify_exception, failure_status_details
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nhx.rl.app.jobs.training.schemas import (
     GPUInfo,
@@ -30,8 +31,7 @@ from nhx.rl.app.jobs.training.schemas import TrainingBackend as TrainingBackendE
 from nhx.rl.tasks.training.progress import JobsServiceProgressReporter
 
 from .distributed import DistributedContext
-from .errors.converter import create_error_details
-from .protocol import LibraryConfig, SupportsPreprocessing, TrainingBackend
+from .protocol import LibraryConfig, SupportsPreprocessing, TrainingBackend, TrainingPaused
 from .utils import get_gpu_info
 
 
@@ -106,7 +106,7 @@ class TrainingRunner:
         1. Config compilation (coordinator, workers wait)
         2. Training (all ranks via torchrun)
         3. Sync point (all ranks) — workers return success and exit here
-        4. Post-processing (coordinator only)
+        4. Post-processing (coordinator only), skipped when training stopped for a pause
         5. Result writing (coordinator only)
 
         Returns:
@@ -127,26 +127,40 @@ class TrainingRunner:
             library_config = self._compile_config_phase()
 
             # === Phase 2: Training (all ranks) ===
-            metrics = self._training_phase(library_config)
+            paused = False
+            metrics = TrainingMetrics()
+            try:
+                metrics = self._training_phase(library_config)
+            except TrainingPaused:
+                paused = True
 
             # === Phase 3: Sync after training ===
+            # After a pause too: workers wait here for the coordinator before they exit.
             self._dist_ctx.sync_point(BARRIER_TRAINING_COMPLETE)
 
             # === Phase 4: Post-processing (coordinator only, workers exit) ===
-            result = self._postprocess_phase(gpu_info, metrics, library_config)
+            if paused:
+                logger.info("Training stopped for a pause after saving its checkpoint; skipping publication")
+                result = TrainingResult(
+                    success=False,
+                    paused=True,
+                    gpu_info=gpu_info,
+                    training_duration_seconds=self._progress.training_duration_seconds,
+                )
+            else:
+                result = self._postprocess_phase(gpu_info, metrics, library_config)
 
         except Exception as e:
             logger.exception(f"Training failed: {e}")
-            # Convert exception to user-friendly error details using error mapping rules
-            error_details = create_error_details(e)
+            error = classify_exception(e)
             result = TrainingResult(
                 success=False,
-                error_message=error_details.get("message", str(e)),
+                error_message=error.message,
                 gpu_info=gpu_info,
                 training_duration_seconds=self._progress.training_duration_seconds,
             )
             if self._dist_ctx.is_coordinator:
-                self._progress.report_error(error_details)
+                self._progress.report_error(dict(error.to_error_details()), failure_status_details(error))
                 # Publish a failure marker so workers blocked on a coordinator
                 # barrier exit promptly instead of waiting out the full timeout.
                 self._dist_ctx.signal_failure()

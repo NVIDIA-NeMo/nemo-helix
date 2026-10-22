@@ -6,54 +6,39 @@
 A benchmark run is identity + config in `benchmark_runs`; its members are
 ordinary `evaluations` rows carrying benchmark_run_id. Status/reward/per-task are
 derived on read from the members (derive_run_view) — nothing is materialized and
-the worker is not involved. Cluster-free: TestClient + mocked psycopg connection.
+the worker is not involved. Cluster-free: TestClient over the fake Entity Store.
 """
 
-from collections.abc import Iterator
+import json
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("scaled_evals")
 
-from api_test_fixture import client, v1
-from scaled_evals.api.db import get_conn
-from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
-from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
+from api_test_fixture import client
+from scaled_evals.api.benchmark_run_store import BenchmarkRunStore, derive_run_view
+from scaled_evals.api.config_profile_store import ConfigProfileStore
+from scaled_evals.api.evaluation_store import EvaluationStore
+from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.settings import settings
+from task_fixtures import seed_benchmark, seed_benchmark_run, seed_evaluation, seed_task_revision
 
 NOW = datetime(2026, 6, 29, tzinfo=UTC)
 
 
-def _conn(*, fetchone=None, fetchall=None) -> MagicMock:
-    """Mock connection. fetchone/fetchall accept a list used as side_effect."""
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    if fetchone is not None:
-        cur.fetchone.side_effect = list(fetchone)
-    if fetchall is not None:
-        cur.fetchall.side_effect = list(fetchall)
-    return conn
-
-
-def _use_conn(conn: MagicMock) -> None:
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    v1.dependency_overrides[get_conn] = _gen
-
-
-@pytest.fixture(autouse=True)
-def _clear_overrides() -> Iterator[None]:
-    yield
-    v1.dependency_overrides.pop(get_conn, None)
+def _seed_suite(*, members: list[dict], **benchmark_fields: Any) -> None:
+    """Store `members` (load_members shape) as revision 1 of benchmark `bm_suite`."""
+    refs = tuple((member["task_id"], member["task_revision"]) for member in members)
+    seed_benchmark("bm_suite", refs, **benchmark_fields)
 
 
 @pytest.fixture(autouse=True)
 def _stub_execution_snapshot(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
-        EvaluationRepository,
+        EvaluationStore,
         "_capture_execution_snapshot",
         MagicMock(
             return_value={
@@ -96,15 +81,22 @@ def _run_row(**overrides) -> dict:
 
 
 def _member(position: int, **overrides) -> dict:
-    """A resolved benchmark member (load_members shape)."""
-    m = {
+    """A resolved benchmark member (load_members shape), with its task stored."""
+    m: dict[str, Any] = {
         "task_id": f"task_{position}",
         "position": position,
         "task_revision": 1,
-        "task_slug": f"task-{position}",
+        "task_slug": f"nemo-task-{position}",
         "revision_status": "ready",
     }
     m.update(overrides)
+    seed_task_revision(
+        m["task_id"],
+        m["task_revision"],
+        slug=m["task_slug"],
+        status=m["revision_status"],
+        **{field: m[field] for field in ("image_ref", "image_digest", "tarball_object_key") if field in m},
+    )
     return m
 
 
@@ -135,7 +127,26 @@ def _member_eval(position: int, **overrides) -> dict:
         "finished_at": None,
     }
     row.update(overrides)
+    seed_task_revision(row["task_id"], row["task_revision"], slug=row["task_slug"], name=row["task_name"])
     return row
+
+
+def _seed_run(*members: dict, **overrides) -> None:
+    """Store run `bmr_1` and the given member evaluations."""
+    seed_benchmark_run(_run_row(**overrides))
+    for member in members:
+        seed_evaluation(member)
+
+
+def _created(response) -> tuple[dict, list[dict]]:  # noqa: ANN001
+    """Stored run and member evaluations (by task) of a create response."""
+    run_id = response.json()["id"]
+    run = BenchmarkRunStore().get(run_id)
+    assert run is not None
+    members = BenchmarkRunStore().members_for_runs([run_id])
+    stored = [EvaluationStore().load_for_dispatch(member["id"]) for member in members]
+    assert None not in stored
+    return run, [row for row in stored if row is not None]
 
 
 # ---- derive_run_view (pure read-time rollup) ------------------------------
@@ -380,54 +391,55 @@ def test_benchmark_request_agent_bundle_runtimes(runtime: str, accepted: bool) -
 
 
 def test_create_run_spawns_run_and_members() -> None:
-    conn = _conn(
-        # fetchone: current_revision, run RETURNING, member0 RETURNING, member1 RETURNING.
-        fetchone=[{"current_revision": 1}, _run_row(), _member_eval(0), _member_eval(1)],
-        # fetchall: load_members (benchmark tasks), then members_for_runs (derive on response).
-        fetchall=[[_member(0), _member(1)], [_member_eval(0, status="queued", reward=None)]],
-    )
-    _use_conn(conn)
+    _seed_suite(members=[_member(0), _member(1)])
 
     resp = client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
 
     assert resp.status_code == 202, resp.text
     body = resp.json()
-    assert body["id"] == "bmr_1"
+    assert body["id"].startswith("bmr_")
     assert body["benchmark_id"] == "bm_suite"
     assert body["status"] == "running"  # members queued → derived running
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    run_inserts = [c for c in execs if "INSERT INTO benchmark_runs" in c.args[0]]
-    member_inserts = [c for c in execs if "INSERT INTO evaluations" in c.args[0]]
-    assert len(run_inserts) == 1
-    assert len(member_inserts) == 2  # one member evaluation per member task
-    assert conn.commit.called
+    run, members = _created(resp)
+    assert run["name"] == "suite run"
+    assert [(member["task_id"], member["status"]) for member in members] == [
+        ("task_0", "queued"),
+        ("task_1", "queued"),
+    ]
+
+
+def test_failed_create_withdraws_its_members_even_if_the_run_delete_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_scaled_evals_plugin.entities import ScaledEvalsEvaluation
+    from scaled_evals.api import entity_store
+
+    _seed_suite(members=[_member(0), _member(1)])
+    create = EvaluationStore.create
+    calls = iter([True, False])
+
+    def flaky_create(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if not next(calls):
+            raise RuntimeError("member create failed")
+        return create(self, *args, **kwargs)
+
+    def failing_run_delete(self, run_id: str) -> bool:  # noqa: ANN001
+        raise RuntimeError("run delete failed")
+
+    monkeypatch.setattr(EvaluationStore, "create", flaky_create)
+    monkeypatch.setattr(BenchmarkRunStore, "soft_delete", failing_run_delete)
+
+    with pytest.raises(RuntimeError, match="member create failed"):
+        client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
+
+    members = entity_store.list_all(entity_store.entity_client(), ScaledEvalsEvaluation)
+    assert len(members) == 1
+    assert members[0].deleted_at is not None
 
 
 def test_create_run_applies_member_framework_profile_overrides() -> None:
     overrides = {"task_0": "cfg_member"}
-    conn = _conn(
-        fetchone=[
-            {"config": {}},
-            {"config": {}},
-            {"current_revision": 1},
-            _run_row(
-                framework_profile_id="cfg_default",
-                harbor_profile_id="cfg_default",
-                runner_metadata={"member_framework_profile_ids": overrides},
-            ),
-            _member_eval(0),
-            _member_eval(1),
-        ],
-        fetchall=[
-            [
-                {"id": "cfg_default", "type": "harbor"},
-                {"id": "cfg_member", "type": "harbor"},
-            ],
-            [_member(0), _member(1)],
-            [_member_eval(0, status="queued", reward=None)],
-        ],
-    )
-    _use_conn(conn)
+    for profile_id in ("cfg_default", "cfg_member"):
+        ConfigProfileStore().create(profile_id, name=profile_id, type="harbor", config={})
+    _seed_suite(members=[_member(0), _member(1)])
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -440,29 +452,21 @@ def test_create_run_applies_member_framework_profile_overrides() -> None:
     )
 
     assert response.status_code == 202, response.text
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    run_insert = next(c for c in execs if "INSERT INTO benchmark_runs" in c.args[0])
-    assert run_insert.args[1][10].obj["member_framework_profile_ids"] == overrides
-    member_inserts = [c for c in execs if "INSERT INTO evaluations" in c.args[0]]
-    assert [(c.args[1][14], c.args[1][15]) for c in member_inserts] == [
+    run, members = _created(response)
+    assert run["runner_metadata"]["member_framework_profile_ids"] == overrides
+    assert [(member["framework_profile_id"], member["harbor_profile_id"]) for member in members] == [
         ("cfg_member", "cfg_member"),
         ("cfg_default", "cfg_default"),
     ]
 
 
 def test_preflight_run_reports_members_without_creating_run() -> None:
-    conn = _conn(
-        fetchone=[
-            {
-                "current_revision": 1,
-                "qualification_status": "qualified",
-                "qualification_evidence": {"receipt": "qe_1"},
-                "qualified_at": NOW,
-            }
-        ],
-        fetchall=[[_member(0), _member(1)]],
+    _seed_suite(
+        members=[_member(0), _member(1)],
+        qualification_status="qualified",
+        qualification_evidence={"receipt": "qe_1"},
+        qualified_at=NOW,
     )
-    _use_conn(conn)
 
     response = client.post(
         "/v1/benchmark-runs/preflight",
@@ -482,19 +486,13 @@ def test_preflight_run_reports_members_without_creating_run() -> None:
     qualification = next(check for check in body["checks"] if check["prerequisite"] == "benchmark_qualification")
     assert qualification["state"] == "ready"
     assert qualification["details"]["evidence_present"] is True
-    assert not any(
-        "INSERT INTO benchmark_runs" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
-    assert not conn.commit.called
+    assert client.get("/v1/benchmark-runs").json()["data"] == []
 
 
 def test_preflight_run_reports_bounded_member_failure() -> None:
-    conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[[_member(0, revision_status="building"), _member(1)]],
+    _seed_suite(
+        members=[_member(0, revision_status="building"), _member(1)],
     )
-    _use_conn(conn)
 
     response = client.post(
         "/v1/benchmark-runs/preflight",
@@ -508,10 +506,31 @@ def test_preflight_run_reports_bounded_member_failure() -> None:
     assert summary["failures"][0]["code"] == "task_not_ready"
 
 
+def test_preflight_run_blocks_a_soft_deleted_member_task() -> None:
+    from scaled_evals.api.task_store import TaskStore
+
+    _seed_suite(members=[_member(0), _member(1)])
+    # Task deletion doesn't check benchmark pins, so a ready member can be deleted under the benchmark.
+    TaskStore().soft_delete("task_0")
+
+    response = client.post(
+        "/v1/benchmark-runs/preflight",
+        json={"name": "suite check", "benchmark_id": "bm_suite"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runnable"] is False
+    summary = body["member_summary"]
+    assert (summary["total"], summary["ready"], summary["blocked"]) == (2, 1, 1)
+    failure = summary["failures"][0]
+    assert (failure["task_id"], failure["code"]) == ("task_0", "task_not_ready")
+    assert "'deleted'" in failure["message"]
+
+
 def test_preflight_run_truncates_large_member_failure_details() -> None:
     members = [_member(i, revision_status="building") for i in range(52)]
-    conn = _conn(fetchone=[{"current_revision": 1}], fetchall=[members])
-    _use_conn(conn)
+    _seed_suite(members=members)
 
     response = client.post(
         "/v1/benchmark-runs/preflight",
@@ -530,27 +549,20 @@ def test_create_run_rejects_member_with_missing_task_pack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     member = _member(0, tarball_object_key="task_0/rev/1/tarball.tar.gz")
-    conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[[member]],
+    _seed_suite(
+        members=[member],
     )
-    _use_conn(conn)
     monkeypatch.setattr("scaled_evals.api.routers.benchmark_runs.artifacts.object_exists", lambda _key: False)
 
     resp = client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
 
     assert resp.status_code == 409
     assert resp.json()["detail"]["error"]["code"] == "task_object_missing"
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    assert not any("INSERT INTO benchmark_runs" in call.args[0] for call in execs)
+    assert client.get("/v1/benchmark-runs").json()["data"] == []
 
 
 def test_create_run_fans_out_full_member_execution_contract() -> None:
-    conn = _conn(
-        fetchone=[{"current_revision": 1}, _run_row(), _member_eval(0)],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
-    )
-    _use_conn(conn)
+    _seed_suite(members=[_member(0)])
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -566,24 +578,15 @@ def test_create_run_fans_out_full_member_execution_contract() -> None:
     )
 
     assert response.status_code == 202, response.text
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    member_insert = next(c for c in execs if "INSERT INTO evaluations" in c.args[0])
-    params = member_insert.args[1]
-    assert params[18:22] == (
-        ["skills/review/SKILL.md"],
-        "inspect first",
-        "summarize last",
-        ["Initialize", "/review"],
-    )
-    assert params[25] == 3
+    [member] = _created(response)[1]
+    assert member["extra_skill_object_keys"] == ["skills/review/SKILL.md"]
+    assert (member["instruction_prefix"], member["instruction_postfix"]) == ("inspect first", "summarize last")
+    assert member["initial_user_turns"] == ["Initialize", "/review"]
+    assert member["n_attempts"] == 3
 
 
 def test_create_run_persists_member_cap() -> None:
-    conn = _conn(
-        fetchone=[{"current_revision": 1}, _run_row(max_concurrent_members=50), _member_eval(0)],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
-    )
-    _use_conn(conn)
+    _seed_suite(members=[_member(0)])
 
     resp = client.post(
         "/v1/benchmark-runs",
@@ -591,25 +594,11 @@ def test_create_run_persists_member_cap() -> None:
     )
 
     assert resp.status_code == 202, resp.text
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    run_insert = next(c for c in execs if "INSERT INTO benchmark_runs" in c.args[0])
-    assert run_insert.args[1][21] == 50
+    assert _created(resp)[0]["max_concurrent_members"] == 50
 
 
 def test_create_run_fans_out_network_policy() -> None:
-    conn = _conn(
-        fetchone=[
-            {"current_revision": 1},
-            _run_row(network_policy="default_deny"),
-            _member_eval(0),
-            _member_eval(1),
-        ],
-        fetchall=[
-            [_member(0), _member(1)],
-            [_member_eval(0, status="queued", reward=None)],
-        ],
-    )
-    _use_conn(conn)
+    _seed_suite(members=[_member(0), _member(1)])
 
     resp = client.post(
         "/v1/benchmark-runs",
@@ -622,23 +611,13 @@ def test_create_run_fans_out_network_policy() -> None:
 
     assert resp.status_code == 202, resp.text
     assert resp.json()["network_policy"] == "default_deny"
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    run_insert = next(c for c in execs if "INSERT INTO benchmark_runs" in c.args[0])
-    member_insert = next(c for c in execs if "INSERT INTO evaluations" in c.args[0])
-    assert run_insert.args[1][18] == "default_deny"
-    assert member_insert.args[1][23] == "default_deny"
+    run, members = _created(resp)
+    assert run["network_policy"] == "default_deny"
+    assert {member["network_policy"] for member in members} == {"default_deny"}
 
 
 def test_create_run_resolves_version_once_for_run_and_members() -> None:
-    conn = _conn(
-        fetchone=[
-            {"current_revision": 1},
-            _run_row(requested_framework_version="stable", framework_version="0.13.2"),
-            _member_eval(0),
-        ],
-        fetchall=[[_member(0)], [_member_eval(0, status="queued", reward=None)]],
-    )
-    _use_conn(conn)
+    _seed_suite(members=[_member(0)])
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -650,12 +629,16 @@ def test_create_run_resolves_version_once_for_run_and_members() -> None:
     )
 
     assert response.status_code == 202, response.text
-    execs = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    run_insert = next(c for c in execs if "INSERT INTO benchmark_runs" in c.args[0])
-    member_insert = next(c for c in execs if "INSERT INTO evaluations" in c.args[0])
-    assert run_insert.args[1][4:10] == member_insert.args[1][4:10]
-    assert run_insert.args[1][10].obj == member_insert.args[1][10].obj
-    assert run_insert.args[1][4:10] == (
+    run, [member] = _created(response)
+    version_fields = (
+        "requested_framework_version",
+        "framework_version",
+        "runner_image_ref",
+        "runner_image_digest",
+        "framework_adapter_version",
+        "sandbox_k8s_version",
+    )
+    assert tuple(run[field] for field in version_fields) == (
         "stable",
         "0.13.2",
         "scaled-evals-api:dev",
@@ -663,21 +646,20 @@ def test_create_run_resolves_version_once_for_run_and_members() -> None:
         "nemo-helix-plugin-overlay-v1",
         "0.1.13",
     )
-    assert run_insert.args[1][10].obj["qualification"]["release"]["version"] == "0.13.2"
+    assert tuple(member[field] for field in version_fields) == tuple(run[field] for field in version_fields)
+    assert member["runner_metadata"] == run["runner_metadata"]
+    assert run["runner_metadata"]["qualification"]["release"]["version"] == "0.13.2"
 
 
 def test_create_run_404_when_benchmark_unknown() -> None:
-    _use_conn(_conn(fetchone=[None]))
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_missing"})
     assert resp.status_code == 404, resp.text
 
 
 def test_create_run_409_when_member_not_ready() -> None:
-    conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[[_member(0, revision_status="building")]],
+    _seed_suite(
+        members=[_member(0, revision_status="building")],
     )
-    _use_conn(conn)
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_suite"})
     assert resp.status_code == 409, resp.text
 
@@ -687,19 +669,15 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
 ) -> None:
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
-    conn = _conn(
-        fetchone=[{"current_revision": 1}],
-        fetchall=[
-            [
-                _member(
-                    0,
-                    image_ref="artifactory.nvidia.com/team/task:rev1",
-                    image_digest="sha256:" + "a" * 64,
-                )
-            ]
+    _seed_suite(
+        members=[
+            _member(
+                0,
+                image_ref="artifactory.nvidia.com/team/task:rev1",
+                image_digest="sha256:" + "a" * 64,
+            )
         ],
     )
-    _use_conn(conn)
 
     response = client.post(
         "/v1/benchmark-runs",
@@ -713,21 +691,16 @@ def test_create_run_rejects_member_image_from_unapproved_registry(
         "member task task_0 rev 1: task image registry 'artifactory.nvidia.com' "
         "is not approved; allowed registries: us-central1-docker.pkg.dev"
     )
-    assert not any(
-        "INSERT INTO benchmark_runs" in call.args[0]
-        for call in conn.cursor.return_value.__enter__.return_value.execute.call_args_list
-    )
+    assert client.get("/v1/benchmark-runs").json()["data"] == []
 
 
 def test_create_run_422_when_empty_benchmark() -> None:
-    conn = _conn(fetchone=[{"current_revision": 1}], fetchall=[[]])
-    _use_conn(conn)
+    _seed_suite(members=[])
     resp = client.post("/v1/benchmark-runs", json={"name": "x", "benchmark_id": "bm_suite"})
     assert resp.status_code == 422, resp.text
 
 
 def test_create_run_422_on_bad_profile_id() -> None:
-    _use_conn(MagicMock())
     resp = client.post(
         "/v1/benchmark-runs",
         json={"name": "x", "benchmark_id": "bm_suite", "framework_profile_id": "nope"},
@@ -749,11 +722,7 @@ def test_create_run_422_on_bad_profile_id() -> None:
 
 
 def test_get_run_derives_succeeded() -> None:
-    conn = _conn(
-        fetchone=[_run_row()],  # get()
-        fetchall=[[_member_eval(0), _member_eval(1)]],  # members_for_runs()
-    )
-    _use_conn(conn)
+    _seed_run(_member_eval(0), _member_eval(1))
     resp = client.get("/v1/benchmark-runs/bmr_1")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -765,17 +734,13 @@ def test_get_run_derives_succeeded() -> None:
 
 
 def test_get_run_derives_running() -> None:
-    conn = _conn(
-        fetchone=[_run_row()],
-        fetchall=[[_member_eval(0), _member_eval(1, status="running", reward=None)]],
-    )
-    _use_conn(conn)
+    _seed_run(_member_eval(0), _member_eval(1, status="running", reward=None))
     body = client.get("/v1/benchmark-runs/bmr_1").json()
     assert body["status"] == "running"
 
 
 def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
-    run = _run_row(
+    run = dict(
         framework_version="0.6.3",
         runner_metadata={
             "agent_bundle": {"bundle_id": "ab_codex"},
@@ -788,7 +753,7 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         max_concurrent_members=4,
     )
     member = _member_eval(0, status="failed", reward=None)
-    source = {
+    member = {
         **member,
         "name": "suite run · nemo-task-0",
         "framework": "harbor",
@@ -808,8 +773,7 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
         "parallelism": 2,
         "visibility": "private",
     }
-    conn = _conn(fetchone=[run, source], fetchall=[[member]])
-    _use_conn(conn)
+    _seed_run(member, **run)
 
     response = client.get("/v1/benchmark-runs/bmr_1/reproduce")
 
@@ -831,7 +795,6 @@ def test_reproduce_run_returns_complete_frozen_request_and_command() -> None:
 
 
 def test_get_run_404() -> None:
-    _use_conn(_conn(fetchone=[None]))
     assert client.get("/v1/benchmark-runs/bmr_missing").status_code == 404
 
 
@@ -839,26 +802,30 @@ def test_get_run_404() -> None:
 
 
 def test_cancel_run_derives_cancelled() -> None:
-    conn = _conn(
-        # cancel() UPDATE … RETURNING → run row with cancelled_at; then members_for_runs.
-        fetchone=[
-            _run_row(cancelled_at=NOW),
-            _member_eval(
-                0,
-                status="cancelled",
-                reward=None,
-                cancel_teardown_status="succeeded",
-            ),
-        ],
-        fetchall=[
-            [_member_eval(0, status="cancelled", reward=None)],
-            [_member_eval(0, status="cancelled", reward=None)],
-        ],
-    )
-    _use_conn(conn)
+    _seed_run(_member_eval(0, status="queued", reward=None))
     resp = client.post("/v1/benchmark-runs/bmr_1/cancel")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled"
+    assert (EvaluationStore().load_for_dispatch("ev_m0") or {}).get("status") == "cancelled"
+
+
+def test_cancelling_again_finishes_members_a_conflict_left_queued(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_run(_member_eval(0, status="queued", reward=None), _member_eval(1, status="queued", reward=None))
+    real_cancel = EvaluationStore.cancel
+
+    def conflict_once(self: EvaluationStore, evaluation_id: str, **kwargs: Any) -> Any:
+        monkeypatch.setattr(EvaluationStore, "cancel", real_cancel)
+        raise Conflict("evaluation_changed", "evaluation changed concurrently; retry")
+
+    monkeypatch.setattr(EvaluationStore, "cancel", conflict_once)
+    with pytest.raises(Conflict):
+        BenchmarkRunStore().cancel("bmr_1")
+
+    _row, cancelled_now, members = BenchmarkRunStore().cancel("bmr_1")
+
+    assert cancelled_now is False
+    assert sorted(member["id"] for member in members) == ["ev_m0", "ev_m1"]
+    assert {(EvaluationStore().load_for_dispatch(f"ev_m{i}") or {}).get("status") for i in (0, 1)} == {"cancelled"}
 
 
 def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -867,23 +834,15 @@ def test_cancel_run_tears_down_launched_members(monkeypatch: pytest.MonkeyPatch)
         "scaled_evals.api.routers.evaluations._resolve_backend",
         lambda runtime: backend,
     )
-    cancelled = _member_eval(
-        0,
-        status="cancelled",
-        reward=None,
-        runtime="sandbox_k8s",
-        backend_handle={"backend": "sandbox_k8s", "external_id": "job-123"},
-        dispatch_job_name=None,
-        cancel_teardown_status="pending",
+    _seed_run(
+        _member_eval(
+            0,
+            status="running",
+            reward=None,
+            runtime="sandbox_k8s",
+            backend_handle=json.dumps({"backend": "sandbox_k8s", "external_id": "job-123"}),
+        )
     )
-    conn = _conn(
-        fetchone=[
-            _run_row(cancelled_at=NOW),
-            {**cancelled, "cancel_teardown_status": "succeeded"},
-        ],
-        fetchall=[[cancelled], [cancelled]],
-    )
-    _use_conn(conn)
 
     response = client.post("/v1/benchmark-runs/bmr_1/cancel")
 

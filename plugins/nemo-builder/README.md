@@ -102,9 +102,10 @@ nemo files filesets create hello-context --workspace default
 nemo files upload "$CTX/" hello-context --workspace default
 ```
 
-**7. Build.** A spec's `platform` defaults to `linux/amd64`. On an arm64 machine, its `RUN` steps
-work only if the node can run amd64 binaries, as Docker Desktop's emulation does; otherwise add
-`"platform": "linux/arm64"` to the spec.
+**7. Build.** A spec that names no `platform` is built for the deployment's `default_platform`,
+`linux/amd64` unless set. On an arm64 machine, its `RUN` steps work only if the node can run amd64
+binaries, as Docker Desktop's emulation does; otherwise uncomment `default_platform: linux/arm64` in
+`config/minikube-values.yaml`, or add `"platform": "linux/arm64"` to the spec.
 
 ```bash
 curl -s -X POST "$NHX_BASE_URL/apis/builder/v2/workspaces/default/builds" \
@@ -632,6 +633,8 @@ builder:
   signing_key_secret: builder-signing-key
   # Registries a build may copy a published image from. These are the defaults; [] refuses every copy.
   import_registries: [docker.io, ghcr.io, nvcr.io, quay.io]
+  # The platform for a spec that names none. Set it to the nodes' architecture; this is the default.
+  default_platform: linux/amd64
 ```
 
 `registry` has no default; while it is unset, submits fail with a `409` rather than as builds that

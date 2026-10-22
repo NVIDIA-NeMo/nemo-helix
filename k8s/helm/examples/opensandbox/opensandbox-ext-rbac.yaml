@@ -17,6 +17,12 @@
 # same value as [kubernetes] namespace in the server values) and, if the server
 # is not in opensandbox-system, the subject namespace. For the Kata server, add a
 # second subject named opensandbox-server-kata.
+#
+# Multi-tenant server ([tenants] in the server config): each tenant's sandboxes are in the
+# tenant's own namespace, so the server needs these permissions in every one of them. Apply
+# this file once per tenant namespace, with that namespace in place of
+# REPLACE_WITH_RELEASE_NAMESPACE. A tenant namespace without it gets a 403 from Kubernetes on
+# the extension's exec and services routes.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

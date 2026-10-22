@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=22.23.4
 ARG DOCKERHUB_MIRROR=docker.io/library
 
 # --------------- BASE --------------- #
@@ -44,7 +44,7 @@ COPY plugins/nemo-safe-synthesizer/openapi /app/plugins/nemo-safe-synthesizer/op
 COPY plugins/nemo-evals/openapi /app/plugins/nemo-evals/openapi
 COPY plugins/nemo-customizer/openapi /app/plugins/nemo-customizer/openapi
 COPY plugins/nemo-agent-hardener/openapi /app/plugins/nemo-agent-hardener/openapi
-COPY plugins/nemo-insights/openapi /app/plugins/nemo-insights/openapi
+COPY plugins/nemo-compass/openapi /app/plugins/nemo-compass/openapi
 COPY plugins/nemo-agent-optimization/openapi /app/plugins/nemo-agent-optimization/openapi
 
 # Install pnpm modules and generate SDK artifacts during postinstall.

@@ -178,7 +178,7 @@ def test_registered_fabric_evaluation_reaches_local_gateway_and_intake(determini
                     },
                 },
             }
-            AgentsResource(client).create(name=name, config=config, config_format="nemo-agents-spec-v1")
+            AgentsResource(client).register(name=name, config=config, config_format="nemo-agents-spec-v1")
             files_client = FilesClient.from_client(client)
             files_client.create_fileset(body=CreateFilesetRequest(name=name)).data()
             dataset = (

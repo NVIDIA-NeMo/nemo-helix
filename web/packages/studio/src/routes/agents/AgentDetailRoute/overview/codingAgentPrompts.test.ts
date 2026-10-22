@@ -6,11 +6,11 @@ import { traceImportPrompt } from '@studio/routes/agents/AgentDetailRoute/overvi
 const params = { workspace: 'default', baseUrl: 'http://localhost:8080' };
 
 describe('traceImportPrompt', () => {
-  it('asks for an analyst run once the agent it belongs to is known', () => {
+  it('asks for a Compass run once the agent it belongs to is known', () => {
     const prompt = traceImportPrompt({ ...params, agent: 'email-triage' });
 
     expect(prompt).toContain('## Then turn the traces into insights');
-    expect(prompt).toContain('nemo insights analysis enable');
+    expect(prompt).toContain('nemo compass analysis enable');
     expect(prompt).toContain('export AGENT_NAME=email-triage');
   });
 
@@ -18,7 +18,7 @@ describe('traceImportPrompt', () => {
     const prompt = traceImportPrompt(params);
 
     expect(prompt).not.toContain('## Then turn the traces into insights');
-    expect(prompt).not.toContain('nemo insights analysis enable');
+    expect(prompt).not.toContain('nemo compass analysis enable');
     expect(prompt).toContain('export AGENT_NAME=<agent-name>');
   });
 });

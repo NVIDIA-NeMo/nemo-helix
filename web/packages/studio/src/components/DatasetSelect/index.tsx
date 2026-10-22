@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { useFilesListFilesets as useListDatasets } from '@nemo/sdk/generated/platform/files';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Select, Text } from '@nvidia/foundations-react-core';
 import {
@@ -10,7 +9,7 @@ import {
   LOADING_DATASETS_OPTION,
 } from '@studio/components/DatasetSelect/constants';
 import { ValueWithLabel } from '@studio/components/ValueWithLabel';
-import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
+import { useOwnedFirstDatasets } from '@studio/hooks/useOwnedFirstDatasets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { FC, useMemo } from 'react';
 
@@ -21,6 +20,9 @@ interface Props {
   disabled?: boolean;
 }
 
+/** The files API rejects `page_size` above 100 (HTTP 422), unlike the 1000 default used elsewhere. */
+const FILESETS_MAX_PAGE_SIZE = 100;
+
 const datasetToOption = (dataset: FilesetOutput) => ({
   children: dataset.name ?? '',
   value: getEntityReference(dataset),
@@ -28,22 +30,12 @@ const datasetToOption = (dataset: FilesetOutput) => ({
 
 export const DatasetSelect: FC<Props> = ({ onChange, selectedDatasetId, errorText, disabled }) => {
   const workspace = useWorkspaceFromPath();
+  // Fetches one full page so search can run client-side; the user's own datasets come first.
   const {
-    data: datasetsResponse,
-    isLoading,
+    datasets,
+    isPending: isLoading,
     isError,
-  } = useListDatasets(workspace, {
-    /**
-     * For now, we use an arbitrarily large page size to fetch all datasets, to enable client-side search.
-     * When DataStore implements server-side search, update this implementation to leverage
-     * server-side search and pagination.
-     */
-    page_size: DEFAULT_LARGE_PAGE_SIZE,
-    sort: 'created_at',
-    filter: { purpose: 'dataset' },
-  });
-
-  const { data: datasets } = datasetsResponse || {};
+  } = useOwnedFirstDatasets(workspace, FILESETS_MAX_PAGE_SIZE);
 
   const selectedDatasetOption = useMemo(() => {
     const selectedDataset = datasets?.find(
@@ -59,11 +51,7 @@ export const DatasetSelect: FC<Props> = ({ onChange, selectedDatasetId, errorTex
       return [LOADING_DATASETS_ERROR_OPTION];
     }
 
-    return (
-      datasets
-        ?.sort((datasetA, datasetB) => (datasetA?.name || '').localeCompare(datasetB.name || ''))
-        .map(datasetToOption) || []
-    );
+    return datasets?.map(datasetToOption) ?? [];
   }, [datasets, isLoading, isError]);
 
   return (

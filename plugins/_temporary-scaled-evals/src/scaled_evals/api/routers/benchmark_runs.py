@@ -13,9 +13,9 @@ from fastapi.responses import StreamingResponse
 from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
+from scaled_evals.api.benchmark_run_store import derive_run_view
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
-from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
 from scaled_evals.api.runnability import (
     BlockedPreflight,
@@ -268,8 +268,6 @@ def create_benchmark_run(
         visibility=body.visibility,
         owner_id=current.owner_id,
     )
-    # Commit so the dispatch worker (its own connection) sees the queued members.
-    db.commit()
     return _response(db, row)
 
 
@@ -386,7 +384,6 @@ def cancel_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
     row, _cancelled_now, cancelled_members = db.benchmark_runs.cancel(run_id)
     if row is None:
         raise _http_error(404, "not_found", "benchmark run not found")
-    db.commit()
     for member in cancelled_members:
         teardown_cancelled_evaluation(db, member)
     return _response(db, row)
@@ -397,7 +394,6 @@ def delete_benchmark_run(run_id: str, db: Db) -> DeleteResponse:
     """Soft-delete a benchmark run (cascades to its member evaluations)."""
     if not db.benchmark_runs.soft_delete(run_id):
         raise _http_error(404, "not_found", "benchmark run not found")
-    db.commit()
     return DeleteResponse(id=run_id)
 
 
@@ -425,14 +421,11 @@ def request_benchmark_archive(run_id: str, body: BenchmarkArchiveRequest, db: Db
         raise _http_error(404, "not_found", exc.message) from exc
     except Conflict as exc:
         raise _http_error(409, exc.code, exc.message) from exc
-    db.commit()
     return _benchmark_archive_response(run_id, row)
 
 
 @router.get("/{run_id}/archive/download")
 def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
-    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
-    # connection for the entire archive stream and can exhaust the pool.
     with database_factory() as db:
         row = db.benchmark_archives.get(run_id)
     if row is None or row["status"] != "ready" or not row["object_key"]:

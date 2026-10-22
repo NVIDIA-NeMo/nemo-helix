@@ -10,7 +10,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
-from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
+from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, dockerfile_pin, plan_images
 
 
 def _archive(*paths: str, compose: str | None = None) -> TaskArchive:
@@ -178,6 +178,19 @@ def test_a_compose_service_named_like_the_separate_verifier_is_refused() -> None
     assert error.value.code == "invalid_compose_file"
 
 
+@pytest.mark.parametrize("service", ["main", "cache"])
+@pytest.mark.parametrize("option", ["target: test", "args: {MODE: fast}", "dockerfile_inline: FROM scratch"])
+def test_a_compose_build_option_builder_cannot_apply_fails_planning(service: str, option: str) -> None:
+    """Builder builds only a context and a Dockerfile; dropping any other option would build a different image."""
+    compose = f"services:\n  {service}:\n    build: {{context: ., {option}}}\n"
+
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({}, _archive("environment/Dockerfile", compose=compose), allowed_registries=[])
+
+    assert error.value.code == "unsupported_compose_build_option"
+    assert option.split(":")[0] in str(error.value)
+
+
 @pytest.mark.parametrize(
     ("config", "archive", "code"),
     [
@@ -275,3 +288,82 @@ def test_task_archive_with_two_task_directories_is_rejected(tmp_path: Path) -> N
         TaskArchive.read(path)
 
     assert error.value.code == "invalid_task_archive"
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "pin"),
+    [
+        ("FROM python:3.12\n", None),
+        ("FROM --platform=linux/amd64 python:3.12\n", "linux/amd64"),
+        ("FROM --platform=linux/x86_64 python:3.12\n", "linux/amd64"),
+        ("from --platform=LINUX/ARM64/v8 python:3.12 AS app\n", "linux/arm64"),
+        ("FROM --platform=$BUILDPLATFORM golang AS build\nFROM --platform=linux/arm64 alpine\n", "linux/arm64"),
+        ("FROM --platform=linux/amd64 golang AS build\nFROM alpine\n", None),
+        ("FROM --platform=$TARGETPLATFORM alpine\n", None),
+        ("FROM \\\n  --platform=linux/amd64 \\\n  ubuntu\n", "linux/amd64"),
+        ("# FROM --platform=linux/amd64 ubuntu\nFROM ubuntu\n", None),
+        # A comment line never continues, even ending in a backslash, and is dropped from an instruction it splits.
+        ("# a note \\\nFROM --platform=linux/arm64 alpine\n", "linux/arm64"),
+        ("FROM \\\n# a note\n  --platform=linux/amd64 ubuntu\n", "linux/amd64"),
+    ],
+)
+def test_a_dockerfile_pins_the_platform_its_final_stage_names_plainly(dockerfile: str, pin: str | None) -> None:
+    assert dockerfile_pin(dockerfile) == pin
+
+
+def test_a_pinned_dockerfile_in_the_archive_pins_its_image(tmp_path: Path) -> None:
+    path = tmp_path / "task_archive"
+    _write_tar(path, {"sort-task/environment/Dockerfile": b"FROM --platform=linux/arm64 python:3.12\n"})
+
+    (image,) = plan_images({}, TaskArchive.read(path), allowed_registries=[])
+
+    assert image.platform == "linux/arm64"
+
+
+def test_compose_services_pin_the_platform_they_name_plainly() -> None:
+    compose = """
+services:
+  main:
+    build: .
+    platform: linux/amd64
+  cache:
+    image: redis:7
+    platform: ${CACHE_PLATFORM}
+  db:
+    image: postgres:16
+    platform: linux/arm64/v8
+"""
+    images = plan_images({}, _archive("environment/Dockerfile", compose=compose), allowed_registries=[])
+
+    assert [(image.role, image.platform) for image in images] == [
+        ("main", "linux/amd64"),
+        ("cache", None),
+        ("db", "linux/arm64"),
+    ]
+
+
+def test_a_compose_service_naming_an_unreadable_platform_is_refused() -> None:
+    compose = "services:\n  cache:\n    image: redis:7\n    platform: arm64\n"
+
+    with pytest.raises(ImagePlanError) as error:
+        plan_images({}, _archive("environment/Dockerfile", compose=compose), allowed_registries=[])
+
+    assert error.value.code == "invalid_compose_file"
+
+
+def test_a_compose_main_platform_pins_main_built_from_the_environment() -> None:
+    """Compose merges `main.platform` over Harbor's base, so it pins `main` even when only adjusting it."""
+    compose = "services:\n  main:\n    depends_on: [db]\n    platform: linux/amd64\n  db:\n    build: ./db\n"
+    archive = _archive("environment/Dockerfile", "environment/db/Dockerfile", compose=compose)
+
+    images = plan_images({}, archive, allowed_registries=[])
+
+    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("db", None)]
+
+
+def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> None:
+    """BuildKit takes `x86_64` and `aarch64` for `amd64` and `arm64`; a task that names one still builds."""
+    compose = "services:\n  main:\n    build: .\n    platform: linux/x86_64\n  cache:\n    image: redis:7\n    platform: linux/aarch64\n"
+    images = plan_images({}, _archive("environment/Dockerfile", compose=compose), allowed_registries=[])
+
+    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("cache", "linux/arm64")]

@@ -58,7 +58,7 @@ def test_terminal_spans_round_trip_into_admin_views(monkeypatch: pytest.MonkeyPa
     intake = _FakeIntake()
     monkeypatch.setattr(execution_analytics, "_intake", lambda: intake)
     db = MagicMock()
-    db.users.live_usage.return_value = {
+    db.evaluations.live_usage.return_value = {
         "queued_runs": 1,
         "active_runs": 0,
         "total_parallelism": 3,
@@ -144,18 +144,16 @@ def test_failed_evidence_still_records_the_terminal_span(monkeypatch: pytest.Mon
         "ev_bad": _row("ev_bad", "failed", datetime.now(UTC), execution_snapshot={"not": "valid"}),
         "ev_live": _row("ev_live", "running", datetime.now(UTC)),
     }
-    repo = MagicMock()
-    repo.load_for_dispatch.side_effect = rows.get
-    usage_repo = MagicMock()
-    usage_repo.totals_for_evaluation.side_effect = ConnectionError("db down")
-    monkeypatch.setattr(worker_module, "EvaluationRepository", lambda conn: repo)
-    monkeypatch.setattr(worker_module, "ResourceUsageRepository", lambda conn: usage_repo)
-    worker = Dispatcher(connect=MagicMock())
+    store = MagicMock()
+    store.load_for_dispatch.side_effect = rows.get
+    store.resource_totals_for.side_effect = ConnectionError("store down")
+    monkeypatch.setattr(worker_module, "EvaluationStore", lambda: store)
+    worker = Dispatcher()
 
     worker.build_evidence("ev_bad")
     worker.build_evidence("ev_live")
 
-    assert repo.mark_evidence_failed.call_count == 2
-    repo.mark_evidence_ready.assert_not_called()
+    assert store.mark_evidence_failed.call_count == 2
+    store.mark_evidence_ready.assert_not_called()
     assert [span.attributes["scaled_evals.evaluation_id"] for span in intake.spans] == ["ev_bad"]
     assert intake.spans[0].attributes["scaled_evals.cpu_samples"] is None

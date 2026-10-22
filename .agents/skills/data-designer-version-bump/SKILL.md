@@ -1,6 +1,8 @@
 ---
 name: data-designer-version-bump
 description: Bump the upstream NVIDIA NeMo Data Designer library (`data-designer`, `data-designer-config`, `data-designer-engine`) to a new release in nemo-helix. Covers upstream research, pin edits, relocking, dependency-conflict triage, wheel constraints, versioned doc links, generated license/OpenAPI/CLI artifacts, API-change adoption, the vendored plugin skill refresh, and verification. Use when asked to bump, upgrade, or update Data Designer or the data-designer dependency to a new version. Not for nemo-anonymizer, which releases on its own cadence.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->

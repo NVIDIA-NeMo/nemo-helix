@@ -145,6 +145,7 @@ export const locateJobResultFiles = async (
   const { data: results } = await agentOptimizationListRunStrategyJobResults(
     workspace,
     jobName,
+    undefined,
     signal
   );
 

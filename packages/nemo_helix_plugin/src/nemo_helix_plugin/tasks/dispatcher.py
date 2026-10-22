@@ -53,6 +53,7 @@ from nemo_helix_plugin.job_usage import HelixJobUsageReporter
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
@@ -208,6 +209,9 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
     job_id = os.environ.get(NEMO_JOB_ID_ENVVAR, "").strip()
     if not job_id:
         raise RuntimeError(f"{NEMO_JOB_ID_ENVVAR} not set; running outside the platform?")
+    attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR, "").strip()
+    if not attempt_id:
+        raise RuntimeError(f"{NEMO_JOB_ATTEMPT_ID_ENVVAR} not set; running outside the platform?")
     return JobContext(
         workspace=workspace,
         storage=StoragePaths(
@@ -218,13 +222,16 @@ def build_ctx_from_env(client: NemoClient) -> JobContext:
             job_name=job_id,
             workspace=workspace,
             client=client,
+            attempt_id=attempt_id,
         ),
         usage=HelixJobUsageReporter(
             job_name=job_id,
+            attempt_id=attempt_id,
             workspace=workspace,
             jobs_client=JobsClient.from_client(client),
         ),
         job_id=job_id,
+        attempt_id=attempt_id,
     )
 
 

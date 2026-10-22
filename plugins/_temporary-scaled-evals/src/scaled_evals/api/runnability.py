@@ -183,7 +183,7 @@ def _append_reference_checks(
         )
     profile_slots = [(profile_id, kind) for profile_id, kind in profile_slots if profile_id]
     try:
-        db.evaluations.validate_profile_references(profile_slots)
+        db.config_profiles.validate_references(profile_slots)
     except InvalidReference as exc:
         checks.append(
             _check(
@@ -207,7 +207,7 @@ def _append_reference_checks(
     if isinstance(body, CreateBenchmarkRunRequest):
         framework_profile_ids.update(body.member_framework_profile_ids.values())
     for framework_profile_id in sorted(framework_profile_ids) if body.framework == "harbor" else ():
-        profile_row = db.evaluations.load_framework_profile(framework_profile_id)
+        profile_row = db.config_profiles.get_typed(framework_profile_id, ("harbor", "gym"))
         profile = profile_row.get("config") if profile_row else None
         if isinstance(profile, dict) and profile.get("dataset_only") is True:
             try:
@@ -529,7 +529,7 @@ def preflight_evaluation(
     if blocker:
         return BlockedPreflight(_report("evaluation", checks), blocker)
 
-    task_revision = db.evaluations.task_revision_for_evaluation(body.task_id, body.task_revision)
+    task_revision = db.tasks.revision(body.task_id, body.task_revision)
     if task_revision is None:
         message = f"task revision not found: {body.task_id} rev {body.task_revision}"
         checks.append(
@@ -612,7 +612,7 @@ def preflight_benchmark_run(
     if blocker:
         return BlockedPreflight(_report("benchmark_run", checks), blocker)
 
-    benchmark_revision = db.benchmark_runs.benchmark_revision_for_run(body.benchmark_id, body.benchmark_revision)
+    benchmark_revision = db.benchmarks.revision_for_run(body.benchmark_id, body.benchmark_revision)
     if benchmark_revision is None:
         target = (
             f"{body.benchmark_id} rev {body.benchmark_revision}"

@@ -24,24 +24,4 @@ if [ ${#filtered_files[@]} -eq 0 ]; then
 	exit 0
 fi
 
-# Match the CI type-check policy: the repository still has known violations in
-# these categories, so pre-commit should not block broad mechanical changes on
-# diagnostics that CI intentionally suppresses.
-ci_ignored_rules=(
-	invalid-argument-type
-	unused-ignore-comment
-	unresolved-attribute
-	not-subscriptable
-	invalid-assignment
-	invalid-return-type
-	invalid-method-override
-	no-matching-overload
-	unsupported-operator
-)
-
-ignore_args=()
-for rule in "${ci_ignored_rules[@]}"; do
-	ignore_args+=(--ignore "$rule")
-done
-
-uv run --frozen --group insights --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${ignore_args[@]}" "${filtered_files[@]}"
+uv run --frozen --group compass --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${filtered_files[@]}"

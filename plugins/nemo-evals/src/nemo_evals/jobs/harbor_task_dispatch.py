@@ -13,12 +13,14 @@ TODO(M2 story 6b): replace the agent evaluation with a dedicated dispatcher.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -34,6 +36,8 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 TASK_JOB_SOURCE = "evals.harbor-task"
 """Jobs ``source`` of every task Job; with the name, spec and platform spec it marks a Job as ours."""
 
@@ -41,6 +45,8 @@ DISPATCH_STEP_NAME = "harbor-task-dispatch"
 DISPATCH_ENTRYPOINT = ["python", "-m"]
 DISPATCH_COMMAND = ["nemo_evals.tasks.harbor_task_dispatch"]
 OPENSANDBOX_ENVIRONMENT = "nemo_evals.harbor.opensandbox_environment:AgentChannelOpenSandboxEnvironment"
+UNWRAPPED_AGENTS = frozenset({"oracle", "nop"})
+"""Agents that install nothing, and that Harbor constructs or scores differently by name, so they stay unwrapped."""
 """Harbor environment the task Job runs trials in: nhx-sandbox's environment plus the agent channel."""
 
 SANDBOX_READY_TIMEOUT_S = 600
@@ -179,6 +185,7 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
             "agent_channel_hosts": list(policy.agent_channel),
+            "agent_setup_hosts": list(policy.agent_setup_egress),
             "egress_verification": policy.egress_verification,
             "enforce_disk_limit": policy.enforce_disk_limit,
             "max_disk_mb": policy.max_disk_mb,
@@ -191,7 +198,19 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             },
         },
     )
-    return config.model_copy(update={"environment": environment, "n_concurrent_trials": 1})
+    update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
+    agent = config.agent_import_path or config.agent_name or "oracle"
+    if policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
+        reason = "a loose agent file (agent_dir)" if config.agent_dir is not None else "it installs nothing"
+        logger.info("Agent %s runs setup without the agent setup egress window: %s", agent, reason)
+    elif policy.agent_setup_egress:
+        update["agent_import_path"] = SETUP_EGRESS_AGENT
+        update["agent_kwargs"] = {
+            **config.agent_kwargs,
+            INNER_AGENT_KWARG: agent,
+            SETUP_HOSTS_KWARG: list(policy.agent_setup_egress),
+        }
+    return config.model_copy(update=update)
 
 
 def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str | None = None) -> bool:

@@ -28,7 +28,17 @@ from pydantic import BaseModel
 
 # Top-level entity fields that exist as columns rather than under data.*
 # Filter models implicitly extend this set via _get_valid_fields.
-ENTITY_BASE_FIELDS: set[str] = {"id", "name", "workspace", "created_at", "updated_at", "entity_type", "project"}
+ENTITY_BASE_FIELDS: set[str] = {
+    "id",
+    "name",
+    "workspace",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
+    "entity_type",
+    "project",
+}
 
 
 def _reverse_translate_dict(d: dict[str, Any], reverse_map: dict[str, str]) -> dict[str, Any]:

@@ -16,7 +16,7 @@ import ipaddress
 import logging
 import socket
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Iterable, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -187,6 +187,26 @@ def allowed_networks(allow_targets: Iterable[str]) -> tuple[IPNetwork, ...]:
     return tuple(dict.fromkeys(networks))
 
 
+_SameVersionNetwork = TypeVar("_SameVersionNetwork", ipaddress.IPv4Network, ipaddress.IPv6Network)
+
+
+def _subtract_same_version(fragment: _SameVersionNetwork, hole: _SameVersionNetwork) -> tuple[_SameVersionNetwork, ...]:
+    if fragment.subnet_of(hole):
+        return ()
+    if hole.subnet_of(fragment):
+        return tuple(fragment.address_exclude(hole))
+    return (fragment,)
+
+
+def _subtract(fragment: IPNetwork, hole: IPNetwork) -> tuple[IPNetwork, ...]:
+    """``fragment`` with ``hole`` removed; a hole of the other IP version removes nothing."""
+    if isinstance(fragment, ipaddress.IPv4Network) and isinstance(hole, ipaddress.IPv4Network):
+        return _subtract_same_version(fragment, hole)
+    if isinstance(fragment, ipaddress.IPv6Network) and isinstance(hole, ipaddress.IPv6Network):
+        return _subtract_same_version(fragment, hole)
+    return (fragment,)
+
+
 def denied_cidrs(
     allow_targets: Iterable[str] = (),
     resolver_addresses: Iterable[str] | None = None,
@@ -208,20 +228,12 @@ def denied_cidrs(
             for hole in holes:
                 if hole.version != fragments[0].version:
                     continue
-                remaining: list[IPNetwork] = []
-                for fragment in fragments:
-                    if fragment.subnet_of(hole):  # type: ignore[arg-type]
-                        continue
-                    if hole.subnet_of(fragment):  # type: ignore[arg-type]
-                        remaining.extend(fragment.address_exclude(hole))  # type: ignore[arg-type]
-                    else:
-                        remaining.append(fragment)
-                fragments = remaining
+                fragments = [piece for fragment in fragments for piece in _subtract(fragment, hole)]
                 if not fragments:
                     break
             # Resolvers may return a host's addresses in any order; sorting keeps the policy, and
             # its hash, identical across builds.
-            denied.extend(sorted(fragments))  # type: ignore[type-var]
+            denied.extend(sorted(fragments, key=lambda network: (network.network_address.packed, network.prefixlen)))
     return tuple(str(network) for network in denied)
 
 

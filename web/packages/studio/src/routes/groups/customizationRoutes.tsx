@@ -8,6 +8,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import {
   gateCustomizationRoutes,
+  gateModelDetailsRoutes,
   getWorkspaceCustomizationJobListRoute,
 } from '@studio/routes/utils';
 import { lazy } from 'react';
@@ -33,6 +34,11 @@ const CustomizationJobDetailsRoute = lazy(() =>
     default: module.CustomizationJobDetailsRoute,
   }))
 );
+const ModelDetailRoute = lazy(() =>
+  import('@studio/routes/ModelDetailRoute').then((module) => ({
+    default: module.ModelDetailRoute,
+  }))
+);
 
 export const customizationRoutes: RouteObject[] = gateCustomizationRoutes([
   {
@@ -55,6 +61,18 @@ export const customizationRoutes: RouteObject[] = gateCustomizationRoutes([
     element: <CustomizationJobDetailsRoute />,
     errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
+  ...gateModelDetailsRoutes([
+    {
+      path: ROUTES.workspace.modelDetail,
+      element: <ModelDetailRoute />,
+      errorElement: <RouteErrorPanel title="Model" />,
+    },
+    {
+      path: ROUTES.workspace.modelAdapterDetail,
+      element: <ModelDetailRoute />,
+      errorElement: <RouteErrorPanel title="Model" />,
+    },
+  ]),
 ]);
 
 const NavIcon = ENTITY_ICONS.customModels;

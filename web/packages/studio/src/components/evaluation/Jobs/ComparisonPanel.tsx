@@ -40,6 +40,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
   const { data: resultsPage, isLoading: isLoadingMetadata } = useEvalsListEvaluateJobResults(
     workspace,
     jobName,
+    undefined,
     {
       query: {
         enabled: !!workspace && !!jobName,

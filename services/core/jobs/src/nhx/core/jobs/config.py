@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class JobsStorageConfig(BaseModel):
-    """How long a paused or failed job keeps its storage.
+    """How long a paused or failed job keeps its storage, and how often that is checked.
 
     These are platform settings under ``jobs.storage`` in the platform config, and
     each deployment can set its own values. The numbers here are only the defaults.
@@ -42,6 +42,12 @@ class JobsStorageConfig(BaseModel):
         ge=0,
         description="How long storage is kept after a job fails, measured from the failed step's stopped_at. "
         "0 reclaims on the next retention pass.",
+    )
+    retention_interval_seconds: int = Field(
+        default=300,
+        ge=1,
+        description="How often the jobs controller checks paused, failed and cancelled jobs for storage to reclaim. "
+        "Storage of deleted jobs is reclaimed on every reconcile tick instead.",
     )
 
 

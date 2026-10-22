@@ -168,6 +168,12 @@ def test_operator_config_requires_digest_pinned_dispatcher_image(harbor_config):
         HarborTaskJobsConfig.model_validate(data)
 
 
+def test_operator_config_may_omit_dispatcher_image(harbor_config):
+    data = harbor_config.model_dump()
+    del data["dispatcher_image"]
+    assert HarborTaskJobsConfig.model_validate(data).dispatcher_image is None
+
+
 def test_operator_config_requires_the_default_profile(harbor_config):
     data = harbor_config.model_dump()
     data["default_sandbox_profile"] = "harbor-gpu"

@@ -1179,6 +1179,18 @@ def test_gateway_get_and_delete(group: str, path_segment: str) -> None:
     assert "Deleted successfully" in result.stdout
 
 
+def test_gateway_strips_leading_slash_from_trailing_uri() -> None:
+    recorder = Recorder([httpx.Response(200, json={})])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(
+        app, ["inference", "gateway", "provider", "get", "/v1/models", "--name", "nvidia"], obj=state
+    )
+
+    assert result.exit_code == 0, result.output
+    assert recorder.last.url.raw_path == f"{GATEWAY}/default/provider/nvidia/-/v1/models".encode()
+
+
 @pytest.mark.parametrize("group", ["provider", "model"])
 def test_gateway_get_requires_name_option(group: str) -> None:
     recorder = Recorder([])

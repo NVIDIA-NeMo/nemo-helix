@@ -4,7 +4,7 @@
 import logging
 import os
 import tarfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from filesets import AsyncFilesetFileSystem, FilesetFileSystem, parse_fileset_ref
@@ -25,6 +25,26 @@ class CreateJobResultError(Exception): ...
 class FileDoesNotExist(Exception): ...
 
 
+async def download_artifact_from_url(
+    artifact_url: str,
+    *,
+    workspace: str | None = None,
+    files_client: AsyncFilesClient,
+    local_dir: str | Path | None = None,
+) -> TmpDirPath:
+    """Download an artifact without requiring job execution metadata."""
+    resolved_workspace = files_client.resolve_workspace(workspace)
+    _, fileset_name, _ = parse_fileset_ref(artifact_url, workspace_fallback=resolved_workspace)
+    if fileset_name is None:
+        raise ValueError(f"Could not extract fileset name from URL: {artifact_url}")
+    file_manager = AsyncFilesetFileManager(
+        workspace=resolved_workspace,
+        fileset_name=fileset_name,
+        filesystem=AsyncFilesetFileSystem(client=files_client),
+    )
+    return await file_manager.download_from_url(url=artifact_url, local_dir=local_dir)
+
+
 class BaseResultManager:
     """
     Base class for sync and async versions of the ResultManager. If there is any common code that can be used across
@@ -33,7 +53,7 @@ class BaseResultManager:
 
     job_name: str
     workspace: str
-    attempt_id: str | None
+    attempt_id: str
 
     def _validate_local_path(self, artifact_local_path: str | Path) -> Path:
         if isinstance(artifact_local_path, str):
@@ -56,13 +76,12 @@ class ResultManager(BaseResultManager):
     workspace: str
     files_client: FilesClient
     jobs_client: JobsClient
-    attempt_id: str | None = field(default=None)
+    attempt_id: str
 
     def _fetch_job_metadata(self) -> tuple[str, str, str | None]:
         """Fetch job and return (attempt_id, fileset_name, output_location)."""
         job = self.jobs_client.get_job(name=self.job_name, workspace=self.workspace).data()
-        attempt_id = self.attempt_id if self.attempt_id is not None else job.attempt_id
-        return attempt_id, job.fileset, job.output_location
+        return self.attempt_id, job.fileset, job.output_location
 
     def _create_file_manager(self, fileset_name: str) -> FilesetFileManager:
         """Create a file manager for the given fileset."""
@@ -94,6 +113,7 @@ class ResultManager(BaseResultManager):
                 job=self.job_name,
                 workspace=self.workspace,
                 body=HelixJobResultCreateRequest(
+                    attempt_id=attempt_id,
                     artifact_url=artifact_url,
                     artifact_storage_type=file_manager.storage_type(),
                 ),
@@ -127,13 +147,12 @@ class AsyncResultManager(BaseResultManager):
     workspace: str
     files_client: AsyncFilesClient
     jobs_client: AsyncJobsClient
-    attempt_id: str | None = field(default=None)
+    attempt_id: str
 
     async def _fetch_job_metadata(self) -> tuple[str, str, str | None]:
         """Fetch job and return (attempt_id, fileset_name, output_location)."""
         job = (await self.jobs_client.get_job(name=self.job_name, workspace=self.workspace)).data()
-        attempt_id = self.attempt_id if self.attempt_id is not None else job.attempt_id
-        return attempt_id, job.fileset, job.output_location
+        return self.attempt_id, job.fileset, job.output_location
 
     def _create_file_manager(self, fileset_name: str) -> AsyncFilesetFileManager:
         """Create a file manager for the given fileset."""
@@ -166,6 +185,7 @@ class AsyncResultManager(BaseResultManager):
                     job=self.job_name,
                     workspace=self.workspace,
                     body=HelixJobResultCreateRequest(
+                        attempt_id=attempt_id,
                         artifact_url=artifact_url,
                         artifact_storage_type=file_manager.storage_type(),
                     ),
@@ -189,17 +209,18 @@ class AsyncResultManager(BaseResultManager):
         return job_result
 
     async def download_artifact(self, artifact_url: str, local_dir: str | Path | None = None) -> TmpDirPath:
-        _, fileset_name, _ = parse_fileset_ref(artifact_url, workspace_fallback=self.workspace)
-        if fileset_name is None:
-            raise ValueError(f"Could not extract fileset name from URL: {artifact_url}")
-        file_manager = self._create_file_manager(fileset_name)
-        return await file_manager.download_from_url(url=artifact_url, local_dir=local_dir)
+        return await download_artifact_from_url(
+            artifact_url,
+            workspace=self.workspace,
+            files_client=self.files_client,
+            local_dir=local_dir,
+        )
 
 
 def result_manager_factory(
     job_name: str,
     *,
-    attempt_id: str | None = None,
+    attempt_id: str,
     workspace: str | None = None,
     files_client: FilesClient,
     jobs_client: JobsClient | None = None,
@@ -218,7 +239,7 @@ def result_manager_factory(
 def async_result_manager_factory(
     job_name: str,
     *,
-    attempt_id: str | None = None,
+    attempt_id: str,
     workspace: str | None = None,
     files_client: AsyncFilesClient,
     jobs_client: AsyncJobsClient | None = None,
@@ -227,7 +248,7 @@ def async_result_manager_factory(
 
     Args:
         job_name: Name of the job to create results for.
-        attempt_id: Optional attempt ID for the job.
+        attempt_id: Concrete attempt ID that produces uploaded results.
         workspace: Job workspace. If not provided, falls back to the client workspace resolution.
         files_client: Files service client.
         jobs_client: Jobs service client. If not provided, one is created from
@@ -252,21 +273,22 @@ async def download_from_result_info(
     files_client: AsyncFilesClient,
 ) -> tuple[str, TmpDirPath]:
     """
-    This is a helper composition function that creates a result_manager
-    and prepares the artifact for download.
+    Download and prepare a result artifact for an HTTP response.
+
+    ``job_name`` remains part of this public helper's signature for compatibility;
+    downloads are resolved entirely from the artifact URL.
 
     Returns:
         A tuple containing:
           - filename (str): The final filename of the artifact (may include .tar.gz extension if compressed)
           - tmp_dir_path (TmpDirPath): Path object pointing to the downloaded artifact
     """
-    result_manager = async_result_manager_factory(
-        job_name=job_name,
+    del job_name
+    tmp_dir_path = await download_artifact_from_url(
+        artifact_url,
         workspace=workspace,
         files_client=files_client,
     )
-
-    tmp_dir_path = await result_manager.download_artifact(artifact_url=artifact_url)
     filename = result_name
 
     if tmp_dir_path.path.is_dir():

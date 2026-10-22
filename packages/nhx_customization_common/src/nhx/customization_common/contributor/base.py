@@ -77,7 +77,7 @@ class BaseContributor:
             self.job_cls,
             service_name=CUSTOMIZATION_JOB_SOURCE,
             generate_job_name=self.generate_job_name,
-            route_options=[JobRouteOption.CORE],
+            route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN],
             default_profile=config.default_training_execution_profile,
             authz=AuthzScope("customization").child(self.name, "jobs"),
         )

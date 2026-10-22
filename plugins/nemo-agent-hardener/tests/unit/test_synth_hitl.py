@@ -72,28 +72,31 @@ def test_drive_synth_hitl_relays_interview_then_review() -> None:
 def test_status_details_channel_publishes_and_matches_round() -> None:
     published: dict[str, Any] = {}
 
-    job = {
-        "id": "job1",
-        "attempt_id": "att-1",
-        "name": "job1",
+    attempt = {
+        "id": "att-1",
+        "name": "attempt-1",
+        "job": "job1",
         "workspace": "default",
-        "source": "test",
+        "seq": 1,
         "spec": {},
         "platform_spec": {
             "steps": [{"name": "step-one", "executor": {"provider": "cpu", "container": {"image": "x"}}}]
         },
-        "fileset": "fs-1",
         "status": "active",
         "status_details": {"interview_response": {"round": 1, "answers": [{"gap": "g", "answer": "a"}]}},
+        "error_details": {},
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "is_current": True,
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.method == "PATCH" and request.url.path.endswith("/status-details"):
+        if request.method == "PATCH" and request.url.path.endswith("/jobs/job1/attempts/att-1/status-details"):
             if request.content:
                 published.update(json.loads(request.content))
             return httpx.Response(200, json={})
-        if request.method == "GET" and request.url.path.endswith("/jobs/job1"):
-            return httpx.Response(200, json=job)
+        if request.method == "GET" and request.url.path.endswith("/jobs/job1/attempts/att-1"):
+            return httpx.Response(200, json=attempt)
         return httpx.Response(404)
 
     # The channel wraps the SDK via ``client_from_platform`` into a typed JobsClient;
@@ -106,7 +109,13 @@ def test_status_details_channel_publishes_and_matches_round() -> None:
         http_client=http_client,
     )
 
-    channel = hitl.StatusDetailsChannel(platform, name="job1", workspace="default", poll_interval=0.0)
+    channel = hitl.StatusDetailsChannel(
+        platform,
+        name="job1",
+        attempt_id="att-1",
+        workspace="default",
+        poll_interval=0.0,
+    )
     channel.publish("interview", {"questions": [{"gap": "g"}]})
     assert published["interview"]["round"] == 1
     assert channel.await_response("interview") == [{"gap": "g", "answer": "a"}]

@@ -543,9 +543,9 @@ async def test_a_real_opensandbox_host_serves_rollouts(tmp_path: Path) -> None:
         sandbox_runtime_image=os.environ["NHX_GYM_RUNTIME_IMAGE"],
         sandbox_job_storage_pvc_claim=os.environ.get("NHX_GYM_PVC_CLAIM", "job-storage"),
     )
-    runner = SessionBackedGymRunner(
-        target=_target(), plan=resolve_sandbox_plan(config, _target()), job_id="eval-live-1"
-    )
+    plan = resolve_sandbox_plan(config, _target())
+    assert plan is not None
+    runner = SessionBackedGymRunner(target=_target(), plan=plan, job_id="eval-live-1")
 
     trials = await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
 

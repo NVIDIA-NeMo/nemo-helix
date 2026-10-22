@@ -1,6 +1,6 @@
 module github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts
 
-go 1.25.8
+go 1.26.10
 
 require (
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0

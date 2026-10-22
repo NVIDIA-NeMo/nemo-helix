@@ -4,7 +4,7 @@
 """Bridge the ``agent-hardener serve`` synth HITL to the platform ``status_details`` channel.
 
 The war-game job drives the synth service (interview rounds, then benign-suite review) and relays each
-checkpoint to the operator via the job's ``status_details`` — Studio renders it and PATCHes a response.
+checkpoint to the operator via the attempt's ``status_details`` — Studio renders it and PATCHes a response.
 :func:`drive_synth_hitl` is the transport-agnostic loop (``publish``/``await_response`` injected so it is
 unit-testable); :class:`StatusDetailsChannel` implements those over the typed Jobs client for the real job.
 """
@@ -62,17 +62,25 @@ def drive_synth_hitl(
 
 
 class StatusDetailsChannel:
-    """Implements ``publish``/``await_response`` over the job's ``status_details`` (Studio is the peer).
+    """Implements ``publish``/``await_response`` over an attempt's ``status_details`` (Studio is the peer).
 
     Each ``publish`` stamps an incrementing ``round`` so a multi-round interview never reads a stale answer;
     Studio echoes the round in its ``{kind}_response``. Polls (the job stays ``active`` — no platform pause).
     """
 
     def __init__(
-        self, sdk: Any, *, name: str, workspace: str, poll_interval: float = 2.0, timeout: float = 1800.0
+        self,
+        sdk: Any,
+        *,
+        name: str,
+        attempt_id: str,
+        workspace: str,
+        poll_interval: float = 2.0,
+        timeout: float = 1800.0,
     ) -> None:
         self._sdk = sdk
         self._name = name
+        self._attempt_id = attempt_id
         self._workspace = workspace
         self._poll_interval = poll_interval
         self._timeout = timeout
@@ -88,8 +96,11 @@ class StatusDetailsChannel:
         # the interview until the poll deadline with no explanation).
         for attempt in range(1, _PUBLISH_MAX_ATTEMPTS + 1):
             try:
-                client_from_platform(self._sdk, JobsClient).update_job_status_details(
-                    name=self._name, workspace=self._workspace, body=JobStatusDetailsUpdate(root=body)
+                client_from_platform(self._sdk, JobsClient).update_job_attempt_status_details(
+                    job=self._name,
+                    attempt=self._attempt_id,
+                    workspace=self._workspace,
+                    body=JobStatusDetailsUpdate(root=body),
                 )
                 return
             except Exception:
@@ -106,16 +117,16 @@ class StatusDetailsChannel:
         deadline = time.monotonic() + self._timeout
         while time.monotonic() < deadline:
             try:
-                job = (
+                attempt = (
                     client_from_platform(self._sdk, JobsClient)
-                    .get_job(name=self._name, workspace=self._workspace)
+                    .get_job_attempt(job=self._name, attempt=self._attempt_id, workspace=self._workspace)
                     .data()
                 )
             except Exception:  # a transient poll failure must not abort a minutes-long human wait
                 logger.warning("status_details poll failed for job %s; retrying", self._name, exc_info=True)
                 time.sleep(self._poll_interval)
                 continue
-            resp = (getattr(job, "status_details", None) or {}).get(key)
+            resp = (attempt.status_details or {}).get(key)
             if isinstance(resp, dict) and resp.get("round") == self._round:
                 rows = list(resp.get("answers") or resp.get("suite") or [])
                 if kind == "interview":

@@ -3,67 +3,44 @@
 
 """Unit tests for the tasks router.
 
-Uses an in-process FastAPI TestClient with a mocked psycopg connection
-(via dependency_overrides on the mounted /v1 sub-app). End-to-end
-coverage against a real Postgres lives in tests/integration/.
+Uses an in-process FastAPI TestClient against the in-memory Entity Store.
 """
 
-from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("scaled_evals")
-from api_test_fixture import client, v1
+from api_test_fixture import client
 from scaled_evals.api import build
-from scaled_evals.api.db import get_conn
 from scaled_evals.api.settings import settings
-
-
-def _conn_returning(fetchones: list) -> MagicMock:
-    """Fake connection whose cursor.fetchone yields each value in turn."""
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchone.side_effect = list(fetchones)
-    cur.rowcount = 1
-    return conn
-
-
-def _use_conn(conn: MagicMock) -> None:
-    """Point get_conn at a specific fake connection for one test."""
-
-    def _gen() -> Iterator[MagicMock]:
-        yield conn
-
-    v1.dependency_overrides[get_conn] = _gen
-
-
-def _conn_with_fetchall(rows: list[dict]) -> MagicMock:
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = rows
-    cur.fetchone.return_value = None
-    cur.rowcount = 1
-    return conn
-
-
-def _empty_db() -> Iterator[MagicMock]:
-    """Fake connection whose queries return nothing — empty list, no row."""
-    conn = MagicMock()
-    cur = conn.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = []
-    cur.fetchone.return_value = None
-    yield conn
-
-
-@pytest.fixture(autouse=True)
-def _override_db():
-    v1.dependency_overrides[get_conn] = _empty_db
-    yield
-    v1.dependency_overrides.pop(get_conn, None)
-
+from scaled_evals.api.task_store import TaskStore
+from task_fixtures import seed_evaluation, stored_revision, stored_task
 
 # ---------- list ----------------------------------------------------------
+
+
+def _seed(task_id: str = "task_x", *, owner_id: str | None = "dev", revisions: int = 1) -> TaskStore:
+    store = TaskStore()
+    store.create_with_initial_revision(
+        task_id,
+        name=task_id,
+        slug=task_id.replace("_", "-"),
+        description=None,
+        visibility="private",
+        object_key="k",
+        owner_id=owner_id,
+    )
+    for _ in range(revisions - 1):
+        store.create_next_revision(task_id)
+    return store
+
+
+def _make_ready(store: TaskStore, task_id: str, revision: int) -> None:
+    store.mark_latest_revision_building(
+        task_id, build_backend="buildkit", expected_revision=revision, exact_revision=True
+    )
+    store.record_success(task_id, revision, image_ref=f"image:{revision}", image_digest="sha256:" + "a" * 64)
 
 
 def test_list_returns_envelope_shape() -> None:
@@ -75,38 +52,27 @@ def test_list_returns_envelope_shape() -> None:
 def test_reconcile_packs_repairs_missing_owner_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    conn = _conn_with_fetchall(
-        [
-            {
-                "task_id": "task_abc",
-                "revision": 2,
-                "status": "ready",
-                "tarball_object_key": "task_abc/rev/2/tarball.tar.gz",
-            }
-        ]
-    )
-    _use_conn(conn)
-    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.object_exists", lambda _key: False)
+    store = _seed("task_abc", revisions=2)
+    _make_ready(store, "task_abc", 1)
+    _make_ready(store, "task_abc", 2)
+    object_key = stored_revision("task_abc", 2)["tarball_object_key"]
+    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.object_exists", lambda key: key != object_key)
 
     response = client.post("/v1/tasks/reconcile-packs?repair=true")
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["owner_id"] == "dev"
-    assert body["checked"] == 1
-    assert body["missing"] == 1
-    assert body["repaired"] == 1
+    assert (body["owner_id"], body["checked"], body["missing"], body["repaired"]) == ("dev", 2, 1, 1)
     assert body["items"][0] == {
         "task_id": "task_abc",
         "revision": 2,
         "status": "ready",
-        "object_key": "task_abc/rev/2/tarball.tar.gz",
+        "object_key": object_key,
         "missing": True,
         "repaired": True,
     }
-    executed = _executed_sql(conn)
-    assert any("UPDATE task_revisions" in sql and "task_object_missing" not in sql for sql in executed)
-    assert any("current_revision = latest.revision" in sql for sql in executed)
+    assert stored_revision("task_abc", 2)["status"] == "failed"
+    assert stored_task("task_abc")["current_revision"] == 1
 
 
 # ---------- get -----------------------------------------------------------
@@ -146,44 +112,31 @@ def test_delete_returns_404_when_missing() -> None:
 
 
 def test_delete_returns_409_when_active_evaluation_references_task() -> None:
-    _use_conn(_conn_returning([{"id": "ev_active"}]))
+    store = _seed("task_in_use")
+    seed_evaluation({"id": "ev_active", "status": "running", "task_id": "task_in_use"})
 
     response = client.delete("/v1/tasks/task_in_use")
 
     assert response.status_code == 409
     assert response.json()["detail"]["error"]["code"] == "task_in_use"
+    assert store.get("task_in_use") is not None
 
 
 def test_delete_allows_task_when_no_active_evaluation_references_it() -> None:
-    _use_conn(_conn_returning([None, {"id": "task_done"}]))
+    store = _seed("task_done")
 
     response = client.delete("/v1/tasks/task_done")
 
     assert response.status_code == 200
     assert response.json() == {"id": "task_done", "deleted": True}
+    assert store.get("task_done") is None
+    assert client.delete("/v1/tasks/task_done").status_code == 404
 
 
 # ---------- finalize ------------------------------------------------------
 #
 # The build itself is exercised by the durable worker tests; here we assert the
-# handler's state machine and the queue metadata persisted on task_revisions.
-
-
-def _build_queue_params(conn: MagicMock) -> tuple:
-    cur = conn.cursor.return_value.__enter__.return_value
-    for call in cur.execute.call_args_list:
-        sql, params = call.args
-        if "build_backend = %s" in sql:
-            return params
-    raise AssertionError("build queue update was not executed")
-
-
-def _latest_revision_row(*, revision: int = 1, status: str = "uploading", object_key: str = "k") -> dict:
-    return {
-        "revision": revision,
-        "status": status,
-        "tarball_object_key": object_key,
-    }
+# handler's state machine and the queue metadata persisted on the revision.
 
 
 def _mock_task_pack_size(monkeypatch: pytest.MonkeyPatch, size_bytes: int | None) -> MagicMock:
@@ -193,35 +146,18 @@ def _mock_task_pack_size(monkeypatch: pytest.MonkeyPatch, size_bytes: int | None
     return deleted
 
 
-def _recorded_upload_size(conn: MagicMock) -> int:
-    cur = conn.cursor.return_value.__enter__.return_value
-    for call in cur.execute.call_args_list:
-        sql, params = call.args
-        if "tarball_size_bytes = %s" in sql:
-            return params[0]
-    raise AssertionError("upload size was not recorded")
-
-
-def _executed_sql(conn: MagicMock) -> list[str]:
-    cur = conn.cursor.return_value.__enter__.return_value
-    return [call.args[0] for call in cur.execute.call_args_list]
+def _revision(revision: int = 1, task_id: str = "task_x") -> dict:
+    return stored_revision(task_id, revision)
 
 
 def test_finalize_returns_404_when_missing() -> None:
-    _use_conn(_conn_returning([None]))  # task row absent
     response = client.post("/v1/tasks/task_missing/finalize")
     assert response.status_code == 404
     assert response.json()["detail"]["error"]["code"] == "not_found"
 
 
 def test_finalize_returns_409_when_not_uploading() -> None:
-    _use_conn(
-        _conn_returning(
-            [
-                _latest_revision_row(status="ready"),
-            ]
-        )
-    )
+    _make_ready(_seed(), "task_x", 1)
     response = client.post("/v1/tasks/task_x/finalize")
     assert response.status_code == 409
     assert response.json()["detail"]["error"]["code"] == "not_finalizable"
@@ -235,16 +171,7 @@ def test_finalize_prebuilt_image_marks_ready_without_buildkit(
     _mock_task_pack_size(monkeypatch, 12)
     scheduled = MagicMock()
     monkeypatch.setattr(build, "run_finalize_build", scheduled)
-    _use_conn(
-        _conn_returning(
-            [
-                _latest_revision_row(),
-                {"id": "task_x"},
-                {"revision": 1, "status": "uploading", "tarball_object_key": "k"},
-                {"previous_storage_bytes": 0},
-            ]
-        )
-    )
+    _seed()
 
     response = client.post(
         "/v1/tasks/task_x/finalize",
@@ -253,8 +180,8 @@ def test_finalize_prebuilt_image_marks_ready_without_buildkit(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "ready"
-    assert body["revision"] == 1
+    assert (body["status"], body["revision"]) == ("ready", 1)
+    assert _revision()["image_ref"] == "registry.example.com/bp:dev"
     scheduled.assert_not_called()
 
 
@@ -265,15 +192,7 @@ def test_finalize_prebuilt_image_queues_registry_resolution(
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
     _mock_task_pack_size(monkeypatch, 12)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(),
-            {"id": "task_x"},
-            {"revision": 1, "status": "uploading", "tarball_object_key": "k"},
-            {"previous_storage_bytes": 0},
-        ]
-    )
-    _use_conn(conn)
+    _seed()
 
     response = client.post(
         "/v1/tasks/task_x/finalize",
@@ -285,22 +204,16 @@ def test_finalize_prebuilt_image_queues_registry_resolution(
 
     assert response.status_code == 202
     assert response.json()["status"] == "building"
-    backend, payload, credentials, *_ = _build_queue_params(conn)
-    assert backend == "prebuilt"
-    assert payload.obj == {
+    revision = _revision()
+    assert (revision["status"], revision["build_backend"], revision["build_credentials"]) == (
+        "building",
+        "prebuilt",
+        {},
+    )
+    assert revision["build_payload"] == {
         "image_ref": "registry.example.com/team/task:signed",
         "expected_digest": "sha256:" + "a" * 64,
     }
-    assert credentials.obj == {}
-
-
-def _prebuilt_finalize_params(conn: MagicMock) -> tuple:
-    cur = conn.cursor.return_value.__enter__.return_value
-    for call in cur.execute.call_args_list:
-        sql, params = call.args
-        if "verifier_image_ref = %s" in sql:
-            return params
-    raise AssertionError("prebuilt finalize update was not executed")
 
 
 def test_finalize_prebuilt_records_verifier_image_without_validation(
@@ -309,15 +222,7 @@ def test_finalize_prebuilt_records_verifier_image_without_validation(
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "task_image_validation_mode", "disabled")
     _mock_task_pack_size(monkeypatch, 12)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(),
-            {"id": "task_x"},
-            {"revision": 1, "status": "uploading", "tarball_object_key": "k"},
-            {"previous_storage_bytes": 0},
-        ]
-    )
-    _use_conn(conn)
+    _seed()
 
     response = client.post(
         "/v1/tasks/task_x/finalize",
@@ -329,10 +234,10 @@ def test_finalize_prebuilt_records_verifier_image_without_validation(
     )
 
     assert response.status_code == 200, response.text
-    image_ref, _digest, verifier_ref, verifier_digest, *_ = _prebuilt_finalize_params(conn)
-    assert image_ref == "registry.example.com/bp:dev"
-    assert verifier_ref == "registry.example.com/bp-verifier:dev"
-    assert verifier_digest == "sha256:" + "b" * 64
+    revision = _revision()
+    assert revision["image_ref"] == "registry.example.com/bp:dev"
+    assert revision["verifier_image_ref"] == "registry.example.com/bp-verifier:dev"
+    assert revision["verifier_image_digest"] == "sha256:" + "b" * 64
 
 
 def test_finalize_rejects_verifier_image_without_digest_when_validation_disabled(
@@ -361,15 +266,7 @@ def test_finalize_prebuilt_queues_verifier_image_resolution(
     monkeypatch.setattr(settings, "task_image_validation_mode", "resolve")
     monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
     _mock_task_pack_size(monkeypatch, 12)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(),
-            {"id": "task_x"},
-            {"revision": 1, "status": "uploading", "tarball_object_key": "k"},
-            {"previous_storage_bytes": 0},
-        ]
-    )
-    _use_conn(conn)
+    _seed()
 
     response = client.post(
         "/v1/tasks/task_x/finalize",
@@ -382,8 +279,7 @@ def test_finalize_prebuilt_queues_verifier_image_resolution(
     )
 
     assert response.status_code == 202, response.text
-    _backend, payload, *_ = _build_queue_params(conn)
-    assert payload.obj == {
+    assert _revision()["build_payload"] == {
         "image_ref": "registry.example.com/team/task:signed",
         "expected_digest": "sha256:" + "a" * 64,
         "verifier_image_ref": "registry.example.com/team/task-verifier:signed",
@@ -451,15 +347,15 @@ def test_finalize_rejects_digest_without_image_ref() -> None:
 def test_finalize_rejects_revision_changed_after_pack_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    deleted = _mock_task_pack_size(monkeypatch, 12)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(object_key="rev-1-pack"),
-            {"id": "task_x"},
-            {"revision": 2, "status": "uploading", "tarball_object_key": "rev-2-pack"},
-        ]
-    )
-    _use_conn(conn)
+    store = _seed()
+
+    def size_then_revise(_key: str) -> int:
+        store.create_next_revision("task_x")
+        return 12
+
+    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.object_size", size_then_revise)
+    deleted = MagicMock()
+    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.delete_object", deleted)
 
     response = client.post("/v1/tasks/task_x/finalize")
 
@@ -468,41 +364,24 @@ def test_finalize_rejects_revision_changed_after_pack_validation(
     assert error["code"] == "not_finalizable"
     assert error["details"] == {"expected_revision": 1, "actual_revision": 2}
     deleted.assert_not_called()
-    with pytest.raises(AssertionError, match="build queue update"):
-        _build_queue_params(conn)
+    assert _revision(1)["status"] == _revision(2)["status"] == "uploading"
 
 
 def test_finalize_persists_supplied_tarball_hash(monkeypatch: pytest.MonkeyPatch) -> None:
     digest = "a" * 64
     _mock_task_pack_size(monkeypatch, 12)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(),
-            {"id": "task_x"},
-            {"revision": 1, "status": "uploading", "tarball_object_key": "key"},
-            {"previous_storage_bytes": 0},
-        ]
-    )
-    _use_conn(conn)
+    _seed()
 
     response = client.post("/v1/tasks/task_x/finalize", json={"tarball_sha256": digest})
 
     assert response.status_code == 202
-    _backend, _payload, _credentials, stored_hash, *_ = _build_queue_params(conn)
-    assert stored_hash == digest
+    revision = _revision()
+    assert (revision["status"], revision["tarball_sha256"], revision["tarball_size_bytes"]) == ("building", digest, 12)
 
 
 def test_finalize_can_pin_exact_reserved_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_task_pack_size(monkeypatch, 12)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(revision=1, object_key="rev-1-pack"),
-            {"id": "task_x"},
-            _latest_revision_row(revision=1, object_key="rev-1-pack"),
-            {"previous_storage_bytes": 0},
-        ]
-    )
-    _use_conn(conn)
+    _seed(revisions=2)
 
     response = client.post(
         "/v1/tasks/task_x/finalize",
@@ -510,13 +389,11 @@ def test_finalize_can_pin_exact_reserved_revision(monkeypatch: pytest.MonkeyPatc
     )
 
     assert response.status_code == 202
-    revision_queries = [sql for sql in _executed_sql(conn) if "FROM task_revisions" in sql]
-    assert revision_queries
-    assert all("AND revision = %s" in sql for sql in revision_queries)
+    assert (_revision(1)["status"], _revision(2)["status"]) == ("building", "uploading")
 
 
 def test_finalize_rejects_missing_task_pack_upload(monkeypatch: pytest.MonkeyPatch) -> None:
-    _use_conn(_conn_returning([_latest_revision_row(object_key="missing")]))
+    _seed()
 
     # On Files, a not-yet-uploaded pack simply has no size (object_size -> None); there is no
     # separate object-store error to raise.
@@ -536,7 +413,7 @@ def test_finalize_rejects_cloud_build_after_files_migration(monkeypatch: pytest.
     # With cloud build the only configured builder (no image-builder URL), finalize must refuse.
     monkeypatch.setattr(settings, "cloud_build_enabled", True)
     monkeypatch.setattr(settings, "image_builder_service_url", "")
-    _use_conn(_conn_returning([_latest_revision_row(object_key="k")]))
+    _seed()
 
     response = client.post("/v1/tasks/task_x/finalize")
 
@@ -549,22 +426,16 @@ def test_finalize_rejects_cloud_build_after_files_migration(monkeypatch: pytest.
 def test_finalize_rejects_oversized_task_pack(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "task_pack_max_size_bytes", 100)
     deleted = _mock_task_pack_size(monkeypatch, 101)
-    conn = _conn_returning([_latest_revision_row(object_key="too-big")])
-    _use_conn(conn)
+    _seed()
 
     response = client.post("/v1/tasks/task_x/finalize")
 
     assert response.status_code == 413
     error = response.json()["detail"]["error"]
     assert error["code"] == "task_pack_too_large"
-    assert error["details"] == {
-        "object_key": "too-big",
-        "limit_bytes": 100,
-        "uploaded_bytes": 101,
-    }
-    deleted.assert_called_once_with("too-big")
-    with pytest.raises(AssertionError, match="build queue update"):
-        _build_queue_params(conn)
+    assert error["details"] == {"object_key": "k", "limit_bytes": 100, "uploaded_bytes": 101}
+    deleted.assert_called_once_with("k")
+    assert _revision()["status"] == "uploading"
 
 
 def test_finalize_rejects_prebuilt_bypass_when_pack_oversized(
@@ -573,8 +444,7 @@ def test_finalize_rejects_prebuilt_bypass_when_pack_oversized(
     monkeypatch.setattr(settings, "task_image_allowed_registries", "registry.example.com")
     monkeypatch.setattr(settings, "task_pack_max_size_bytes", 100)
     _mock_task_pack_size(monkeypatch, 101)
-    conn = _conn_returning([_latest_revision_row(object_key="too-big")])
-    _use_conn(conn)
+    _seed()
 
     response = client.post(
         "/v1/tasks/task_x/finalize",
@@ -583,23 +453,19 @@ def test_finalize_rejects_prebuilt_bypass_when_pack_oversized(
 
     assert response.status_code == 413
     assert response.json()["detail"]["error"]["code"] == "task_pack_too_large"
-    with pytest.raises(AssertionError, match="build queue update"):
-        _build_queue_params(conn)
+    assert _revision()["status"] == "uploading"
 
 
 def test_finalize_rejects_tenant_storage_quota(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "task_pack_max_size_bytes", 100)
     monkeypatch.setattr(settings, "task_pack_tenant_storage_quota_bytes", 100)
-    deleted = _mock_task_pack_size(monkeypatch, 11)
-    conn = _conn_returning(
-        [
-            _latest_revision_row(object_key="quota-pack"),
-            {"id": "task_x"},
-            {"revision": 1, "status": "uploading", "tarball_object_key": "quota-pack"},
-            {"previous_storage_bytes": 90},
-        ]
+    store = _seed("task_old")
+    _mock_task_pack_size(monkeypatch, 90)
+    assert client.post("/v1/tasks/task_old/finalize").status_code == 202
+    store.create_with_initial_revision(
+        "task_x", name="x", slug="x", description=None, visibility="private", object_key="quota-pack", owner_id="dev"
     )
-    _use_conn(conn)
+    deleted = _mock_task_pack_size(monkeypatch, 11)
 
     response = client.post("/v1/tasks/task_x/finalize")
 
@@ -613,10 +479,7 @@ def test_finalize_rejects_tenant_storage_quota(monkeypatch: pytest.MonkeyPatch) 
         "uploaded_bytes": 11,
     }
     deleted.assert_called_once_with("quota-pack")
-    sql = _executed_sql(conn)
-    lock_index = next(i for i, statement in enumerate(sql) if "pg_advisory_xact_lock" in statement)
-    usage_index = next(i for i, statement in enumerate(sql) if "SUM(r2.tarball_size_bytes)" in statement)
-    assert lock_index < usage_index
+    assert _revision()["status"] == "uploading"
 
 
 # ---------- patch: request-body validation (no DB hit) --------------------

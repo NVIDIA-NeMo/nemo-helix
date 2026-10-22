@@ -111,7 +111,7 @@ _DEFAULTS: dict[str, str] = {
     "base_image_url": "nvcr.io/nvidia/base/ubuntu",
     "base_image_tag": "noble-20260217",
     "python_version": "3.13",
-    "uv_version": "0.9.14",
+    "uv_version": "0.13.4",
     # Default NAT version — used ONLY as a last-resort fallback.  Callers are
     # expected to pass ``--nat-version`` (or set ``NAT_VERSION``) explicitly
     # so that image tags, labels, and the ``nvidia-nat[most]`` constraint

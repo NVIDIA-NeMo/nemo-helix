@@ -537,3 +537,122 @@ def test_an_evaluator_that_failed_everywhere_still_appears_in_the_rollup(client:
     assert judge["count"] == 1
     assert judge["mean"] == pytest.approx(0.0)
     assert judge["failed_count"] == 1
+
+
+def _post_atif(client: TestClient, body: dict[str, Any]) -> Any:
+    return client.post(ATIF_INGEST, json=body)
+
+
+def _create_named_evaluation(client: TestClient, evaluation_id: str) -> None:
+    group_id = _ensure_group(client)
+    created = client.post(
+        EVALUATIONS,
+        json={
+            "name": evaluation_id,
+            "experiment_group_id": group_id,
+            "dataset_name": "rollup-dataset",
+            "dataset_version": "v1",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+
+def _body_with_context_in_extra(*, evaluation_id: str, test_case_id: str = "case-1") -> dict[str, Any]:
+    body = _atif_body(
+        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        evaluation_id=evaluation_id,
+        run_id="run-1",
+        test_case_id=test_case_id,
+        score=1.0,
+        cost_usd=0.01,
+        latency_ms=100,
+        offset_seconds=0,
+    )
+    body["extra"]["evaluation_context"] = body.pop("evaluation_context")
+    return body
+
+
+def test_extra_evaluation_context_hydrates_evaluation_rollups(client: TestClient) -> None:
+    evaluation_id = "extra-eval-context-exp"
+    _create_named_evaluation(client, evaluation_id)
+
+    response = _post_atif(client, _body_with_context_in_extra(evaluation_id=evaluation_id))
+    assert response.status_code == 201, response.text
+
+    fetched = client.get(f"{EVALUATIONS}/{evaluation_id}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["run_count"] == 1
+
+
+def test_top_level_evaluation_context_still_hydrates_rollups(client: TestClient) -> None:
+    evaluation_id = "top-level-eval-context-exp"
+    _create_named_evaluation(client, evaluation_id)
+    body = _atif_body(
+        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        evaluation_id=evaluation_id,
+        run_id="run-1",
+        test_case_id="case-1",
+        score=1.0,
+        cost_usd=0.01,
+        latency_ms=100,
+        offset_seconds=0,
+    )
+
+    response = _post_atif(client, body)
+    assert response.status_code == 201, response.text
+    assert client.get(f"{EVALUATIONS}/{evaluation_id}").json()["run_count"] == 1
+
+
+def test_matching_top_level_and_extra_evaluation_context_hydrates_rollups(client: TestClient) -> None:
+    evaluation_id = "matching-eval-context-exp"
+    _create_named_evaluation(client, evaluation_id)
+    body = _atif_body(
+        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        evaluation_id=evaluation_id,
+        run_id="run-1",
+        test_case_id="case-1",
+        score=1.0,
+        cost_usd=0.01,
+        latency_ms=100,
+        offset_seconds=0,
+    )
+    body["extra"]["evaluation_context"] = body["evaluation_context"]
+
+    response = _post_atif(client, body)
+    assert response.status_code == 201, response.text
+    assert client.get(f"{EVALUATIONS}/{evaluation_id}").json()["run_count"] == 1
+
+
+def test_conflicting_evaluation_context_locations_are_rejected(client: TestClient) -> None:
+    evaluation_id = "conflict-eval-context-exp"
+    _create_named_evaluation(client, evaluation_id)
+    body = _atif_body(
+        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        evaluation_id=evaluation_id,
+        run_id="run-1",
+        test_case_id="case-1",
+        score=1.0,
+        cost_usd=0.01,
+        latency_ms=100,
+        offset_seconds=0,
+    )
+    body["extra"]["evaluation_context"] = {"evaluation_name": "other-eval", "test_case_name": "case-1"}
+
+    response = _post_atif(client, body)
+    assert response.status_code == 422, response.text
+    assert "must match" in response.text
+
+
+def test_extra_evaluation_context_for_missing_evaluation_is_rejected(client: TestClient) -> None:
+    response = _post_atif(client, _body_with_context_in_extra(evaluation_id="missing-extra-eval"))
+
+    assert response.status_code == 400, response.text
+    assert "must be created before it can be logged" in response.json()["detail"]
+
+
+def test_non_object_extra_evaluation_context_is_rejected(client: TestClient) -> None:
+    body = _body_with_context_in_extra(evaluation_id="ignored-shape-eval")
+    body["extra"]["evaluation_context"] = "not-an-object"
+
+    response = _post_atif(client, body)
+    assert response.status_code == 422, response.text

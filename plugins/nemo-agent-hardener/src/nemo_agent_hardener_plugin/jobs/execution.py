@@ -309,9 +309,11 @@ def _run_service_driven(
     From that point on, any failure is classified and returned as a *failed* ``RunOutcome`` carrying the
     record name, so ``run()`` finalizes the record instead of leaving it orphaned as ``running``.
     """
-    if not ctx.job_id:
+    job_id = ctx.job_id
+    attempt_id = ctx.attempt_id
+    if not job_id or not attempt_id:
         raise RuntimeError(
-            "service-driven mode needs a submitted platform job (Studio drives the HITL via status_details)."
+            "service-driven mode needs a submitted platform job attempt (Studio drives the HITL via status_details)."
         )
     _reject_platform_auth_sources(manifest, env_file)
     env = _build_native_subprocess_env(plugin_config, model_env)
@@ -329,7 +331,7 @@ def _run_service_driven(
             manifest,
             "running",
             -1,
-            job_id=ctx.job_id,
+            job_id=job_id,
             manifest_id=manifest_id or "",
             source_run=source_run,
         ),
@@ -349,6 +351,8 @@ def _run_service_driven(
                 plugin_config.agent_hardener_bin,
                 ctx,
                 sdk,
+                job_id=job_id,
+                attempt_id=attempt_id,
                 manifest_id=manifest_id,
                 cached_suite=cached_suite,
                 stop_after_synth=stop_after_synth,
@@ -371,6 +375,8 @@ def _drive_service_run(
     ctx: JobContext,
     sdk: Any,
     *,
+    job_id: str,
+    attempt_id: str,
     manifest_id: str | None,
     cached_suite: list[dict[str, str]] | None,
     stop_after_synth: bool,
@@ -413,8 +419,12 @@ def _drive_service_run(
     # container. `agent-hardener run` self-cleans via its own teardown, so the `down` below is a redundant
     # no-op on the happy path but the safety net whenever `run` is never reached.
     try:
-        # ctx.job_id is guaranteed set by _run_service_driven's guard before we get here.
-        channel = StatusDetailsChannel(sdk, name=ctx.job_id or "", workspace=ctx.workspace)
+        channel = StatusDetailsChannel(
+            sdk,
+            name=job_id,
+            attempt_id=attempt_id,
+            workspace=ctx.workspace,
+        )
         with launch_synth_service(bin_path, env, log_path=ctx.storage.persistent / "serve.log") as client:
             csv_path = drive_synth_hitl(client, manifest, channel.publish, channel.await_response)
         reviewed = (

@@ -19,6 +19,7 @@ from nemo_helix_plugin.integrations import IntegrationsSpec, MlflowIntegration, 
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.common.entities.utils import get_random_id
+from nhx.customization_common.schemas.file_io import model_upload_lifecycle
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 from nhx.rl.app.constants import NHX_BROKER_PORT_ENVVAR, NHX_VLLM_PORT_ENVVAR
@@ -322,6 +323,23 @@ def test_multi_node_uses_distributed_executor_with_shared_storage(monkeypatch: p
     assert any(_env_value(env) == "/shared" for env in step["environment"])
 
 
+@pytest.mark.parametrize("num_nodes", [1, 2])
+def test_the_training_step_can_pause_within_the_configured_deadline(
+    num_nodes: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pause is rejected for a step without a deadline, so training declares one, on one node or several."""
+    from nhx.rl.config import config
+
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
+    job = _make_job_output(
+        DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=num_nodes, num_gpus_per_node=1))
+    )
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+
+    assert step.lifecycle is not None
+    assert step.lifecycle.pause_deadline_seconds == config.training_pause_deadline_seconds > 0
+
+
 def test_explicit_profile_overrides_default() -> None:
     job = _make_job_output()
     step = _build_training_step(job, [], trust_remote_code=False, profile="custom-gpu")
@@ -366,6 +384,7 @@ async def test_compiler_emits_four_steps(
     steps = _steps(spec)
     names = [s["name"] for s in steps]
     assert names == ["model-and-dataset-download", "dpo-training", "model-upload", "model-entity-creation"]
+    assert steps[2]["lifecycle"] == model_upload_lifecycle()
 
     # CPU task steps share the lighter customizer-tasks image; the GPU step uses the training image.
     assert "nhx-customizer-tasks" in _container(steps[0])["image"]

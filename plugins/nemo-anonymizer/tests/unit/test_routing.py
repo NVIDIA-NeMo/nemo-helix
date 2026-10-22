@@ -3,14 +3,14 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
+import httpx
 from anonymizer.config.anonymizer_config import AnonymizerConfig
 from anonymizer.config.replace_strategies import Redact
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest
 from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_anonymizer_plugin.service import AnonymizerService
+from nemo_helix_plugin.client.client import NemoClient
 
 
 def test_service_mounts_run_job_at_generated_collection_path() -> None:
@@ -28,29 +28,16 @@ def test_service_mounts_run_job_at_generated_collection_path() -> None:
 def test_sdk_run_uses_run_job_collection_path() -> None:
     calls: list[tuple[str, str]] = []
 
-    class Response:
-        def raise_for_status(self) -> None:
-            pass
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, str(request.url)))
+        return httpx.Response(200, json={"name": "anonymizer-run-1"})
 
-        def json(self) -> dict[str, str]:
-            return {"name": "anonymizer-run-1"}
-
-    class Client:
-        def post(self, url: str, **kwargs: object) -> Response:
-            calls.append(("POST", url))
-            return Response()
-
-        def get(self, url: str, **kwargs: object) -> Response:
-            calls.append(("GET", url))
-            return Response()
-
-    platform = SimpleNamespace(
+    platform = NemoClient(
         base_url="https://platform.test",
         workspace="default",
-        default_headers={},
-        _client=Client(),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    resource = AnonymizerResource(platform)  # type: ignore[arg-type]
+    resource = AnonymizerResource(platform)
     request = AnonymizerRequest(
         config=AnonymizerConfig(replace=Redact()),
         data=AnonymizerInputSpec(source="inputs#records.csv"),

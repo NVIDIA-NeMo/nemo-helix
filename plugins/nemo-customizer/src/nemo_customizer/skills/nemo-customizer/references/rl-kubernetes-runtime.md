@@ -5,15 +5,16 @@
 
 The `rl` (DPO **and GRPO**) backend runs **each job step as a Kubernetes pod** via the
 `kubernetes_job` execution backend. This is different from `automodel` / `unsloth`,
-which use the **docker** job backend. So the platform you submit against must be
-deployed/configured for Kubernetes job execution — the docker job backend cannot
-run rl, and `rl --job-json` fails fast (`require_distributed_runtime`) on a
-docker-runtime platform.
+which run on either the `docker` or the `kubernetes_job` backend, depending on how
+the platform is configured. rl has no docker fallback, so the platform you submit
+against must be deployed/configured for Kubernetes job execution — the docker job
+backend cannot run rl, and `rl --job-json` fails fast (`require_distributed_runtime`)
+on a docker-runtime platform.
 
 Deployment model is the same as automodel/unsloth: **run the platform locally**
 (`nemo services run` — never anything else). The only difference for rl is the
-**execution backend** the local platform dispatches jobs to: `kubernetes_job`
-(pointing at a Kubernetes GPU cluster via its kubeconfig) instead of `docker`.
+**execution backend** the local platform dispatches jobs to: it must be
+`kubernetes_job` (pointing at a Kubernetes GPU cluster via its kubeconfig), never `docker`.
 What matters is that the platform's jobs backend is `kubernetes_job` and the job
 pods can reach the platform's APIs.
 
@@ -90,7 +91,7 @@ index needs the operator to open it:
 
 | Setting | Env var | Notes |
 |---|---|---|
-| `rl.sandbox_allow_internet` | `NHX_RL_SANDBOX_ALLOW_INTERNET` | Default `false`. Required for every `native-v1` and every `adapter-wheels-v1` job |
+| `rl.sandbox_allow_internet` | `NHX_RL_SANDBOX_ALLOW_INTERNET` | Default `false`. Required for every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
 | `rl.sandbox_public_dns_allow` | `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra suffixes/FQDNs, consulted only when the above is true. NeMo-RL's built-in list covers `*.com` and `*.org`, so e.g. `hub.primeintellect.ai` must be named here |
 
 Cluster-private, node-local and metadata destinations stay denied either way. A
@@ -106,7 +107,9 @@ The sandbox must reach the training pod's vLLM port and the episode broker, and 
 | `networkPolicies.jobSteps.enabled` | `false` | Helm value. Set `true` to write `jobs.executor_defaults.kubernetes_job.step_network_policies_enabled` and the same flag on `volcano_job`. The jobs controller then creates and deletes an ingress NetworkPolicy for each step that declares `network`, which sandboxed GRPO does. |
 | `jobs.executor_defaults.{kubernetes_job,volcano_job}.step_network_policies_enabled` | `false` | The resolved flag. A `platformConfig` override turns the controller, its NetworkPolicy RBAC, and the ValidatingAdmissionPolicy on or off together. Enabling it needs a CNI that enforces NetworkPolicy (Cilium on the minikube Docker driver; the default CNI accepts the resources and does not enforce them) and Kubernetes 1.30+ for the admission policy, or 1.28+ with the ValidatingAdmissionPolicy beta API. |
 
-Leave it off and a Gym sandbox can open the training pod's Ray ports.
+Leave it off and GRPO still runs, but a Gym sandbox can open the training pod's Ray ports. Both
+`networkPolicies.enabled` and `networkPolicies.jobSteps.enabled` must be true. The operator setup is
+`docs/set-up/helm/sandboxed-grpo.mdx`.
 
 ### Rollout transport and sandbox sizing (operator-scoped)
 

@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
+import tarfile
 from typing import Literal
 from unittest.mock import Mock
 
@@ -12,12 +15,14 @@ import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity
-from nemo_evals.image_builds.planning import TaskArchive
-from nemo_evals.image_builds.runner import TaskImageBuildSpec, run_task_image_build
+from nemo_evals.image_builds.builder import builder_name, copy_builder_name
+from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
+from nemo_evals.image_builds.runner import TaskImageBuildSpec, read_task_archive, run_task_image_build
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
-from nemo_evals.revisions import get_revision
+from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
+from nemo_evals.revisions import apply_tag, get_revision, publish_revision
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -60,12 +65,23 @@ class _Jobs:
 class _Builder:
     """Builder whose images finish with ``outcomes[context_path]`` on the first read after submit."""
 
-    def __init__(self, outcomes: dict[str, Outcome], *, refuse: bool = False, job: str = "active") -> None:
+    def __init__(
+        self,
+        outcomes: dict[str, Outcome],
+        *,
+        refuse: bool = False,
+        job: str = "active",
+        published: dict[str, list[str]] | None = None,
+    ) -> None:
         self.outcomes = outcomes
         self.refuse = refuse
         self.job = job
+        #: The platforms each prebuilt image is published for, by fully qualified reference.
+        self.published = published or {}
         self.images: dict[str, str] = {}
         self.submits: list[FileSetSource | ImageSource] = []
+        #: The platform each submit named, by Builder name.
+        self.platforms: dict[str, str | None] = {}
 
     async def get_image(self, name: str) -> ContainerImage | None:
         context = self.images.get(name)
@@ -75,8 +91,15 @@ class _Builder:
         return _container_image(name, outcome, detail="kaniko exited 1" if outcome == "failed" else None)
 
     async def submit(
-        self, *, name: str, revision: int, source: FileSetSource | ImageSource, dockerfile: str | None
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: FileSetSource | ImageSource,
+        dockerfile: str | None,
+        platform: str | None,
     ) -> SubmitBuildResponse:
+        self.platforms[name] = platform
         if self.refuse:
             raise PermissionDeniedError(httpx.Response(403, json={"detail": "not allowed to build"}))
         what = source.image if isinstance(source, ImageSource) else source.context_path
@@ -88,6 +111,9 @@ class _Builder:
     async def job_status(self, job: str) -> str | None:
         return self.job
 
+    async def image_platforms(self, image: str) -> list[str]:
+        return self.published.get(image, ["linux/amd64", "linux/arm64"])
+
 
 async def _no_sleep(seconds: float) -> None:
     pass
@@ -97,28 +123,49 @@ async def _allow(workspace: str) -> None:
     pass
 
 
+def _serve_archive(monkeypatch, files: dict[str, bytes]) -> None:
+    """Serve a task archive holding ``files`` as the task's download, through the runner's own temporary file."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, content in files.items():
+            info = tarfile.TarInfo(f"sort-task/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+
+    async def download(files_client, ref, output, **kwargs) -> None:
+        output.write(buffer.getvalue())
+
+    monkeypatch.setattr("nemo_evals.image_builds.runner.download_verified_async", download)
+
+
 @pytest.fixture
-def archive(monkeypatch) -> list[str]:
-    files = ["environment/Dockerfile", "tests/Dockerfile"]
-
-    async def read(files_client, definition):
-        return TaskArchive(root="sort-task", files=frozenset(f"sort-task/{f}" for f in files), compose=None)
-
-    monkeypatch.setattr("nemo_evals.image_builds.runner.read_task_archive", read)
-    return files
+def archive(monkeypatch) -> None:
+    _serve_archive(
+        monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n", "tests/Dockerfile": b"FROM python:3.12\n"}
+    )
 
 
-async def _start(entity_store, store_task, *, config: dict, allowed: list[str] | None = None) -> TaskImageBuildSpec:
+async def _start(
+    entity_store, store_task, *, config: dict, allowed: list[str] | None = None, platform: str | None = None
+) -> TaskImageBuildSpec:
     digest = await store_task(config=config)
     service = ImageBuildService(entity_store, _Jobs(), _allow)
-    await service.request_build("default", "sort-task", digest, ImageBuildRequest(allowed_registries=allowed or []))
+    request = ImageBuildRequest(allowed_registries=allowed or [], platform=platform)
+    await service.request_build("default", "sort-task", digest, request)
     return TaskImageBuildSpec(workspace="default", task="sort-task", revision_digest=digest, attempt=1)
 
 
 async def _stored_build(entity_store, spec: TaskImageBuildSpec) -> TaskImageBuildEntity:
     head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    name = build_entity_name(spec.revision_digest, 1)
+    return await entity_store.get(TaskImageBuildEntity, name=name, workspace="default", parent=head.id)
+
+
+async def _stored_task_definition(entity_store, spec: TaskImageBuildSpec) -> HarborTaskDefinition:
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
     revision = await get_revision(entity_store, TaskRevisionEntity, head, spec.revision_digest)
-    return await entity_store.get(TaskImageBuildEntity, name="build.1", workspace="default", parent=revision.id)
+    assert isinstance(revision.spec, HarborTaskDefinition)
+    return revision.spec
 
 
 async def _run(entity_store, spec: TaskImageBuildSpec, builder: _Builder, **kwargs) -> TaskImageBuildEntity:
@@ -190,8 +237,8 @@ async def test_an_image_whose_builder_job_ended_without_it_fails(entity_store, s
     assert build.error.endswith("ended (error) without the image")
 
 
-async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store_task, archive) -> None:
-    archive.remove("tests/Dockerfile")
+async def test_an_unbuildable_task_fails_with_the_plan_error(entity_store, store_task, monkeypatch) -> None:
+    _serve_archive(monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n"})
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
 
     build = await _run(entity_store, spec, _Builder({}))
@@ -214,10 +261,10 @@ async def test_an_unexpected_error_fails_the_build_instead_of_leaving_it_running
 ) -> None:
     spec = await _start(entity_store, store_task, config={})
 
-    async def corrupt(files_client, definition):
+    async def corrupt(files_client, ref, output, **kwargs) -> None:
         raise ValueError("Downloaded object checksum mismatch")
 
-    monkeypatch.setattr("nemo_evals.image_builds.runner.read_task_archive", corrupt)
+    monkeypatch.setattr("nemo_evals.image_builds.runner.download_verified_async", corrupt)
 
     build = await _run(entity_store, spec, _Builder({}))
 
@@ -251,6 +298,57 @@ async def test_a_finished_build_is_left_alone(entity_store, store_task, archive)
     assert builder.submits == []
 
 
+class _RecordingJobs(_Jobs):
+    def __init__(self) -> None:
+        self.created: list[CreateHelixJobRequest] = []
+
+    async def create(self, request: CreateHelixJobRequest) -> None:
+        self.created.append(request)
+
+    async def get(self, name: str) -> BuildJob | None:
+        return next(
+            (BuildJob(status="active", custom_fields=job.custom_fields) for job in self.created if job.name == name),
+            None,
+        )
+
+
+async def _republish(entity_store, harbor_digest: str) -> None:
+    """Publish the task again with different contents, as Harbor hashes them."""
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    harbor_hash = head.spec.harbor_hash.model_copy(update={"digest": harbor_digest})
+    head.spec = head.spec.model_copy(update={"harbor_hash": harbor_hash})
+    await publish_revision(entity_store, entity_store, head, TaskRevisionEntity)
+
+
+async def test_revisions_with_the_same_contents_share_one_build(entity_store, store_task, archive) -> None:
+    """Publishing A, B, then A again makes revisions 1, 2 and 3; 1 and 3 hold the same contents, so the same images."""
+    digest = await store_task(config={})
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    await apply_tag(entity_store, entity_store, TaskRevisionEntity, head, "v1", digest)
+    await _republish(entity_store, "c" * 64)
+    await _republish(entity_store, "b" * 64)
+    jobs = _RecordingJobs()
+    service = ImageBuildService(entity_store, jobs, _allow)
+
+    first = await service.request_build("default", "sort-task", "v1", ImageBuildRequest())
+    again = await service.request_build("default", "sort-task", "latest", ImageBuildRequest())
+    assert first is not None and again == first
+    # The service creates the Job each time and relies on Jobs refusing a name it already holds.
+    assert len({job.name for job in jobs.created}) == 1
+    job = jobs.created[0]
+
+    build = await _run(
+        entity_store, TaskImageBuildSpec.model_validate(job.spec), _Builder({"sort-task/environment": "ready"})
+    )
+
+    assert build.status == "ready"
+    for fragment in ("v1", "latest", digest):
+        page = await service.list_builds("default", "sort-task", fragment)
+        assert page is not None
+        [listed] = page.data
+        assert listed.status == "ready"
+
+
 @pytest.mark.parametrize(("status", "job_status"), [("ready", "completed"), ("failed", "failed")])
 def test_job_fails_when_the_build_fails(monkeypatch, status: str, job_status: str) -> None:
     """The Job's exit status is what Jobs shows, so a failed build must not exit as success."""
@@ -268,3 +366,115 @@ def test_job_fails_when_the_build_fails(monkeypatch, status: str, job_status: st
     )
 
     assert result["status"] == job_status
+
+
+def test_a_job_left_by_a_build_kept_under_its_revision_is_never_adopted() -> None:
+    """Builds used to be kept under a revision; a Job one of them left must not stand in for a build kept by contents.
+
+    Adopted, the old Job would never write the new record, and the next request would fail it as abandoned.
+    """
+    digest = "a" * 64
+    spec = TaskImageBuildSpec(workspace="default", task="sort-task", revision_digest=digest, attempt=1)
+    old_name = f"task-image-build-{hashlib.sha256(f'default/sort-task#{digest}'.encode()).hexdigest()[:16]}-1"
+
+    assert build_job_name("default/sort-task", digest, 1) != old_name
+    assert not is_job_for({"task_image_build": f"default/sort-task#{digest}/1"}, spec)
+    assert is_job_for(task_image_build_job_request(spec, name="any").custom_fields, spec)
+
+
+@pytest.fixture
+def pinned_archive(monkeypatch) -> None:
+    """A task whose environment Dockerfile pins linux/amd64."""
+    _serve_archive(
+        monkeypatch,
+        {
+            "environment/Dockerfile": b"FROM --platform=linux/amd64 python:3.12\n",
+            "tests/Dockerfile": b"FROM python:3.12\n",
+        },
+    )
+
+
+async def test_the_requested_platform_builds_every_image(entity_store, store_task, archive) -> None:
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, platform="linux/arm64")
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "ready"
+    assert [image.platform for image in build.images] == ["linux/arm64", "linux/arm64"]
+    assert list(builder.platforms.values()) == ["linux/arm64", "linux/arm64"]
+
+
+async def test_without_a_platform_builder_builds_for_its_default(entity_store, store_task, archive) -> None:
+    """The names are the ones builds had before a build could name a platform, so those builds are found again."""
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+
+    await _run(entity_store, spec, builder)
+
+    source = (await _stored_task_definition(entity_store, spec)).source
+    assert builder.platforms == {
+        builder_name(
+            archive=source.fileset_ref,
+            archive_digest=source.files_hash,
+            context_path=f"sort-task/{part}",
+            dockerfile="Dockerfile",
+        ): None
+        for part in ("environment", "tests")
+    }
+
+
+async def test_a_dockerfile_pinned_platform_is_built_for(entity_store, store_task, pinned_archive) -> None:
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert [(image.role, image.platform) for image in build.images] == [("main", "linux/amd64"), ("verifier", None)]
+
+
+async def test_a_request_for_another_platform_than_the_task_pins_fails(
+    entity_store, store_task, pinned_archive
+) -> None:
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER, platform="linux/arm64")
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.status == "failed"
+    assert build.error is not None and build.error.startswith("platform_conflict: main is pinned to linux/amd64")
+    assert builder.submits == []
+
+
+async def test_a_prebuilt_image_published_for_one_platform_is_copied_for_it(entity_store, store_task, archive) -> None:
+    spec = await _start(entity_store, store_task, config={"environment": {"docker_image": "ubuntu:24.04"}})
+    reference = "docker.io/library/ubuntu:24.04"
+    builder = _Builder({reference: "ready"}, published={reference: ["linux/arm64", "unknown/unknown"]})
+
+    build = await _run(entity_store, spec, builder)
+
+    assert build.images[0].platform == "linux/arm64"
+    assert builder.platforms == {copy_builder_name(reference, "linux/arm64"): "linux/arm64"}
+
+
+async def test_a_prebuilt_image_published_for_several_platforms_follows_the_default(
+    entity_store, store_task, archive
+) -> None:
+    spec = await _start(entity_store, store_task, config={"environment": {"docker_image": "ubuntu:24.04"}})
+    reference = "docker.io/library/ubuntu:24.04"
+    builder = _Builder({reference: "ready"}, published={reference: ["linux/amd64", "linux/arm64"]})
+
+    await _run(entity_store, spec, builder)
+
+    assert builder.platforms == {copy_builder_name(reference): None}
+
+
+async def test_an_archive_read_for_its_listing_does_not_point_at_its_deleted_download(monkeypatch) -> None:
+    _serve_archive(monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n"})
+
+    archive = await read_task_archive(
+        Mock(), HarborArchiveSource(fileset_ref="default/f#a/task_archive", files_hash="a" * 64)
+    )
+
+    assert archive.has("environment/Dockerfile")
+    assert archive.text("environment/Dockerfile") is None

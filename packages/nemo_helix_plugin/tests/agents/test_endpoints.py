@@ -23,7 +23,6 @@ from nemo_helix_plugin.agents.types import (
     AgentJobResultListResponse,
     AgentJobStatusResponse,
     AgentSession,
-    CreateAgentRequest,
     CreateComputeSpecRequest,
     CreateDeploymentRequest,
     CreateEnvironmentRequest,
@@ -34,6 +33,7 @@ from nemo_helix_plugin.agents.types import (
     InvokeAgentRequest,
     JsonObject,
     LogLine,
+    RegisterAgentRequest,
 )
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated, PreparedRequest, Stream
 from pydantic import JsonValue
@@ -54,9 +54,9 @@ def _json_body(prepared: PreparedRequest) -> dict[str, JsonValue]:
     return body
 
 
-def test_create_agent() -> None:
-    body = CreateAgentRequest(name="calc", config={"workflow": {}})
-    prepared = endpoints.create_agent(workspace="default", body=body)
+def test_register_agent() -> None:
+    body = RegisterAgentRequest(name="calc", config={"workflow": {}})
+    prepared = endpoints.register_agent(workspace="default", body=body)
 
     assert isinstance(prepared, PreparedRequest)
     assert prepared.method == "POST"

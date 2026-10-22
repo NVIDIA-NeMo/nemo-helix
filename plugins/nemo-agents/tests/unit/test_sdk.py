@@ -51,7 +51,7 @@ def _async_client(handler: _Handler, *, workspace: str | None = "team-a") -> Asy
     )
 
 
-def test_create_resolves_default_model_placeholder_before_post() -> None:
+def test_register_resolves_default_model_placeholder_before_post() -> None:
     captured: dict[str, Any] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -63,7 +63,7 @@ def test_create_resolves_default_model_placeholder_before_post() -> None:
     config = {"llms": {"llm": {"_type": "openai", "model_name": "${NEMO_DEFAULT_MODEL}"}}}
 
     with patch("nemo_agents_plugin.utils.get_default_model", return_value="team-a/nemotron"):
-        result = client.create(name="calc", config=config)
+        result = client.register(name="calc", config=config)
 
     assert result == {"name": "calc"}
     assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
@@ -71,7 +71,7 @@ def test_create_resolves_default_model_placeholder_before_post() -> None:
     assert config["llms"]["llm"]["model_name"] == "${NEMO_DEFAULT_MODEL}"
 
 
-def test_create_rejects_unresolved_default_model_placeholder() -> None:
+def test_register_rejects_unresolved_default_model_placeholder() -> None:
     def handler(_req: httpx.Request) -> httpx.Response:
         raise AssertionError("should not POST unresolved agent config")
 
@@ -82,7 +82,16 @@ def test_create_rejects_unresolved_default_model_placeholder() -> None:
         patch("nemo_agents_plugin.utils.get_default_model", return_value=None),
         pytest.raises(ValueError, match="NEMO_DEFAULT_MODEL"),
     ):
-        client.create(name="calc", config=config)
+        client.register(name="calc", config=config)
+
+
+def test_register_rejects_conflicting_formats() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST conflicting config formats")
+
+    client = AgentsResource(_client(handler))
+    with pytest.raises(ValueError, match="config_format must match config.config_format"):
+        client.register(name="calc", config={"config_format": "nemo-agents-spec-v1"}, config_format="nat-workflow-v1")
 
 
 def test_agents_resource_uses_default_workspace_when_platform_workspace_is_unset() -> None:
@@ -90,11 +99,13 @@ def test_agents_resource_uses_default_workspace_when_platform_workspace_is_unset
 
     def handler(req: httpx.Request) -> httpx.Response:
         paths.append(req.url.path)
+        if req.url.path.endswith("/agents"):
+            assert _read_json(req) == {"name": "calc"}
         return httpx.Response(201, json={"name": "calc"})
 
     resource = AgentsResource(_client(handler, workspace=None))
 
-    resource.create(name="calc", config={})
+    resource.register(name="calc")
     resource.jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
 
     assert paths == [
@@ -117,14 +128,18 @@ async def test_async_agents_resource_uses_default_workspace_when_platform_worksp
     assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute"]
 
 
+# Typed as Any, as an untyped caller's value would be: the runtime check is what's under test.
+_NOT_A_CLIENT: Any = object()
+
+
 def test_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
     with pytest.raises(TypeError, match="AgentsResource requires .*NemoClient"):
-        AgentsResource(object())  # type: ignore[arg-type]
+        AgentsResource(_NOT_A_CLIENT)
 
 
 def test_async_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
     with pytest.raises(TypeError, match="AsyncAgentsResource requires .*AsyncNemoClient"):
-        AsyncAgentsResource(object())  # type: ignore[arg-type]
+        AsyncAgentsResource(_NOT_A_CLIENT)
 
 
 def test_deployments_create_uses_client_workspace_by_default() -> None:

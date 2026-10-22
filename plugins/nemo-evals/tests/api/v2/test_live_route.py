@@ -718,6 +718,7 @@ def test_stored_cloudpickle_metric_is_rejected_by_default(
 ) -> None:
     """A cloudpickle metric stored before the deployment disabled them is refused when referenced."""
     bundle = MetricInline.model_validate(detonating_cloudpickle_metric)
+    assert bundle.payload.digest is not None
     entity = MetricBundleEntity(
         name="stored-custom",
         workspace="default",

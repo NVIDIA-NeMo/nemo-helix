@@ -48,7 +48,7 @@ export const AnonymizerJobDetailRoute: FC | null = ANONYMIZER_ENABLED
         data: results,
         isLoading: isLoadingResults,
         error: resultsError,
-      } = useAnonymizerListRunJobResults(workspace, anonymizerJobName, {
+      } = useAnonymizerListRunJobResults(workspace, anonymizerJobName, undefined, {
         query: { enabled: isTerminal },
       });
 

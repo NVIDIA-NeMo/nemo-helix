@@ -175,7 +175,7 @@ def build_fabric_agent_eval_spec() -> dict[str, Any]:
 
 
 def build_registered_agent_eval_spec() -> dict[str, Any]:
-    """Return a one-task durable spec that evaluates an agent registered with ``nemo agents create``."""
+    """Return a one-task durable spec that evaluates an agent registered with ``nemo agents register``."""
     return {
         "tasks": [
             {
@@ -194,7 +194,7 @@ def build_registered_agent_eval_spec() -> dict[str, Any]:
             }
         ],
         # A registered agent as the source: resolved at submit into the config a deployment of this agent
-        # would run. The agent must already exist (`nemo agents create -n calculator-agent -c agent.yaml`).
+        # would run. The agent must already exist (`nemo agents register -n calculator-agent -c agent.yaml`).
         "target": {
             "kind": "fabric",
             "source": {"agent": "calculator-agent"},

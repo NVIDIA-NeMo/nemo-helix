@@ -22,13 +22,14 @@ from scaled_evals.api.settings import Settings, settings
 @pytest.fixture(autouse=True)
 def _user_db_override() -> Iterator[MagicMock]:
     db = MagicMock()
-    db.users.quota_usage.return_value = {
+    db.evaluations.quota_usage.return_value = {
         "evaluations_active": 0,
         "sandbox_slots_active": 0,
         "tasks_owned": 0,
     }
     app.dependency_overrides[get_db] = lambda: db
     v1.dependency_overrides[get_db] = lambda: db
+    ops._evaluation_metrics_cache = None
     yield db
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(auth.current_principal, None)
@@ -93,11 +94,13 @@ def test_healthz_responds_when_worker_thread_capacity_is_exhausted() -> None:
 
 
 def test_metrics(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        ops,
-        "_evaluation_status_counts",
-        lambda: dict.fromkeys(ops._KNOWN_EVALUATION_STATUSES, 0),
-    )
+    scans: list[int] = []
+
+    def status_counts() -> dict[str, int]:
+        scans.append(1)
+        return dict.fromkeys(ops._KNOWN_EVALUATION_STATUSES, 0)
+
+    monkeypatch.setattr(ops, "_evaluation_status_counts", status_counts)
     monkeypatch.setattr(ops, "_fleet_totals", lambda: {})
     monkeypatch.setattr(
         ops,
@@ -115,6 +118,9 @@ def test_metrics(monkeypatch) -> None:  # noqa: ANN001
     response = client.get("/v1/metrics")
     assert response.status_code == 200
     assert "scaled_evals_up 1" in response.text
+    # A second scrape inside the cache window does not rescan every evaluation.
+    assert client.get("/v1/metrics").status_code == 200
+    assert len(scans) == 1
 
 
 def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noqa: ANN001
@@ -123,12 +129,11 @@ def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noq
         "_evaluation_status_counts",
         lambda: dict.fromkeys(ops._KNOWN_EVALUATION_STATUSES, 0),
     )
-    ops._READINESS_SNAPSHOT.checks = {"postgres": "ok"}
+    ops._READINESS_SNAPSHOT.checks = {"object_store": "ok"}
 
     def fail_probe() -> None:
         raise AssertionError("metrics must not run live dependency probes")
 
-    monkeypatch.setattr(ops, "_postgres_probe", fail_probe)
     monkeypatch.setattr(ops.artifacts, "check_bucket", fail_probe)
     monkeypatch.setattr(ops.buildkit, "check_buildkit", fail_probe)
     monkeypatch.setattr(ops.registry, "check_registry", fail_probe)
@@ -136,16 +141,13 @@ def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noq
     response = client.get("/v1/metrics")
 
     assert response.status_code == 200
-    assert 'scaled_evals_dependency_ready{dependency="postgres"} 1' in response.text
+    assert 'scaled_evals_dependency_ready{dependency="object_store"} 1' in response.text
 
 
 def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
     monkeypatch.setattr(ops.artifacts, "check_bucket", lambda: None)
-    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
 
     def fail_probe() -> None:
         raise AssertionError("disabled dependencies should not be probed")
@@ -158,42 +160,18 @@ def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  #
     assert required_ok is True
     assert checks["buildkit"] == "skipped: disabled"
     assert checks["registry"] == "skipped: disabled"
+    assert checks.keys().isdisjoint({"postgres", "schema", "platform_jobs_controller"})
+    assert checks["entity_store"] == "ok"
 
+    # Every route keeps its state in Entity Store, so readiness fails without it.
+    def store_down(*_args: object, **_kwargs: object) -> None:
+        raise ConnectionError("entities unavailable")
 
-def test_dependency_checks_require_platform_jobs_controller(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "buildkit_enabled", False)
-    monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
-    monkeypatch.setattr(ops.artifacts, "check_bucket", lambda: None)
-
-    def stale_controller() -> None:
-        raise RuntimeError("no fresh Platform Jobs controller heartbeat")
-
-    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", stale_controller)
-
+    monkeypatch.setattr(ops.entity_store.entity_client(), "list", store_down)
     checks, required_ok = ops._run_dependency_checks()
-
-    assert required_ok is False
-    assert checks["platform_jobs_controller"] == "fail: RuntimeError"
-
-
-def test_dependency_checks_require_compatible_schema(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "buildkit_enabled", False)
-    monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops.artifacts, "check_bucket", lambda: None)
-    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
-
-    def drifted_schema() -> None:
-        raise RuntimeError('column "current_execution" does not exist')
-
-    monkeypatch.setattr(ops, "_schema_probe", drifted_schema)
-
-    checks, required_ok = ops._run_dependency_checks()
-
-    assert required_ok is False
-    assert checks["schema"] == "fail: RuntimeError"
+    assert required_ok is False and checks["entity_store"] == "fail: ConnectionError"
+    assert ops._dependency_is_required("entity_store")
+    assert client.get("/v1/readyz").status_code == 503
 
 
 def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
@@ -202,9 +180,7 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
         "_run_dependency_checks",
         lambda: (
             {
-                "postgres": "ok",
                 "object_store": "ok",
-                "platform_jobs_controller": "ok",
                 "buildkit": "skipped: disabled",
                 "registry": "ok",
                 "gym_dispatch": "skipped: disabled",
@@ -216,9 +192,7 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
     response = client.get("/v1/readyz")
     body = response.json()
     assert "checks" in body
-    assert "postgres" in body["checks"]
     assert "object_store" in body["checks"]
-    assert "platform_jobs_controller" in body["checks"]
     assert "buildkit" in body["checks"]
     assert "registry" in body["checks"]
     assert "gym_dispatch" in body["checks"]
@@ -233,7 +207,7 @@ def test_users_me_reports_owner_backed_capacity(
     _user_db_override: MagicMock,
 ) -> None:
     monkeypatch.setattr(settings, "control_plane_per_user_run_limit", 50)
-    _user_db_override.users.quota_usage.return_value = {
+    _user_db_override.evaluations.quota_usage.return_value = {
         "evaluations_active": 72,
         "sandbox_slots_active": 49,
         "tasks_owned": 11,
@@ -249,7 +223,7 @@ def test_users_me_reports_owner_backed_capacity(
         "sandbox_slots_max": 50,
         "sandbox_slots_active": 49,
     }
-    _user_db_override.users.quota_usage.assert_called_once_with("dev")
+    _user_db_override.evaluations.quota_usage.assert_called_once_with("dev")
 
 
 @pytest.mark.parametrize("query", ["days=0", "days=91"])

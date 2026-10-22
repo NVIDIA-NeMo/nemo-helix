@@ -20,9 +20,9 @@ pytest.importorskip("scaled_evals")
 
 from api_test_fixture import app, v1
 from scaled_evals.api import artifacts
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
-from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import BenchmarkArchiveError, build_benchmark_archive
 from scaled_evals.dispatch.worker import Dispatcher
@@ -245,7 +245,6 @@ def test_api_queues_and_reports_snapshot_without_private_storage_fields(api_db):
     assert data["members"][0]["current_execution"] == 1
     assert "claim_token" not in data
     assert data["download"] is None
-    api_db.commit.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -260,7 +259,6 @@ def test_api_archive_rejects_unavailable_run(api_db, exception, status):
     client = TestClient(app)
     response = client.post("/v1/benchmark-runs/bmr_1/archive", json={})
     assert response.status_code == status
-    api_db.commit.assert_not_called()
 
 
 def test_api_missing_and_ready_archive(api_db, monkeypatch):
@@ -296,14 +294,10 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
 
 
 def test_worker_records_build_and_failure(monkeypatch):
-    repo = MagicMock(spec=BenchmarkArchiveRepository)
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
+    repo = MagicMock(spec=BenchmarkArchiveStore)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveStore", lambda: repo)
 
-    @contextmanager
-    def connect():
-        yield MagicMock()
-
-    worker = Dispatcher(connect=connect)
+    worker = Dispatcher()
     builder = MagicMock(return_value={"object_key": "key", "size_bytes": 123})
     monkeypatch.setattr("scaled_evals.dispatch.worker.build_benchmark_archive", builder)
     worker.build_benchmark_archive(job())
@@ -493,9 +487,9 @@ def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(mo
     import threading
     from types import SimpleNamespace
 
-    repo = MagicMock(spec=BenchmarkArchiveRepository)
+    repo = MagicMock(spec=BenchmarkArchiveStore)
     repo.heartbeat.side_effect = [False] if ownership_lost else [RuntimeError("temporary DB failure"), True]
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveStore", lambda: repo)
     stop = MagicMock()
     stop.wait.side_effect = [False, False, True]
     lost = threading.Event()
@@ -512,16 +506,12 @@ def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(mo
         SimpleNamespace(Event=lambda: next(events), Thread=make_thread),
     )
 
-    @contextmanager
-    def connect():
-        yield MagicMock()
-
     def build_archive(job, *, check_claim):
         check_claim()
         return {"object_key": "archive", "size_bytes": 123}
 
     monkeypatch.setattr("scaled_evals.dispatch.worker.build_benchmark_archive", build_archive)
-    Dispatcher(connect=connect).build_benchmark_archive(job())
+    Dispatcher().build_benchmark_archive(job())
     if ownership_lost:
         repo.finish.assert_not_called()
         repo.fail.assert_called_once_with(job(), "benchmark archive worker lease lost")

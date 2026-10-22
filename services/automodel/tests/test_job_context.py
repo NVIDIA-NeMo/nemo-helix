@@ -76,6 +76,7 @@ class TestNHXJobContextFromEnv:
         assert ctx.files_url is None
         assert ctx.storage_path == Path(DEFAULT_JOB_STORAGE_PATH)
         assert ctx.config_path == Path(DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH)
+        assert ctx.is_configured is False
 
     def test_uses_env_vars_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _clear_path_env(monkeypatch)
@@ -93,11 +94,24 @@ class TestNHXJobContextFromEnv:
 
         assert ctx.workspace == "test-workspace"
         assert ctx.job_id == "job-123"
+        assert ctx.attempt_id == "attempt-5"
         assert ctx.normalized_task == "task-train-model"
         assert ctx.jobs_url == "http://jobs.example.com"
         assert ctx.files_url == "http://files.example.com"
         assert ctx.storage_path == Path("/custom/storage")
         assert ctx.config_path == Path("/custom/config.json")
+        assert ctx.is_configured is True
+
+    def test_missing_attempt_disables_platform_reporting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(NEMO_JOB_ID_ENVVAR, "job-123")
+        monkeypatch.delenv(NEMO_JOB_ATTEMPT_ID_ENVVAR, raising=False)
+        monkeypatch.setenv(NEMO_JOB_STEP_ENVVAR, "training")
+        monkeypatch.setenv(NEMO_JOB_TASK_ENVVAR, "train-model")
+
+        ctx = NHXJobContext.from_env()
+
+        assert ctx.attempt_id == DEFAULT_ATTEMPT_ID
+        assert ctx.is_configured is False
 
     def test_current_storage_env_wins_over_legacy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _clear_path_env(monkeypatch)

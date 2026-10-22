@@ -3,7 +3,7 @@
 #
 # The war-game victim on the Hermes harness, as a NeMo Helix agent.
 #
-#   nemo agents create --name ledger-hermes --agent-config agent.yaml
+#   nemo agents register --name ledger-hermes --agent-config agent.yaml
 #   nemo agent-hardener init --agent ledger-hermes --name ledger-hermes --harness hermes
 #
 # Hermes is the second of the two guardable harnesses (deepagents is the other). But it reaches

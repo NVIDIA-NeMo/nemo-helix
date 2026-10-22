@@ -34,6 +34,8 @@ from nhx.core.jobs.app.constants import (
     JOB_MANAGED_BY_LABEL,
     JOB_STEP_ID_LABEL,
     JOB_STEP_NAME_LABEL,
+    JOB_TYPE_LABEL,
+    JOB_TYPE_STORAGE_CLEANUP,
     JOB_USES_PERSISTENT_STORAGE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
@@ -53,7 +55,7 @@ from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_VOLUME_PATH,
     JobUpdate,
 )
-from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, SchedulingDeferred
+from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
@@ -85,8 +87,10 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_step_network_policy,
     delete_configmap,
     delete_step_network_policy,
+    first_task_image_id,
     last_task_exit_time,
     name_for_step,
+    reclaim_job_persistent_storage,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
@@ -616,6 +620,7 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     )
     batch_v1.create_namespaced_job.assert_called_once()
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert body.spec.ttl_seconds_after_finished == 300
     sc = body.spec.template.spec.security_context
     assert sc is not None
     assert sc.run_as_user == 2000
@@ -640,6 +645,102 @@ def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured
     )
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert body.spec.template.spec.security_context is None
+
+
+def _reclaim_storage(batch_v1: MagicMock) -> bool:
+    return reclaim_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+
+def _cleanup_job(name: str, finished: str | None = None) -> client.V1Job:
+    conditions = [client.V1JobCondition(type=finished, status="True")] if finished else None
+    return client.V1Job(metadata=client.V1ObjectMeta(name=name), status=client.V1JobStatus(conditions=conditions))
+
+
+def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
+    batch_v1.list_namespaced_job.return_value = SimpleNamespace(items=list(jobs))
+
+
+def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+
+    assert _reclaim_storage(batch_v1) is False
+
+    selector = batch_v1.list_namespaced_job.call_args.kwargs["label_selector"].split(",")
+    for label in (
+        f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
+        f"{JOB_WORKSPACE_ID_LABEL}=ws",
+        f"{JOB_ID_LABEL}=jid",
+        f"{JOB_STEP_NAME_LABEL}=retention",
+        f"{JOB_EXECUTION_BACKEND_LABEL}=kubernetes_job",
+        f"{JOB_EXECUTION_PROFILE_LABEL}=default",
+    ):
+        assert label in selector
+    body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
+    # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.
+    assert body.spec.ttl_seconds_after_finished is None
+
+
+def test_reclaim_waits_for_a_running_cleanup_job():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    batch_v1.create_namespaced_job.assert_not_called()
+    batch_v1.delete_namespaced_job.assert_not_called()
+
+
+def test_reclaim_reports_done_and_deletes_the_succeeded_cleanup_job():
+    """A later reclaim of a job with the same name must run its own cleanup, not read this result."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Complete"))
+
+    assert _reclaim_storage(batch_v1) is True
+
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "cleanup-1"
+
+
+def test_reclaim_waits_while_another_cleanup_job_runs():
+    """The running one could still delete storage that a new job with the same name wrote."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Complete"), _cleanup_job("cleanup-2"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    assert [c.kwargs["name"] for c in batch_v1.delete_namespaced_job.call_args_list] == ["cleanup-1"]
+
+
+def test_reclaim_raises_and_deletes_a_failed_cleanup_job():
+    """The next call starts a new cleanup Job."""
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("cleanup-1", "Failed"))
+
+    with pytest.raises(JobStorageError):
+        _reclaim_storage(batch_v1)
+
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "cleanup-1"
+
+
+def test_reclaim_raises_when_the_cleanup_job_cannot_be_created():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+    batch_v1.create_namespaced_job.side_effect = ApiException(status=403)
+
+    with pytest.raises(ApiException):
+        _reclaim_storage(batch_v1)
 
 
 def test_build_affinity_without_affinity():
@@ -873,6 +974,7 @@ def test_schedule_job_success(kubernetes_job, cpu_execution_provider, test_step_
     assert "ENV_VAR" in env_vars
     assert env_vars["ENV_VAR"] == "test_value"
     assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
+    assert env_vars["NEMO_JOB_UID"] == "platform-job-test-uid"
     assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
     assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
     assert "NHX_BASE_URL" in env_vars
@@ -1579,11 +1681,12 @@ def test_sync_pausing_deadline_deletes_job_and_returns_error(kubernetes_job, tes
     terminate.assert_called_once_with(job)
 
 
-def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None):
-    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
-    state = SimpleNamespace(terminated=terminated)
-    container = SimpleNamespace(name="nemo-job-task", state=state)
-    return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Succeeded"))
+def _terminated_task_pod(exit_code: int, finished_at: datetime.datetime | None = None) -> client.V1Pod:
+    pod = _task_pod("uid-1", exit_code)
+    task = pod.status.container_statuses[0]
+    task.state.terminated.finished_at = finished_at
+    task.image_id = "sha256:training"
+    return pod
 
 
 @pytest.mark.parametrize(
@@ -1611,6 +1714,71 @@ def test_sync_pausing_exit_uses_exit_code(kubernetes_job, test_step_pausing, exi
         terminate.assert_called_once_with(job)
     else:
         terminate.assert_not_called()
+
+
+def _task_pod(uid: str, exit_code: int | None) -> client.V1Pod:
+    """A pod whose task container is running (exit_code None) or exited with exit_code."""
+    state = (
+        client.V1ContainerState(running=client.V1ContainerStateRunning())
+        if exit_code is None
+        else client.V1ContainerState(terminated=client.V1ContainerStateTerminated(exit_code=exit_code))
+    )
+    phase = "Running" if exit_code is None else "Succeeded" if exit_code == 0 else "Failed"
+    container = client.V1ContainerStatus(
+        image="test-image", image_id="test-image-id", name="nemo-job-task", ready=False, restart_count=0, state=state
+    )
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase=phase, container_statuses=[container]),
+    )
+
+
+@pytest.mark.parametrize(
+    "exit_code,expected",
+    [(75, HelixJobStatus.PAUSED), (0, HelixJobStatus.COMPLETED), (1, HelixJobStatus.ERROR)],
+)
+def test_sync_pausing_exit_gives_the_task_the_pause_outcome(
+    kubernetes_job, mock_jobs_client, test_step_pausing, exit_code, expected
+):
+    """A pod that exits 75 ends Failed, but its task records the pause, not an error."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+    pod = _task_pod("uid-1", exit_code)
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job"),
+    ):
+        update = kubernetes_job.sync(step)
+
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
+    assert task_update["body"].status == update.status == expected
+    assert task_update["body"].error_details == (update.error_details or {})
+    assert bool(task_update["body"].error_stack) == (expected == HelixJobStatus.ERROR)
+
+
+def test_sync_pausing_deadline_fails_the_task(kubernetes_job, mock_jobs_client, test_step_pausing):
+    """The deadline fails a still-running pod's task as well as the step."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = _running_pause_job()
+    pod = _task_pod("uid-1", None)
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job"),
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
+    assert task_update["body"].status == HelixJobStatus.ERROR
+    assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
 
 
 @pytest.mark.parametrize(
@@ -2522,6 +2690,37 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
     assert call_args.kwargs["namespace"] == "test-namespace"
 
 
+def test_cleanup_active_by_the_step_ttl(kubernetes_job, test_step_active):
+    """A TTL in the step's lifecycle replaces the execution profile's."""
+    assert test_step_active.step_spec is not None
+    test_step_active.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=3600)
+    test_step_active.status = HelixJobStatus.ACTIVE
+    test_step_active.created_at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)
+    mock_job = MagicMock()
+    mock_job.metadata.name = "test-job-active"
+    mock_job.metadata.labels = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
+
+    with (
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"),
+    ):
+        result = kubernetes_job.sync(test_step_active)
+
+    assert result.status == HelixJobStatus.ERROR.value
+    assert result.error_details == {"message": "Job timed out after reaching max TTL of 3600 seconds"}
+
+
+def test_schedule_sets_the_pod_deadline_from_the_step_ttl(kubernetes_job, cpu_execution_provider, test_step_pending):
+    assert test_step_pending.step_spec is not None
+    test_step_pending.step_spec.lifecycle = StepLifecycle(ttl_seconds_active=259200)
+
+    kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+    job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert job_body.spec.template.spec.active_deadline_seconds == 259200
+
+
 # =============================================================================
 # Auth Context Tests
 # =============================================================================
@@ -2903,7 +3102,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
     kubernetes_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     # Mock check_step_is_terminal: step1 terminal (True), step2 not terminal (False)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         return step_name == "step1"
 
     kubernetes_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)
@@ -2983,12 +3182,12 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
         # Verify check_step_is_terminal was called for step 1 (and step 2, but we skip step 2)
         assert kubernetes_job.check_step_is_terminal.call_count >= 1
         kubernetes_job.check_step_is_terminal.assert_any_call(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup eligibility was checked for step 1
         kubernetes_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup was NOT called
@@ -3179,7 +3378,7 @@ def test_cancel_reports_teardown_completion_to_jobs_service(kubernetes_job):
     update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
     assert update.status == HelixJobStatus.CANCELLED
-    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+    kubernetes_job._jobs.update_attempt_step_task.assert_not_called()
 
 
 def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job):
@@ -3191,7 +3390,7 @@ def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job
 
     kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
 
-    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+    kubernetes_job._jobs.update_attempt_step_task.assert_not_called()
 
 
 def test_cancel_missing_job_revokes_delegations(kubernetes_job, test_step_cancelling):
@@ -3716,3 +3915,11 @@ def test_delete_step_network_policy_raises_other_errors():
 
     with pytest.raises(ApiException):
         delete_step_network_policy(networking_v1, "test-namespace", "step")
+
+
+def test_image_digest_comes_from_the_task_container():
+    sidecar = SimpleNamespace(name="istio-proxy", image_id="sha256:proxy")
+    task = SimpleNamespace(name="nemo-job-task", image_id="sha256:training")
+    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task]))
+
+    assert first_task_image_id([pod]) == "sha256:training"

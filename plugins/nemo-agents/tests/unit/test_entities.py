@@ -8,7 +8,7 @@ model behaviour — no network, no entity store required.
 
 Entity classes: ``Agent``, ``AgentDeployment``, ``AgentSession``
                                                → ``nemo_agents_plugin.entities``
-Request schemas: ``CreateAgentRequest``, ``CreateDeploymentRequest``
+Request schemas: ``RegisterAgentRequest``, ``CreateDeploymentRequest``
                                                → ``nemo_agents_plugin.schema``
 """
 
@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import pytest
 from nemo_agents_plugin.entities import (
     NAT_WORKFLOW_CONFIG_FORMAT,
+    NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     AgentComputeSpec,
     AgentDeployment,
@@ -37,11 +38,11 @@ from nemo_agents_plugin.entities import (
     ethos_local_path,
 )
 from nemo_agents_plugin.schema import (
-    CreateAgentRequest,
     CreateComputeSpecRequest,
     CreateDeploymentRequest,
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
+    RegisterAgentRequest,
 )
 from nemo_helix_plugin.auth import AuthContext
 from pydantic import ValidationError
@@ -321,24 +322,26 @@ class TestAgentSessionEntity:
 
 
 # ---------------------------------------------------------------------------
-# API schema: CreateAgentRequest
+# API schema: RegisterAgentRequest
 # ---------------------------------------------------------------------------
 
 
-class TestCreateAgentRequest:
+class TestRegisterAgentRequest:
     def test_required_fields(self) -> None:
-        req = CreateAgentRequest(name="calc", config={"llms": {}})
+        req = RegisterAgentRequest(name="calc", config={"llms": {}})
         assert req.name == "calc"
         assert req.config == {"llms": {}}
         assert req.description == ""
         assert req.config_format == NAT_WORKFLOW_CONFIG_FORMAT
 
-    def test_missing_config_raises(self) -> None:
-        with pytest.raises(ValidationError):
-            CreateAgentRequest.model_validate({"name": "calc"})
+    def test_name_only_defaults_to_empty_fabric_config(self) -> None:
+        req = RegisterAgentRequest(name="calc")
+        assert req.config == {}
+        assert req.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT
+        assert req.model_dump(exclude_unset=True) == {"name": "calc"}
 
     def test_custom_format(self) -> None:
-        req = CreateAgentRequest(name="x", config={}, config_format="custom-v2")
+        req = RegisterAgentRequest(name="x", config={}, config_format="custom-v2")
         assert req.config_format == "custom-v2"
 
 

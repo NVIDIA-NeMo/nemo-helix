@@ -23,6 +23,7 @@ from typing import Any, ClassVar
 
 import yaml
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
+from nemo_helix_plugin.agents.validation import require_registered_agent_config
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
@@ -101,10 +102,12 @@ class OptimizeJob(NemoJob):
         async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> OptimizeSpec:
-        del entity_client, async_sdk
+        del entity_client
         payload = input_spec.model_dump(mode="json")
         payload["workspace"] = workspace
-        return OptimizeSpec.model_validate(payload, context={"is_local": is_local})
+        spec = OptimizeSpec.model_validate(payload, context={"is_local": is_local})
+        await require_registered_agent_config(spec.agent, workspace=workspace, async_sdk=async_sdk)
+        return spec
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)

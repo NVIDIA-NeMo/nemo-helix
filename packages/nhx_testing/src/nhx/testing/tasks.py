@@ -43,9 +43,8 @@ from typing import Any, AsyncGenerator
 
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.auth import NHX_PRINCIPAL_ENVVAR, Principal
-from nhx.common.service import Service
 from nhx.testing.access_log import AccessLog
-from nhx.testing.client import ClientContext, create_test_client
+from nhx.testing.client import ClientContext, ServiceFactory, create_test_client
 
 
 @dataclass
@@ -156,7 +155,7 @@ class TaskContext:
 @asynccontextmanager
 async def task_harness(
     module: ModuleType,
-    *services: type[Service],
+    *services: ServiceFactory,
     config: dict[str, Any] | None = None,
     env: dict[str, str] | None = None,
     auth_enabled: bool = False,

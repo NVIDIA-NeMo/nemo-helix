@@ -32,6 +32,7 @@ from nhx.core.jobs.controllers.backends.base import (
     get_logs_endpoint_from_fileset,
     get_workload_identity_token_audience,
     resolve_task_image,
+    step_ttl_seconds_active,
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.test import MockKubernetesCPUJobBackend
@@ -605,6 +606,9 @@ def _patched_jobs_client(backend):
     task list on its ``.data`` attribute.
     """
     mock_jobs = MagicMock()
+    mock_jobs.get_attempt_step = mock_jobs.get_job_step
+    mock_jobs.list_attempt_step_tasks = mock_jobs.list_job_step_tasks
+    mock_jobs.update_attempt_step_status = mock_jobs.update_job_step_status
     original = backend._jobs
     backend._jobs = mock_jobs
     try:
@@ -615,6 +619,22 @@ def _patched_jobs_client(backend):
 
 def _set_tasks(mock_jobs: MagicMock, tasks: list) -> None:
     mock_jobs.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=tasks))
+
+
+@pytest.mark.parametrize(
+    ("lifecycle", "expected"),
+    [
+        (StepLifecycle(ttl_seconds_active=259200), 259200),
+        (StepLifecycle(), 86400),
+        (None, 86400),
+    ],
+)
+def test_step_ttl_seconds_active_falls_back_to_the_profile(lifecycle: StepLifecycle | None, expected: int) -> None:
+    step = _make_step()
+    assert step.step_spec is not None
+    step.step_spec = step.step_spec.model_copy(update={"lifecycle": lifecycle})
+
+    assert step_ttl_seconds_active(step, 86400) == expected
 
 
 class TestCheckTaskStaleness:

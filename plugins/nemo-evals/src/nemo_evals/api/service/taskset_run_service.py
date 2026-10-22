@@ -62,6 +62,7 @@ from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.schema import Page
 
 DEVELOPMENT_CALLER = "user:development"
@@ -193,7 +194,7 @@ class TasksetRunService:
             authorize: Caller-scoped source read authorizer, independent of service privileges.
             config: Operator configuration including run budgets and ``runs.harbor``.
             clock: Aware acceptance clock, invoked after resolution.
-            platform: Platform configuration naming the OpenSandbox server.
+            platform: Platform configuration naming the OpenSandbox server and the default dispatcher image.
             preparer: Checks every task, then prepares each one's images, before acceptance.
             task_jobs: Jobs operations for fan-out; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
@@ -360,7 +361,7 @@ class TasksetRunService:
                 spec=spec,
                 max_concurrent_task_jobs=req.execution.max_concurrent_task_jobs,
                 sandbox_policy=policy,
-                dispatcher_image=harbor.dispatcher_image,
+                dispatcher_image=harbor.dispatcher_image or self._default_dispatcher_image(),
                 dispatcher_profile=dispatcher_profile,
                 task_environments=prepared,
                 intake=intake,
@@ -389,6 +390,10 @@ class TasksetRunService:
         warnings += await self._start_task_jobs(result.run)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=warnings)
         return SubmitOutcome(status, created=result.created)
+
+    def _default_dispatcher_image(self) -> str:
+        """The platform's nhx-tasks image: the dispatcher a run gets when ``runs.harbor`` doesn't pin one."""
+        return get_qualified_image("nhx-tasks", tag=self._platform.image_tag, registry=self._platform.image_registry)
 
     async def _check_execution(
         self, req: TasksetRunInput

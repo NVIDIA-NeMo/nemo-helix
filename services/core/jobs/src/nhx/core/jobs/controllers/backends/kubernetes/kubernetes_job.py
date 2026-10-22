@@ -11,6 +11,7 @@ from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import get_workload_delegation_audience
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.constants import (
+    JOB_ATTEMPT_ID_LABEL,
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -23,7 +24,7 @@ from nhx.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nhx.core.jobs.app.lifecycle import describe_paused_exit, pause_deadline_exceeded
+from nhx.core.jobs.app.lifecycle import describe_paused_exit, image_digest_updates, pause_deadline_exceeded
 from nhx.core.jobs.app.providers import (
     ComputeResources,
     ContainerSpec,
@@ -37,6 +38,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     require_staleness_timeout_seconds,
     staleness_error_message,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
@@ -53,6 +55,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_step_network_policy,
     delete_configmap,
     delete_step_network_policy,
+    first_task_image_id,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     last_task_exit_time,
@@ -60,7 +63,9 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
+    reclaim_job_persistent_storage,
     update_all_tasks,
+    update_tasks_with_pause_outcome,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
@@ -116,7 +121,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
             namespace=self.namespace,
-            ttl_seconds_active=lambda: self._execution_profile_config.ttl_seconds_active,
+            ttl_seconds_active=lambda step: step_ttl_seconds_active(
+                step, self._execution_profile_config.ttl_seconds_active
+            ),
             workload_audience=get_workload_delegation_audience,
             register_workload_delegation=self._workload_delegation_store.register,
             revoke_workload_delegation=self._workload_delegation_store.revoke,
@@ -327,7 +334,10 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if step.status == HelixJobStatus.ACTIVE:
             if k8s_job is not None and (
                 result := self.enforce_sync_ttl(
-                    step, self._execution_profile_config.ttl_seconds_active, k8s_job, before_active=False
+                    step,
+                    step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
+                    k8s_job,
+                    before_active=False,
                 )
             ):
                 return result
@@ -407,6 +417,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if status == HelixJobStatus.ERROR:
             error_message = _status_details_message(status_details, "Job encountered an error")
         status_details["events"] = self.get_kube_job_events(job)
+        status_details.update(image_digest_updates(step.status_details, _task_image_id(self._core_v1, job, step)))
         task_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         teardown_lifecycle_statuses = {
             HelixJobStatus.PAUSING,
@@ -546,20 +557,27 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
 
         pods = _pods_for_job(self._core_v1, job, step)
+        digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
         running, exit_code = classify_task_containers(pods)
         if not running and exit_code is None:
             exit_code = _job_object_pause_exit_code(job)
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
-            return _pause_exit_update(self, job, exit_code)
+            return _pause_exit_update(self, step, job, pods, exit_code, digest_details)
         if pause_deadline_exceeded(step):
-            self.terminate_job(job)
             message = "Pause deadline exceeded"
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.ERROR, {"message": message}
+            )
+            self.terminate_job(job)
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
                 status_details={"message": message},
                 error_details={"message": message},
             )
-        return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
+        return JobUpdate(
+            status=HelixJobStatus.PAUSING,
+            status_details={"message": "Job is being paused", **digest_details},
+        )
 
     def sync_suspend_job(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
@@ -636,6 +654,24 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             return
         delete_step_network_policy(self._networking_v1, self.namespace, name)
 
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        storage = self._execution_profile_config.storage
+        if storage is None:
+            return True
+        return reclaim_job_persistent_storage(
+            namespace=self.namespace,
+            batch_v1=self._batch_v1,
+            pvc_name=storage.pvc_name,
+            workspace=workspace,
+            job_id=job,
+            permissions_image=storage.volume_permissions_image,
+            execution_backend=self.BACKEND_NAME,
+            execution_profile=self._profile_name,
+            job_metadata=self._execution_profile_config.job_metadata,
+            pod_metadata=self._execution_profile_config.pod_metadata,
+            pod_security_context=self._execution_profile_config.pod_security_context,
+        )
+
     def cleanup_steps(self):
         jobs = self.get_kubernetes_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
         for job in jobs:
@@ -646,6 +682,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             ):
                 # Extract job_id and step_name from labels
                 job_id = job.metadata.labels.get(JOB_ID_LABEL)
+                attempt_id = job.metadata.labels.get(JOB_ATTEMPT_ID_LABEL)
                 step_name = job.metadata.labels.get(JOB_STEP_NAME_LABEL)
                 workspace_id = job.metadata.labels.get(JOB_WORKSPACE_ID_LABEL)
                 job_type = job.metadata.labels.get(JOB_TYPE_LABEL)
@@ -669,7 +706,12 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
 
                 # Verify the step is terminal before cleaning up, or that the job entity is gone (e.g. workspace deleted).
                 # check_step_is_terminal returns True when terminal or when step entity is not found (404).
-                if not self.check_step_is_terminal(job=job_id, step_name=step_name, workspace=workspace_id):
+                if not self.check_step_is_terminal(
+                    job=job_id,
+                    step_name=step_name,
+                    workspace=workspace_id,
+                    attempt_id=attempt_id,
+                ):
                     logger.debug(
                         "Skipping cleanup for kubernetes job as step is not in terminal state",
                         extra={
@@ -683,7 +725,10 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 uses_persistent_storage = job.metadata.labels.get(JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
                 if uses_persistent_storage and self._execution_profile_config.storage:
                     if self.check_job_persistent_storage_cleanup_allowed(
-                        job=job_id, step_name=step_name, workspace=workspace_id
+                        job=job_id,
+                        step_name=step_name,
+                        workspace=workspace_id,
+                        attempt_id=attempt_id,
                     ):
                         logger.info(
                             "Cleaning up persistent storage for successful job",
@@ -926,6 +971,10 @@ def _pods_for_job(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithC
     return list_pods_by_labels(core_v1, namespace, common_labels_for_step(step))
 
 
+def _task_image_id(core_v1: client.CoreV1Api, job: V1Job, step: HelixJobStepWithContext) -> str | None:
+    return first_task_image_id(_pods_for_job(core_v1, job, step))
+
+
 def _positive_count(value: object) -> bool:
     return isinstance(value, int) and value > 0
 
@@ -942,12 +991,22 @@ def _job_object_pause_exit_code(job: V1Job) -> int | None:
     return None
 
 
-def _pause_exit_update(backend: KubernetesJobBackend, job: V1Job, exit_code: int) -> JobUpdate:
+def _pause_exit_update(
+    backend: KubernetesJobBackend,
+    step: HelixJobStepWithContext,
+    job: V1Job,
+    pods: list,
+    exit_code: int,
+    digest_details: dict,
+) -> JobUpdate:
     status, message, error_details = describe_paused_exit(exit_code)
+    update_tasks_with_pause_outcome(
+        backend._nemo_client, backend._core_v1, backend.namespace, step, pods, status, error_details
+    )
     if status == HelixJobStatus.PAUSED:
         backend.terminate_job(job)
     return JobUpdate(
         status=status,
-        status_details={"message": message},
+        status_details={"message": message, **digest_details},
         error_details=error_details or None,
     )

@@ -44,6 +44,12 @@ navigation:
         contents:
           - page: Register Agents
             path: ../../agents/register-agents.mdx
+          - page: Fabric 0.5 Upgrade and Adapter Support
+            slug: fabric-upgrade
+            path: ../../agents/fabric-upgrade.mdx
+          - page: Run Mini-SWE-Agent
+            slug: mini-swe-agent
+            path: ../../agents/mini-swe-agent.mdx
           - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
             contents:
@@ -183,6 +189,9 @@ navigation:
               - page: Cancel a Job
                 path: ../../customizer/manage-customization-jobs/cancel-job.mdx
                 slug: cancel-job
+              - page: Pause, Resume, and Rerun a Job
+                path: ../../customizer/manage-customization-jobs/pause-resume-rerun.mdx
+                slug: pause-resume-rerun
               - page: Training Configuration
                 path: ../../customizer/manage-customization-jobs/hyperparameters.mdx
                 slug: training-configuration
@@ -452,6 +461,9 @@ navigation:
                   - page: OpenSandbox
                     slug: open-sandbox
                     path: ../../set-up/helm/opensandbox.mdx
+                  - page: Secure Sandboxed GRPO
+                    slug: sandboxed-grpo
+                    path: ../../set-up/helm/sandboxed-grpo.mdx
                   - page: OpenShell
                     slug: openshell
                     path: ../../set-up/helm/openshell.mdx
@@ -550,6 +562,9 @@ navigation:
           - section: Release Notes
             path: ../../about/release-notes/index.mdx
             contents:
+              - page: v0.9.0
+                slug: release-0-9-0
+                path: ../../about/release-notes/release-0-9-0.mdx
               - page: v0.8.0
                 slug: release-0-8-0
                 path: ../../about/release-notes/release-0-8-0.mdx

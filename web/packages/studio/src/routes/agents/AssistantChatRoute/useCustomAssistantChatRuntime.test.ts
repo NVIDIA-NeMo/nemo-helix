@@ -7,6 +7,8 @@ import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import {
   STUDIO_MESSAGE_SUMMARY_END,
   STUDIO_MESSAGE_SUMMARY_START,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';

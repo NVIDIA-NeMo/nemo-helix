@@ -3,12 +3,12 @@
 
 from typing import Annotated
 
-import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_scaled_evals_plugin.authz import admin_only
 
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.schemas.agent_bundles import (
     AgentBundle,
     AgentBundleCreate,
@@ -41,12 +41,8 @@ def create_agent_bundle(body: AgentBundleCreate, db: Db, current: Principal) -> 
             owner_id=current.owner_id,
             **body.model_dump(),
         )
-    except psycopg.errors.UniqueViolation as exc:
-        raise _http_error(
-            409,
-            "agent_bundle_exists",
-            f"a live bundle named {body.bundle_name!r} already exists for this owner",
-        ) from exc
+    except Conflict as exc:
+        raise _http_error(409, exc.code, exc.message) from exc
     return AgentBundle(**row)
 
 
@@ -93,12 +89,15 @@ def set_agent_bundle_qualification(
     db: Db,
     current: Principal,
 ) -> AgentBundle:
-    row = db.agent_bundles.set_qualification(
-        bundle_id,
-        status=body.status,
-        evidence=body.evidence,
-        qualified_by=current.owner_id,
-    )
+    try:
+        row = db.agent_bundles.set_qualification(
+            bundle_id,
+            status=body.status,
+            evidence=body.evidence,
+            qualified_by=current.owner_id,
+        )
+    except Conflict as exc:
+        raise _http_error(409, exc.code, exc.message) from exc
     if row is None:
         raise _http_error(404, "not_found", "agent bundle not found")
     return AgentBundle(**row)
@@ -107,7 +106,10 @@ def set_agent_bundle_qualification(
 @router.post("/{bundle_id}/promote", response_model=AgentBundle)
 @admin_only
 def promote_agent_bundle(bundle_id: str, db: Db, current: Principal) -> AgentBundle:
-    row = db.agent_bundles.promote(bundle_id, qualified_by=current.owner_id)
+    try:
+        row = db.agent_bundles.promote(bundle_id, qualified_by=current.owner_id)
+    except Conflict as exc:
+        raise _http_error(409, exc.code, exc.message) from exc
     if row is None:
         existing = db.agent_bundles.get_accessible(bundle_id, owner_id=current.owner_id, include_all=True)
         if existing is None:
@@ -122,11 +124,10 @@ def promote_agent_bundle(bundle_id: str, db: Db, current: Principal) -> AgentBun
 
 @router.delete("/{bundle_id}", response_model=DeleteResponse)
 def delete_agent_bundle(bundle_id: str, db: Db, current: Principal, admin: IsAdmin) -> DeleteResponse:
-    deleted = db.agent_bundles.soft_delete(
-        bundle_id,
-        owner_id=current.owner_id,
-        include_all=admin,
-    )
+    try:
+        deleted = db.agent_bundles.delete(bundle_id, owner_id=current.owner_id, include_all=admin)
+    except Conflict as exc:
+        raise _http_error(409, exc.code, exc.message) from exc
     if not deleted:
         raise _http_error(404, "not_found", "agent bundle not found")
     return DeleteResponse(id=bundle_id)

@@ -30,6 +30,7 @@ from nemo_evals.revisions import RevisionNotFoundError
 from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, PermissionDeniedError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,6 +48,7 @@ PreparationErrorCode = Literal[
     "registry_not_allowed",
     "main_dockerfile_missing",
     "dockerfile_missing",
+    "unsupported_compose_build_option",
     # Task shape (M3 story 1)
     "invalid_task_config",
     "shared_verifier_unsupported",
@@ -251,10 +253,12 @@ async def _current_build(builds: ImageBuildService, workspace: str, name: str, r
     attempt, recreates a lost Job, or replaces a build whose Job ended without a result. ``request_build``
     checks build permission first, so a caller without it still learns that someone else's build is running.
     """
-    page = await builds.list_builds(workspace, name, revision, page_size=1)
-    if page is None:
+    # A run takes images for the deployment's default platform, as ``request_build`` below asks for: another
+    # platform's build, ready or failed, is no answer.
+    try:
+        newest = await builds.newest_build(workspace, name, revision)
+    except NemoEntityNotFoundError:
         return None
-    newest = page.data[0] if page.data else None
     if newest is not None and newest.status in ("ready", "failed"):
         return newest
     try:

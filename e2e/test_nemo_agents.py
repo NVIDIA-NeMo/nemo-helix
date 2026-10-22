@@ -237,7 +237,7 @@ def test_agent_create_list_get_delete_lifecycle(client: NemoClient, workspace: s
     name = _unique_name("agent")
     config = _agent_config(name)
 
-    created = agents_resource(client).create(
+    created = agents_resource(client).register(
         workspace=workspace,
         name=name,
         description="E2E agent lifecycle test",
@@ -267,11 +267,11 @@ def test_agent_create_list_get_delete_lifecycle(client: NemoClient, workspace: s
 
 def test_agent_duplicate_create_returns_conflict(client: NemoClient, workspace: str) -> None:
     name = _unique_name("duplicate")
-    agents_resource(client).create(workspace=workspace, name=name, config=_agent_config(name))
+    agents_resource(client).register(workspace=workspace, name=name, config=_agent_config(name))
 
     try:
         with pytest.raises((httpx.HTTPStatusError, NemoHTTPError)) as exc_info:
-            agents_resource(client).create(workspace=workspace, name=name, config=_agent_config(f"{name}-again"))
+            agents_resource(client).register(workspace=workspace, name=name, config=_agent_config(f"{name}-again"))
         _assert_http_status(exc_info, 409)
     finally:
         _delete_agent_if_exists(client, workspace=workspace, name=name)
@@ -295,9 +295,9 @@ def test_agent_list_pagination_sorting_and_filtering(client: NemoClient, workspa
 
     try:
         for name in agent_names:
-            agents_resource(client).create(workspace=workspace, name=name, config=_agent_config(name))
+            agents_resource(client).register(workspace=workspace, name=name, config=_agent_config(name))
 
-        agents_resource(client).create(
+        agents_resource(client).register(
             workspace=workspace,
             name=alternate_name,
             config=_platform_agent_config(alternate_name),
@@ -335,7 +335,7 @@ def test_agents_are_isolated_by_workspace(client: NemoClient, workspace: str) ->
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=other_workspace)).data()
 
     try:
-        agents_resource(client).create(
+        agents_resource(client).register(
             workspace=workspace,
             name=agent_name,
             description="Primary workspace agent",
@@ -349,7 +349,7 @@ def test_agents_are_isolated_by_workspace(client: NemoClient, workspace: str) ->
         other_list = agents_resource(client).list(workspace=other_workspace)
         assert agent_name not in {agent["name"] for agent in _page_data(other_list)}
 
-        other_agent = agents_resource(client).create(
+        other_agent = agents_resource(client).register(
             workspace=other_workspace,
             name=agent_name,
             description="Secondary workspace agent",
@@ -376,7 +376,7 @@ def test_agents_are_isolated_by_workspace(client: NemoClient, workspace: str) ->
 def test_agents_sdk_resource_methods_are_available(client: NemoClient, workspace: str) -> None:
     """Verify the agents SDK resource exposes the expected subprocess-safe methods."""
     agents = agents_resource(client)
-    for method_name in ("create", "list", "get", "delete"):
+    for method_name in ("register", "list", "get", "delete"):
         method = getattr(agents, method_name, None)
         assert isinstance(method, Callable), f"agents_resource(client).{method_name} should be callable"
 
@@ -409,7 +409,7 @@ def test_agent_deployment_missing_agent_returns_not_found(client: NemoClient, wo
 def test_agent_deployment_create_list_get_delete_lifecycle(client: NemoClient, workspace: str) -> None:
     agent_name = _unique_name("deployment-agent")
     deployment_name = _unique_name("deployment")
-    agents_resource(client).create(workspace=workspace, name=agent_name, config=_agent_config(agent_name))
+    agents_resource(client).register(workspace=workspace, name=agent_name, config=_agent_config(agent_name))
 
     try:
         created = agents_resource(client).deployments.create(
@@ -446,7 +446,7 @@ def test_agent_deployment_create_list_get_delete_lifecycle(client: NemoClient, w
 def test_agent_delete_is_blocked_while_deployment_is_active(client: NemoClient, workspace: str) -> None:
     agent_name = _unique_name("blocked-delete-agent")
     deployment_name = _unique_name("blocked-delete-deployment")
-    agents_resource(client).create(workspace=workspace, name=agent_name, config=_agent_config(agent_name))
+    agents_resource(client).register(workspace=workspace, name=agent_name, config=_agent_config(agent_name))
 
     try:
         deployment = agents_resource(client).deployments.create(
@@ -495,7 +495,7 @@ def test_agent_deployment_reaches_running(client: NemoClient, workspace: str) ->
         },
         served_models={model_name: model_name},
     )
-    agents_resource(client).create(
+    agents_resource(client).register(
         workspace=workspace,
         name=agent_name,
         config=_mock_backed_agent_config(f"{workspace}/{model_name}"),

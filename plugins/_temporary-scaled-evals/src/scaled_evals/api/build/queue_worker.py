@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Durable database-leased task image build worker."""
+"""Durable lease-holding task image build worker."""
 
 from __future__ import annotations
 
@@ -11,37 +11,22 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass, field
-
-import psycopg
-from psycopg.rows import dict_row
 
 from scaled_evals.api.build.buildkit import build_revision_image
 from scaled_evals.api.build.cloud_build import build_revision_image as build_cloud_revision_image
 from scaled_evals.api.build.image_builder_service import resolve_uploaded_revision_image
 from scaled_evals.api.build.task_image_identity import resolve_task_image
-from scaled_evals.api.repositories.build_repository import TaskBuildJob, TaskBuildRepository
+from scaled_evals.api.task_store import TaskBuildJob, TaskStore
 from scaled_evals.api.settings import settings
 
 LOG = logging.getLogger(__name__)
-ConnFactory = Callable[[], AbstractContextManager[psycopg.Connection]]
-
-
-@contextmanager
-def _default_connect() -> Iterator[psycopg.Connection]:
-    conn = psycopg.connect(settings.resolved_database_url(), row_factory=dict_row)
-    conn.autocommit = True
-    try:
-        yield conn
-    finally:
-        conn.close()
 
 
 @dataclass
 class TaskBuildWorker:
-    connect: ConnFactory = _default_connect
+    store: Callable[[], TaskStore] = TaskStore
     sleep: Callable[[float], None] = time.sleep
     claim_timeout: float = 90.0
     heartbeat_interval: float = 15.0
@@ -69,8 +54,7 @@ class TaskBuildWorker:
                 job.revision,
                 job.attempt,
             )
-            with self.connect() as conn:
-                TaskBuildRepository(conn).retry_or_fail(
+            self.store().retry_or_fail(
                     job.task_id,
                     job.revision,
                     worker_id=self.worker_id,
@@ -81,8 +65,7 @@ class TaskBuildWorker:
                 )
             return False
         else:
-            with self.connect() as conn:
-                completed = TaskBuildRepository(conn).complete(
+            completed = self.store().complete(
                     job.task_id,
                     job.revision,
                     worker_id=self.worker_id,
@@ -108,8 +91,7 @@ class TaskBuildWorker:
     def _heartbeat_forever(self, job: TaskBuildJob, stop: threading.Event) -> None:
         while not stop.wait(self.heartbeat_interval):
             try:
-                with self.connect() as conn:
-                    alive = TaskBuildRepository(conn).heartbeat(
+                alive = self.store().heartbeat(
                         job.task_id,
                         job.revision,
                         worker_id=self.worker_id,

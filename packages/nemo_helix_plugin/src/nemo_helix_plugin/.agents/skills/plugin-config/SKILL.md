@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-config
-description: Creates plugin configuration using NemoConfig with environment variables and YAML file support. Use when adding plugin configuration fields, reading config values at runtime, setting up test config overrides, or understanding the env var naming formula. Trigger keywords: config, configuration, NemoConfig, env var, environment variable, plugin_name, NHX_CONFIG, YAML config, config override, test config.
+description: 'Creates plugin configuration using NemoConfig with environment variables and YAML file support. Use when adding plugin configuration fields, reading config values at runtime, setting up test config overrides, or understanding the env var naming formula. Trigger keywords: config, configuration, NemoConfig, env var, environment variable, plugin_name, NHX_CONFIG, YAML config, config override, test config.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Plugin Configuration (NemoConfig)

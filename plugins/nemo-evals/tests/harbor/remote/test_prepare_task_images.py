@@ -10,7 +10,7 @@ import httpx
 import pytest
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
-from nemo_evals.entities import TaskEntity, TaskRevisionEntity
+from nemo_evals.entities import TaskEntity
 from nemo_evals.harbor.remote import preparation
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparationUnavailableError,
@@ -19,13 +19,19 @@ from nemo_evals.harbor.remote.preparation import (
     TaskPreparation,
     prepare_task_images,
 )
-from nemo_evals.image_builds.models import BuildImage, BuildImageSource, TaskImageBuildEntity, build_job_name
+from nemo_evals.image_builds.models import (
+    BuildImage,
+    BuildImageSource,
+    ImageBuildRequest,
+    TaskImageBuildEntity,
+    build_entity_name,
+    build_job_name,
+)
 from nemo_evals.image_builds.planning import TaskArchive
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
-from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -118,9 +124,8 @@ async def prepare(resolved: ResolvedTask, clients, policy, recorded: TaskPrepara
 async def settle(entity_store, digest: str, attempt: int, status: str, *, images=(), error=None) -> None:
     """Record the outcome the task-builder Job would write on build ``attempt``."""
     head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-    revision = await get_revision(entity_store, TaskRevisionEntity, head, digest)
     build = await entity_store.get(
-        TaskImageBuildEntity, name=f"build.{attempt}", workspace="default", parent=revision.id
+        TaskImageBuildEntity, name=build_entity_name(digest, attempt), workspace="default", parent=head.id
     )
     build.status, build.images, build.error = status, list(images), error
     await entity_store.update(build)
@@ -176,6 +181,45 @@ async def test_a_failed_build_fails_the_task_without_a_new_attempt(
     code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
     assert code == "build_failed" and detail.endswith("Dockerfile step 3 failed")
     assert len(jobs.created) == 1  # a broken task doesn't start attempt after attempt
+
+
+async def test_a_failed_build_for_another_platform_does_not_hide_the_ready_default_one(
+    clients, store_task, sandbox_policy, entity_store
+):
+    """Runs use the deployment's default platform, so another platform's newer build is no answer."""
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    images = [image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
+    await settle(entity_store, digest, 1, "ready", images=images)
+    await clients.image_builds("default").request_build(
+        "default", "sort-task", digest, ImageBuildRequest(platform="linux/arm64")
+    )
+    await settle(entity_store, digest, 2, "failed", error="no arm64 base image")
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert result.environment.agent.image_ref == digest_ref("d")
+
+
+async def test_a_default_build_older_than_a_page_of_other_platforms_builds_is_found(
+    clients, store_task, sandbox_policy, entity_store, monkeypatch
+):
+    """A page holds 2 builds here: the default build is on the second page, behind other platforms' newer builds."""
+    monkeypatch.setattr("nemo_evals.image_builds.service._LOOKUP_PAGE_SIZE", 2)
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    images = [image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
+    await settle(entity_store, digest, 1, "ready", images=images)
+    service = clients.image_builds("default")
+    for attempt, platform in enumerate(("linux/arm64", "linux/amd64", "linux/riscv64"), start=2):
+        await service.request_build("default", "sort-task", digest, ImageBuildRequest(platform=platform))
+        await settle(entity_store, digest, attempt, "failed", error="no base image for the platform")
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert result.environment.agent.image_ref == digest_ref("d")
 
 
 async def test_a_running_build_is_reported_and_left_alone(clients, store_task, sandbox_policy, jobs):

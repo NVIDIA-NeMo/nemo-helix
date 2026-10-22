@@ -802,6 +802,31 @@ describe('NewAgentModal deploy after create', () => {
     );
   });
 
+  it('holds the modal busy until the deployment request settles', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    let release: (() => void) | undefined;
+    server.use(
+      http.post(DEPLOYMENTS_URL, async () => {
+        await new Promise<void>((resolve) => (release = resolve));
+        return HttpResponse.json({ agent: 'calc', name: 'calc-dep', workspace }, { status: 201 });
+      })
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    const register = within(dialog).getByRole('button', { name: 'Register' });
+    await user.click(register);
+
+    await waitFor(() => expect(release).toBeDefined());
+    expect(register).toBeDisabled();
+    expect(screen.queryByText('Agent detail page')).not.toBeInTheDocument();
+
+    release?.();
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+  });
+
   it('creates without deploying when the box is cleared', async () => {
     const user = userEvent.setup();
     const { created, deployments } = mockHelix();
@@ -914,7 +939,7 @@ describe('NewAgentModal deploy after create', () => {
     await waitFor(() => expect(register).toBeEnabled());
   });
 
-  it('creates without deploying when the runtimes cannot be read', async () => {
+  it('holds Register when the runtimes cannot be read until deploying is unchecked', async () => {
     const user = userEvent.setup();
     server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({}, { status: 403 })));
     const { created, deployments } = mockHelix();
@@ -922,16 +947,50 @@ describe('NewAgentModal deploy after create', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
     await pickAgent(dialog);
-    await waitFor(() =>
-      expect(
-        within(dialog).queryByRole('checkbox', { name: 'Deploy after creating' })
-      ).not.toBeInTheDocument()
-    );
+    expect(
+      await within(dialog).findByText(/Could not load the available runtimes/)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Deploy after creating' }));
+    expect(within(dialog).queryByText(/Could not load the available runtimes/)).toBeNull();
     await submit(dialog, user);
 
     expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
     expect(created).toHaveLength(1);
     expect(deployments).toEqual([]);
+  });
+
+  it('deploys once a retry reads the runtimes', async () => {
+    const user = userEvent.setup();
+    let failModes = true;
+    server.use(
+      http.get(DEPLOYMENT_MODES_URL, () =>
+        failModes
+          ? HttpResponse.json({}, { status: 403 })
+          : HttpResponse.json({
+              data: [{ mode: 'subprocess', enabled: true, requires_image: false }],
+            })
+      )
+    );
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    const register = within(dialog).getByRole('button', { name: 'Register' });
+    await user.click(await within(dialog).findByRole('button', { name: 'Retry' }));
+    expect(register).toBeDisabled();
+
+    failModes = false;
+    await user.click(await within(dialog).findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(register).toBeEnabled());
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    await waitFor(() => expect(deployments).toHaveLength(1));
   });
 
   it('deploys straight away with a runtime that has a default image', async () => {

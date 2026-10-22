@@ -1,6 +1,8 @@
 ---
 name: create-release-notes
 description: Draft or audit NeMo Helix release notes by comparing a release ref with a candidate ref, reconciling forward-merged release-line changes, checking published documentation coverage, and recording verified CLI or Studio entry points. Use when asked to create, update, compare, review, or check release notes for a NeMo Helix release. Not for publishing artifacts or running the release workflow.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->

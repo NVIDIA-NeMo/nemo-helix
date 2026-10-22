@@ -5,6 +5,7 @@
 
 import logging
 import threading
+import time
 from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,8 @@ from nhx.customization_common.tasks.file_io_progress_reporter import ProgressRep
 from nhx.customization_common.tasks.file_io_utils import list_local_files as _list_local_files
 
 logger = logging.getLogger(__name__)
+
+UPLOAD_PROGRESS_INTERVAL_SECONDS = 60.0
 
 
 def get_percentage(current: int, total: int) -> int:
@@ -282,9 +285,41 @@ class FileUploadProgressCallback(BaseProgressCallback):
 
 
 class SingleFileUploadCallback(BaseSingleFileCallback):
-    """Per-file upload callback. Notifies parent on completion."""
+    """Per-file upload callback. Reports bytes in flight periodically and notifies parent on completion.
+
+    A single file can take hours to upload, and the step's staleness check reads a silent task as stalled.
+    """
 
     parent: FileUploadProgressCallback
+
+    def __init__(self, parent: FileUploadProgressCallback, source_path: str, dest_path: str, **kwargs: Any):
+        super().__init__(parent=parent, source_path=source_path, dest_path=dest_path, **kwargs)
+        self._started_at = time.monotonic()
+        self._last_reported_at = self._started_at
+
+    def relative_update(self, inc: int = 1) -> None:
+        super().relative_update(inc)
+        now = time.monotonic()
+        if self._completed or now - self._last_reported_at < UPLOAD_PROGRESS_INTERVAL_SECONDS:
+            return
+        self._last_reported_at = now
+
+        parent = self.parent
+        current_file = self._get_file_display_path()
+        with parent._lock:
+            files_count = parent.stats.files_uploaded
+            uploaded_bytes = parent.stats.total_bytes + self.value
+
+        size = self.size or 0
+        rate = self.value / (now - self._started_at)
+        logger.info(
+            f"Uploading {current_file}: {self.value}/{size} bytes "
+            f"({get_percentage(self.value, size)}%) at {rate / 2**20:.1f} MiB/s"
+        )
+        parent.progress_reporter.update_progress(
+            status=HelixJobStatus.ACTIVE,
+            status_details=self._build_status_details(files_count, uploaded_bytes, current_file),
+        )
 
     def _get_phase(self) -> str:
         return TaskPhase.UPLOADING
@@ -309,6 +344,8 @@ class SingleFileUploadCallback(BaseSingleFileCallback):
             "uploaded_files": files_count,
             "uploaded_bytes": total_bytes,
             "current_file": current_file,
+            "current_file_uploaded_bytes": self.value,
+            "current_file_size": self.size,
             "progress_pct": get_percentage(files_count, self.parent.total_files),
         }
 

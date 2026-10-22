@@ -88,6 +88,7 @@ class StudioService(Service[StudioConfig]):
     """
 
     dependencies: ClassVar[list[str]] = ["entities", "auth"]
+    permission_namespace: ClassVar[str | None] = None
 
     def __init__(self):
         """Initialize the studio service."""

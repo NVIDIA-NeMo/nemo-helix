@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote, urlencode, urlparse
 
 import httpx
@@ -1770,6 +1770,16 @@ def _render_session_event(event_type: str, payload: Any) -> str | None:
     return None
 
 
+class _ConversationStore(Protocol):
+    """The entity-store calls ``_stream_assistant`` makes to persist the conversation."""
+
+    async def get(
+        self, entity_type: type[AssistantConversation], name: str, *, workspace: str | None = None
+    ) -> AssistantConversation: ...
+
+    async def update(self, entity: AssistantConversation) -> AssistantConversation: ...
+
+
 async def _stream_assistant(
     session_id: str,
     message: str,
@@ -1777,7 +1787,7 @@ async def _stream_assistant(
     headers: Mapping[str, str],
     studio_system_prompt: str,
     conversation: AssistantConversation,
-    entity_store: EntityClient,
+    entity_store: _ConversationStore,
 ) -> AsyncIterator[str]:
     """Invoke the deployed NeMo Assistant while preserving Studio's blocking UI event protocol."""
     if session_id in _session_streams:

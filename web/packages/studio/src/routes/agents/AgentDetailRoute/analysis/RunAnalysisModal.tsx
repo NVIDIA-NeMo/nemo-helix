@@ -4,8 +4,8 @@
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
-import { useInsightsGetStatusesAnalysisRunStatus } from '@nemo/sdk/generated/insights/insights-analysis-run-statuses';
-import type { AnalysisConfig } from '@nemo/sdk/generated/insights/schema';
+import { useCompassGetStatusesAnalysisRunStatus } from '@nemo/sdk/generated/compass/compass-analysis-run-statuses';
+import type { AnalysisConfig } from '@nemo/sdk/generated/compass/schema';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
@@ -53,7 +53,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
     data: runStatus,
     isFetchedAfterMount,
     isError,
-  } = useInsightsGetStatusesAnalysisRunStatus(workspace, agent, {
+  } = useCompassGetStatusesAnalysisRunStatus(workspace, agent, {
     query: { retry: false, staleTime: 0 },
   });
   const periodicCursor =
@@ -121,7 +121,7 @@ export const RunAnalysisModal: FC<RunAnalysisModalProps> = ({
         <Stack gap="1">
           <Text kind="title/sm">Run insight analysis</Text>
           <Text kind="body/regular/sm" className="text-secondary">
-            Choose which of <strong>{agent}</strong>&apos;s traces the analyst reads for this run.
+            Choose which of <strong>{agent}</strong>&apos;s traces Compass reads for this run.
           </Text>
         </Stack>
       }

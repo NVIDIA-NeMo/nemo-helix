@@ -95,6 +95,9 @@ ResponseResult = Union[dict[str, Any], AsyncIterator[dict[str, Any]]]
 
 - ``dict[str, Any]`` — Non-streaming response parsed from the backend.
 - ``AsyncIterator[dict[str, Any]]`` — Streaming response (sequence of chunk dicts).
+  For Anthropic Messages and OpenAI Responses requests, IGW writes each chunk's
+  ``type`` as its SSE ``event:`` name, so chunks a middleware synthesizes for those
+  APIs must carry ``type``.
 """
 
 TypedRequest: TypeAlias = Mapping[str, Any]

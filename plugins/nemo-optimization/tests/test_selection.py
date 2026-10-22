@@ -7,6 +7,7 @@ import optuna
 import pytest
 from nemo_optimization.backends.optuna.selection import pick_trial
 from optuna.study import StudyDirection
+from optuna.trial import FrozenTrial
 
 
 def _study_with_trials(values_list: list[tuple[float, float]]) -> optuna.Study:
@@ -19,23 +20,28 @@ def _study_with_trials(values_list: list[tuple[float, float]]) -> optuna.Study:
     return study
 
 
+def _values(trial: FrozenTrial) -> tuple[float, ...]:
+    assert trial.values is not None, "a completed trial has values"
+    return tuple(trial.values)
+
+
 def test_pick_trial_sum_and_chebyshev_select_center_point() -> None:
     study = _study_with_trials([(0.1, 0.9), (0.2, 0.2), (0.9, 0.1)])
-    assert tuple(pick_trial(study, mode="sum").values) == (0.2, 0.2)
-    assert tuple(pick_trial(study, mode="chebyshev").values) == (0.2, 0.2)
+    assert _values(pick_trial(study, mode="sum")) == (0.2, 0.2)
+    assert _values(pick_trial(study, mode="chebyshev")) == (0.2, 0.2)
 
 
 def test_pick_trial_harmonic_selects_compromise_not_zero_cost_extreme() -> None:
     # Normalized costs [0,1] vs [0.4,0.4]: argmin(hmean(cost)) wrongly prefers the extreme.
     study = _study_with_trials([(0.0, 1.0), (0.4, 0.4)])
-    assert tuple(pick_trial(study, mode="harmonic").values) == (0.4, 0.4)
+    assert _values(pick_trial(study, mode="harmonic")) == (0.4, 0.4)
 
 
 @pytest.mark.parametrize("mode", ["sum", "weighted_sum", "WEIGHTED_SUM"])
 @pytest.mark.parametrize("weights, expected", [(None, (0.2, 0.2)), ([10.0, 1.0], (0.1, 0.9))])
 def test_pick_trial_weighted_sum_alias(mode: str, weights: list[float] | None, expected: tuple[float, float]) -> None:
     study = _study_with_trials([(0.1, 0.9), (0.2, 0.2), (0.9, 0.1)])
-    assert tuple(pick_trial(study, mode=mode, weights=weights).values) == expected
+    assert _values(pick_trial(study, mode=mode, weights=weights)) == expected
 
 
 def test_pick_trial_weighted_sum_rejects_wrong_weight_count() -> None:
@@ -47,7 +53,7 @@ def test_pick_trial_weighted_sum_rejects_wrong_weight_count() -> None:
 def test_pick_trial_harmonic_returns_pareto_member() -> None:
     study = _study_with_trials([(0.1, 0.9), (0.2, 0.2), (0.9, 0.1)])
     trial = pick_trial(study, mode="harmonic")
-    assert tuple(trial.values) == (0.2, 0.2)
+    assert _values(trial) == (0.2, 0.2)
 
 
 def test_pick_trial_rejects_hypervolume() -> None:

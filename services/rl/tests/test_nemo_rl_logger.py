@@ -79,6 +79,10 @@ class _RecordingCallback:
         #: the job config down to the gate is assertable from this side.
         self.time_series_metrics: Any = None
         self.min_report_interval_seconds: Any = None
+        self.rewound_to: list[int] = []
+
+    def rewind_to(self, step: int) -> None:
+        self.rewound_to.append(step)
 
     def report_training_start(self, max_steps: int, num_epochs: int, *, run_facts=None) -> None:
         self.training_starts.append({"max_steps": max_steps, "num_epochs": num_epochs, "run_facts": run_facts})
@@ -874,3 +878,10 @@ def test_unhandled_prefixes_produce_no_reports(callback: _RecordingCallback, pre
 
     assert callback.train_steps == []
     assert callback.validations == []
+
+
+def test_rewind_reaches_the_callback(callback: _RecordingCallback) -> None:
+    """A rerun can restore a step behind the last one reported; the callback drops the points past it."""
+    _make_logger().rewind_to(40)
+
+    assert callback.rewound_to == [40]

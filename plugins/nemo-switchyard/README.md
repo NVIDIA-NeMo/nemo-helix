@@ -139,7 +139,7 @@ uv run nemo agents optimize run-strategy --strategy switchyard --agent my-agent 
 uv run nemo jobs results download switchyard --job <job-name> -o switchyard.tar.gz
 mkdir -p switchyard-results && tar -xzf switchyard.tar.gz -C switchyard-results --strip-components=1
 # Pick a VirtualModel name from switchyard-result.json, e.g. my-agent-3f2a9c1e.
-uv run nemo agents create --name my-agent-3f2a9c1e \
+uv run nemo agents register --name my-agent-3f2a9c1e \
   --agent-config ./switchyard-results/agent-my-agent-3f2a9c1e.yaml
 ```
 

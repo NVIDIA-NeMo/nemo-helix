@@ -60,6 +60,8 @@ platformConfig:
     image_tag: local
   builder:
     repository_prefix: ""
+    # On an arm64 machine, such as a Mac with Apple silicon, build for it rather than under emulation.
+    # default_platform: linux/arm64
     sandbox:
       cpu: 500m
       memory: 1Gi

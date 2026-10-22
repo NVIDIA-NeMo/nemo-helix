@@ -23,7 +23,6 @@ from nemo_helix_plugin.agents.types import (
     AgentJobStatusResponse,
     AgentSession,
     CreateAgentDeploymentRequest,
-    CreateAgentRequest,
     CreateComputeSpecRequest,
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
@@ -42,6 +41,7 @@ from nemo_helix_plugin.agents.types import (
     ListEnvironmentResourcesQueryParams,
     ListSessionsQueryParams,
     LogLine,
+    RegisterAgentRequest,
     SampleAgentStreamEvent,
 )
 from nemo_helix_plugin.client.endpoint import delete, get, post
@@ -81,14 +81,14 @@ def list_agents(
 ) -> Paginated[Agent]: ...
 
 
-def _get_agent_on_conflict(body: CreateAgentRequest, workspace: str | None) -> PreparedRequest[Agent]:
-    """Build the retrieve request replayed when ``create_agent(exist_ok=True)`` 409s."""
+def _get_agent_on_conflict(body: RegisterAgentRequest, workspace: str | None) -> PreparedRequest[Agent]:
+    """Build the retrieve request replayed when ``register_agent(exist_ok=True)`` 409s."""
     return get_agent(name=body.name, workspace=workspace)
 
 
 @post(_AGENTS, get_on_conflict=_get_agent_on_conflict)
 @abstractmethod
-def create_agent(*, workspace: str | None = None, body: CreateAgentRequest, exist_ok: bool = False) -> Agent: ...
+def register_agent(*, workspace: str | None = None, body: RegisterAgentRequest, exist_ok: bool = False) -> Agent: ...
 
 
 @delete(f"{_AGENTS}/{{name}}")

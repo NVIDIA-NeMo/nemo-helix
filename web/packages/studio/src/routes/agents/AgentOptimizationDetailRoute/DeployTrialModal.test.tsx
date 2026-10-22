@@ -18,6 +18,7 @@ const workspace = workspace1.workspace;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 const FILE_URL = `${FILESETS_URL}/:name/-/:path`;
+const DEPLOYMENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`;
 
 const SPEC = {
   strategy: 'config-tuning',
@@ -242,5 +243,54 @@ models:
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(/has no optimize config fileset/)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
+  });
+});
+
+describe('DeployTrialModal deploy after create', () => {
+  const captureDeployments = () => {
+    const deployments: { agent?: string; deployment_mode?: string }[] = [];
+    server.use(
+      http.post(DEPLOYMENTS_URL, async ({ request }) => {
+        const body = (await request.json()) as { agent?: string; deployment_mode?: string };
+        deployments.push(body);
+        return HttpResponse.json({ name: 'deployment', ...body });
+      })
+    );
+    return deployments;
+  };
+
+  it('deploys the new agent as a subprocess by default', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    const deployments = captureDeployments();
+    renderModal();
+
+    const { dialog, deploy } = await deployButton();
+    expect(
+      await within(dialog).findByRole('checkbox', { name: 'Deploy after creating' })
+    ).toBeChecked();
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(deployments).toEqual([{ agent: 'hermes-trial-4', deployment_mode: 'subprocess' }])
+    );
+  });
+
+  it('creates without deploying when the box is cleared', async () => {
+    const user = userEvent.setup();
+    const captured = mockHelix();
+    const deployments = captureDeployments();
+    renderModal();
+
+    const { dialog, deploy } = await deployButton();
+    await user.click(
+      await within(dialog).findByRole('checkbox', { name: 'Deploy after creating' })
+    );
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(captured.agent.name).toBe('hermes-trial-4');
+    expect(deployments).toEqual([]);
   });
 });

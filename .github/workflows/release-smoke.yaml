@@ -33,7 +33,7 @@ permissions:
   packages: read
 
 env:
-  UV_VERSION: "0.10.10"
+  UV_VERSION: "0.13.4"
   RELEASE_VERSION: ${{ inputs.release-version }}
 
 jobs:

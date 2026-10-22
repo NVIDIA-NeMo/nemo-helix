@@ -12,10 +12,7 @@ import {
   getPartsFromReference,
   getURNFromNamedEntityRef,
 } from '@nemo/common/src/namedEntity';
-import {
-  useFilesListFilesets as useListFilesets,
-  useFilesRetrieveFileset,
-} from '@nemo/sdk/generated/platform/files';
+import { useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import {
   Anchor,
   Block,
@@ -35,6 +32,7 @@ import { PatternsTooltipTrigger } from '@studio/components/customizer/Customizat
 import { Loading } from '@studio/components/Layouts/Loading';
 import { LINK_DOCS_FINE_TUNE_DATASET_FORMAT_REQUIREMENTS } from '@studio/constants/links';
 import { useCustomizationDatasetValidation } from '@studio/hooks/useCustomizationDatasetValidation';
+import { useOwnedFirstDatasets } from '@studio/hooks/useOwnedFirstDatasets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { usesChatTemplate } from '@studio/util/customizerSchema';
 import { inferJsonContentType, isJsonFile } from '@studio/util/files';
@@ -84,17 +82,9 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     fieldState: { error: fieldError },
   } = useController({ control, name: fieldName });
 
-  const {
-    data: filesetsResponse,
-    isPending,
-    isFetching,
-    error,
-  } = useListFilesets(workspace, {
-    page_size: 100,
-    sort: 'created_at',
-    filter: { purpose: 'dataset' },
-  });
-  const filesets = useMemo(() => filesetsResponse?.data ?? [], [filesetsResponse?.data]);
+  // Newest first, with the signed-in user's own datasets ahead of the rest.
+  const { datasets, isPending, isFetching, error } = useOwnedFirstDatasets(workspace, 100);
+  const filesets = useMemo(() => datasets ?? [], [datasets]);
   const dropdownDisabled = isPending || isFetching || !!error;
 
   const selectedParts = selectedRef ? getPartsFromReference(selectedRef) : undefined;

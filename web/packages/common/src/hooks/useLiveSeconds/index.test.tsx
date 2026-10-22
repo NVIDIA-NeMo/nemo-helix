@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { act, renderHook } from '@testing-library/react';
 
-import { useLiveSeconds } from './index';
+const START = new Date('2025-01-01T00:00:00.000Z');
 
 describe('useLiveSeconds', () => {
   beforeEach(() => {
@@ -14,14 +15,18 @@ describe('useLiveSeconds', () => {
     vi.useRealTimers();
   });
 
-  it('should update the live seconds', () => {
-    const { result } = renderHook(() =>
-      useLiveSeconds({ startDate: new Date('2025-01-01T00:00:00.000Z') })
-    );
-    // Set the system time to a known value
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+  it('starts at the time already elapsed rather than 0', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:01:30.000Z'));
 
-    // Initial render should calculate difference: 1 second
+    const { result } = renderHook(() => useLiveSeconds({ startDate: START }));
+
+    expect(result.current).toBe(90);
+  });
+
+  it('should update the live seconds', () => {
+    vi.setSystemTime(START);
+    const { result } = renderHook(() => useLiveSeconds({ startDate: START }));
+
     expect(result.current).toBe(0);
 
     // Advance timers by 1 second (triggers interval + advances system time)
@@ -30,51 +35,69 @@ describe('useLiveSeconds', () => {
     });
     expect(result.current).toBe(1);
 
-    // Advance timers by 1 second (triggers interval + advances system time)
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(result.current).toBe(2);
 
-    // Advance another second
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(result.current).toBe(3);
   });
 
-  it('should lock the startDate value to prevent desync when startDate is provided asynchronously', () => {
-    const { result, rerender } = renderHook(() =>
-      useLiveSeconds({ startDate: new Date('2025-01-01T00:00:00.000Z') })
-    );
-    // Set the system time to a known value
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
-
-    // Initial render
-    expect(result.current).toBe(0);
-
-    // Try to change the startDate - should be ignored (locked)
-    rerender({ startDate: new Date('2025-01-01T00:00:05.000Z') });
+  it('keeps counting when rerendered with an equal but new Date', () => {
+    vi.setSystemTime(START);
+    const { result, rerender } = renderHook(({ startDate }) => useLiveSeconds({ startDate }), {
+      initialProps: { startDate: START },
+    });
 
     act(() => {
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(500);
     });
-    // Should still be calculating from original startDate (00:00:00)
-    // Now at 00:00:02, so difference is 2 seconds
+    rerender({ startDate: new Date(START.getTime()) });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
     expect(result.current).toBe(1);
+  });
+
+  it('follows a new startDate without remounting', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:01:00.000Z'));
+    const { result, rerender } = renderHook(
+      ({ startDate }: { startDate?: Date }) => useLiveSeconds({ startDate }),
+      { initialProps: { startDate: START as Date | undefined } }
+    );
+    expect(result.current).toBe(60);
+
+    rerender({ startDate: new Date('2025-01-01T00:00:50.000Z') });
+    expect(result.current).toBe(10);
 
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    // Now at 00:00:03, so difference is 3 seconds
-    expect(result.current).toBe(2);
+    expect(result.current).toBe(11);
+  });
+
+  it('picks up a different startDate after going undefined in between', () => {
+    vi.setSystemTime(new Date('2025-01-01T00:01:00.000Z'));
+    const { result, rerender } = renderHook(
+      ({ startDate }: { startDate?: Date }) => useLiveSeconds({ startDate }),
+      { initialProps: { startDate: START as Date | undefined } }
+    );
+    expect(result.current).toBe(60);
+
+    rerender({ startDate: undefined });
+    expect(result.current).toBeUndefined();
+
+    rerender({ startDate: new Date('2025-01-01T00:00:30.000Z') });
+    expect(result.current).toBe(30);
   });
 
   it('should handle long durations', () => {
-    const { result } = renderHook(() =>
-      useLiveSeconds({ startDate: new Date('2025-01-01T00:00:00.000Z') })
-    );
-    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+    vi.setSystemTime(START);
+    const { result } = renderHook(() => useLiveSeconds({ startDate: START }));
     for (let i = 0; i < 50; i++) {
       act(() => {
         vi.advanceTimersByTime(1000);
