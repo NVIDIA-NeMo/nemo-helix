@@ -13,6 +13,7 @@ from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import (
     PLATFORM_PATTERN,
     normalize_reference,
+    platform_name,
     validate_caller_tag,
     validate_repository,
 )
@@ -179,8 +180,13 @@ class BuildSpec(BaseModel):
     platform: str | None = Field(
         default=None,
         pattern=PLATFORM_PATTERN,
-        description="The platform to build or copy, as `os/architecture`. Omit for the deployment's `default_platform`.",
+        description=(
+            "The platform to build or copy, as `os/architecture`. BuildKit's spellings, such as `linux/x86_64`, are "
+            "taken and named as it names them. Omit for the deployment's `default_platform`."
+        ),
     )
+
+    _platform_name = field_validator("platform", mode="before")(platform_name)
 
     @model_validator(mode="after")
     def _dockerfile_stays_within_the_context(self) -> Self:

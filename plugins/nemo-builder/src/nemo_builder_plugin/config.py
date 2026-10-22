@@ -14,6 +14,7 @@ from nemo_builder_plugin.identity import (
     PLATFORM_PATTERN,
     ImageIdentityError,
     normalize_registry,
+    platform_name,
     validate_registry_host,
     validate_repository,
 )
@@ -160,6 +161,8 @@ class BuilderConfig(NemoConfig):
             "refused with `409`. Empty refuses every copy. Images are read anonymously, so only public ones copy."
         ),
     )
+
+    _default_platform_name = field_validator("default_platform", mode="before")(platform_name)
 
     @field_validator("import_registries")
     @classmethod

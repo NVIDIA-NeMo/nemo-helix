@@ -9,7 +9,7 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar, Literal
 
-from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry
+from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry, platform_name
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -106,9 +106,12 @@ class ImageBuildRequest(BaseModel):
             "The platform to build every image for, as `os/architecture`, such as `linux/arm64`. Omit to follow the "
             "task: an image whose Dockerfile or compose service pins a platform is built for it, a prebuilt image "
             "published for one platform is copied for that one, and anything else follows the deployment's default. "
-            "An image pinned to another platform fails the build."
+            "An image pinned to another platform fails the build. BuildKit's spellings, such as `linux/x86_64`, are "
+            "taken and named as it names them."
         ),
     )
+
+    _platform_name = field_validator("platform", mode="before")(platform_name)
 
     rebuild: bool = Field(
         default=False,

@@ -11,9 +11,10 @@ import tempfile
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
-from nemo_builder_plugin.identity import normalize_reference
+from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import FileSetSource, ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
@@ -34,7 +35,7 @@ from nemo_evals.image_builds.models import (
     TaskImageBuildEntity,
     build_entity_name,
 )
-from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, normalize_platform, plan_images
+from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive, plan_images
 from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.client.errors import InternalServerError, NemoClientError, NemoTransportError
 from nemo_helix_plugin.entities import EntityClient
@@ -151,7 +152,7 @@ def _choose_platforms(images: list[BuildImage], requested: str | None) -> None:
     """Give each image the request's platform, or keep the one its task pins; the two must agree."""
     if requested is None:
         return
-    requested = normalize_platform(requested)
+    requested = str(Platform.parse(requested))
     for image in images:
         if image.platform is not None and image.platform != requested:
             raise ImagePlanError(
@@ -168,9 +169,12 @@ def _settled(images: list[BuildImage]) -> bool:
 
 
 async def read_task_archive(files: AsyncFilesClient, source: HarborArchiveSource) -> TaskArchive:
-    """Download a task archive, check its digest, and list its files."""
+    """Download a task archive, check its digest, and list its files.
+
+    The download is gone once this returns, so the archive keeps no path to it: ``text`` reads nothing.
+    """
     async with _downloaded(files, source) as path:
-        return await asyncio.to_thread(TaskArchive.read, path)
+        return replace(await asyncio.to_thread(TaskArchive.read, path), path=None)
 
 
 async def _plan(

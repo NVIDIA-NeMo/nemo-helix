@@ -11,12 +11,12 @@ import tarfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 from harbor.models.task.config import EnvironmentConfig, TaskConfig, TaskOS
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config, task_has_any_separate_verifier
-from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_reference, normalize_registry
+from nemo_builder_plugin.identity import ImageIdentityError, Platform, normalize_reference, normalize_registry
 from nemo_evals.image_builds.models import BuildImage
 from pydantic import ValidationError
 
@@ -225,9 +225,14 @@ def _compose_pin(service: str, options: dict) -> str | None:
     platform = options.get("platform")
     if platform is None or (isinstance(platform, str) and "$" in platform):
         return None
-    if not isinstance(platform, str) or not re.fullmatch(PLATFORM_PATTERN, platform.lower()):
-        raise ImagePlanError("invalid_compose_file", f"service {service} names an unreadable platform: {platform!r}")
-    return normalize_platform(platform)
+    try:
+        return str(Platform.parse(platform)) if isinstance(platform, str) else _unreadable(service, platform)
+    except ImageIdentityError:
+        return _unreadable(service, platform)
+
+
+def _unreadable(service: str, platform: object) -> NoReturn:
+    raise ImagePlanError("invalid_compose_file", f"service {service} names an unreadable platform: {platform!r}")
 
 
 def dockerfile_pin(dockerfile: str) -> str | None:
@@ -242,16 +247,13 @@ def dockerfile_pin(dockerfile: str) -> str | None:
     if not froms:
         return None
     flag = _PLATFORM_FLAG.search(froms[-1].group("flags"))
-    # A variable, such as `$BUILDPLATFORM`, never matches the pattern.
-    if flag is None or not re.fullmatch(PLATFORM_PATTERN, flag.group(1).lower()):
+    if flag is None:
         return None
-    return normalize_platform(flag.group(1))
-
-
-def normalize_platform(platform: str) -> str:
-    """``os/architecture[/variant]`` in lowercase, with arm64's default variant, ``v8``, left out."""
-    platform = platform.lower()
-    return platform.removesuffix("/v8") if platform.startswith("linux/arm64/") else platform
+    try:
+        return str(Platform.parse(flag.group(1)))
+    except ImageIdentityError:
+        # A variable, such as `$BUILDPLATFORM`, isn't a platform.
+        return None
 
 
 def _build_options(service: str, build: object) -> tuple[str, str]:

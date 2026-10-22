@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import httpx
-from nemo_builder_plugin.identity import DIGEST_PATTERN, ImageReference
+from nemo_builder_plugin.identity import DIGEST_PATTERN, ImageIdentityError, ImageReference, Platform
 from nemo_builder_plugin.registry_auth import parse_challenges
 
 MANIFEST_ACCEPT = ", ".join(
@@ -49,21 +49,24 @@ class UpstreamManifest:
 
 
 def _platform_matches(candidate: dict, platform: str) -> bool:
-    """Whether ``os``/``architecture``/``variant`` is ``os/arch[/variant]``; ``arm64`` with no variant is ``v8``."""
-    os_name, _, rest = platform.partition("/")
-    architecture, _, variant = rest.partition("/")
-    if candidate.get("os") != os_name or candidate.get("architecture") != architecture:
+    """Whether an image config or index entry is for ``platform``; a platform naming no variant takes any."""
+    try:
+        have = Platform.from_oci(candidate)
+    except ImageIdentityError:
         return False
-    if not variant:
-        return True
-    return (candidate.get("variant") or ("v8" if architecture == "arm64" else "")) == variant
+    want = Platform.parse(platform)
+    return (have.os, have.architecture) == (want.os, want.architecture) and want.variant in (None, have.variant)
 
 
-def _platform_name(candidate: dict) -> str:
-    os_name, architecture, variant = candidate.get("os"), candidate.get("architecture"), candidate.get("variant")
-    if not variant or (architecture == "arm64" and variant == "v8"):
-        return f"{os_name}/{architecture}"
-    return f"{os_name}/{architecture}/{variant}"
+def _platform_names(candidates: list[dict]) -> set[str]:
+    """The platforms ``candidates`` name, leaving out any that names none readably."""
+    names = set()
+    for candidate in candidates:
+        try:
+            names.add(str(Platform.from_oci(candidate)))
+        except ImageIdentityError:
+            continue
+    return names
 
 
 def _platform_entries(document: dict) -> list[dict]:
@@ -118,9 +121,9 @@ class UpstreamRegistry:
         """
         _, document, is_index = self._manifest(reference)
         if is_index:
-            names = {_platform_name(entry["platform"]) for entry in _platform_entries(document)}
+            names = _platform_names([entry["platform"] for entry in _platform_entries(document)])
             return sorted(name for name in names if not name.startswith("unknown/"))
-        return [_platform_name(self._config(reference, document))]
+        return sorted(_platform_names([self._config(reference, document)]))
 
     def _manifest(self, reference: ImageReference) -> tuple[str, dict, bool]:
         """The digest and document ``reference`` names, and whether it is an index."""

@@ -6524,7 +6524,9 @@ components:
             such as `linux/arm64`. Omit to follow the task: an image whose Dockerfile
             or compose service pins a platform is built for it, a prebuilt image published
             for one platform is copied for that one, and anything else follows the
-            deployment''s default. An image pinned to another platform fails the build.'
+            deployment''s default. An image pinned to another platform fails the build.
+            BuildKit''s spellings, such as `linux/x86_64`, are taken and named as
+            it names them.'
           type: string
           pattern: ^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$
         rebuild:
