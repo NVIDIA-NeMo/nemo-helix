@@ -246,7 +246,7 @@ Read each model's `strong_at` and `watch_out_for` from `benchmark_cache.json` wh
 
 After explaining the recommendation, briefly note *how we know* — framed as "the test that simulates this" not "the score it got".
 
-Frame it as the test that simulates the agent's work, never as a score. Right and wrong examples: `references/evidence-framing.md`.
+Right and wrong examples: `references/evidence-framing.md`.
 
 If the user asks what benchmark was used or wants the raw number, tell them. Do not lead with it.
 
@@ -295,8 +295,6 @@ placement and validation.
 If they are explicitly maintaining a legacy NAT workflow YAML, emit the NAT compatibility block, pick the NAT `_type` from `namespace_to_type[]`, and pair the model with a workflow type. All of that is in `references/legacy-nat-output.md`. For Platform `agent.yaml`, represent credentials with `api_key_env` and put `base_url` directly in the model block.
 
 ## Step 5 — Staleness notice
-
-End with:
 
 End with a staleness notice: say the recommendations reflect the last cache refresh, give `python scripts/refresh-benchmark-cache.py` to refresh, and link the raw leaderboards. Exact text: `references/staleness-notice.md`.
 
