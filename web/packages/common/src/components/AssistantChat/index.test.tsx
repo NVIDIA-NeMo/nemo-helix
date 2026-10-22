@@ -726,7 +726,6 @@ describe('AssistantChat', () => {
     async () => {
       const user = userEvent.setup({ delay: null });
       const stream = createHangingStream('0 this is an example response');
-      const user = userEvent.setup({ delay: null });
       const abortSpy = vi.spyOn(stream.controller, 'abort');
       mocks.createChatCompletion.mockResolvedValueOnce(stream);
 
