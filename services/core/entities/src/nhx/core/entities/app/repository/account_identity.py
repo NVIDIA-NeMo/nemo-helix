@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
 
+from nhx.common.datetime_utils import ensure_utc
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountIdentity
 from nhx.core.entities.utils.identifiers import generate_entity_id
 from sqlalchemy import select
@@ -15,6 +17,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AccountType = Literal["user", "service"]
+# Issuer of the identities that back service accounts (service-account:<subject>), which the auth
+# service materializes when it first issues a Scoped Access Key for one.
+SERVICE_ACCOUNT_IDENTITY_ISSUER = "nemo:service-account"
 
 
 class AccountIdentityUnavailableError(RuntimeError):
@@ -34,6 +39,8 @@ class AccountIdentityRecord:
     identity_id: str
     issuer: str
     subject: str
+    # When the identity was first linked to the account.
+    linked_at: datetime | None = None
 
 
 class AccountIdentityStore:
@@ -46,6 +53,22 @@ class AccountIdentityStore:
         """Return the active identity for ``issuer``/``subject`` if present."""
         async with self.session_maker() as session:
             return await self._get_active_identity(session, issuer=issuer, subject=subject)
+
+    async def get_subject(self, *, account_id: str, issuer: str) -> str | None:
+        """The subject of ``account_id``'s identity from ``issuer``, whatever its status, or None if it has none."""
+        async with self.session_maker() as session:
+            stmt = select(DBAccountIdentity.subject).where(
+                DBAccountIdentity.account_id == account_id, DBAccountIdentity.issuer == issuer
+            )
+            return (await session.execute(stmt)).scalars().first()
+
+    async def get_linked_at(self, *, issuer: str, subject: str) -> datetime | None:
+        """When the identity for ``issuer``/``subject`` was first linked, whatever its status, or None if there is none."""
+        async with self.session_maker() as session:
+            stmt = select(DBAccountIdentity.linked_at).where(
+                DBAccountIdentity.issuer == issuer, DBAccountIdentity.subject == subject
+            )
+            return ensure_utc((await session.execute(stmt)).scalars().first())
 
     async def resolve_or_materialize(
         self,
@@ -197,6 +220,7 @@ class AccountIdentityStore:
             identity_id=identity.id,
             issuer=identity.issuer,
             subject=identity.subject,
+            linked_at=ensure_utc(identity.linked_at),
         )
 
     async def _get_active_account_by_link_key(self, session: AsyncSession, *, link_key: str | None) -> DBAccount | None:

@@ -9,8 +9,10 @@ import httpx
 import pytest
 from nemo_helix_plugin.auth.access_keys.client import AccessKeyIssuerClient, AccessKeysClient
 from nemo_helix_plugin.auth.access_keys.issuer import (
+    AccessKeyBoundWorkspacesNotAdministeredError,
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
+    AccessKeyWorkspaceBoundKeysError,
 )
 from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
@@ -20,7 +22,9 @@ from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyRotateResponse,
     AccessKeyStatusChangeResponse,
 )
-from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, PermissionDeniedError
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 
 
 class _AccessKeysClientStub:
@@ -192,3 +196,100 @@ def test_access_key_issuer_client_propagates_not_found_as_http_error() -> None:
         issuer.revoke("ak_" + "0" * 32)
     assert exc_info.value.status_code == 404
     assert "was not found" in exc_info.value.detail
+
+
+def test_access_key_issuer_client_translates_workspace_bound_keys_conflict_to_domain_error() -> None:
+    response = httpx.Response(
+        409,
+        json={"detail": "Service account 'otel' already has live keys", "code": "workspace_bound_keys_exist"},
+        request=httpx.Request("POST", "https://cluster.example.com/apis/auth/v2/access-keys"),
+    )
+    client = _AccessKeysClientStub()
+    client.create_access_key.side_effect = NemoHTTPError(response)
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+
+    with pytest.raises(AccessKeyWorkspaceBoundKeysError, match="already has live keys") as exc_info:
+        issuer.create(AccessKeyCreateRequest(service_account_id="otel"))
+    # Still a 409, for code that handles the API's errors by status.
+    assert isinstance(exc_info.value, ConflictError)
+    assert exc_info.value.detail == "Service account 'otel' already has live keys"
+
+
+def test_access_key_issuer_client_does_not_resend_a_workspace_bound_keys_conflict() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            409,
+            headers={"x-should-retry": "false"},
+            json={"detail": "Service account 'otel' already has live keys", "code": "workspace_bound_keys_exist"},
+        )
+
+    # The platform retry policy retries 409s unless the server says not to.
+    nemo_client = NemoClient(
+        base_url="https://cluster.example.com",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        retry=PLATFORM_DEFAULT_RETRY_POLICY,
+    )
+    issuer = AccessKeyIssuerClient(AccessKeysClient.from_client(nemo_client))
+
+    with pytest.raises(AccessKeyWorkspaceBoundKeysError, match="already has live keys"):
+        issuer.create(AccessKeyCreateRequest(service_account_id="otel"))
+    assert len(requests) == 1
+
+
+def test_access_key_issuer_client_propagates_other_conflicts_as_http_error() -> None:
+    response = httpx.Response(
+        409,
+        json={"detail": "Concurrent conflict; retry."},
+        request=httpx.Request("POST", "https://cluster.example.com/apis/auth/v2/access-keys"),
+    )
+    client = _AccessKeysClientStub()
+    client.create_access_key.side_effect = NemoHTTPError(response)
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+
+    with pytest.raises(NemoHTTPError):
+        issuer.create(AccessKeyCreateRequest())
+
+
+@pytest.mark.parametrize("operation", ["revoke", "suspend", "unsuspend", "rotate"])
+def test_access_key_issuer_client_translates_bound_workspaces_not_administered_to_domain_error(
+    operation: str,
+) -> None:
+    response = httpx.Response(
+        403,
+        json={
+            "detail": "Scoped Access Key ak_example is also bound to workspace(s) 'team-b', which you aren't Admin of",
+            "code": "bound_workspaces_not_administered",
+        },
+        request=httpx.Request("DELETE", "https://cluster.example.com/apis/auth/v2/access-keys/ak_example"),
+    )
+    client = _AccessKeysClientStub()
+    getattr(client, f"{operation}_access_key").side_effect = NemoHTTPError(response)
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+
+    with pytest.raises(
+        AccessKeyBoundWorkspacesNotAdministeredError, match="'team-b', which you aren't Admin of"
+    ) as exc_info:
+        getattr(issuer, operation)("ak_example")
+    assert isinstance(exc_info.value, PermissionDeniedError)
+
+
+def test_access_key_issuer_client_propagates_other_forbidden_errors_as_http_error() -> None:
+    response = httpx.Response(
+        403,
+        json={"detail": "only a HelixAdmin can create, rotate or unsuspend keys for it"},
+        request=httpx.Request("POST", "https://cluster.example.com/apis/auth/v2/access-keys/ak_example/rotate"),
+    )
+    client = _AccessKeysClientStub()
+    client.rotate_access_key.side_effect = NemoHTTPError(response)
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+
+    with pytest.raises(NemoHTTPError) as exc_info:
+        issuer.rotate("ak_example")
+    assert exc_info.value.status_code == 403
