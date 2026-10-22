@@ -49,6 +49,12 @@ span with the agent's name (`gen_ai.agent.name` for OTLP) so the traces can be
 [registered](/documentation/agents/register-agents#register-from-traces) and
 [analyzed](/documentation/agents/traces-and-insights/insights-from-traces).
 
+For the Fabric 0.5 upgrade, distinguish automatic persisted Relay
+observability v3-to-v4 compatibility from execution-time ATIF/OTLP gateway
+rewriting. Platform Intake endpoints may use a different origin in a container
+than in the source config; independent collectors keep their own destination.
+See [gateway telemetry routing and troubleshooting](/documentation/agents/fabric-upgrade#telemetry-routing-through-gateways).
+
 ## How It Works
 
 ### What It Does
