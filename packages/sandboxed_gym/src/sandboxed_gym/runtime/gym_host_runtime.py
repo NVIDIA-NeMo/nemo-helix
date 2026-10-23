@@ -11,11 +11,13 @@ is injected verbatim into the sandbox image, where ``nemo_rl`` may not be import
 """
 
 import asyncio
+import codecs
 import collections
 import concurrent.futures
 import json
 import os
 import re
+import select
 import shutil
 import socket
 import subprocess
@@ -192,16 +194,71 @@ def _captured_output_secrets() -> tuple[str, ...]:
     return tuple(value for value in values if len(value) >= _MIN_MASKED_SECRET_CHARS)
 
 
+class _FdOutputTail:
+    """Tee an inherited fd, not just Python writes, into the bounded diagnostic tail.
+
+    One daemon drains each pipe throughout training so component output cannot fill it and
+    block Gym. The saved destination still receives the output; no on-disk log can grow
+    without bound. Captures live for this dedicated host process's lifetime.
+    """
+
+    def __init__(self, fd: int, secrets: tuple[str, ...]) -> None:
+        self._lock = threading.Lock()
+        self._read_fd, write_fd = os.pipe()
+        os.set_blocking(self._read_fd, False)
+        destination = os.fdopen(os.dup(fd), "w", buffering=1, encoding="utf-8", errors="replace")
+        self._tail = _OutputTail(destination, _OUTPUT_TAIL, secrets)
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        os.dup2(write_fd, fd)
+        os.close(write_fd)
+        threading.Thread(target=self._run, daemon=True, name=f"gym-output-{fd}").start()
+
+    def drain(self) -> str:
+        # Also called synchronously before serializing an error: a child can exit before the
+        # reader thread gets scheduled. Bound each read even if a component never stops writing.
+        with self._lock:
+            try:
+                chunk = os.read(self._read_fd, 65536)
+            except BlockingIOError:
+                chunk = b""
+            if chunk:
+                text = self._decoder.decode(chunk)
+                try:
+                    self._tail.write(text)
+                    self._tail.flush()
+                except (BrokenPipeError, OSError):
+                    # Losing the container log sink must not stop capture or block the child.
+                    pass
+            # Setup scripts need not end their last diagnostic with a newline. Scrub before
+            # truncating, just as for complete lines (including secrets split across reads).
+            return self._tail._scrub(self._tail._partial) if self._tail._partial.strip() else ""
+
+    def _run(self) -> None:
+        while True:
+            select.select([self._read_fd], [], [])
+            self.drain()
+
+
+_OUTPUT_CAPTURES: tuple[_FdOutputTail, ...] = ()
+
+
 def _install_output_tail() -> None:
+    global _OUTPUT_CAPTURES
+    sys.stdout.flush()
+    sys.stderr.flush()
     secrets = _captured_output_secrets()
-    sys.stdout = _OutputTail(sys.stdout, _OUTPUT_TAIL, secrets)
-    sys.stderr = _OutputTail(sys.stderr, _OUTPUT_TAIL, secrets)
+    _OUTPUT_CAPTURES = tuple(_FdOutputTail(fd, secrets) for fd in (1, 2))
 
 
 def _runtime_error(code: str, message: str) -> dict[str, Any]:
+    sys.stdout.flush()
+    sys.stderr.flush()
+    pending = [line for capture in _OUTPUT_CAPTURES if (line := capture.drain())]
     error: dict[str, Any] = {"code": code, "message": message}
-    if _OUTPUT_TAIL:
-        error["host_output_tail"] = list(_OUTPUT_TAIL)
+    # Copy before iterating: component-reader threads can append while an HTTP handler renders.
+    tail = (list(_OUTPUT_TAIL.copy()) + pending)[-_OUTPUT_TAIL_LINES:]
+    if tail:
+        error["host_output_tail"] = tail
     return {"error": error}
 
 
@@ -518,8 +575,8 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
 
     # --target keeps mutable packages under the writable work mount. --only-binary closes the
     # source-distribution path opened by --find-links, including for transitive dependencies.
-    # Output is captured because uv writes to the process's own file descriptors, which bypass
-    # the output tail, so a failure would otherwise reach the caller with no reason.
+    # Keep uv's failure reason separately so it also reaches the exception message, even if
+    # subsequent Gym output would push it out of the bounded host tail.
     result = subprocess.run(
         [
             "uv",
@@ -538,7 +595,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         text=True,
         check=False,
     )
-    # Forwarded through sys.stdout/sys.stderr so the output tail keeps it, with secrets masked.
+    # Forwarded to the host fds so the output tail keeps it, with secrets masked.
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
     if result.returncode != 0:
@@ -1264,9 +1321,8 @@ class _Server(ThreadingHTTPServer):
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
-    # Before bootstrap, so this host's own startup output is captured if a rollout later fails.
-    # Gym's component servers are not: they inherit fd 1/2 and write past this wrapper. Gym's
-    # `nemo_gym_log_dir` would capture them, but in nemo-gym 0.5.0 it runs each component under
+    # Before bootstrap, so both host output and inherited component fd 1/2 are captured.
+    # Do not enable Gym's `nemo_gym_log_dir`: in nemo-gym 0.5.0 it runs each component under
     # `set -o pipefail`, which kills any non-editable install whose requirements.txt has nothing
     # left after Gym filters out its `../..` lines -- a FileSet server then dies printing nothing.
     _install_output_tail()
