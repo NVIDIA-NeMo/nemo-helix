@@ -12,7 +12,7 @@ import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import type { FilesetRef } from '@studio/hooks/useModelLineage';
 import { FilesTab as FilesetFilesTab } from '@studio/routes/FilesetDetailRoute/FilesTab';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen } from '@nvidia/react-gui-icons/icons';
 import type { FC, ReactNode } from 'react';
 
 export interface FilesTabProps {

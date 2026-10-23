@@ -16,10 +16,6 @@ vi.mock('@nemo/common/src/components/ScoreGauge', () => ({
   ),
 }));
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Mock the ScrollTable component
 /* eslint-disable testing-library/no-node-access */
 vi.mock('@nemo/common/src/components/ScrollTable', () => ({

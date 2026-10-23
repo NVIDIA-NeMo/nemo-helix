@@ -123,10 +123,6 @@ vi.mock('@studio/providers/toast/useToast', () => ({
 }));
 
 // Mock brand assets icons
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Test wrapper
 const createWrapper = () => {
   const queryClient = new QueryClient({

@@ -43,7 +43,7 @@ export const SearchBar = ({
     <form
       onSubmit={handleSubmit(
         handleOnSubmit,
-        handleFormErrorsGeneric({ title: 'MagnifyingGlass Bar Form Errors' })
+        handleFormErrorsGeneric({ title: 'Search Bar Form Errors' })
       )}
       className={`w-full${formClassName ? ` ${formClassName}` : ''}`}
     >

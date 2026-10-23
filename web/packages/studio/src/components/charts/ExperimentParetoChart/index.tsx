@@ -218,7 +218,7 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
           <Button
             kind="primary"
             size="small"
-            aria-label={isSaving ? 'Saving' : 'Floppy as group default'}
+            aria-label={isSaving ? 'Saving' : 'Save as group default'}
             disabled={!hasUnsavedAxes || isSaving}
             onClick={() => xMetric && yMetric && persistAxes(xMetric.id, yMetric.id)}
           >

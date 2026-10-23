@@ -8,10 +8,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Mock the highlighted code region to avoid act() warnings from async Shiki
 // highlighting. LogViewer composes the snippet from primitives, so only
 // CodeSnippetCode needs standing in for — the actions row stays real.

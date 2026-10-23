@@ -5,10 +5,6 @@ import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { ScoreItem } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreItem';
 import { render, screen } from '@testing-library/react';
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 const renderScoreItem = (success: boolean, value: string) => {
   return render(
     <ThemeProvider>

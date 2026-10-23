@@ -33,10 +33,6 @@ vi.mock('@nemo/common/src/components/ScoreGauge', () => ({
 }));
 
 // Mock brand assets icons
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Mock the util constants
 vi.mock('@studio/routes/GenerateJobRoute/util', () => ({
   SAFE_SYNTHESIZER_POLLING_INTERVAL_MS: 5000,

@@ -26,15 +26,15 @@ export interface FileHeaderProps {
   /** Disables the Download action (e.g. when there are no rows to export). */
   downloadDisabled: boolean;
   /**
-   * Persists the current rows to the backing store. When provided, a "Floppy File" action
+   * Persists the current rows to the backing store. When provided, a "Save File" action
    * is shown; when omitted, the editor stays in-memory only (e.g. the standalone demo).
    */
   onSaveFile?: () => void;
-  /** Whether a save is in flight — shows a spinner and disables the Floppy action. */
+  /** Whether a save is in flight — shows a spinner and disables the Save action. */
   isSaving?: boolean;
-  /** Disables the Floppy action (e.g. when there are no unsaved changes). */
+  /** Disables the Save action (e.g. when there are no unsaved changes). */
   saveDisabled?: boolean;
-  /** When set, disables the Floppy action and shows this text as its tooltip. */
+  /** When set, disables the Save action and shows this text as its tooltip. */
   saveDisabledReason?: string;
   /** Whether there are staged edits not yet persisted — shows an "Unsaved changes" chip. */
   hasUnsavedChanges?: boolean;
@@ -135,7 +135,7 @@ export const FileHeader: FC<FileHeaderProps> = ({
             title={saveDisabledReason}
           >
             {isSaving ? <Spinner size="small" aria-label="Saving" /> : <Floppy size="16" />}
-            Floppy File
+            Save File
           </Button>
           {hasUnsavedChanges && (
             <span

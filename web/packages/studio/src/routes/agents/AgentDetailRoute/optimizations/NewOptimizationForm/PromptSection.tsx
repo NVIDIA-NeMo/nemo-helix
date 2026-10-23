@@ -26,7 +26,7 @@ import {
   promptModeById,
   type PromptModeId,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
-import { Plus, X } from 'lucide-react';
+import { Add, Close } from '@nvidia/react-gui-icons/icons';
 import { type FC, useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 
@@ -183,7 +183,7 @@ export const PromptSection: FC<PromptSectionProps> = ({ workspace, agentName }) 
                             setVersions(prompt.versions.filter((_, other) => other !== index))
                           }
                         >
-                          <X size={16} />
+                          <Close size="16" />
                         </Button>
                       )}
                     </Flex>
@@ -213,7 +213,7 @@ export const PromptSection: FC<PromptSectionProps> = ({ workspace, agentName }) 
                 disabled={isSubmitting}
                 onClick={() => setVersions([...prompt.versions, ''])}
               >
-                <Plus size={16} aria-hidden />
+                <Add size="16" aria-hidden />
                 Add a version
               </Button>
 

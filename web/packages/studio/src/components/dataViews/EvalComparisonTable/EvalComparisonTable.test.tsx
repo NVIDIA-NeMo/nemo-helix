@@ -37,10 +37,6 @@ const rowFor = (metricName: string): HTMLElement => {
   return cell;
 };
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 describe('EvalComparisonTable', () => {
   it('renders one row per metric and pins the metric and baseline columns', () => {
     render(<EvalComparisonTable evaluations={evaluations} />);

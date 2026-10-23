@@ -194,7 +194,7 @@ export const ReportTraceModal = ({ open, onClose }: ReportTraceModalProps) => {
               </Button>
               <Button color="brand" onClick={handleCopyAllTraces} disabled={traces.length === 0}>
                 <CopyGeneric />
-                CopyGeneric {showErrorsOnly ? 'Error' : 'All'} Traces
+                Copy {showErrorsOnly ? 'Error' : 'All'} Traces
               </Button>
             </>
           )}
@@ -285,7 +285,7 @@ export const ReportTraceModal = ({ open, onClose }: ReportTraceModalProps) => {
                   </Button>
                   <Button onClick={() => handleCopyTrace(selectedTrace)}>
                     <CopyGeneric />
-                    CopyGeneric Trace Data
+                    Copy Trace Data
                   </Button>
                 </Flex>
               </Flex>

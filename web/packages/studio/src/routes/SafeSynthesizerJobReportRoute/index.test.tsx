@@ -118,10 +118,6 @@ vi.mock('@studio/routes/SafeSynthesizerJobReportRoute/components/ReportMenu', ()
 }));
 
 // Mock icons - use importOriginal to preserve other exports
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 const mockuseWorkspaceFromPath = vi.mocked(useWorkspaceFromPath);
 const mockUseBreadcrumbs = vi.mocked(useBreadcrumbs);
 
