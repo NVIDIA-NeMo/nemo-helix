@@ -579,6 +579,32 @@ async def test_creators_share_the_cluster_least_loaded_first(make_harness, harbo
     assert [len(jobs.active(r.name)) for r in (*a, *b)] == [15, 10, 0, 20, 5]
 
 
+async def test_a_run_whose_jobs_client_wont_open_for_its_creates_doesnt_stop_the_others(
+    make_harness, harbor_plan, jobs
+):
+    harness = make_harness()
+    a = await harness.submit(sized(harbor_plan, 2), name="run-a", creator="user:a")
+    b = await harness.submit(sized(harbor_plan, 2), name="run-b", creator="user:b")
+    opens: dict[str, int] = {}
+    real = harness.reconciler._jobs_for
+
+    @asynccontextmanager
+    async def failing_for_a_creates(workspace, run):
+        if run is not None:
+            opens[run.name] = opens.get(run.name, 0) + 1
+            if run.name == a.name and opens[a.name] == 2:  # phase 1's open worked; phase 2's fails (no token)
+                raise RuntimeError("token unavailable")
+        async with real(workspace, run) as inner:
+            yield inner
+
+    harness.reconciler._jobs_for = failing_for_a_creates
+    report = await harness.cycle()
+    assert jobs.active(a.name) == [] and len(jobs.active(b.name)) == 2
+    assert report.created == 2  # the cycle finished and reported
+    await harness.cycle()
+    assert len(jobs.active(a.name)) == 2
+
+
 # ---- registration ---------------------------------------------------------------------------------------
 
 

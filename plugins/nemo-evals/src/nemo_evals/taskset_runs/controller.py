@@ -809,9 +809,17 @@ class TasksetRunReconciler:
                     if state.no_grant or member is None:
                         continue
                     if state.run.id not in opened:
-                        opened[state.run.id] = await stack.enter_async_context(
-                            self._jobs_for(state.run.workspace, state.run)
-                        )
+                        try:
+                            opened[state.run.id] = await stack.enter_async_context(
+                                self._jobs_for(state.run.workspace, state.run)
+                            )
+                        except Exception:
+                            # Like a failed registration: this run gets no creates this cycle; the others still do.
+                            logger.exception(
+                                "Run %s/%s: opening its Jobs client failed", state.run.workspace, state.run.name
+                            )
+                            state.no_grant = True
+                            continue
                     if not await self._register(state, member, GuardedRunJobs(opened[state.run.id], breaker), report):
                         break
                 report.jobs_timeouts += breaker.timeouts

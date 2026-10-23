@@ -151,3 +151,6 @@ def test_controller_caps_have_defaults_and_refuse_a_creator_cap_above_the_cluste
         )
     with pytest.raises(ValidationError, match="typo"):
         TasksetRunsConfig.model_validate({"controller": {"typo": 1}})
+    # Shorter than a create may take, a 404 could be read while the timed-out create is still saving.
+    with pytest.raises(ValidationError, match="create_grace_seconds"):
+        TasksetRunsConfig.model_validate({"controller": {"create_grace_seconds": 30}})
