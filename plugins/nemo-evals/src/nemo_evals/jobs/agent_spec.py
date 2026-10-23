@@ -321,11 +321,11 @@ class HarborRunnerTarget(BaseModel):
     kind: Literal["harbor"] = "harbor"
     source: HarborAgentSource = Field(
         default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
-        description="The agent Harbor runs in each task container: a built-in agent by `name` (with an optional `model`, by "
-        "name or as a gateway model ref), your own by `import_path`, or a registered platform `agent` (with an "
-        "optional `environment`). A registered agent is resolved at submit into the SDK's installed Fabric agent "
-        "with the agent's translated config in `agent_kwargs.fabric_config`, so it runs as registered — identity, "
-        "skills, MCP servers, and telemetry included — and stays, qualified, as the run's provenance.",
+        description="The agent Harbor runs in each task container: a built-in agent by `name` (with an optional "
+        "`model`, by name or as a gateway model ref), your own by `import_path`, or a registered platform `agent` "
+        "(with an optional `environment`). A registered agent is resolved at submit into the SDK's installed Fabric "
+        "agent with the agent's translated config in `agent_kwargs.fabric_config`, so it runs as registered — "
+        "identity, skills, MCP servers, and telemetry included — and stays, qualified, as the run's provenance.",
     )
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
