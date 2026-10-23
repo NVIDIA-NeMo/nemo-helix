@@ -939,6 +939,9 @@ async def finalize_run(
         return PassOutcome("bundling", bundle.name if bundle else "")
     if _status(bundle) == "completed":
         result = await jobs.result(bundle.name, DEFAULT_RESULT_NAME)
+        if result is not None and result.job != bundle.id:
+            # The name changed hands between the two reads; the next pass sees the other Job and refuses it.
+            return PassOutcome("bundling", f"{bundle.name} was replaced before its result was read")
         bundle_ref = result.artifact_url if result is not None else None
         if bundle_ref is None:
             return PassOutcome("bundling", f"{bundle.name} completed without {DEFAULT_RESULT_NAME}")
