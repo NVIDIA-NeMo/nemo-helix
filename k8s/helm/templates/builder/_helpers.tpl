@@ -63,6 +63,7 @@ a profile the config adds doesn't inherit executor_defaults.
     launcher_image: {{ include "nhx-core.image" $ | quote }}
     # Deletes each finished step's Job and, once the job succeeds, its directory on the work volume. Nothing else does.
     cleanup_completed_jobs_immediately: true
+    ttl_seconds_before_active: {{ $.Values.builder.ttlSecondsBeforeActive | int }}
     storage:
       pvc_name: {{ include "nemo-helix.builder.workVolume" $ | quote }}
       volume_permissions_image: {{ $.Values.core.storage.volumePermissionsImage | quote }}
