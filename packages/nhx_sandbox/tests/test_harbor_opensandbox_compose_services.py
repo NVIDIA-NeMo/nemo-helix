@@ -210,6 +210,46 @@ async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(
     assert extension.requests == []
 
 
+async def test_a_plain_sandbox_starts_with_its_image_s_own_entrypoint(tmp_path: Path, server: Server) -> None:
+    entrypoints = {"registry.example/task:1": ["/bin/bash", "-l", "-c"], "registry.example/verifier:1": ["/verify"]}
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints)
+
+    await environment._create_sandbox()
+
+    assert server.creates[-1]["entrypoint"] == ["/bin/bash", "-l", "-c", "sh", "-c", "sleep infinity"]
+
+
+@pytest.mark.parametrize(
+    "entrypoints",
+    [{"registry.example/task:1": []}, {"registry.example/verifier:1": ["/verify"]}],
+    ids=["image-has-none", "another-image-s"],
+)
+async def test_an_image_without_a_recorded_entrypoint_keeps_the_default(
+    tmp_path: Path, server: Server, entrypoints: dict[str, list[str]]
+) -> None:
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints)
+
+    await environment._create_sandbox()
+
+    assert server.creates[-1]["entrypoint"] is None
+
+
+async def test_compose_main_without_its_own_entrypoint_starts_with_its_image_s(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    main = {key: value for key, value in COMPOSE_SERVICES["main"].items() if key != "entrypoint"}
+    environment = _environment(
+        _task(tmp_path),
+        server,
+        compose_services={**COMPOSE_SERVICES, "main": main},
+        image_entrypoints={"registry.example/task:1": ["/bin/bash", "-l", "-c"]},
+    )
+
+    await environment._create_sandbox()
+
+    assert server.creates[-1]["entrypoint"] == ["/bin/bash", "-l", "-c", "sh", "-c", "sleep infinity"]
+
+
 def test_compose_task_without_services_is_still_rejected(tmp_path: Path, server: Server) -> None:
     with pytest.raises(ValueError, match="docker-compose"):
         _environment(_task(tmp_path), server, compose_services=None)

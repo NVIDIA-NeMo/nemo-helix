@@ -240,17 +240,13 @@ class ComposeServices(_Strict):
         """The service names, in start order."""
         return [s.name for s in self.services]
 
-    def sandbox_entrypoint(self) -> list[str] | None:
-        """The sandbox container's entrypoint: ``main``'s own entrypoint, kept alive; None to keep the default.
+    def sandbox_entrypoint(self, image_entrypoint: list[str] | None = None) -> list[str] | None:
+        """The sandbox container's entrypoint: ``main``'s from the spec, else ``image_entrypoint``, kept alive.
 
-        OpenSandbox replaces the container's entrypoint with its own process, which would skip the
-        image's ``ENTRYPOINT``, so it is restored here. ``sh -c "sleep infinity"`` follows it as its
-        arguments, as Compose passes ``command`` to an image's ``ENTRYPOINT``. An entrypoint that exits
-        on its own therefore ends the container, as it would under Compose, rather than being masked.
+        ``image_entrypoint`` is the image's own ``ENTRYPOINT``, for a spec that doesn't carry it. See
+        :func:`keep_alive_entrypoint`.
         """
-        if self.main.entrypoint is None:
-            return None
-        return [*self.main.entrypoint, "sh", "-c", "sleep infinity"]
+        return keep_alive_entrypoint(self.main.entrypoint or image_entrypoint)
 
     def to_json(self) -> str:
         """The value sent in ``extensions[EXTENSION_KEY]``."""
@@ -292,6 +288,20 @@ class SandboxAgentBundle(_Strict):
     def to_json(self) -> str:
         """The value sent in ``extensions[AGENT_BUNDLE_EXTENSION_KEY]``."""
         return self.model_dump_json(exclude_defaults=True)
+
+
+def keep_alive_entrypoint(entrypoint: list[str] | None) -> list[str] | None:
+    """The sandbox container's entrypoint for an image that starts with ``entrypoint``; None to keep the default.
+
+    OpenSandbox replaces the container's entrypoint with its own process, which would skip the
+    image's ``ENTRYPOINT``, so it is restored here. ``sh -c "sleep infinity"`` follows it as its
+    arguments: Harbor gives ``main`` that command, and Docker passes a command to the image's
+    ``ENTRYPOINT``. An entrypoint that exits on its own therefore ends the container, as it would
+    under Harbor, rather than being masked.
+    """
+    if not entrypoint:
+        return None
+    return [*entrypoint, "sh", "-c", "sleep infinity"]
 
 
 def parse_compose_services(raw: object) -> ComposeServices:

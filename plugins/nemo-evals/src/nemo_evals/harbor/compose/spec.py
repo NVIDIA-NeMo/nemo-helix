@@ -83,7 +83,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
         ) from error
 
 
-def compose_services_kwarg(task_dir: Path, images: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+def compose_services_kwarg(
+    task_dir: Path, images: Mapping[str, str] | None = None, *, read_entrypoint: bool = True
+) -> dict[str, Any] | None:
     """Build the ``environment.kwargs.compose_services`` value for a task directory; None for a single-container task.
 
     The task Job calls this on the materialized task with the images its run prepared. From compose file to spec:
@@ -97,8 +99,11 @@ def compose_services_kwarg(task_dir: Path, images: Mapping[str, str] | None = No
     5. :func:`to_compose_services` maps that to ``ComposeServices``: a container per service, ``main``'s readiness
        wait, and each service's image from ``images``.
     6. The spec is returned as the plain data ``NemoOpenSandboxEnvironment`` takes.
+
+    ``read_entrypoint=False`` leaves ``main``'s entrypoint to the compose file alone, for a caller that knows the
+    image's own ``ENTRYPOINT`` from its config; otherwise it's guessed from ``main``'s Dockerfile.
     """
-    task = parse_compose(task_dir)
+    task = parse_compose(task_dir, read_entrypoint=read_entrypoint)
     if task is None:
         return None
     return to_compose_services(task, images).model_dump(mode="json", by_alias=True, exclude_defaults=True)
