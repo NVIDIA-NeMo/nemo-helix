@@ -69,7 +69,7 @@ export const FilesetFileExplorerToolbar: FC<FilesetFileExplorerToolbarProps> = (
       <TextInput
         value={searchQuery}
         onValueChange={(value) => handleSearchQueryChange(value, clearSelectedItems)}
-        placeholder="MagnifyingGlass"
+        placeholder="Search"
         slotStart={<MagnifyingGlass />}
         dismissible
         data-testid="dataset-details-search-input"

@@ -21,9 +21,11 @@ import {
   Rocket,
   Shield,
   Sliders,
+  Sparkle,
   Profile,
   ProfileGroup,
   Network,
+  Wand,
 } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
@@ -56,7 +58,7 @@ export const ENTITY_ICONS = {
 
   // Models
   baseModels: CubeStack,
-  customModels: Sliders,
+  customModels: Wand,
   deployments: Rocket,
   virtualModels: Network,
   inferenceProviders: Radar,
@@ -67,7 +69,7 @@ export const ENTITY_ICONS = {
   filesetFiles: FolderOpen,
   anonymizerJobs: Profile,
   dataDesignerJobs: Generate,
-  safeSynthesizerJobs: Db,
+  safeSynthesizerJobs: Sparkle,
 
   // Governance. A config and its tests are one thing to the user, so the tests
   // take the config's glyph rather than a second shield.

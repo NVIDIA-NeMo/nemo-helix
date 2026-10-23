@@ -110,7 +110,7 @@ export const InferenceModelProviderSelect: FC<InferenceModelProviderSelectProps>
             name="model-provider-search"
             className="overflow-hidden"
             slotStart={<MagnifyingGlass aria-hidden className="size-4 shrink-0 opacity-70" />}
-            placeholder="MagnifyingGlass by name..."
+            placeholder="Search by name..."
             value={localSearch}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setLocalSearch(e.target.value)}
             attributes={{

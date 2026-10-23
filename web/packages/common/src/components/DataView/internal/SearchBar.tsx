@@ -15,7 +15,7 @@ export interface DataViewSearchBarProps extends Omit<
 > {
   /**
    * Provide a placeholder that informs the user what they're able to search for.
-   * @defaultValue "MagnifyingGlass table"
+   * @defaultValue "Search table"
    */
   placeholder?: string;
 }
@@ -41,7 +41,7 @@ export function SearchBar(props: DataViewSearchBarProps): JSX.Element {
     <DebouncedTextInput
       dismissible
       onValueChange={handleChange}
-      placeholder="MagnifyingGlass table"
+      placeholder="Search table"
       slotStart={MagnifyingGlassIcon}
       value={state.searchBar.state}
       {...props}

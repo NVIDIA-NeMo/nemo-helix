@@ -48,7 +48,7 @@ describe('StatusBadge component', () => {
 
     // Use querySelector with document to find SVG (escape hatch for SVG testing)
     // eslint-disable-next-line testing-library/no-node-access
-    const icon = document.querySelector('.lucide-refresh-cw');
+    const icon = document.querySelector('svg[width="12px"][height="12px"]');
     expect(icon).toBeInTheDocument();
     expect(icon).toHaveAttribute('width', '12px');
     expect(icon).toHaveAttribute('height', '12px');
@@ -59,7 +59,7 @@ describe('StatusBadge component', () => {
     render(<StatusBadge status="completed" />);
 
     // eslint-disable-next-line testing-library/no-node-access
-    const icon = document.querySelector('.lucide-circle-check');
+    const icon = document.querySelector('svg[width="12px"][height="12px"]');
     expect(icon).toBeInTheDocument();
   });
 

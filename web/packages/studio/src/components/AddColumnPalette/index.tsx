@@ -67,10 +67,10 @@ export const AddColumnPalette: FC<AddColumnPaletteProps> = ({
       <TextInput
         value={search}
         onValueChange={setSearch}
-        placeholder="MagnifyingGlass column types…"
+        placeholder="Search column types…"
         slotStart={<MagnifyingGlass size="14" className="text-secondary" />}
         className="shrink-0"
-        attributes={{ Input: { 'aria-label': 'MagnifyingGlass column types' } }}
+        attributes={{ Input: { 'aria-label': 'Search column types' } }}
       />
 
       <Stack gap="density-lg" className="min-h-0 flex-1 overflow-y-auto" paddingX="1">
