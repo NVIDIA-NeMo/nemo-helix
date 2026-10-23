@@ -5901,43 +5901,37 @@ components:
           type: string
           title: Name
           description: Built-in Harbor agent to run, e.g. `oracle`.
-        model_name:
-          title: Model Name
-          description: Optional model slug passed to the agent.
-          type: string
+        model:
+          title: Model
+          description: 'Optional model for the agent: `{"name": ...}` passes a model
+            slug as-is, `{"ref": ...}` calls a model the Inference Gateway serves.'
+          oneOf:
+          - $ref: '#/components/schemas/HarborModelName'
+          - $ref: '#/components/schemas/HarborGatewayModel'
       additionalProperties: false
       type: object
       required:
       - name
       title: HarborBuiltinAgentSource
       description: One of Harbor's built-in agents, selected by name.
-    HarborGatewayAgentSource:
+    HarborGatewayModel:
       properties:
-        name:
-          type: string
-          title: Name
-          description: Built-in Harbor agent to run, such as `codex`, `claude-code`,
-            `aider`, `goose` or `openhands`. Any built-in agent qualifies if it declares
-            an OpenAI- or Anthropic-style model connection, or takes its provider
-            from the model name; an agent of that last kind calls the gateway's OpenAI-style
-            route and is given the model as `openai/<name>`. Other agents are refused.
-        model:
+        ref:
           allOf:
           - $ref: '#/components/schemas/ModelRef'
           description: 'A model the Inference Gateway serves, as `workspace/name`:
-            a model or a VirtualModel.'
+            a model or a VirtualModel. The agent must declare an OpenAI- or Anthropic-style
+            model connection, or take its provider from the model name, as `codex`,
+            `claude-code`, `aider`, `goose` and `openhands` do; an agent of that last
+            kind calls the gateway''s OpenAI-style route and is given the model as
+            `openai/<name>`. Other agents are refused.'
       additionalProperties: false
       type: object
       required:
-      - name
-      - model
-      title: HarborGatewayAgentSource
-      description: 'A built-in Harbor agent that calls a model the Inference Gateway
-        serves.
-
-
-        Evals sets the agent''s model name, base URL and API key variables for the
-        gateway route.'
+      - ref
+      title: HarborGatewayModel
+      description: A model the Inference Gateway serves. Evals sets the agent's model
+        name, base URL and API key variables.
     HarborImportedAgentSource:
       properties:
         import_path:
@@ -5955,6 +5949,19 @@ components:
       - import_path
       title: HarborImportedAgentSource
       description: A Harbor agent class the run environment can already import.
+    HarborModelName:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Model slug passed to the agent as-is, e.g. `openai/gpt-5`.
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: HarborModelName
+      description: A model the agent calls by name, through whatever endpoint its
+        environment gives it.
     HarborRunnerTarget:
       properties:
         kind:
@@ -5965,18 +5972,17 @@ components:
         source:
           anyOf:
           - $ref: '#/components/schemas/HarborBuiltinAgentSource'
-          - $ref: '#/components/schemas/HarborGatewayAgentSource'
           - $ref: '#/components/schemas/HarborImportedAgentSource'
           - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
           description: "The agent Harbor runs in each task container: a built-in agent\
-            \ by `name` (with an optional `model_name`, or a gateway `model` for an\
-            \ agent that declares a model connection), your own by `import_path`,\
-            \ or a registered platform `agent` (with an optional `environment`). A\
-            \ registered agent is resolved at submit into the SDK's installed Fabric\
-            \ agent with the agent's translated config in `agent_kwargs.fabric_config`,\
-            \ so it runs as registered \u2014 identity, skills, MCP servers, and telemetry\
-            \ included \u2014 and stays, qualified, as the run's provenance."
+            \ by `name` (with an optional `model`, by name or as a gateway model ref),\
+            \ your own by `import_path`, or a registered platform `agent` (with an\
+            \ optional `environment`). A registered agent is resolved at submit into\
+            \ the SDK's installed Fabric agent with the agent's translated config\
+            \ in `agent_kwargs.fabric_config`, so it runs as registered \u2014 identity,\
+            \ skills, MCP servers, and telemetry included \u2014 and stays, qualified,\
+            \ as the run's provenance."
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'

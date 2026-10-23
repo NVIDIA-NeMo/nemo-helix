@@ -15,7 +15,8 @@ from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
     HarborBuiltinAgentSource,
-    HarborGatewayAgentSource,
+    HarborGatewayModel,
+    HarborModelName,
     HarborRunnerTarget,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
@@ -37,11 +38,15 @@ from pytest_mock import MockerFixture
 ROUTE = "/apis/inference-gateway/v2/workspaces/ws/model/cb-gpt/-"
 
 
+def _gateway_source(agent: str) -> HarborBuiltinAgentSource:
+    return HarborBuiltinAgentSource(name=agent, model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+
+
 def _codex(
     *, env_vars: dict[str, str] | None = None, env_secrets: dict[str, SecretRef] | None = None
 ) -> HarborRunnerTarget:
     return HarborRunnerTarget(
-        source=HarborGatewayAgentSource(name="codex", model=ModelRef("ws/cb-gpt")),
+        source=_gateway_source("codex"),
         env_vars=env_vars or {},
         env_secrets=env_secrets or {},
     )
@@ -97,7 +102,7 @@ def test_each_agent_gets_the_route_on_the_variables_its_model_connection_declare
     OpenAI clients take the ``/v1`` root; the Anthropic client appends ``/v1`` itself. An agent that takes its provider
     from the model name is sent ``openai/<name>``, so it picks the OpenAI-style route.
     """
-    target = HarborRunnerTarget(source=HarborGatewayAgentSource(name=agent, model=ModelRef("ws/cb-gpt")))
+    target = HarborRunnerTarget(source=_gateway_source(agent))
     assert target.agent_model_name == model_name
 
     config = point_agent_at_gateway_model(HarborRuntimeConfig(agent_name="codex"), target, "http://gw:8080")
@@ -129,28 +134,45 @@ def test_the_agent_gets_the_bare_model_name() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "expected"),
-    [
-        ({"name": "codex", "model_name": "gpt-x"}, HarborBuiltinAgentSource),
-        ({"name": "codex", "model": "ws/cb-gpt"}, HarborGatewayAgentSource),
-    ],
-    ids=["model-name", "gateway-model"],
+    ("model", "expected"),
+    [({"name": "gpt-x"}, HarborModelName), ({"ref": "ws/cb-gpt"}, HarborGatewayModel)],
+    ids=["by-name", "gateway-ref"],
 )
-def test_a_source_document_is_the_one_shape_its_keys_fit(source: dict[str, str], expected: type) -> None:
-    assert type(HarborRunnerTarget.model_validate({"source": source}).source) is expected
+def test_a_model_document_is_the_one_shape_its_key_fits(model: dict[str, str], expected: type) -> None:
+    target = HarborRunnerTarget.model_validate({"source": {"name": "codex", "model": model}})
+    assert isinstance(target.source, HarborBuiltinAgentSource)
+    assert type(target.source.model) is expected
+
+
+def test_model_name_is_read_as_model_name_and_written_in_the_new_shape() -> None:
+    """Specs saved before `model` took a shape still load, and are stored in the new shape from then on."""
+    target = HarborRunnerTarget.model_validate({"source": {"name": "codex", "model_name": "gpt-x"}})
+
+    assert target.source == HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-x"))
+    assert target.model_dump(mode="json")["source"] == {"name": "codex", "model": {"name": "gpt-x"}}
 
 
 @pytest.mark.parametrize(
     "source",
     [
-        {"name": "codex", "model": "ws/cb-gpt", "model_name": "gpt-x"},
-        {"name": "oracle", "model": "ws/cb-gpt"},
-        {"name": "gemini-cli", "model": "ws/cb-gpt"},
+        {"name": "codex", "model": {"name": "gpt-x"}, "model_name": "gpt-x"},
+        {"name": "codex", "model": {"name": "gpt-x", "ref": "ws/cb-gpt"}},
+        {"name": "codex", "model": {}},
+        {"name": "codex", "model": "ws/cb-gpt"},
+        {"name": "oracle", "model": {"ref": "ws/cb-gpt"}},
+        {"name": "gemini-cli", "model": {"ref": "ws/cb-gpt"}},
     ],
-    ids=["model-and-model-name", "no-model-connection", "provider-the-gateway-does-not-serve"],
+    ids=[
+        "model-and-model-name",
+        "name-and-ref",
+        "neither-name-nor-ref",
+        "bare-string",
+        "no-model-connection",
+        "provider-the-gateway-does-not-serve",
+    ],
 )
-def test_a_source_document_no_shape_fits_is_refused(source: dict[str, str]) -> None:
-    """Neither source takes both fields, and only agents whose model connection the gateway can serve take `model`."""
+def test_a_model_no_shape_fits_is_refused(source: dict[str, object]) -> None:
+    """A model is given once, by name or by ref, and only agents whose model connection the gateway serves take a ref."""
     with pytest.raises(ValidationError):
         HarborRunnerTarget.model_validate({"source": source})
 
@@ -185,7 +207,7 @@ async def test_check_ignores_targets_without_a_gateway_model(mocker: MockerFixtu
     resolve = mocker.patch.object(gateway_models.HelixMetricModelResolver, "resolve_model", AsyncMock())
 
     await check_gateway_model(
-        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model_name="gpt")),
+        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt"))),
         async_sdk=None,
         authorize=None,
     )
@@ -257,7 +279,9 @@ def test_a_no_network_task_off_the_agent_channel_is_refused(monkeypatch: pytest.
 def test_tasks_with_network_access_or_targets_without_a_gateway_model_are_not_checked() -> None:
     check_tasks_reach_the_gateway(_codex(), [("online", {})], ())
     check_tasks_reach_the_gateway(
-        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model_name="gpt")), [("t", _NO_NETWORK)], ()
+        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt"))),
+        [("t", _NO_NETWORK)],
+        (),
     )
 
 

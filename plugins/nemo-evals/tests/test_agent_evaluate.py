@@ -39,6 +39,7 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
     ModelTarget,
     RegisteredAgentSource,
@@ -630,7 +631,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     ctx = _job_context(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
-        source=HarborBuiltinAgentSource(name="oracle", model_name="openai/gpt-5.4"),
+        source=HarborBuiltinAgentSource(name="oracle", model=HarborModelName(name="openai/gpt-5.4")),
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         env_vars={"FABRIC_LOG": "debug"},
