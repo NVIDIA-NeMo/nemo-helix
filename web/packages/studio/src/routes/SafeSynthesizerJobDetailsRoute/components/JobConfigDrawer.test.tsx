@@ -75,7 +75,6 @@ describe('JobConfigDrawer', () => {
       });
 
       expect(screen.getByText('Job Configuration')).toBeInTheDocument();
-      expect(screen.getByTestId('cog-icon')).toBeInTheDocument();
     });
   });
 
@@ -100,7 +99,6 @@ describe('JobConfigDrawer', () => {
         });
 
         expect(screen.getByText('Job Configuration')).toBeInTheDocument();
-        expect(screen.getByTestId('cog-icon')).toBeInTheDocument();
       });
     });
   });

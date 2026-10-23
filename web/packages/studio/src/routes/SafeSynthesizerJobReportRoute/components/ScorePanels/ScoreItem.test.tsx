@@ -17,15 +17,15 @@ describe('ScoreItem', () => {
   it('renders CheckCircle icon when success is true', () => {
     renderScoreItem(true, 'Test passed');
 
-    expect(screen.getByTestId('circle-check-icon')).toBeInTheDocument();
-    expect(screen.queryByTestId('ban-icon')).not.toBeInTheDocument();
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('svg:not([id*="sprite"]).text-brand')).toBeInTheDocument();
   });
 
   it('renders Cancel icon when success is false', () => {
     renderScoreItem(false, 'Test failed');
 
-    expect(screen.getByTestId('ban-icon')).toBeInTheDocument();
-    expect(screen.queryByTestId('circle-check-icon')).not.toBeInTheDocument();
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('svg:not([id*="sprite"]).text-brand')).not.toBeInTheDocument();
   });
 
   it('displays the correct value text', () => {
@@ -38,7 +38,7 @@ describe('ScoreItem', () => {
   it('applies text-brand className to CheckCircle when success is true', () => {
     renderScoreItem(true, 'Success message');
 
-    const icon = screen.getByTestId('circle-check-icon');
-    expect(icon).toHaveClass('text-brand');
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('svg:not([id*="sprite"])')).toHaveClass('text-brand');
   });
 });

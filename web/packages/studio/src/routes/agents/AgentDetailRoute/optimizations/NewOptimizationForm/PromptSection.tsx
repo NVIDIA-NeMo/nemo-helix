@@ -15,6 +15,7 @@ import {
   Text,
   TextArea,
 } from '@nvidia/foundations-react-core';
+import { Add, Close } from '@nvidia/react-gui-icons/icons';
 import {
   type OptimizationFormValues,
   sweepableVersions,
@@ -26,7 +27,6 @@ import {
   promptModeById,
   type PromptModeId,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
-import { Add, Close } from '@nvidia/react-gui-icons/icons';
 import { type FC, useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 

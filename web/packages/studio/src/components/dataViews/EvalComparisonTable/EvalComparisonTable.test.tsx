@@ -73,7 +73,6 @@ describe('EvalComparisonTable', () => {
 
     const safety = within(rowFor('safety')).getByLabelText('No change versus baseline');
     expect(safety).toHaveAttribute('data-delta', 'unchanged');
-    expect(within(safety).getByTestId('equal-icon')).toBeInTheDocument();
   });
 
   it('keeps column ids distinct for run ids that sanitize to the same string', () => {

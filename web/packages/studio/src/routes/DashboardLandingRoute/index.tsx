@@ -77,11 +77,11 @@ const LandingComposer = ({
           <WindowTerminal size="16" />
           <Text kind="body/regular/sm">NeMo Assistant</Text>
         </Flex>
-        <Tooltip slotContent="Paperplane">
+        <Tooltip slotContent="Send">
           <Button
             color="brand"
             size="small"
-            aria-label="Paperplane message"
+            aria-label="Send message"
             type="submit"
             disabled={!input.trim()}
           >

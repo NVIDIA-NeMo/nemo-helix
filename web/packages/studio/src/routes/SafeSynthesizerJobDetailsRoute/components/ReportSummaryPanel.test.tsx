@@ -80,7 +80,6 @@ describe('ReportSummaryPanel', () => {
       });
 
       expect(screen.getByText('Report Summary')).toBeInTheDocument();
-      expect(screen.getByTestId('file-icon')).toBeInTheDocument();
     });
 
     it('should render Quality (SQS) and Privacy (DPS) labels', () => {

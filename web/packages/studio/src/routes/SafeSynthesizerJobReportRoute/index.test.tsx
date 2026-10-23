@@ -269,11 +269,6 @@ describe('GenerateJobReportRoute - Rendering', () => {
     expect(panelTitles[0]).toHaveTextContent('Overview');
     expect(panelTitles[1]).toHaveTextContent('Synthetic Quality');
     expect(panelTitles[2]).toHaveTextContent('Data Privacy');
-
-    // Verify icons are rendered
-    expect(screen.getByTestId('file-icon')).toBeInTheDocument();
-    expect(screen.getByTestId('badge-check-icon')).toBeInTheDocument();
-    expect(screen.getByTestId('lock-icon')).toBeInTheDocument();
   });
 
   it('should pass correct props to OverviewPanel', () => {

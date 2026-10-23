@@ -368,7 +368,7 @@ export const AgentDecisionInput = ({
               </Button>
             ) : null}
             <Button
-              aria-label="Paperplane"
+              aria-label="Send"
               type="button"
               color="brand"
               size="small"

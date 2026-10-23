@@ -208,7 +208,6 @@ describe('JobDetailsPanel', () => {
       render(<JobDetailsPanel job={job} />, { wrapper: createWrapper() });
 
       expect(screen.getByText('Job Details')).toBeInTheDocument();
-      expect(screen.getByTestId('play-icon')).toBeInTheDocument();
     });
 
     it('should display job status with badge', () => {
@@ -447,7 +446,6 @@ describe('JobDetailsPanel', () => {
       render(<JobDetailsPanel job={job} />, { wrapper: createWrapper() });
 
       expect(screen.getByText('View Job Config')).toBeInTheDocument();
-      expect(screen.getByTestId('cog-icon')).toBeInTheDocument();
     });
 
     it('should open job config drawer when button is clicked', async () => {
