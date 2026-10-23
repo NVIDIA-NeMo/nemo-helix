@@ -742,11 +742,11 @@ target = HarborRunnerTarget(
 ```
 
 `model` names any model the gateway serves, a model or a virtual model, in place of `model_name`.
-It works for `codex`, `claude-code` and `nemo_evals.harbor.agents:SandboxedCodex`. Evals then sets:
+It works for `codex` and `claude-code`. Evals then sets:
 
 | Agent | Model name | Base URL variable | Key variable |
 |---|---|---|---|
-| `codex`, `SandboxedCodex` | `closed-book-model` | `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
+| `codex` | `closed-book-model` | `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
 | `claude-code` | `closed-book-model` | `ANTHROPIC_BASE_URL` | `ANTHROPIC_API_KEY` |
 
 - The base URL is the gateway's route for that model, at the platform address the task container
