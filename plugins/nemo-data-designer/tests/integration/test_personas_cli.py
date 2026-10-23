@@ -126,7 +126,7 @@ def test_make_fileset_unknown_locale() -> None:
             "personas",
             "make-fileset",
             "--locale",
-            "de_DE",
+            "xx_XX",
             "--api-key-secret",
             "system/ngc-api-key",
         ]
@@ -134,7 +134,7 @@ def test_make_fileset_unknown_locale() -> None:
 
     assert result.exit_code != 0
     assert "Invalid value for '--locale'" in result.output
-    assert "de_DE" in result.output
+    assert "xx_XX" in result.output
 
 
 def test_make_fileset_bare_secret_name() -> None:
