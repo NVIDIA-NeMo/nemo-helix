@@ -626,6 +626,17 @@ def get_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
     return response.json()
 
 
+def cancel_run(client: NemoClient, workspace: str, run_id: str) -> dict[str, Any]:
+    """Request a run's cancel with ``POST …/agent-evaluate/runs/{run_id}/cancel``; returns its stored status."""
+    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/cancel"
+    response = client.http_client.post(url, headers=client.request_headers(None, url=url))
+    if response.status_code == 404:
+        raise SelectionError(f"run {workspace}/{run_id} not found")
+    if response.status_code >= 400:
+        raise RuntimeError(f"cancelling run {run_id} failed ({response.status_code}): {_detail(response)}")
+    return response.json()
+
+
 def list_runs(
     client: NemoClient, workspace: str, *, active: bool, mine: bool, page: int, page_size: int
 ) -> dict[str, Any]:
@@ -935,7 +946,7 @@ _RUN_TERMINAL = frozenset({"completed", "failed", "cancelled", "expired"})
 
 
 def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoClient]) -> None:
-    """Register ``runs list``, ``runs status`` and ``runs results`` under ``runs``."""
+    """Register ``runs list``, ``runs status``, ``runs cancel`` and ``runs results`` under ``runs``."""
 
     @runs.command("list")
     def list_(
@@ -986,6 +997,27 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         except (SelectionError, RuntimeError, NemoClientError) as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
+
+    @runs.command("cancel")
+    def cancel(
+        run_id: str = typer.Argument(..., help="Run name, e.g. run-7f3a…"),
+        workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the run; default: configured."),
+        output_json: bool = typer.Option(False, "--json", help="Print the run's status as JSON."),
+    ) -> None:
+        """Request a run's cancel; the run controller acts on it, and the run keeps its phase until then."""
+        client = client_factory()
+        workspace = client.resolve_workspace(workspace)
+        try:
+            run = cancel_run(client, workspace, run_id)
+        except (SelectionError, RuntimeError, NemoClientError) as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        if output_json:
+            typer.echo(json.dumps(run, indent=2))
+            return
+        flag = _workspace_flag(workspace, client.resolve_workspace())
+        typer.echo(f"Cancel requested for {run_id} at {run['cancel_requested_at']} (phase {run['phase']}).")
+        typer.echo(f"Follow it with: nemo evals runs status {run_id}{flag}")
 
     @runs.command("download")
     def download(
