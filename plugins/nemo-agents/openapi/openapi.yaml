@@ -2746,6 +2746,10 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
+        reference:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceConfig'
+          description: Agent source and container references.
         id:
           type: string
           title: Id
@@ -5649,6 +5653,19 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    ReferenceConfig:
+      properties:
+        fileset:
+          title: Fileset
+          description: Fileset containing agent source and supporting files.
+          type: string
+        container_image:
+          title: Container Image
+          description: Container image reference with a tag or digest.
+          type: string
+      type: object
+      title: ReferenceConfig
+      description: Optional source and container references associated with an agent.
     RegisterAgentRequest:
       properties:
         name:

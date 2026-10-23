@@ -15,6 +15,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.refs import FilesetRef
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -230,8 +231,19 @@ class AgentInline(BaseModel):
     )
 
 
+class ReferenceConfig(BaseModel):
+    """Optional source and container references associated with an agent."""
+
+    fileset: FilesetRef | None = Field(
+        default=None, description="Fileset containing agent source and supporting files."
+    )
+    container_image: str | None = Field(default=None, description="Container image reference with a tag or digest.")
+
+
 class Agent(EntityMetadata, AgentInline):
     """An agent definition stored in the Agents service."""
+
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
 
 
 class AgentComputeSpec(EntityMetadata, ComputeSpecInline):

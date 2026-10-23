@@ -44,6 +44,8 @@ from nemo_agents_plugin.schema import (
     CreateEnvironmentSpecRequest,
     RegisterAgentRequest,
 )
+from nemo_helix_plugin.agents.types import Agent as AgentResponse
+from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.auth import AuthContext
 from pydantic import ValidationError
 
@@ -66,11 +68,34 @@ class TestAgentEntity:
         assert a.description == ""
         assert a.config == {}
         assert a.config_format == NAT_WORKFLOW_CONFIG_FORMAT
+        assert a.reference is None
 
     def test_config_stored(self) -> None:
         config = {"llms": {"my_llm": {"_type": "nim", "model_name": "llama"}}}
         a = Agent(name="calc", workspace="default", config=config)
         assert a.config["llms"]["my_llm"]["_type"] == "nim"
+
+    @pytest.mark.parametrize(
+        "reference",
+        [
+            {},
+            {"fileset": "default/agent-source"},
+            {"container_image": "nvcr.io/my-org/agent:1.0"},
+            {"fileset": "default/agent-source", "container_image": "nvcr.io/my-org/agent:1.0"},
+        ],
+    )
+    @pytest.mark.parametrize("config", [{}, {"key": "value"}])
+    def test_references_round_trip(self, reference: dict[str, str], config: dict[str, str]) -> None:
+        refs = ReferenceConfig.model_validate(reference)
+        a = Agent(name="calc", workspace="default", config=config, reference=refs)
+        data = a._get_data_fields()
+        assert data["reference"] == refs.model_dump()
+        assert data["config"] == config
+
+        restored = Agent.model_validate({"name": a.name, "workspace": a.workspace, **data})
+        response = AgentResponse.model_validate_json(restored.model_dump_json())
+        assert response.reference == refs
+        assert response.config == config
 
     def test_data_fields_include_domain_fields(self) -> None:
         a = Agent(
