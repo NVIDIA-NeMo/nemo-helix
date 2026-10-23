@@ -26,7 +26,7 @@ from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskR
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.filesets import FilesetRef
-from nemo_evals.jobs.gateway_agents import GATEWAY_AGENTS, GatewayAgentEnv, validate_gateway_env
+from nemo_evals.jobs.gateway_agents import GATEWAY_AGENTS, GatewayAgentEnv, GatewayAgentName, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
@@ -220,19 +220,20 @@ class HarborBuiltinAgentSource(BaseModel):
 
     name: str = Field(description="Built-in Harbor agent to run, e.g. `oracle`.")
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
-    model: ModelRef | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-        description="A model the Inference Gateway serves, as `workspace/name`: a model or a VirtualModel. The agent "
-        "calls it through the gateway, and evals sets the agent's model name, base URL and API key variables. "
-        "Use instead of `model_name`. Supported for `codex` and `claude-code`.",
-    )
 
-    @model_validator(mode="after")
-    def _one_model_selector(self) -> Self:
-        if self.model is not None and self.model_name is not None:
-            raise ValueError("set `model` or `model_name`, not both")
-        return self
+
+class HarborGatewayAgentSource(BaseModel):
+    """A built-in Harbor agent that calls a model the Inference Gateway serves.
+
+    Evals sets the agent's model name, base URL and API key variables for the gateway route.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: GatewayAgentName = Field(description="Built-in Harbor agent to run.")
+    model: ModelRef = Field(
+        description="A model the Inference Gateway serves, as `workspace/name`: a model or a VirtualModel."
+    )
 
 
 class HarborImportedAgentSource(BaseModel):
@@ -247,9 +248,11 @@ class HarborImportedAgentSource(BaseModel):
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
 
 
-#: What Harbor runs in each task container. The three shapes share no required field, so a document is
-#: exactly one of them.
-HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource | RegisteredAgentSource
+#: What Harbor runs in each task container. Every shape is closed, so a document is exactly one of them: the
+#: built-in and gateway sources share `name` but take `model_name` and `model` respectively.
+HarborAgentSource: TypeAlias = (
+    HarborBuiltinAgentSource | HarborGatewayAgentSource | HarborImportedAgentSource | RegisteredAgentSource
+)
 
 #: The SDK's installed Fabric agent, which a registered agent runs as: it brings its own Python, so any
 #: task image works.
@@ -276,8 +279,9 @@ class HarborRunnerTarget(BaseModel):
     kind: Literal["harbor"] = "harbor"
     source: HarborAgentSource = Field(
         default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
-        description="The agent Harbor runs in each task container: a built-in agent by `name`, your own by "
-        "`import_path`, or a registered platform `agent` (with an optional `environment`). A registered agent is "
+        description="The agent Harbor runs in each task container: a built-in agent by `name` (with an optional "
+        "`model_name`, or a gateway `model` for `codex` and `claude-code`), your own by `import_path`, or a registered "
+        "platform `agent` (with an optional `environment`). A registered agent is "
         "resolved at submit into the SDK's installed Fabric agent with the agent's translated config in "
         "`agent_kwargs.fabric_config`, so it runs as registered — identity, skills, MCP servers, and telemetry "
         "included — and stays, qualified, as the run's provenance.",
@@ -363,34 +367,27 @@ class HarborRunnerTarget(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _gateway_model_fits_the_agent(self) -> Self:
-        if self.gateway_model is None:
-            return self
-        env = GATEWAY_AGENTS.get(self.agent_name or "")
-        if env is None:
-            raise ValueError(
-                f"`model` points the agent at the Inference Gateway, which evals can do for {sorted(GATEWAY_AGENTS)}; "
-                f"for {self.agent_name!r}, set `model_name` and the agent's own endpoint variables instead"
-            )
-        validate_gateway_env(env, self.env_vars, self.env_secrets)
+    def _gateway_variables_are_not_set_twice(self) -> Self:
+        if (env := self.gateway_agent_env) is not None:
+            validate_gateway_env(env, self.env_vars, self.env_secrets)
         return self
 
     @property
     def gateway_model(self) -> ModelRef | None:
         """The Inference Gateway model the agent calls, when the source names one."""
-        return self.source.model if isinstance(self.source, HarborBuiltinAgentSource) else None
+        return self.source.model if isinstance(self.source, HarborGatewayAgentSource) else None
 
     @property
     def gateway_agent_env(self) -> GatewayAgentEnv | None:
         """The variables the agent reads its gateway endpoint and key from, when it calls a gateway model."""
-        if self.gateway_model is None:
-            return None
-        return GATEWAY_AGENTS[self.agent_name or ""]
+        return GATEWAY_AGENTS[self.source.name] if isinstance(self.source, HarborGatewayAgentSource) else None
 
     @property
     def agent_name(self) -> str | None:
         """The built-in Harbor agent the source names, if it names one."""
-        return self.source.name if isinstance(self.source, HarborBuiltinAgentSource) else None
+        if isinstance(self.source, (HarborBuiltinAgentSource, HarborGatewayAgentSource)):
+            return self.source.name
+        return None
 
     @property
     def agent_import_path(self) -> str | None:
@@ -406,8 +403,8 @@ class HarborRunnerTarget(BaseModel):
         """The model slug handed to a built-in or imported agent: a gateway model's name, or ``model_name``."""
         if isinstance(self.source, RegisteredAgentSource):
             return None
-        if self.gateway_model is not None:
-            return self.gateway_model.root.partition("/")[2]
+        if isinstance(self.source, HarborGatewayAgentSource):
+            return self.source.model.root.partition("/")[2]
         return self.source.model_name
 
 

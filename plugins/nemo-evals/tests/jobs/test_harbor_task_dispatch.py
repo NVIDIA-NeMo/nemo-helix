@@ -24,7 +24,7 @@ from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_default
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
-    HarborBuiltinAgentSource,
+    HarborGatewayAgentSource,
     HarborRunnerTarget,
     RegisteredAgentSource,
 )
@@ -382,7 +382,7 @@ def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_s
     spec = task_spec.spec.model_copy(
         update={
             "tasks": [harbor_resolved_task("offline", config={"environment": {"allow_internet": False}})],
-            "target": HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=ModelRef("ws/cb-gpt"))),
+            "target": HarborRunnerTarget(source=HarborGatewayAgentSource(name="codex", model=ModelRef("ws/cb-gpt"))),
         }
     )
     future = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -394,7 +394,7 @@ def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_s
 
 async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_spec):
     """The agent reads it like any other key; the gateway checks none with platform auth off."""
-    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")))
+    target = HarborRunnerTarget(source=HarborGatewayAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")))
     spec = task_spec.model_copy(update={"spec": task_spec.spec.model_copy(update={"target": target})})
 
     compiled = await HarborTaskDispatchJob.compile(spec=spec, profile="k8s-cpu")

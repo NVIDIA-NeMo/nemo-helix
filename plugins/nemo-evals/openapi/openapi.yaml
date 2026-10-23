@@ -5855,19 +5855,38 @@ components:
           title: Model Name
           description: Optional model slug passed to the agent.
           type: string
-        model:
-          allOf:
-          - $ref: '#/components/schemas/ModelRef'
-          description: 'A model the Inference Gateway serves, as `workspace/name`:
-            a model or a VirtualModel. The agent calls it through the gateway, and
-            evals sets the agent''s model name, base URL and API key variables. Use
-            instead of `model_name`. Supported for `codex` and `claude-code`.'
       additionalProperties: false
       type: object
       required:
       - name
       title: HarborBuiltinAgentSource
       description: One of Harbor's built-in agents, selected by name.
+    HarborGatewayAgentSource:
+      properties:
+        name:
+          type: string
+          enum:
+          - codex
+          - claude-code
+          title: Name
+          description: Built-in Harbor agent to run.
+        model:
+          allOf:
+          - $ref: '#/components/schemas/ModelRef'
+          description: 'A model the Inference Gateway serves, as `workspace/name`:
+            a model or a VirtualModel.'
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - model
+      title: HarborGatewayAgentSource
+      description: 'A built-in Harbor agent that calls a model the Inference Gateway
+        serves.
+
+
+        Evals sets the agent''s model name, base URL and API key variables for the
+        gateway route.'
     HarborImportedAgentSource:
       properties:
         import_path:
@@ -5895,13 +5914,15 @@ components:
         source:
           anyOf:
           - $ref: '#/components/schemas/HarborBuiltinAgentSource'
+          - $ref: '#/components/schemas/HarborGatewayAgentSource'
           - $ref: '#/components/schemas/HarborImportedAgentSource'
           - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
           description: "The agent Harbor runs in each task container: a built-in agent\
-            \ by `name`, your own by `import_path`, or a registered platform `agent`\
-            \ (with an optional `environment`). A registered agent is resolved at\
-            \ submit into the SDK's installed Fabric agent with the agent's translated\
+            \ by `name` (with an optional `model_name`, or a gateway `model` for `codex`\
+            \ and `claude-code`), your own by `import_path`, or a registered platform\
+            \ `agent` (with an optional `environment`). A registered agent is resolved\
+            \ at submit into the SDK's installed Fabric agent with the agent's translated\
             \ config in `agent_kwargs.fabric_config`, so it runs as registered \u2014\
             \ identity, skills, MCP servers, and telemetry included \u2014 and stays,\
             \ qualified, as the run's provenance."
