@@ -25,6 +25,7 @@ Registering an agent creates an `agent` entity in a workspace. Choose the method
 | [Container image](#register-with-a-container-image) | An `agent.yaml` and an image | The agent is already packaged, or the image runs its own server. |
 | [Remote endpoint](#register-a-remote-endpoint) | An `agent.yaml` that points at a URL | The agent runs elsewhere behind an OpenAI- or Anthropic-compatible API. |
 | [Traces](#register-from-traces) | A name | You only want to analyze traces the agent already sends. |
+| [Source and image references](#register-with-references) | A name and an existing fileset, a container image reference, or both | You want to record associated artifacts on the agent. |
 
 Agent names must start with a lowercase letter, be 2–63 characters long, and use lowercase letters,
 digits, hyphens, and dots, with no consecutive hyphens and no trailing hyphen.
@@ -117,6 +118,7 @@ format retain the legacy `nat-workflow-v1` default.
 |---|---|
 | `config_format` | Always `nemo-agents-spec-v1`. |
 | `name`, `description` | Agent metadata. |
+| `reference` | Optional registration metadata for a fileset and container image; see [Register with References](#register-with-references). |
 | `default_harness`, `harnesses` | The harness that runs the agent. Each entry sets a `kind` (`deepagents`, `claude`, `codex`, `hermes`, `nooa-bench-agent`, `remote-agent`), plus optional `settings` and a harness-specific `model`. |
 | `models` | Named model bindings. A harness uses `models.default` unless it sets its own `model`. |
 | `instructions.system.content` | The system prompt, shared by every harness. |
@@ -293,6 +295,48 @@ environment. From a source checkout, run `script/dev-install-hermes.sh` and expo
 install the matching `nemo-fabric[relay]` and `nemo-fabric-adapters-hermes` versions into that
 environment.
 
+## Register with References
+
+Add an optional top-level `reference` block to the YAML passed to `nemo agents register`.
+Both fields are optional, and an agent can have either or both:
+
+```yaml
+name: support-agent
+reference:
+  fileset: default/support-agent-source
+  container_image: nvcr.io/my-org/support-agent:1.0
+```
+
+Save this as `agent.yaml`, then register it:
+
+```bash
+nemo agents register --name support-agent --agent-config ./agent.yaml
+```
+
+`--name` is still required. You can register references without a runtime
+configuration, as above, or include both in the same YAML.
+
+| Field | Registration validation |
+|---|---|
+| `reference.fileset` | An existing fileset as `name` or `workspace/name`. A bare name resolves in the agent's workspace and is stored as `workspace/name`. Registration checks that the caller can access the fileset; it does not require an `agent.yaml` inside it. |
+| `reference.container_image` | Image syntax only. Shorthand and untagged names such as `alpine` or `org/agent`, tagged names, and SHA-256 digest references are accepted. The supplied string is preserved; registration does not contact the registry or check image existence or access. |
+
+For Python SDK registration, pass `reference` separately from `config`:
+
+```python
+from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.client.client import NemoClient
+
+agents = AgentsResource(NemoClient.from_config())
+agents.register(
+    name="support-agent",
+    reference={
+        "fileset": "default/support-agent-source",
+        "container_image": "nvcr.io/my-org/support-agent:1.0",
+    },
+)
+```
+
 ## Register with a Container Image
 
 The image is chosen when you deploy, so register the agent's `agent.yaml` as in
@@ -392,6 +436,6 @@ nemo agents get calculator-agent
 nemo agents delete calculator-agent
 ```
 
-An agent's config cannot be edited in place. To change it, register a new agent, or use
+An agent's config and references cannot be edited in place. To change them, register a new agent, or use
 `nemo agents redeploy` to replace a deployed agent; see
 [Update a Deployed Agent](/documentation/agents/deploy-agents#update-a-deployed-agent).
