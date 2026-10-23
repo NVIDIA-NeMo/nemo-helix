@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import Request
+from nhx.common.service.dependencies import find_service
 from nhx.studio.config import StudioConfig
 from nhx.studio.env_mappings import ENV_MAPPINGS
 
@@ -479,16 +480,15 @@ def _studio_config_from_request(request: Request) -> StudioConfig:
         if isinstance(config, StudioConfig):
             return config
 
-    for attr in ("studio_service", "service"):
-        service = getattr(request.app.state, attr, None)
-        config = getattr(service, "service_config", None)
+    service = find_service(request, "studio")
+    config = getattr(service, "service_config", None)
+    if isinstance(config, StudioConfig):
+        return config
+    get_config = getattr(service, "_get_config", None)
+    if callable(get_config):
+        config = get_config()
         if isinstance(config, StudioConfig):
             return config
-        get_config = getattr(service, "_get_config", None)
-        if callable(get_config):
-            config = get_config()
-            if isinstance(config, StudioConfig):
-                return config
 
     return StudioConfig()
 

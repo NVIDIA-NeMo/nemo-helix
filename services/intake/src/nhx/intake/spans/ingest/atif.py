@@ -10,8 +10,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.config import IntakeConfig
-from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
+from nhx.intake.spans.api.dependencies import (
+    DenormalizerDep,
+    SpansServiceDep,
+    get_intake_config,
+    require_workspace_access,
+)
 from nhx.intake.spans.domain import TraceBatch
 from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
@@ -41,11 +45,7 @@ EntityClientDep = Annotated[EntityClient, Depends(get_entity_client)]
 
 def _atif_max_subagent_depth(request: Request) -> int:
     """Read the configured ATIF subagent depth cap from the Intake service."""
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    cfg: IntakeConfig | None = getattr(service, "service_config", None) if service is not None else None
-    if cfg is None:
-        cfg = IntakeConfig()
-    return cfg.atif_max_subagent_depth
+    return get_intake_config(request).atif_max_subagent_depth
 
 
 def _evaluation_context_from_extra(extra: dict[str, Any] | None) -> EvaluationContext | None:

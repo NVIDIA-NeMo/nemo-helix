@@ -8,7 +8,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
-from nhx.common.service.dependencies import get_nemo_client
+from nhx.common.service.dependencies import find_service, get_nemo_client
+from nhx.intake.config import IntakeConfig
 from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
 from nhx.intake.repository.annotations import AnnotationsRepository
 from nhx.intake.repository.clickhouse.annotations import ClickHouseAnnotationsRepository
@@ -111,8 +112,13 @@ SpansServiceDep = Annotated[IntakeSpansService, Depends(get_spans_service)]
 
 def get_denormalizer(request: Request) -> EvaluationDenormalizer | None:
     """Reach the service-owned denormalizer from the request (absent if startup didn't create one)."""
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    return getattr(service, "denormalizer", None) if service is not None else None
+    return getattr(find_service(request, "intake"), "denormalizer", None)
 
 
 DenormalizerDep = Annotated[EvaluationDenormalizer | None, Depends(get_denormalizer)]
+
+
+def get_intake_config(request: Request) -> IntakeConfig:
+    """Read the attached Intake service's config, or the defaults when it has none."""
+    cfg: IntakeConfig | None = getattr(find_service(request, "intake"), "service_config", None)
+    return cfg if cfg is not None else IntakeConfig()

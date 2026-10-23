@@ -13,6 +13,7 @@ from typing import Any
 
 from clickhouse_connect.driver.external import ExternalData
 from fastapi import HTTPException, Request
+from nhx.common.service.dependencies import find_service
 from nhx.intake.config import IntakeConfig
 from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
 from nhx.intake.spans.clickhouse_migrations import parse_clickhouse_url, run_clickhouse_migrations
@@ -138,10 +139,7 @@ async def bootstrap_schema(client: ClickHouseSpanClient) -> None:
 async def get_clickhouse_client(request: Request) -> AsyncIterator[ClickHouseSpanClient]:
     """FastAPI dependency for Intake's service-owned ClickHouse client."""
 
-    # Platform-mounted app uses `intake_service`; standalone service app uses `service`.
-    service = getattr(request.app.state, "intake_service", None)
-    if service is None:
-        service = getattr(request.app.state, "service", None)
+    service = find_service(request, "intake")
     if service is None:
         raise HTTPException(status_code=503, detail="Intake service is not attached to this application")
 

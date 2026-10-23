@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.jobs.openapi_utils import clear_query_param_schemas, generate_openapi_extra_params
 from nhx.common.config import AuthConfig, Configuration
@@ -21,6 +21,7 @@ from nhx.common.config.base import OIDCConfig
 from nhx.common.controller import ControllerManager
 from nhx.common.platform_endpoint import _SyncHelixEndpointRoutingTransport
 from nhx.common.service import RouterConfig, Service
+from nhx.common.service.dependencies import get_service
 from nhx.platform_runner import config as runner_config
 from nhx.platform_runner import server
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS
@@ -202,6 +203,36 @@ def test_create_app_marks_mounted_services_as_local(monkeypatch):
     server.create_app(services=[PluginService()])
 
     assert platform_cfg.services == "agents"
+
+
+class WhoAmIService(Service):
+    """Service whose route looks itself up by name on the merged platform app."""
+
+    def __init__(self, name: str):
+        super().__init__(name=name, module_name=f"test.{name}")
+
+    def get_routers(self):
+        router = APIRouter()
+        name = self.name
+
+        @router.get("/whoami")
+        async def whoami(request: Request):
+            return {"name": get_service(request, name).name}
+
+        return [RouterConfig(router, tag="WhoAmI", description="WhoAmI endpoints")]
+
+
+def test_create_app_registers_each_service_by_name(monkeypatch):
+    _patch_platform_app_config(monkeypatch, seed_on_startup=False)
+    alpha, beta = WhoAmIService("alpha"), WhoAmIService("beta-svc")
+
+    app = server.create_app(services=[alpha, beta])
+
+    assert app.state.services == {"alpha": alpha, "beta-svc": beta}
+    assert app.state.beta_svc_service is beta
+    client = TestClient(app)
+    assert client.get("/apis/alpha/whoami").json() == {"name": "alpha"}
+    assert client.get("/apis/beta-svc/whoami").json() == {"name": "beta-svc"}
 
 
 def test_create_app_openapi_registers_rebased_query_param_schemas(monkeypatch):

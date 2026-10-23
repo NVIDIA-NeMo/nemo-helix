@@ -4,7 +4,8 @@
 """Common FastAPI dependencies for NeMo Helix services.
 
 Simple placeholders are re-exported from nemo_helix_plugin.dependencies.
-get_service_config_factory (which needs ServiceConfig type) is defined here.
+get_service_config_factory (which needs ServiceConfig type) and the service
+lookups (which need the Service type) are defined here.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from nemo_helix_plugin.dependencies import get_platform_config as get_platform_c
 from nemo_helix_plugin.dependencies import get_service_config as get_service_config
 from nemo_helix_plugin.dependencies import get_sync_nemo_client as get_sync_nemo_client
 from nhx.common.config import ServiceConfig
+from nhx.common.service.base import Service
 
 T = TypeVar("T", bound=ServiceConfig)
 
@@ -46,3 +48,29 @@ def get_service_config_factory(config_class: type[T]) -> Callable[[Request], T]:
         return registry[config_class]
 
     return _get_config
+
+
+def find_service(request: Request, name: str) -> Service | None:
+    """Return the service registered on the request's app under ``name``, or None.
+
+    Both app shapes keep services in ``app.state.services``: a standalone
+    ``Service.create_app`` app holds its own service, and the platform runner's
+    merged app holds every mounted service. Use this for optional services.
+    """
+    services: dict[str, Service] = getattr(request.app.state, "services", {})
+    return services.get(name)
+
+
+def get_service(request: Request, name: str) -> Service:
+    """Return the service registered on the request's app under ``name``.
+
+    Raises:
+        RuntimeError: If no service with that name is registered on the app.
+    """
+    service = find_service(request, name)
+    if service is None:
+        raise RuntimeError(
+            f"Service {name!r} is not registered on this app. "
+            "Ensure the service is loaded and added to app.state.services."
+        )
+    return service
