@@ -183,7 +183,7 @@ guardrails-service = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 harbor = [
   "nemo-helix[nhx-evals-sdk]",
-  "harbor>=0.23,<0.24",
+  "harbor>=0.23,<0.25",
   "nemo-fabric[harbor]>=0.5.0,<0.6.0",
 ]
 
