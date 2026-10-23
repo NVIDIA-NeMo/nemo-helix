@@ -25,6 +25,11 @@ logger = getLogger(__name__)
 
 T = TypeVar("T")
 
+_MULTI_LLM_NIM_IMAGE_NAME = "llm-nim"
+# NIM 2.0.x published the vLLM model-free NIM as ``model-free-nim``; NIM 2.1 renamed it ``vllm-model-free-nim``.
+_SGLANG_MODEL_FREE_NIM_IMAGE_NAMES = frozenset({"sglang-model-free-nim"})
+_MODEL_FREE_NIM_IMAGE_NAMES = frozenset({"model-free-nim", "vllm-model-free-nim"}) | _SGLANG_MODEL_FREE_NIM_IMAGE_NAMES
+
 
 class PaginatedResult(BaseModel, Generic[T]):
     """Generic container for paginated repository results.
@@ -122,12 +127,7 @@ def _image_basename(image_name: str) -> str:
 
 def is_multi_llm_image(image_name: Optional[str]) -> bool:
     """Whether the image is the NIM 1.x multi-LLM NIM (any registry, as long as the image is named ``llm-nim``)."""
-    return bool(image_name) and _image_basename(image_name) == "llm-nim"
-
-
-# NIM 2.0.x published the vLLM model-free NIM as ``model-free-nim``; NIM 2.1 renamed it ``vllm-model-free-nim``.
-_SGLANG_MODEL_FREE_NIM_IMAGE_NAMES = frozenset({"sglang-model-free-nim"})
-_MODEL_FREE_NIM_IMAGE_NAMES = frozenset({"model-free-nim", "vllm-model-free-nim"}) | _SGLANG_MODEL_FREE_NIM_IMAGE_NAMES
+    return bool(image_name) and _image_basename(image_name) == _MULTI_LLM_NIM_IMAGE_NAME
 
 
 def is_model_free_nim_image(image_name: Optional[str]) -> bool:

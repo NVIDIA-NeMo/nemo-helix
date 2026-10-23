@@ -349,8 +349,10 @@ def compile_nim_server_env(
     chat_template = resolve_chat_template(view, model_entity)
 
     if model_free:
+        if chat_template and not chat_template_path:
+            raise ValueError("the model-free NIM needs chat_template_path to apply a chat template")
         passthrough_args: list[str] = []
-        if chat_template and chat_template_path:
+        if chat_template_path and chat_template:
             passthrough_args.extend(["--chat-template", chat_template_path])
         if tool_call_parser:
             passthrough_args.extend(["--tool-call-parser", tool_call_parser])

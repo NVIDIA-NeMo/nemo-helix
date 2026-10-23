@@ -168,6 +168,19 @@ def test_lora_merged_auto_deploys_with_tool_calling(
             tool_choice="auto",
         )
         logger.info("Tool calling response: %s", response["choices"][0]["message"])
+
+        # tool_choice "auto" may answer in plain text, so force a call to check one comes back.
+        response = _chat(
+            client,
+            ws,
+            deployment,
+            model=model,
+            messages=[{"role": "user", "content": "What is the weather in Paris right now?"}],
+            tools=[_WEATHER_TOOL],
+            tool_choice="required",
+        )
+        tool_calls = response["choices"][0]["message"].get("tool_calls")
+        assert isinstance(tool_calls, list) and tool_calls, response
     finally:
         jobs.delete_deployment(client, ws, deployment, config)
 

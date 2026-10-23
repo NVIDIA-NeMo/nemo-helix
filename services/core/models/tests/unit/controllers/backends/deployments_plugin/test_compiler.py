@@ -18,7 +18,10 @@ from nhx.core.models.app import ModelWeightsType
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
 from nhx.core.models.controllers.backends.deployments_plugin.compiler import _busybox_image, compile_model_deployment
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
-from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import pod_security_context_for_engine
+from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import (
+    compile_nim_server_env,
+    pod_security_context_for_engine,
+)
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
 
@@ -537,6 +540,13 @@ def test_nim_model_free_writes_the_chat_template_to_a_file(tmp_path: Path) -> No
     script = writer.command[2].replace("/scratch", str(tmp_path))
     subprocess.run([*writer.command[:2], script], env=_env_dict(writer), check=True)
     assert (tmp_path / "chat_template.jinja").read_text() == chat_template
+
+
+def test_nim_model_free_chat_template_requires_a_path() -> None:
+    resolved = _model_free_resolved()
+    resolved.view.chat_template = "{{ messages }}"
+    with pytest.raises(ValueError, match="chat_template_path"):
+        compile_nim_server_env(resolved, DeploymentsPluginConfig(), weighted=True, tool_call_plugin_path=None)
 
 
 def test_nim_1x_keeps_tool_calling_and_chat_template_env() -> None:
