@@ -741,13 +741,19 @@ target = HarborRunnerTarget(
 )
 ```
 
-`model` names any model the gateway serves, a model or a virtual model. The gateway source takes
-`codex` or `claude-code` as its `name`, and no `model_name`. Evals then sets:
+`model` names any model the gateway serves, a model or a virtual model. The gateway source takes no
+`model_name`. Its `name` is any built-in Harbor agent that declares how it connects to a model, with an
+OpenAI- or Anthropic-style provider or one it takes from the model name. Evals reads that declaration
+and sets the agent's variables, for example:
 
 | Agent | Model name | Base URL variable | Key variable |
 |---|---|---|---|
 | `codex` | `closed-book-model` | `OPENAI_BASE_URL` | `OPENAI_API_KEY` |
 | `claude-code` | `closed-book-model` | `ANTHROPIC_BASE_URL` | `ANTHROPIC_API_KEY` |
+| `mini-swe-agent` | `openai/closed-book-model` | `OPENAI_BASE_URL` | `MSWEA_API_KEY` |
+
+An agent that declares no model connection, or a provider the gateway doesn't serve (such as
+`gemini-cli`), is refused; give it `model_name` and its own endpoint variables instead.
 
 - The base URL is the gateway's route for that model, at the platform address the task container
   reaches: `host.docker.internal` for a local Docker run, the in-cluster address for a taskset run on
