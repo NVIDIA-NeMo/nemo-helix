@@ -61,6 +61,11 @@ merged, a user's jobs.executors would drop them. A user's profile with the same 
 {{- $_ := set $jobs "executors" $executors -}}
 {{- $_ := set $config "jobs" $jobs -}}
 {{- end -}}
+{{- $auth := default (dict) $config.auth -}}
+{{- if empty (get $auth "policy_decision_point_base_url") -}}
+{{- $_ := set $auth "policy_decision_point_base_url" (get $config.platform "base_url") -}}
+{{- $_ := set $config "auth" $auth -}}
+{{- end -}}
 {{ tpl ($config | toYaml) . }}
 {{- end -}}
 
@@ -163,6 +168,14 @@ Internal API URL for pods that need to call the platform API service.
 */}}
 {{- define "nemo-helix.internalBaseUrl" -}}
 {{- printf "http://%s:%s" (include "nhx-api.api-servicename" .) (toString .Values.api.service.port) -}}
+{{- end -}}
+
+{{/*
+Effective platform API URL for pods and managed workloads.
+*/}}
+{{- define "nemo-helix.platformBaseUrl" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- get $config.platform "base_url" | trimSuffix "/" -}}
 {{- end -}}
 
 {{/*
