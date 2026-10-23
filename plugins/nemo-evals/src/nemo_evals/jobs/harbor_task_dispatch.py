@@ -134,7 +134,7 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         for task in tasks:
             task_dir = Path(str(task.metadata[HARBOR_TASK_DIR_KEY]))
             # Derive the services before binding: binding sets docker_image, which would make the parser drop
-            # main's ENTRYPOINT.
+            # main's ENTRYPOINT when it has to guess it from the Dockerfile.
             self._compose_services = prepared_compose_services(task_dir, environment)
             bind_task_image(task_dir, environment.agent.image_ref, verifier_image_ref=verifier)
 
@@ -173,15 +173,17 @@ def check_sandbox_server(spec: HarborTaskJobSpec) -> None:
 def prepared_compose_services(task_dir: Path, environment: PreparedHarborEnvironment) -> dict[str, Any] | None:
     """The task's ``compose_services`` kwarg with each service on the image the run prepared for it; None without any.
 
-    Call before :func:`bind_task_image`: binding sets ``docker_image``, which makes the parser skip main's Dockerfile
-    and lose its ``ENTRYPOINT``.
+    When Builder recorded how ``main``'s image starts, the sandbox restores its ``ENTRYPOINT`` from that (see
+    :func:`image_entrypoints`), so the spec only carries an ``entrypoint`` the compose file sets. Otherwise the
+    parser guesses it from ``main``'s Dockerfile, so call this before :func:`bind_task_image`: binding sets
+    ``docker_image``, which makes the parser skip the Dockerfile.
 
     Raises:
         ComposeError: The task's compose file can't run as a pod.
         ValueError: The prepared images are not for the task's services.
     """
     images = {name: image.image_ref for name, image in environment.compose_images.items()}
-    spec = compose_services_kwarg(task_dir, images)
+    spec = compose_services_kwarg(task_dir, images, read_entrypoint=environment.agent.runtime_config is None)
 
     services = {service["name"] for service in spec["services"]} if spec is not None else set()
     if services != set(images):
@@ -190,6 +192,20 @@ def prepared_compose_services(task_dir: Path, environment: PreparedHarborEnviron
             f"{sorted(images)}"
         )
     return spec
+
+
+def image_entrypoints(environment: PreparedHarborEnvironment) -> dict[str, list[str]]:
+    """Each prepared sandbox image's own ``ENTRYPOINT``, by reference, for the images Builder recorded it for.
+
+    OpenSandbox replaces a container's entrypoint, so the sandbox restores its image's from here. An image that has
+    none maps to an empty list; one Builder didn't record is left out, and starts as it did before.
+    """
+    images = [environment.agent, *([environment.verifier] if environment.verifier is not None else [])]
+    return {
+        image.image_ref: list(image.runtime_config.entrypoint or [])
+        for image in images
+        if image.runtime_config is not None
+    }
 
 
 def configure_runtime(
@@ -203,7 +219,8 @@ def configure_runtime(
     The request's resource overrides size the agent sandbox only; a separate verifier keeps task.toml's
     resources. Every sandbox gets ``resource_defaults(policy)`` for unset cpus and memory_mb, the values
     submit checked against the profile's ceilings. No Harbor resource mode is set, so every value is a limit.
-    A compose task's services go to the environment as ``compose_services``.
+    A compose task's services go to the environment as ``compose_services``, and each image's own ``ENTRYPOINT``
+    as ``image_entrypoints``.
     """
     policy = spec.sandbox_policy
     connection = policy.connection
@@ -230,6 +247,8 @@ def configure_runtime(
     }
     if compose_services is not None:
         kwargs["compose_services"] = compose_services
+    if entrypoints := image_entrypoints(spec.environment):
+        kwargs["image_entrypoints"] = entrypoints
     environment = HarborEnvironmentConfig(import_path=OPENSANDBOX_ENVIRONMENT, kwargs=kwargs)
     update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
     agent = config.agent_import_path or config.agent_name or "oracle"

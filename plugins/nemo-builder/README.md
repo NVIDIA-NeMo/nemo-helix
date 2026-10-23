@@ -387,6 +387,7 @@ service on its own permissions, so the service checks its user may read images h
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
+| `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or whose config couldn't be read. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. |
 
 Names come from the request:
@@ -484,7 +485,7 @@ sequenceDiagram
         opt signing is on
             Push->>Registry: sign the digest, and store the signature beside the image
         end
-        Push->>API: POST /container-images/{name}/complete, with the digest
+        Push->>API: POST /container-images/{name}/complete, with the digest and how the image starts
         API-->>Push: the row, ready
     end
     Caller->>API: GET /container-images/{name}
@@ -517,8 +518,11 @@ sequenceDiagram
    not symlinks or FIFOs, under real directories. The registry checks each blob against its digest
    as crane uploads it. For each image whose row is still `pending`, it pushes the caller's tag and
    the system tag with crane, goes on only if crane reports pushing the digest the index names, signs
-   that digest unless signing is off, and asks the builder to complete the image.
-5. **Completing** writes the row `ready` at the digest the push step names, in one write.
+   that digest unless signing is off, and asks the builder to complete the image. It sends along the
+   image's `ENTRYPOINT`, `CMD` and `WORKDIR` from its config, after checking the config against its
+   digest; a config it can't read is sent as none rather than refusing the push.
+5. **Completing** writes the row `ready` at the digest the push step names, with how the image starts,
+   in one write.
 
 One failed Dockerfile, or one sandbox that can't run, doesn't stop the rest of the set: the other
 images still build, push and complete. The failed image's row stays `pending` (see

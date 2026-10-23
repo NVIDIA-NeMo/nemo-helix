@@ -78,6 +78,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     MAIN_SERVICE,
     ComposeServices,
     SandboxAgentBundle,
+    keep_alive_entrypoint,
     parse_compose_services,
 )
 from nhx_sandbox.opensandbox_policy import (
@@ -197,6 +198,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             ``/installed-agent`` before the sandbox starts; ``start`` then puts its executable on
             ``PATH``, so Harbor finds the agent already installed and skips its own install,
             which needs root.
+        image_entrypoints: Each image's own ``ENTRYPOINT``, by the pinned reference ``task.toml``'s
+            ``docker_image`` names, with an empty list for an image that has none. OpenSandbox
+            replaces the container's entrypoint, so the sandbox restores its image's, unless the
+            compose file gives ``main`` its own. An image missing here starts as before.
 
     Any other keyword argument is Harbor's and goes to ``BaseEnvironment`` unchanged.
     """
@@ -225,6 +230,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         max_disk_mb: int | None = None,
         compose_services: dict[str, Any] | None = None,
         agent_bundle: dict[str, Any] | None = None,
+        image_entrypoints: dict[str, list[str]] | None = None,
         **kwargs: Any,
     ) -> None:
         """Store this environment's settings, then let ``BaseEnvironment`` validate the task against them."""
@@ -255,6 +261,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
         self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
+        self._image_entrypoints = dict(image_entrypoints or {})
         self._egress_verification: EgressVerificationMode = egress_verification
         self._enforce_disk_limit = enforce_disk_limit
         self._max_disk_mb = max_disk_mb
@@ -433,7 +440,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 sandbox_timeout_sec=self._sandbox_timeout_sec,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
-                entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,
+                entrypoint=self._sandbox_entrypoint(),
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its
@@ -455,6 +462,13 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             raise
         self._record_applied_egress(sandbox_id(sandbox), egress_policy)
         return sandbox
+
+    def _sandbox_entrypoint(self) -> list[str] | None:
+        """The sandbox container's entrypoint: the compose file's for ``main``, else its image's own; None for neither."""
+        image_entrypoint = self._image_entrypoints.get(str(self.task_env_config.docker_image)) or None
+        if self._services is not None:
+            return self._services.sandbox_entrypoint(image_entrypoint)
+        return keep_alive_entrypoint(image_entrypoint)
 
     def _record_applied_egress(self, recorded_id: str | None, policy: EgressPolicy) -> None:
         """Write the verified policy and its hash into the trial directory for the supervisor.
