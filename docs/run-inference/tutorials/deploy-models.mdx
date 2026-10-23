@@ -70,7 +70,7 @@ echo "$NVIDIA_API_KEY" | nemo secrets create "nvidia-api-key" --from-file -
 
 # Create provider
 nemo inference providers create "my-nvidia-build" \
-  --host-url "https://integrate.api.nvidia.com" \
+  --host-url "${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}" \
   --api-key-secret-name "nvidia-api-key"
 
 nemo wait inference provider my-nvidia-build
@@ -98,7 +98,7 @@ client.secrets.create_secret(
 provider = client.models.create_provider(
     body=CreateModelProviderRequest(
         name="my-nvidia-build",
-        host_url="https://integrate.api.nvidia.com",
+        host_url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
         api_key_secret_name="nvidia-api-key",
     ),
 ).data()

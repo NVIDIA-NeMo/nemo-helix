@@ -93,18 +93,21 @@ with tempfile.NamedTemporaryFile(suffix=".csv") as tmpfile:
 
 ### Step 2: Build Configuration
 
-Define your models and create a config builder:
+Define your models and create a config builder. Set `NVIDIA_MODEL` to override the example's default with a model served by your provider:
 
 {/* @nemo-docs: skip-python-type-check */}
 ```python
+import os
+
 import data_designer.config as dd
 
+MODEL_ID = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 MODEL_ALIAS = "text"
 
 model_configs = [
     dd.ModelConfig(
         provider="system/nvidia-build",
-        model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
+        model=MODEL_ID,  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(
             temperature=1.0,

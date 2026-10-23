@@ -15,7 +15,13 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nemo_helix_plugin.client.client import NemoClient
 
 from nemo_nb import (
     MarkdownToNotebookConverter,
@@ -29,6 +35,29 @@ from nemo_nb import (
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 TIMEOUT_SECONDS = 3600
+
+
+@contextmanager
+def cleanup_notebook_deployments(client: "NemoClient", workspace: str = "default") -> Generator[None, None, None]:
+    """Remove deployments created by a notebook, including when execution fails.
+
+    Use only on an isolated test backend: deployments that existed before the
+    notebook are preserved, and deletion is awaited before the next GPU test.
+    """
+    existing = {deployment.name for deployment in client.models.list_deployments(workspace=workspace).items()}
+    try:
+        yield
+    finally:
+        created = [
+            deployment.name
+            for deployment in client.models.list_deployments(workspace=workspace).items()
+            if deployment.name not in existing
+        ]
+        for name in created:
+            client.models.delete_deployment(name=name, workspace=workspace)
+        for name in created:
+            if not client.models.wait_for_deployment_status(name, "DELETED", workspace=workspace, timeout=600):
+                raise TimeoutError(f"Notebook deployment {workspace}/{name} was not deleted")
 
 
 def create_temp_venv_with_kernel(

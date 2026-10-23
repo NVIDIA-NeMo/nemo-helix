@@ -581,6 +581,7 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 <Tab title="Python SDK">
 
 ```python
+import os
 from pydantic import SecretStr
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -592,11 +593,16 @@ client = NemoClient.from_config()
 
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
-# Create a secret to store your NGC API key
+# Export NGC_API_KEY with a current NGC personal API key before running this section.
+# Do not submit the literal placeholder as a credential.
+ngc_api_key = os.environ.get("NGC_API_KEY")
+if not ngc_api_key:
+    raise RuntimeError("Export NGC_API_KEY with a current NGC personal API key before running this section.")
+
 secret = client.secrets.create_secret(
     body=HelixSecretCreateRequest(
         name="my-ngc-api-key",
-        value=SecretStr("<your-ngc-api-key>"),
+        value=SecretStr(ngc_api_key),
     ),
 ).data()
 
@@ -683,11 +689,14 @@ hf_fileset = client.files.create_fileset(
 </Tabs>
 Connect to an S3 bucket or S3-compatible storage (e.g., MinIO, Ceph):
 
+These optional S3/MinIO examples are not exercised by default in E2E. Set `NHX_RUN_S3_TUTORIAL=true` to run them.
+
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
+if [ "${NHX_RUN_S3_TUTORIAL:-false}" = "true" ]; then
 # Create a fileset backed by S3 storage using SDK credential chain
 # (uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars, IRSA, instance profiles, etc.)
 # The "prefix" field is optional - use it to scope the fileset to a folder within the bucket
@@ -706,29 +715,36 @@ nemo files upload ./training_data/ s3-training-data
 
 # Download data from S3
 nemo files download s3-training-data -o ./downloaded_data/
+else
+    echo "SKIPPED S3 tutorial: set NHX_RUN_S3_TUTORIAL=true to run."
+fi
 ```
 
 </Tab>
 <Tab title="Python SDK">
 
 ```python
+import os
 from nemo_helix_plugin.files.storage_config import S3StorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
-# Create a fileset backed by S3 storage using SDK credential chain
-# (uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars, IRSA, instance profiles, etc.)
-s3_fileset = client.files.create_fileset(
-    body=CreateFilesetRequest(
-        name="s3-training-data",
-        description="Training data stored in S3",
-        storage=S3StorageConfig(
-            bucket="my-ml-bucket",
-            prefix="datasets/training",  # Optional: scope to a folder within the bucket
-            region="us-east-1",
-            use_sdk_auth=True,  # Use AWS SDK credential chain
+if os.environ.get("NHX_RUN_S3_TUTORIAL") == "true":
+    # Create a fileset backed by S3 storage using SDK credential chain
+    # (uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars, IRSA, instance profiles, etc.)
+    s3_fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name="s3-training-data",
+            description="Training data stored in S3",
+            storage=S3StorageConfig(
+                bucket="my-ml-bucket",
+                prefix="datasets/training",  # Optional: scope to a folder within the bucket
+                region="us-east-1",
+                use_sdk_auth=True,  # Use AWS SDK credential chain
+            ),
         ),
-    ),
-).data()
+    ).data()
+else:
+    print("SKIPPED S3 tutorial: set NHX_RUN_S3_TUTORIAL=true to run.")
 ```
 
 </Tab>
@@ -741,6 +757,7 @@ For S3-compatible storage like MinIO, use explicit credentials and a custom endp
 <Tab title="CLI">
 
 ```bash
+if [ "${NHX_RUN_S3_TUTORIAL:-false}" = "true" ]; then
 # Create secrets to store your S3 credentials
 echo "$S3_ACCESS_KEY" | nemo secrets create s3_access_key --from-file -
 echo "$S3_SECRET_KEY" | nemo secrets create s3_secret_key --from-file -
@@ -756,6 +773,9 @@ nemo files filesets create minio-fileset \
 "access_key_id_secret": "s3_access_key",
 "secret_access_key_secret": "s3_secret_key"
 }'
+else
+    echo "SKIPPED MinIO tutorial: set NHX_RUN_S3_TUTORIAL=true to run."
+fi
 ```
 
 </Tab>
@@ -771,34 +791,37 @@ from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
-# Create secrets to store your S3 credentials
-access_key = client.secrets.create_secret(
-    body=HelixSecretCreateRequest(
-        name="s3_access_key",
-        value=SecretStr(os.getenv("S3_ACCESS_KEY") or ""),
-    ),
-).data()
-secret_key = client.secrets.create_secret(
-    body=HelixSecretCreateRequest(
-        name="s3_secret_key",
-        value=SecretStr(os.getenv("S3_SECRET_KEY") or ""),
-    ),
-).data()
-
-s3_fileset = client.files.create_fileset(
-    body=CreateFilesetRequest(
-        name="minio-fileset",
-        description="Data stored in MinIO",
-        storage=S3StorageConfig(
-            bucket="my-bucket",
-            endpoint_url="http://minio.example.com:9000",  # Custom S3 endpoint
-            region="us-east-1",
-            use_sdk_auth=False,  # Use explicit credentials instead of SDK auth
-            access_key_id_secret=access_key.name,
-            secret_access_key_secret=secret_key.name,
+if os.environ.get("NHX_RUN_S3_TUTORIAL") == "true":
+    # Create secrets to store your S3 credentials
+    access_key = client.secrets.create_secret(
+        body=HelixSecretCreateRequest(
+            name="s3_access_key",
+            value=SecretStr(os.getenv("S3_ACCESS_KEY") or ""),
         ),
-    ),
-).data()
+    ).data()
+    secret_key = client.secrets.create_secret(
+        body=HelixSecretCreateRequest(
+            name="s3_secret_key",
+            value=SecretStr(os.getenv("S3_SECRET_KEY") or ""),
+        ),
+    ).data()
+
+    s3_fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name="minio-fileset",
+            description="Data stored in MinIO",
+            storage=S3StorageConfig(
+                bucket="my-bucket",
+                endpoint_url="http://minio.example.com:9000",  # Custom S3 endpoint
+                region="us-east-1",
+                use_sdk_auth=False,  # Use explicit credentials instead of SDK auth
+                access_key_id_secret=access_key.name,
+                secret_access_key_secret=secret_key.name,
+            ),
+        ),
+    ).data()
+else:
+    print("SKIPPED MinIO tutorial: set NHX_RUN_S3_TUTORIAL=true to run.")
 ```
 
 </Tab>

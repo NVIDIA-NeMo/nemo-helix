@@ -102,7 +102,7 @@ def test_docker_backend_starts_clickhouse_sidecar_on_api_network(
     monkeypatch.setattr(docker_backend, "DockerContainer", FakeDockerContainer)
     monkeypatch.setattr(docker_backend, "Network", FakeNetwork)
     monkeypatch.setattr(docker_backend.Docker, "_wait_for_clickhouse_healthy", lambda _self: None)
-    monkeypatch.setattr(docker_backend.Docker, "_wait_for_healthy", lambda _self: None)
+    monkeypatch.setattr(docker_backend.Docker, "_wait_for_healthy", lambda _self, _container: None)
     monkeypatch.setattr(docker_backend.Docker, "_collect_logs", lambda _self: None)
 
     backend = docker_backend.Docker(config_path, registry="registry.example/nhx", tag="test-tag")
