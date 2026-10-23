@@ -3,6 +3,7 @@
 
 """The MVP preparer over the real ``ImageBuildService``: check first, then one call that is ready or failed."""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -11,6 +12,8 @@ import pytest
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.entities import TaskEntity
+from nemo_evals.harbor.compose.models import ComposeError
+from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.harbor.remote import preparation
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparationUnavailableError,
@@ -27,10 +30,11 @@ from nemo_evals.image_builds.models import (
     build_entity_name,
     build_job_name,
 )
-from nemo_evals.image_builds.planning import TaskArchive
+from nemo_evals.image_builds.planning import ImagePlanError, TaskArchive
 from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
+from nemo_evals.jobs.harbor_task_spec import PreparedImage
 from nemo_evals.jobs.task_image_build import task_image_build_job_request
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -94,7 +98,10 @@ def archive(monkeypatch) -> dict[str, TaskArchive]:
     holder = {"archive": TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=None)}
 
     async def read(files, source):
-        return holder["archive"]
+        archive = holder["archive"]
+        if isinstance(archive, Exception):
+            raise archive
+        return archive
 
     monkeypatch.setattr(preparation, "read_task_archive", read)
     return holder
@@ -276,13 +283,57 @@ async def test_a_job_name_held_by_another_job_is_reported(clients, store_task, s
     assert code == "image_unavailable"
 
 
-async def test_a_compose_service_image_is_not_supported(clients, store_task, sandbox_policy, entity_store):
+async def test_compose_service_images_are_prepared_by_service_name(clients, store_task, sandbox_policy, entity_store):
     digest = await store_task(config=SEPARATE)
     await prepare(task(digest), clients, sandbox_policy)
-    images = [image("main", digest_ref("d")), image("db", digest_ref("f"))]
+    images = [
+        image("main", digest_ref("d")),
+        image("service/db", digest_ref("f"), source="prebuilt"),
+        image("service/seeder", digest_ref("a")),
+        # A service may be called `verifier`; its image is still a service's, not the separate verifier's.
+        image("service/verifier", digest_ref("b"), source="prebuilt"),
+    ]
     await settle(entity_store, digest, 1, "ready", images=images)
-    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "multi_container_not_yet_supported"
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert list(result.images) == ["agent"]
+    assert result.environment.verifier is None
+    assert result.environment.compose_images == {
+        "db": PreparedImage(
+            image_ref=digest_ref("f"),
+            preparation_key="sha256:" + "f" * 64,
+            builder_image="harbor-env-service/db",
+            build_job="b",
+        ),
+        "seeder": PreparedImage(
+            image_ref=digest_ref("a"),
+            preparation_key="sha256:" + "a" * 64,
+            builder_image="harbor-env-service/seeder",
+            build_job="b",
+            source_archive_digest="a" * 64,
+        ),
+        "verifier": PreparedImage(
+            image_ref=digest_ref("b"),
+            preparation_key="sha256:" + "b" * 64,
+            builder_image="harbor-env-service/verifier",
+            build_job="b",
+        ),
+    }
+
+
+async def test_a_compose_service_image_that_is_not_ready_is_reported_as_a_service_image(
+    clients, store_task, sandbox_policy, entity_store
+):
+    digest = await store_task(config=SEPARATE)
+    await prepare(task(digest), clients, sandbox_policy)
+    pending = BuildImage(role="service/db", source="prebuilt", image="redis:7", status="pending")
+    await settle(entity_store, digest, 1, "ready", images=[image("main", digest_ref("d")), pending])
+    result = await prepare(task(digest), clients, sandbox_policy)
+    assert result.error is not None
+    assert (result.error.code, result.error.role) == ("image_unavailable", "service")
+    assert "no ready service/db image" in result.error.detail
 
 
 @pytest.mark.parametrize("missing", ["task", "revision"])
@@ -305,24 +356,92 @@ async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy
 
 
 @pytest.mark.parametrize(
-    ("config", "compose", "code"),
+    ("config", "code"),
     [
-        ({"environment": {"gpus": 1}}, None, "gpu_unsupported"),
-        # Its build has only a main image, so only the archive shows it's a compose task.
-        ({"environment": {}}, "services: {main: {}}", "multi_container_not_yet_supported"),
-        ({"environment": {"os": "windows"}}, None, "windows_unsupported"),
+        ({"environment": {"gpus": 1}}, "gpu_unsupported"),
+        ({"environment": {"os": "windows"}}, "windows_unsupported"),
         # A CPU agent with a GPU verifier would still ask OpenSandbox for a GPU.
         (
             {"environment": {"gpus": 0}, "verifier": {"environment_mode": "separate", "environment": {"gpus": 1}}},
-            None,
             "gpu_unsupported",
         ),
     ],
 )
-async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, sandbox_policy, config, compose, code):
-    archive["archive"] = TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=compose)
+async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, sandbox_policy, config, code):
     rejected = await prepare_task_images.check(task("f" * 64, config=config), policy=sandbox_policy, clients=clients)
     assert rejected is not None and rejected.code == code
+
+
+@pytest.fixture
+def compose_task(archive, tmp_path):
+    """Give the task a compose file, read as ``read_task_archive`` reads it: parsed, or an ``ImagePlanError``."""
+
+    def write(compose: str) -> None:
+        """Write the task's compose file, and make ``read_task_archive`` return it as parsed (or as an error)."""
+        environment = tmp_path / "t" / "environment"
+        environment.mkdir(parents=True, exist_ok=True)
+        (environment / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+        (environment / "docker-compose.yaml").write_text(compose, encoding="utf-8")
+
+        listed = TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=compose)
+        try:
+            archive["archive"] = replace(listed, compose_task=parse_compose(tmp_path / "t", read_entrypoint=False))
+        except ComposeError as exc:
+            archive["archive"] = ImagePlanError("invalid_compose_file", str(exc))
+
+    return write
+
+
+async def check(clients, policy, config=None):
+    """Run the preparer's submit-time check on a task with ``config``, as submit would."""
+    return await prepare_task_images.check(task("f" * 64, config=config), policy=policy, clients=clients)
+
+
+async def test_check_passes_a_compose_task_the_pod_can_run(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  db:\n    image: postgres:16\n  api:\n    build: ./api\n")
+    assert await check(clients, sandbox_policy) is None
+
+
+@pytest.mark.parametrize(
+    ("compose", "expected"),
+    [
+        ("services:\n  main:\n    environment: {A: b}\n", "compose_override_only"),
+        ("services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n", "compose_reserved_port"),
+        ("services:\n  db:\n    image: redis\n    privileged: true\n", "compose_unsupported"),
+    ],
+)
+async def test_check_reports_what_the_pod_cannot_run_in_the_parsers_words(
+    clients, sandbox_policy, compose_task, compose, expected
+):
+    compose_task(compose)
+    rejected = await check(clients, sandbox_policy)
+    assert rejected is not None and rejected.code == "invalid_compose_file"
+    assert expected in rejected.detail
+
+
+async def test_check_rejects_service_limits_above_the_profiles_ceilings(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  db:\n    image: postgres:16\n    mem_limit: 8g\n")
+    capped = sandbox_policy.model_copy(update={"max_memory_mb": 4096})
+    rejected = await check(clients, capped)
+    assert rejected is not None and rejected.code == "resources_exceed_policy"
+    assert "compose service db memory limit=8Gi exceeds" in rejected.detail
+    assert await check(clients, sandbox_policy) is None
+
+
+async def test_check_counts_a_services_shm_size_against_the_memory_ceiling(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  db:\n    image: postgres:16\n    shm_size: 8g\n")
+    capped = sandbox_policy.model_copy(update={"max_memory_mb": 4096})
+
+    rejected = await check(clients, capped)
+
+    assert rejected is not None and rejected.code == "resources_exceed_policy"
+    assert "shm_size" in rejected.detail
+
+
+async def test_check_reports_an_unsafe_archive(clients, sandbox_policy, archive):
+    archive["archive"] = ImagePlanError("invalid_task_archive", "the archive is unsafe")
+    rejected = await check(clients, sandbox_policy)
+    assert rejected is not None and rejected.code == "invalid_task_archive"
 
 
 async def test_check_passes_a_dockerfile_task_without_starting_a_build(clients, archive, sandbox_policy, jobs):

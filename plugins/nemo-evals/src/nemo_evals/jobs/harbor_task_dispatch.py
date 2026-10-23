@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
+from nemo_evals.harbor.compose.spec import compose_services_kwarg
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
-from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
+from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec, PreparedHarborEnvironment
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -50,7 +51,6 @@ UNWRAPPED_AGENTS = frozenset({"oracle", "nop"})
 """Harbor environment the task Job runs trials in: nhx-sandbox's environment plus the agent channel."""
 
 SANDBOX_READY_TIMEOUT_S = 600
-COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
 
 
 class ExecutionDeadlinePassedError(RuntimeError):
@@ -112,6 +112,8 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     discard_agent_files: ClassVar[bool] = False
     record_publication_durations: ClassVar[bool] = False
     _task_spec: HarborTaskJobSpec
+    # The task's ``compose_services``, set by ``_prepared_tasks`` for ``_configure_harbor_runtime``.
+    _compose_services: dict[str, Any] | None = None
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
         """Run the task Job's one task and persist its result bundle."""
@@ -131,10 +133,13 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         verifier = environment.verifier.image_ref if environment.verifier is not None else None
         for task in tasks:
             task_dir = Path(str(task.metadata[HARBOR_TASK_DIR_KEY]))
+            # Derive the services before binding: binding sets docker_image, which would make the parser drop
+            # main's ENTRYPOINT.
+            self._compose_services = prepared_compose_services(task_dir, environment)
             bind_task_image(task_dir, environment.agent.image_ref, verifier_image_ref=verifier)
 
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
-        return configure_runtime(config, ctx, self._task_spec)
+        return configure_runtime(config, ctx, self._task_spec, self._compose_services)
 
 
 def check_execution_deadline(spec: HarborTaskJobSpec, now: datetime | None = None) -> None:
@@ -165,39 +170,67 @@ def check_sandbox_server(spec: HarborTaskJobSpec) -> None:
         )
 
 
-def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: HarborTaskJobSpec) -> HarborRuntimeConfig:
+def prepared_compose_services(task_dir: Path, environment: PreparedHarborEnvironment) -> dict[str, Any] | None:
+    """The task's ``compose_services`` kwarg with each service on the image the run prepared for it; None without any.
+
+    Call before :func:`bind_task_image`: binding sets ``docker_image``, which makes the parser skip main's Dockerfile
+    and lose its ``ENTRYPOINT``.
+
+    Raises:
+        ComposeError: The task's compose file can't run as a pod.
+        ValueError: The prepared images are not for the task's services.
+    """
+    images = {name: image.image_ref for name, image in environment.compose_images.items()}
+    spec = compose_services_kwarg(task_dir, images)
+
+    services = {service["name"] for service in spec["services"]} if spec is not None else set()
+    if services != set(images):
+        raise ValueError(
+            f"the task's compose services {sorted(services)} are not the services the run prepared images for "
+            f"{sorted(images)}"
+        )
+    return spec
+
+
+def configure_runtime(
+    config: HarborRuntimeConfig,
+    ctx: JobContext,
+    spec: HarborTaskJobSpec,
+    compose_services: dict[str, Any] | None = None,
+) -> HarborRuntimeConfig:
     """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time.
 
     The request's resource overrides size the agent sandbox only; a separate verifier keeps task.toml's
     resources. Every sandbox gets ``resource_defaults(policy)`` for unset cpus and memory_mb, the values
     submit checked against the profile's ceilings. No Harbor resource mode is set, so every value is a limit.
+    A compose task's services go to the environment as ``compose_services``.
     """
     policy = spec.sandbox_policy
     connection = policy.connection
-    environment = HarborEnvironmentConfig(
-        import_path=OPENSANDBOX_ENVIRONMENT,
-        kwargs={
-            "domain": connection.domain,
-            "protocol": connection.protocol,
-            "use_server_proxy": connection.use_server_proxy,
-            "ready_timeout_sec": SANDBOX_READY_TIMEOUT_S,
-            "request_timeout_sec": connection.request_timeout_s,
-            "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
-            "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
-            "agent_channel_hosts": list(policy.agent_channel),
-            "agent_setup_hosts": list(policy.agent_setup_egress),
-            "egress_verification": policy.egress_verification,
-            "enforce_disk_limit": policy.enforce_disk_limit,
-            "max_disk_mb": policy.max_disk_mb,
-            "agent_resource_overrides": policy.resource_overrides.model_dump(exclude_none=True),
-            "sandbox_resource_defaults": resource_defaults(policy),
-            "metadata": {
-                "nemo-run": spec.run_id,
-                "nemo-task-index": str(spec.task_index),
-                "nemo-job": ctx.job_id or spec.run_id,
-            },
+    kwargs: dict[str, Any] = {
+        "domain": connection.domain,
+        "protocol": connection.protocol,
+        "use_server_proxy": connection.use_server_proxy,
+        "ready_timeout_sec": SANDBOX_READY_TIMEOUT_S,
+        "request_timeout_sec": connection.request_timeout_s,
+        "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
+        "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
+        "agent_channel_hosts": list(policy.agent_channel),
+        "agent_setup_hosts": list(policy.agent_setup_egress),
+        "egress_verification": policy.egress_verification,
+        "enforce_disk_limit": policy.enforce_disk_limit,
+        "max_disk_mb": policy.max_disk_mb,
+        "agent_resource_overrides": policy.resource_overrides.model_dump(exclude_none=True),
+        "sandbox_resource_defaults": resource_defaults(policy),
+        "metadata": {
+            "nemo-run": spec.run_id,
+            "nemo-task-index": str(spec.task_index),
+            "nemo-job": ctx.job_id or spec.run_id,
         },
-    )
+    }
+    if compose_services is not None:
+        kwargs["compose_services"] = compose_services
+    environment = HarborEnvironmentConfig(import_path=OPENSANDBOX_ENVIRONMENT, kwargs=kwargs)
     update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
     agent = config.agent_import_path or config.agent_name or "oracle"
     if policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
@@ -220,13 +253,11 @@ def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str |
     task names for the verifier is replaced. Returns whether it was bound. Ported from scaled-evals.
 
     Raises:
-        ValueError: The task is a compose task, or its task.toml tables are malformed.
+        ValueError: The task's task.toml tables are malformed.
     """
     import tomlkit  # the cpu-tasks group installs it in the dispatcher image
     from tomlkit.items import InlineTable, Table
 
-    if any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES):
-        raise ValueError("compose tasks are not supported in the MVP")
     task_toml = task_dir / "task.toml"
     document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
 

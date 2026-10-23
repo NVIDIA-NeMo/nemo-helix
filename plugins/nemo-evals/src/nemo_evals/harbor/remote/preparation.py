@@ -18,10 +18,18 @@ from typing import Literal, Protocol, Self, get_args
 
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
+from nemo_evals.harbor.compose.models import ComposeError, ComposeTask
+from nemo_evals.harbor.compose.spec import check_compose_task
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
-from nemo_evals.harbor.remote.sandbox_policy import task_resources_violation
+from nemo_evals.harbor.remote.sandbox_policy import compose_resources_violation, task_resources_violation
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
-from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config
+from nemo_evals.image_builds.planning import (
+    MAIN_SERVICE,
+    SERVICE_ROLE_PREFIX,
+    VERIFIER_ROLE,
+    ImagePlanError,
+    parse_task_config,
+)
 from nemo_evals.image_builds.runner import read_task_archive
 from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildJobConflictError, ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
@@ -37,8 +45,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 logger = logging.getLogger(__name__)
 
 ImageRole = Literal["agent", "verifier"]
-"""``agent`` is ``image_builds``' ``BuildImage.role == "main"`` (Harbor's name for the agent container).
-TODO(M3 story 8b): add ``service``."""
+"""``agent`` is ``image_builds``' ``BuildImage.role == "main"`` (Harbor's name for the agent container)."""
+
+ErrorImageRole = Literal["agent", "verifier", "service"]
+"""The image an error names. ``service`` is one of the task's compose services, which the error's detail names.
+Service images are recorded only in ``PreparedHarborEnvironment.compose_images``: a variable number of them can't be
+keyed by role, and how their progress is stored is for when preparation can be pending."""
 
 PreparationErrorCode = Literal[
     # Raised by image_builds.planning today (ImagePlanError, #2881)
@@ -79,7 +91,7 @@ class PreparationErrorInfo(BaseModel):
 
     code: PreparationErrorCode
     detail: str = Field(description="Human-readable reason, for logs and `runs tasks`.")
-    role: ImageRole | None = Field(default=None, description="The image that failed; None for task-level errors.")
+    role: ErrorImageRole | None = Field(default=None, description="The image that failed; None for task-level errors.")
 
 
 class ImagePreparation(BaseModel):
@@ -193,10 +205,8 @@ class ImageBuildPreparer:
             return _plan_error(exc)
         except NemoHTTPError as exc:
             raise ImagePreparationUnavailableError(f"could not read task {task.id}'s archive: {exc}") from exc
-        if archive.compose is not None:
-            return PreparationErrorInfo(
-                code="multi_container_not_yet_supported", detail="compose tasks aren't supported on Kubernetes runs yet"
-            )
+        if archive.compose_task is not None:
+            return _check_compose(archive.compose_task, policy)
         return None
 
     async def __call__(
@@ -241,6 +251,20 @@ class ImageBuildPreparer:
         return _from_build(build, definition)
 
 
+def _check_compose(task: ComposeTask, policy: ResolvedHarborSandboxPolicy) -> PreparationErrorInfo | None:
+    """Reject a compose task that can't run as a pod, or whose services declare more than the policy allows.
+
+    The parser's own message is the detail, so users see which key of which file is the problem.
+    """
+    try:
+        services = check_compose_task(task)
+    except ComposeError as exc:
+        return PreparationErrorInfo(code="invalid_compose_file", detail=str(exc))
+    if (violation := compose_resources_violation(services, policy)) is not None:
+        return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
+    return None
+
+
 prepare_task_images = ImageBuildPreparer()
 """The deployment's preparer."""
 
@@ -280,14 +304,15 @@ def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> 
             "(`nemo evals runs submit` waits for it)",
         )
     images: dict[ImageRole, ImagePreparation] = {}
+    compose_images: dict[str, PreparedImage] = {}
     for image in build.images:
         role = _ROLE_BY_BUILD_ROLE.get(image.role)
-        if role is None:
-            return _failed(
-                "multi_container_not_yet_supported", f"image build {build.id} of {target} has a {image.role} image"
-            )
         if image.status != "ready" or image.image_ref is None:
-            return _failed("image_unavailable", f"image build {build.id} has no ready {image.role} image", role=role)
+            return _failed(
+                "image_unavailable",
+                f"image build {build.id} has no ready {image.role} image",
+                role=role or "service",
+            )
         built = image.source == "dockerfile"
         prepared = PreparedImage(
             image_ref=image.image_ref,
@@ -296,6 +321,10 @@ def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> 
             build_job=image.build_job,
             source_archive_digest=definition.source.files_hash if built else None,
         )
+        if role is None:
+            # The task Job looks up a service's image by the service's own name.
+            compose_images[image.role.removeprefix(SERVICE_ROLE_PREFIX)] = prepared
+            continue
         source: Literal["prebuilt", "built"] = "built" if built else "prebuilt"
         images[role] = ImagePreparation(
             role=role, preparation_key=prepared.preparation_key, source=source, prepared=prepared
@@ -308,6 +337,7 @@ def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> 
         archive_digest=definition.source.files_hash,
         agent=agent,
         verifier=images["verifier"].prepared if "verifier" in images else None,
+        compose_images=compose_images,
     )
     return TaskPreparation(status="ready", resource_class="cpu", images=images, environment=environment)
 
@@ -317,5 +347,6 @@ def _plan_error(exc: ImagePlanError) -> PreparationErrorInfo:
     return PreparationErrorInfo(code=code, detail=exc.detail)  # ty: ignore[invalid-argument-type]
 
 
-def _failed(code: PreparationErrorCode, detail: str, *, role: ImageRole | None = None) -> TaskPreparation:
+def _failed(code: PreparationErrorCode, detail: str, *, role: ErrorImageRole | None = None) -> TaskPreparation:
+    """A failed preparation with ``code`` and ``detail``; ``role`` names the image that failed, if one did."""
     return TaskPreparation(status="failed", error=PreparationErrorInfo(code=code, detail=detail, role=role))
