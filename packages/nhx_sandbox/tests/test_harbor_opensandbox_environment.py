@@ -313,6 +313,29 @@ async def test_sends_task_resources_env_and_gpu_types(tmp_path: Path, server: Se
     assert sent["timeout"].total_seconds() == 600
 
 
+async def test_a_sandbox_created_later_still_ends_at_the_expiry(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each create cuts the lifetime to the time left, so a later sandbox (a retry, a separate verifier) built
+    from the same settings ends when the first one does, not ``sandbox_timeout_sec`` after its own create."""
+    settings: dict[str, Any] = {"sandbox_timeout_sec": 3600, "sandbox_expires_at": "2026-10-23T13:00:00+00:00"}
+    now = [datetime(2026, 10, 23, 12, 30, tzinfo=UTC).timestamp()]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+
+    await _environment(tmp_path, server, NetworkMode.NO_NETWORK, **settings)._create_sandbox()
+    now[0] += 20 * 60
+    await _environment(tmp_path, server, NetworkMode.NO_NETWORK, trial_name="later", **settings)._create_sandbox()
+    now[0] += 20 * 60  # past the expiry
+    await _environment(tmp_path, server, NetworkMode.NO_NETWORK, trial_name="late", **settings)._create_sandbox()
+
+    assert [create["timeout"].total_seconds() for create in server.creates[-3:]] == [1800, 600, 1]
+
+
+async def test_without_an_expiry_every_sandbox_gets_the_full_lifetime(tmp_path: Path, server: Server) -> None:
+    await _environment(tmp_path, server, NetworkMode.NO_NETWORK, sandbox_timeout_sec=3600)._create_sandbox()
+    assert server.creates[-1]["timeout"].total_seconds() == 3600
+
+
 async def test_kills_the_sandbox_when_the_applied_default_is_wrong(tmp_path: Path, server: Server) -> None:
     """A sandbox whose applied default action differs from the requested one is killed."""
     server.applied_default = "allow"

@@ -190,8 +190,16 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
     The request's resource overrides size the agent sandbox only; a separate verifier keeps task.toml's
     resources. Every sandbox gets ``resource_defaults(policy)`` for unset cpus and memory_mb, the values
     submit checked against the profile's ceilings. No Harbor resource mode is set, so every value is a limit.
+
+    No sandbox outlives the run's execution deadline: the environment cuts each sandbox's lifetime to the time
+    left when it creates it, so a later one (a retry, a separate verifier) ends then too. A dispatcher that is
+    cancelled, OOM-killed or evicted leaks its sandboxes only until the deadline, not for the profile's whole
+    ``max_sandbox_lifetime_s``. TODO(M4 story 8): the controller deletes them on stop.
     """
     policy = spec.sandbox_policy
+    deadline = spec.execution_deadline_at
+    if deadline.utcoffset() is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
     connection = policy.connection
     environment = HarborEnvironmentConfig(
         import_path=OPENSANDBOX_ENVIRONMENT,
@@ -202,6 +210,7 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "ready_timeout_sec": SANDBOX_READY_TIMEOUT_S,
             "request_timeout_sec": connection.request_timeout_s,
             "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
+            "sandbox_expires_at": deadline.isoformat(),
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
             AGENT_CHANNEL_HOSTS_KWARG: list(policy.agent_channel),
             "agent_setup_hosts": list(policy.agent_setup_egress),
