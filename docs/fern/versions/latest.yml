@@ -543,6 +543,9 @@ navigation:
           - section: Release Notes
             path: ../../about/release-notes/index.mdx
             contents:
+              - page: v0.8.1
+                slug: release-0-8-1
+                path: ../../about/release-notes/release-0-8-1.mdx
               - page: Current Release
                 path: ../../about/release-notes/current-release.mdx
               - page: v0.7.1
