@@ -314,6 +314,22 @@ def configured_subprocess_translation_profiles() -> set[str]:
     return {profile.profile for profile in config.executors if profile.provider == "subprocess"}
 
 
+async def require_delegated_create_permission(auth_client: AuthClient, workspace: str) -> None:
+    """Refuse with 403 a create that a service makes for a user who may not create jobs in ``workspace``.
+
+    The route gate passes a delegated service principal on the service's own role. Without this
+    check, the user's missing access first shows up as the entity store's 422 for the workspace.
+    """
+    principal = auth_client.principal
+    if not (principal.is_privileged() and principal.is_delegated):
+        return
+    if not await auth_client.on_behalf_of_has_permissions(workspace, ["jobs.create"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Principal '{principal.on_behalf_of}' is not allowed to create jobs in workspace '{workspace}'.",
+        )
+
+
 # Execution Profiles Endpoint
 @router.get("/v2/execution-profiles")
 async def get_execution_profiles() -> list[ExecutionProfileT]:
@@ -338,6 +354,7 @@ async def create_job(
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
     """Create a new platform job."""
+    await require_delegated_create_permission(auth_client, workspace)
     platform_spec = translate_cpu_container_steps_to_subprocess(
         request.platform_spec, configured_subprocess_translation_profiles()
     )
