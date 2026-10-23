@@ -14,7 +14,7 @@ import {
   Spinner,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Download as DownloadIcon, MoreVert } from '@nvidia/react-gui-icons/icons';
+import { Download, MoreVert } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode } from 'react';
 
 interface CSVPreviewProps {
@@ -90,7 +90,7 @@ export const FilePreview: FC<CSVPreviewProps> = ({
           <DropdownContent align="end">
             <DropdownItem onClick={handleDownload}>
               <Flex align="center" gap="density-sm">
-                <DownloadIcon size="20" fill="solid" />
+                <Download size="20" fill="solid" />
                 Download
               </Flex>
             </DropdownItem>

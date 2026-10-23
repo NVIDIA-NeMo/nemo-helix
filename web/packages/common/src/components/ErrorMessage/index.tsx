@@ -8,7 +8,7 @@ import {
   Stack,
   Button,
 } from '@nvidia/foundations-react-core';
-import { IconError as ErrorIcon } from '@nvidia/react-gui-icons/icons';
+import { IconError } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -45,7 +45,7 @@ export const ErrorMessage: FC<ErrorMessageProps> = ({
     <Stack gap="density-md" align="center" justify="center" style={{ height }}>
       <StatusMessage
         slotHeading={header}
-        slotMedia={slotMedia ?? <ErrorIcon className="size-16" />}
+        slotMedia={slotMedia ?? <IconError className="size-16" />}
         slotSubheading={message}
         slotFooter={slotFooter ?? defaultRenderAction}
         className="max-w-[640px]"

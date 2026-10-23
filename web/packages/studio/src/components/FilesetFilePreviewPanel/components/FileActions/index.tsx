@@ -12,13 +12,7 @@ import {
   DropdownTrigger,
   Flex,
 } from '@nvidia/foundations-react-core';
-import {
-  Download as DownloadIcon,
-  Pencil,
-  Trash,
-  Split,
-  MoreVert,
-} from '@nvidia/react-gui-icons/icons';
+import { Download, Pencil, Trash, Split, MoreVert } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
@@ -134,7 +128,7 @@ export const FileActions: FC<Props> = ({
           </DropdownItem>
           <DropdownItem onClick={downloadFile}>
             <Flex align="center" gap="density-sm">
-              <DownloadIcon size="20" />
+              <Download size="20" />
               Download
             </Flex>
           </DropdownItem>

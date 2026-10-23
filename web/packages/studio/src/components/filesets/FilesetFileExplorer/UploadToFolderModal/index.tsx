@@ -17,7 +17,7 @@ import {
   Upload,
   type UploadRootProps,
 } from '@nvidia/foundations-react-core';
-import { FolderClosed, Upload as UploadIcon } from '@nvidia/react-gui-icons/icons';
+import { FolderClosed, Upload as UploadIcon } from '@nvidia/react-gui-icons/icons'; // UploadIcon alias needed: Upload name conflicts with KUI Upload component above
 import { collectFolderPathsFromDatasetFiles } from '@studio/util/files';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 

@@ -3,7 +3,7 @@
 
 import { type Attachment, AttachmentPrimitive, ComposerPrimitive } from '@assistant-ui/react';
 import { Flex, Tooltip } from '@nvidia/foundations-react-core';
-import { IconImage as ImageIcon, Close } from '@nvidia/react-gui-icons/icons';
+import { IconImage, Close } from '@nvidia/react-gui-icons/icons';
 import { useEffect, useState } from 'react';
 
 const useImagePreviewUrl = (file?: File): string | undefined => {
@@ -39,7 +39,7 @@ const ComposerAttachmentChip = ({ attachment }: { attachment: Attachment }) => {
           />
         ) : (
           <div className="flex size-full items-center justify-center text-fg-subtle">
-            <ImageIcon size="18" />
+            <IconImage size="18" />
           </div>
         )}
         <AttachmentPrimitive.Remove asChild>

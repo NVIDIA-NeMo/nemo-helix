@@ -8,7 +8,7 @@ import {
   StatusMessage,
   type StatusMessageProps,
 } from '@nvidia/foundations-react-core';
-import { IconError as ErrorIcon, Filter, Refresh } from '@nvidia/react-gui-icons/icons';
+import { IconError, Filter, Refresh } from '@nvidia/react-gui-icons/icons';
 import type { JSX } from 'react';
 
 export type TableStatusState = Pick<
@@ -42,7 +42,7 @@ export function StatusResult({
       <Flex justify="center" className="p-density-md">
         <StatusMessage
           attributes={{ StatusMessageMedia: { className: '!text-feedback-danger' } }}
-          slotMedia={<ErrorIcon variant="fill" />}
+          slotMedia={<IconError variant="fill" />}
           slotHeading="Something went wrong"
           slotSubheading="There was an error loading the data. If the problem persists, please contact support."
           slotFooter={

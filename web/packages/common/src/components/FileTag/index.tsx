@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Tag, TagProps } from '@nvidia/foundations-react-core';
-import { CheckCircle, Close, Refresh, IconError as ErrorIcon } from '@nvidia/react-gui-icons/icons';
+import { CheckCircle, Close, Refresh, IconError } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode, MouseEventHandler } from 'react';
 
 export type FileTagStatus = 'success' | 'pending' | 'error' | 'idle';
@@ -47,7 +47,7 @@ export const FileTag: FC<FileTagProps> = ({
       )}
       {status === 'pending' && <Refresh width="16" height="16" />}
       {status === 'error' && (
-        <ErrorIcon color="var(--text-color-feedback-danger)" width="16" height="16" />
+        <IconError color="var(--text-color-feedback-danger)" width="16" height="16" />
       )}
       {fileName ? (
         <Tag
