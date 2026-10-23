@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CopyGeneric, Download, FolderOpen, Trash } from '@nemo/icons/icons';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { BulkDeleteModal } from '@studio/components/filesets/FilesetFileExplorer/BulkDeleteModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { getTextWithCount } from '@studio/util/strings';
-import { Copy, Download, FolderOpen, Trash } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface BulkActionsBarProps {
@@ -76,7 +76,7 @@ export const BulkActionsBar: FC<BulkActionsBarProps> = ({
                 }}
                 data-testid="dataset-files-bulk-duplicate"
               >
-                <Copy />
+                <CopyGeneric />
                 Duplicate
               </Button>
               <Button kind="tertiary" onClick={onMove} data-testid="dataset-files-bulk-move">

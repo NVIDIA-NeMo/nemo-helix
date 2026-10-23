@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { triggerDownload } from '@nemo/common/src/utils/file';
+import { Download } from '@nemo/icons/icons';
 import {
   useSafeSynthesizerDownloadJobResultEvaluationReport as useDownloadJobResultEvaluationReportV1beta1GenerateJobsJobIdResultsEvaluationReportDownloadGet,
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
@@ -10,7 +11,6 @@ import { Button, Panel } from '@nvidia/foundations-react-core';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { Download } from 'lucide-react';
 import { FC } from 'react';
 
 interface OverviewPanelProps {

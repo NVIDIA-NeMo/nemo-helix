@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ArrowRight } from '@nemo/icons/icons';
 import { Anchor } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { getStudioInternalLinkTarget } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLinkTarget';
-import { ArrowRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 

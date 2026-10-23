@@ -5,6 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import ModelEvaluationIcon from '@nemo/common/src/svgs/model_evaluation.svg?react';
 import SafeSynthesizerLogo from '@nemo/common/src/svgs/safe_synthesizer_logo.svg?react';
+import { CubeStack } from '@nemo/icons/icons';
 import { Grid, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CUSTOMIZER_ENABLED,
@@ -18,7 +19,6 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute, getModelCompareRoute } from '@studio/routes/utils';
 import { DashboardCard } from '@studio/routes/WorkspaceDashboardRoute/DashboardCard';
 import { ResourcesSection } from '@studio/routes/WorkspaceDashboardRoute/ResourcesSection';
-import { Boxes } from 'lucide-react';
 import type { FC } from 'react';
 import { generatePath } from 'react-router';
 
@@ -52,7 +52,7 @@ export const WorkspaceDashboardRoute: FC = () => {
             <Grid cols={{ md: 1, lg: 3 }} gap="density-xl">
               {MODEL_COMPARE_ENABLED && (
                 <DashboardCard
-                  icon={<Boxes className="w-8 h-8" />}
+                  icon={<CubeStack className="w-8 h-8" />}
                   title="Chat with a Model"
                   description="Chat with base models and explore capabilities."
                   actionLabel="Chat"

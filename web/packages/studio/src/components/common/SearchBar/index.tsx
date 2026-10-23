@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import { FormField, TextInput } from '@nvidia/foundations-react-core';
-import { Search } from 'lucide-react';
 import { ComponentProps } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 
@@ -49,7 +49,7 @@ export const SearchBar = ({
     >
       <FormField slotLabel={label}>
         <TextInput
-          slotStart={<Search />}
+          slotStart={<MagnifyingGlass />}
           {...register('searchString')}
           {...inputProps}
           size="small"

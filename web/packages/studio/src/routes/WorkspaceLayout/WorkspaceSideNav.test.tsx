@@ -61,7 +61,7 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
 const findPluginLinkWithIcon = async (name: string) => {
   const link = screen.getByRole('link', { name });
   // eslint-disable-next-line testing-library/no-node-access
-  await waitFor(() => expect(link.closest('li')?.querySelector('svg.lucide')).not.toBeNull());
+  await waitFor(() => expect(link.closest('li')?.querySelector('svg')).not.toBeNull());
   return link;
 };
 

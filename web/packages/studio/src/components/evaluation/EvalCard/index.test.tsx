@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Star } from '@nemo/icons/icons';
 import { EvalCard } from '@studio/components/evaluation/EvalCard';
 import { render, screen } from '@testing-library/react';
-import { Star } from 'lucide-react';
 
 describe('EvalCard', () => {
   it('renders the metric name', () => {
@@ -37,7 +37,7 @@ describe('EvalCard', () => {
   });
 
   it('renders a custom icon when provided', () => {
-    render(<EvalCard name="my-metric" icon={<Star data-testid="custom-icon" size={12} />} />);
+    render(<EvalCard name="my-metric" icon={<Star data-testid="custom-icon" size="12" />} />);
     expect(screen.getByTestId('custom-icon')).toBeInTheDocument();
   });
 });

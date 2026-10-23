@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Download, IconDocument, FolderOpen, Add, Floppy } from '@nemo/icons/icons';
 import { Button, Flex, Spinner, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { FILE_FORMAT_TAG_COLOR } from '@studio/components/FileRowEditor/constants';
 import type { DataFileFormat } from '@studio/components/FileRowEditor/parse';
-import { Download, FileSpreadsheet, FolderOpen, Plus, Save } from 'lucide-react';
 import { type ChangeEvent, type FC, type ReactNode, type RefObject } from 'react';
 
 export interface FileHeaderProps {
@@ -64,7 +64,7 @@ export const FileHeader: FC<FileHeaderProps> = ({
 }) => (
   <Flex align="center" gap="density-md" className="w-full shrink-0">
     <Flex align="center" justify="center" className="size-10 shrink-0 rounded-md bg-surface-sunken">
-      <FileSpreadsheet className="size-20 text-secondary" />
+      <IconDocument className="size-20 text-secondary" />
     </Flex>
     <Stack gap="density-xs" className="min-w-0 flex-1">
       <Flex align="center" gap="density-sm" className="min-w-0">
@@ -108,13 +108,13 @@ export const FileHeader: FC<FileHeaderProps> = ({
             onChange={onFileSelected}
           />
           <Button kind="secondary" color="neutral" onClick={onOpenFileClick}>
-            <FolderOpen size={16} />
+            <FolderOpen size="16" />
             Open File
           </Button>
         </>
       )}
       <Button kind="secondary" color="neutral" onClick={onDownload} disabled={downloadDisabled}>
-        <Download size={16} />
+        <Download size="16" />
         Download
       </Button>
       <Button
@@ -122,7 +122,7 @@ export const FileHeader: FC<FileHeaderProps> = ({
         color={onSaveFile ? 'neutral' : 'brand'}
         onClick={onAddRow}
       >
-        <Plus size={16} />
+        <Add size="16" />
         Add Row
       </Button>
       {onSaveFile && (
@@ -134,7 +134,7 @@ export const FileHeader: FC<FileHeaderProps> = ({
             disabled={saveDisabled || isSaving || Boolean(saveDisabledReason)}
             title={saveDisabledReason}
           >
-            {isSaving ? <Spinner size="small" aria-label="Saving" /> : <Save size={16} />}
+            {isSaving ? <Spinner size="small" aria-label="Saving" /> : <Floppy size="16" />}
             Save File
           </Button>
           {hasUnsavedChanges && (

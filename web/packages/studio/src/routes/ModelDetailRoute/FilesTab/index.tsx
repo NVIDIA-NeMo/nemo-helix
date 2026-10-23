@@ -3,6 +3,7 @@
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { FolderOpen } from '@nemo/icons/icons';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
@@ -12,7 +13,6 @@ import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import type { FilesetRef } from '@studio/hooks/useModelLineage';
 import { FilesTab as FilesetFilesTab } from '@studio/routes/FilesetDetailRoute/FilesTab';
-import { FolderOpen } from 'lucide-react';
 import type { FC, ReactNode } from 'react';
 
 export interface FilesTabProps {

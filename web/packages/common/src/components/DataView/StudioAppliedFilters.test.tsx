@@ -36,10 +36,6 @@ vi.mock('@nvidia/foundations-react-core', () => ({
   ),
 }));
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 function makeColumn(
   id: string,
   overrides: {

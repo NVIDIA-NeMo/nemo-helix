@@ -4,8 +4,8 @@
 import { CODE_BLOCK_SURFACE_CLASS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import { summarizeRepeatedSubtleToolActions } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
 import type { SubtleToolAction } from '@nemo/common/src/components/AssistantChat/toolCall/types';
+import { ChevronRight, CopyGeneric } from '@nemo/icons/icons';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, Copy } from 'lucide-react';
 
 interface SubtleToolCallRowProps {
   readonly actions: readonly SubtleToolAction[];
@@ -42,7 +42,7 @@ const InvocationPanel = ({
         title="Copy invocation"
         type="button"
       >
-        <Copy aria-hidden className="size-3.5" />
+        <CopyGeneric aria-hidden className="size-3.5" />
       </button>
       <pre
         className={`max-h-72 w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-words rounded ${CODE_BLOCK_SURFACE_CLASS} p-density-sm pr-density-xl text-xs leading-relaxed text-secondary`}

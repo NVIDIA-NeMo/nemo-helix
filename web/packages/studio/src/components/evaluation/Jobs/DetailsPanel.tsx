@@ -11,6 +11,7 @@ import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { logger } from '@nemo/common/src/utils/logger';
+import { ChartBar, CloseCircle } from '@nemo/icons/icons';
 import {
   getEvalsGetEvaluateJobQueryKey,
   useEvalsCancelEvaluateJob,
@@ -25,7 +26,6 @@ import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutco
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChartBar, CircleX } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
@@ -141,7 +141,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
                 size="small"
                 onClick={() => setCancelModalOpen(true)}
               >
-                <CircleX /> Cancel Job
+                <CloseCircle /> Cancel Job
               </Button>
             )}
           </Flex>
@@ -233,7 +233,7 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
         onOpenChange={(open) => !isCancelling && setCancelModalOpen(open)}
         slotHeading={
           <Flex align="center" gap="density-sm">
-            <CircleX />
+            <CloseCircle />
             Cancel Evaluation Job
           </Flex>
         }

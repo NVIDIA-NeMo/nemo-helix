@@ -10,9 +10,9 @@ import { FileList, FileListItem } from '@nemo/common/src/components/FileList';
 import { UploadModal } from '@nemo/common/src/components/UploadModal/index';
 import { InlineUploadPicker } from '@nemo/common/src/components/UploadModal/InlineUploadPicker';
 import type { SubmitUploadType } from '@nemo/common/src/components/UploadModal/types';
+import { FolderOpen } from '@nemo/icons/icons';
 import type { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
-import { FolderOpen } from 'lucide-react';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 
 export type AcceptedFileType = '.json' | '.jsonl' | '.csv' | '.parquet' | '.yml' | '.yaml';

@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Add } from '@nemo/icons/icons';
 import {
   getListEvaluationsQueryKey,
   usePatchEvaluation,
@@ -35,7 +36,6 @@ import {
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { Plus } from 'lucide-react';
 import { type FC, type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 
@@ -268,7 +268,7 @@ export const AddToGroupModal: FC<AddToGroupModalProps> = ({
                 {/* "Create new" sits at the bottom of the list, matching the workspace dropdown. */}
                 <SelectItem value={CREATE_NEW}>
                   <Flex gap="density-sm" align="center">
-                    <Plus className="size-4" />
+                    <Add className="size-4" />
                     Create new experiment
                   </Flex>
                 </SelectItem>

@@ -5,6 +5,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import { InfoCircle, Retry } from '@nemo/icons/icons';
 import {
   Text,
   Stack,
@@ -22,7 +23,6 @@ import {
   SafeSynthesizerFormData,
   getSafeSynthesizerFormDefaults,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
-import { Info, RotateCcw } from 'lucide-react';
 import { useFormContext } from 'react-hook-form';
 
 export const AdvancedParameters = () => {
@@ -65,7 +65,7 @@ export const AdvancedParameters = () => {
                   slotContent="Controls the randomness of responses. Lower values make output more focused and deterministic, while higher values increase creativity and variability."
                   side="bottom"
                 >
-                  <Info className="inline ml-density-sm" />
+                  <InfoCircle className="inline ml-density-sm" />
                 </Tooltip>
               </>
             ),
@@ -102,7 +102,7 @@ export const AdvancedParameters = () => {
                   slotContent="Controls output diversity by only considering the most likely words until their combined probability reaches this percentage, filtering out improbable options."
                   side="bottom"
                 >
-                  <Info className="inline ml-density-sm" />
+                  <InfoCircle className="inline ml-density-sm" />
                 </Tooltip>
               </>
             ),
@@ -139,7 +139,7 @@ export const AdvancedParameters = () => {
                   slotContent="Penalty for the model repeating the same token on generation. A value of 1.0 means no penalty. Values greater than 1.0 reduce the likelihood of repeating the same token."
                   side="bottom"
                 >
-                  <Info className="inline ml-density-sm" />
+                  <InfoCircle className="inline ml-density-sm" />
                 </Tooltip>
               </>
             ),
@@ -179,7 +179,7 @@ export const AdvancedParameters = () => {
                   slotContent="Model that gets fine-tuned to generate synthetic data."
                   side="bottom"
                 >
-                  <Info className="inline ml-density-sm" />
+                  <InfoCircle className="inline ml-density-sm" />
                 </Tooltip>
               </>
             ),
@@ -203,7 +203,7 @@ export const AdvancedParameters = () => {
                   slotContent="Total number of non-unique records seen by the model. It is effectively the product of training data size and the number of epochs. If 'num_input_records_to_sample' is greater than the sample size, the model is trained on each record multiple times; otherwise, the model is trained on a subset of the records. Recommended value 10,000 or more."
                   side="bottom"
                 >
-                  <Info className="inline ml-density-sm" />
+                  <InfoCircle className="inline ml-density-sm" />
                 </Tooltip>
               </>
             }
@@ -241,7 +241,7 @@ export const AdvancedParameters = () => {
                 className="shrink-0"
                 type="button"
               >
-                <RotateCcw />
+                <Retry />
               </Button>
             }
           />
@@ -288,7 +288,7 @@ export const AdvancedParameters = () => {
                   slotContent="Scaling factor for the model's context window; an integer >=1. 1 means no additional scaling of the model's context window. Lower is better for quality, but higher may be required if your records (or groups of records, in case of event-driven data) are too large to fit in the original context window. Higher values require more GPU RAM, so reduce if hitting OOM errors. Up to 6 typically works and higher values may be possible with large GPUs."
                   side="bottom"
                 >
-                  <Info className="inline ml-density-sm" />
+                  <InfoCircle className="inline ml-density-sm" />
                 </Tooltip>
               </>
             ),
@@ -322,7 +322,7 @@ export const AdvancedParameters = () => {
               className="shrink-0"
               type="button"
             >
-              <RotateCcw />
+              <Retry />
             </Button>
           }
         />
@@ -356,7 +356,7 @@ export const AdvancedParameters = () => {
               slotContent="Automatically redact or replace Personally Identifiable Information (PII) prior to training the model. Highly recommended to ensure the model has no chance to learn this sensitive information."
               side="bottom"
             >
-              <Info className="inline ml-density-sm" />
+              <InfoCircle className="inline ml-density-sm" />
             </Tooltip>
           </Text>
           <div className="flex-1">

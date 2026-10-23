@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { GridColDef } from '@mui/x-data-grid';
+import { FolderClosed, IconDocument } from '@nemo/icons/icons';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { Flex } from '@nvidia/foundations-react-core';
 import { DirectoryQuickActions } from '@studio/components/FilesTable/DirectoryQuickActions';
 import { FileQuickActions } from '@studio/components/FilesTable/FileQuickActions';
 import { getHumanReadableFileSize } from '@studio/util/files';
-import { FolderClosed, File } from 'lucide-react';
 
 /**
  * Base file entry interface that works with both HuggingFace ListFileEntry and v2 FilesetFileOutput.
@@ -207,7 +207,7 @@ export const getFilesTablesColumns = ({
       headerName: 'Name',
       flex: 3,
       renderCell: ({ row: file }) => {
-        const icon = file.type === 'directory' ? <FolderClosed /> : <File />;
+        const icon = file.type === 'directory' ? <FolderClosed /> : <IconDocument />;
         const filename = file.path.split('/').pop();
         return (
           <Flex gap="density-sm" align="center">

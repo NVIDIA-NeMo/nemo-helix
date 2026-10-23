@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { DEFAULT_PAGE_SIZE } from '@nemo/common/src/constants/api';
+import { ChatNew, Trash } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
@@ -22,7 +23,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import { ThumbButton } from '@studio/components/buttons/ThumbButton';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
-import { MessageSquarePlus, Trash2 } from 'lucide-react';
 import { type FC, useEffect, useMemo, useRef } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -203,7 +203,7 @@ export const AnnotationsPanel: FC<AnnotationsPanelProps> = ({
                 onClick={() => void deleteAnnotation(annotation.annotation_id)}
                 className="shrink-0"
               >
-                <Trash2 />
+                <Trash />
               </Button>
             </Flex>
           ))
@@ -239,7 +239,7 @@ export const AnnotationsPanel: FC<AnnotationsPanelProps> = ({
             </FormField>
             <Flex justify="end">
               <Button type="submit" disabled={isMutating || !isValid}>
-                <MessageSquarePlus />
+                <ChatNew />
                 Add Note
               </Button>
             </Flex>

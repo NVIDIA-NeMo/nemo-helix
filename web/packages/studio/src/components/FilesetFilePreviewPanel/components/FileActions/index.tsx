@@ -4,6 +4,7 @@
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
+import { Download, Pencil, Trash, Split, MoreVert } from '@nemo/icons/icons';
 import {
   Button,
   DropdownContent,
@@ -19,7 +20,6 @@ import { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/ut
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import LargeFileWorker from '@studio/workers/LargeFileWorker?worker';
-import { Download as DownloadIcon, Pencil, Trash, Split, EllipsisVertical } from 'lucide-react';
 import { FC, useState } from 'react';
 
 type ModalType = 'createSplit' | 'rename' | 'delete';
@@ -116,7 +116,7 @@ export const FileActions: FC<Props> = ({
             aria-label="Open file actions menu"
             className="absolute top-4 right-19"
           >
-            <EllipsisVertical />
+            <MoreVert />
           </Button>
         </DropdownTrigger>
         <DropdownContent align="end">
@@ -128,7 +128,7 @@ export const FileActions: FC<Props> = ({
           </DropdownItem>
           <DropdownItem onClick={downloadFile}>
             <Flex align="center" gap="density-sm">
-              <DownloadIcon size="20" />
+              <Download size="20" />
               Download
             </Flex>
           </DropdownItem>

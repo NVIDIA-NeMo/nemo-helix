@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Puzzle, Route, Sliders } from '@nemo/icons/icons';
 import {
   strategyOptions,
   UPLOAD_CONFIG_OPTION_ID,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
-import { Puzzle, Route, SlidersHorizontal } from 'lucide-react';
 
 describe('strategyOptions', () => {
   it('offers each installed strategy in its own words, keyed by name', () => {
@@ -36,7 +36,7 @@ describe('strategyOptions', () => {
     ])
       .filter((option) => option.id !== UPLOAD_CONFIG_OPTION_ID)
       .map((option) => option.icon);
-    expect(icons).toEqual([SlidersHorizontal, Route]);
+    expect(icons).toEqual([Sliders, Route]);
   });
 
   it('leads with the upload tile only when config-tuning is installed', () => {

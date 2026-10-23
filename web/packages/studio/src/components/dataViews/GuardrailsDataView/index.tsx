@@ -13,6 +13,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import { useGuardrailsListGuardrailConfigs } from '@nemo/sdk/generated/platform/guardrails';
 import type {
   GuardrailConfig,
@@ -25,7 +26,6 @@ import {
   getRailCounts,
 } from '@studio/components/dataViews/GuardrailsDataView/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback } from 'react';
 
 export interface GuardrailsDataViewProps {

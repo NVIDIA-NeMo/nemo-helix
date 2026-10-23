@@ -3,6 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { ChartTree } from '@nemo/icons/icons';
 import {
   Button,
   Card,
@@ -25,7 +26,6 @@ import type {
 } from '@studio/components/AgentTraceStatistics/types';
 import { RANGE_LABELS } from '@studio/components/AgentTraceStatistics/utils';
 import { AxiosError } from 'axios';
-import { ListTree } from 'lucide-react';
 import { type FC } from 'react';
 
 const RANGE_OPTIONS: TraceStatisticsRange[] = ['day', 'week', 'month', 'max'];
@@ -98,7 +98,7 @@ export const AgentTraceStatistics: FC<AgentTraceStatisticsProps> = ({
           <Flex gap="2" align="center">
             {onViewTraces && !isEmpty ? (
               <Button kind="tertiary" onClick={onViewTraces}>
-                <ListTree size={16} aria-hidden />
+                <ChartTree size="16" aria-hidden />
                 View traces
               </Button>
             ) : null}

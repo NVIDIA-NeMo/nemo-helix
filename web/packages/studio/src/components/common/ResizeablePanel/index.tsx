@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { GripEdgeVertical } from '@nemo/icons/icons';
 import cn from 'classnames';
-import { GripVertical } from 'lucide-react';
 import {
   type FC,
   type KeyboardEvent,
@@ -210,7 +210,7 @@ export const ResizeablePanel: FC<ResizeablePanelProps> = ({
                 isDragging && 'bg-border-brand'
               )}
             >
-              <GripVertical aria-hidden className="size-3 max-w-none text-secondary" />
+              <GripEdgeVertical aria-hidden className="size-3 max-w-none text-secondary" />
             </span>
           ) : (
             <>
@@ -221,7 +221,7 @@ export const ResizeablePanel: FC<ResizeablePanelProps> = ({
                   isDragging && 'bg-border-brand'
                 )}
               />
-              <GripVertical
+              <GripEdgeVertical
                 className={cn(
                   'relative z-10 size-3 text-content-secondary transition-opacity',
                   'opacity-0 group-hover:opacity-100',

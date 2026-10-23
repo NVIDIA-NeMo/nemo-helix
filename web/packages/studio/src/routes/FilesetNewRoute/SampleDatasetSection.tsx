@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DocumentCheckmark } from '@nemo/icons/icons';
 import {
   Badge,
   Block,
@@ -20,7 +21,6 @@ import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { SAMPLE_DATASETS, SampleDataset } from '@studio/constants/sampleDatasets';
 import type { DatasetFormFields } from '@studio/routes/FilesetNewRoute/types';
 import { useQueryClient } from '@tanstack/react-query';
-import { FileCheck } from 'lucide-react';
 import { FC } from 'react';
 import type { Control } from 'react-hook-form';
 
@@ -69,7 +69,7 @@ export const SampleDatasetSection: FC<SampleDatasetSectionProps> = ({
               className="cursor-pointer shadow-none!"
               slotHeader={
                 <Badge kind="solid" color="purple">
-                  <FileCheck />
+                  <DocumentCheckmark />
                   Sample Dataset
                 </Badge>
               }

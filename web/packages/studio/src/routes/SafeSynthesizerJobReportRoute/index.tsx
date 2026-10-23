@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { CheckmarkBadge, IconDocument, LockClosed } from '@nemo/icons/icons';
 import {
   useSafeSynthesizerDownloadJobResultSummary as useDownloadJobResultSummaryV1beta1GenerateJobsJobIdResultsSummaryDownloadGet,
   useSafeSynthesizerGetJobSuspense as useGetJobV1beta1GenerateJobsJobIdGetSuspense,
@@ -18,7 +19,6 @@ import { SyntheticQualityPanel } from '@studio/routes/SafeSynthesizerJobReportRo
 import { getSafeSynthesizerRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { BadgeCheck, File, Lock } from 'lucide-react';
 import { FC, useRef } from 'react';
 
 export type ReportSection = 'overview' | 'synthetic-quality' | 'data-privacy';
@@ -89,17 +89,17 @@ export const GenerateJobReportRoute: FC = () => {
     {
       id: 'overview',
       label: 'Overview',
-      icon: <File />,
+      icon: <IconDocument />,
     },
     {
       id: 'synthetic-quality',
       label: 'Synthetic Quality',
-      icon: <BadgeCheck />,
+      icon: <CheckmarkBadge />,
     },
     {
       id: 'data-privacy',
       label: 'Data Privacy',
-      icon: <Lock />,
+      icon: <LockClosed />,
     },
   ];
 

@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { Warning } from '@nemo/icons/icons';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -18,7 +19,6 @@ import {
   isSampleWorkspace,
   useSampleQuickstartAgent,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
-import { TriangleAlert } from 'lucide-react';
 import { useRef, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -36,7 +36,7 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
   return (
     <GradientBackground>
       {isSample && (
-        <Banner kind="global" status="warning" slotIcon={<TriangleAlert role="img" aria-hidden />}>
+        <Banner kind="global" status="warning" slotIcon={<Warning role="img" aria-hidden />}>
           Sample Sandbox. This sandbox can be reset at any time with nemo CLI.
         </Banner>
       )}

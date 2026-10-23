@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
+import { Sparkle, Upload, Close } from '@nemo/icons/icons';
 import { Button, Flex, Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CUSTOMIZER_ENABLED,
@@ -29,7 +30,6 @@ import {
   type DashboardPanelAction,
 } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { Sparkles, Upload, X } from 'lucide-react';
 import { useState, type FC, type ReactNode } from 'react';
 
 export interface QuickstartSectionProps {
@@ -204,7 +204,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           <Flex align="center" gap="density-sm">
             {canCreateSample && (
               <Button kind="secondary" size="small" onClick={() => setSampleModalOpen(true)}>
-                <Sparkles className="size-4" />
+                <Sparkle className="size-4" />
                 Try a Sample Agent
               </Button>
             )}
@@ -215,7 +215,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
               aria-label="Dismiss Quickstart"
               onClick={handleDismiss}
             >
-              <X className="size-4" />
+              <Close className="size-4" />
             </Button>
           </Flex>
         </Flex>

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { NvidiaGuiIconProps } from '@nemo/icons';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import type { AddColumnSelection } from '@studio/components/AddColumnPalette/types';
@@ -9,7 +10,7 @@ import type {
   StartOptionTag,
 } from '@studio/components/StartOptions/types';
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
-import type { LucideIcon } from 'lucide-react';
+import type { FC } from 'react';
 
 export type StartOptionId = 'ai' | 'template' | 'scratch';
 
@@ -45,7 +46,7 @@ export interface FilesetTemplate {
   id: string;
   title: string;
   description: string;
-  icon: LucideIcon;
+  icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
   tag: StartOptionTag;
   columns: TemplateColumnSpec[];
   /** Models preloaded into the job config, referenced by the columns' `model_alias`. */

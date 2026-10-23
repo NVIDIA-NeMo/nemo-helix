@@ -20,6 +20,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import { useJobsCancelJob, useJobsDeleteJob } from '@nemo/sdk/generated/platform/jobs';
 import {
   getSafeSynthesizerDownloadJobResultSummaryQueryOptions as getDownloadJobResultSummaryQueryOptions,
@@ -43,7 +44,6 @@ import {
   getGenerateJobRoute,
 } from '@studio/routes/utils';
 import { keepPreviousData, useQueries, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 

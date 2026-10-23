@@ -5,6 +5,7 @@ import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/c
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
+import { GraphNode, Gpu } from '@nemo/icons/icons';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
@@ -23,7 +24,6 @@ import {
 import { formatElapsedTime } from '@studio/util/date';
 import { formatStepDuration, GRPO_METRIC, medianValue, readSeries } from '@studio/util/grpoMetrics';
 import { getTextWithCount } from '@studio/util/strings';
-import { Circle /* TODO: replace with a proper icon (was Circle) */, Gpu } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
@@ -809,7 +809,7 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
     const p = job.spec.parallelism;
     const badges: ReactNode[] = [
       badge('num_gpus_per_node', <Gpu />, getTextWithCount('GPU', p.num_gpus_per_node ?? 0)),
-      badge('num_nodes', <Circle />, getTextWithCount('Node', p.num_nodes ?? 0)),
+      badge('num_nodes', <GraphNode />, getTextWithCount('Node', p.num_nodes ?? 0)),
       badge(
         'tensor_parallel_size',
         <Gpu />,

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Code } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -16,7 +17,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import type { OutputFormatField } from '@studio/components/transform/formats';
 import { columnReference } from '@studio/components/transform/template';
-import { Braces } from 'lucide-react';
 import { type FC } from 'react';
 
 export interface FieldMappingRowProps {
@@ -117,7 +117,7 @@ export const FieldMappingRow: FC<FieldMappingRowProps> = ({
           aria-label={`${isRaw ? 'Pick a column for' : 'Write a template for'} ${field.label}`}
           onClick={() => onToggleRaw(field.path)}
         >
-          <Braces size={14} aria-hidden />
+          <Code size="14" aria-hidden />
         </Button>
       </Flex>
 

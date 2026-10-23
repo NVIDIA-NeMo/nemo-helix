@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Close } from '@nemo/icons/icons';
 import { Tag, Text } from '@nvidia/foundations-react-core';
-import { X } from 'lucide-react';
 import React, { ComponentProps } from 'react';
 
 import { OverflowGroup } from '../components/OverflowGroup';
@@ -35,7 +35,7 @@ export const renderMultipleSelectedValues = ({
       {values.map((value) => (
         <Tag key={value} color="gray" density="compact" {...tagProps}>
           {value}
-          <X className="text-secondary" />
+          <Close className="text-secondary" />
         </Tag>
       ))}
     </OverflowGroupTyped>

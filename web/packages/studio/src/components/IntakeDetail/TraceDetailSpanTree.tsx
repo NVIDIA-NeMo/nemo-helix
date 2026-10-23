@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChatMulti, Warning, ChartFlow } from '@nemo/icons/icons';
 import { SpanStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   TreeNavBranch,
@@ -23,7 +24,6 @@ import {
   type SessionTrajectory,
   type SpanTreeNode,
 } from '@studio/util/intakeTelemetry';
-import { MessagesSquare, TriangleAlert, Workflow } from 'lucide-react';
 import { type FC, type ReactNode, useState } from 'react';
 
 interface TraceSpanTreeProps {
@@ -82,7 +82,7 @@ const SpanTreeLabel: FC<SpanTreeLabelProps> = ({ name, durationMs, errored }) =>
   <span className="flex flex-1 items-center gap-2 min-w-0">
     <SpanTreeName name={name} />
     {errored && (
-      <TriangleAlert
+      <Warning
         role="img"
         aria-label="Error"
         fill="currentColor"
@@ -175,7 +175,7 @@ const renderTraceNodes = ({
         <TreeNavBranch key={trace.id} defaultOpen>
           <TreeNavBranchTrigger
             className={ROW_CLASS}
-            slotIcon={<Workflow role="img" aria-hidden />}
+            slotIcon={<ChartFlow role="img" aria-hidden />}
             active={trace.id === activeTraceId && !sessionActive && activeSpanId === null}
             title="View trace"
             onClick={() => onSelectTrace?.(trace.id)}
@@ -202,7 +202,7 @@ const renderTraceNodes = ({
       <TreeNavLeaf
         key={trace.id}
         className={ROW_CLASS}
-        slotIcon={<Workflow role="img" aria-hidden />}
+        slotIcon={<ChartFlow role="img" aria-hidden />}
         active={trace.id === activeTraceId}
         title="View trace"
         onSelect={() => onSelectTrace?.(trace.id)}
@@ -236,7 +236,7 @@ export const TraceSpanTree: FC<TraceSpanTreeProps> = ({
     <TreeNavList>
       <TreeNavLeaf
         className={ROW_CLASS}
-        slotIcon={<MessagesSquare role="img" aria-hidden />}
+        slotIcon={<ChatMulti role="img" aria-hidden />}
         active={sessionActive}
         title="View session"
         onSelect={onSelectSession}

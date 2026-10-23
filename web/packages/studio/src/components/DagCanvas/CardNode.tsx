@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cube } from '@nemo/icons/icons';
 import { CardIconBadge, SelectableCard } from '@studio/components/common/SelectableCard';
 import type { DagNodeData, DagNodeStatus } from '@studio/components/DagCanvas/types';
 import { Handle, type Node, type NodeProps, Position } from '@xyflow/react';
-import { Box } from 'lucide-react';
 import { type FC } from 'react';
 
 /** Internal node data: the public {@link DagNodeData} plus the activation callback. */
@@ -48,7 +48,7 @@ export const CardNode: FC<NodeProps<CardNodeType>> = ({
     type,
     description,
     tags,
-    icon: Icon = Box,
+    icon: Icon = Cube,
     status = 'idle',
     colorClassName,
     highlighted = false,
@@ -89,7 +89,7 @@ export const CardNode: FC<NodeProps<CardNodeType>> = ({
         stopPropagation={stopPropagation}
         leading={
           <CardIconBadge>
-            <Icon size={16} className={iconClassName} role="img" aria-hidden />
+            <Icon size="16" className={iconClassName} role="img" aria-hidden />
           </CardIconBadge>
         }
       />

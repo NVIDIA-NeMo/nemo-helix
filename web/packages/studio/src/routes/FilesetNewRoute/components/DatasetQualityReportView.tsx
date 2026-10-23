@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DatasetQualityReport } from '@nemo/common/src/utils/datasetQuality';
+import { Warning, CheckCircle, CloseCircle } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import type { FC } from 'react';
 
 interface DatasetQualityReportViewProps {
@@ -22,7 +22,7 @@ export const DatasetQualityReportView: FC<DatasetQualityReportViewProps> = ({ re
     return (
       <Stack gap="density-xs">
         <Flex gap="density-sm" align="center">
-          <CheckCircle2 size={16} className="text-green-500 shrink-0" />
+          <CheckCircle size="16" className="text-green-500 shrink-0" />
           <Text kind="body/regular/sm">{report.fileName}: all quality checks passed.</Text>
         </Flex>
         {partialScanNote}
@@ -36,9 +36,9 @@ export const DatasetQualityReportView: FC<DatasetQualityReportViewProps> = ({ re
       {report.issues.map((issue, idx) => (
         <Flex key={idx} gap="density-sm" align="start">
           {issue.severity === 'error' ? (
-            <XCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
+            <CloseCircle size="16" className="text-red-500 shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+            <Warning size="16" className="text-amber-500 shrink-0 mt-0.5" />
           )}
           <Stack gap="density-xs">
             <Text kind="body/regular/sm">{issue.message}</Text>
