@@ -121,6 +121,55 @@ class HarborTaskJobsConfig(BaseModel):
         return self
 
 
+class RunControllerConfig(BaseModel):
+    """The run controller's caps and timing, under evals.runs.controller.
+
+    Read when the controller starts (config is cached per process): a change takes effect after the
+    core-controller pod restarts, and runs already going pick it up. Lowering a cap cancels nothing; new
+    task Jobs wait until the count is below it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_seconds: float = Field(default=15.0, gt=0, description="Time between controller cycles.")
+    max_cluster_concurrent_jobs: int = Field(
+        default=50, gt=0, description="Task Jobs at once across every run in every workspace."
+    )
+    max_concurrent_task_jobs_per_creator: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Task Jobs at once across all of one creator's runs; None for no per-creator cap. With auth off every "
+            "run belongs to user:development, so any value acts as a second, smaller cluster cap."
+        ),
+    )
+    default_max_concurrent_task_jobs: int | None = Field(
+        default=20,
+        gt=0,
+        description=(
+            "Task Jobs at once for one run. Takes precedence over the request's max_concurrent_task_jobs: "
+            "a request may ask for fewer, never more. None leaves only the request's value."
+        ),
+    )
+    create_grace_seconds: int = Field(
+        default=600,
+        gt=0,
+        description=(
+            "How long after a task Job create with an unknown outcome a 404 or stepless read of the Job is "
+            "conclusive: Jobs keeps saving after the controller's client times out."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _creator_cap_within_cluster_cap(self) -> Self:
+        cap = self.max_concurrent_task_jobs_per_creator
+        if cap is not None and cap > self.max_cluster_concurrent_jobs:
+            raise ValueError(
+                "runs.controller.max_concurrent_task_jobs_per_creator must be ≤ runs.controller.max_cluster_concurrent_jobs"
+            )
+        return self
+
+
 class TasksetRunsConfig(BaseModel):
     """Operator budgets under evals.runs.
 
@@ -149,6 +198,9 @@ class TasksetRunsConfig(BaseModel):
     )
     harbor: HarborTaskJobsConfig | None = Field(
         default=None, description="Kubernetes taskset runs; None leaves them off in this deployment."
+    )
+    controller: RunControllerConfig = Field(
+        default_factory=RunControllerConfig, description="The run controller's task Job caps and timing."
     )
 
     @model_validator(mode="after")

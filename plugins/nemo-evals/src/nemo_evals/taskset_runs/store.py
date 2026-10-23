@@ -14,7 +14,10 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunEntity,
     TasksetRunMemberEntity,
     TasksetRunPhase,
+    assert_member_transition,
+    assert_run_transition,
 )
+from nemo_evals.taskset_runs.identifiers import member_name
 from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError as PlanDigestMismatchError
 from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorageError
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
@@ -440,14 +443,16 @@ class TasksetRunStore:
         )
         return _to_page(result, sort="-created_at")
 
-    async def list_open_runs(self, *, page_size: int = 50) -> list[TasksetRunEntity]:
+    async def list_open_runs(self, *, page_size: int = 1000) -> list[TasksetRunEntity]:
         """Every run in every workspace that hasn't finished (accepted or running), oldest first.
 
         For the run controller, whose client acts as the evals service principal. Reads every page:
-        a backlog of old open runs must not hide newer ones. A run that finishes
-        mid-scan shifts later pages, so one may be skipped until the next pass.
+        a backlog of old open runs must not hide newer ones. Pages of 1,000 (the Entity Store maximum)
+        make a multi-page scan rare; a run that finishes mid-scan shifts later pages, so one may be
+        skipped (its held slots go uncounted for a cycle) or repeated, and repeats are dropped.
         """
         runs: list[TasksetRunEntity] = []
+        seen: set[tuple[str, str]] = set()
         page = 1
         while True:
             result = await self.entity_client.list(
@@ -462,7 +467,10 @@ class TasksetRunStore:
                 page=page,
                 page_size=page_size,
             )
-            runs.extend(result.data)
+            for run in result.data:
+                if (run.workspace, run.name) not in seen:
+                    seen.add((run.workspace, run.name))
+                    runs.append(run)
             if not result.data or page >= result.pagination.total_pages:
                 return runs
             page += 1
@@ -477,13 +485,15 @@ class TasksetRunStore:
     ) -> TasksetRunEntity:
         """Write the run's phase, result state and error; a versioned update of only those fields.
 
-        A terminal phase is never changed. Raises ``NemoEntityConflictError`` when another writer
-        updated the run first; the controller re-reads it on its next pass.
+        A terminal phase is never changed, and a phase change must pass ``assert_run_transition``.
+        Raises ``NemoEntityConflictError`` when another writer updated the run first; the controller
+        re-reads it on its next pass.
         """
         if run.phase in TERMINAL_RUN_PHASES:
             return run
         update: dict[str, object] = {}
-        if phase is not None:
+        if phase is not None and phase is not run.phase:
+            assert_run_transition(run.phase, phase)
             update["phase"] = phase
         if result_state is not None:
             update["result_state"] = result_state
@@ -542,8 +552,7 @@ class TasksetRunStore:
 
         Returns:
             Stored members and filtered pagination counts. No plan or Jobs reads occur;
-            storage failures propagate. TODO(M4 story 4): nothing writes members yet, so pages
-            are empty until the controller does.
+            storage failures propagate.
         """
         conditions: list[FilterOperation] = [
             ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run.id),
@@ -560,6 +569,57 @@ class TasksetRunStore:
             page_size=page_size,
         )
         return _to_page(result, sort="task_index")
+
+    async def list_all_members(self, run: TasksetRunEntity) -> list[TasksetRunMemberEntity]:
+        """Every member of ``run`` in task-index order, reading every page; any failed page raises.
+
+        For the run controller, the only member writer: members are created once and never deleted,
+        so offset pages are stable.
+        """
+        members: list[TasksetRunMemberEntity] = []
+        page = 1
+        while True:
+            result = await self.list_members(run, phase=None, page=page, page_size=1000)
+            members.extend(result.data)
+            assert result.pagination is not None
+            if not result.data or page >= result.pagination.total_pages:
+                return members
+            page += 1
+
+    async def create_member(self, run: TasksetRunEntity, task_index: int) -> TasksetRunMemberEntity | None:
+        """Create task ``task_index``'s member under ``run``, queued (``image_ready``): its images are in the plan.
+
+        A named create, so a repeat is harmless.
+
+        Returns:
+            The new member, or None when it already exists.
+        """
+        member = TasksetRunMemberEntity(
+            name=member_name(task_index), workspace=run.workspace, task_index=task_index, phase=MemberPhase.IMAGE_READY
+        )
+        member._parent = run.id
+        member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        try:
+            return await member_client.create(member)
+        except NemoEntityConflictError:
+            return None
+
+    async def update_member(self, member: TasksetRunMemberEntity, **changes: object) -> TasksetRunMemberEntity:
+        """A versioned write of ``changes`` to ``member``.
+
+        The phase must pass ``assert_member_transition``, and ``task_job`` is write-once.
+
+        Raises:
+            ValueError: An illegal phase change, or ``task_job`` rewritten.
+            NemoEntityConflictError: Another write landed first; the next cycle re-reads the member.
+        """
+        phase = changes.get("phase", member.phase)
+        assert isinstance(phase, MemberPhase)
+        assert_member_transition(member.phase, phase)
+        if member.task_job is not None and changes.get("task_job", member.task_job) != member.task_job:
+            raise ValueError(f"member {member.name}'s task_job is write-once ({member.task_job})")
+        member_client = cast(EntityUpdateClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        return await member_client.update(member.model_copy(update=changes))
 
     async def list_active(self, workspace: str, caller: str, taskset_ref: str | None = None) -> list[TasksetRunEntity]:
         """Read all pages of this caller's active runs for overlap warnings.
