@@ -138,6 +138,9 @@ class E2EServicesPool:
             seen_modules.add(module.nodeid)
             self._ensure_module_registered(module)
 
+    def config_hash_for_module(self, module_id: str) -> str:
+        return self._module_states[module_id].key.config_hash
+
     def acquire_for_module(self, module: pytest.Module) -> RunningServices:
         self._ensure_module_registered(module)
         state = self._module_states[module.nodeid]

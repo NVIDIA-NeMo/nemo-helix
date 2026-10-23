@@ -1900,7 +1900,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run e2e tests
-        run: make test-e2e PYTEST_EXTRA='-m "not full_e2e"'
+        # Two workers, one services pool per worker (see register_services_pool_items).
+        run: make test-e2e PYTEST_EXTRA='-m "not full_e2e" -n 2 --dist loadgroup'
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
