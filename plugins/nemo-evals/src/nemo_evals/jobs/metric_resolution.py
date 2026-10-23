@@ -166,11 +166,12 @@ class HelixMetricModelResolver(ModelResolver):
             raise _model_not_found_error(model_ref, workspace, name) from exc
         if resolved.virtual_model and readable == "model":
             await authorize_source_read(self.authorize, "virtual_model", workspace, name)
+        entity_readable = readable == "model"
         return Model(
             url=_job_reachable_url(resolved.url, self.models_client.base_url),
             name=resolved.name,
-            host_url=resolved.host_url,
-            served_model_name=resolved.served_model_name,
+            host_url=resolved.host_url if entity_readable else None,
+            served_model_name=resolved.served_model_name if entity_readable else None,
         )
 
 
