@@ -32,7 +32,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.evals.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
-from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentTaskRunner
 from nhx_evals_sdk.datasets.loader import prepare_dataset_rows
@@ -97,10 +97,12 @@ def _resolve_submit_target(
         )
         try:
             resolved = models_client.resolve_model_reference(target.root)
+        except UnroutableModelError as exc:
+            raise ValueError(str(exc.detail)) from exc
         except ClientNotFoundError as exc:
             raise ValueError(
                 f"Model reference '{target.root}' not found. "
-                f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
+                f"Ensure a model or VirtualModel named '{name}' exists in workspace '{workspace}', "
                 "or use an inline model definition instead."
             ) from exc
         return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)
@@ -117,10 +119,12 @@ async def _resolve_submit_target_async(
         )
         try:
             resolved = await models_client.resolve_model_reference(target.root)
+        except UnroutableModelError as exc:
+            raise ValueError(str(exc.detail)) from exc
         except ClientNotFoundError as exc:
             raise ValueError(
                 f"Model reference '{target.root}' not found. "
-                f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
+                f"Ensure a model or VirtualModel named '{name}' exists in workspace '{workspace}', "
                 "or use an inline model definition instead."
             ) from exc
         return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)

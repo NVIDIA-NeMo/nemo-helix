@@ -18,12 +18,13 @@ from urllib.parse import quote
 #: Request-scoped check of ``(method, path)`` as the caller; raises when the caller is denied.
 type SourceReadAuthorizer = Callable[[str, str], Awaitable[None]]
 
-type SourceKind = Literal["task", "metric", "model"]
+type SourceKind = Literal["task", "metric", "model", "virtual_model"]
 
 _READ_PATHS: dict[SourceKind, str] = {
     "task": "/apis/evals/v2/workspaces/{workspace}/tasks/{name}",
     "metric": "/apis/evals/v2/workspaces/{workspace}/metrics/{name}",
     "model": "/apis/models/v2/workspaces/{workspace}/models/{name}",
+    "virtual_model": "/apis/inference-gateway/v2/workspaces/{workspace}/virtual-models/{name}",
 }
 
 

@@ -446,8 +446,9 @@ target = HarborRunnerTarget(
 - A secondary reward discovered for one task does not apply to another task.
 
 `source` names exactly one agent: `HarborBuiltinAgentSource(name=...)` or
-`HarborImportedAgentSource(import_path=...)` for a custom Harbor agent; both take
-`model_name` when the agent requires a model. Pass the agent's constructor arguments as
+`HarborImportedAgentSource(import_path=...)` for a custom Harbor agent. A built-in agent takes its
+model as `model=HarborModelName(name=...)`, or as `model=HarborGatewayModel(ref=...)` for a model the
+Inference Gateway serves; an imported agent takes `model_name`. Pass the agent's constructor arguments as
 `agent_kwargs` (a JSON mapping, Harbor's `--ak key=value`). Do not put secrets
 in `agent_kwargs`: Harbor persists them unredacted across the job directory and
 needs the real value to run. Credential-shaped plaintext is rejected at submit
