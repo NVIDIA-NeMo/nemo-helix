@@ -763,10 +763,12 @@ An agent that declares no model connection, or a provider the gateway doesn't se
   reaches: `host.docker.internal` for a local Docker run, the in-cluster address for a taskset run on
   Kubernetes. Don't set the base URL variable yourself; a target that does is refused.
 - The gateway holds the provider's key, so the agent needs none. With platform authentication
-  disabled, evals sets a placeholder key. With it enabled, put a Helix access key scoped to
-  `inference` in `env_secrets` under the key variable; a target without one is refused.
-- With platform authentication enabled, `claude-code` can't call the gateway yet: it sends its key
-  as `x-api-key`, and the gateway accepts only bearer tokens.
+  disabled, evals sets a placeholder key, unless another secret in the job, such as a judge's,
+  already uses the key variable's name; that job is refused rather than handing the agent the other
+  secret. With platform authentication enabled, put a Helix access key scoped to `inference` in
+  `env_secrets` under the key variable; a target without one is refused.
+- With platform authentication enabled, `claude-code` can't call the gateway yet, so its target is
+  refused: it sends its key as `x-api-key`, and the gateway accepts only bearer tokens.
 
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.

@@ -30,7 +30,7 @@ from nemo_evals.harbor.agent_setup_egress import (
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
-from nemo_evals.jobs.gateway_models import check_tasks_reach_the_gateway, gateway_key_placeholder
+from nemo_evals.jobs.gateway_models import add_gateway_key_placeholder, check_tasks_reach_the_gateway
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_evals.taskset_runs.identifiers import task_job_name
@@ -97,10 +97,9 @@ class HarborTaskDispatchJob(NemoJob):
                     ),
                 ),
                 config=spec.model_dump(mode="json"),
-                environment=[
-                    *build_task_environment(_secret_refs(spec.spec)),
-                    *gateway_key_placeholder(spec.spec.target),
-                ],
+                environment=add_gateway_key_placeholder(
+                    build_task_environment(_secret_refs(spec.spec)), spec.spec.target
+                ),
             )
         )
         return HelixJobSpec(steps=steps)

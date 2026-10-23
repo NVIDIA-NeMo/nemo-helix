@@ -21,15 +21,16 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
+    add_gateway_key_placeholder,
     agent_gateway_origin,
     check_gateway_model,
     check_tasks_reach_the_gateway,
-    gateway_key_placeholder,
     point_agent_at_gateway_model,
 )
+from nemo_evals.jobs.secret_env import SecretEnvError
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
-from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
 from nhx_evals_sdk.values import Model, ModelRef, SecretRef
 from pydantic import ValidationError
@@ -109,7 +110,9 @@ def test_each_agent_gets_the_route_on_the_variables_its_model_connection_declare
 
     assert config.env_vars == {base_url_env: f"http://gw:8080{base_url}"}
     assert config.env_secrets == {api_key_env: SecretRef(GATEWAY_PLACEHOLDER_KEY)}
-    assert gateway_key_placeholder(target) == [EnvironmentVariable(name=api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
+    assert add_gateway_key_placeholder([], target) == [
+        EnvironmentVariable(name=api_key_env, value=GATEWAY_PLACEHOLDER_KEY)
+    ]
 
 
 def test_a_platform_key_in_env_secrets_replaces_the_placeholder() -> None:
@@ -122,11 +125,21 @@ def test_a_platform_key_in_env_secrets_replaces_the_placeholder() -> None:
     )
 
     assert config.env_secrets == {"OPENAI_API_KEY": key}
-    assert gateway_key_placeholder(target) == []
+    assert add_gateway_key_placeholder([], target) == []
 
 
 def test_targets_without_a_gateway_model_get_no_placeholder() -> None:
-    assert gateway_key_placeholder(HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex"))) == []
+    assert add_gateway_key_placeholder([], HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex"))) == []
+
+
+def test_a_placeholder_whose_variable_another_secret_fills_is_refused() -> None:
+    """Otherwise the job injects that secret under the agent's key variable, handing another credential to the agent."""
+    judge_key = EnvironmentVariable(
+        name="OPENAI_API_KEY", from_secret=EnvironmentVariableFromSecret(name="ws/OPENAI_API_KEY")
+    )
+
+    with pytest.raises(SecretEnvError, match="OPENAI_API_KEY is already sourced from a secret"):
+        add_gateway_key_placeholder([judge_key], _codex())
 
 
 def test_the_agent_gets_the_bare_model_name() -> None:
@@ -187,6 +200,18 @@ async def test_check_refuses_auth_on_without_a_platform_key(monkeypatch: pytest.
 
     with pytest.raises(ValueError, match="under OPENAI_API_KEY"):
         await check_gateway_model(_codex(), async_sdk=AsyncMock(), authorize=None)
+
+
+async def test_check_refuses_an_anthropic_style_agent_with_auth_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """It sends its key as `x-api-key`, which the gateway rejects, so the run would fail on every model call."""
+    monkeypatch.setattr(gateway_models, "platform_auth_enabled", lambda: True)
+    target = HarborRunnerTarget(
+        source=_gateway_source("claude-code"),
+        env_secrets={"ANTHROPIC_API_KEY": SecretRef("ws/agent-access-key")},
+    )
+
+    with pytest.raises(ValueError, match="sends its key as `x-api-key`"):
+        await check_gateway_model(target, async_sdk=AsyncMock(), authorize=None)
 
 
 async def test_check_resolves_the_model_as_the_caller(mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,25 +280,31 @@ _NO_NETWORK = {"environment": {"allow_internet": False}}
         ("nemo-api.ns.svc", ("Nemo-API.ns.svc",)),
         ("nemo-api.ns.svc", (" nemo-api.ns.svc. ",)),
         ("10.1.2.3", ("10.0.0.0/8",)),
-        ("nemo-api.ns.svc", ("*.ns.svc",)),
     ],
-    ids=["host", "trailing-dot", "cidr", "wildcard"],
+    ids=["host", "trailing-dot", "cidr"],
 )
 def test_a_no_network_task_reaches_a_gateway_on_its_agent_channel(
     monkeypatch: pytest.MonkeyPatch, host: str, agent_channel: tuple[str, ...]
 ) -> None:
-    """Matches the sandbox's own allowlist: hosts trimmed and case-insensitively, IPs by CIDR, ``*.`` as a suffix."""
+    """Matches the sandbox's own allowlist: hosts trimmed and case-insensitively, IPs by CIDR."""
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", f"http://{host}:8080")
 
     check_tasks_reach_the_gateway(_codex(), [("t", _NO_NETWORK)], agent_channel)
 
 
-def test_a_no_network_task_off_the_agent_channel_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Its sandbox would deny the agent's model calls, so the run fails at submit rather than mid-trial."""
+@pytest.mark.parametrize("agent_channel", [(), ("*.ns.svc",)], ids=["absent", "wildcard"])
+def test_a_no_network_task_off_the_agent_channel_is_refused(
+    monkeypatch: pytest.MonkeyPatch, agent_channel: tuple[str, ...]
+) -> None:
+    """Its sandbox would deny the agent's model calls, so the run fails before any sandbox starts.
+
+    A wildcard entry doesn't count: the sandbox keeps private addresses denied for wildcards, and an in-cluster
+    gateway is usually on one.
+    """
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
 
     with pytest.raises(ValueError, match=r"no-network tasks \['offline'\] can't reach the Inference Gateway"):
-        check_tasks_reach_the_gateway(_codex(), [("online", {}), ("offline", _NO_NETWORK)], ())
+        check_tasks_reach_the_gateway(_codex(), [("online", {}), ("offline", _NO_NETWORK)], agent_channel)
 
 
 def test_tasks_with_network_access_or_targets_without_a_gateway_model_are_not_checked() -> None:
