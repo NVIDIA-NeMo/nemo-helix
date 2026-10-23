@@ -36,6 +36,62 @@ shared instructions, models, skills, tools, MCP servers, environment settings,
 telemetry, and a selectable harness. NeMo Agents validates that contract and
 executes it through the selected harness.
 
+### Live progress for `agents.execute` jobs
+
+Jobs automatically observe existing local Relay ATOF file sinks and emit safe
+lifecycle counters to normal job logs during invocation. No new job/API field is
+required. A compatible agent configuration is:
+
+```yaml
+telemetry:
+  enabled: true
+  output_dir: ./artifacts/relay
+  atof:
+    enabled: true
+    filename: events.atof.jsonl
+    mode: append
+```
+
+With a local environment and the common Fabric adapter layout, this writes to
+`<fabric-base>/artifacts/relay/<runtime-id>/events.atof.jsonl`. Explicit
+`telemetry.atof.sinks` file sinks are also supported when their directory is
+beneath the configured local artifacts directory. Symlinks, path traversal, and
+non-regular files are rejected; remote environments and endpoint-only sinks are
+not observed. The observer does not change telemetry configuration.
+
+Example (counts describe **observed records**, not successful operations):
+
+```text
+Agent telemetry progress: elapsed=12.0s last_event_age=1.5s agent_start=1 agent_end=0 llm_start=2 llm_end=2 tool_start=2 tool_end=1 discarded=0.
+```
+
+Only fixed agent/model (`llm`)/tool start/end counters, elapsed time, event age,
+and discarded-record counts are logged. Names, prompts, arguments, results,
+reasoning, tokens, IDs, timestamps, and raw error/record contents are never logged
+by this observer. End records do not imply success. Repeated summaries retain
+last-event age to distinguish silence from fresh progress; they are not new
+agent events.
+
+Observation is best effort: poll every 0.5 seconds, summarize at most once per
+5 seconds, inspect at most 64 directory entries per sink and four files total,
+read at most 64 KiB per file per poll, and discard records over 16 KiB. Partial
+lines are buffered within that limit. A missing/buffered file produces a warning
+after 30 seconds without lifecycle records. Unsupported configuration or an
+observer failure is reported without interrupting or retrying the invocation.
+Jobs create fresh artifact directories; no recursive search is performed. Short
+jobs may finish before a poll, and terminal counters are not an authoritative or
+complete trace. Artifacts, usage, terminal result, invocation timeout, and
+after-invoke extensions remain authoritative and unchanged.
+
+This is a local-file workaround, **not** a native streaming fix. In Fabric SDK
+0.5.0, `InvokeStream.result()` shields its invocation task, while
+`InvokeStream.aclose()` and `Runtime.__aexit__()` can await it indefinitely.
+Wrapping stream consumption/result in a timeout alone cannot enforce the job
+deadline. An upstream fix needs public cancellation/abort that cancels and joins
+the underlying invocation, bounded stream/collector cleanup, and regression
+tests for stalled invocations and cancellation during cleanup. Until that
+contract exists, jobs retain their non-streaming invocation.
+
 ### Prerequisites
 
 | Requirement | Notes |
