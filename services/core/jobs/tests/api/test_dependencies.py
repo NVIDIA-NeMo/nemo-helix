@@ -20,20 +20,10 @@ def _jobs_service() -> SimpleNamespace:
     return SimpleNamespace(name="jobs", dependency_provider=Mock())
 
 
-def test_system_entity_client_acts_as_jobs_in_platform_runner_app() -> None:
-    """The platform runner merges services into one app, which keeps no ``app.state.service``."""
+def test_system_entity_client_acts_as_jobs() -> None:
     service = _jobs_service()
 
-    client = dep_system_entity_client(_request(jobs_service=service))
-
-    service.dependency_provider.get_service_entity_client.assert_called_once_with("jobs")
-    assert client is service.dependency_provider.get_service_entity_client.return_value
-
-
-def test_system_entity_client_acts_as_jobs_in_standalone_app() -> None:
-    service = _jobs_service()
-
-    client = dep_system_entity_client(_request(service=service))
+    client = dep_system_entity_client(_request(services={"jobs": service}))
 
     service.dependency_provider.get_service_entity_client.assert_called_once_with("jobs")
     assert client is service.dependency_provider.get_service_entity_client.return_value

@@ -8,7 +8,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.client import EntityClient
-from nhx.common.service.dependencies import get_entity_client, get_nemo_client
+from nhx.common.service.dependencies import get_entity_client, get_nemo_client, get_service
 from nhx.core.jobs.app.dispatcher import JobDispatcher
 
 
@@ -21,12 +21,10 @@ def dep_system_entity_client(request: Request) -> EntityClient:
     """Entity client acting as the jobs service, for records kept in the system workspace.
 
     The request-scoped client acts for the caller, and callers only read the system workspace.
-    The platform runner merges every service into one app and keeps this one as
-    ``app.state.jobs_service``; a standalone Jobs app keeps it as ``app.state.service``.
+    Raises rather than falling back to the caller's client, which would check the system
+    workspace as the caller.
     """
-    service = getattr(request.app.state, "jobs_service", None) or getattr(request.app.state, "service", None)
-    if service is None:
-        raise RuntimeError("The Jobs service is not registered on the app, so it cannot act as service:jobs.")
+    service = get_service(request, "jobs")
     return service.dependency_provider.get_service_entity_client(service.name)
 
 

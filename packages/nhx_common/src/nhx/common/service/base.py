@@ -552,8 +552,10 @@ class Service(ABC, Generic[TConfig]):
         # Store reference to app for use in on_startup
         self._app = app
 
-        # Store service instance for access by endpoints
+        # Store service instance for access by endpoints. Route code should look it up
+        # by name with get_service/find_service, which also work on the platform app.
         app.state.service = self
+        app.state.services = {self.name: self}
 
         # Setup dependency overrides (e.g., entity client factory)
         self._setup_dependencies(app)

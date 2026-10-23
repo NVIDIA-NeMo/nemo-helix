@@ -7,8 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 from nhx.common.entities.client import EntityClient
-from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
+from nhx.common.service.dependencies import find_service, get_entity_client
 from nhx.intake.experiments.read_service import EvaluationReadService
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.evaluation_session import ClickHouseEvaluationSessionRepository
@@ -21,10 +20,7 @@ EntityClientDep = Annotated[EntityClient, Depends(get_entity_client)]
 
 
 def _get_clickhouse_client(request: Request) -> ClickHouseSpanClient | None:
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    if service is None:
-        return None
-    return getattr(service, "clickhouse_client", None)
+    return getattr(find_service(request, "intake"), "clickhouse_client", None)
 
 
 def get_evaluation_rollup_repository(request: Request) -> EvaluationRollupRepository | None:
@@ -60,12 +56,3 @@ def get_evaluation_read_service(
 
 
 EvaluationReadServiceDep = Annotated[EvaluationReadService, Depends(get_evaluation_read_service)]
-
-
-def get_denormalizer(request: Request) -> EvaluationDenormalizer | None:
-    """Reach the service-owned denormalizer from the request (absent if startup didn't create one)."""
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    return getattr(service, "denormalizer", None) if service is not None else None
-
-
-DenormalizerDep = Annotated[EvaluationDenormalizer | None, Depends(get_denormalizer)]

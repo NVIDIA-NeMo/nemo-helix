@@ -25,7 +25,6 @@ from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.intake.api.v2.experiments.dependencies import (
-    DenormalizerDep,
     EntityClientDep,
     EvaluationReadServiceDep,
 )
@@ -60,7 +59,7 @@ from nhx.intake.experiments.read_service import (
 from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, ScoreRollup
 from nhx.intake.repository.evaluation_session import MetricSortTooLargeError
-from nhx.intake.spans.api.dependencies import require_workspace_access, validate_list_query_params
+from nhx.intake.spans.api.dependencies import DenormalizerDep, require_workspace_access, validate_list_query_params
 from nhx.intake.spans.domain import SpanStatus
 from nhx.intake.spans.storage import make_pagination
 

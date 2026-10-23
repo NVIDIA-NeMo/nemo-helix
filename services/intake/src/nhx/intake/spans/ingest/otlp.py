@@ -9,8 +9,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.config import IntakeConfig
-from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
+from nhx.intake.spans.api.dependencies import (
+    DenormalizerDep,
+    SpansServiceDep,
+    get_intake_config,
+    require_workspace_access,
+)
 from nhx.intake.spans.domain import (
     IntakeSpan,
     SpanKind,
@@ -198,12 +202,7 @@ async def _read_limited_body(request: Request, *, max_bytes: int) -> bytes:
 
 def _otlp_max_body_bytes(request: Request) -> int:
     """Read the configured OTLP body-size cap from the attached Intake service."""
-
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    cfg: IntakeConfig | None = getattr(service, "service_config", None) if service is not None else None
-    if cfg is None:
-        cfg = IntakeConfig()
-    return cfg.otlp_max_body_bytes
+    return get_intake_config(request).otlp_max_body_bytes
 
 
 def _span_to_domain(

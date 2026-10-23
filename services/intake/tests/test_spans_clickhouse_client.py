@@ -51,7 +51,7 @@ async def test_clickhouse_dependency_returns_actionable_503(monkeypatch: pytest.
     client = CountingClickHouseSpanClient()
     monkeypatch.setattr(client, "bootstrap_schema", AsyncMock(side_effect=PermissionError("read-only volume")))
     app = FastAPI()
-    app.state.intake_service = SimpleNamespace(clickhouse_client=client)
+    app.state.services = {"intake": SimpleNamespace(clickhouse_client=client)}
     request = Request(
         {
             "type": "http",
