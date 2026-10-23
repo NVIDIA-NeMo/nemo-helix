@@ -151,7 +151,10 @@ class FabricInstalledAgent(BaseInstalledAgent):
     a property is itself an incompatible override.
     """
 
-    capabilities = AgentCapabilities(atif=True)
+    #: Harbor refuses a task's skills or MCP servers unless the agent class declares them. Both are
+    #: forwarded to the wrapped agent, which raises at construction when the selected adapter can't
+    #: implement what was requested.
+    capabilities = AgentCapabilities(atif=True, skills=True, mcp_servers=True)
 
     #: Declared, never assigned here: Harbor attaches the resolved skill list at dispatch time and
     #: ``BaseAgent`` does not declare it, so this is the only place it is typed. Leaving it unset

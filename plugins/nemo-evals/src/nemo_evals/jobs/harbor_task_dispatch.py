@@ -20,7 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
-from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
+from nemo_evals.harbor.agent_setup_egress import (
+    INNER_AGENT_KWARG,
+    SETUP_EGRESS_AGENT,
+    SETUP_HOSTS_KWARG,
+    setup_timeout_multiplier,
+)
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -210,6 +215,11 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             INNER_AGENT_KWARG: agent,
             SETUP_HOSTS_KWARG: list(policy.agent_setup_egress),
         }
+        # Harbor falls back to the global multiplier, then 1.0, when the setup one is unset.
+        multiplier = config.agent_setup_timeout_multiplier
+        if multiplier is None:
+            multiplier = config.timeout_multiplier if config.timeout_multiplier is not None else 1.0
+        update["agent_setup_timeout_multiplier"] = setup_timeout_multiplier(agent, multiplier)
     return config.model_copy(update=update)
 
 

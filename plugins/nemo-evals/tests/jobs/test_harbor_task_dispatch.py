@@ -12,11 +12,12 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from harbor.agents.factory import AgentFactory
 from harbor.environments.factory import EnvironmentFactory
 from harbor.models.task.config import EnvironmentConfig, TaskConfig
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
+from harbor.models.trial.config import AgentConfig, ResourceMode
 from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
-from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
@@ -291,6 +292,36 @@ def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, t
         INNER_AGENT_KWARG: "claude-code",
         SETUP_HOSTS_KWARG: ["registry.npmjs.org"],
     }
+
+
+def _harbor_setup_timeout_sec(configured: HarborRuntimeConfig) -> float:
+    """The setup timeout Harbor gives the trial: its agent class's default times the setup multiplier."""
+    agent_class = AgentFactory.get_agent_class_from_config(AgentConfig(import_path=configured.agent_import_path))
+    assert configured.agent_setup_timeout_multiplier is not None
+    return agent_class.DEFAULT_SETUP_TIMEOUT_SEC * configured.agent_setup_timeout_multiplier
+
+
+@pytest.mark.parametrize(
+    ("agent", "multipliers", "timeout_sec"),
+    [
+        ("codex", {}, 360.0),
+        ("hermes", {}, 1200.0),
+        ("hermes", {"agent_setup_timeout_multiplier": 2.0}, 2400.0),
+        ("hermes", {"timeout_multiplier": 0.5}, 600.0),
+        ("hermes", {"timeout_multiplier": 0.5, "agent_setup_timeout_multiplier": 3.0}, 3600.0),
+    ],
+)
+def test_a_wrapped_agent_keeps_its_own_setup_timeout(task_spec, tmp_path, agent, multipliers, timeout_sec):
+    """Harbor reads the setup timeout from the wrapper's class, so the dispatcher scales it to the inner agent's."""
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, **multipliers
+    )
+    assert _harbor_setup_timeout_sec(configured) == pytest.approx(timeout_sec)
+
+
+def test_an_unwrapped_agent_keeps_the_callers_setup_multiplier(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(task_spec, tmp_path, (), agent_name="hermes")
+    assert configured.agent_setup_timeout_multiplier is None
 
 
 def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):

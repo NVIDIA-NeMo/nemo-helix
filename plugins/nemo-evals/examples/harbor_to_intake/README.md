@@ -33,7 +33,7 @@ pipeline smoke test, not an evaluation.
 - **Python >= 3.12** with the Harbor extra. The SDK's own floor now matches Harbor's `>=3.12`, so
   Harbor is a plain optional dependency — imported lazily and never installed by default:
   ```bash
-  uv pip install "harbor>=0.23,<0.24"
+  uv pip install "harbor>=0.24,<0.25"
   ```
 - **Docker**, running. Harbor needs it for the task containers, and Intake needs it for ClickHouse.
 - **The platform**, running at least `auth,entities,intake`.
