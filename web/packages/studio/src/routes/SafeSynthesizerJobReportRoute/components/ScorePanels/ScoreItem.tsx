@@ -12,7 +12,11 @@ interface ScoreItemProps {
 export const ScoreItem: FC<ScoreItemProps> = ({ success, value }) => {
   return (
     <Flex align="center" gap="density-md">
-      {success ? <CheckCircle className="text-brand" /> : <Cancel />}
+      {success ? (
+        <CheckCircle className="text-brand" data-testid="score-check-icon" />
+      ) : (
+        <Cancel data-testid="score-cancel-icon" />
+      )}
       <Text>{value}</Text>
     </Flex>
   );

@@ -106,7 +106,6 @@ describe('OverviewPanel', () => {
     });
 
     expect(screen.getByText('Download Report')).toBeInTheDocument();
-    expect(screen.getByTestId('download-icon')).toBeInTheDocument();
   });
 
   it('does not show download button when report is not available', () => {

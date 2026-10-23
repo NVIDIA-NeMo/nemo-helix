@@ -17,15 +17,13 @@ describe('ScoreItem', () => {
   it('renders CheckCircle icon when success is true', () => {
     renderScoreItem(true, 'Test passed');
 
-    // eslint-disable-next-line testing-library/no-node-access
-    expect(document.querySelector('svg:not([id*="sprite"]).text-brand')).toBeInTheDocument();
+    expect(screen.getByTestId('score-check-icon')).toBeInTheDocument();
   });
 
   it('renders Cancel icon when success is false', () => {
     renderScoreItem(false, 'Test failed');
 
-    // eslint-disable-next-line testing-library/no-node-access
-    expect(document.querySelector('svg:not([id*="sprite"]).text-brand')).not.toBeInTheDocument();
+    expect(screen.getByTestId('score-cancel-icon')).toBeInTheDocument();
   });
 
   it('displays the correct value text', () => {
@@ -38,7 +36,6 @@ describe('ScoreItem', () => {
   it('applies text-brand className to CheckCircle when success is true', () => {
     renderScoreItem(true, 'Success message');
 
-    // eslint-disable-next-line testing-library/no-node-access
-    expect(document.querySelector('svg:not([id*="sprite"])')).toHaveClass('text-brand');
+    expect(screen.getByTestId('score-check-icon')).toHaveClass('text-brand');
   });
 });

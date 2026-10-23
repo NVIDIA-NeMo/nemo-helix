@@ -312,8 +312,8 @@ describe('SyntheticQualityPanel', () => {
       );
 
       // Verify that both check and cancel icons are rendered
-      const checkIcons = screen.getAllByTestId('circle-check-icon');
-      const cancelIcons = screen.getAllByTestId('ban-icon');
+      const checkIcons = screen.getAllByTestId('score-check-icon');
+      const cancelIcons = screen.getAllByTestId('score-cancel-icon');
 
       expect(checkIcons.length).toBeGreaterThan(0);
       expect(cancelIcons.length).toBeGreaterThan(0);
