@@ -9,17 +9,21 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from harbor.agents.model_connection import ModelConnectionSpec, ProviderAccess
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
+from nemo_evals.api.fields import AgentRef
 from nemo_evals.jobs import agent_compiler, gateway_agents, gateway_models
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
     HarborBuiltinAgentSource,
     HarborGatewayModel,
+    HarborImportedAgentSource,
     HarborModelName,
     HarborRunnerTarget,
+    RegisteredAgentSource,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
@@ -29,8 +33,11 @@ from nemo_evals.jobs.gateway_models import (
     check_gateway_model,
     check_tasks_reach_the_gateway,
     point_agent_at_gateway_model,
+    require_closed_book_route,
 )
 from nemo_evals.jobs.secret_env import SecretEnvError
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModel
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
@@ -388,3 +395,111 @@ def test_an_agent_whose_connection_names_no_variables_cannot_call_the_gateway(mo
         assert gateway_agents.gateway_agent_env("claude-code") is None
     finally:
         gateway_agents.gateway_agent_env.cache_clear()
+
+
+_CLOSED_BOOK = MiddlewareCall(name="nemo-evals-closed-book", config_type="closed_book", config={})
+_ROUTER = MiddlewareCall(name="nemo-switchyard", config_type="routellm_config", config={})
+_NO_NETWORK_TASKS = [("open", {}), ("offline", {"environment": {"network_mode": "no-network"}})]
+
+
+def _virtual_models(monkeypatch: pytest.MonkeyPatch, virtual_model: VirtualModel | Exception) -> AsyncMock:
+    get = AsyncMock(
+        side_effect=virtual_model
+        if isinstance(virtual_model, Exception)
+        else lambda **_: SimpleNamespace(data=lambda: virtual_model)
+    )
+    monkeypatch.setattr(gateway_models, "client_from_platform", lambda *_: SimpleNamespace(get_virtual_model=get))
+    return get
+
+
+async def test_a_closed_book_virtual_model_serves_no_network_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    get = _virtual_models(
+        monkeypatch, VirtualModel(name="cb-gpt", workspace="ws", request_middleware=[_ROUTER, _CLOSED_BOOK])
+    )
+
+    await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+
+    get.assert_awaited_once_with(name="cb-gpt", workspace="ws")
+
+
+@pytest.mark.parametrize(
+    "virtual_model",
+    [
+        VirtualModel(name="cb-gpt", workspace="ws"),
+        VirtualModel(name="cb-gpt", workspace="ws", response_middleware=[_CLOSED_BOOK]),
+        VirtualModel(name="cb-gpt", workspace="ws", request_middleware=[_CLOSED_BOOK, _ROUTER]),
+        NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://gw"))),
+    ],
+    ids=["no-middleware", "closed-book-on-the-response", "router-after-closed-book", "model-entity-only"],
+)
+async def test_a_gateway_model_that_is_not_closed_book_is_refused(
+    monkeypatch: pytest.MonkeyPatch, virtual_model: VirtualModel | Exception
+) -> None:
+    """Only the last request middleware checks the model the request is sent to; an entity alone passes tools on."""
+    _virtual_models(monkeypatch, virtual_model)
+
+    with pytest.raises(ValueError, match=r"closed_book_required: no-network tasks \['offline'\] need a closed-book"):
+        await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5"))),
+        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="terminus-2")),
+        HarborRunnerTarget(source=HarborImportedAgentSource(import_path="my_agent:Agent", model_name="gpt-5")),
+        HarborRunnerTarget(
+            source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+            agent_kwargs={"fabric_config": {"name": "coder"}},
+        ),
+    ],
+    ids=["model-by-name", "built-in-default-model", "imported-agent", "registered-agent"],
+)
+async def test_a_model_route_evals_cannot_check_is_refused_for_no_network_tasks(target: HarborRunnerTarget) -> None:
+    with pytest.raises(ValueError, match=r"closed_book_required: no-network tasks \['offline'\]"):
+        await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=None, authorize=None)
+
+
+@pytest.mark.parametrize("agent", ["oracle", "nop"])
+async def test_agents_that_call_no_model_run_no_network_tasks(agent: str) -> None:
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
+
+    await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=None, authorize=None)
+
+
+async def test_runs_without_no_network_tasks_are_not_checked() -> None:
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
+
+    await require_closed_book_route(target, [("open", {})], async_sdk=None, authorize=None)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"environment": {"allow_internet": False}},
+        {"agent": {"network_mode": "no-network"}},
+        {"steps": [{"name": "build"}, {"name": "solve", "agent": {"network_mode": "no-network"}}]},
+    ],
+    ids=["deprecated-allow-internet", "agent-phase", "one-step"],
+)
+async def test_every_way_a_task_takes_the_agent_offline_is_checked(config: dict[str, object]) -> None:
+    """Harbor runs the agent under its own or a step's network mode, ahead of the environment's."""
+    with pytest.raises(ValueError, match=r"closed_book_required: no-network tasks \['offline'\]"):
+        await require_closed_book_route(
+            HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5"))),
+            [("offline", config)],
+            async_sdk=None,
+            authorize=None,
+        )
+
+
+async def test_the_caller_must_be_able_to_read_the_virtual_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otherwise the refusal would tell them what its middleware is."""
+    get = _virtual_models(monkeypatch, VirtualModel(name="cb-gpt", workspace="ws", request_middleware=[_CLOSED_BOOK]))
+    authorize = AsyncMock(side_effect=PermissionError("denied"))
+
+    with pytest.raises(PermissionError):
+        await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=authorize)
+
+    authorize.assert_awaited_once_with("GET", "/apis/inference-gateway/v2/workspaces/ws/virtual-models/cb-gpt")
+    get.assert_not_awaited()

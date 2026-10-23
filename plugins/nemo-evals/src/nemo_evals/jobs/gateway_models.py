@@ -15,17 +15,20 @@ from harbor.models.trial.config import AgentConfig as TrialAgentConfig
 from harbor.trial.network_policy import resolve_agent_phase_policy
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
+from nemo_evals.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evals.jobs.secret_env import SecretEnvError
-from nemo_evals.source_authorization import SourceReadAuthorizer
+from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import model_entity_route_openai_url, parse_workspace_name_ref
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
 from nhx_evals_sdk.values.common import SecretRef
 
@@ -139,6 +142,58 @@ def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dic
     config = agent_kwargs.get("fabric_config")
     if isinstance(target.source, RegisteredAgentSource) and isinstance(config, dict):
         agent_kwargs["fabric_config"] = rewrite_fabric_config_base_urls(config, origin)
+
+
+#: Harbor's built-in agents that call no model, so they have no model route to check.
+MODEL_FREE_HARBOR_AGENTS = frozenset({"oracle", "nop"})
+
+
+async def require_closed_book_route(
+    target: object,
+    tasks: Iterable[tuple[str, Mapping[str, Any]]],
+    *,
+    async_sdk: AsyncHelixClient | None,
+    authorize: SourceReadAuthorizer | None,
+) -> None:
+    """Refuse no-network tasks unless the agent's model calls go through a closed-book VirtualModel.
+
+    A no-network task's sandbox can still reach the model route, so the run is only closed-book if that route is.
+    ``tasks`` are (task id, task.toml config) pairs. The VirtualModel must end its request middleware with the
+    closed-book middleware, so the model it checks is the one the request is sent to.
+
+    Raises:
+        ValueError: Some task is no-network, and the agent's model route isn't a closed-book VirtualModel.
+    """
+    no_network = no_network_task_ids(tasks)
+    if not no_network or (isinstance(target, HarborRunnerTarget) and target.agent_name in MODEL_FREE_HARBOR_AGENTS):
+        return
+    model = target.gateway_model if isinstance(target, HarborRunnerTarget) else None
+    if model is None:
+        raise ValueError(
+            f"closed_book_required: no-network tasks {no_network} need the agent's model calls to go through a "
+            f'closed-book VirtualModel: give a built-in agent one as `model: {{"ref": ...}}`'
+        )
+    if async_sdk is None:
+        raise ValueError("checking a closed-book model route requires a platform client")
+    workspace, name = parse_workspace_name_ref(model.root, label="Gateway model")
+    await authorize_source_read(authorize, "virtual_model", workspace, name)
+    try:
+        virtual_model = (
+            await client_from_platform(async_sdk, AsyncVirtualModelsClient).get_virtual_model(
+                name=name, workspace=workspace
+            )
+        ).data()
+    except NotFoundError:
+        virtual_model = None
+    if (
+        virtual_model is None
+        or not virtual_model.request_middleware
+        or (virtual_model.request_middleware[-1].name != CLOSED_BOOK_MIDDLEWARE)
+    ):
+        raise ValueError(
+            f"closed_book_required: no-network tasks {no_network} need a closed-book model route, and {model.root} "
+            f"isn't one: make `{CLOSED_BOOK_MIDDLEWARE}` the last entry of its VirtualModel's request_middleware"
+        )
 
 
 def no_network_task_ids(tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> list[str]:
