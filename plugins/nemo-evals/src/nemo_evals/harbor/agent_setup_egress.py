@@ -203,12 +203,14 @@ def _with_setup_egress(agent_class: type[BaseAgent], hosts: tuple[str, ...]) -> 
 def setup_timeout_multiplier(inner: str, multiplier: float) -> float:
     """The setup timeout multiplier that gives ``inner`` its own setup timeout through the wrapper.
 
-    Harbor reads ``DEFAULT_SETUP_TIMEOUT_SEC`` from the class it imports, which is :class:`AgentSetupEgress`
+    Harbor 0.24 reads ``DEFAULT_SETUP_TIMEOUT_SEC`` from the class it imports, which is :class:`AgentSetupEgress`
     and can't know the inner agent. Scaling the multiplier keeps the inner agent's timeout (1200 s for
-    hermes) times the caller's ``multiplier``.
+    hermes) times the caller's ``multiplier``. Harbor 0.23 has no per-agent default and uses 360 s for
+    every agent, so there the multiplier is left as it is.
     """
-    inner_timeout = _inner_agent_class(inner).DEFAULT_SETUP_TIMEOUT_SEC
-    return multiplier * inner_timeout / AgentSetupEgress.DEFAULT_SETUP_TIMEOUT_SEC
+    default = AgentSetupEgress.DEFAULT_SETUP_TIMEOUT_SEC
+    inner_timeout = getattr(_inner_agent_class(inner), "DEFAULT_SETUP_TIMEOUT_SEC", default)
+    return multiplier * inner_timeout / default
 
 
 class AgentSetupEgress:

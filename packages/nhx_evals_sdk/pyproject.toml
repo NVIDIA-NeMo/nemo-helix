@@ -64,7 +64,7 @@ engine = []
 # the SDK and constructing Harbor configuration work without the extra; execution and result
 # adaptation do not.
 harbor = [
-  "harbor>=0.24,<0.25",
+  "harbor>=0.23,<0.25",
   "nemo-fabric[harbor]>=0.5.0,<0.6.0",
 ]
 # NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or

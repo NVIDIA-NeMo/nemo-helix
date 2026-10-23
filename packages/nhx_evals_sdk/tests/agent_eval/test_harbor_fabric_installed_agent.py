@@ -13,6 +13,7 @@ import pytest
 pytest.importorskip("harbor", reason="FabricInstalledAgent builds on Harbor's BaseInstalledAgent")
 
 import harbor
+from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import MCPServerConfig
@@ -99,10 +100,11 @@ def test_it_is_an_installed_agent_wrapping_a_fabric_agent(tmp_path: Path) -> Non
 
 
 def test_harbor_admits_skills_and_mcp_servers(tmp_path: Path) -> None:
-    """Harbor refuses a task's skills or MCP servers unless the agent declares them."""
-    capabilities = _agent(tmp_path).capabilities
+    """Harbor 0.24 refuses a task's skills or MCP servers unless the agent declares them; 0.23 has no such fields."""
+    declared = _agent(tmp_path).capabilities.model_dump()
+    expected = [field for field in ("atif", "skills", "mcp_servers") if field in AgentCapabilities.model_fields]
 
-    assert capabilities.skills and capabilities.mcp_servers and capabilities.atif
+    assert expected and all(declared[field] is True for field in expected)
 
 
 def test_mcp_servers_the_adapter_cannot_implement_fail_at_construction(tmp_path: Path) -> None:

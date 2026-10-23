@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
 from harbor.environments.factory import EnvironmentFactory
 from harbor.models.task.config import EnvironmentConfig, TaskConfig
@@ -301,6 +302,9 @@ def _harbor_setup_timeout_sec(configured: HarborRuntimeConfig) -> float:
     return agent_class.DEFAULT_SETUP_TIMEOUT_SEC * configured.agent_setup_timeout_multiplier
 
 
+@pytest.mark.skipif(
+    not hasattr(BaseAgent, "DEFAULT_SETUP_TIMEOUT_SEC"), reason="Harbor 0.23 uses one setup timeout for every agent"
+)
 @pytest.mark.parametrize(
     ("agent", "multipliers", "timeout_sec"),
     [
