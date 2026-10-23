@@ -231,9 +231,10 @@ class HarborGatewayAgentSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(
-        description="Built-in Harbor agent to run. It must declare a model connection the gateway can serve: an "
-        "OpenAI- or Anthropic-style provider, or one taken from the model name (for example `codex`, `claude-code`, "
-        "`mini-swe-agent`)."
+        description="Built-in Harbor agent to run, such as `codex`, `claude-code`, `aider`, `goose` or `openhands`. "
+        "Any built-in agent qualifies if it declares an OpenAI- or Anthropic-style model connection, or takes its "
+        "provider from the model name; an agent of that last kind calls the gateway's OpenAI-style route and is "
+        "given the model as `openai/<name>`. Other agents are refused."
     )
     model: ModelRef = Field(
         description="A model the Inference Gateway serves, as `workspace/name`: a model or a VirtualModel."
