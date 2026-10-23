@@ -199,7 +199,14 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 f"The provider serving {model!r} adds provider-executed tools or features to requests, "
                 "so it cannot be served closed-book.",
             )
-        stored = [key for key in _PROVIDER_STORED_HISTORY_KEYS if request.body.get(key) is not None]
+        stored = [
+            key
+            for key in _PROVIDER_STORED_HISTORY_KEYS
+            if any(
+                body.get(key) is not None
+                for body in (request.body, target.default_extra_body, target.required_extra_body)
+            )
+        ]
         if stored:
             raise _refusal(
                 ctx,

@@ -393,6 +393,24 @@ async def test_provider_stored_history_is_refused(history: dict[str, object]) ->
     assert exc_info.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    ("default_extra_body", "required_extra_body"),
+    [({"previous_response_id": "resp_1"}, None), (None, {"conversation": "conv_1"})],
+)
+async def test_provider_policy_adding_stored_history_is_refused(
+    default_extra_body: dict[str, object] | None, required_extra_body: dict[str, object] | None
+) -> None:
+    """The gateway merges provider body policy after middleware runs, so the request alone is not enough."""
+    target = _target("azure/openai/gpt-5.6-luna", default_extra_body, required_extra_body)
+    middleware = _middleware({"ws/luna": target})
+    ctx, request = _request("v1/responses", {"model": "ws/luna", "input": "hi"})
+
+    with pytest.raises(InferenceMiddlewareError) as exc_info:
+        await middleware.process_request(ctx, request, ClosedBookConfig())
+
+    assert exc_info.value.status_code == 403
+
+
 async def test_null_provider_stored_history_is_allowed() -> None:
     middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
     ctx, request = _request(
