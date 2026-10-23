@@ -38,6 +38,7 @@ from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
+from nemo_evals.jobs.gateway_models import require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
@@ -350,6 +351,13 @@ class TasksetRunService:
                     f"this deployment starts every task Job at once: {len(spec.tasks)} tasks exceed "
                     f"execution.max_concurrent_task_jobs={req.execution.max_concurrent_task_jobs}; select fewer tasks"
                 )
+            configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+            try:
+                await require_closed_book_route(
+                    spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
+                )
+            except ValueError as exc:
+                raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared = await self._prepare_images(spec.tasks, policy, caller=caller)
             accepted_at = self._clock()
