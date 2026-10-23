@@ -205,6 +205,27 @@ class TestRegisterAgent:
         assert created_entity.name == "calc"
         assert created_entity.workspace == "default"
 
+    @pytest.mark.parametrize("config", [None, {"llms": {}}, _fabric_agent_config()])
+    def test_register_stores_references(
+        self, client: TestClient, mock_entity_client: AsyncMock, config: dict[str, Any] | None
+    ) -> None:
+        mock_entity_client.create.side_effect = lambda agent: agent
+        reference = {"fileset": "default/agent-source", "container_image": "nvcr.io/my-org/agent:1.0"}
+        body: dict[str, Any] = {"name": "calc", "reference": reference}
+        if config is not None:
+            body["config"] = config
+
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json=body)
+
+        assert resp.status_code == 201
+        agent = mock_entity_client.create.call_args[0][0]
+        assert agent.reference.model_dump() == reference
+        assert "reference" not in agent.config
+        assert resp.json()["reference"] == reference
+        if config is None:
+            assert agent.config == {}
+            assert agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT
+
     @pytest.mark.parametrize("explicit_format", [False, True])
     def test_register_validates_platform_agent_config(
         self, client: TestClient, mock_entity_client: AsyncMock, explicit_format: bool

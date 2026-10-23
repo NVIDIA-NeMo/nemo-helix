@@ -18,6 +18,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.sdk import AgentsResource, AsyncAgentsResource, agents_sdk_resources
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 _Handler = Callable[[httpx.Request], httpx.Response]
@@ -69,6 +70,21 @@ def test_register_resolves_default_model_placeholder_before_post() -> None:
     assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
     assert captured["body"]["config"]["llms"]["llm"]["model_name"] == "team-a/nemotron"
     assert config["llms"]["llm"]["model_name"] == "${NEMO_DEFAULT_MODEL}"
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_register_forwards_references_without_config(typed: bool) -> None:
+    reference = {"fileset": "team-a/agent-source", "container_image": "nvcr.io/my-org/agent:1.0"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = _read_json(req)
+        assert body == {"name": "calc", "reference": reference}
+        return httpx.Response(201, json=body)
+
+    client = AgentsResource(_client(handler))
+    result = client.register(name="calc", reference=ReferenceConfig.model_validate(reference) if typed else reference)
+
+    assert result["reference"] == reference
 
 
 def test_register_rejects_unresolved_default_model_placeholder() -> None:
