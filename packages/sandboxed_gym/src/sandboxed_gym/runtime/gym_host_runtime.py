@@ -11,6 +11,7 @@ is injected verbatim into the sandbox image, where ``nemo_rl`` may not be import
 """
 
 import asyncio
+import atexit
 import codecs
 import collections
 import concurrent.futures
@@ -149,6 +150,11 @@ class _OutputTail:
         self._retain = _MAX_CAPTURED_LINE_CHARS + max((len(secret) for secret in secrets), default=0)
 
     def write(self, text: str) -> int:
+        self.capture(text)
+        return self._stream.write(text)
+
+    def capture(self, text: str) -> None:
+        """Retain bounded, scrubbed text without forwarding it to the destination."""
         # Captured only once a line terminator arrives. Masking each write on its own would store a
         # secret straddling two writes as two fragments, neither of which matches it.
         pending = self._partial + text
@@ -158,7 +164,10 @@ class _OutputTail:
                 self._buffer.append(self._scrub(line))
         # A writer under no obligation to emit a newline would otherwise grow this without bound.
         self._partial = self._partial[: self._retain]
-        return self._stream.write(text)
+
+    def pending_line(self) -> str:
+        """Return the bounded, scrubbed final line even when it has no terminator."""
+        return self._scrub(self._partial) if self._partial.strip() else ""
 
     def _scrub(self, line: str) -> str:
         for secret in self._secrets:
@@ -197,46 +206,71 @@ def _captured_output_secrets() -> tuple[str, ...]:
 class _FdOutputTail:
     """Tee an inherited fd, not just Python writes, into the bounded diagnostic tail.
 
-    One daemon drains each pipe throughout training so component output cannot fill it and
-    block Gym. The saved destination still receives the output; no on-disk log can grow
+    One daemon drains each pipe throughout training, rather than waiting for an error.
+    The saved destination still receives the output; no on-disk log can grow
     without bound. Captures live for this dedicated host process's lifetime.
     """
 
     def __init__(self, fd: int, secrets: tuple[str, ...]) -> None:
         self._lock = threading.Lock()
+        self._fd = fd
         self._read_fd, write_fd = os.pipe()
         os.set_blocking(self._read_fd, False)
-        destination = os.fdopen(os.dup(fd), "w", buffering=1, encoding="utf-8", errors="replace")
-        self._tail = _OutputTail(destination, _OUTPUT_TAIL, secrets)
+        self._destination = os.fdopen(os.dup(fd), "wb", buffering=0)
+        self._tail: _OutputTail | None = _OutputTail(None, _OUTPUT_TAIL, secrets)
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         os.dup2(write_fd, fd)
         os.close(write_fd)
         threading.Thread(target=self._run, daemon=True, name=f"gym-output-{fd}").start()
 
-    def drain(self) -> str:
-        # Also called synchronously before serializing an error: a child can exit before the
-        # reader thread gets scheduled. Bound each read even if a component never stops writing.
+    def drain(self, *, max_chunks: int = 1) -> str:
+        """Drain queued output, with a byte budget even if a component keeps writing."""
         with self._lock:
-            try:
-                chunk = os.read(self._read_fd, 65536)
-            except BlockingIOError:
-                chunk = b""
-            if chunk:
-                text = self._decoder.decode(chunk)
+            for _ in range(max_chunks):
                 try:
-                    self._tail.write(text)
-                    self._tail.flush()
-                except (BrokenPipeError, OSError):
-                    # Losing the container log sink must not stop capture or block the child.
+                    chunk = os.read(self._read_fd, 65536)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    break
+                if self._tail is not None:
+                    try:
+                        self._tail.capture(self._decoder.decode(chunk))
+                    except Exception:
+                        # Fail closed if capture/redaction breaks. Keep pumping raw container
+                        # logs, but never publish a partially scrubbed diagnostic.
+                        self._tail = None
+                try:
+                    # Only the diagnostic copy is decoded. Container logs retain original bytes,
+                    # including invalid UTF-8, and raw writes may complete only part of a chunk.
+                    remaining = memoryview(chunk)
+                    while remaining:
+                        written = self._destination.write(remaining)
+                        if not written:
+                            break
+                        remaining = remaining[written:]
+                except (OSError, ValueError):
+                    # A broken or closed container sink must not stop capture or pipe draining.
                     pass
-            # Setup scripts need not end their last diagnostic with a newline. Scrub before
-            # truncating, just as for complete lines (including secrets split across reads).
-            return self._tail._scrub(self._tail._partial) if self._tail._partial.strip() else ""
+            try:
+                return self._tail.pending_line() if self._tail is not None else ""
+            except Exception:
+                self._tail = None
+                return ""
 
     def _run(self) -> None:
-        while True:
-            select.select([self._read_fd], [], [])
-            self.drain()
+        """Pump until process exit; a broken reader must not leave writers blocked."""
+        try:
+            while True:
+                select.select([self._read_fd], [], [])
+                self.drain()
+        except Exception:
+            # If the pipe itself fails, restore the host fd for subsequent writes. Closing the
+            # reader also makes existing children fail fast rather than hang on a full pipe.
+            try:
+                os.dup2(self._destination.fileno(), self._fd)
+            finally:
+                os.close(self._read_fd)
 
 
 _OUTPUT_CAPTURES: tuple[_FdOutputTail, ...] = ()
@@ -248,12 +282,30 @@ def _install_output_tail() -> None:
     sys.stderr.flush()
     secrets = _captured_output_secrets()
     _OUTPUT_CAPTURES = tuple(_FdOutputTail(fd, secrets) for fd in (1, 2))
+    # Uncaught Python tracebacks are printed before atexit, but daemon pumps are not joined.
+    atexit.register(_drain_output_captures)
+
+
+def _drain_output_captures() -> list[str]:
+    """Forward final/error output with a bounded read budget of 1 MiB per fd."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            pass
+    pending = []
+    for capture in _OUTPUT_CAPTURES:
+        try:
+            if line := capture.drain(max_chunks=16):
+                pending.append(line)
+        except OSError:
+            # The reader may already have restored a failed pipe's original output fd.
+            pass
+    return pending
 
 
 def _runtime_error(code: str, message: str) -> dict[str, Any]:
-    sys.stdout.flush()
-    sys.stderr.flush()
-    pending = [line for capture in _OUTPUT_CAPTURES if (line := capture.drain())]
+    pending = _drain_output_captures()
     error: dict[str, Any] = {"code": code, "message": message}
     # Copy before iterating: component-reader threads can append while an HTTP handler renders.
     tail = (list(_OUTPUT_TAIL.copy()) + pending)[-_OUTPUT_TAIL_LINES:]

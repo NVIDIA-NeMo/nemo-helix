@@ -3,11 +3,16 @@
 
 """Exercise inherited component fds in a separate host, without Gym installs or GPUs."""
 
+import codecs
+import collections
+import io
 import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sandboxed_gym.host.models import render_host_error
@@ -40,8 +45,14 @@ os.write(fd, sys.argv[2].encode())  # deliberately no final newline
 """
     subprocess.run([sys.executable, '-c', script, str(fd), cause], check=True, timeout=10)
 
-if mode == 'rollout':
+if mode in ('rollout', 'capture-failure', 'sink-failure'):
     runtime._install_output_tail()
+    if mode == 'capture-failure':
+        def broken_capture(text):
+            raise ValueError('capture unavailable')
+        runtime._OUTPUT_CAPTURES[fd - 1]._tail.capture = broken_capture
+    elif mode == 'sink-failure':
+        runtime._OUTPUT_CAPTURES[fd - 1]._destination.close()
     component()
     future = concurrent.futures.Future()
     future.set_exception(RuntimeError('component request failed'))
@@ -121,3 +132,137 @@ def test_component_output_does_not_turn_success_into_a_bootstrap_failure(tmp_pat
     body, result = _host(tmp_path, "success", 2, "custom reward server ready")
     assert body == {"ready": True}
     assert "custom reward server ready" in result.stderr
+
+
+def test_uncaught_host_failure_flushes_final_traceback_at_exit():
+    """A parked daemon makes losing the final bind-error traceback deterministic."""
+    script = """
+import os
+from sandboxed_gym.runtime import gym_host_runtime as runtime
+runtime.threading.Thread.start = lambda self: None
+runtime._ensure_event_loop = lambda: None
+
+def bootstrap():
+    os.write(2, b'last component setup detail\\n')
+    return None, None, None
+
+class BindFailure:
+    def __init__(self, *args):
+        raise OSError('intentional host bind failure')
+
+runtime.bootstrap_gym_host = bootstrap
+runtime._Server = BindFailure
+runtime.main()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(Path(runtime.__file__).parents[2])},
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert b"last component setup detail" in result.stderr
+    assert b"Traceback (most recent call last):" in result.stderr
+    assert b"OSError: intentional host bind failure" in result.stderr
+
+
+@pytest.mark.parametrize("fd", [1, 2])
+def test_exit_tee_preserves_raw_bytes(fd):
+    """Container logs remain byte-exact, even when text diagnostics need replacement."""
+    raw = b"invalid-utf8=\xff\xfe\r\nunterminated=\xe2\x82"
+    script = f"""
+import os
+from sandboxed_gym.runtime import gym_host_runtime as runtime
+runtime.threading.Thread.start = lambda self: None
+runtime._install_output_tail()
+os.write({fd}, {raw!r})
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(Path(runtime.__file__).parents[2])},
+        timeout=10,
+        check=True,
+    )
+    assert (result.stdout if fd == 1 else result.stderr) == raw
+
+
+def _capture_without_thread(monkeypatch, chunks):
+    """Model queued reads larger than one chunk without platform-specific pipe sizing."""
+    capture = object.__new__(runtime._FdOutputTail)
+    capture._lock = threading.Lock()
+    capture._read_fd = -1
+    monkeypatch.setattr(capture, "_destination", io.BytesIO(), raising=False)
+    capture._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    buffer = collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES)
+    capture._tail = runtime._OutputTail(None, buffer)
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", buffer)
+    monkeypatch.setattr(runtime, "_OUTPUT_CAPTURES", (capture,))
+    calls = []
+
+    def read(fd, size):
+        calls.append(size)
+        return next(chunks, b"")
+
+    monkeypatch.setattr(runtime.os, "read", read)
+    return capture, calls
+
+
+def test_error_drain_retains_cause_after_multiple_queued_chunks(monkeypatch):
+    cause = b"missing-install-marker in custom_reward"
+    noise = b"component startup log\n" * 3000
+    capture, calls = _capture_without_thread(monkeypatch, iter([noise, noise, cause]))
+
+    body = runtime._runtime_error("bootstrap_failed", "component finished unexpectedly")
+
+    assert cause.decode() in render_host_error(body["error"])
+    assert capture._destination.getvalue() == noise * 2 + cause
+    assert len(calls) == 4, "drain until the queue empties, not just one read"
+
+
+def test_error_drain_is_bounded_for_a_continuous_writer(monkeypatch):
+    def forever():
+        while True:
+            yield b"chatty component\n"
+
+    _, calls = _capture_without_thread(monkeypatch, forever())
+
+    runtime._runtime_error("internal", "failure")
+
+    assert len(calls) == 16, "continuous output must not keep the error path draining forever"
+
+
+@pytest.mark.parametrize("fd", [1, 2])
+@pytest.mark.parametrize("mode", ["capture-failure", "sink-failure"])
+def test_capture_or_sink_failure_does_not_block_component_writes(tmp_path, mode, fd):
+    """A broken capture or log sink must still drain more than a pipe's capacity."""
+    cause = "RuntimeError: component original cause"
+    body, result = _host(tmp_path, mode, fd, cause)
+    assert body["error"]["code"] == "internal"
+    if mode == "sink-failure":
+        diagnostic = render_host_error(body["error"])
+        assert cause in diagnostic
+        assert "component-secret-123456789" not in diagnostic
+    else:
+        assert cause in (result.stdout if fd == 1 else result.stderr)
+
+
+def test_failed_reader_restores_host_fd_and_closes_pipe(monkeypatch):
+    """If the pipe itself breaks, do not leave existing child writers blocked forever."""
+    capture, _ = _capture_without_thread(monkeypatch, iter(()))
+    capture._fd = 2
+    capture._destination = SimpleNamespace(fileno=lambda: 99)
+    restored = []
+    closed = []
+
+    def broken_select(*args):
+        raise OSError("reader unavailable")
+
+    monkeypatch.setattr(runtime.select, "select", broken_select)
+    monkeypatch.setattr(runtime.os, "dup2", lambda source, target: restored.append((source, target)))
+    monkeypatch.setattr(runtime.os, "close", closed.append)
+
+    capture._run()
+
+    assert restored == [(99, 2)]
+    assert closed == [-1]
