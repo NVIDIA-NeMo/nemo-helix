@@ -71,24 +71,19 @@ Before you begin, here is a quick overview of the resources you will use:
 
 ## 1. Create a Workspace and Initialize the SDK
 
-Create a dedicated workspace for this tutorial to keep your resources isolated from other projects, and make it the default workspace for your current CLI context:
-
-```bash
-nemo workspaces create llm-as-judge-tutorial
-nemo config set --workspace llm-as-judge-tutorial
-```
-
-If the workspace already exists from a previous run, the create command reports a conflict; continue with the second command. To return to your original workspace after the tutorial, run `nemo config set --workspace default`.
-
-Create a client from your current CLI context. It connects to the deployment and workspace saved in the context, using the credentials from `nemo auth login`. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+Create a fresh, dedicated workspace for each run of this tutorial so cleanup never deletes resources in your current workspace. The client connects to the deployment saved in your CLI context, using the credentials from `nemo auth login`, then uses the new workspace without changing your CLI context. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ```python
+from uuid import uuid4
+
 from nemo_evals.sdk import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-# Create a NemoClient from the current CLI context.
 client = NemoClient.from_config()
-WORKSPACE = client.resolve_workspace()
+WORKSPACE = f"llm-as-judge-tutorial-{uuid4().hex[:12]}"
+client.workspaces.create_workspace(body=CreateWorkspaceRequest(name=WORKSPACE)).data()
+client = client.with_workspace(WORKSPACE)
 evaluator = Evaluator.from_client(client)
 
 # Verify evals plugin connectivity.
@@ -655,7 +650,7 @@ If your judge's distribution looks very different from humans, such as always sc
 
 ## 10. Clean Up
 
-To delete the workspace, you must first delete all resources within it. Delete jobs first, then filesets, secrets, and the workspace.
+Delete the tutorial's jobs first, then its fileset, secret, and dedicated workspace.
 
 ```python
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -686,7 +681,7 @@ print("Cleanup complete!")
 
 <Note>
 
-Workspaces cannot be deleted while they contain resources. The code above deletes resources in dependency order.
+Workspace deletion revokes access immediately and asynchronously cleans up remaining resources. The code above explicitly deletes the tutorial resources in dependency order before requesting workspace deletion.
 
 </Note>
 ---
@@ -713,13 +708,9 @@ Wait for all services to be healthy before running the tutorial. Check health st
 curl -s http://localhost:8080/health/ready
 ```
 
-### Workspace already exists
+### Re-running after an interrupted tutorial
 
-If you're re-running the tutorial and want to start fresh, delete the existing workspace first:
-
-```python
-client.workspaces.delete_workspace(name=WORKSPACE)
-```
+The initialization cell creates a fresh workspace on each run. If a previous run stopped before cleanup, use the workspace name printed by that run to inspect and clean up its resources. Do not delete your current CLI workspace or any workspace you did not create for this tutorial.
 
 ### Local NVIDIA Build authentication fails
 
