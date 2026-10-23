@@ -29,31 +29,40 @@ from nemo_evals.harbor.compose.models import (
     ComposeProblems,
     ComposeService,
     ComposeTask,
+    ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.resolve import (
     COMPOSE_FILENAME,
     ENVIRONMENT_DIR,
+    HARBOR_LOG_DIRECTORIES,
     find_compose_file,
     read_env_files,
     resolve_compose,
 )
 from nemo_evals.harbor.compose.service_options import (
     parse_argument_list,
+    parse_capabilities,
     parse_dependency_conditions,
     parse_entrypoint,
     parse_environment,
+    parse_memory_quantity,
+    parse_platform,
     parse_ports,
     parse_readiness,
+    parse_resources,
+    parse_volume_mounts,
 )
 from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE
 
 _COMPLETED = "service_completed_successfully"
 
-# Service keys that a pod already behaves as, or that images prebuilt elsewhere make moot.
-_NO_EFFECT_KEYS = frozenset({"pull_policy", "restart", "container_name", "hostname", "labels", "logging"})
+# Service keys that a pod already behaves as, or that images prebuilt elsewhere make moot. `tty` and `stdin_open`
+# attach a terminal to the container's own process; Harbor runs every command through exec, which never uses it.
+_NO_EFFECT_KEYS = frozenset(
+    {"pull_policy", "restart", "container_name", "hostname", "labels", "logging", "tty", "stdin_open"}
+)
 
-# The service keys read so far; any other key is recorded as unsupported.
-_SERVICE_KEYS = frozenset(
+_COMMON_KEYS = frozenset(
     {
         "image",
         "build",
@@ -65,9 +74,14 @@ _SERVICE_KEYS = frozenset(
         "env_file",
         "expose",
         "ports",
+        "volumes",
         "network_mode",
+        "networks",
+        "platform",
     }
 )
+_SERVICE_KEYS = _COMMON_KEYS | {"shm_size", "cpus", "mem_limit", "deploy"}
+_MAIN_KEYS = _COMMON_KEYS | {"cap_add", "cpus", "mem_limit", "deploy"}
 
 
 def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTask | None:
@@ -99,13 +113,23 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
     # Merge the task's file over Harbor's base file and interpolate it, as `docker compose` would.
     resolved = resolve_compose(task_dir, compose_file, compose_path, problems)
 
+    # Volumes are declared once at the top level, so read them before any service mounts one.
+    declared_volumes = _declared_volumes(resolved.document, problems)
+    for name in sorted(declared_volumes & {volume for _path, volume in HARBOR_LOG_DIRECTORIES.values()}):
+        problems.invalid(f"volumes.{name}", "this name is reserved for Harbor's log directories")
+    _check_networks(resolved.document, {MAIN_SERVICE: resolved.main, **resolved.services}, problems)
+
     # Parse every service before raising, so a task with several problems reports all of them.
-    service_parser = ServiceParser(task_dir, problems)
+    service_parser = ServiceParser(task_dir, declared_volumes, problems)
     parsed_services = {
         name: service_parser.service(name, raw_service) for name, raw_service in resolved.services.items()
     }
     main, main_build = service_parser.main(
-        resolved.main, resolved.harbor_main, prebuilt=resolved.prebuilt, read_entrypoint=read_entrypoint
+        resolved.main,
+        resolved.harbor_main,
+        prebuilt=resolved.prebuilt,
+        read_entrypoint=read_entrypoint,
+        task_limits=resolved.task_limits,
     )
 
     # Roles and start order read `depends_on`, which is only meaningful once every service parsed cleanly.
@@ -116,6 +140,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         main.depends_on,
         compose_path=compose_path,
     )
+    services, main, log_volumes = _share_harbor_log_mounts(services, main, resolved.harbor_log_mounts)
 
     # Only a prebuilt task runs the image named in the compose file; a built `main` comes from its Dockerfile.
     main_image = resolved.main.get("image")
@@ -126,15 +151,17 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         main_image=str(main_image) if resolved.prebuilt and main_image else None,
         services=services,
         main=main,
+        volumes=[*_mounted_volumes(resolved.document, services, main), *log_volumes],
     )
 
 
 class ServiceParser:
     """Reads the raw services of one compose file into models, recording what a pod can't run in ``problems``."""
 
-    def __init__(self, task_dir: Path, problems: ComposeProblems) -> None:
-        """Parse services of the task at ``task_dir``."""
+    def __init__(self, task_dir: Path, declared_volumes: set[str], problems: ComposeProblems) -> None:
+        """Parse services of the task at ``task_dir``, whose compose file declares ``declared_volumes``."""
         self._task_dir = task_dir
+        self._declared_volumes = declared_volumes
         self._problems = problems
 
     def service(self, name: str, raw_service: dict[str, Any]) -> ComposeService | None:
@@ -148,15 +175,22 @@ class ServiceParser:
         if source is None:
             return None
 
+        environment = self._environment(raw_service, path)
+        limits, requests = parse_resources(raw_service, path, self._problems)
         return ComposeService(
             name=name,
             source=source,
+            platform=parse_platform(raw_service.get("platform"), f"{path}.platform", self._problems),
             depends_on=parse_dependency_conditions(raw_service.get("depends_on"), f"{path}.depends_on", self._problems),
             command=parse_entrypoint(raw_service.get("entrypoint"), f"{path}.entrypoint", self._problems),
             args=parse_argument_list(raw_service.get("command"), f"{path}.command", self._problems),
-            env=self._environment(raw_service, path),
+            env=environment,
             ports=parse_ports(raw_service, path, self._problems),
             readiness=parse_readiness(raw_service.get("healthcheck"), f"{path}.healthcheck", self._problems),
+            limits=limits,
+            requests=requests,
+            volume_mounts=self._volume_mounts(raw_service, path),
+            shm_size=parse_memory_quantity(raw_service.get("shm_size"), f"{path}.shm_size", self._problems),
         )
 
     def main(
@@ -166,18 +200,21 @@ class ServiceParser:
         *,
         prebuilt: bool,
         read_entrypoint: bool,
+        task_limits: Mapping[str, str],
     ) -> tuple[ComposeMainSettings, ComposeBuild | None]:
         """Read ``main`` as the task's file lays it over Harbor's own, as its settings and what builds it.
 
         What builds ``main`` is None for a prebuilt task. ``main``'s entrypoint is the compose override if there is
         one, otherwise (for a built ``main``, and when ``read_entrypoint`` is set) the last ``ENTRYPOINT`` of its
-        Dockerfile, since the sandbox would otherwise replace it.
+        Dockerfile, since the sandbox would otherwise replace it. ``task_limits`` are ``task.toml``'s CPUs and
+        memory, which ``main``'s own limits may only repeat.
         """
         path = f"services.{MAIN_SERVICE}"
-        self._check_keys(MAIN_SERVICE, raw_main, _SERVICE_KEYS)
+        self._check_keys(MAIN_SERVICE, raw_main, _MAIN_KEYS)
         if raw_main.get("command") != harbor_main.get("command"):
             # The sandbox keeps ``main`` alive itself; a task's own ``command`` for it would be dropped.
             self._problems.unsupported(f"{path}.command")
+        self._check_main_limits(raw_main, task_limits, path)
 
         environment = self._environment(raw_main, path)
         entrypoint = parse_entrypoint(raw_main.get("entrypoint"), f"{path}.entrypoint", self._problems)
@@ -195,9 +232,27 @@ class ServiceParser:
             depends_on=parse_dependency_conditions(raw_main.get("depends_on"), f"{path}.depends_on", self._problems),
             env=environment,
             readiness=parse_readiness(raw_main.get("healthcheck"), f"{path}.healthcheck", self._problems),
+            add_capabilities=parse_capabilities(raw_main, path, self._problems),
+            volume_mounts=self._volume_mounts(raw_main, path),
             entrypoint=entrypoint,
+            platform=parse_platform(raw_main.get("platform"), f"{path}.platform", self._problems),
         )
         return settings, build
+
+    def _check_main_limits(self, raw_main: Mapping[str, Any], task_limits: Mapping[str, str], path: str) -> None:
+        """Record resources on ``main`` that the sandbox wouldn't apply.
+
+        The sandbox sizes ``main`` from ``task.toml``, and many files set ``main``'s limits from Harbor's ``${CPUS}``
+        and ``${MEMORY}``, which only repeats it. Limits that say something else, and reservations (requests, GPUs),
+        would be silently ignored, so they are unsupported.
+        """
+        limits, requests = parse_resources(raw_main, path, self._problems)
+        # Read `task.toml`'s values the same way, so `2048M` and `memory_mb = 2048` compare equal.
+        expected, _ = parse_resources(task_limits, path, self._problems)
+        if requests:
+            self._problems.unsupported(f"{path}.deploy.resources.reservations")
+        if any(expected.get(resource) != quantity for resource, quantity in limits.items()):
+            self._problems.unsupported(f"{path}: resource limits {limits} differ from task.toml's {expected}")
 
     def _environment(self, raw_service: Mapping[str, Any], path: str) -> dict[str, str]:
         """Read a service's variables: its ``env_file`` entries, overridden by its ``environment``, as compose does."""
@@ -206,14 +261,38 @@ class ServiceParser:
             **parse_environment(raw_service.get("environment"), f"{path}.environment", self._problems),
         }
 
+    def _volume_mounts(self, raw_service: Mapping[str, Any], path: str) -> list[ComposeVolumeMount]:
+        """Read a service's ``volumes`` as mounts of the compose file's declared named volumes."""
+        return parse_volume_mounts(
+            raw_service.get("volumes"), f"{path}.volumes", self._declared_volumes, self._problems
+        )
+
     def _check_keys(self, name: str, raw_service: Mapping[str, Any], allowed_keys: frozenset[str]) -> None:
-        """Record every key of service ``name`` that a pod can't honor: unknown keys and other network modes."""
+        """Record every key of service ``name`` that a pod can't honor: unknown keys and other network modes.
+
+        Its ``networks`` are checked across all services, by :func:`_check_networks`.
+        """
         for key in raw_service:
             if key not in allowed_keys and key not in _NO_EFFECT_KEYS and not str(key).startswith("x-"):
                 self._problems.unsupported(f"services.{name}.{key}")
 
         if _shares_a_network_namespace(raw_service) is False:
             self._problems.unsupported(f"services.{name}.network_mode")
+
+
+def _declared_volumes(document: Mapping[str, Any], problems: ComposeProblems) -> set[str]:
+    """Read the names of the top-level ``volumes``; options on a volume aren't supported."""
+    volumes = document.get("volumes")
+    if volumes is None:
+        return set()
+    if not isinstance(volumes, dict):
+        problems.invalid("volumes", "expected a mapping")
+        return set()
+
+    for name, options in volumes.items():
+        if options not in (None, {}):
+            problems.unsupported(f"volumes.{name}: options")
+    return {str(name) for name in volumes}
 
 
 def _shares_a_network_namespace(raw_service: Mapping[str, Any]) -> bool | None:
@@ -225,6 +304,121 @@ def _shares_a_network_namespace(raw_service: Mapping[str, Any]) -> bool | None:
     if network_mode is None:
         return None
     return isinstance(network_mode, str) and network_mode.startswith("service:")
+
+
+def _check_networks(
+    document: Mapping[str, Any], raw_services: Mapping[str, Mapping[str, Any]], problems: ComposeProblems
+) -> None:
+    """Record any use of networks that a pod, which has exactly one network, couldn't reproduce.
+
+    Every container in a pod shares one network, so a file is accepted only when Compose would also connect every
+    service to every other: when they all, ``main`` included, join the same set of networks, and those networks are
+    plain bridges. Separate network sets would isolate services from each other, and per-service settings (a fixed
+    ``ipv4_address``, extra ``aliases``) have no meaning in a pod, so both are refused.
+
+    ``raw_services`` holds every service by name, ``main`` included.
+    """
+    declared = document.get("networks") or {}
+    if not isinstance(declared, dict):
+        problems.invalid("networks", "expected a mapping")
+        declared = {}
+
+    for network, options in declared.items():
+        if options is None:
+            continue
+        if not isinstance(options, dict):
+            problems.invalid(f"networks.{network}", "expected a mapping")
+            continue
+        for option, value in options.items():
+            # A plain bridge is what a pod's one network behaves as; anything else (a fixed subnet, an internal-only
+            # network, an external one) changes what the services can reach.
+            if (option, value) not in (("driver", "bridge"), ("internal", False)) and option != "name":
+                problems.unsupported(f"networks.{network}.{option}")
+
+    network_sets: dict[str, frozenset[str]] = {}
+    for name, raw_service in raw_services.items():
+        # A service in another's network namespace has no networks of its own.
+        if _shares_a_network_namespace(raw_service):
+            continue
+        networks = _service_networks(name, raw_service.get("networks"), problems)
+        for network in networks - {"default"} - set(declared):
+            problems.invalid(f"services.{name}.networks", f"network {network!r} is not declared")
+        network_sets[name] = networks
+
+    reference = network_sets.get(MAIN_SERVICE, frozenset({"default"}))
+    for name, networks in network_sets.items():
+        if networks != reference:
+            problems.unsupported(f"services.{name}.networks: not the same networks as main")
+
+
+def _service_networks(name: str, value: Any, problems: ComposeProblems) -> frozenset[str]:
+    """Read the networks a service joins: ``default`` when it names none, as in Compose.
+
+    ``[backend]`` and ``{backend: {}}`` both give ``{"backend"}``. A per-network setting such as ``ipv4_address`` is
+    recorded as unsupported.
+    """
+    path = f"services.{name}.networks"
+    if value is None:
+        return frozenset({"default"})
+    if isinstance(value, dict):
+        for network, settings in value.items():
+            if settings is None:
+                continue
+            if not isinstance(settings, dict):
+                problems.invalid(f"{path}.{network}", "expected a mapping")
+                continue
+            for setting in settings:
+                problems.unsupported(f"{path}.{network}.{setting}")
+        return frozenset(str(network) for network in value)
+    if isinstance(value, list) and all(isinstance(network, str) for network in value):
+        return frozenset(value)
+
+    problems.unsupported(path)
+    return frozenset()
+
+
+def _share_harbor_log_mounts(
+    services: dict[str, ComposeService], main: ComposeMainSettings, log_mounts: Mapping[str, Mapping[str, bool]]
+) -> tuple[dict[str, ComposeService], ComposeMainSettings, list[str]]:
+    """Give each service that mounted a Harbor log directory a pod volume there, shared with ``main``.
+
+    Under Harbor such a mount binds one host directory into several containers, so what a service writes there (kumo's
+    game server writes the agent's step log to ``/logs/verifier``) reaches ``main``, where the verifier and Harbor
+    read it. A shared pod volume keeps that. ``main``'s own log mounts need nothing: the sandbox creates the
+    directories in it.
+
+    Returns the services, ``main``, and the names of the volumes added, in :data:`HARBOR_LOG_DIRECTORIES` order.
+    """
+    shared: set[str] = set()
+    for name, directories in log_mounts.items():
+        service = services.get(name)
+        if service is None:
+            continue
+        mounts = [
+            ComposeVolumeMount(name=volume, mount_path=path, read_only=read_only)
+            for directory, read_only in directories.items()
+            for path, volume in [HARBOR_LOG_DIRECTORIES[directory]]
+        ]
+        services[name] = service.model_copy(update={"volume_mounts": [*service.volume_mounts, *mounts]})
+        shared.update(mount.name for mount in mounts)
+
+    # `main` mounts each shared volume read-write, where its own directory would be.
+    added = [(path, volume) for path, volume in HARBOR_LOG_DIRECTORIES.values() if volume in shared]
+    main_mounts = [ComposeVolumeMount(name=volume, mount_path=path) for path, volume in added]
+    main = main.model_copy(update={"volume_mounts": [*main.volume_mounts, *main_mounts]})
+    return services, main, [volume for _path, volume in added]
+
+
+def _mounted_volumes(
+    document: Mapping[str, Any], services: Mapping[str, ComposeService], main: ComposeMainSettings
+) -> list[str]:
+    """List the declared volumes that ``main`` or any service mounts, in the order the file declares them."""
+    declared = document.get("volumes")
+    declared_names = [str(name) for name in declared] if isinstance(declared, dict) else []
+
+    mounts = [mount for service in services.values() for mount in service.volume_mounts] + main.volume_mounts
+    mounted_names = {mount.name for mount in mounts}
+    return [name for name in declared_names if name in mounted_names]
 
 
 def _check_dependencies(
