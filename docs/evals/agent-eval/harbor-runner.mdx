@@ -761,7 +761,11 @@ An agent that declares no model connection, or a provider the gateway doesn't se
 
 - The base URL is the gateway's route for that model, at the platform address the task container
   reaches: `host.docker.internal` for a local Docker run, the in-cluster address for a taskset run on
-  Kubernetes. Don't set the base URL variable yourself; a target that does is refused.
+  Kubernetes. On Kubernetes the agent gets the address by the name the sandbox profile's
+  `agent_channel` lists for it, such as `nemo-helix-api.<namespace>.svc.cluster.local`, because the
+  sandbox resolves only the names it allows. A run with no-network tasks is refused when no
+  `agent_channel` entry names the platform. Don't set the base URL variable yourself; a target that
+  does is refused.
 - The gateway holds the provider's key, so the agent needs none. With platform authentication
   disabled, evals sets a placeholder key, unless another secret in the job, such as a judge's,
   already uses the key variable's name; that job is refused rather than handing the agent the other

@@ -30,7 +30,11 @@ from nemo_evals.harbor.agent_setup_egress import (
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
-from nemo_evals.jobs.gateway_models import add_gateway_key_placeholder, check_tasks_reach_the_gateway
+from nemo_evals.jobs.gateway_models import (
+    AGENT_CHANNEL_HOSTS_KWARG,
+    add_gateway_key_placeholder,
+    check_tasks_reach_the_gateway,
+)
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_evals.taskset_runs.identifiers import task_job_name
@@ -199,7 +203,7 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "request_timeout_sec": connection.request_timeout_s,
             "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
-            "agent_channel_hosts": list(policy.agent_channel),
+            AGENT_CHANNEL_HOSTS_KWARG: list(policy.agent_channel),
             "agent_setup_hosts": list(policy.agent_setup_egress),
             "egress_verification": policy.egress_verification,
             "enforce_disk_limit": policy.enforce_disk_limit,

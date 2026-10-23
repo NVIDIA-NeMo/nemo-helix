@@ -23,6 +23,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
+    AGENT_CHANNEL_HOSTS_KWARG,
     add_gateway_key_placeholder,
     agent_gateway_origin,
     check_gateway_model,
@@ -81,6 +82,24 @@ def test_origin_is_reachable_from_where_the_agent_runs(
         monkeypatch.setenv("NHX_INTERNAL_BASE_URL", internal_base_url)
 
     assert agent_gateway_origin(sandboxed=sandboxed) == expected
+
+
+@pytest.mark.parametrize(
+    ("agent_channel", "expected"),
+    [
+        (["nemo-api.ns.svc"], "http://nemo-api.ns.svc:8080"),
+        (["other.ns.svc.cluster.local", "nemo-api.ns.svc.cluster.local"], "http://nemo-api.ns.svc.cluster.local:8080"),
+        (["nemo-api.ns.svcx"], "http://nemo-api.ns.svc:8080"),
+        ([], "http://nemo-api.ns.svc:8080"),
+    ],
+    ids=["same-name", "fully-qualified-name", "label-prefix-is-not-a-name", "no-channel"],
+)
+def test_a_sandbox_gets_the_gateway_by_its_agent_channel_name(
+    monkeypatch: pytest.MonkeyPatch, agent_channel: list[str], expected: str
+) -> None:
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+
+    assert agent_gateway_origin(sandboxed=True, agent_channel=agent_channel) == expected
 
 
 def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
@@ -257,7 +276,10 @@ def _job_config(tmp_path: Path, target: HarborRunnerTarget, *, sandboxed: bool) 
     ctx = JobContext(workspace="ws", storage=storage, results=LocalJobResults(root=storage.persistent / "results"))
 
     def to_sandbox(config: HarborRuntimeConfig) -> HarborRuntimeConfig:
-        return config.model_copy(update={"environment": HarborEnvironmentConfig(import_path="x:Sandbox")})
+        environment = HarborEnvironmentConfig(
+            import_path="x:Sandbox", kwargs={AGENT_CHANNEL_HOSTS_KWARG: ["nemo-api.ns.svc.cluster.local"]}
+        )
+        return config.model_copy(update={"environment": environment})
 
     runtime, _, _ = AgentEvalJob._resolve_target(target, ctx, configure_harbor=to_sandbox if sandboxed else None)
     config = getattr(runtime, "_config")
@@ -267,12 +289,13 @@ def _job_config(tmp_path: Path, target: HarborRunnerTarget, *, sandboxed: bool) 
 
 @pytest.mark.parametrize(
     ("sandboxed", "origin"),
-    [(False, "http://host.docker.internal:8080"), (True, "http://nemo-api.ns.svc:8080")],
+    [(False, "http://host.docker.internal:8080"), (True, "http://nemo-api.ns.svc.cluster.local:8080")],
     ids=["docker", "sandbox"],
 )
 def test_the_job_points_the_agent_at_the_route_for_its_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandboxed: bool, origin: str
 ) -> None:
+    """A sandbox is given the gateway by the name its agent_channel allows, since that is the name it resolves."""
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
 
     config = _job_config(tmp_path, _codex(), sandboxed=sandboxed)
@@ -290,13 +313,14 @@ _NO_NETWORK = {"environment": {"allow_internet": False}}
         ("nemo-api.ns.svc", ("Nemo-API.ns.svc",)),
         ("nemo-api.ns.svc", (" nemo-api.ns.svc. ",)),
         ("10.1.2.3", ("10.0.0.0/8",)),
+        ("nemo-api.ns.svc", ("nemo-api.ns.svc.cluster.local",)),
     ],
-    ids=["host", "trailing-dot", "cidr"],
+    ids=["host", "trailing-dot", "cidr", "fully-qualified-name"],
 )
 def test_a_no_network_task_reaches_a_gateway_on_its_agent_channel(
     monkeypatch: pytest.MonkeyPatch, host: str, agent_channel: tuple[str, ...]
 ) -> None:
-    """Matches the sandbox's own allowlist: hosts trimmed and case-insensitively, IPs by CIDR."""
+    """Hosts trimmed and case-insensitively, IPs by CIDR, or the host followed by more DNS labels."""
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", f"http://{host}:8080")
 
     check_tasks_reach_the_gateway(_codex(), [("t", _NO_NETWORK)], agent_channel)
