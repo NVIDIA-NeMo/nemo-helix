@@ -127,17 +127,34 @@ def test_completions_prompt_is_kept(prompt: object) -> None:
 
 
 def test_forced_hosted_tool_choice_falls_back_to_auto_per_wire_format() -> None:
-    openai = {"tools": [{"type": "web_search_preview"}], "tool_choice": {"type": "web_search_preview"}}
+    function_tool = {"type": "function", "name": "f"}
+    anthropic_tool = {"name": "f", "input_schema": {}}
+    openai = {"tools": [{"type": "web_search_preview"}, function_tool], "tool_choice": {"type": "web_search_preview"}}
     anthropic = {
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}, anthropic_tool],
         "tool_choice": {"type": "tool", "name": "web_search"},
     }
 
     strip_hosted_tools(openai)
     strip_hosted_tools(anthropic, anthropic=True)
 
-    assert openai == {"tools": [], "tool_choice": "auto"}
-    assert anthropic == {"tools": [], "tool_choice": {"type": "auto"}}
+    assert openai == {"tools": [function_tool], "tool_choice": "auto"}
+    assert anthropic == {"tools": [anthropic_tool], "tool_choice": {"type": "auto"}}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"tools": [{"type": "web_search"}], "tool_choice": "required", "parallel_tool_calls": True},
+        {"tools": [{"type": "web_search_preview"}], "tool_choice": {"type": "web_search_preview"}},
+        {"tools": [{"type": "web_search_20250305", "name": "web_search"}], "tool_choice": {"type": "any"}},
+    ],
+)
+def test_removing_every_tool_drops_the_tool_settings(body: dict) -> None:
+    """Providers reject an empty `tools` list, and a `tool_choice` or `parallel_tool_calls` without tools."""
+    strip_hosted_tools(body)
+
+    assert body == {}
 
 
 def test_tool_choice_naming_a_kept_tool_or_a_mode_is_preserved() -> None:
@@ -178,10 +195,13 @@ def test_forced_choice_of_a_kept_client_tool_type_is_preserved() -> None:
 
 
 def test_forced_choice_of_a_stripped_shell_falls_back_to_auto() -> None:
-    body = {"tools": [{"type": "shell", "environment": {"type": "container_auto"}}], "tool_choice": {"type": "shell"}}
+    body = {
+        "tools": [{"type": "shell", "environment": {"type": "container_auto"}}, {"type": "apply_patch"}],
+        "tool_choice": {"type": "shell"},
+    }
 
     assert strip_hosted_tools(body) == ["shell:container_auto", "tool_choice:shell"]
-    assert body == {"tools": [], "tool_choice": "auto"}
+    assert body == {"tools": [{"type": "apply_patch"}], "tool_choice": "auto"}
 
 
 def test_malformed_function_field_is_tolerated() -> None:
@@ -207,6 +227,17 @@ def test_allowed_tools_choice_loses_hosted_entries() -> None:
     assert body["tool_choice"]["tools"] == [{"type": "function", "name": "lookup"}]
 
 
+def test_allowed_tools_choice_left_empty_falls_back_to_auto() -> None:
+    body = {
+        "tools": [{"type": "function", "name": "lookup"}, {"type": "web_search"}],
+        "tool_choice": {"type": "allowed_tools", "mode": "required", "tools": [{"type": "web_search"}]},
+    }
+
+    strip_hosted_tools(body)
+
+    assert body == {"tools": [{"type": "function", "name": "lookup"}], "tool_choice": "auto"}
+
+
 def test_request_without_tools_is_unchanged() -> None:
     body = {"model": "m", "input": "hello", "tool_choice": "none"}
 
@@ -222,6 +253,7 @@ def test_request_without_tools_is_unchanged() -> None:
         "azure/openai/gpt-4o-search-preview",
         "azure/openai/o4-mini-deep-research",
         "openai/gpt-5:online",
+        "openai/gpt-5-search-api",
         "Perplexity/Llama-3-Sonar-Large",
     ],
 )
@@ -231,7 +263,15 @@ def test_models_that_search_on_every_call_are_flagged(model: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "model", ["azure/openai/gpt-5.6-luna", "azure/anthropic/claude-opus-5", "nvidia/google/gemma-4-31b-it", None]
+    "model",
+    [
+        "azure/openai/gpt-5.6-luna",
+        "azure/anthropic/claude-opus-5",
+        "nvidia/google/gemma-4-31b-it",
+        "my-research-model",
+        "nvidia/searchless-chess",
+        None,
+    ],
 )
 def test_ordinary_models_are_not_flagged(model: object) -> None:
     assert not is_self_searching_model(model)
@@ -294,14 +334,13 @@ async def test_messages_request_falls_back_to_anthropic_auto_tool_choice() -> No
         "/v1/messages",
         {
             "model": "ws/opus",
-            "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+            "tools": [{"type": "web_search_20250305", "name": "web_search"}, {"name": "f", "input_schema": {}}],
             "tool_choice": {"type": "tool", "name": "web_search"},
         },
     )
 
     result = await middleware.process_request(ctx, request, ClosedBookConfig())
 
-    assert result.body["tools"] == []
     assert result.body["tool_choice"] == {"type": "auto"}
 
 
@@ -336,6 +375,29 @@ async def test_workspace_name_does_not_make_a_model_self_searching() -> None:
     """Only the model's own name says what it does; a workspace called `research` must not refuse its models."""
     middleware = _middleware({"research/luna": _target("azure/openai/gpt-5.6-luna")})
     ctx, request = _request("v1/responses", {"model": "research/luna", "input": "hi"})
+
+    assert await middleware.process_request(ctx, request, ClosedBookConfig()) is request
+
+
+@pytest.mark.parametrize(
+    "history", [{"previous_response_id": "resp_1"}, {"conversation": "conv_1"}, {"conversation": {"id": "conv_1"}}]
+)
+async def test_provider_stored_history_is_refused(history: dict[str, object]) -> None:
+    """Stored history may hold hosted search output from outside this route, and the middleware cannot read it."""
+    middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
+    ctx, request = _request("v1/responses", {"model": "ws/luna", "input": "hi", **history})
+
+    with pytest.raises(InferenceMiddlewareError) as exc_info:
+        await middleware.process_request(ctx, request, ClosedBookConfig())
+
+    assert exc_info.value.status_code == 403
+
+
+async def test_null_provider_stored_history_is_allowed() -> None:
+    middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
+    ctx, request = _request(
+        "v1/responses", {"model": "ws/luna", "input": "hi", "previous_response_id": None, "conversation": None}
+    )
 
     assert await middleware.process_request(ctx, request, ClosedBookConfig()) is request
 
@@ -384,7 +446,7 @@ async def test_provider_body_policy_without_hosted_tools_is_allowed() -> None:
             "prompt": "Answer briefly.",
             "tools": [{"type": "function", "name": "f"}],
         },
-        required_extra_body={"max_output_tokens": 128},
+        required_extra_body={"max_output_tokens": 128, "tool_choice": {"type": "function", "name": "lookup"}},
     )
     middleware = _middleware({"ws/luna": target})
     ctx, request = _request("v1/responses", {"model": "ws/luna", "input": "hi"})
@@ -402,13 +464,15 @@ async def test_provider_body_policy_without_hosted_tools_is_allowed() -> None:
             "provider_adds_hosted_tools",
         ),
         ({}, "ws/unregistered", "unresolved_model"),
+        ({"ws/luna": _target("azure/openai/gpt-5.6-luna")}, "ws/luna", "provider_stored_history"),
     ],
 )
 async def test_refusal_is_logged_with_its_reason(
     targets: dict[str, ModelProviderInferenceTarget], model: str, reason: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Refusals are the security events an operator needs to find in the gateway logs."""
-    ctx, request = _request("v1/responses", {"model": model, "input": "hi"})
+    body = {"model": model, "input": "hi", "previous_response_id": "resp_1"}
+    ctx, request = _request("v1/responses", body)
 
     with caplog.at_level(logging.WARNING, logger="nemo_evals.closed_book"), pytest.raises(InferenceMiddlewareError):
         await _middleware(targets).process_request(ctx, request, ClosedBookConfig())

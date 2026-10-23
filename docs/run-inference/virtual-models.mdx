@@ -264,11 +264,15 @@ The `nemo-evals-closed-book` middleware closes that path for the request the gat
   functions, custom tools, a `shell` tool without a provider container, computer use, and
   Anthropic's `bash` and `text_editor`. A tool type it does not recognize counts as provider-executed and is removed.
 - It removes provider-side features such as `web_search_options` and `mcp_servers`, and resets a
-  `tool_choice` that pointed at a removed tool to `auto`.
+  `tool_choice` that pointed at a removed tool to `auto`. When it removes every tool, it also drops
+  `tool_choice` and `parallel_tool_calls`.
 - It refuses with `403` models that search on their own, such as Perplexity Sonar and
   `*-search-preview` models, and any model whose provider adds hosted tools or search features to
   requests through its `default_extra_body` or `required_extra_body`. It also refuses a model it
   cannot resolve to a provider, since it cannot check what that model is.
+- It refuses with `403` a Responses request that continues provider-stored history through
+  `previous_response_id` or `conversation`, since that history may hold search results it cannot
+  see. Send the conversation history in the request instead.
 
 It takes no settings. Add it last in `request_middleware`, so it sees the model a routing
 middleware selected:

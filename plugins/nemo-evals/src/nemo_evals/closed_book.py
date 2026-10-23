@@ -45,7 +45,10 @@ _PROVIDER_FEATURE_KEYS = (
     "search_parameters",
     "web_search_options",
 )
-_SELF_SEARCHING_MODEL = re.compile(r"(?:^|/)perplexity/|sonar|search|:online$", re.IGNORECASE)
+_PROVIDER_STORED_HISTORY_KEYS = ("conversation", "previous_response_id")
+_SELF_SEARCHING_MODEL = re.compile(
+    r"(?:^|/)perplexity/|(?:^|[/_-])(?:sonar|search)(?:-|$)|deep-research|:online$", re.IGNORECASE
+)
 
 
 class ClosedBookConfig(BaseModel):
@@ -77,6 +80,7 @@ def strip_hosted_tools(body: MutableMapping[str, Any], *, anthropic: bool = Fals
     """Remove provider-executed tools and features from ``body`` in place; return a label for each removal."""
     removed: list[str] = []
     kept = _KeptTools()
+    had_tools = bool(body.get("tools"))
     _strip_list(body, "tools", removed, kept)
     input_items = body.get("input")
     if isinstance(input_items, list):
@@ -90,6 +94,10 @@ def strip_hosted_tools(body: MutableMapping[str, Any], *, anthropic: bool = Fals
     if isinstance(body.get("prompt"), dict):
         del body["prompt"]
         removed.append("prompt")
+    if had_tools and not body["tools"]:
+        for key in ("tools", "tool_choice", "parallel_tool_calls"):
+            body.pop(key, None)
+        return removed
     choice = body.get("tool_choice")
     if isinstance(choice, dict) and not _tool_choice_survives(choice, kept, removed):
         body["tool_choice"] = {"type": "auto"} if anthropic else "auto"
@@ -133,7 +141,7 @@ def _tool_choice_survives(choice: MutableMapping[str, Any], kept: _KeptTools, re
         return True
     if kind == "allowed_tools":
         _strip_list(choice, "tools", removed, _KeptTools())
-        return True
+        return bool(choice.get("tools"))
     name = _tool_name(choice)
     if kind in {"function", "tool", "custom"}:
         survives = name in kept.names
@@ -180,8 +188,9 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 f"Model {model!r} searches the web on its own, so it cannot be served closed-book.",
             )
         if any(
-            strip_hosted_tools(copy.deepcopy(dict(policy)))
+            not label.startswith("tool_choice:")
             for policy in (target.default_extra_body, target.required_extra_body)
+            for label in strip_hosted_tools(copy.deepcopy(dict(policy)))
         ):
             raise _refusal(
                 ctx,
@@ -189,6 +198,15 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 "provider_adds_hosted_tools",
                 f"The provider serving {model!r} adds provider-executed tools or features to requests, "
                 "so it cannot be served closed-book.",
+            )
+        stored = [key for key in _PROVIDER_STORED_HISTORY_KEYS if request.body.get(key) is not None]
+        if stored:
+            raise _refusal(
+                ctx,
+                model,
+                "provider_stored_history",
+                f"The request continues provider-stored history through {', '.join(stored)}, which closed-book "
+                "cannot inspect; send the conversation history in the request instead.",
             )
         removed = strip_hosted_tools(request.body, anthropic=request.path.lstrip("/").startswith("v1/messages"))
         ctx.state(MIDDLEWARE_NAME).set(REMOVED_TOOLS_STATE_KEY, removed)
