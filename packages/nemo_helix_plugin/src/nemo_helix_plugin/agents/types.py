@@ -312,6 +312,7 @@ class RegisterAgentRequest(BaseModel):
 
     name: str = Field(description="Unique agent name within the workspace.")
     description: str = Field(default="", description="Human-readable description.")
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     config: JsonMap = Field(
         default_factory=dict, description="Agent config dict interpreted according to config_format."
     )

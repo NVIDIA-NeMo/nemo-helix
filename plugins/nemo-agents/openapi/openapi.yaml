@@ -5669,6 +5669,10 @@ components:
           title: Description
           description: Human-readable description.
           default: ''
+        reference:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceConfig'
+          description: Agent source and container references.
         config:
           additionalProperties: true
           type: object
