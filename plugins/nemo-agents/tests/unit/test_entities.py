@@ -97,6 +97,20 @@ class TestAgentEntity:
         assert response.reference == refs
         assert response.config == config
 
+    @pytest.mark.parametrize(
+        "image",
+        [
+            "alpine",
+            "org/agent",
+            "index.docker.io/library/agent:1.0",
+            "localhost:5000/team/agent:1.0",
+            "nvcr.io/org/agent@sha256:" + "a" * 64,
+            "agent:1.0@sha256:" + "a" * 64,
+        ],
+    )
+    def test_container_reference_preserves_input(self, image: str) -> None:
+        assert ReferenceConfig(container_image=image).container_image == image
+
     def test_data_fields_include_domain_fields(self) -> None:
         a = Agent(
             name="calc",
