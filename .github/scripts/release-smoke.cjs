@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+const console = require("node:console");
+
 function resolveRelease(version) {
   const match = /^(\d+\.\d+\.\d+)(?:-(nightly-\d{14}|(?:a|b|rc)\d+))?$/.exec(
     version,
@@ -46,7 +48,7 @@ function summarize(results) {
   return "cancelled/incomplete";
 }
 
-async function finishSmoke({ env, fetchImpl }) {
+async function finishSmoke({ env, fetchImpl, github, context }) {
   const result = summarize([
     env.PREPARE_RESULT,
     env.MACOS_RESULT,
@@ -57,12 +59,45 @@ async function finishSmoke({ env, fetchImpl }) {
     failed: ":gitlab_ci_status_failed:",
     "cancelled/incomplete": ":gitlab_ci_status_canceled:",
   };
+  const failures = [];
+  if (result === "failed" && github) {
+    try {
+      const jobs = await github.paginate(
+        github.rest.actions.listJobsForWorkflowRun,
+        {
+          ...context.repo,
+          run_id: context.runId,
+          filter: "latest",
+        },
+      );
+      for (const job of jobs) {
+        const name = job.name.split(" / ").at(-1);
+        if (
+          ![
+            "prepare",
+            "Published wheel (macOS)",
+            "Published images and chart",
+          ].includes(name)
+        )
+          continue;
+        for (const step of job.steps || []) {
+          if (step.conclusion === "failure")
+            failures.push(
+              `*Failed step:* <${job.html_url}|${name}: ${step.name}>`,
+            );
+        }
+      }
+    } catch (error) {
+      console.warn(`Could not read failed smoke steps: ${error.message}`);
+    }
+  }
   const text = [
     `${icons[result]} *Release smoke checks ${result}*`,
     `Release: \`${env.RELEASE_VERSION}\``,
     "",
     `:macos: *macOS:* ${env.MACOS_RESULT}`,
     `:kubernetes: *Kubernetes:* ${env.KUBERNETES_RESULT}`,
+    ...failures,
     "",
     `<${env.RUN_URL}|View run and diagnostics>`,
   ].join("\n");
