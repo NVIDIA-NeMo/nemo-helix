@@ -30,7 +30,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evals.jobs.fabric_harness_packages import fabric_harness_requirements
-from nemo_evals.jobs.gateway_models import gateway_key_placeholder
+from nemo_evals.jobs.gateway_models import add_gateway_key_placeholder
 from nemo_evals.jobs.gym_registered_agent_package import GymRegisteredAgentPackageSpec
 from nemo_evals.jobs.gym_sandbox import SandboxPlan, resolve_sandbox_plan
 from nemo_evals.jobs.secret_env import GYM_SANDBOX_PLAN_ENVVAR, build_task_environment
@@ -227,7 +227,7 @@ def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> li
     sandbox-capability gates to submit time, so a deployment that cannot sandbox is refused with a
     message naming the setting instead of failing partway through an evaluation.
     """
-    environment = [*build_task_environment(_secret_refs(spec)), *gateway_key_placeholder(spec.target)]
+    environment = add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
     if sandbox_plan is None:
         return environment
     environment.append(EnvironmentVariable(name=GYM_SANDBOX_PLAN_ENVVAR, value=sandbox_plan.model_dump_json()))

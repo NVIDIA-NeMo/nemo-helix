@@ -16,6 +16,7 @@ from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
+from nemo_evals.jobs.secret_env import SecretEnvError
 from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
@@ -36,13 +37,18 @@ async def check_gateway_model(
     """Refuse a Harbor target whose gateway model is missing, unreadable by the caller, or uncallable.
 
     Raises:
-        ValueError: No model or VirtualModel has the name, or platform auth is on and the agent has no
-            platform key in ``env_secrets``.
+        ValueError: No model or VirtualModel has the name, or platform auth is on and the agent can't
+            authenticate to the gateway.
     """
     if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
         return
     env = target.gateway_agent_env
     assert env is not None
+    if platform_auth_enabled() and env.api_style == "anthropic":
+        raise ValueError(
+            "platform auth is on, and an Anthropic-style agent can't authenticate to the Inference Gateway: it sends "
+            "its key as `x-api-key`, and the gateway accepts only bearer tokens"
+        )
     if platform_auth_enabled() and env.api_key_env not in target.env_secrets:
         raise ValueError(
             f"platform auth is on, so the agent needs a key to call the Inference Gateway: put a Helix access key "
@@ -74,8 +80,8 @@ def point_agent_at_gateway_model(
 ) -> HarborRuntimeConfig:
     """``config`` with the agent's base URL set to its gateway model's route, and its key read from ``env_secrets``.
 
-    Without a key in the target's ``env_secrets``, the key is the placeholder :func:`gateway_key_placeholder` puts in
-    the job's environment.
+    Without a key in the target's ``env_secrets``, the key is the placeholder :func:`add_gateway_key_placeholder` puts
+    in the job's environment.
     """
     env = target.gateway_agent_env
     if target.gateway_model is None or env is None:
@@ -90,14 +96,24 @@ def point_agent_at_gateway_model(
     )
 
 
-def gateway_key_placeholder(target: object) -> list[EnvironmentVariable]:
-    """The job variable holding a gateway agent's placeholder key, when its target supplies no key of its own."""
+def add_gateway_key_placeholder(environment: list[EnvironmentVariable], target: object) -> list[EnvironmentVariable]:
+    """``environment`` plus a gateway agent's placeholder key, when its target supplies no key of its own.
+
+    Raises:
+        SecretEnvError: The job's environment already sources the agent's key variable from a secret.
+    """
     if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
-        return []
+        return environment
     env = target.gateway_agent_env
     if env is None or env.api_key_env in target.env_secrets:
-        return []
-    return [EnvironmentVariable(name=env.api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
+        return environment
+    if any(variable.name == env.api_key_env for variable in environment):
+        raise SecretEnvError(
+            f"{env.api_key_env} is already sourced from a secret in this job, so the agent would be handed it to call "
+            f"the Inference Gateway: put the agent's own key in the target's env_secrets under {env.api_key_env}, or "
+            "use a secret under another name"
+        )
+    return [*environment, EnvironmentVariable(name=env.api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
 
 
 def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dict[str, Any], origin: str) -> None:
@@ -131,14 +147,14 @@ def check_tasks_reach_the_gateway(
     if not _in_agent_channel(host, agent_channel):
         raise ValueError(
             f"gateway_unreachable: no-network tasks {no_network} can't reach the Inference Gateway at {host}: "
-            "add it to the sandbox profile's agent_channel"
+            "add the host itself, or an IP range containing it, to the sandbox profile's agent_channel"
         )
 
 
 def _in_agent_channel(host: str, agent_channel: Sequence[str]) -> bool:
     host = host.strip().rstrip(".").lower()
     for entry in (entry.strip().rstrip(".").lower() for entry in agent_channel):
-        if entry == host or (entry.startswith("*.") and host.endswith(entry[1:])):
+        if entry == host:
             return True
         try:
             if ipaddress.ip_address(host) in ipaddress.ip_network(entry, strict=False):
