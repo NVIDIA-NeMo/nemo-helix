@@ -381,7 +381,7 @@
 {"name": "scikit-network", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "scipy", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "secretstorage", "license": "BSD-3-CLAUSE", "compatible": true}
-{"name": "semver", "license": "NON-STANDARD", "compatible": false}
+{"name": "semver", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "sentence-transformers", "license": "APACHE-2.0", "compatible": true}
 {"name": "sentencepiece", "license": "APACHE-2.0", "compatible": true}
 {"name": "sentry-sdk", "license": "MIT", "compatible": true}
