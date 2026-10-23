@@ -8,24 +8,32 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
-from nemo_evals.api.dependencies import get_taskset_run_service
+from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
     IntakeUnavailableError,
     RunEvaluationDeniedError,
     RunEvaluationError,
     TasksetRunResolutionError,
     TasksetRunService,
+    utc_now,
 )
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
+    to_status,
 )
 from nemo_evals.authz import scope
 from nemo_evals.harbor.remote.preparation import ImagePreparationUnavailableError
 from nemo_evals.taskset_runs.entities import MemberPhase
-from nemo_evals.taskset_runs.store import RunRequestConflict
+from nemo_evals.taskset_runs.store import (
+    CancelContended,
+    RunAlreadyFinished,
+    RunNotFound,
+    RunRequestConflict,
+    TasksetRunStore,
+)
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 from nemo_evals.taskset_runs.task_jobs import TaskJobsIncompleteError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
@@ -253,6 +261,57 @@ async def get_taskset_run(
     if result is None:
         raise HTTPException(status_code=404, detail="Taskset run not found")
     return result
+
+
+@router.post(
+    "/agent-evaluate/runs/{run_id}/cancel",
+    summary="Cancel Taskset Run",
+    response_model=TasksetRunStatus,
+    response_model_exclude_none=True,
+    responses={
+        200: {"description": "Cancel requested now or earlier; the run controller stops the run on its next pass."},
+        404: {"description": "Run not found in this workspace."},
+        409: {"description": "The run already finished; there is nothing to cancel."},
+        503: {"description": "The run kept changing while the cancel was recorded; retry."},
+    },
+)
+@scope.write
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.CANCEL])
+async def cancel_taskset_run(
+    workspace: str,
+    run_id: str,
+    store: TasksetRunStore = Depends(get_service_run_store),
+) -> TasksetRunStatus:
+    """Record the intent to cancel a run and return its status; the phase changes on the controller's next pass.
+
+    Writes only ``cancel_requested_at``: never the phase, members, Jobs or the Intake Evaluation. A repeat keeps the
+    first request's time. The write goes through the evals service, after the caller's permission check, so it never
+    erases a field only the service reads back.
+
+    Args:
+        workspace: Workspace that scopes the record lookup.
+        run_id: Public run name in that workspace.
+        store: Run store acting as the evals service.
+
+    Returns:
+        The stored status with ``cancel_requested_at`` set, excluding null optionals.
+
+    Raises:
+        HTTPException: The record is absent (404), the run already finished (409), every write lost to a concurrent
+            one (503, safe to retry), or an unexpected failure (sanitized 500).
+    """
+    try:
+        run = await store.request_cancel(workspace, run_id, now=utc_now())
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail="Taskset run not found") from exc
+    except RunAlreadyFinished as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers={"x-should-retry": "false"}) from exc
+    except CancelContended as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
+    except Exception:
+        logger.exception("Failed to cancel taskset run %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id))
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+    return to_status(run)
 
 
 @router.get(

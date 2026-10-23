@@ -130,6 +130,31 @@ class RunRequestConflict(RuntimeError):
         super().__init__(f"run {run_id!r} already exists with a different request digest")
 
 
+CANCEL_WRITE_ATTEMPTS = 3
+"""Reads and versioned writes ``request_cancel`` tries before giving up to a concurrent writer."""
+
+
+class RunNotFound(LookupError):
+    """No run with this name in the workspace."""
+
+    def __init__(self, workspace: str, run_id: str) -> None:
+        super().__init__(f"Run not found: {workspace}/{run_id}")
+
+
+class RunAlreadyFinished(RuntimeError):
+    """The run ended before a cancel was requested; there is nothing to cancel."""
+
+    def __init__(self, run_id: str, phase: TasksetRunPhase) -> None:
+        super().__init__(f"run {run_id} already finished: {phase.value}")
+
+
+class CancelContended(RuntimeError):
+    """Every attempt lost to a concurrent write (the run controller's pass); a retry is safe."""
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"run {run_id} kept changing while the cancel was recorded; retry")
+
+
 class TasksetRunStore:
     """Create taskset runs and read them back; the only code that writes a new run record.
 
@@ -144,6 +169,7 @@ class TasksetRunStore:
     - ``list_runs``: one filtered, newest-first page of workspace run records.
     - ``list_members``: a numerically ordered page of children of a persisted run.
     - ``list_active``: the caller's accepted or running runs, optionally for one taskset revision.
+    - ``request_cancel``: record a caller's intent to cancel, for the run controller to act on.
 
     ``accept`` is an idempotent get-or-create built on a named create (below).
     Unlike plain get-or-create, it rejects the same key with a different request
@@ -466,6 +492,34 @@ class TasksetRunStore:
         if not update:
             return run
         return await self.entity_client.update(run.model_copy(update=update))
+
+    async def request_cancel(self, workspace: str, run_id: str, *, now: datetime) -> TasksetRunEntity:
+        """Record the intent to cancel: one versioned write of ``cancel_requested_at``, and nothing else.
+
+        The run controller turns the intent into an outcome (cancel Jobs, settle members, ``cancelled``); until
+        it does, the run keeps its phase. Idempotent: an earlier request's time is kept, even once the run is
+        ``cancelled``. The store must act as the evals service, as the run controller does: a run may hold fields
+        only a service-principal client reads back (the creator's principal, once runs store it), and writing a
+        delegated copy back would erase them.
+
+        Raises:
+            RunNotFound: No such run in ``workspace``.
+            RunAlreadyFinished: The run ended with no cancel requested.
+            CancelContended: Every attempt lost to a concurrent write; the record is unchanged.
+        """
+        for _ in range(CANCEL_WRITE_ATTEMPTS):
+            run = await self.find(workspace, run_id)
+            if run is None:
+                raise RunNotFound(workspace, run_id)
+            if run.cancel_requested_at is not None:
+                return run
+            if run.phase in TERMINAL_RUN_PHASES:
+                raise RunAlreadyFinished(run_id, run.phase)
+            try:
+                return await self.entity_client.update(run.model_copy(update={"cancel_requested_at": now}))
+            except NemoEntityConflictError:
+                continue  # the controller wrote first; re-read and keep its fields
+        raise CancelContended(run_id)
 
     async def list_members(
         self,

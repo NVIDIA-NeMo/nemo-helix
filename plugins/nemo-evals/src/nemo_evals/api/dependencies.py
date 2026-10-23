@@ -63,6 +63,17 @@ async def get_taskset_run_service(
         )
 
 
+async def get_service_run_store() -> AsyncGenerator[TasksetRunStore, None]:
+    """A run store acting as the evals service, for a route that rewrites a run after checking the caller.
+
+    A run may hold fields only a service-principal client reads back (the creator's principal, once runs store it),
+    so only it can rewrite the run without erasing them. The route's permission check, as the caller, scopes it to
+    one workspace.
+    """
+    async with get_async_nemo_client(as_service="evals", internal=True) as async_client:
+        yield TasksetRunStore(AsyncEntitiesClient.from_client(async_client), AsyncFilesClient.from_client(async_client))
+
+
 def get_metric_service(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
     async_client: AsyncNemoClient = Depends(get_nemo_client),

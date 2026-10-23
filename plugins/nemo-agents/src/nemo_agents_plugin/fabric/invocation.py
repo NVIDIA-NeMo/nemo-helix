@@ -8,12 +8,15 @@ from __future__ import annotations
 import asyncio
 import shutil
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Self
 
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.environment import ensure_local_workspace_dir
+from nemo_agents_plugin.fabric.progress import LocalProgressObserver
+from nemo_agents_plugin.fabric.progress import logger as progress_logger
 from nemo_agents_plugin.fabric.runtime import FabricOneShotRequest, FabricRuntimeResult, run_fabric_agent_once
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 
@@ -30,6 +33,7 @@ class AgentConfigInvocationRequest:
     request_id: str | None = None
     caller_context: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float | None = None
+    observe_progress: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,16 +96,32 @@ async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest
         )
         await asyncio.to_thread(artifacts_dir.mkdir, parents=True, exist_ok=True)
 
-    return await run_fabric_agent_once(
-        FabricOneShotRequest(
-            fabric_config=fabric_config,
-            base_dir=request.base_dir,
-            input=request.input,
-            request_id=request.request_id,
-            caller_context=request.caller_context,
-            timeout_seconds=request.timeout_seconds,
+    observer_task: asyncio.Task[None] | None = None
+    if request.observe_progress:
+        try:
+            if request.agent_config.environment.provider != "local":
+                progress_logger.info("Live agent telemetry unavailable for a non-local environment.")
+            else:
+                observer = LocalProgressObserver(fabric_config, request.base_dir.resolve(), artifacts_dir)
+                observer_task = asyncio.create_task(observer.run())
+        except Exception:
+            progress_logger.warning("Live agent telemetry observer setup failed; invocation continues.")
+    try:
+        return await run_fabric_agent_once(
+            FabricOneShotRequest(
+                fabric_config=fabric_config,
+                base_dir=request.base_dir,
+                input=request.input,
+                request_id=request.request_id,
+                caller_context=request.caller_context,
+                timeout_seconds=request.timeout_seconds,
+            )
         )
-    )
+    finally:
+        if observer_task is not None:
+            observer_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await observer_task
 
 
 async def invoke_agent_config_once(
