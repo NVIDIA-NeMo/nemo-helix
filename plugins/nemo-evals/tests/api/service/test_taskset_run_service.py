@@ -114,7 +114,7 @@ async def test_accept_freezes_resolved_harbor_content(
     assert plan.sandbox_policy.profile == "harbor-standard"
     assert plan.sandbox_policy.connection.domain == "opensandbox.opensandbox-system.svc.cluster.local"
     assert plan.dispatcher_profile == "local-k8s" and plan.dispatcher_image.endswith("1" * 64)
-    assert result.status.warnings == [f"task 0 (task-1): Job {result.status.run_id}-task-0"]
+    assert result.status.warnings == []
     assert len(files_service.filesets) == 1
     assert not (await entity_store.list(TasksetRunMemberEntity, workspace="default")).data
 
@@ -146,7 +146,7 @@ async def test_authorized_replay_preserves_original_run_without_resolution(
     assert replay.status.run_id == first.status.run_id
     assert replay.status.accepted_at == first.status.accepted_at
     assert replay.status.phase == TasksetRunPhase.COMPLETED
-    assert first.status.warnings and replay.status.warnings == []  # an ended run's task Jobs aren't touched
+    assert replay.status.warnings == []  # a replay returns the stored status only
     assert not [call for call in files_service.calls[len(before) :] if call[0] != "download"]
 
 
@@ -203,10 +203,7 @@ async def test_requests_with_new_keys_create_distinct_runs_and_warn(service, pub
     ]
     assert first.created and second.created
     assert first.status.run_id != second.status.run_id
-    assert second.status.warnings == [
-        f"{first.status.run_id} is already running {first.status.taskset_ref}",
-        f"task 0 (task-1): Job {second.status.run_id}-task-0",
-    ]
+    assert second.status.warnings == [f"{first.status.run_id} is already running {first.status.taskset_ref}"]
 
 
 async def test_warning_failure_preserves_acceptance(service, published, request_body, monkeypatch, caplog):
@@ -215,7 +212,7 @@ async def test_warning_failure_preserves_acceptance(service, published, request_
         TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
     )
     assert outcome.created
-    assert outcome.status.warnings == [f"task 0 (task-1): Job {outcome.status.run_id}-task-0"]
+    assert outcome.status.warnings == []
     assert "listing failed" in caplog.text
 
 
