@@ -351,7 +351,7 @@ async def publishing(harbor_plan, stored_run, fake_evaluations) -> tuple[Taskset
     for index in range(len(plan.spec.tasks)):
         fake.put(await task_job_request(plan, stored_run, index, plan.task_environments[index]), "active")
     fake.evaluations = fake_evaluations
-    await ensure_run_evaluation(fake_evaluations, stored_run, plan)
+    await ensure_run_evaluation(fake_evaluations, stored_run.workspace, stored_run.name, plan)
     return plan, fake
 
 

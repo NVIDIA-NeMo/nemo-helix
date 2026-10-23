@@ -318,8 +318,7 @@ async def _ensure_bundle_job(
     although every task completed, so the next attempt's name is used instead.
 
     TODO: AIRCORE-1379 makes Jobs create atomic. Once it ships, remove these workarounds: the stalled and
-    unreadable-name skips here, ``_stalled``, ``STALLED_CREATE_SECONDS``, ``RunJobs.has_steps``, and submit's
-    steps check in ``task_jobs._adoption_refused``.
+    unreadable-name skips here, ``_stalled``, ``STALLED_CREATE_SECONDS`` and ``RunJobs.has_steps``.
 
     Raises:
         ForeignBundleJobError: A Job under a bundle Job's name runs something else.

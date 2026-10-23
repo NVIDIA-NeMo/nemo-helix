@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Submit checks the deployment can run the request, prepares images, then creates one task Job per task."""
+"""Submit checks the deployment can run the request and reads every task's images, then accepts the run.
+
+It starts no task Jobs (the controller does) and no image builds.
+"""
 
 import asyncio
 from types import SimpleNamespace
@@ -13,12 +16,11 @@ from nemo_evals.api.service.taskset_run_service import MAX_CONCURRENT_IMAGE_PREP
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evals.harbor.remote.preparation import prepare_task_images
+from nemo_evals.image_builds.models import BuildImage, ImageBuildRequest, TaskImageBuildEntity, build_entity_name
 from nemo_evals.image_builds.planning import TaskArchive
 from nemo_evals.image_builds.service import ImageBuildService
-from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
-from nemo_evals.revisions import publish_revision
+from nemo_evals.revisions import get_revision, publish_revision
 from nemo_evals.taskset_runs.entities import TasksetRunEntity, TasksetRunPhase
-from nemo_evals.taskset_runs.task_jobs import TaskJobsIncompleteError
 
 pytestmark = pytest.mark.usefixtures("published")
 
@@ -52,22 +54,18 @@ async def test_unknown_sandbox_profile_lists_the_profiles(service, request_body)
         await submit(service, request_body)
 
 
-async def test_open_profile_is_frozen_into_the_plan(service, request_body, run_store, fake_task_jobs):
+async def test_open_profile_is_frozen_into_the_plan(service, request_body, run_store):
     request_body["execution"]["sandbox"] = {"profile": "harbor-open"}
     outcome = await submit(service, request_body)
     plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
     assert plan.sandbox_policy.egress_allow == ("igw.svc.cluster.local", "inference-api.nvidia.com")
-    (job,) = fake_task_jobs.created
-    assert HarborTaskJobSpec.model_validate(job.spec).sandbox_policy == plan.sandbox_policy
 
 
-async def test_sandbox_overrides_are_frozen_into_the_plan(service, request_body, run_store, fake_task_jobs):
+async def test_sandbox_overrides_are_frozen_into_the_plan(service, request_body, run_store):
     request_body["execution"]["sandbox"] = {"cpus": 4, "memory_mb": 8192}
     outcome = await submit(service, request_body)
     plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
     assert plan.sandbox_policy.resource_overrides.model_dump(exclude_none=True) == {"cpus": 4, "memory_mb": 8192}
-    (job,) = fake_task_jobs.created
-    assert HarborTaskJobSpec.model_validate(job.spec).sandbox_policy == plan.sandbox_policy
 
 
 async def test_sandbox_override_over_the_ceiling_is_rejected(service, request_body, entity_store):
@@ -120,11 +118,12 @@ async def two_task_body(request_body, entity_store, published):
     return request_body
 
 
-async def test_more_tasks_than_the_concurrency_cap_is_rejected(service, two_task_body, entity_store):
+async def test_more_tasks_than_the_concurrency_cap_are_accepted(service, two_task_body, run_store, fake_task_jobs):
+    """The cap is how many task Jobs run at once; the controller queues the rest."""
     two_task_body["execution"]["max_concurrent_task_jobs"] = 1
-    with pytest.raises(TasksetRunResolutionError, match="2 tasks exceed execution.max_concurrent_task_jobs=1"):
-        await submit(service, two_task_body)
-    assert not await runs(entity_store)
+    outcome = await submit(service, two_task_body)
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert outcome.created and len(plan.spec.tasks) == 2 and plan.max_concurrent_task_jobs == 1
 
 
 async def test_task_without_images_is_rejected_before_acceptance(service, request_body, entity_store, run_preparer):
@@ -145,24 +144,82 @@ class _BuildJobs:
         return None
 
 
-async def test_a_cold_submit_starts_the_first_build_and_asks_to_resubmit(
-    service, request_body, entity_store, monkeypatch
-):
-    """The real preparer: no build yet means submit starts one and rejects the run until it's ready."""
-    build_jobs = _BuildJobs()
-
-    async def allow(workspace: str) -> None:
-        return None
+@pytest.fixture
+def real_preparer(service, monkeypatch):
+    """Submit with the real preparer and image build service; a task archive read returns a Dockerfile task."""
 
     async def archive(files, source):
         return TaskArchive(root="t", files=frozenset({"t/environment/Dockerfile"}), compose=None)
 
     monkeypatch.setattr("nemo_evals.harbor.remote.preparation.read_task_archive", archive)
-    monkeypatch.setattr(service, "_image_builds", lambda workspace: ImageBuildService(entity_store, build_jobs, allow))
     service._preparer = prepare_task_images
-    with pytest.raises(TasksetRunResolutionError, match="task-1: image_unavailable: image build 1 of default/task-1"):
-        await submit(service, request_body)
-    assert len(build_jobs.created) == 1 and not await runs(entity_store)
+    return service
+
+
+async def build(entity_store, task: str, status: str, *, rebuild: bool = False) -> None:
+    """Start the next build of ``task``'s newest revision, as the CLI does before submit, and record ``status``."""
+    head = await entity_store.get(TaskEntity, name=task, workspace="default")
+    digest = (await get_revision(entity_store, TaskRevisionEntity, head)).content_hash
+
+    async def allow(workspace: str) -> None:
+        return None
+
+    builds = ImageBuildService(entity_store, _BuildJobs(), allow)
+    started = await builds.request_build("default", task, digest, ImageBuildRequest(rebuild=rebuild))
+    assert started is not None
+    record = await entity_store.get(
+        TaskImageBuildEntity, name=build_entity_name(digest, int(started.id)), workspace="default", parent=head.id
+    )
+    record.status = status
+    if status == "ready":
+        ref = f"registry.invalid/{task}@sha256:{'d' * 64}"
+        record.images = [
+            BuildImage(
+                role="main", source="dockerfile", status="ready", image_ref=ref, builder_image="b", build_job="j"
+            )
+        ]
+    await entity_store.update(record)
+
+
+def builder_calls(authorizer) -> list:
+    return [call for call in authorizer.await_args_list if "/apis/builder/" in str(call)]
+
+
+async def test_an_unbuilt_task_is_rejected_without_starting_a_build(
+    real_preparer, two_task_body, entity_store, authorizer, fake_task_jobs
+):
+    """The real preparer only reads builds: task-2 has none, so the run is refused and nothing is started."""
+    await build(entity_store, "task-1", "ready")
+    with pytest.raises(
+        TasksetRunResolutionError, match=r"tasks without images: task-2: image_unavailable: .* has no image build"
+    ):
+        await submit(real_preparer, two_task_body)
+    assert not await runs(entity_store)
+    assert not builder_calls(authorizer)  # never needs, nor asks for, the caller's Builder permission
+
+
+async def test_every_task_ready_is_accepted_with_its_images(
+    real_preparer, two_task_body, entity_store, run_store, authorizer, fake_task_jobs
+):
+    await build(entity_store, "task-1", "ready")
+    await build(entity_store, "task-2", "ready")
+    outcome = await submit(real_preparer, two_task_body)
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert outcome.created and [env.agent.image_ref for env in plan.task_environments] == [
+        f"registry.invalid/task-{i}@sha256:{'d' * 64}" for i in (1, 2)
+    ]
+    assert not builder_calls(authorizer)
+
+
+async def test_a_rebuild_in_flight_is_rejected_although_an_older_build_is_ready(
+    real_preparer, request_body, entity_store, fake_task_jobs
+):
+    """The CLI waits for the rebuild; runs already accepted keep the digests they froze."""
+    await build(entity_store, "task-1", "ready")
+    await build(entity_store, "task-1", "pending", rebuild=True)
+    with pytest.raises(TasksetRunResolutionError, match=r"task-1: image_unavailable: image build 2 .* is pending"):
+        await submit(real_preparer, request_body)
+    assert not await runs(entity_store)
 
 
 async def test_a_task_over_the_profiles_ceiling_is_rejected_before_any_build(
@@ -183,10 +240,10 @@ async def test_a_task_over_the_profiles_ceiling_is_rejected_before_any_build(
     assert not await runs(entity_store)
 
 
-async def test_the_default_resources_notice_survives_a_replay(
+async def test_the_default_resources_notice_is_on_the_accept_response(
     service, request_body, fake_task_jobs, harbor_config, monkeypatch
 ):
-    """task-1 sets no resources: the notice comes from the stored plan, so a keyed retry says it too."""
+    """task-1 sets no resources. A keyed replay returns the stored status only."""
     request = TasksetRunInput.model_validate(request_body)
     pinned, spec = await service._resolve(request, "default")
     spec.tasks[0].spec.config = {"environment": {}}
@@ -199,18 +256,15 @@ async def test_the_default_resources_notice_survives_a_replay(
         "Set them in task.toml or pass --cpus/--memory-mb."
     )
 
-    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
-    with pytest.raises(TaskJobsIncompleteError) as exc:
-        await submit(service, request_body)
-    assert exc.value.notices == (notice,)
-    fake_task_jobs.refuse = set()
+    accepted = await submit(service, request_body)
+    assert accepted.created is True and accepted.status.warnings == [notice]
     replay = await submit(service, request_body)
-    assert replay.created is False and replay.status.warnings[-1] == notice
+    assert replay.created is False and replay.status.warnings == []
 
 
 @pytest.mark.parametrize("rejected", [0, 1], ids=["first-rejected", "second-rejected"])
 async def test_a_rejected_task_stops_every_preparation(service, two_task_body, run_preparer, rejected):
-    """Every task is checked before any is prepared, so a rejected task never leaves builds behind for the rest."""
+    """Every task is checked before any task's builds are read."""
     tasks = ["task-1", "task-2"]
     run_preparer.reject = {tasks[rejected]: "gpu_unsupported"}
     with pytest.raises(TasksetRunResolutionError, match=f"{tasks[rejected]}: gpu_unsupported"):
@@ -218,106 +272,38 @@ async def test_a_rejected_task_stops_every_preparation(service, two_task_body, r
     assert sorted(run_preparer.checked) == tasks and run_preparer.calls == []
 
 
-async def test_missing_task_job_is_503_and_a_retry_completes_it_from_the_plan(
-    service, request_body, fake_task_jobs, entity_store, harbor_config
-):
-    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
-    with pytest.raises(TaskJobsIncompleteError) as exc:
-        await submit(service, request_body)
-    assert [index for index, _ in exc.value.missing] == [0]
-    assert len(await runs(entity_store)) == 1 and not fake_task_jobs.created
-
-    # The operator changes the dispatcher image before the retry; the Job still uses the plan's.
-    service._config.runs.harbor = harbor_config.model_copy(update={"dispatcher_image": "r/x@sha256:" + "9" * 64})
-    fake_task_jobs.refuse = set()
-    replay = await submit(service, request_body)
-    assert replay.created is False
-    (job,) = fake_task_jobs.created
-    assert job.platform_spec.steps[-1].executor.container.image == harbor_config.dispatcher_image
-    assert replay.status.warnings == [f"task 0 (task-1): Job {job.name}"]
-
-
-async def test_retry_uses_the_images_frozen_at_accept(service, request_body, fake_task_jobs, run_preparer):
-    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
-    with pytest.raises(TaskJobsIncompleteError):
-        await submit(service, request_body)
+async def test_a_replay_never_reads_images_again(service, request_body, fake_task_jobs, run_preparer, run_store):
+    outcome = await submit(service, request_body)
     calls = len(run_preparer.calls)
 
     # Before the retry the task's images change (a moved tag, a newer build), then can't be prepared at all.
     run_preparer.with_verifier = {"task-1"}
     run_preparer.fail = {"task-1": "image_unavailable"}
-    fake_task_jobs.refuse = set()
-    await submit(service, request_body)
-    assert len(run_preparer.calls) == calls  # the retry never prepares images again
-    (job,) = fake_task_jobs.created
-    environment = HarborTaskJobSpec.model_validate(job.spec).environment
+    replay = await submit(service, request_body)
+    assert replay.created is False and len(run_preparer.calls) == calls
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    (environment,) = plan.task_environments
     assert environment.verifier is None and environment.agent.image_ref.startswith(
         "registry.invalid/fake/task-1-agent@"
     )
 
 
 @pytest.mark.parametrize("miss_replay", [False, True], ids=["replay", "accept-conflict"])
-async def test_an_ended_run_creates_no_task_jobs(
+async def test_an_ended_run_is_returned_as_is(
     service, request_body, fake_task_jobs, run_store, run_preparer, monkeypatch, miss_replay
 ):
-    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
-    with pytest.raises(TaskJobsIncompleteError):
-        await submit(service, request_body)
+    await submit(service, request_body)
     # The controller expired the run before the caller retried.
     await run_store.set_state(await run_store.find("default", "run-11f77762178b0e05"), phase=TasksetRunPhase.EXPIRED)
     prepared = len(run_preparer.calls)
     if miss_replay:
         # Stands in for a submit that raced the winner past the replay lookup: accept returns the winner's run.
         monkeypatch.setattr(service._store, "replay", AsyncMock(return_value=None))
-    fake_task_jobs.refuse = set()
     outcome = await submit(service, request_body)
     # Only the accept path prepares images again; this proves which path ran.
     assert (len(run_preparer.calls) > prepared) is miss_replay
     assert outcome.created is False and outcome.status.phase == TasksetRunPhase.EXPIRED
-    assert outcome.status.warnings == [] and not fake_task_jobs.created
-
-
-async def test_a_retry_after_the_execution_deadline_creates_no_task_jobs(
-    service, request_body, fake_task_jobs, run_store, monkeypatch
-):
-    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
-    with pytest.raises(TaskJobsIncompleteError):
-        await submit(service, request_body)
-    run = await run_store.find("default", "run-11f77762178b0e05")
-    # The controller hasn't expired the run yet; a Job created now would outlive its expiry pass.
-    monkeypatch.setattr(service, "_clock", lambda: run.execution_deadline_at)
-    fake_task_jobs.refuse = set()
-    outcome = await submit(service, request_body)
-    assert outcome.created is False and outcome.status.warnings == [] and not fake_task_jobs.created
-
-
-@pytest.mark.parametrize("revoke", ["dispatcher_profile", "sandbox_profile", "runs"])
-async def test_retry_after_execution_policy_change_starts_no_jobs(
-    service, request_body, fake_task_jobs, entity_store, harbor_config, revoke
-):
-    """Today's operator config gates whether a retry may start the run's missing Jobs (422 at the route)."""
-    fake_task_jobs.refuse = {"run-11f77762178b0e05-task-0"}
-    with pytest.raises(TaskJobsIncompleteError):
-        await submit(service, request_body)
-    fake_task_jobs.refuse = set()
-
-    execution = TasksetRunInput.model_validate(request_body).execution
-    if revoke == "dispatcher_profile":
-        frozen = execution.dispatcher_profile or harbor_config.dispatcher_profiles[0]  # what the plan froze
-        profiles = [p for p in harbor_config.dispatcher_profiles if p != frozen]
-        service._config.runs.harbor = harbor_config.model_copy(update={"dispatcher_profiles": profiles})
-    elif revoke == "sandbox_profile":
-        frozen = harbor_config.default_sandbox_profile  # the request names none
-        sandboxes = {k: v for k, v in harbor_config.sandbox_profiles.items() if k != frozen}
-        # The retry passes submit's check on the new default; only the plan still names the removed profile.
-        service._config.runs.harbor = harbor_config.model_copy(
-            update={"sandbox_profiles": sandboxes, "default_sandbox_profile": next(iter(sandboxes))}
-        )
-    else:
-        service._config.runs.harbor = None
-    with pytest.raises(TasksetRunResolutionError):
-        await submit(service, request_body)
-    assert not fake_task_jobs.created and len(await runs(entity_store)) == 1
+    assert outcome.status.warnings == []
 
 
 class SlowPreparer:
