@@ -50,6 +50,7 @@ class SQLAlchemyFilterRepository(FilterRepository):
         model: Any,
         relationship_child_workspaces: Optional[Set[str]] = None,
         dialect_name: Optional[str] = None,
+        json_path_columns: frozenset[str] = frozenset(),
     ):
         """Initialize repository with SQLAlchemy model class or alias.
 
@@ -60,10 +61,14 @@ class SQLAlchemyFilterRepository(FilterRepository):
                 is unconstrained. An empty set makes relationship EXISTS match nothing.
             dialect_name: Database dialect (``"sqlite"`` or ``"postgresql"``). Required only by
                 operators whose SQL differs per backend (``$elemMatch``).
+            json_path_columns: JSON columns other than ``data`` that a field may path into, as
+                ``<column>.<key>`` (e.g. ``public_metadata.key``). Opt-in per caller, so a filter
+                can't reach into any other JSON column.
         """
         self.model = model
         self._relationship_child_workspaces = relationship_child_workspaces
         self._dialect_name = dialect_name
+        self._json_path_columns = json_path_columns
 
     def _get_json_element(self, column: ColumnElement, path: List[str]) -> ColumnElement:
         """Navigate to a nested JSON element using subscript operators.
@@ -102,6 +107,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
             column = getattr(self.model, "data")
             path = field.split(".")[1:]
             return self._get_json_element(column, path), isinstance(column.type, JSON)
+
+        # a path into another JSON column the caller allowed, e.g. "public_metadata.key"
+        column_name, _, rest = field.partition(".")
+        column = getattr(self.model, column_name, None) if rest and column_name in self._json_path_columns else None
+        if column is not None and isinstance(getattr(column, "type", None), JSON):
+            return self._get_json_element(column, rest.split(".")), True
 
         raise ValueError(f"Field '{field}' does not exist on model {self.model.__name__}")
 
@@ -325,7 +336,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
         if operator == FilterOperator.EQ:
             return self._element_equals(element, value)
         if operator in (FilterOperator.IN, FilterOperator.NIN):
-            matches = or_(false(), *(self._element_equals(element, v) for v in value if v is not None))
+            candidates = [v for v in value if v is not None]
+            if candidates and all(isinstance(v, str) for v in candidates):
+                # One IN over the element text rather than an OR per value, for long lists of IDs.
+                matches = and_(element.is_string, text.in_(candidates))
+            else:
+                matches = or_(false(), *(self._element_equals(element, v) for v in candidates))
             return matches if operator == FilterOperator.IN else and_(text.is_not(None), not_(matches))
         if operator == FilterOperator.LIKE:
             comparison = text.ilike(f"%{value}%")
@@ -375,6 +391,7 @@ class SQLAlchemyFilterRepository(FilterRepository):
             child_alias,
             relationship_child_workspaces=self._relationship_child_workspaces,
             dialect_name=self._dialect_name,
+            json_path_columns=self._json_path_columns,
         )
 
         conditions = [child_alias.entity_type == target_entity_type]

@@ -9,6 +9,7 @@ from fastapi import Depends
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import get_auth_client
 from nhx.core.entities.app.repository import (
+    AccountIdentityStore,
     EntityRepositoryInterface,
     WorkspaceRepositoryInterface,
     dep_entity_repository,
@@ -32,19 +33,29 @@ def dep_workspace_repository_with_session(
     return dep_workspace_repository(session_maker)
 
 
+def dep_account_identity_store(
+    session_maker: async_sessionmaker[AsyncSession] = Depends(get_async_session_maker),
+) -> AccountIdentityStore:
+    """Dependency function for the account identity store with injected session maker."""
+    return AccountIdentityStore(session_maker)
+
+
 AsyncSessionMaker = Annotated[async_sessionmaker, Depends(get_async_session_maker)]
 WorkspaceRepository = Annotated[WorkspaceRepositoryInterface, Depends(dep_workspace_repository_with_session)]
 EntityRepository = Annotated[EntityRepositoryInterface, Depends(dep_entity_repository_with_session)]
+AccountIdentityStoreDep = Annotated[AccountIdentityStore, Depends(dep_account_identity_store)]
 
 
 AuthClientDep = Annotated[AuthClient, Depends(get_auth_client)]
 
 
 __all__ = [
+    "AccountIdentityStoreDep",
     "AsyncSessionMaker",
     "WorkspaceRepository",
     "EntityRepository",
     "AuthClientDep",
+    "dep_account_identity_store",
     "dep_entity_repository_with_session",
     "dep_workspace_repository_with_session",
 ]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 from typing import Annotated, NoReturn
 
@@ -18,8 +19,11 @@ import httpx
 import typer
 from nemo_helix_plugin.auth.access_keys.client import AccessKeyIssuerClient, AccessKeysClient
 from nemo_helix_plugin.auth.access_keys.issuer import (
+    WORKSPACE_BOUND_KEYS_HINT,
+    AccessKeyBoundWorkspacesNotAdministeredError,
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
+    AccessKeyWorkspaceBoundKeysError,
 )
 from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
@@ -28,6 +32,7 @@ from nemo_helix_plugin.auth.access_keys.types import (
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.oidc import OidcClientName, TokenRefreshKind, refresh_client
 from rich.console import Console
+from rich.markup import escape
 
 from nemo_helix_ext.auth.helpers import (
     AuthError,
@@ -42,7 +47,7 @@ from nemo_helix_ext.auth.helpers import (
 from nemo_helix_ext.auth.login import authenticate_with_oidc
 from nemo_helix_ext.auth.token_provider import OIDCTokenProvider, TokenPersistenceError, TokenSet
 from nemo_helix_ext.cli.core.context import CLIContext
-from nemo_helix_ext.cli.core.errors import handle_errors
+from nemo_helix_ext.cli.core.errors import REMOTE_ERROR_EXIT_CODE, handle_errors
 from nemo_helix_ext.cli.core.formatters import Column, format_output
 from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 from nemo_helix_ext.config.config import Config
@@ -73,6 +78,16 @@ def _raise_access_key_not_implemented(exc: AccessKeyOperationNotImplementedError
 
 def _raise_access_key_disabled(exc: AccessKeyFeatureDisabledError) -> NoReturn:
     raise AuthError(str(exc) or "Scoped Access Keys are not enabled.") from exc
+
+
+def _warn_bound_workspaces_not_administered(
+    exc: AccessKeyBoundWorkspacesNotAdministeredError, jti: str, *, completed_action: str
+) -> NoReturn:
+    """Warn that the key is also bound to workspaces the caller isn't Admin of, and fail without changing it."""
+    console = Console(stderr=True)
+    console.print(f"[yellow]Warning:[/yellow] {escape(exc.detail)}", highlight=False)
+    console.print(f"[bold red]Error:[/] Scoped Access Key {escape(jti)} was not {completed_action}.", highlight=False)
+    raise typer.Exit(REMOTE_ERROR_EXIT_CODE) from exc
 
 
 def _parse_access_key_expires_in(value: str | None) -> tuple[bool, int | None]:
@@ -132,6 +147,41 @@ def _parse_access_key_workspace_grants(
             )
         )
     return grants
+
+
+def _stdout_is_terminal() -> bool:
+    return sys.stdout.isatty()
+
+
+def _stderr_is_terminal() -> bool:
+    return sys.stderr.isatty()
+
+
+def _confirm_widening_workspace_bound_keys(exc: AccessKeyWorkspaceBoundKeysError) -> None:
+    """Warn that the new key extends the account's workspace-bound keys, and ask to proceed.
+
+    Exits without creating the key when the user declines, and fails when there is no terminal to
+    ask on, so a script has to opt in with --yes.
+    """
+    # Imported here so other auth commands don't load prompt_toolkit.
+    from nemo_helix_ext.ui.prompts import UserCancelled, is_interactive, prompt_confirm
+
+    # The server tells API clients which request field confirms; the CLI asks, or takes --yes.
+    warning = exc.detail.removesuffix(WORKSPACE_BOUND_KEYS_HINT).rstrip()
+    # The prompt renders on stdout, which also carries the new token: when stdout is captured (as in
+    # TOKEN="$(nemo auth access-keys create ...)"), asking would hide the prompt and corrupt the token.
+    # The warning that explains it goes to stderr, so asking with stderr redirected would ask blind.
+    if not is_interactive() or not _stdout_is_terminal() or not _stderr_is_terminal():
+        raise AuthError(f"{warning} Re-run with --yes to create the key anyway.") from exc
+    console = Console(stderr=True)
+    console.print(f"[yellow]Warning:[/yellow] {escape(warning)}", highlight=False)
+    try:
+        proceed = prompt_confirm("Create the key anyway?", default=False)
+    except UserCancelled:
+        proceed = False
+    if not proceed:
+        console.print("Cancelled; no key was created.")
+        raise typer.Exit(1)
 
 
 def is_auth_disabled(base_url: str, *, http_client: httpx.Client, timeout: float = 3.0) -> bool:
@@ -880,7 +930,10 @@ def create_access_key(
         str | None,
         typer.Option(
             "--service-account",
-            help="Bind the key to a non-human service account (HelixAdmin only).",
+            help=(
+                "Bind the key to a non-human service account (HelixAdmin, or an Admin of every --workspace "
+                "for an account named '<workspace>--<name>' after one of them)."
+            ),
         ),
     ] = None,
     scope: Annotated[
@@ -908,12 +961,28 @@ def create_access_key(
             help=(
                 "Grant the key's principal workspace membership, formatted '<workspace>' or "
                 "'<workspace>:<role1>,<role2>' (role defaults to Editor). Repeat for multiple workspaces. "
-                "Replaces a separate 'nemo workspaces members create' call."
+                "Replaces a separate 'nemo workspaces members create' call. "
+                "With --service-account named '<workspace>--<name>' after one of them, the key is also bound to "
+                "each workspace, so their Admins can manage it (Admins of all of them, for several); any other "
+                "service-bound key is managed by HelixAdmins only."
             ),
         ),
     ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help=(
+                "With --service-account: create the key without asking when the account already has keys "
+                "bound to workspaces and this key grants it a role it doesn't hold yet."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Create a user-bound or service-bound Scoped Access Key."""
+    if yes and service_account is None:
+        raise typer.BadParameter("--yes only applies together with --service-account.", param_hint="--yes")
     expires_in_was_set, parsed_expires_in = _parse_access_key_expires_in(expires_in)
     request = AccessKeyCreateRequest(
         name=name,
@@ -922,10 +991,16 @@ def create_access_key(
         scope=_parse_access_key_scope(scope),
         rotates=rotate,
         workspaces=_parse_access_key_workspace_grants(workspace),
+        **({"acknowledge_workspace_bound_keys": True} if yes else {}),
         **({"expires_in_seconds": parsed_expires_in} if expires_in_was_set else {}),
     )
+    issuer = _access_key_issuer(ctx)
     try:
-        created = _access_key_issuer(ctx).create(request)
+        try:
+            created = issuer.create(request)
+        except AccessKeyWorkspaceBoundKeysError as exc:
+            _confirm_widening_workspace_bound_keys(exc)
+            created = issuer.create(request.model_copy(update={"acknowledge_workspace_bound_keys": True}))
     except AccessKeyFeatureDisabledError as exc:
         _raise_access_key_disabled(exc)
     except AccessKeyOperationNotImplementedError as exc:
@@ -946,7 +1021,8 @@ def list_access_keys(
     """List Scoped Access Keys owned by the currently authenticated user.
 
     HelixAdmins also see every service-bound Scoped Access Key, not just the
-    ones they personally created.
+    ones they personally created; workspace Admins also see the service-bound
+    keys bound to workspaces they administer, whoever created them.
     """
     try:
         listed = _access_key_issuer(ctx).list(page=page, page_size=page_size)
@@ -966,6 +1042,7 @@ def list_access_keys(
             Column("description", None),
             Column("entity_type", None),
             Column("principal", None),
+            Column("bound_workspaces", None),
             Column("status", None),
             Column("issuer", None),
             Column("audiences", None),
@@ -987,13 +1064,15 @@ def revoke_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to revoke.")],
 ) -> None:
-    """Revoke a Scoped Access Key owned by the currently authenticated user."""
+    """Revoke a Scoped Access Key you own, or a service-bound key you administer."""
     try:
         result = _access_key_issuer(ctx).revoke(jti)
     except AccessKeyFeatureDisabledError as exc:
         _raise_access_key_disabled(exc)
     except AccessKeyOperationNotImplementedError as exc:
         _raise_access_key_not_implemented(exc)
+    except AccessKeyBoundWorkspacesNotAdministeredError as exc:
+        _warn_bound_workspaces_not_administered(exc, jti, completed_action="revoked")
     if result.revoked:
         typer.echo(f"Revoked Scoped Access Key {jti}.")
     else:
@@ -1006,7 +1085,7 @@ def suspend_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to suspend.")],
 ) -> None:
-    """Temporarily suspend a Scoped Access Key owned by the current user.
+    """Temporarily suspend a Scoped Access Key you own, or a service-bound key you administer.
 
     Unlike revocation, suspension is reversible until the key expires.
     """
@@ -1016,6 +1095,8 @@ def suspend_access_key(
         _raise_access_key_disabled(exc)
     except AccessKeyOperationNotImplementedError as exc:
         _raise_access_key_not_implemented(exc)
+    except AccessKeyBoundWorkspacesNotAdministeredError as exc:
+        _warn_bound_workspaces_not_administered(exc, jti, completed_action="suspended")
     if result.changed:
         typer.echo(f"Suspended Scoped Access Key {jti}.")
     else:
@@ -1028,13 +1109,15 @@ def unsuspend_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to unsuspend.")],
 ) -> None:
-    """Restore a suspended Scoped Access Key owned by the current user."""
+    """Restore a suspended Scoped Access Key you own, or a service-bound key you administer."""
     try:
         result = _access_key_issuer(ctx).unsuspend(jti)
     except AccessKeyFeatureDisabledError as exc:
         _raise_access_key_disabled(exc)
     except AccessKeyOperationNotImplementedError as exc:
         _raise_access_key_not_implemented(exc)
+    except AccessKeyBoundWorkspacesNotAdministeredError as exc:
+        _warn_bound_workspaces_not_administered(exc, jti, completed_action="unsuspended")
     if result.changed:
         typer.echo(f"Unsuspended Scoped Access Key {jti}.")
     else:
@@ -1071,6 +1154,8 @@ def rotate_access_key(
         _raise_access_key_disabled(exc)
     except AccessKeyOperationNotImplementedError as exc:
         _raise_access_key_not_implemented(exc)
+    except AccessKeyBoundWorkspacesNotAdministeredError as exc:
+        _warn_bound_workspaces_not_administered(exc, jti, completed_action="rotated")
     typer.echo(result.new_key.token)
     if result.previous_status == "ROTATING":
         if result.grace_period_expires_at is not None:

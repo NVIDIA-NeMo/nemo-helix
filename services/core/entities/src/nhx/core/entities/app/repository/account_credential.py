@@ -6,10 +6,15 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from nemo_helix_plugin.filter_ops import ElemMatchCondition
+from nhx.common.api.filter import FilterOperator
+from nhx.common.datetime_utils import ensure_utc
+from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountCredential, DBAccountIdentity
 from nhx.core.entities.utils.identifiers import generate_entity_id
 from sqlalchemy import and_, delete, func, or_, select, update
@@ -24,12 +29,6 @@ AccountCredentialStatus = Literal["ACTIVE", "REVOKED", "SUSPENDED", "ROTATING"]
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _aware(value: datetime | None) -> datetime | None:
-    if value is None or value.tzinfo is not None:
-        return value
-    return value.replace(tzinfo=timezone.utc)
 
 
 def _naive_utc(value: datetime) -> datetime:
@@ -267,22 +266,72 @@ class AccountCredentialStore:
         owner_account_id: str,
         *,
         include_service_subjects: bool,
+        service_subject_metadata_contains: tuple[str, Sequence[str]] | None = None,
         offset: int,
         limit: int,
     ) -> tuple[list[AccountCredentialRecord], bool]:
+        """List credentials owned by ``owner_account_id``, newest first, and whether more rows follow.
+
+        ``include_service_subjects`` adds every credential whose subject is a service account.
+        Otherwise ``service_subject_metadata_contains=(key, values)`` adds just the service-account
+        credentials whose ``public_metadata[key]`` array contains any of ``values``.
+        """
         subject = aliased(DBAccount)
         ownership = DBAccountCredential.owner_account_id == owner_account_id
         query = select(DBAccountCredential).join(subject, subject.id == DBAccountCredential.subject_account_id)
-        if include_service_subjects:
-            ownership = or_(ownership, subject.type == "service")
-        query = (
-            query.where(DBAccountCredential.credential_type == credential_type, ownership)
-            .order_by(DBAccountCredential.issued_at.desc())
-            .offset(offset)
-            # Fetch one extra row as a lookahead so callers can set `has_more`
-            # without running a separate count query.
-            .limit(limit + 1)
+        async with self.session_maker() as session:
+            if include_service_subjects:
+                ownership = or_(ownership, subject.type == "service")
+            elif service_subject_metadata_contains is not None and service_subject_metadata_contains[1]:
+                key, values = service_subject_metadata_contains
+                filters = SQLAlchemyFilterRepository(
+                    DBAccountCredential,
+                    dialect_name=session.get_bind().dialect.name,
+                    json_path_columns=frozenset({"public_metadata"}),
+                )
+                ownership = or_(
+                    ownership,
+                    and_(
+                        subject.type == "service",
+                        # One $elemMatch/$in, so a long list of values stays a single array scan.
+                        filters.elem_match(
+                            f"public_metadata.{key}", [ElemMatchCondition(None, FilterOperator.IN, list(values))]
+                        ),
+                    ),
+                )
+            query = (
+                query.where(DBAccountCredential.credential_type == credential_type, ownership)
+                .order_by(DBAccountCredential.issued_at.desc())
+                .offset(offset)
+                # Fetch one extra row as a lookahead so callers can set `has_more`
+                # without running a separate count query.
+                .limit(limit + 1)
+            )
+            rows = list((await session.scalars(query)).all())
+        return [self._record(row) for row in rows[:limit]], len(rows) > limit
+
+    async def list_for_subject(
+        self,
+        credential_type: AccountCredentialType,
+        subject_account_id: str,
+        *,
+        after_id: str | None = None,
+        limit: int,
+    ) -> tuple[list[AccountCredentialRecord], bool]:
+        """List credentials of any status whose subject is ``subject_account_id``, ordered by ID.
+
+        Returns the page and whether more rows follow. Pass the last returned record's ID as
+        ``after_id`` to fetch the next page. Callers use this to scan every row for a security
+        check, where a skipped row would fail open: unlike offset paging, a row deleted while the
+        scan runs can't shift a later row onto a page already read.
+        """
+        query = select(DBAccountCredential).where(
+            DBAccountCredential.credential_type == credential_type,
+            DBAccountCredential.subject_account_id == subject_account_id,
         )
+        if after_id is not None:
+            query = query.where(DBAccountCredential.id > after_id)
+        query = query.order_by(DBAccountCredential.id).limit(limit + 1)
         async with self.session_maker() as session:
             rows = list((await session.scalars(query)).all())
         return [self._record(row) for row in rows[:limit]], len(rows) > limit
@@ -326,10 +375,10 @@ class AccountCredentialStore:
             credential_type=_credential_type(row.credential_type),
             lookup_hash=row.lookup_hash,
             status=_credential_status(row.status),
-            issued_at=_aware(row.issued_at) or datetime.now(timezone.utc),
-            expires_at=_aware(row.expires_at),
-            last_used_at=_aware(row.last_used_at),
-            revoked_at=_aware(row.revoked_at),
+            issued_at=ensure_utc(row.issued_at) or datetime.now(timezone.utc),
+            expires_at=ensure_utc(row.expires_at),
+            last_used_at=ensure_utc(row.last_used_at),
+            revoked_at=ensure_utc(row.revoked_at),
             revoked_by=row.revoked_by,
             public_metadata=dict(row.public_metadata),
             encrypted_payload=row.encrypted_payload,

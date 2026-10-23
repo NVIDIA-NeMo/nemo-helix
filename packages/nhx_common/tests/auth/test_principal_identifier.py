@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from nhx.common.auth.principal_identifier import (
     PRINCIPAL_IDENTIFIER_KIND_PRINCIPAL,
@@ -10,6 +12,8 @@ from nhx.common.auth.principal_identifier import (
     is_service_principal,
     normalize_service_principal_identifier,
     parse_principal_identifier,
+    service_account_namespace,
+    service_account_predates_namespace,
 )
 
 
@@ -107,3 +111,34 @@ def test_parse_principal_identifier_can_classify_extended_non_service_subject_wi
 
     assert parsed.kind == "principal"
     assert parsed.caller_kind == "principal"
+
+
+@pytest.mark.parametrize(
+    ("service_account_id", "workspace"),
+    [
+        ("team-a--otel", "team-a"),
+        ("team-a--otel--extra", "team-a"),
+        ("team-a--", None),
+        ("--otel", None),
+        ("team-a-otel", None),
+        ("otel", None),
+    ],
+)
+def test_service_account_namespace(service_account_id: str, workspace: str | None) -> None:
+    assert service_account_namespace(service_account_id) == workspace
+
+
+@pytest.mark.parametrize(
+    ("linked_at", "expected"),
+    [
+        (None, False),
+        (datetime(2026, 1, 2, tzinfo=UTC), False),
+        # Within the clock skew the two services' clocks are allowed.
+        (datetime(2026, 1, 1, tzinfo=UTC) - timedelta(minutes=4), False),
+        (datetime(2026, 1, 1, tzinfo=UTC) - timedelta(minutes=6), True),
+        # A naive time is taken as UTC.
+        (datetime(2025, 12, 31), True),
+    ],
+)
+def test_service_account_predates_namespace(linked_at: datetime | None, expected: bool) -> None:
+    assert service_account_predates_namespace(linked_at, datetime(2026, 1, 1)) is expected

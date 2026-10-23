@@ -31,7 +31,17 @@ from nhx.common.api.common import DeleteResponse, GenericSortField, Page, Pagina
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
-from nhx.core.entities.api.dependencies import AuthClientDep, EntityRepository, WorkspaceRepository
+from nhx.common.auth.principal_identifier import (
+    SERVICE_ACCOUNT_PRINCIPAL_PREFIX,
+    service_account_namespace,
+    service_account_predates_namespace,
+)
+from nhx.core.entities.api.dependencies import (
+    AccountIdentityStoreDep,
+    AuthClientDep,
+    EntityRepository,
+    WorkspaceRepository,
+)
 from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
@@ -46,8 +56,14 @@ from nhx.core.entities.api.v2.workspaces.schemas import (
     WorkspaceMemberUpdate,
     WorkspaceUpdate,
 )
+from nhx.core.entities.app.repository import (
+    SERVICE_ACCOUNT_IDENTITY_ISSUER,
+    AccountIdentityStore,
+    WorkspaceRepositoryInterface,
+)
 from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
 from nhx.core.entities.utils.filter import FilterDep
+from nhx.core.entities.utils.identifiers import entity_id_prefix
 from sqlalchemy.exc import IntegrityError
 
 router = APIRouter()
@@ -233,7 +249,6 @@ async def create_workspace(
             status_code=status.HTTP_409_CONFLICT,
             detail=_workspace_name_conflict_detail(existing),
         )
-
     try:
         new_workspace = await workspace_repository.create_workspace(
             name=workspace.name,
@@ -263,7 +278,11 @@ async def create_workspace(
                 detail="Invalid data provided. Please check your input.",
             )
 
-    # Grant Admin role to the creator (prefer email for stored principal so listings match IdP email)
+    # Grant Admin role to the creator (prefer email for stored principal so listings match IdP email).
+    # Not held to the service-account namespace rule (see _require_service_account_namespace_owner):
+    # that stops other workspaces' Admins locking an account's owners out, and here the account acts
+    # for itself. Its key's Admin role in the new workspace is access outside its bound workspaces,
+    # so its workspace's Admins can no longer rotate or unsuspend its keys until it's removed.
     binding_principal = _principal_for_role_binding(auth_client.principal)
     if auth_client.auth_enabled and binding_principal:
         granted_by = auth_client.principal.id if auth_client.principal.id else binding_principal
@@ -650,6 +669,71 @@ async def list_workspace_members(
     return WorkspaceMemberListResponse(data=list(members_dict.values()))
 
 
+# Prefix of account IDs, which role bindings may be keyed by too.
+_ACCOUNT_ID_PREFIX = entity_id_prefix("account")
+
+
+async def _require_service_account_namespace_owner(
+    auth_client: AuthClient,
+    identity_store: AccountIdentityStore,
+    workspace_repository: WorkspaceRepositoryInterface,
+    principal: str,
+    workspace: str,
+) -> None:
+    """Only a HelixAdmin or an Admin of ``<ws>`` may grant ``service-account:<ws>--<name>`` roles outside ``<ws>``.
+
+    Workspace Admins create Scoped Access Keys for service accounts named after their workspace, and
+    only while the account has no access outside the workspaces the key is bound to. Without this,
+    any workspace Admin (and any user can create a workspace) could grant such an account a role in
+    their own workspace and lock the owning workspace's Admins out of it. The account's keys also
+    authenticate as its account ID, so a binding keyed by that ID is held to the same rule.
+
+    Nobody owns the namespace of a workspace that doesn't exist (or is being deleted), so there's no
+    one to lock out. And an account whose identity is older than ``<ws>`` belongs to an earlier
+    workspace of that name (or to a HelixAdmin): its keys may still be live, so only a HelixAdmin
+    may grant it roles anywhere, ``<ws>`` included, or a recreated workspace's Admins would hand
+    them access. Internal service principals (``service:*``) acting for themselves are trusted, and
+    the check is skipped when auth is disabled.
+    """
+    if not auth_client.auth_enabled:
+        return
+    if principal.startswith(SERVICE_ACCOUNT_PRINCIPAL_PREFIX):
+        service_account_id: str | None = principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX)
+    elif principal.startswith(_ACCOUNT_ID_PREFIX):
+        service_account_id = await identity_store.get_subject(
+            account_id=principal, issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER
+        )
+    else:
+        return
+    owner = service_account_namespace(service_account_id) if service_account_id is not None else None
+    if owner is None or service_account_id is None:
+        return
+    owner_workspace = await workspace_repository.get_workspace_by_name(name=owner)
+    # One being deleted is gone already as far as the auth service's checks can tell.
+    if owner_workspace is None or owner_workspace._deletion_stage is not None:
+        return
+    linked_at = await identity_store.get_linked_at(issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER, subject=service_account_id)
+    predates_owner = service_account_predates_namespace(linked_at, owner_workspace.created_at)
+    # Granting it roles in its own workspace takes Admin of that workspace, which the endpoint checks.
+    if owner == workspace and not predates_owner:
+        return
+    if auth_client.principal.effective_principal.is_privileged():
+        return
+    if await auth_client.has_role("system", "HelixAdmin"):
+        return
+    if not predates_owner and await auth_client.has_role(owner, "Admin"):
+        return
+    account = f"{SERVICE_ACCOUNT_PRINCIPAL_PREFIX}{service_account_id}"
+    if predates_owner:
+        detail = (
+            f"'{account}' is older than workspace '{owner}', so it belongs to an earlier workspace of that "
+            f"name; only a HelixAdmin can grant it roles in workspace '{workspace}'"
+        )
+    else:
+        detail = f"Only a HelixAdmin or an Admin of workspace '{owner}' can grant '{account}' roles in workspace '{workspace}'"
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 @router.post(
     "/v2/workspaces/{workspace}/members",
     response_model=WorkspaceMember,
@@ -662,6 +746,10 @@ async def list_workspace_members(
         This creates role bindings for the specified principal with the given roles.
         By default, this endpoint waits for the roles to propagate before returning.
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
+
+        A service account named after a workspace (`service-account:<workspace>--<name>`)
+        can only be granted roles in another workspace by a HelixAdmin or an Admin of
+        `<workspace>`; other callers get 403.
 
         Example:
         ```
@@ -679,6 +767,7 @@ async def add_workspace_member(
     workspace_repository: WorkspaceRepository,
     entity_repository: EntityRepository,
     auth_client: AuthClientDep,
+    identity_store: AccountIdentityStoreDep,
     wait_role_propagation: bool = Query(
         default=True,
         description="If true, wait for roles to propagate before returning (default: true). Set to false for bulk operations.",
@@ -691,6 +780,10 @@ async def add_workspace_member(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workspace '{workspace}' not found",
+        )
+    if member.roles:
+        await _require_service_account_namespace_owner(
+            auth_client, identity_store, workspace_repository, member.principal, workspace
         )
 
     granted_by = auth_client.principal.id if auth_client.principal.id else "system"
@@ -769,6 +862,11 @@ async def add_workspace_member(
         By default, this endpoint waits for the roles to propagate before returning.
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
 
+        Adding roles for a service account named after another workspace
+        (`service-account:<workspace>--<name>`) requires HelixAdmin or Admin of
+        `<workspace>`, as when adding a member; other callers get 403. Removing roles
+        is never restricted this way.
+
         Example:
         ```
         PUT /apis/entities/v2/workspaces/ml-team/members/user@example.com
@@ -785,6 +883,7 @@ async def update_workspace_member(
     workspace_repository: WorkspaceRepository,
     entity_repository: EntityRepository,
     auth_client: AuthClientDep,
+    identity_store: AccountIdentityStoreDep,
     wait_role_propagation: bool = Query(
         default=True,
         description="If true, wait for roles to propagate before returning (default: true). Set to false for bulk operations.",
@@ -828,6 +927,10 @@ async def update_workspace_member(
     # Track which roles are being added and removed
     roles_to_add = new_roles - current_roles
     roles_to_remove = current_roles - new_roles
+    if roles_to_add:
+        await _require_service_account_namespace_owner(
+            auth_client, identity_store, workspace_repository, principal_id, workspace
+        )
 
     # Check if removing Admin role would leave workspace without any admins
     if "Admin" in roles_to_remove:

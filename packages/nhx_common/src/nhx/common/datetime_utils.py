@@ -4,6 +4,19 @@
 """Datetime utilities shared across controllers and reconcilers."""
 
 from datetime import datetime, timezone
+from typing import overload
+
+
+@overload
+def ensure_utc(dt: datetime) -> datetime: ...
+
+
+@overload
+def ensure_utc(dt: None) -> None: ...
+
+
+@overload
+def ensure_utc(dt: datetime | None) -> datetime | None: ...
 
 
 def ensure_utc(dt: datetime | None) -> datetime | None:

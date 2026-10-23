@@ -180,15 +180,202 @@ allowed unlimited keys.
 
 Restrict a key to specific services with `--scope`, and grant its principal
 workspace membership with `--workspace` (formatted `<workspace>` or
-`<workspace>:<role1>,<role2>`, repeatable) instead of a separate
-`nemo workspaces members create` call. Creating a service-bound key with
-`--service-account` requires the HelixAdmin role; omit it to create a
-personal, user-bound key instead:
+`<workspace>:<role1>,<role2>`, repeatable; the role defaults to `Editor`) instead
+of a separate `nemo workspaces members create` call. Without `--service-account`,
+the key is a personal, user-bound key:
 
 ```bash
-nemo auth access-keys create --name "intake-worker" --service-account service-id \
+nemo auth access-keys create --name "intake-worker" \
   --scope intake,entities --workspace ml-team:Editor
 ```
+
+Pass `--service-account <id>` to create a service-bound key that authenticates as
+that service account instead, as described below.
+
+#### Service-bound keys and workspaces
+
+A key created with `--service-account` authenticates as that service account
+rather than as you. With `--workspace`, the service account gets the roles you
+name in each workspace. If the account is named `<workspace>--<name>` after one
+of those workspaces, the key is also **bound** to each of them, so their Admins
+can manage it. A workspace Admin can create such a key; a HelixAdmin can create
+one for any service account.
+
+Bind a key to one workspace:
+
+```bash
+nemo auth access-keys create --name otel \
+  --service-account team-a--otel-collector \
+  --workspace team-a:Editor
+```
+
+Bind it to several by repeating the option. The service account gets the role
+you name in each workspace:
+
+```bash
+nemo auth access-keys create --name shared-ci \
+  --service-account team-a--shared-ci \
+  --workspace team-a:Editor \
+  --workspace team-b:Viewer
+```
+
+Without `--workspace`, or for an account whose name isn't `<workspace>--<name>`
+after one of the `--workspace` workspaces, the key isn't bound to any workspace
+and only a HelixAdmin can create and manage it. Use this for platform-owned
+accounts that workspace Admins shouldn't manage: the account still gets the roles
+named with `--workspace`. You can also grant them separately with
+`nemo workspaces members create --principal service-account:<id>`. Granting roles
+that way never asks for confirmation, even if the account already has keys bound
+to other workspaces; see the warning under
+[Confirming access for existing workspace-bound keys](#confirming-access-for-existing-workspace-bound-keys).
+
+A key bound to several workspaces is managed by someone who is an Admin of
+**all** of them (or by a HelixAdmin). An Admin of only `team-a` can't create it
+(`403`), and `list` leaves it out.
+
+If they try to suspend, unsuspend, rotate, or revoke it, the key is left unchanged
+and the request fails with `403` and the code `bound_workspaces_not_administered`.
+The CLI shows this as a warning naming the bound workspaces they aren't an Admin
+of. Workspaces they can't see, or that no longer exist, are only counted:
+
+```text
+Warning: Scoped Access Key ak_... is also bound to workspace(s) 'team-b', which you aren't Admin of; only a HelixAdmin, or an Admin of every workspace it's bound to, can revoke it
+Error: Scoped Access Key ak_... was not revoked.
+```
+
+Someone who isn't an Admin of any of the key's workspaces gets `404`, as if the key
+didn't exist.
+
+Creating these keys with a `--scope`-restricted key needs `entities` or `platform`
+in its scope, so the platform can read the workspaces; otherwise the request fails
+with `400` and says so. A workspace Admin managing existing keys needs that scope
+too: without it, the keys bound to their workspaces read as not found (`404`).
+
+What each caller can do with a service-bound key:
+
+| Caller | Create | Suspend, unsuspend, revoke | Rotate |
+| --- | --- | --- | --- |
+| HelixAdmin | Any service account | Any key | Any key |
+| Admin of every bound workspace | A `<workspace>--<name>` account with no access outside the bound workspaces | Suspend and revoke: yes. Unsuspend: only while the account still has no access outside the bound workspaces | Any key whose account still has no access outside the bound workspaces |
+| Admin of only some of the bound workspaces, or none | No | No | No |
+
+`list` shows the service-bound keys bound to workspaces you administer, whoever
+created them, so every Admin of a workspace sees its keys. Callers who aren't an
+Admin of any workspace only see their personal keys. Bound workspaces are shown by
+their current name. If the platform can't check a workspace's Admin role
+while listing, the service-bound keys bound to that workspace are left out until a
+retry.
+
+##### Service account names
+
+A workspace Admin must name the service account after one of the bound workspaces,
+as `<workspace>--<name>`, for example `team-a--otel-collector`. A key bound to `team-a`
+and `team-b` can use `team-a--...` or `team-b--...`. Any other name is rejected with
+`403`. Workspace names can't contain `--`, so the prefix always names exactly one
+workspace. The name also keeps the account under its workspace's control: only a
+HelixAdmin or an Admin of `team-a` can grant `service-account:team-a--...` a role in
+another workspace, for example with `nemo workspaces members create`. The account
+itself still becomes Admin of any workspace it creates, if it's allowed to create
+workspaces. That is access outside its bound workspaces, so its workspace's Admins
+can then no longer rotate or unsuspend its keys (see below) until a HelixAdmin
+removes it.
+
+Service account names can't contain `@`, so the Admins of a workspace whose name
+contains `@` can't create service-bound keys; a HelixAdmin has to create them. Avoid
+`/` in service account names: `nemo workspaces members update` and `delete` can't
+address an account whose name contains one.
+
+Service account names are shared across the platform, and roles belong to the
+account. The prefix stops a workspace's Admins from claiming a generic name, such as
+`otel-collector`, that someone else later grants access elsewhere: their key would
+silently get that access too. A HelixAdmin's key follows the same naming: it is
+bound, and so handed to the bound workspaces' Admins, only for an account named
+after one of its workspaces. Those Admins can then suspend, revoke, and rotate it,
+subject to the restrictions below.
+
+<Warning>
+Names of the form `<workspace>--<name>` belong to the Admins of `<workspace>`, even
+before that workspace exists: anyone who creates a workspace with that name can
+create keys for its `<workspace>--...` accounts, as long as the account has no
+access outside it. Until the workspace exists, anyone can grant such an account
+roles. HelixAdmins should give platform-owned service accounts names without `--`,
+and only grant roles to a `<workspace>--...` account when that workspace's Admins
+are meant to hold its keys.
+</Warning>
+
+##### Service account restrictions
+
+A workspace Admin can only use a service account whose existing keys and role
+bindings all stay within the workspaces the new key is bound to. For example, with
+a key already bound to `team-a`:
+
+- A new key for the same account bound to `team-a` is allowed.
+- A new key bound to `team-a` and `team-b` is allowed if you administer both, after
+  you confirm the warning described below.
+- An account that also has a role in `team-c`, or a key not bound to a workspace,
+  is rejected with `403`. A HelixAdmin has to create or rotate keys for it.
+
+The platform checks this when you create, rotate, or unsuspend a key, not
+continuously. If the account later gains access elsewhere, the existing key keeps
+working and you can still suspend or revoke it, but you can't rotate it, or
+unsuspend it once suspended. A HelixAdmin is not subject to this check.
+
+##### Confirming access for existing workspace-bound keys
+
+Roles belong to the service account, not the key, so every key for an account gets
+any role granted to that account. That includes keys bound to a workspace and
+managed by that workspace's Admins. When the account has a live workspace-bound key,
+the CLI warns you and asks you to confirm before you create a key that grants the
+account a role it doesn't hold yet, in any workspace, whoever creates it. For
+example, `Editor` in `team-a` when the account only has `Viewer` there, or any role
+in `team-b` when it has none there.
+
+A key that grants no roles, or only roles the account already holds (counting the
+roles they include, such as `Viewer` for an account with `Editor`), needs no
+confirmation:
+
+```text
+Warning: Service account 'team-a--otel-collector' already has live keys bound to
+workspace(s) 'team-a', which those workspaces' Admins manage. Roles belong to the
+service account, not the key, so those keys will also get the roles this key grants
+that the account doesn't hold yet.
+Create the key anyway? [y/N]:
+```
+
+Answer `n` to cancel without creating a key. Pass `--yes` to skip the prompt, for
+example in scripts. Without a terminal, or when the output is captured (as in
+`TOKEN="$(nemo auth access-keys create ...)"`), the command fails unless you pass `--yes`.
+Revoked and expired keys don't trigger the warning. If the service account is
+disabled, the command fails without a prompt; enable the account before you create
+keys for it.
+
+API clients get a `409` response with `code` set to `workspace_bound_keys_exist`
+and a `detail` that names the service account and those keys' workspaces. To create
+the key anyway, resend the request with `acknowledge_workspace_bound_keys` set to
+`true`. The check runs again after the key is saved, so a key created at the same
+time for the same account still triggers the `409` unless you confirmed; if both
+need confirming, both do.
+
+<Warning>
+The warning only covers roles granted while creating a key. Adding the service
+account as a member of another workspace with `nemo workspaces members create`
+gives every key of the account, including workspace-bound ones, that access without
+any warning.
+</Warning>
+
+##### Deleted and recreated workspaces
+
+A key is bound to each workspace's ID; the name is only looked up when needed. If a
+bound workspace is deleted and recreated under the same name, the new workspace's
+Admins don't manage the key and only a HelixAdmin does. A HelixAdmin sees the old
+workspace listed by its ID. The old key stays valid until a HelixAdmin revokes it,
+because deleting a workspace doesn't revoke its keys. That also stops the recreated
+workspace's Admins from reusing the service account: it was first issued a key before
+their workspace existed, so only a HelixAdmin can grant it roles, in that workspace
+or any other.
+
+Roles belong to the service account, not the key, so a role you grant applies to
+every key of that account. Rotating a key never changes roles.
 
 A `--scope`-restricted key is enforced platform-wide, not just advisory: it can only
 call endpoints whose required scope is covered by the services you listed (plus any
