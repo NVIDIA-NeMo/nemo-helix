@@ -38,9 +38,8 @@ test("resolves exact stable, prerelease and nightly artifacts", () => {
   }
 });
 
-test("only full published releases are eligible, regardless of Slack outcome", () => {
+test("full published releases are eligible without an opt-in, regardless of Slack outcome", () => {
   const env = {
-    SMOKE_ENABLED: "true",
     RELEASE_SCOPE: "all",
     RELEASE_TYPE: "stable",
     POLL_RESULT: "success",
@@ -58,7 +57,6 @@ test("only full published releases are eligible, regardless of Slack outcome", (
     }
   }
   for (const change of [
-    { SMOKE_ENABLED: "" },
     { RELEASE_SCOPE: "containers" },
     { RELEASE_TYPE: "custom" },
     { POLL_RESULT: "failure" },
