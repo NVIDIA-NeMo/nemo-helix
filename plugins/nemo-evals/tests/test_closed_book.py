@@ -411,6 +411,15 @@ async def test_provider_policy_adding_stored_history_is_refused(
     assert exc_info.value.status_code == 403
 
 
+async def test_request_null_overriding_a_provider_default_history_is_allowed() -> None:
+    """The gateway lets the request override `default_extra_body`, so a null there is what the provider gets."""
+    target = _target("azure/openai/gpt-5.6-luna", default_extra_body={"previous_response_id": "resp_1"})
+    middleware = _middleware({"ws/luna": target})
+    ctx, request = _request("v1/responses", {"model": "ws/luna", "input": "hi", "previous_response_id": None})
+
+    assert await middleware.process_request(ctx, request, ClosedBookConfig()) is request
+
+
 async def test_null_provider_stored_history_is_allowed() -> None:
     middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
     ctx, request = _request(
