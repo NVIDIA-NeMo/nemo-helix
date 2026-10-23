@@ -19,6 +19,8 @@ export interface BulkDeleteModalProps<T> {
    *   (count) => `Delete ${count} Job${count !== 1 ? 's' : ''}`
    */
   title: string | ((count: number) => string);
+  /** Optional explanation of exactly which records are removed or preserved. */
+  description?: string;
   /** Called on both successful delete AND user cancel. */
   onClose: () => void;
 }
@@ -28,6 +30,7 @@ export const BulkDeleteModal = <T,>({
   open,
   onDelete,
   title,
+  description,
   onClose,
 }: BulkDeleteModalProps<T>) => {
   const [pendingCount, setPendingCount] = useState<number | null>(null);
@@ -52,6 +55,7 @@ export const BulkDeleteModal = <T,>({
       onDelete={handleDelete}
       simpleConfirm
       title={resolvedTitle}
+      description={description}
       onClose={onClose}
     />
   );
