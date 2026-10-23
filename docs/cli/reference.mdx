@@ -9185,6 +9185,7 @@ nemo evals runs [OPTIONS] COMMAND [ARGS]...
 
 * `list`: List a workspace's runs, newest first.
 * `status`: Show each task Job of a run and its status.
+* `cancel`: Request a run's cancel; the run controller acts on it,...
 * `download`: Download a run's merged result bundle (report.html,...
 * `results`: Show each completed task's scores (every Harbor reward)...
 * `submit`: Publish the selected tasks as a taskset, build their...
@@ -9232,6 +9233,29 @@ nemo evals runs status [OPTIONS] RUN_ID
 * `--watch`: Refresh until every task Job is done.
 * `--poll-seconds <FLOAT>`: Refresh interval with --watch. [default: 15.0]
 * `--json`: Print JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs cancel
+
+Request a run's cancel; the run controller acts on it, and the run keeps its phase until then.
+
+**Usage:**
+
+```shell
+nemo evals runs cancel [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--workspace`: Workspace of the run; default: configured.
+* `--json`: Print the run's status as JSON.
 
 **Help:**
 

@@ -902,6 +902,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/cancel:
+    post:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Cancel Taskset Run
+      description: "Record the intent to cancel a run and return its status; the phase\
+        \ changes on the controller's next pass.\n\nWrites only ``cancel_requested_at``:\
+        \ never the phase, members, Jobs or the Intake Evaluation. A repeat keeps\
+        \ the\nfirst request's time. The write goes through the evals service, after\
+        \ the caller's permission check, so it never\nerases a field only the service\
+        \ reads back.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
+        \    run_id: Public run name in that workspace.\n    store: Run store acting\
+        \ as the evals service.\n\nReturns:\n    The stored status with ``cancel_requested_at``\
+        \ set, excluding null optionals.\n\nRaises:\n    HTTPException: The record\
+        \ is absent (404), the run already finished (409), every write lost to a concurrent\n\
+        \        one (503, safe to retry), or an unexpected failure (sanitized 500)."
+      operationId: cancel_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Cancel requested now or earlier; the run controller stops the
+            run on its next pass.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunStatus'
+        '404':
+          description: Run not found in this workspace.
+        '409':
+          description: The run already finished; there is nothing to cancel.
+        '503':
+          description: The run kept changing while the cancel was recorded; retry.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks:
     get:
       tags:
