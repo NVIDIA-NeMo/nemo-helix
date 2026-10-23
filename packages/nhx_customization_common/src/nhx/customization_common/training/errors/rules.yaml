@@ -429,6 +429,13 @@ rules:
     exception: CheckpointError
     error_details: "Training finished without saving any checkpoint, so there is no model to publish. This usually means the dataset was too small for a single training step (for example, fewer rows than the batch size), or validation never ran. Add samples, lower batch_size, or check the validation settings."
 
+  # Our check that a resume restored a checkpoint, instead of starting over.
+  - id: resume_checkpoint_missing
+    rerunnable: false
+    type_name: ResumeCheckpointMissingError
+    exception: CheckpointError
+    error_details: "The job paused, but job storage no longer holds a complete checkpoint to resume from, so it cannot continue where it stopped. Create a new job to train again."
+
   - id: checkpoint_already_published
     rerunnable: false
     regex: "Checkpoint directory .+ already holds a published checkpoint"
