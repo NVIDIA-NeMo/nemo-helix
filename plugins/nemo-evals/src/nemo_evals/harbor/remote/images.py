@@ -6,6 +6,7 @@
 Shared by the run plan (frozen at submit) and the task Job input, so both name the same images.
 """
 
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, ResourceClass
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,6 +29,13 @@ class PreparedImage(BaseModel):
         default=None, description="Built images only: the Builder Job (BuildImage.build_job)."
     )
     source_archive_digest: str | None = Field(default=None, description="Built images only: digest of the build input.")
+    runtime_config: ImageRuntimeConfig | None = Field(
+        default=None,
+        description=(
+            "How the image starts by default, as Builder recorded it. The sandbox replaces the container's "
+            "entrypoint, so the task Job restores the image's own from here. None when Builder didn't record it."
+        ),
+    )
 
 
 class PreparedHarborEnvironment(BaseModel):

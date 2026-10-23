@@ -303,6 +303,7 @@ def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> 
             builder_image=image.builder_image,
             build_job=image.build_job,
             source_archive_digest=definition.source.files_hash if built else None,
+            runtime_config=image.runtime_config,
         )
         if image_type is None:
             # The task Job looks up a service's image by the service's own name.

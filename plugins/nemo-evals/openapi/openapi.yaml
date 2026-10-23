@@ -4649,6 +4649,12 @@ components:
           title: Image Ref
           description: '`<registry>/<repository>@<digest>` once the image is ready.'
           type: string
+        runtime_config:
+          allOf:
+          - $ref: '#/components/schemas/ImageRuntimeConfig'
+          description: How the image starts by default (its `ENTRYPOINT`, `CMD` and
+            `WORKDIR`), once it's ready. None when Builder didn't record it, as for
+            an image it built before it started to.
         error:
           title: Error
           type: string
@@ -6654,6 +6660,36 @@ components:
       required:
       - data
       title: ImageBuildsPage
+    ImageRuntimeConfig:
+      properties:
+        entrypoint:
+          title: Entrypoint
+          description: The image's `ENTRYPOINT`, or None when it has none.
+          items:
+            type: string
+          type: array
+          maxItems: 256
+        cmd:
+          title: Cmd
+          description: 'The image''s `CMD`: the default arguments to its `ENTRYPOINT`,
+            or None when it has none.'
+          items:
+            type: string
+          type: array
+          maxItems: 256
+        working_dir:
+          title: Working Dir
+          description: The image's `WORKDIR`, or None when it sets none.
+          type: string
+          maxLength: 4096
+      type: object
+      title: ImageRuntimeConfig
+      description: 'How the image starts by default, from its image config, including
+        what it inherits from its base image.
+
+
+        A runtime that replaces the container''s entrypoint, such as OpenSandbox,
+        reads this to start the image''s own.'
     InferenceParams:
       properties:
         temperature:

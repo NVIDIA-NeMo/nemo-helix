@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nhx_sandbox.harbor_opensandbox_services import ComposeServices, parse_compose_services
+from nhx_sandbox.harbor_opensandbox_services import ComposeServices, keep_alive_entrypoint, parse_compose_services
 from pydantic import ValidationError
 
 
@@ -139,6 +139,26 @@ def test_resource_requests_may_not_exceed_limits(
 def test_rejects_a_non_mapping() -> None:
     with pytest.raises(ValueError, match="must be a mapping"):
         parse_compose_services(["db"])
+
+
+def test_an_image_without_an_entrypoint_keeps_opensandbox_s_default() -> None:
+    assert keep_alive_entrypoint(None) is None
+    assert keep_alive_entrypoint([]) is None
+
+
+def test_main_falls_back_to_its_image_s_own_entrypoint() -> None:
+    image_entrypoint = ["/bin/bash", "-l", "-c"]
+    assert parse_compose_services(_spec()).sandbox_entrypoint(image_entrypoint) == [
+        "/bin/bash",
+        "-l",
+        "-c",
+        "sh",
+        "-c",
+        "sleep infinity",
+    ]
+    # An entrypoint the compose file sets wins, as Compose's `entrypoint` replaces the image's.
+    with_own = parse_compose_services(_spec(main={"entrypoint": ["/start.sh"]}))
+    assert with_own.sandbox_entrypoint(image_entrypoint) == ["/start.sh", "sh", "-c", "sleep infinity"]
 
 
 def test_sandbox_entrypoint_keeps_main_alive() -> None:
