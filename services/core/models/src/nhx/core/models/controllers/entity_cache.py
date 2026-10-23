@@ -23,6 +23,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest, ModelEntity, UpdateModelEntityRequest
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 
 logger = getLogger(__name__)
 
@@ -71,6 +72,7 @@ class ModelEntityCache:
                 have to report progress or a large batch looks like a stall.
         """
         self._models_client = AsyncModelsClient.from_client(client)
+        self._workspaces_client = AsyncWorkspacesClient.from_client(client)
         self._emit_heartbeat = emit_heartbeat
         self._entities: dict[tuple[str, str], ModelEntity] = {}
         self._pending: dict[tuple[str, str], _PendingEntity] = {}
@@ -186,7 +188,14 @@ class ModelEntityCache:
         provider that is about to be deleted is derived from that provider, which
         will be gone -- so dropping a failure would leave the entity permanently
         inconsistent.
+
+        The exception is a workspace that no longer exists or is being deleted.
+        Workspace cleanup removes the entities in it, so nothing is left to keep
+        consistent, and every retry would fail the same way.
         """
+        # Whether each workspace with a failed write still exists, so a burst of
+        # failures in one workspace costs one lookup.
+        workspace_exists: dict[str, bool] = {}
         for (workspace, name), staged in list(self._pending.items()):
             staged.attempts += 1
             existing = self._entities.get((workspace, name))
@@ -196,6 +205,16 @@ class ModelEntityCache:
                 else:
                     await self._update(workspace, name, staged, existing)
             except Exception:
+                if workspace not in workspace_exists:
+                    workspace_exists[workspace] = await self._workspace_exists(workspace)
+                if not workspace_exists[workspace]:
+                    logger.info(
+                        "Dropping Model Entity changes for %s/%s: workspace no longer exists",
+                        workspace,
+                        name,
+                    )
+                    del self._pending[(workspace, name)]
+                    continue
                 # One entity must not stop the rest, and the change is kept for a
                 # later attempt rather than discarded.
                 logger.warning(
@@ -209,6 +228,20 @@ class ModelEntityCache:
                 del self._pending[(workspace, name)]
             finally:
                 self._emit_heartbeat()
+
+    async def _workspace_exists(self, workspace: str) -> bool:
+        """Whether a workspace exists and is not being deleted.
+
+        Any answer other than "not found" counts as existing, so a failed lookup
+        keeps the staged change rather than losing it.
+        """
+        try:
+            await self._workspaces_client.get_workspace(name=workspace)
+        except NotFoundError:
+            return False
+        except Exception:
+            logger.debug("Could not check whether workspace %s exists", workspace, exc_info=True)
+        return True
 
     async def _create(self, workspace: str, name: str, staged: _PendingEntity) -> None:
         if staged.create_kwargs is None:
