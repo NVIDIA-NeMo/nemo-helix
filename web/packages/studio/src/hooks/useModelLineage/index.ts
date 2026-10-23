@@ -5,6 +5,7 @@ import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
+import { useLatestModelDeployment } from '@studio/hooks/useLatestModelDeployment';
 import {
   type DeploymentIndicatorState,
   type DeploymentStatusTarget,
@@ -41,9 +42,12 @@ export interface ModelLineage {
   /** Null when the entity records no fileset. */
   fileset: FilesetRef | null;
   deployment: DeploymentIndicatorState;
+  /** What serves the base model: `deployment` on a model page, its model's on an adapter page. */
+  baseDeployment: DeploymentIndicatorState;
 }
 
 const TARGET_KEY = 'lineage';
+const BASE_KEY = 'base';
 
 /**
  * Resolves what a model or adapter is linked to: the customization job that produced it,
@@ -51,7 +55,9 @@ const TARGET_KEY = 'lineage';
  * own, so callers can show each one as soon as it arrives.
  *
  * Deployment state is the same one the models list shows, so the two never disagree; an
- * adapter is served through its model's providers and can be `adapter-not-loaded`.
+ * adapter is served through its model's providers and can be `adapter-not-loaded`. Where
+ * the models list would say nothing serves it, a deployment bound to the model through its
+ * config shows up as `not-serving`: one still starting, or one that failed.
  */
 export const useModelLineage = (
   workspace: string,
@@ -74,13 +80,28 @@ export const useModelLineage = (
 
   const job = useCustomizationJobForModel(subject);
 
-  const targets = useMemo<DeploymentStatusTarget[]>(
-    () => (model && subject ? [{ key: TARGET_KEY, model, adapter: adapter ?? undefined }] : []),
-    [model, subject, adapter]
-  );
-  const deployment: DeploymentIndicatorState =
-    useModelDeploymentStatuses(targets).get(TARGET_KEY) ??
-    (isLoading ? { kind: 'loading' } : { kind: 'unknown' });
+  const targets = useMemo<DeploymentStatusTarget[]>(() => {
+    if (!model || !subject) return [];
+    return adapter
+      ? [
+          { key: TARGET_KEY, model, adapter },
+          { key: BASE_KEY, model },
+        ]
+      : [{ key: TARGET_KEY, model }];
+  }, [model, subject, adapter]);
+  const statuses = useModelDeploymentStatuses(targets);
+
+  const baseState = statuses.get(adapter ? BASE_KEY : TARGET_KEY);
+  const latest = useLatestModelDeployment(model, { isServed: baseState?.kind === 'served' });
+
+  const resolve = (state: DeploymentIndicatorState | undefined): DeploymentIndicatorState => {
+    if (!state) return isLoading ? { kind: 'loading' } : { kind: 'unknown' };
+    if (state.kind !== 'not-deployed') return state;
+    if (latest.isLoading) return { kind: 'loading' };
+    return latest.deployment ? { kind: 'not-serving', deployment: latest.deployment } : state;
+  };
+  const deployment = resolve(statuses.get(TARGET_KEY));
+  const baseDeployment = adapter ? resolve(baseState) : deployment;
 
   return {
     model,
@@ -91,5 +112,6 @@ export const useModelLineage = (
     job: { ...job, workspace: subject?.workspace ?? workspace },
     fileset: parseFilesetRef(subject?.fileset, subject?.workspace ?? workspace),
     deployment,
+    baseDeployment,
   };
 };

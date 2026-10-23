@@ -65,6 +65,10 @@ export const DetailsTab: FC<DetailsTabProps> = ({ model, adapter, lineage, jobRe
         job={jobCard}
         fileset={lineage.fileset}
         deployment={lineage.deployment}
+        deploymentTo={getModelDetailRoute(workspace, model.name, {
+          adapterName: adapter?.name,
+          tab: ModelDetailTab.Deployment,
+        })}
         isAdapter={Boolean(adapter)}
       />
 

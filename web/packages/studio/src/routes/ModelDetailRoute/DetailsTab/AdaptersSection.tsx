@@ -7,20 +7,26 @@ import type { Adapter } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Card, Flex, Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import { DetailSection } from '@studio/routes/ModelDetailRoute/DetailsTab/layout/DetailSection';
 import { getModelDetailRoute } from '@studio/routes/utils';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 import { Link } from 'react-router';
 
 export interface AdaptersSectionProps {
   workspace: string;
   modelName: string;
   adapters: Adapter[];
+  description?: string;
+  /** A badge shown under each adapter's name, such as whether a deployment has it loaded. */
+  renderStatus?: (adapter: Adapter) => ReactNode;
 }
 
-export const AdaptersSection: FC<AdaptersSectionProps> = ({ workspace, modelName, adapters }) => (
-  <DetailSection
-    heading={`Adapters (${adapters.length})`}
-    description="Adapters trained on top of this model."
-  >
+export const AdaptersSection: FC<AdaptersSectionProps> = ({
+  workspace,
+  modelName,
+  adapters,
+  description = 'Adapters trained on top of this model.',
+  renderStatus,
+}) => (
+  <DetailSection heading={`Adapters (${adapters.length})`} description={description}>
     <Grid colMinWidth="260px" gap="density-lg">
       {adapters.map((adapter) => {
         const summary = [
@@ -44,6 +50,7 @@ export const AdaptersSection: FC<AdaptersSectionProps> = ({ workspace, modelName
                     {summary.join(' · ')}
                   </Text>
                 )}
+                {renderStatus && <Flex>{renderStatus(adapter)}</Flex>}
                 {adapter.enabled === false && (
                   <Text kind="body/regular/sm" className="text-secondary">
                     Disabled

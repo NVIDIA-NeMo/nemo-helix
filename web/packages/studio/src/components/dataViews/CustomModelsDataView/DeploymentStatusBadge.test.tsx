@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { render, screen } from '@testing-library/react';
 
@@ -33,10 +34,23 @@ describe('DeploymentStatusBadge', () => {
     expect(screen.getByText('Not deployed')).toBeVisible();
   });
 
-  it('reads "Not active", not "Not deployed", for an adapter nothing serves', () => {
+  it('reads "Base not deployed", not "Not active", for an adapter nothing serves', () => {
     render(<DeploymentStatusBadge state={{ kind: 'not-deployed' }} isAdapter />);
-    expect(screen.getByText('Not active')).toBeVisible();
-    expect(screen.queryByText('Not deployed')).not.toBeInTheDocument();
+    expect(screen.getByText('Base not deployed')).toBeVisible();
+    expect(screen.queryByText('Not active')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['PENDING', 'Deploying'],
+    ['READY', 'Deploying'],
+    ['ERROR', 'Failed'],
+  ] as const)('reads a %s deployment that is not serving yet as "%s"', (status, label) => {
+    render(
+      <DeploymentStatusBadge
+        state={{ kind: 'not-serving', deployment: { status } as ModelDeployment }}
+      />
+    );
+    expect(screen.getByText(label)).toBeVisible();
   });
 
   it('reads "Deploying" while a deployment is coming up', () => {
