@@ -30,6 +30,7 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
     ModelTarget,
     ResolvedTask,
@@ -149,7 +150,10 @@ def _publish(
     [
         (AgentTarget(agent=NemoAgentToolkitAgent(name="my-agent", url="http://agent")), ("my-agent", None)),
         (ModelTarget(model=Model(name="gpt-4o", url="http://model")), (None, "gpt-4o")),
-        (HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model_name="m")), ("oracle", "m")),
+        (
+            HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model=HarborModelName(name="m"))),
+            ("oracle", "m"),
+        ),
         (HarborRunnerTarget(source=HarborImportedAgentSource(import_path="pkg:Agent")), ("pkg:Agent", None)),
         (
             GymRunnerTarget(

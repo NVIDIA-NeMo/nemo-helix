@@ -18,6 +18,7 @@ from nemo_evals.jobs.agent_spec import (
     GymPlacement,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
 )
 from nemo_evals.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
@@ -124,7 +125,7 @@ def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_p
     runner = HarborAgentTaskRunner(
         config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
     )
-    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="m"))
     with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
         runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
