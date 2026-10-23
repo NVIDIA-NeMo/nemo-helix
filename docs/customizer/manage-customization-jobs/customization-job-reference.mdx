@@ -40,6 +40,8 @@ All three backends (automodel, unsloth, RL) resolve a referenced `deployment_con
 
 A merged save (`lora_merged`, or unsloth's `merged_16bit` / `merged_4bit`) folds the adapter into the base weights and produces a standalone model, so the LoRA-specific rules above do not apply to it.
 
+A LoRA job deploys its base model only when no active deployment of the base has `lora_enabled: true`. If one does, the adapter is served from it. If the base is served only by a deployment with `lora_enabled: false`, the job creates a LoRA-enabled deployment alongside it, so the base model runs twice. A named deployment config gets a deployment of its own. Inline parameters use the job's default deployment name, `sft-deploy-<base model>`; if a deployment with that name already exists, for example from an earlier job, the job updates it to the LoRA-enabled config instead, which restarts it. To serve adapters from the existing deployment without a second copy, enable LoRA on it before you submit: set `model_spec.lora_enabled` to `true` on its config with `nemo inference deployment-configs update`, then repoint the deployment at the new version with `nemo inference deployments update <deployment> --config <config>`.
+
 Two config shapes are therefore valid ahead of a model that does not exist yet:
 
 - A **forward reference** — the config names the model the run will produce. Creating it up front means a bad engine or image is rejected in milliseconds at submit instead of after a training run, and the deployment can start the moment training ends. One config per run.

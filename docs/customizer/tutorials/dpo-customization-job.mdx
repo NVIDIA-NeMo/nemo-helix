@@ -49,19 +49,11 @@ import time
 import uuid
 from pathlib import Path
 
-from IPython.display import clear_output
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_helix_plugin.models.types import (
-    ContainerExecutorConfig,
-    CreateModelDeploymentConfigRequest,
-    CreateModelDeploymentRequest,
-    CreateModelEntityRequest,
-    Engine,
-    ModelDeploymentConfigModelSpec,
-)
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretResponse
 from nemo_customizer.sdk import Customization
 from nemo_rl_plugin.schema import RlJobInput
@@ -245,6 +237,7 @@ Submit a DPO job to the `rl` backend with `RlJobInput`. Note the DPO-specific sh
 - The training method is `{"type": "dpo", ...}` — full-weight, no `finetuning_type`/LoRA.
 - `ref_policy_kl_penalty` is **β** (DPO paper): how strongly the policy stays tied to the reference model.
 - `rl` auto-generates the job id (`rl-<hex>`); read it back from the response.
+- `deployment_config` deploys the trained model with vLLM when training finishes; omit it to skip deployment.
 
 The learning rate, β, and weight decay follow the NeMo-RL reference config [`dpo.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/dpo.yaml). `max_seq_length` is raised to 4096 so long HelpSteer3 conversations fit.
 
@@ -274,6 +267,7 @@ spec = RlJobInput(
         },
     },
     output={"name": OUTPUT_NAME},
+    deployment_config={"engine": "vllm", "gpu": 1},
 )
 
 # `rl` auto-generates the job id (rl-<hex>); do not pass name=.
@@ -316,49 +310,38 @@ model_entity = client.models.get_model(name=OUTPUT_NAME).data()
 print(model_entity.model_dump_json(indent=2))
 ```
 
-### 9. Deploy and Evaluate (optional)
+### 9. Deploy and Evaluate
 
-The DPO output is a full model, so it deploys like any full-weight checkpoint (see the [Full SFT](/documentation/customizer-reference/tutorials/sft-customization-job) tutorial for details). We deploy with vLLM and send a chat completion.
+The DPO output is a full model. Because the job set `deployment_config`, it created a vLLM deployment for the model when training finished (see the [Full SFT](/documentation/customizer-reference/tutorials/sft-customization-job) tutorial for details). The job completes once the deployment is created, not when it is ready, so find the deployment, wait for it, and send a chat completion.
 
 ```python
-deploy_suffix = uuid.uuid4().hex[:8]
-DEPLOYMENT_CONFIG_NAME = f"dpo-deployment-cfg-{deploy_suffix}"
-DEPLOYMENT_NAME = f"dpo-deployment-{deploy_suffix}"
+def find_deployment(model_entity: str):
+    """Return the active deployment that serves a model entity."""
+    configs = client.models.list_deployment_configs(
+        workspace="default",
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"})},
+    ).items()
+    for config in configs:
+        deployments = client.models.list_deployments(
+            workspace="default",
+            query_params={"filter": json.dumps({"config": config.name})},
+        ).items()
+        for deployment in deployments:
+            if deployment.status in ("CREATED", "PENDING", "READY"):
+                return deployment
+    raise RuntimeError(f"No active deployment serves default/{model_entity}")
 
-deployment_config = client.models.create_deployment_config(
-    body=CreateModelDeploymentConfigRequest(
-        name=DEPLOYMENT_CONFIG_NAME,
-        engine=Engine.VLLM,
-        model_spec=ModelDeploymentConfigModelSpec(model_namespace="default", model_name=OUTPUT_NAME),
-        executor_config=ContainerExecutorConfig(
-            gpu=1,
-            image_name="docker.io/vllm/vllm-openai",
-            image_tag="v0.22.1",
-        ),
-    ),
-).data()
 
-deployment = client.models.create_deployment(
-    body=CreateModelDeploymentRequest(name=DEPLOYMENT_NAME, config=deployment_config.name),
-).data()
+deployment = find_deployment(OUTPUT_NAME)
 print(f"Deployment name: {deployment.name}")
 
 ```
 
 ```python
-check = max_wait_time_checker(1800, "Deployment")
-while True:
-    check()
-    deployment_status = client.models.get_deployment(name=deployment.name).data()
-    clear_output(wait=True)
-    print(f"Deployment status: {deployment_status.status}")
-    if deployment_status.status in ("READY", "RUNNING"):
-        if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
-            raise RuntimeError("Inference gateway did not become ready")
-        break
-    if deployment_status.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
-        raise RuntimeError(f"Deployment failed with status: {deployment_status.status}")
-    time.sleep(15)
+if not client.models.wait_for_deployment_status(deployment.name, "READY", workspace="default", timeout=1800):
+    raise RuntimeError(f"Deployment {deployment.name} did not become ready")
+if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
+    raise RuntimeError("Inference gateway did not become ready")
 ```
 
 ```python
@@ -395,6 +378,6 @@ You aligned a base model with **DPO** on NeMo Helix using the `rl` backend:
 
 - Uploaded a HelpSteer3 preference dataset **as-is** (the platform detects the schema natively).
 - Submitted a full-weight DPO job that ran on a Ray cluster via the Kubernetes executor.
-- Registered the output as a full model entity and (optionally) deployed it for inference.
+- Registered the output as a full model entity and deployed it for inference with `deployment_config`.
 
 **Next steps:** tune the alignment strength with `ref_policy_kl_penalty` (β), add `sft_loss_weight` to anchor the policy to the chosen responses, enable `activation_checkpointing` for memory headroom, or scale up with `parallelism`. See the [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration) reference for the full hyperparameter set.

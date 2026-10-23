@@ -8,7 +8,8 @@ Covers:
 - Full / merged model entity creation
 - Update-on-conflict semantics (matches automodel behavior)
 - Deployment launch with string-ref and inline DeploymentParams
-- Skipping deployment when there's already an active one for a LoRA base
+- Skipping deployment when there's already a LoRA-enabled one for a LoRA base, and
+  deploying alongside one that does not have LoRA enabled
 - sanitize_name utility
 """
 
@@ -150,6 +151,11 @@ def _resolved_config(
         ),
         executor_config=ContainerExecutorConfig(gpu=gpu, image_name="tmpl-img", image_tag="2.0"),
     )
+
+
+def _base_config(*, name: str, lora_enabled: bool) -> types.SimpleNamespace:
+    """A deployment config of the base model, as ``list_deployment_configs`` returns it."""
+    return types.SimpleNamespace(name=name, model_spec=types.SimpleNamespace(lora_enabled=lora_enabled))
 
 
 def _model_entity(*, workspace: str = "default", name: str = "base", spec: object | None = None) -> MagicMock:
@@ -888,7 +894,7 @@ class TestLaunchModel:
         assert update_call.kwargs["body"].config_version is None
 
     def test_lora_template_does_not_fork_the_base_models_deployment(self) -> None:
-        """A LoRA adapter must never stand up a second copy of its base model.
+        """A LoRA template does not scope the base model's deployment.
 
         The adapter is served from the base model's deployment, which is shared by
         every adapter and every template. Scoping the deployment per template would
@@ -940,7 +946,7 @@ class TestLaunchModel:
         from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
-        models.list_deployment_configs.return_value = _page([types.SimpleNamespace(name="base-cfg")])
+        models.list_deployment_configs.return_value = _page([_base_config(name="base-cfg", lora_enabled=True)])
         models.list_deployments.return_value = _page(
             [types.SimpleNamespace(name="base-deploy", status=ModelDeploymentStatus.READY)]
         )
@@ -961,6 +967,150 @@ class TestLaunchModel:
 
         # The live base deployment hot-loads the adapter; nothing new is stood up.
         models.get_deployment_config.assert_not_called()
+        models.create_deployment_config.assert_not_called()
+        models.create_deployment.assert_not_called()
+
+    def test_lora_named_config_deploys_alongside_a_base_without_lora(self) -> None:
+        """A base served without LoRA cannot load the adapter, so a LoRA-enabled one joins it.
+
+        The named config was chosen at submit time, for example by Studio offering to
+        deploy alongside the existing deployment. The new deployment is scoped to that
+        config, so it does not take over the existing deployment's name.
+        """
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page([_base_config(name="base-cfg", lora_enabled=False)])
+        models.list_deployments.return_value = _page(
+            [types.SimpleNamespace(name="sft-deploy-llama-base", status=ModelDeploymentStatus.READY)]
+        )
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(name="prod", model_name="llama-base", model_namespace="default")
+        )
+        expected_deploy = _expected("sft-deploy", "llama-base", template="prod")
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="shared", name=expected_deploy)
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="shared", name=expected_deploy, status=ModelDeploymentStatus.PENDING)
+        )
+
+        runner = _make_runner(models, files)
+        base = _model_entity(name="llama-base", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        runner.launch_model(
+            ModelEntityTaskConfig(
+                name="my-adapter",
+                workspace="default",
+                fileset=FileSetRef(workspace="default", name="fs"),
+                model_entity="default/llama-base",
+                peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                deployment_config="shared/prod",
+            ),
+            base,
+        )
+
+        body = models.create_deployment.call_args.kwargs["body"]
+        assert body.name == expected_deploy
+        assert body.config == "prod"
+        models.create_deployment_config.assert_not_called()
+        models.update_deployment_config.assert_not_called()
+        models.update_deployment.assert_not_called()
+
+    def test_lora_inline_params_next_to_a_base_without_lora_update_the_deployment_on_a_name_conflict(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Inline parameters use the job's own names, so an earlier job's deployment is updated.
+
+        The base is served without LoRA by ``sft-deploy-llama-base``, the name the job
+        gives the deployment. Its config is updated with LoRA enabled and the deployment
+        is repointed at it, which restarts it, so the conflict is logged as a warning.
+        """
+        from nemo_helix_plugin.deployment import DeploymentParams
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page(
+            [_base_config(name="sft-cfg-llama-base", lora_enabled=False)]
+        )
+        models.list_deployments.return_value = _page(
+            [types.SimpleNamespace(name="sft-deploy-llama-base", status=ModelDeploymentStatus.READY)]
+        )
+        models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
+        models.update_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-cfg-llama-base")
+        )
+        models.create_deployment.side_effect = lambda **_: _raise_runner_conflict()
+        models.update_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-deploy-llama-base")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(
+                workspace="default", name="sft-deploy-llama-base", status=ModelDeploymentStatus.PENDING
+            )
+        )
+
+        runner = _make_runner(models, files)
+        base = _model_entity(name="llama-base", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        with caplog.at_level("WARNING"):
+            runner.launch_model(
+                ModelEntityTaskConfig(
+                    name="my-adapter",
+                    workspace="default",
+                    fileset=FileSetRef(workspace="default", name="fs"),
+                    model_entity="default/llama-base",
+                    peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                    deployment_config=DeploymentParams(gpu=1),
+                ),
+                base,
+            )
+
+        config_call = models.update_deployment_config.call_args
+        assert config_call.kwargs["name"] == "sft-cfg-llama-base"
+        assert config_call.kwargs["body"].model_spec.lora_enabled is True
+        deployment_call = models.update_deployment.call_args
+        assert deployment_call.kwargs["name"] == "sft-deploy-llama-base"
+        assert deployment_call.kwargs["body"].config == "sft-cfg-llama-base"
+        assert any(
+            "sft-deploy-llama-base already exists for model default/llama-base" in r.getMessage()
+            for r in caplog.records
+            if r.levelname == "WARNING"
+        )
+
+    def test_lora_uses_a_lora_enabled_base_deployment_when_another_lacks_lora(self) -> None:
+        """One LoRA-enabled deployment of the base is enough to serve the adapter."""
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page(
+            [
+                _base_config(name="plain-cfg", lora_enabled=False),
+                _base_config(name="lora-cfg", lora_enabled=True),
+            ]
+        )
+        models.list_deployments.return_value = _page(
+            [types.SimpleNamespace(name="base-deploy", status=ModelDeploymentStatus.READY)]
+        )
+
+        runner = _make_runner(models, files)
+        runner.launch_model(
+            ModelEntityTaskConfig(
+                name="my-adapter",
+                workspace="default",
+                fileset=FileSetRef(workspace="default", name="fs"),
+                model_entity="default/llama-base",
+                peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                deployment_config="shared/prod",
+            ),
+            _model_entity(name="llama-base"),
+        )
+
         models.create_deployment_config.assert_not_called()
         models.create_deployment.assert_not_called()
 
@@ -1009,7 +1159,7 @@ class TestLaunchModel:
         from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
-        existing_config = types.SimpleNamespace(workspace="other", name="cfg-1")
+        existing_config = _base_config(name="cfg-1", lora_enabled=True)
         active_deployment = types.SimpleNamespace(status=ModelDeploymentStatus.READY)
         models.list_deployment_configs.return_value = _page([existing_config])
         models.list_deployments.return_value = _page([active_deployment])

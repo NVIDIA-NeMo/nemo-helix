@@ -589,6 +589,8 @@ KD requires loading both student and teacher models, so plan GPU memory accordin
 
 Use `teacher_precision="bf16"` (default) to reduce teacher memory footprint.
 
+`deployment_config` deploys the distilled student with vLLM on 1 GPU when training finishes.
+
 ```python
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
@@ -612,6 +614,7 @@ kd_spec = AutomodelJobInput(
     optimizer={"learning_rate": 1e-5, "weight_decay": 0.0},
     parallelism={"num_gpus_per_node": 1},
     output={"name": KD_OUTPUT_NAME},
+    deployment_config={"engine": "vllm", "gpu": 1},
 )
 
 kd_job = customization.automodel.jobs.create(
@@ -649,36 +652,28 @@ assert kd_status.status.lower() == "completed"
 
 ### 11. Deploy the Distilled Student Model
 
-The output model has the same architecture as the 0.6B student—only its weights have been updated via distillation. It requires just 1 GPU to deploy.
+The output model has the same architecture as the 0.6B student—only its weights have been updated via distillation. Because the distillation job set `deployment_config`, it deployed the model on 1 GPU when training finished. Find that deployment and wait for it to be ready:
 
 ```python
-deploy_suffix_2 = uuid.uuid4().hex[:4]
-STUDENT_DEPLOYMENT_CONFIG = f"kd-student-deploy-cfg-{deploy_suffix_2}"
-STUDENT_DEPLOYMENT_NAME = f"kd-student-deploy-{deploy_suffix_2}"
+def find_deployment(model_entity: str):
+    """Return the active deployment that serves a model entity."""
+    configs = client.models.list_deployment_configs(
+        workspace="default",
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"})},
+    ).items()
+    for config in configs:
+        deployments = client.models.list_deployments(
+            workspace="default",
+            query_params={"filter": json.dumps({"config": config.name})},
+        ).items()
+        for deployment in deployments:
+            if deployment.status in ("CREATED", "PENDING", "READY"):
+                return deployment
+    raise RuntimeError(f"No active deployment serves default/{model_entity}")
 
-student_deployment_config = client.models.create_deployment_config(
-    body=CreateModelDeploymentConfigRequest(
-        name=STUDENT_DEPLOYMENT_CONFIG,
-        engine=Engine.VLLM,
-        model_spec=ModelDeploymentConfigModelSpec(
-            model_namespace="default",
-            model_name=DISTILLED_STUDENT_NAME,
-        ),
-        executor_config=ContainerExecutorConfig(
-            gpu=1,
-            image_name="docker.io/vllm/vllm-openai",
-            image_tag="v0.22.1",
-        ),
-    ),
-).data()
 
-student_deployment = client.models.create_deployment(
-    body=CreateModelDeploymentRequest(
-        name=STUDENT_DEPLOYMENT_NAME,
-        config=student_deployment_config.name,
-    ),
-).data()
-
+student_deployment = find_deployment(DISTILLED_STUDENT_NAME)
+STUDENT_DEPLOYMENT_NAME = student_deployment.name
 print(f"Student deployment: {student_deployment.name}")
 
 ```

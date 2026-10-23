@@ -155,6 +155,7 @@ Common steps, then branch by plugin pick (full per-backend checklists: `referenc
 - [ ] Create dataset fileset (new name when the data changes; no --exist-ok), upload JSONL, `nemo files list` to verify
       (automodel/unsloth: train.jsonl [+ validation.jsonl]; rl: training.jsonl + validation.jsonl)
 - [ ] Gated HF base model? confirm `hf-token`
+- [ ] LoRA job: base already deployed without LoRA? ask the user before submit (references/post-training-eval.md § **Base already deployed without LoRA**)
 - [ ] Create HF weights fileset + model entity if missing
 - [ ] Look up the model's recipe in references/recipes.md
 - [ ] Write /tmp/job.json, submit `nemo customization <plugin> --job-json /tmp/job.json --workspace default`

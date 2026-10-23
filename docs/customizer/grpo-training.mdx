@@ -448,6 +448,8 @@ Bad configurations fail before training starts, not after the run. These are rej
 - On a LoRA job, a referenced config with `lora_enabled: false`.
 - On a full-weight job, a referenced config that names a _different_ model. The output entity does not have to exist yet — a config may point forward at the model the run will produce — but a config built for some other model cannot serve it.
 
+If the base model is already deployed with `lora_enabled: true`, a LoRA job does not deploy it again; that deployment serves the adapter. If the base is served only with `lora_enabled: false`, the job creates a LoRA-enabled deployment alongside it. See [Deployment config validation](/documentation/customizer-reference/manage-customization-jobs/customization-job-reference#deployment-config-validation) for how that deployment is named and how to enable LoRA on the existing one instead.
+
 A deployment config that names no model — neither `model_entity_id` nor `model_spec.model_name` — is an **unbound template**. It carries only engine and executor settings, so it is accepted by any job: the trained model is stamped onto a copy of it at deploy time, leaving the template reusable for the next run. This is the only way to share engine/executor settings across full-weight jobs, whose output model does not exist when the job is submitted.
 
 ## Key hyperparameters
