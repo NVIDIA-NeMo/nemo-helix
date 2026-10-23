@@ -48,7 +48,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Safe Synthesizer',
     description: 'Studio has a guided UI for generating safe synthetic datasets.',
     getHref: getNewSafeSynthesizerRoute,
-    requiredFeatureFlags: ['safeSynthesizerEnabled'],
     patterns: [
       /\bsafe[-\s]?synthesizer\b/i,
       /\bsynthetic (data|dataset|datasets)\b/i,
@@ -62,7 +61,7 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Agent Monitor',
     description: 'Studio has a monitor UI for agent telemetry, logs, and token usage.',
     getHref: getAgentMonitorRoute,
-    requiredFeatureFlags: ['agentsEnabled', 'monitorEnabled'],
+    requiredFeatureFlags: ['monitorEnabled'],
     patterns: [
       /\bmonitor (an? )?agent\b/i,
       /\bagent (monitor|telemetry|logs|traces|usage)\b/i,
@@ -89,7 +88,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Data Designer',
     description: 'Studio has a Data Designer UI for creating and transforming datasets.',
     getHref: getNewDataDesignerJobRoute,
-    requiredFeatureFlags: ['dataDesignerEnabled'],
     patterns: [
       /\bdata designer\b/i,
       /\bgenerate (synthetic )?(data|dataset|datasets)\b/i,
@@ -103,7 +101,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Fileset Upload',
     description: 'Studio has a UI for creating filesets and uploading files.',
     getHref: getNewFilesetRoute,
-    requiredFeatureFlags: ['datasetsEnabled'],
     patterns: [
       /\bcreate (a )?fileset\b/i,
       /\bnew fileset\b/i,
@@ -131,7 +128,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Secrets',
     description: 'Studio has a UI for creating and managing workspace secrets.',
     getHref: getSecretsRoute,
-    requiredFeatureFlags: ['secretsEnabled'],
     patterns: [
       /\b(add|create|manage|store|update) (an? )?(workspace )?(secret|secrets)\b/i,
       /\b(add|create|manage|store|update) (an? )?(api key|credential|credentials|token) (secret|secrets|in (the )?workspace|for (this )?workspace)\b/i,
@@ -156,7 +152,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Deployments',
     description: 'Studio has a UI for managing model deployments.',
     getHref: getWorkspaceDeploymentsRoute,
-    requiredFeatureFlags: ['deploymentsEnabled'],
     patterns: [
       /\bmodel deployments?\b/i,
       /\bdeploy (a )?model\b/i,
@@ -169,7 +164,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Base Models',
     description: 'Studio has a UI for browsing base models and model details.',
     getHref: getWorkspaceBaseModelsRoute,
-    requiredFeatureFlags: ['baseModelsEnabled'],
     patterns: [
       /\bbase models?\b/i,
       /\bmodel catalog\b/i,
@@ -182,7 +176,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Agents',
     description: 'Studio has a UI for viewing agents and managing their deployments.',
     getHref: getAgentsListRoute,
-    requiredFeatureFlags: ['agentsEnabled'],
     patterns: [
       /\bmanage agents?\b/i,
       /\bview agents?\b/i,
@@ -215,7 +208,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Safe Synthesizer',
     description: 'Studio has a UI for monitoring safe synthetic data jobs.',
     getHref: getWorkspaceSafeSynthesizerRoute,
-    requiredFeatureFlags: ['safeSynthesizerEnabled'],
     patterns: [/\bsafe synth(esizer)? jobs?\b/i],
   },
   {
@@ -223,7 +215,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Data Designer',
     description: 'Studio has a UI for managing Data Designer jobs.',
     getHref: getDataDesignerJobListRoute,
-    requiredFeatureFlags: ['dataDesignerEnabled'],
     patterns: [/\bdata designer jobs?\b/i],
   },
   {
@@ -231,7 +222,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Jobs',
     description: 'Studio has a UI for viewing workspace jobs.',
     getHref: getWorkspaceJobsRoute,
-    requiredFeatureFlags: ['jobsEnabled'],
     patterns: [/\bworkspace jobs?\b/i, /\bworkspace job history\b/i],
   },
   {
@@ -259,7 +249,6 @@ const STUDIO_UI_DESTINATIONS: readonly StudioUiDestination[] = [
     title: 'Open Settings',
     description: 'Studio has a UI for workspace settings.',
     getHref: getWorkspaceSettingsRoute,
-    requiredFeatureFlags: ['settingsEnabled'],
     patterns: [
       /\bworkspace settings?\b/i,
       /\b(open|change|manage|update) (the )?settings (for|in|of) (this )?workspace\b/i,

@@ -28,7 +28,6 @@ import {
 import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
-import { JOBS_ENABLED } from '@studio/constants/environment';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { Package } from 'lucide-react';
@@ -150,18 +149,17 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
   const isBusy = isQueued || isRunning;
   const hasImage = isComplete && Boolean(image);
-  const viewJobButton =
-    jobName && JOBS_ENABLED ? (
-      <Button
-        kind="secondary"
-        size="small"
-        type="button"
-        className="shrink-0"
-        onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, jobName))}
-      >
-        View job
-      </Button>
-    ) : null;
+  const viewJobButton = jobName ? (
+    <Button
+      kind="secondary"
+      size="small"
+      type="button"
+      className="shrink-0"
+      onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, jobName))}
+    >
+      View job
+    </Button>
+  ) : null;
 
   return (
     <>

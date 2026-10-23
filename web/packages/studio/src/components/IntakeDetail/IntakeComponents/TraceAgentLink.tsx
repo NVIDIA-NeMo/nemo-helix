@@ -3,7 +3,6 @@
 
 import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import { Anchor } from '@nvidia/foundations-react-core';
-import { AGENTS_ENABLED } from '@studio/constants/environment';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { EMPTY_VALUE } from '@studio/util/intakeTelemetry';
 import type { FC } from 'react';
@@ -21,7 +20,7 @@ interface TraceAgentLinkProps {
  */
 export const TraceAgentLink: FC<TraceAgentLinkProps> = ({ workspace, agentName }) => {
   const { isSuccess } = useAgentsGetAgent(workspace, agentName ?? '', {
-    query: { enabled: AGENTS_ENABLED && !!agentName, retry: false },
+    query: { enabled: !!agentName, retry: false },
   });
 
   if (!agentName) return <>{EMPTY_VALUE}</>;

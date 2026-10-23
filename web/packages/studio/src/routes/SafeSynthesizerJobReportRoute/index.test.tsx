@@ -193,33 +193,6 @@ const mockApiHooks = (job: GenerateJob, summary: SafeSynthesizerSummary) => {
   );
 };
 
-describe('GenerateJobReportRoute - Feature Flag', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  it('should be defined when feature flag is enabled', async () => {
-    // Mock the environment constant to enable the component
-    vi.doMock('@studio/constants/environment', () => ({
-      SAFE_SYNTHESIZER_ENABLED: true,
-    }));
-
-    const module = await import('./index');
-    expect(module.GenerateJobReportRoute).toBeDefined();
-    expect(module.GenerateJobReportRoute).not.toBeNull();
-  });
-
-  it('should be null when feature flag is disabled', async () => {
-    // Mock the environment constant to disable the component
-    vi.doMock('@studio/constants/environment', () => ({
-      SAFE_SYNTHESIZER_ENABLED: false,
-    }));
-
-    const module = await import('./index');
-    expect(module.GenerateJobReportRoute).toBeNull();
-  });
-});
-
 describe('GenerateJobReportRoute - Rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
