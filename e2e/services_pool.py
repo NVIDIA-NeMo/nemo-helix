@@ -43,6 +43,7 @@ _DEFAULT_E2E_PLATFORM_CONFIG = _E2E_REPO_ROOT / "packages/nhx_platform/config/lo
 # Layered on the default config so pooled platforms that are not testing
 # deployments orphan cleanup cannot delete peer platforms' docker containers.
 _DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP = _E2E_REPO_ROOT / "e2e/configs/disable-deployments-orphan-cleanup.yaml"
+_DEFAULT_E2E_FAST_CONTROLLER_INTERVALS = _E2E_REPO_ROOT / "e2e/configs/fast-controller-intervals.yaml"
 _E2E_COMPOSE_LIFECYCLE_ENV = "NHX_E2E_COMPOSE_LIFECYCLE"
 
 
@@ -433,6 +434,7 @@ def _resolve_e2e_config_layers_from_node(node: Node) -> list[str | dict[str, Any
         return [
             str(_DEFAULT_E2E_PLATFORM_CONFIG),
             str(_DEFAULT_E2E_DISABLE_DEPLOYMENTS_ORPHAN_CLEANUP),
+            str(_DEFAULT_E2E_FAST_CONTROLLER_INTERVALS),
         ]
     layers: list[str | dict[str, Any]] = []
     for layer in marker.args:
