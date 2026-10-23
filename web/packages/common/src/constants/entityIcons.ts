@@ -10,13 +10,13 @@ import {
   Layers,
   Beaker,
   FolderOpen,
+  Generate,
   ListCheckmark,
   ScmCompare,
   Lightbulb,
   ChartTree,
   LockClosed,
   Pulse,
-  Ekg,
   Radar,
   Rocket,
   Shield,
@@ -56,7 +56,7 @@ export const ENTITY_ICONS = {
 
   // Models
   baseModels: CubeStack,
-  customModels: Ekg,
+  customModels: Sliders,
   deployments: Rocket,
   virtualModels: Network,
   inferenceProviders: Radar,
@@ -66,7 +66,7 @@ export const ENTITY_ICONS = {
   filesets: Layers,
   filesetFiles: FolderOpen,
   anonymizerJobs: Profile,
-  dataDesignerJobs: ListCheckmark,
+  dataDesignerJobs: Generate,
   safeSynthesizerJobs: Db,
 
   // Governance. A config and its tests are one thing to the user, so the tests

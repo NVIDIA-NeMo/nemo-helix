@@ -20,7 +20,7 @@ export const settingsRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.settings,
     element: <WorkspaceSettingsRoute />,
-    errorElement: <RouteErrorPanel title="Cog" />,
+    errorElement: <RouteErrorPanel title="Settings" />,
   },
 ];
 
