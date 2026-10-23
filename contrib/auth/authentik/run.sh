@@ -1227,6 +1227,14 @@ k8s_gateway_tls_matches_runtime() {
     [[ "${sans}" == *"IP Address:127.0.0.1"* ]]
 }
 
+write_k8s_gateway_ca_bundle() {
+    local cert="$1"
+    local ca="$2"
+    # SSL_CERT_FILE replaces the default roots; retain public HTTPS trust.
+    cat "$(uv run --frozen --project "${REPO_ROOT}" python -m certifi)" "${cert}" > "${ca}"
+    chmod 644 "${ca}"
+}
+
 ensure_k8s_gateway_tls_certificate() {
     local cluster_name="$1"
     local output_dir
@@ -1242,6 +1250,7 @@ ensure_k8s_gateway_tls_certificate() {
     openssl_config="${output_dir}/openssl.cnf"
 
     if [[ "${DRY_RUN}" != "true" ]] && k8s_gateway_tls_matches_runtime "${cluster_name}"; then
+        write_k8s_gateway_ca_bundle "${cert}" "${ca}"
         echo "Using Kubernetes gateway TLS certificate: ${cert}"
         return
     fi
@@ -1249,7 +1258,7 @@ ensure_k8s_gateway_tls_certificate() {
         printf "+ mkdir -p %q\n" "${output_dir}"
         printf "+ write Kubernetes gateway TLS config %q\n" "${openssl_config}"
         printf "+ openssl req -x509 -newkey rsa:2048 -nodes -keyout %q -out %q -days 365 -sha256 -config %q -extensions v3_req\n" "${key}" "${cert}" "${openssl_config}"
-        printf "+ cp %q %q\n" "${cert}" "${ca}"
+        printf "+ write combined public-root and gateway CA bundle %q\n" "${ca}"
         return
     fi
 
@@ -1278,7 +1287,7 @@ DNS.5 = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
 IP.1 = 127.0.0.1
 EOF
     openssl req -x509 -newkey rsa:2048 -nodes -keyout "${key}" -out "${cert}" -days 365 -sha256 -config "${openssl_config}" -extensions v3_req >/dev/null 2>&1
-    cp "${cert}" "${ca}"
+    write_k8s_gateway_ca_bundle "${cert}" "${ca}"
     chmod 600 "${key}"
     chmod 644 "${cert}" "${ca}"
     echo "Generated Kubernetes gateway TLS certificate: ${cert}"
@@ -1461,12 +1470,12 @@ k8s_reconcile_secret() {
         printf "+ kubectl --kubeconfig %q --context %q -n %q create secret generic %q " \
             "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${secret_name}"
         quote_args "$@"
-        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" "${kubeconfig}" "${context}"
+        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply --server-side --field-manager=nhx-auth-idp -f -\n" "${kubeconfig}" "${context}"
         return
     fi
     kubectl --kubeconfig "${kubeconfig}" --context "${context}" -n "${HELM_NAMESPACE}" \
         create secret generic "${secret_name}" "$@" --dry-run=client -o yaml \
-        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply --server-side --field-manager=nhx-auth-idp -f -
 }
 
 k8s_prepare_secrets() {

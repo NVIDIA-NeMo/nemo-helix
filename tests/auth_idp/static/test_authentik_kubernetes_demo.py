@@ -1143,19 +1143,15 @@ def test_authentik_umbrella_values_mount_workload_token_signing_key_as_file() ->
         "/etc/nhx/workload-token/private-key.pem"
     )
 
-    assert nemo_values["api"]["extraVolumes"] == [
-        {
-            "name": "workload-token-signing-key",
-            "secret": {"secretName": "nemo-workload-token-signing-key"},
-        }
-    ]
-    assert nemo_values["api"]["extraVolumeMounts"] == [
-        {
-            "name": "workload-token-signing-key",
-            "mountPath": "/etc/nhx/workload-token",
-            "readOnly": True,
-        }
-    ]
+    assert nemo_values["api"]["extraVolumes"][0] == {
+        "name": "workload-token-signing-key",
+        "secret": {"secretName": "nemo-workload-token-signing-key"},
+    }
+    assert nemo_values["api"]["extraVolumeMounts"][0] == {
+        "name": "workload-token-signing-key",
+        "mountPath": "/etc/nhx/workload-token",
+        "readOnly": True,
+    }
 
 
 def test_authentik_umbrella_chart_does_not_locally_template_subchart_workloads() -> None:
@@ -1825,6 +1821,56 @@ def test_authentik_compose_e2e_config_sets_deployments_workload_network() -> Non
     }
 
 
+def test_precreated_secrets_avoid_client_side_apply_annotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.auth_idp import runtime_kubernetes
+
+    calls = []
+    monkeypatch.setattr(
+        runtime_kubernetes, "_run", lambda command: subprocess.CompletedProcess(command, 0, stdout="large-ca-secret")
+    )
+    monkeypatch.setattr(
+        runtime_kubernetes, "_run_with_input", lambda command, manifest: calls.append((command, manifest))
+    )
+    runtime_kubernetes._reconcile_secret("kind-test", "nemo-helix-envoy-tls", ["--from-file=ca.crt=test.pem"])
+    command, manifest = calls[0]
+    assert "--server-side" in command
+    assert "--field-manager=nhx-auth-idp" in command
+    assert manifest == "large-ca-secret"
+    source = (AUTHENTIK_DIR / "run.sh").read_text()
+    assert "apply --server-side --field-manager=nhx-auth-idp -f -" in source
+
+
+def test_kubernetes_gateway_ca_bundle_preserves_public_roots(tmp_path: Path) -> None:
+    source = (AUTHENTIK_DIR / "run.sh").read_text()
+    helper = source.split("write_k8s_gateway_ca_bundle() {", 1)[1].split("\n}\n", 1)[0]
+    public = tmp_path / "public.pem"
+    gateway = tmp_path / "gateway.pem"
+    bundle = tmp_path / "bundle.pem"
+    public.write_text("public-root\n")
+    gateway.write_text("gateway-root\n")
+    result = subprocess.run(
+        [
+            "bash",
+            "-euc",
+            'uv() { printf "%s" "$PUBLIC_ROOTS"; }\n'
+            + "write_k8s_gateway_ca_bundle() {"
+            + helper
+            + "\n}\n"
+            + 'write_k8s_gateway_ca_bundle "$1" "$2"',
+            "test",
+            str(gateway),
+            str(bundle),
+        ],
+        env={**os.environ, "REPO_ROOT": str(Path.cwd()), "PUBLIC_ROOTS": str(public)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert bundle.read_text() == "public-root\ngateway-root\n"
+    assert source.count('write_k8s_gateway_ca_bundle "${cert}" "${ca}"') == 2
+
+
 def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
     tls_values = values["workloadTokenTls"]
@@ -1875,6 +1921,12 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
             "readOnly": True,
         },
     ]
+
+    api = nemo_values["api"]
+    assert api["env"]["SSL_CERT_FILE"] == tls_values["caBundleFile"]
+    assert api["env"]["NHX_CLIENT_SSL_CERT_FILE"] == tls_values["caBundleFile"]
+    assert api["extraVolumes"] == controller["extraVolumes"]
+    assert api["extraVolumeMounts"] == controller["extraVolumeMounts"]
 
     seed_job = nemo_values["platformSeedJob"]
     assert seed_job["extraEnv"] == [{"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/workload-token-ca/ca.crt"}]

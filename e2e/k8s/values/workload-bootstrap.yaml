@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Overlay kind.yaml. Intentionally keep the generic chart's all-controller path
+# and leave platform.advertised_base_url unset to exercise discovery fallback.
+fullnameOverride: workload-bootstrap
+httpRoute:
+  enabled: false
+
+api:
+  extraVolumes: &volumes
+    - name: signing-key
+      secret:
+        secretName: workload-bootstrap-signing
+    - name: gateway-ca
+      configMap:
+        name: workload-bootstrap-ca
+  extraVolumeMounts: &mounts
+    - name: signing-key
+      mountPath: /etc/workload-signing
+      readOnly: true
+    - name: gateway-ca
+      mountPath: /etc/workload-ca
+      readOnly: true
+core:
+  controller:
+    extraVolumes: *volumes
+    extraVolumeMounts: *mounts
+platformSeedJob:
+  extraVolumes: *volumes
+  extraVolumeMounts: *mounts
+
+env:
+  NHX_CLIENT_SSL_CERT_FILE: /etc/workload-ca/ca.crt
+  SSL_CERT_FILE: /etc/workload-ca/ca.crt
+platformConfig:
+  platform:
+    base_url: https://workload-tls-gateway
+  auth:
+    enabled: true
+    # Configure platform-issued bearer authentication without an external IdP.
+    access_keys:
+      enabled: true
+    token_signing:
+      key_id: bootstrap
+      private_key_file: /etc/workload-signing/private-key.pem
+    oidc:
+      workload:
+        client_id: bootstrap

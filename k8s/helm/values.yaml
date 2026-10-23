@@ -522,7 +522,8 @@ baseHelixConfig: |
   auth:
     enabled: false
     policy_decision_point_provider: embedded
-    policy_decision_point_base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
+    # Defaults to the final platform.base_url after platformConfig overrides.
+    policy_decision_point_base_url: ""
     policy_data_refresh_interval: 5
     bundle_cache_seconds: 5
     admin_email: "admin@example.com"

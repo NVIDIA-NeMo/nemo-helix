@@ -69,7 +69,7 @@ spec:
             - name: NHX_CONFIG_FILE_PATH
               value: /etc/nhx/config.yaml
             - name: NHX_BASE_URL
-              value: {{ dig "platform" "base_url" (include "nemo-helix.internalBaseUrl" .) $platformConfig | quote }}
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
             - name: OTEL_SERVICE_NAME
               value: {{ include "nemo-helix.fullname" . }}-platform-seed
             {{ include "nemo-helix.env" . | nindent 12 | trim }}

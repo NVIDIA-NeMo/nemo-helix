@@ -1,0 +1,18 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $auth := get $config "auth" | default dict -}}
+{{- $oidc := get $auth "oidc" | default dict -}}
+{{- $workload := get $oidc "workload" | default dict -}}
+{{- if and (get $auth "enabled") (get $workload "client_id") -}}
+{{- if not (hasPrefix "https://" $config.platform.base_url) -}}
+{{- fail "Workload token exchange requires HTTPS: set platformConfig.platform.base_url to a trusted TLS gateway reachable by platform pods and managed workloads." -}}
+{{- end -}}
+{{- $advertised := get $config.platform "advertised_base_url" | default $config.platform.base_url -}}
+{{- if not (hasPrefix "https://" $advertised) -}}
+{{- fail "Workload token exchange requires an HTTPS platform.advertised_base_url; omit it to inherit platform.base_url." -}}
+{{- end -}}
+{{- end -}}

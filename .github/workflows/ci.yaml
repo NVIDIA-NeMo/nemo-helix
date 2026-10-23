@@ -701,6 +701,73 @@ jobs:
           junit-report: report-kubernetes-gym-*.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
   
+  kind-workload-bootstrap:
+    name: Kind workload-token bootstrap
+    needs: [changes, build-cpu-smoke-images]
+    if: >
+      !cancelled() &&
+      needs.build-cpu-smoke-images.result == 'success' &&
+      needs.build-cpu-smoke-images.outputs.publish_images == 'true' && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.helm == 'true' ||
+        needs.changes.outputs.e2e == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    env:
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-workload-bootstrap
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup fresh Kind cluster without a platform install
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          kind-image-pull-token: ${{ github.token }}
+          kind-image-pull-user: ${{ github.actor }}
+          install-nemo-helix: "false"
+          kind-enable-gateway: "false"
+
+      - name: Pre-pull platform image
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          NHX_E2E_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: e2e/k8s/scripts/prepull_kind_images.sh "${NHX_E2E_REGISTRY}/nhx-api:${NHX_E2E_TAG}"
+
+      - name: Require generic-chart workload-token bootstrap readiness
+        shell: bash
+        env:
+          NHX_E2E_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: |
+          if bash e2e/k8s/scripts/test_workload_bootstrap.sh; then
+            printf '<testsuite name="workload-bootstrap" tests="1" failures="0"/>\n' > report-workload-bootstrap.xml
+          else
+            status=$?
+            printf '<testsuite name="workload-bootstrap" tests="1" failures="1"><testcase name="controller-readiness"><failure message="Helm bootstrap failed; see Kubernetes logs"/></testcase></testsuite>\n' > report-workload-bootstrap.xml
+            exit "${status}"
+          fi
+
+      - name: Finalize Kind e2e
+        if: always()
+        uses: ./.github/actions/finalize-kind-e2e
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact-name: kind-workload-bootstrap-artifacts
+          junit-report: report-workload-bootstrap.xml
+          services-log-dir: ${{ runner.temp }}/e2e-services-logs
+
   kind-network-policy-smoke:
     name: Kind NetworkPolicy smoke
     needs: [changes, build-cpu-smoke-images]
@@ -2599,6 +2666,7 @@ jobs:
       - docker-bake-graph
       - build-cpu-smoke-images
       - kind-cpu-smoke
+      - kind-workload-bootstrap
       - kind-gym-e2e
       - kind-network-policy-smoke
       - helm-lint

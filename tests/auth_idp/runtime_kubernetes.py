@@ -872,7 +872,16 @@ def _reconcile_secret(
             kubeconfig,
         )
     )
-    _apply_manifest(context, rendered.stdout, kubeconfig)
+    # CA bundles can exceed the client-side last-applied annotation's 256 KiB
+    # limit. Match the setup script's field manager without duplicating data.
+    _run_with_input(
+        _kubectl_command(
+            context,
+            ["apply", "--server-side", "--field-manager=nhx-auth-idp", "-f", "-"],
+            kubeconfig,
+        ),
+        rendered.stdout,
+    )
 
 
 def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:

@@ -64,9 +64,8 @@ spec:
             - name: NHX_CONFIG_FILE_PATH
               value: /etc/nhx/config.yaml
             - name: NHX_BASE_URL
-              value: {{ dig "platform" "base_url" (include "nemo-helix.internalBaseUrl" .) $platformConfig | quote }}
-            # In-cluster API Service DNS. Deployed agents use this as their inference
-            # endpoint, since NHX_BASE_URL may not be reachable from an agent pod.
+              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+            # Managed workloads use the same configured platform endpoint.
             - name: NHX_INTERNAL_BASE_URL
               value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
             {{- if include "nemo-helix.embeddedPdpEnabled" . }}

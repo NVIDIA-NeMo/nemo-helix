@@ -175,6 +175,9 @@ nemo-helix:
       - deployments
       - studio
     env:
+      # JWKS validation now calls the HTTPS platform gateway too.
+      SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+      NHX_CLIENT_SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
       NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nhx/workload-token/private-key.pem"
       NHX_OIDC_CLIENT_SECRET:
         valueFrom:
@@ -190,9 +193,18 @@ nemo-helix:
       - name: workload-token-signing-key
         secret:
           secretName: *workloadTokenSigningKeySecretName
+      - name: workload-token-tls-ca
+        secret:
+          secretName: *workloadTokenTlsSecretName
+          items:
+            - key: ca.crt
+              path: ca.crt
     extraVolumeMounts:
       - name: workload-token-signing-key
         mountPath: *workloadTokenSigningKeyMountPath
+        readOnly: true
+      - name: workload-token-tls-ca
+        mountPath: *workloadTokenTlsCaBundleMountPath
         readOnly: true
   platformSeedJob:
     extraEnv:

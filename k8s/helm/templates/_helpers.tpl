@@ -41,7 +41,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Calculate the config from structured and unrendered base platform, with overrides
 */}}
 {{- define "nemo-helix.calculatedConfig" -}}
-{{ tpl (mergeOverwrite (include "nemo-helix.unstructuredConfig" . | fromYaml) .Values.platformConfig | toYaml) . }}
+{{- $config := tpl (mergeOverwrite (include "nemo-helix.unstructuredConfig" . | fromYaml) .Values.platformConfig | toYaml) . | fromYaml -}}
+{{- if and $config.auth (not $config.auth.policy_decision_point_base_url) -}}
+{{- $_ := set $config.auth "policy_decision_point_base_url" $config.platform.base_url -}}
+{{- end -}}
+{{- toYaml $config -}}
 {{- end -}}
 
 {{/*
@@ -132,10 +136,11 @@ Bind address for in-cluster platform runner pods.
 {{- end -}}
 
 {{/*
-Internal API URL for pods that need to call the platform API service.
+Platform connection URL for platform pods and managed workloads, after overrides.
 */}}
 {{- define "nemo-helix.internalBaseUrl" -}}
-{{- printf "http://%s:%s" (include "nhx-api.api-servicename" .) (toString .Values.api.service.port) -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- trimSuffix "/" $config.platform.base_url -}}
 {{- end -}}
 
 {{/*
