@@ -8,7 +8,7 @@ from __future__ import annotations
 import ipaddress
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from harbor.models.task.config import NetworkMode, TaskConfig
 from harbor.models.trial.config import AgentConfig as TrialAgentConfig
@@ -26,7 +26,7 @@ from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import model_entity_route_openai_url, parse_workspace_name_ref
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
 from nhx_evals_sdk.values.common import SecretRef
 
 
@@ -62,11 +62,22 @@ async def check_gateway_model(
     await HelixMetricModelResolver(models_client, authorize=authorize).resolve_model(target.gateway_model)
 
 
-def agent_gateway_origin(*, sandboxed: bool) -> str:
+#: The OpenSandbox environment setting that lists the hosts a no-network sandbox may still reach.
+AGENT_CHANNEL_HOSTS_KWARG = "agent_channel_hosts"
+
+
+def sandbox_agent_channel(environment: HarborEnvironmentConfig | None) -> list[str]:
+    """The hosts an OpenSandbox ``environment`` lets a no-network sandbox reach; none for another environment."""
+    hosts = environment.kwargs.get(AGENT_CHANNEL_HOSTS_KWARG) if environment is not None else None
+    return [host for host in hosts if isinstance(host, str)] if isinstance(hosts, list) else []
+
+
+def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) -> str:
     """The platform origin an agent reaches from its task container.
 
-    ``sandboxed`` is a Kubernetes task Job's OpenSandbox sandbox, which reaches the in-cluster API; otherwise
-    Harbor's Docker task container, which reaches a loopback platform through ``host.docker.internal``.
+    ``sandboxed`` is a Kubernetes task Job's OpenSandbox sandbox, which reaches the in-cluster API by the name its
+    ``agent_channel`` allows; otherwise Harbor's Docker task container, which reaches a loopback platform through
+    ``host.docker.internal``.
     """
     base_url = get_base_url()
     if not sandboxed:
@@ -74,7 +85,12 @@ def agent_gateway_origin(*, sandboxed: bool) -> str:
     internal_base_url = get_internal_base_url()
     if internal_base_url is None and urlsplit(base_url).hostname not in LOOPBACK_ADDRESSES:
         internal_base_url = base_url
-    return resolve_agent_gateway_url(base_url, mode="k8s", internal_base_url=internal_base_url)
+    origin = urlsplit(resolve_agent_gateway_url(base_url, mode="k8s", internal_base_url=internal_base_url))
+    name = agent_channel_name(origin.hostname or "", agent_channel)
+    if name is None or name == origin.hostname:
+        return origin.geturl()
+    netloc = name if origin.port is None else f"{name}:{origin.port}"
+    return urlunsplit(origin._replace(netloc=netloc))
 
 
 def point_agent_at_gateway_model(
@@ -155,21 +171,29 @@ def check_tasks_reach_the_gateway(
     if not no_network:
         return
     host = urlsplit(agent_gateway_origin(sandboxed=True)).hostname or ""
-    if not _in_agent_channel(host, agent_channel):
+    if agent_channel_name(host, agent_channel) is None:
         raise ValueError(
             f"gateway_unreachable: no-network tasks {no_network} can't reach the Inference Gateway at {host}: "
-            "add the host itself, or an IP range containing it, to the sandbox profile's agent_channel"
+            f"add {host}, its fully qualified name, or an IP range containing it to the sandbox profile's "
+            "agent_channel"
         )
 
 
-def _in_agent_channel(host: str, agent_channel: Sequence[str]) -> bool:
+def agent_channel_name(host: str, agent_channel: Sequence[str]) -> str | None:
+    """The name an agent in a sandbox uses for ``host``: as its ``agent_channel`` allows it, else None.
+
+    An entry allows the host when it is the host, an IP range containing it, or the host followed by more DNS
+    labels, such as the fully qualified name of a Kubernetes service. The sandbox resolves only the names it
+    allows, so the agent is given that one.
+    """
     host = host.strip().rstrip(".").lower()
-    for entry in (entry.strip().rstrip(".").lower() for entry in agent_channel):
+    entries = [entry.strip().rstrip(".").lower() for entry in agent_channel]
+    for entry in entries:
         if entry == host:
-            return True
+            return host
         try:
             if ipaddress.ip_address(host) in ipaddress.ip_network(entry, strict=False):
-                return True
+                return host
         except ValueError:
             continue
-    return False
+    return next((entry for entry in entries if host and entry.startswith(f"{host}.")), None)

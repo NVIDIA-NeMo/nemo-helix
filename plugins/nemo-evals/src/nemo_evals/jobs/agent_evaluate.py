@@ -55,6 +55,7 @@ from nemo_evals.jobs.gateway_models import (
     check_gateway_model,
     point_agent_at_gateway_model,
     rebase_registered_agent_config,
+    sandbox_agent_channel,
 )
 from nemo_evals.jobs.gym_sandbox import (
     SandboxUnavailableError,
@@ -536,7 +537,10 @@ class _AgentEvalJobBase(NemoJob):
             if configure_harbor is not None:
                 harbor_config = configure_harbor(harbor_config)
             if target.gateway_model is not None or isinstance(target.source, RegisteredAgentSource):
-                origin = agent_gateway_origin(sandboxed=harbor_config.environment is not None)
+                origin = agent_gateway_origin(
+                    sandboxed=harbor_config.environment is not None,
+                    agent_channel=sandbox_agent_channel(harbor_config.environment),
+                )
                 agent_kwargs = dict(harbor_config.agent_kwargs)
                 rebase_registered_agent_config(target, agent_kwargs, origin)
                 harbor_config = point_agent_at_gateway_model(
