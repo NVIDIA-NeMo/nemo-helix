@@ -36,6 +36,7 @@ from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityN
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import ValidationError
 
 
@@ -1007,3 +1008,46 @@ async def test_request_cancel_gives_up_when_every_write_conflicts(store, entity_
         await store.request_cancel(run.workspace, run.name, now=CANCEL_AT)
     assert update.call_count == CANCEL_WRITE_ATTEMPTS
     assert (await entity_store.get(TasksetRunEntity, name=run.name, workspace=run.workspace)) == run
+
+
+async def test_members_are_created_once_queued_and_task_job_is_write_once(store, entity_store, acceptance) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    member = await store.create_member(run, 3)
+    assert member is not None and (member.name, member.task_index, member.phase) == ("task-3", 3, "image_ready")
+    assert member.parent == run.id
+    assert await store.create_member(run, 3) is None  # exists = done
+
+    intent = await store.update_member(member, task_job=f"{run.name}-task-3")
+    with pytest.raises(NemoEntityConflictError):
+        await store.update_member(member, task_job=f"{run.name}-task-3")  # stale version
+    with pytest.raises(ValueError, match="write-once"):
+        await store.update_member(intent, task_job="other")
+    registered = await store.update_member(intent, phase=MemberPhase.REGISTERED, job_status=HelixJobStatus.ACTIVE)
+    done = await store.update_member(registered, phase=MemberPhase.SUCCEEDED, bundle_ref="ref")
+    with pytest.raises(ValueError, match="illegal taskset run member transition"):
+        await store.update_member(done, phase=MemberPhase.FAILED)
+    assert [m.phase for m in await store.list_all_members(run)] == [MemberPhase.SUCCEEDED]
+
+
+async def test_set_state_checks_transitions(store, entity_store, acceptance) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    assert (await store.set_state(run, phase=TasksetRunPhase.COMPLETED)).phase is TasksetRunPhase.COMPLETED
+    running = await entity_store.create(
+        make_run(acceptance, phase=TasksetRunPhase.RUNNING).model_copy(update={"name": "r2"})
+    )
+    with pytest.raises(ValueError, match="illegal taskset run transition"):
+        await store.set_state(running, phase=TasksetRunPhase.ACCEPTED)
+    assert (await store.set_state(running, phase=TasksetRunPhase.RUNNING)).phase is TasksetRunPhase.RUNNING  # no-op
+
+
+async def test_open_runs_repeated_across_pages_are_listed_once(store, entity_store, acceptance, monkeypatch) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    other = await entity_store.create(make_run(acceptance).model_copy(update={"name": "other"}))
+    real_list = entity_store.list
+
+    async def shifted(*args, **kwargs):
+        page = await real_list(*args, **{**kwargs, "page": 1})  # a finished run shifted page 2 back onto page 1
+        return page.model_copy(update={"pagination": page.pagination.model_copy(update={"total_pages": 2})})
+
+    monkeypatch.setattr(entity_store, "list", shifted)
+    assert [r.name for r in await store.list_open_runs(page_size=1000)] == [run.name, other.name]
