@@ -868,13 +868,14 @@ paths:
       tags:
       - Evals Plugin Taskset Run Routes
       summary: Get Taskset Run
-      description: "Read one stored run without loading its plan or joining its tasks\
-        \ and Jobs.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
-        \    run_id: Public run name in that workspace.\n    service: Shared request-scoped\
-        \ run service.\n\nReturns:\n    Current stored status, excluding null optionals\
-        \ and internal metadata.\n\nRaises:\n    HTTPException: The record is absent\
-        \ (404), or an unexpected storage or\n        projection failure occurs (sanitized\
-        \ 500)."
+      description: "Read one stored run and its progress, counted from its members,\
+        \ without loading its plan or reading Jobs.\n\nArgs:\n    workspace: Workspace\
+        \ that scopes the record lookup.\n    run_id: Public run name in that workspace.\n\
+        \    service: Shared request-scoped run service.\n\nReturns:\n    Current\
+        \ stored status with ``progress`` (omitted while the run has no members),\
+        \ excluding null\n    optionals and internal metadata.\n\nRaises:\n    HTTPException:\
+        \ The record is absent (404), or an unexpected storage or\n        projection\
+        \ failure occurs (sanitized 500)."
       operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
       parameters:
       - name: workspace
@@ -966,9 +967,9 @@ paths:
         \ number, validated by FastAPI.\n    page_size: Maximum page size, from 1\
         \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
         \    Stored task page and filtered counts; existing runs with no members return\n\
-        \    an empty page. Null Job/error details are omitted.\n\nRaises:\n    HTTPException:\
-        \ The parent run is absent (404), or unexpected storage or\n        projection\
-        \ failure occurs (sanitized 500)."
+        \    an empty page. Null Job, Job status and error details are omitted.\n\n\
+        Raises:\n    HTTPException: The parent run is absent (404), or unexpected\
+        \ storage or\n        projection failure occurs (sanitized 500)."
       operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
       parameters:
       - name: workspace
@@ -9171,6 +9172,45 @@ components:
         finalization is tracked separately by ``ResultState`` so execution completion
 
         does not imply that combined results are already available.'
+    TasksetRunProgress:
+      properties:
+        tasks:
+          type: integer
+          title: Tasks
+          description: Members created; the plan's task count from the controller's
+            first cycle on.
+        members:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/MemberPhase'
+          type: object
+          title: Members
+          description: Members by phase, settled phases included; a phase with no
+            members is left out.
+        queued:
+          type: integer
+          title: Queued
+          description: 'Members waiting for a task-Job slot: image_ready without a
+            create intent.'
+        task_jobs:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/HelixJobStatus'
+          type: object
+          title: Task Jobs
+          description: 'Registered members by their task Job''s status as the controller
+            last read it, for example {"active": 18, "pending": 2}.'
+      type: object
+      required:
+      - tasks
+      - members
+      - queued
+      - task_jobs
+      title: TasksetRunProgress
+      description: How far a run's tasks got, as of the controller's last writes to
+        its members.
     TasksetRunPublicationInput:
       properties:
         intake:
@@ -9257,6 +9297,11 @@ components:
           description: 'Submit key: the caller''s, or the one submit generated when
             the request omitted it.'
           type: string
+        progress:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunProgress'
+          description: Counted from the run's members on each GET of this run; None
+            before the controller creates them, and in run lists and submit responses.
       additionalProperties: false
       type: object
       required:
@@ -9373,6 +9418,11 @@ components:
           description: 'Submit key: the caller''s, or the one submit generated when
             the request omitted it.'
           type: string
+        progress:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunProgress'
+          description: Counted from the run's members on each GET of this run; None
+            before the controller creates them, and in run lists and submit responses.
         warnings:
           items:
             type: string
@@ -9412,8 +9462,14 @@ components:
           description: Stored image preparation and execution progress of this task.
         job:
           title: Job
-          description: Name of this task's Jobs Service Job; omitted until registered.
+          description: Name of this task's Jobs Service Job; set when the create is
+            first attempted.
           type: string
+        job_status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The Job's status as the controller last read it; omitted until
+            the task's Job is registered.
         error:
           title: Error
           description: Stored reason the task failed, was cancelled or expired.
@@ -9429,9 +9485,9 @@ components:
         Job/error.
 
 
-        Construction takes the five public fields only. Instances contain no parent,
+        Construction takes the six public fields only. Instances contain no parent,
 
-        persistence metadata or reconstructed Job state; read routes omit unset details.'
+        persistence metadata or live Job state; read routes omit unset details.'
     TasksetRunTasksPage:
       properties:
         data:

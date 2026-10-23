@@ -18,6 +18,8 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
+from nemo_evals.taskset_runs.progress import TasksetRunProgress
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -285,6 +287,13 @@ class TasksetRunStatus(BaseModel):
     idempotency_key: str | None = Field(
         default=None, description="Submit key: the caller's, or the one submit generated when the request omitted it."
     )
+    progress: TasksetRunProgress | None = Field(
+        default=None,
+        description=(
+            "Counted from the run's members on each GET of this run; None before the controller creates them, "
+            "and in run lists and submit responses."
+        ),
+    )
 
 
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
@@ -293,8 +302,8 @@ _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
 class TasksetRunTask(BaseModel):
     """Expose one stored member's task identity, progress and optional Job/error.
 
-    Construction takes the five public fields only. Instances contain no parent,
-    persistence metadata or reconstructed Job state; read routes omit unset details.
+    Construction takes the six public fields only. Instances contain no parent,
+    persistence metadata or live Job state; read routes omit unset details.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -304,7 +313,11 @@ class TasksetRunTask(BaseModel):
     phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
     job: str | None = Field(
         default=None,
-        description="Name of this task's Jobs Service Job; omitted until registered.",
+        description="Name of this task's Jobs Service Job; set when the create is first attempted.",
+    )
+    job_status: HelixJobStatus | None = Field(
+        default=None,
+        description="The Job's status as the controller last read it; omitted until the task's Job is registered.",
     )
     error: str | None = Field(default=None, description="Stored reason the task failed, was cancelled or expired.")
 
@@ -313,10 +326,10 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
     """Copy a stored member's public state without accessing its plan or Job.
 
     Args:
-        member: Persisted child record with an optional task Job name and error.
+        member: Persisted child record with an optional task Job name, Job status and error.
 
     Returns:
-        Five-field task DTO with task_job renamed to job and absent values retained
+        Six-field task DTO with task_job renamed to job and absent values retained
         as None until HTTP serialization.
     """
     return TasksetRunTask(
@@ -324,6 +337,7 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
         task_index=member.task_index,
         phase=member.phase,
         job=member.task_job,
+        job_status=member.job_status,
         error=member.error,
     )
 

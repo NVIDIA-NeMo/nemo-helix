@@ -28,6 +28,7 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from pydantic import ValidationError
 
@@ -405,6 +406,7 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
         "cancel_requested_at": execution if populated else None,
         "error": "failed task" if populated else None,
         "created_by": "user:alice" if populated else None,
+        "progress": None,  # set by GET /runs/{id} only
     }
     wire = json.loads(status.model_dump_json())
     assert wire["accepted_at"] == "2026-10-12T12:00:00Z"
@@ -426,7 +428,8 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
 def test_status_schema_covers_every_run_domain_field():
     domain_fields = set(TasksetRunEntity.model_fields) - TasksetRunEntity.__base_fields__
     assert (
-        domain_fields == (set(TasksetRunStatus.model_fields) - {"run_id", "workspace", "created_by"}) | _INTERNAL_FIELDS
+        domain_fields
+        == (set(TasksetRunStatus.model_fields) - {"run_id", "workspace", "created_by", "progress"}) | _INTERNAL_FIELDS
     )
     assert _INTERNAL_FIELDS == {"plan_ref", "plan_digest", "request_digest"}
 
@@ -455,7 +458,7 @@ def test_status_rejects_unmapped_future_domain_fields():
 @pytest.mark.parametrize("phase", list(MemberPhase))
 @pytest.mark.parametrize("with_details", [False, True])
 def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_details):
-    """Task DTOs rename task_job and expose only the five stored public fields."""
+    """Task DTOs rename task_job and expose only the six stored public fields."""
     from nemo_evals.api.taskset_run_schemas import to_task
 
     member = TasksetRunMemberEntity(
@@ -464,7 +467,10 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         task_index=10,
         phase=phase,
         task_job="run-selected-task-10" if with_details else None,
+        job_status=HelixJobStatus.ACTIVE if with_details else None,
         error="verifier exited 1\nfull diagnostic" if with_details else None,
+        bundle_ref="default/run-selected-task-10#results" if with_details else None,
+        create_sent_at=datetime(2026, 10, 12, tzinfo=timezone.utc) if with_details else None,
     )
     member._parent = "taskset_run-parent"
     member._id = "taskset_run_member-identifier"
@@ -474,5 +480,6 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         "task_index": 10,
         "phase": phase,
         "job": "run-selected-task-10" if with_details else None,
+        "job_status": HelixJobStatus.ACTIVE if with_details else None,
         "error": "verifier exited 1\nfull diagnostic" if with_details else None,
     }

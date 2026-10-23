@@ -38,6 +38,7 @@ from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborBuiltinAgentSou
 from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.taskset_runs.controller import MAX_BUNDLE_ATTEMPTS
+from nemo_evals.taskset_runs.entities import SETTLED_MEMBER_PHASES, MemberPhase
 from nemo_evals.taskset_runs.identifiers import bundle_job_name, task_job_name
 from nemo_helix_plugin.cli_timestamps import parse_timestamp
 from nemo_helix_plugin.client.client import NemoClient
@@ -474,7 +475,7 @@ def submit_run(
     echo: Callable[[str], None],
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """POST the run, retrying a 503 (task Jobs not all created yet) with the same idempotency key."""
+    """POST the run, retrying a 503 (an outage before the run was accepted) with the same idempotency key."""
     url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         response = client.http_client.post(url, json=body, headers=client.request_headers(None, url=url))
@@ -721,7 +722,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             if stored_ref is not None and "without images" in str(exc):
                 echo(f"Check with: nemo evals tasksets build-images {stored_ref}{flag} --status", err=True)
             raise typer.Exit(code=1) from exc
-        echo(f"Run {status['run_id']} accepted: {len(refs)} task Jobs")
+        echo(f"Run {status['run_id']} accepted: {len(refs)} tasks, queued; the run controller starts their task Jobs")
         for line in status.get("warnings", []):
             echo(f"  {line}")
         echo("")
@@ -833,7 +834,32 @@ class TaskJobView:
     publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
 
 
-def _published(view: TaskJobView) -> str:
+@dataclass(frozen=True)
+class TaskStateView:
+    """One task of a run as its member records it (``/tasks``); Jobs is read only for a settled task's publication."""
+
+    index: int
+    task: str  # the task's name in the pinned taskset, or the member's name (task-<i>)
+    state: str  # see task_state
+    job: str | None
+    error: str | None = None
+    publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
+
+
+def task_state(task: dict[str, Any]) -> str:
+    """The state cell of one ``/tasks`` item: ``queued``, ``queued (creating)``, ``registered (active)``, or its phase.
+
+    A queued task with a Job name has a create in flight: it holds a slot, but its Job may not exist yet.
+    """
+    phase = task["phase"]
+    if phase == MemberPhase.IMAGE_READY:
+        return "queued (creating)" if task.get("job") else "queued"
+    if phase == MemberPhase.REGISTERED and task.get("job_status"):
+        return f"registered ({task['job_status']})"
+    return phase
+
+
+def _published(view: TaskJobView | TaskStateView) -> str:
     """The ``published`` cell: what the task's Job published to Intake."""
     if view.publication is None:
         return "-"
@@ -873,6 +899,20 @@ def list_runs(
     response = client.http_client.get(url, params=params, headers=client.request_headers(None, url=url))
     if response.status_code >= 400:
         raise RuntimeError(f"listing runs failed ({response.status_code}): {_detail(response)}")
+    return response.json()
+
+
+def list_run_tasks(
+    client: NemoClient, workspace: str, run_id: str, *, phase: str | None = None, page: int = 1, page_size: int = 1000
+) -> dict[str, Any]:
+    """One task-ordered page of ``GET …/agent-evaluate/runs/{run_id}/tasks``: ``data`` and ``pagination``."""
+    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks"
+    params: dict[str, Any] = {"page": page, "page_size": page_size} | ({"phase": phase} if phase else {})
+    response = client.http_client.get(url, params=params, headers=client.request_headers(None, url=url))
+    if response.status_code == 404:
+        raise SelectionError(f"run {workspace}/{run_id} not found")
+    if response.status_code >= 400:
+        raise RuntimeError(f"listing the tasks of run {run_id} failed ({response.status_code}): {_detail(response)}")
     return response.json()
 
 
@@ -948,6 +988,37 @@ def run_task_jobs(
             result = found[0] if found else None
         publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
         views.append(TaskJobView(index, job_name, tasks[0].get("id"), status, job.id, result, publication))
+    return views
+
+
+def run_tasks(client: NemoClient, run: dict[str, Any], *, workspace: str) -> list[TaskStateView]:
+    """Every task of ``run`` from ``/tasks``, named from its pinned taskset revision.
+
+    Jobs is read only for a settled task with a Job, for what it published: a queued or running task costs no Jobs call.
+    """
+    taskset_workspace, name, digest = _split_ref(run["taskset_ref"])
+    refs = Evaluator.from_client(client).tasksets.retrieve(name, revision=digest, workspace=taskset_workspace).tasks
+    jobs = JobsClient.from_client(client)
+    items: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        body = list_run_tasks(client, workspace, run["run_id"], page=page)
+        items += body["data"]
+        if not body["data"] or page >= body["pagination"]["total_pages"]:
+            break
+        page += 1
+    views: list[TaskStateView] = []
+    for item in items:
+        index, job_name = item["task_index"], item.get("job")
+        publication = None
+        if item["phase"] in SETTLED_MEMBER_PHASES and job_name:
+            try:
+                job = jobs.get_job(workspace=workspace, name=job_name).data()
+                publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
+            except NotFoundError:
+                pass
+        task = _split_ref(str(refs[index]))[1] if index < len(refs) else item["task"]
+        views.append(TaskStateView(index, task, task_state(item), job_name, item.get("error"), publication))
     return views
 
 
@@ -1067,7 +1138,7 @@ def _queue_line(run: dict[str, Any], now: datetime | None) -> str | None:
 
 def _status_table(
     run: dict[str, Any],
-    views: Sequence[TaskJobView],
+    views: Sequence[TaskStateView],
     bundle: BundleJobView | None = None,
     *,
     workspace_flag: str = "",
@@ -1082,6 +1153,7 @@ def _status_table(
         f"  accepted  {str(run['accepted_at'])[:19].replace('T', ' ')}",
         *([queue] if queue else []),
         f"  status    {_run_state(run, bundle)} (phase {phase}, result {result})",
+        f"  progress  {_progress_line(run.get('progress'))}",
     ]
     if bundle is not None:
         lines.append(f"  bundle    {bundle.job} (attempt {bundle.attempt} of {MAX_BUNDLE_ATTEMPTS}): {bundle.status}")
@@ -1092,25 +1164,71 @@ def _status_table(
     # The controller's "bundle Job … ended …" only repeats the bundle line; any other error (a deadline) is news.
     if error and not (bundle is not None and error.startswith(f"bundle Job {bundle.job} ended")):
         lines.append(f"  error     {error}")
-    if result == "failed" and any(v.status == "completed" for v in views):
+    if result == "failed" and any(v.state == MemberPhase.SUCCEEDED for v in views):
         lines.append(f"  completed tasks' scores: nemo evals runs results {run['run_id']}{workspace_flag}")
     lines.append("")
-    width = max([4, *(len(v.task or "") for v in views)])
-    job_width = len(views[0].job) if views else 3
-    if any(v.publication is not None for v in views):
-        status_width = max(6, *(len(v.status) for v in views))
-        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  {'status':<{status_width}}  published")
-        lines += [
-            f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status:<{status_width}}  {_published(v)}"
-            for v in views
-        ]
-    else:
-        lines.append(f"{'#':>3}  {'task':<{width}}  {'Job':<{job_width}}  status")
-        lines += [f"{v.index:>3}  {(v.task or '-'):<{width}}  {v.job}  {v.status}" for v in views]
-    done = [v for v in views if v.status in _TERMINAL]
-    failed = [v for v in done if v.status != "completed"]
-    lines.append(f"{len(done)}/{len(views)} done ({len(done) - len(failed)} completed, {len(failed)} failed)")
+    lines += _task_lines(views)
+    done = [v for v in views if v.state in SETTLED_MEMBER_PHASES]
+    succeeded = sum(v.state == MemberPhase.SUCCEEDED for v in done)
+    lines.append(f"{len(done)}/{len(views)} done ({succeeded} succeeded, {len(done) - succeeded} failed)")
     return lines
+
+
+def _progress_line(progress: dict[str, Any] | None) -> str:
+    """The ``progress`` cell: tasks queued, being created, running (by Job status), then settled by phase."""
+    if progress is None:
+        return "no tasks yet; the run controller creates them on its next pass"
+    members, queued = progress["members"], progress["queued"]
+    parts = [f"{queued} queued"] if queued else []
+    creating = members.get(MemberPhase.IMAGE_READY, 0) - queued
+    if creating:
+        parts.append(f"{creating} creating")
+    if registered := members.get(MemberPhase.REGISTERED, 0):
+        jobs = sorted(progress["task_jobs"].items(), key=lambda item: (-item[1], item[0]))
+        by_status = f" ({', '.join(f'{count} {status}' for status, count in jobs)})" if jobs else ""
+        parts.append(f"{registered} running{by_status}")
+    skip = (MemberPhase.IMAGE_READY, MemberPhase.REGISTERED)
+    parts += [f"{members[phase]} {phase}" for phase in MemberPhase if phase not in skip and members.get(phase)]
+    tasks = progress["tasks"]
+    return f"{tasks} task{'' if tasks == 1 else 's'}: {', '.join(parts)}"
+
+
+def _task_lines(views: Sequence[TaskStateView]) -> list[str]:
+    """The task table: one row per task with its state and Job, then what it published and its error, when set."""
+    width = max([4, *(len(v.task) for v in views)])
+    state_width = max([5, *(len(v.state) for v in views)])
+    job_width = max([3, *(len(v.job or "-") for v in views)])
+    published = [_published(v) for v in views] if any(v.publication is not None for v in views) else []
+    published_width = max([9, *(len(cell) for cell in published)])
+    header = f"{'#':>3}  {'task':<{width}}  {'state':<{state_width}}  {'Job':<{job_width}}"
+    lines = [f"{header}  published" if published else header.rstrip()]
+    for i, view in enumerate(views):
+        row = f"{view.index:>3}  {view.task:<{width}}  {view.state:<{state_width}}  {(view.job or '-'):<{job_width}}"
+        if published:
+            row += f"  {published[i]:<{published_width}}"
+        if view.error:
+            row += f"  {view.error.splitlines()[0]}"
+        lines.append(row.rstrip())
+    return lines
+
+
+def _page_footer(page: dict[str, Any], noun: str) -> str:
+    """``page 1 of 3 (45 runs); next: --page 2``, or the count on the last page."""
+    pagination = page.get("pagination") or {}
+    total, pages, current = pagination.get("total_results"), pagination.get("total_pages", 1), pagination.get("page", 1)
+    if pages > current:
+        return f"page {current} of {pages} ({total} {noun}s); next: --page {current + 1}"
+    count = total if total is not None else len(page["data"])
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def _tasks_table(page: dict[str, Any]) -> list[str]:
+    """The ``runs tasks`` screen: one ``/tasks`` page, by member name."""
+    tasks = page["data"]
+    if not tasks:
+        return ["No tasks."]
+    views = [TaskStateView(t["task_index"], t["task"], task_state(t), t.get("job"), t.get("error")) for t in tasks]
+    return [*_task_lines(views), _page_footer(page, "task")]
 
 
 def _list_table(page: dict[str, Any]) -> list[str]:
@@ -1131,14 +1249,7 @@ def _list_table(page: dict[str, Any]) -> list[str]:
     header = ("run", "phase", "result", "taskset", "accepted", "by")
     widths = [max(len(row[i]) for row in [header, *rows]) for i in range(len(header))]
     lines = ["  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip() for row in [header, *rows]]
-    pagination = page.get("pagination") or {}
-    total, pages, current = pagination.get("total_results"), pagination.get("total_pages", 1), pagination.get("page", 1)
-    if pages > current:
-        lines.append(f"page {current} of {pages} ({total} runs); next: --page {current + 1}")
-    else:
-        count = total if total is not None else len(runs)
-        lines.append(f"{count} run{'' if count == 1 else 's'}")
-    return lines
+    return [*lines, _page_footer(page, "run")]
 
 
 def _short_ref(ref: str) -> str:
@@ -1202,7 +1313,7 @@ _RUN_TERMINAL = frozenset({"completed", "failed", "cancelled", "expired"})
 
 
 def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoClient]) -> None:
-    """Register ``runs list``, ``runs status``, ``runs cancel`` and ``runs results`` under ``runs``."""
+    """Register ``runs list``, ``runs status``, ``runs tasks``, ``runs cancel`` and ``runs results`` under ``runs``."""
 
     @runs.command("list")
     def list_(
@@ -1231,17 +1342,17 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         poll_seconds: float = typer.Option(15.0, "--poll-seconds", help="Refresh interval with --watch."),
         output_json: bool = typer.Option(False, "--json", help="Print JSON."),
     ) -> None:
-        """Show each task Job of a run and its status."""
+        """Show a run's progress and each task's state."""
         client = client_factory()
         workspace = client.resolve_workspace(workspace)
         try:
             run = get_run(client, workspace, run_id)
             while True:
-                views = run_task_jobs(client, run, workspace=workspace)
+                views = run_tasks(client, run, workspace=workspace)
                 bundle = newest_bundle_job(client, run_id, workspace=workspace)
                 if output_json:
                     body = {"run": run, "bundle": bundle and bundle.__dict__}
-                    typer.echo(json.dumps(body | {"tasks": [_view_json(v) for v in views]}, indent=2))
+                    typer.echo(json.dumps(body | {"tasks": [v.__dict__ for v in views]}, indent=2))
                 else:
                     flag = _workspace_flag(workspace, client.resolve_workspace())
                     typer.echo("\n".join(_status_table(run, views, bundle, workspace_flag=flag)))
@@ -1253,6 +1364,25 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         except (SelectionError, RuntimeError, NemoClientError) as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
+
+    @runs.command("tasks")
+    def tasks(
+        run_id: str = typer.Argument(..., help="Run name, e.g. run-7f3a…"),
+        phase: MemberPhase | None = typer.Option(None, "--phase", help="Only tasks in this phase."),
+        page: int = typer.Option(1, "--page", min=1, help="One-based page number."),
+        page_size: int = typer.Option(100, "--page-size", min=1, max=1000, help="Tasks per page."),
+        workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the run; default: configured."),
+        output_json: bool = typer.Option(False, "--json", help="Print the API page as JSON."),
+    ) -> None:
+        """List a run's tasks with their state and Job."""
+        client = client_factory()
+        workspace = client.resolve_workspace(workspace)
+        try:
+            body = list_run_tasks(client, workspace, run_id, phase=phase, page=page, page_size=page_size)
+        except (SelectionError, RuntimeError, NemoClientError) as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(json.dumps(body, indent=2) if output_json else "\n".join(_tasks_table(body)))
 
     @runs.command("cancel")
     def cancel(
