@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
@@ -318,6 +319,29 @@ def test_the_coordinator_clears_an_earlier_pause_marker_before_training(
 
     assert not (tmp_path / "PAUSED").exists()
     assert signals == ["config_ready"]
+
+
+def test_a_resume_tells_training_which_step_it_paused_at(tmp_path: Path) -> None:
+    """The marker is gone once training starts, so the step goes in the config training reads."""
+    (tmp_path / "PAUSED").write_text("9\n")
+    backend = MagicMock()
+    backend.compile_config.return_value = {}
+    runner = _ScriptedRunner(tmp_path, duration=None, compile_config=MagicMock, backend=backend)
+
+    library = TrainingRunner._compile_config_phase(runner)
+
+    assert library.config_dict["_paused_at_step"] == 9
+    assert yaml.safe_load(library.config_path.read_text())["_paused_at_step"] == 9
+
+
+def test_a_first_run_is_not_told_it_resumes(tmp_path: Path) -> None:
+    backend = MagicMock()
+    backend.compile_config.return_value = {}
+    runner = _ScriptedRunner(tmp_path, duration=None, compile_config=MagicMock, backend=backend)
+
+    library = TrainingRunner._compile_config_phase(runner)
+
+    assert "_paused_at_step" not in library.config_dict
 
 
 def test_a_paused_run_exits_with_the_pause_code(monkeypatch: pytest.MonkeyPatch) -> None:
