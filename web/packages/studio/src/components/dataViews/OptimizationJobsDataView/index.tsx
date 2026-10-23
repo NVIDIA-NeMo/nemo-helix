@@ -4,9 +4,11 @@
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { TrialTextModal } from '@studio/components/dataViews/OptimizationJobsDataView/TrialTextModal';
 import { useTrialColumns } from '@studio/components/dataViews/OptimizationJobsDataView/useTrialColumns';
 import {
   formatParamValue,
+  isTextValue,
   METRIC_SORT_PREFIX,
   PARAM_SORT_PREFIX,
   paramValue,
@@ -15,7 +17,7 @@ import type {
   StudyResults,
   Trial,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
-import { type FC, memo, useMemo } from 'react';
+import { type FC, memo, useCallback, useMemo, useState } from 'react';
 
 const paramsText = (trial: Trial): string =>
   trial.params.map((param) => `${param.name} ${formatParamValue(param.value)}`).join('  ·  ');
@@ -47,6 +49,16 @@ const collectNumericParams = (trials: Trial[], names: string[]): Set<string> =>
     )
   );
 
+const collectTextParams = (trials: Trial[], names: string[]): Set<string> =>
+  new Set(
+    names.filter((name) =>
+      trials.some((trial) => {
+        const value = paramValue(trial, name);
+        return value !== undefined && isTextValue(value);
+      })
+    )
+  );
+
 /** What the search bar matches against: the trial id plus every parameter name and value. */
 const searchableText = (trial: Trial): string =>
   `trial ${trial.number} ${paramsText(trial)}`.toLowerCase();
@@ -74,6 +86,7 @@ const sortValue = (
   if (sortId === 'duration') return trial.durationSeconds;
   if (sortId === 'frontier') return trial.paretoOptimal ? 1 : 0;
   if (sortId === 'state') return trial.state || null;
+  if (sortId === 'phase') return trial.phase;
   if (sortId.startsWith(METRIC_SORT_PREFIX)) {
     const name = sortId.slice(METRIC_SORT_PREFIX.length);
     return trial.metrics.find((metric) => metric.name === name)?.value ?? null;
@@ -101,6 +114,10 @@ export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy
     () => collectNumericParams(trials, paramNames),
     [trials, paramNames]
   );
+  const textParams = useMemo(() => collectTextParams(trials, paramNames), [trials, paramNames]);
+  const showPhase = useMemo(() => trials.some((trial) => trial.phase === 'prompt'), [trials]);
+  const [viewing, setViewing] = useState<{ trial: Trial; name: string } | null>(null);
+  const onViewParam = useCallback((trial: Trial, name: string) => setViewing({ trial, name }), []);
 
   const dataViewState = useStudioDataViewState({
     defaultPageSize: 25,
@@ -139,33 +156,48 @@ export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy
     [processedTrials, safePageIndex, pageSize]
   );
 
-  const makeColumns = useTrialColumns({ metricNames, paramNames, numericParams, onDeploy });
+  const makeColumns = useTrialColumns({
+    metricNames,
+    paramNames,
+    numericParams,
+    textParams,
+    showPhase,
+    onDeploy,
+    onViewParam,
+  });
 
   return (
-    <StudioDataView<Trial>
-      dataViewState={dataViewState}
-      searchField="params"
-      makeColumns={makeColumns}
-      attributes={{
-        DataViewSearchBar: { placeholder: 'Search parameters or trial ID...' },
-        DataViewRoot: {
-          data: pageTrials,
-          totalCount: processedTrials.length,
-        },
-        DataViewTableContent: {
-          renderEmptyState: () => (
-            <TableEmptyState
-              header={debouncedSearchBar.trim() ? 'No matching trials' : 'No trials'}
-              emptyMessage={
-                debouncedSearchBar.trim()
-                  ? 'No trial matches this search.'
-                  : 'This study did not record any trials.'
-              }
-            />
-          ),
-        },
-      }}
-    />
+    <>
+      <StudioDataView<Trial>
+        dataViewState={dataViewState}
+        searchField="params"
+        makeColumns={makeColumns}
+        attributes={{
+          DataViewSearchBar: { placeholder: 'Search parameters or trial ID...' },
+          DataViewRoot: {
+            data: pageTrials,
+            totalCount: processedTrials.length,
+          },
+          DataViewTableContent: {
+            renderEmptyState: () => (
+              <TableEmptyState
+                header={debouncedSearchBar.trim() ? 'No matching trials' : 'No trials'}
+                emptyMessage={
+                  debouncedSearchBar.trim()
+                    ? 'No trial matches this search.'
+                    : 'This study did not record any trials.'
+                }
+              />
+            ),
+          },
+        }}
+      />
+      <TrialTextModal
+        trial={viewing?.trial ?? null}
+        name={viewing?.name ?? ''}
+        onClose={() => setViewing(null)}
+      />
+    </>
   );
 });
 
