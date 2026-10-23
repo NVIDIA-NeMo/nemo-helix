@@ -55,6 +55,7 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
 from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig
@@ -189,6 +190,7 @@ class TasksetRunService:
         preparer: ImagePreparer = prepare_task_images,
         task_jobs: TaskJobs | None = None,
         evaluations: RunEvaluations | None = None,
+        auth_context: AuthContext | None = None,
     ) -> None:
         """Bind request-scoped storage, identity and budget dependencies.
 
@@ -203,6 +205,8 @@ class TasksetRunService:
             preparer: Checks every task, then reads each one's images, before acceptance.
             task_jobs: Jobs operations submit's checks need; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
+            auth_context: The caller's full principal, stored on each new run for the run controller to
+                create on the caller's behalf; None with auth off.
         """
         self._store = store
         self._entities = entity_client
@@ -214,6 +218,7 @@ class TasksetRunService:
         self._preparer = preparer
         self._task_jobs = task_jobs or JobsServiceTaskJobs(AsyncJobsClient.from_client(async_client))
         self._evaluations = evaluations or IntakeRunEvaluations(AsyncIntakeClient.from_client(async_client))
+        self._auth_context = auth_context
 
     async def get(self, workspace: str, run_id: str) -> TasksetRunStatus | None:
         """Read one stored run without joining members, plans or Jobs.
@@ -388,6 +393,7 @@ class TasksetRunService:
                 execution_deadline_at=execution,
                 finalization_deadline_at=finalization,
                 discard_on_loss=(snapshot.root,) if snapshot is not None else (),
+                auth_context=self._auth_context,
             )
             acceptance_started = True
             result = await self._store.accept(acceptance)
