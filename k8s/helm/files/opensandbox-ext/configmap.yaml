@@ -872,8 +872,8 @@ data:
         volumes: list[Name] = Field(default_factory=list, max_length=16)
         services: list[Service] = Field(min_length=1, max_length=16)
         main: Main = Field(default_factory=Main)
-        # How long ``start`` waits for the services when ``main`` has no readiness check to carry its own
-        # ``timeout_sec``.
+        # How long ``NemoOpenSandboxEnvironment.start()`` waits for the services when the ``main`` container has no
+        # readiness check to carry its own ``timeout_sec``.
         services_timeout_sec: int | None = Field(default=None, ge=1, le=3600)
 
         @model_validator(mode="after")
