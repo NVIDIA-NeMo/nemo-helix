@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import socket
 from pathlib import Path
 from unittest.mock import Mock
@@ -343,3 +344,199 @@ def test_job_authenticates_with_telemetry_disabled(
         if path.is_file():
             assert b"job-access-token" not in path.read_bytes()
     assert "127.0.0.1" not in json.dumps(config)
+
+
+def _direct_config() -> AgentConfig:
+    """A job whose inference goes direct (no gateway model) and exports no telemetry.
+
+    Nothing in it would have started a proxy before, yet an authenticated run of
+    it may still call the platform API -- the gap this exposure closes.
+    """
+    return AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "auth-test",
+            "default_harness": "deepagents",
+            "harnesses": {"deepagents": {"kind": "deepagents"}},
+            "models": {"default": {"provider": "openai", "model": "test", "base_url": "https://provider.test/v1"}},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "token_file,principal,expected",
+    [
+        ("/job/proof-token", None, True),
+        (None, '{"id":"job-user"}', True),
+        ("/job/proof-token", '{"id":"job-user"}', True),
+        (None, None, False),
+    ],
+)
+def test_job_has_platform_identity_tracks_the_serialized_identity(
+    monkeypatch: pytest.MonkeyPatch, token_file: str | None, principal: str | None, expected: bool
+) -> None:
+    for name, value in (("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", token_file), ("NHX_PRINCIPAL", principal)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    assert gateway_proxy.job_has_platform_identity() is expected
+
+
+def test_publish_proxy_origin_sets_the_env_var_without_mutating_input() -> None:
+    config = _direct_config()
+    config.environment.env["EXISTING"] = "kept"
+    before = config.model_dump()
+
+    runtime = gateway_proxy.publish_proxy_origin(config, "http://127.0.0.1:9100")
+
+    assert runtime.environment.env[gateway_proxy.PLATFORM_PROXY_URL_ENVVAR] == "http://127.0.0.1:9100"
+    assert runtime.environment.env["EXISTING"] == "kept"
+    # The input is left untouched; only the deep copy carries the origin.
+    assert config.model_dump() == before
+    assert gateway_proxy.PLATFORM_PROXY_URL_ENVVAR not in config.environment.env
+
+
+def test_publish_proxy_origin_without_a_proxy_returns_the_config_untouched() -> None:
+    config = _direct_config()
+    # No proxy to publish -> the config itself, not a copy, env var absent.
+    assert gateway_proxy.publish_proxy_origin(config, None) is config
+    assert gateway_proxy.PLATFORM_PROXY_URL_ENVVAR not in config.environment.env
+
+
+def test_direct_inference_job_still_starts_a_proxy_for_its_platform_identity(
+    monkeypatch: pytest.MonkeyPatch, workload: Mock, httpserver: HTTPServer, ctx: JobContext
+) -> None:
+    """A job with no gateway model and no telemetry starts a proxy solely because it has an identity,
+    and that proxy's resolved origin is published to the agent process so it can call the platform API."""
+    config = _direct_config().model_dump()
+    assert not gateway_proxy.routes_inference_through_gateway(_direct_config())
+    spec = {
+        "request": {
+            "agent": {"config_format": "nemo-agents-spec-v1", "config": config},
+            "input": "hello",
+            "auto_telemetry": False,
+        },
+        "agent": {
+            "name": "auth-test",
+            "workspace": "default",
+            "config_format": "nemo-agents-spec-v1",
+            "config": config,
+        },
+    }
+    published: dict[str, str] = {}
+
+    async def invoke(request: AgentConfigInvocationRequest) -> FabricRuntimeResult:
+        env = request.agent_config.environment.env
+        published.update(env)
+        # The agent reaches the platform API through the published origin as its
+        # own identity -- the proxy forwards it authenticated.
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                env[gateway_proxy.PLATFORM_PROXY_URL_ENVVAR] + "/apis/jobs/v1/jobs",
+                headers={"Authorization": "Bearer not-used"},
+            )
+        response.raise_for_status()
+        return FabricRuntimeResult(status="succeeded", response="hello")
+
+    httpserver.expect_request(
+        "/apis/jobs/v1/jobs", headers={"Authorization": "Bearer job-access-token"}
+    ).respond_with_json({"jobs": []})
+    monkeypatch.setattr(execute, "invoke_agent_config_request_once", invoke)
+
+    assert execute.ExecuteAgentJob().run(spec, ctx=ctx)["status"] == "completed"
+
+    origin = published[gateway_proxy.PLATFORM_PROXY_URL_ENVVAR]
+    assert urlsplit(origin).hostname == "127.0.0.1"
+    # The inference base_url is left direct -- the proxy exists for the API, not inference.
+    assert published.get("base_url") is None
+    # The resolved origin is ephemeral; the proxy is gone once the run returns.
+    _assert_closed(origin)
+    # The raw token never entered the agent config or env.
+    assert "job-access-token" not in json.dumps(published)
+    for path in ctx.storage.persistent.rglob("*"):
+        if path.is_file():
+            assert b"job-access-token" not in path.read_bytes()
+
+
+def test_auth_disabled_direct_job_runs_without_a_proxy_or_published_origin(
+    monkeypatch: pytest.MonkeyPatch, ctx: JobContext
+) -> None:
+    """An auth-disabled job has no identity to forward: no proxy, no env var, platform reached directly."""
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8080")
+    resolver = Mock(side_effect=AssertionError("Must not resolve credentials"))
+    monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", resolver)
+
+    config = _direct_config().model_dump()
+    spec = {
+        "request": {
+            "agent": {"config_format": "nemo-agents-spec-v1", "config": config},
+            "input": "hello",
+            "auto_telemetry": False,
+        },
+        "agent": {
+            "name": "auth-test",
+            "workspace": "default",
+            "config_format": "nemo-agents-spec-v1",
+            "config": config,
+        },
+    }
+    published: dict[str, str] = {}
+
+    async def invoke(request: AgentConfigInvocationRequest) -> FabricRuntimeResult:
+        published.update(request.agent_config.environment.env)
+        return FabricRuntimeResult(status="succeeded", response="hello")
+
+    monkeypatch.setattr(execute, "invoke_agent_config_request_once", invoke)
+
+    assert execute.ExecuteAgentJob().run(spec, ctx=ctx)["status"] == "completed"
+    assert gateway_proxy.PLATFORM_PROXY_URL_ENVVAR not in published
+    resolver.assert_not_called()
+
+
+def test_direct_inference_identity_job_degrades_when_the_proxy_cannot_start(
+    monkeypatch: pytest.MonkeyPatch, workload: Mock, ctx: JobContext, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A direct-inference, no-telemetry job that has an identity but whose proxy fails to start.
+
+    It takes the optional (soft-fail) branch solely because it has an identity, so
+    a dead proxy degrades to API-less rather than aborting the run -- the env var
+    is absent and the agent falls back to the platform origin, the same
+    degradation a telemetry-only job gets. This exercises the new identity-only
+    arm of the start gating directly, not only the shared optional wrapper.
+    """
+    monkeypatch.setattr(
+        gateway_proxy,
+        "resolve_workload_exchange_provider",
+        Mock(side_effect=RuntimeError("auth discovery unavailable")),
+    )
+    config = _direct_config().model_dump()
+    assert not gateway_proxy.routes_inference_through_gateway(_direct_config())
+    spec = {
+        "request": {
+            "agent": {"config_format": "nemo-agents-spec-v1", "config": config},
+            "input": "hello",
+            "auto_telemetry": False,
+        },
+        "agent": {
+            "name": "auth-test",
+            "workspace": "default",
+            "config_format": "nemo-agents-spec-v1",
+            "config": config,
+        },
+    }
+    published: dict[str, str] = {}
+
+    async def invoke(request: AgentConfigInvocationRequest) -> FabricRuntimeResult:
+        published.update(request.agent_config.environment.env)
+        return FabricRuntimeResult(status="succeeded", response="hello")
+
+    monkeypatch.setattr(execute, "invoke_agent_config_request_once", invoke)
+    with caplog.at_level(logging.WARNING):
+        assert execute.ExecuteAgentJob().run(spec, ctx=ctx)["status"] == "completed"
+    # The proxy never started, so no origin is published; the agent reaches the
+    # platform directly and the run still completes.
+    assert gateway_proxy.PLATFORM_PROXY_URL_ENVVAR not in published
+    assert "without credentials" in caplog.text

@@ -43,6 +43,14 @@ logger = logging.getLogger(__name__)
 _STARTUP_TIMEOUT_SECONDS = 10.0
 _SHUTDOWN_TIMEOUT_SECONDS = 5
 
+# Env var the agent process reads to find the loopback proxy that forwards
+# authenticated platform API calls as the job's own identity. Named in the
+# ``NHX_*`` family the translator forwards into the agent process (alongside
+# ``NHX_BASE_URL``/``NHX_WORKSPACE``). The agent points its SDK at this origin
+# instead of ``NHX_BASE_URL`` to read its job record, list jobs, or submit
+# sub-jobs without ever handling a raw token.
+PLATFORM_PROXY_URL_ENVVAR = "NHX_PLATFORM_PROXY_URL"
+
 
 def _gateway_models(config: AgentConfig) -> Iterator[tuple[ModelConfig, str]]:
     models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
@@ -50,6 +58,22 @@ def _gateway_models(config: AgentConfig) -> Iterator[tuple[ModelConfig, str]]:
         base_url = model.base_url or model.settings.get("base_url")
         if isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/"):
             yield model, base_url
+
+
+def job_has_platform_identity() -> bool:
+    """Whether this job carries an identity the proxy could forward.
+
+    True when the substrate serialized a non-anonymous identity into the job --
+    a workload-identity token file, or a principal. It is the broadest reason to
+    run a proxy: an authenticated job may reach the platform API at any time (to
+    read its own record, list jobs, submit sub-jobs), not only for the inference
+    and telemetry paths the config happens to name. An auth-disabled platform
+    serializes an anonymous principal, for which :func:`platform_auth_proxy`
+    still yields ``None`` -- so this only decides whether to *attempt* a proxy;
+    the proxy itself remains the authority on whether there is anything to
+    forward.
+    """
+    return bool(os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR) or os.environ.get("NHX_PRINCIPAL"))
 
 
 def routes_inference_through_gateway(config: AgentConfig) -> bool:
@@ -115,6 +139,27 @@ def rewrite_intake_otlp_endpoints(config: AgentConfig, origin: str | None) -> Ag
     for endpoint_config in _intake_otlp_endpoints(runtime_config.telemetry):
         endpoint = urlsplit(endpoint_config["endpoint"])
         endpoint_config["endpoint"] = endpoint._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+    return runtime_config
+
+
+def publish_proxy_origin(config: AgentConfig, origin: str | None) -> AgentConfig:
+    """Return *config* with the proxy *origin* published to the agent process env.
+
+    The agent reaches the platform API as its own job identity by pointing an
+    SDK at this origin instead of ``NHX_BASE_URL`` -- the proxy forwards the
+    call authenticated, so the agent never handles a raw token. The origin is
+    set as ``NHX_PLATFORM_PROXY_URL`` in the config's environment ``env``, which
+    the Fabric translator forwards into the agent process.
+
+    The same contract as :func:`rewrite_gateway_models`: the config itself when
+    there is no proxy (an auth-disabled job reaches the platform directly, env
+    var absent), otherwise a deep copy so the caller's input is left untouched.
+    """
+    if origin is None:
+        return config
+
+    runtime_config = config.model_copy(deep=True)
+    runtime_config.environment.env[PLATFORM_PROXY_URL_ENVVAR] = origin
     return runtime_config
 
 
