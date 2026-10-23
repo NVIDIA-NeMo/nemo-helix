@@ -27,6 +27,7 @@ from nemo_evals.taskset_runs.store import (
     RunRequestConflict,
     TasksetRunStore,
 )
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.entities import EntityClient
@@ -1078,3 +1079,22 @@ async def test_open_runs_repeated_across_pages_are_listed_once(store, entity_sto
 
     monkeypatch.setattr(entity_store, "list", shifted)
     assert [r.name for r in await store.list_open_runs(page_size=1000)] == [run.name, other.name]
+
+
+async def test_accept_stores_the_callers_full_principal_for_the_controller(store, entity_store, acceptance) -> None:
+    principal = AuthContext(
+        principal_id="user:bob",
+        principal_email="bob@ac9.test",
+        principal_groups=["ac9-users"],
+        principal_account_id="a1",
+    )
+    run = (await store.accept(replace(acceptance, auth_context=principal))).run
+    stored = await entity_store.get(TasksetRunEntity, name=run.name, workspace=run.workspace)
+    assert stored.auth_context == principal
+    assert "_auth_context" in stored._get_data_fields()  # persisted with the record
+    assert "auth_context" not in stored.model_dump()  # never part of the status DTO's source
+    assert (await store.set_state(stored, phase=TasksetRunPhase.RUNNING)).auth_context == principal
+
+
+async def test_accept_without_a_principal_stores_none(store, acceptance) -> None:
+    assert (await store.accept(acceptance)).run.auth_context is None

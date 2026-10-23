@@ -23,6 +23,7 @@ from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorage
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.submission import resolve_deadlines
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
 from nemo_helix_plugin.entities.base import EntityUpdateClientProtocol
@@ -96,6 +97,8 @@ class RunAcceptance:
             request (for example its agent-files snapshot). They are deleted, best
             effort, once another request's run is proven to have won; shared
             filesets must never be included.
+        auth_context: The caller's full principal, stored on the run so the controller
+            can create its task Jobs on the caller's behalf; None with auth off.
     """
 
     plan: TasksetRunPlan
@@ -106,6 +109,7 @@ class RunAcceptance:
     execution_deadline_at: datetime
     finalization_deadline_at: datetime
     discard_on_loss: tuple[str, ...] = ()
+    auth_context: AuthContext | None = None
 
 
 @dataclass(frozen=True)
@@ -347,7 +351,7 @@ class TasksetRunStore:
             finalization_deadline_at=acceptance.finalization_deadline_at,
             phase=TasksetRunPhase.ACCEPTED,
             result_state=ResultState.PENDING,
-        )
+        ).with_auth_context(acceptance.auth_context)
 
     async def load_plan(self, run: TasksetRunEntity) -> TasksetRunPlan:
         """Read the accepted bytes afresh so cached state cannot hide tampering.

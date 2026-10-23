@@ -72,6 +72,7 @@ from nemo_evals.taskset_runs.task_jobs import (
     runs_request,
     task_job_request,
 )
+from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.types import RetryPolicy
@@ -1314,11 +1315,18 @@ class JobsServiceRunJobs:
                 raise
 
 
-ClientFactory = Callable[[str | None], AbstractAsyncContextManager[AsyncNemoClient]]
+ClientFactory = Callable[[str | RuntimePrincipal | None], AbstractAsyncContextManager[AsyncNemoClient]]
+
+
+def on_behalf_of(run: TasksetRunEntity) -> str | RuntimePrincipal:
+    """Whom the controller creates for: the run's stored principal snapshot, else (auth off) its creator id."""
+    if run.auth_context is not None:
+        return run.auth_context.to_principal()  # id, email, account id, groups, aliases
+    return run.created_by or DEVELOPMENT_CALLER
 
 
 @asynccontextmanager
-async def _service_client(on_behalf_of: str | None) -> AsyncGenerator[AsyncNemoClient]:
+async def _service_client(on_behalf_of: str | RuntimePrincipal | None) -> AsyncGenerator[AsyncNemoClient]:
     from nemo_helix_plugin.client_provider import get_async_nemo_client
 
     async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=on_behalf_of) as client:
@@ -1374,7 +1382,7 @@ class EvaluatorRunController(NemoController):
         if run is None:
             yield JobsServiceRunJobs(self._service, None, workspace)
             return
-        async with self._client_factory(run.created_by or DEVELOPMENT_CALLER) as creating:
+        async with self._client_factory(on_behalf_of(run)) as creating:
             yield JobsServiceRunJobs(self._service, creating, workspace)
 
     @property
