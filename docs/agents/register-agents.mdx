@@ -147,7 +147,7 @@ shared capabilities.
 
 The built-in harnesses build the agent from `agent.yaml`. To run agent code you wrote yourself, such
 as your own LangGraph or Deep Agents graph, wrap it in a
-[Fabric adapter](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.4.0/docs/adapter-contract): a Python
+[Fabric adapter](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.5.0/docs/adapter-contract): a Python
 runtime that Fabric starts, plus a descriptor that registers it. NeMo Helix then registers, deploys,
 and invokes the agent like any other.
 
@@ -217,7 +217,7 @@ IDs that start with `nvidia.fabric.`.
 [project]
 name = "acme-agent"
 version = "0.1.0"
-dependencies = ["nemo-fabric-adapters-common>=0.4.0,<0.5.0"]
+dependencies = ["nemo-fabric-adapters-common>=0.5.0,<0.6.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -249,7 +249,7 @@ harnesses:
   installs your project; the `nemo agents package-agent` platform job cannot.
 
 Automatic trace export and streaming depend on what the descriptor declares; see the
-[adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.4.0/docs/adapter-contract). The
+[adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.5.0/docs/adapter-contract). The
 Compass plugin's
 [`nvidia.fabric.insights-analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-compass)
 adapter is a complete example.
