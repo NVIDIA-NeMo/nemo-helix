@@ -235,7 +235,13 @@ def _build_router() -> APIRouter:
             )
             raise HTTPException(status_code=403, detail=refusal)
         try:
-            ready = await complete(entity_client, workspace=workspace, name=name, digest=body.digest)
+            ready = await complete(
+                entity_client,
+                workspace=workspace,
+                name=name,
+                digest=body.digest,
+                runtime_config=body.runtime_config,
+            )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
         except CompletionConflict as exc:
