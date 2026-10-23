@@ -9,11 +9,11 @@ import {
   hasDetailValue,
 } from '@studio/routes/ModelDetailRoute/DetailsTab/fields';
 import { FieldGrid } from '@studio/routes/ModelDetailRoute/DetailsTab/layout/FieldGrid';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 
 export interface DetailPanelProps {
   heading: string;
-  description?: string;
+  description?: ReactNode;
   tiles: DetailTile[];
   fields: DetailField[];
 }

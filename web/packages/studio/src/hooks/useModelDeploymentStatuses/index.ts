@@ -45,6 +45,11 @@ export type DeploymentIndicatorState =
   /** Nothing serves this id, and (for an adapter) nothing serves its base either. */
   | { kind: 'not-deployed' }
   /**
+   * Nothing serves it yet, but a deployment of the model exists: still starting, or
+   * failed. Providers can't show this, so only `useModelLineage` reports it.
+   */
+  | { kind: 'not-serving'; deployment: ModelDeployment }
+  /**
    * A provider could not be fetched, so whether this is served is genuinely
    * unknown. Distinct from `not-deployed`, which asserts nothing serves it.
    */
