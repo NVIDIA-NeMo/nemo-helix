@@ -27,7 +27,6 @@ from nhx_evals_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborEnvironmentConfig,
-    HarborGatewayAccess,
     HarborRuntimeConfig,
 )
 from nhx_evals_sdk.values import SecretRef
@@ -67,11 +66,6 @@ HARBOR_REJECTED_VALUES = {
     "verifier_timeout_multiplier": 2.0,
     "environment_build_timeout_multiplier": 2.0,
     "environment": HarborEnvironmentConfig(import_path="custom.environment:Environment"),
-    "gateway": HarborGatewayAccess(
-        base_url="http://localhost:8080/apis/inference-gateway/v2/workspaces/ws/model/m/-/v1",
-        base_url_env="OPENAI_BASE_URL",
-        api_key_env="OPENAI_API_KEY",
-    ),
 }
 
 

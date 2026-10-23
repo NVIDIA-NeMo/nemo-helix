@@ -10,17 +10,25 @@ from unittest.mock import AsyncMock
 
 import pytest
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
-from nemo_evals.jobs import gateway_models
+from nemo_evals.jobs import agent_compiler, gateway_models
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborImportedAgentSource, HarborRunnerTarget
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
+    HarborRunnerTarget,
+)
+from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
     agent_gateway_origin,
     check_gateway_model,
     check_tasks_reach_the_gateway,
-    harbor_gateway_access,
+    gateway_key_placeholder,
+    point_agent_at_gateway_model,
 )
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
 from nhx_evals_sdk.values import Model, ModelRef, SecretRef
 from pydantic import ValidationError
@@ -102,14 +110,30 @@ def test_each_agent_gets_the_route_on_the_variables_it_reads(
     source: HarborBuiltinAgentSource | HarborImportedAgentSource, base_url: str, base_url_env: str, api_key_env: str
 ) -> None:
     """OpenAI clients take the ``/v1`` root; the Anthropic client appends ``/v1`` itself."""
-    access = harbor_gateway_access(HarborRunnerTarget(source=source), "http://gw:8080")
+    target = HarborRunnerTarget(source=source)
 
-    assert access is not None
-    assert (access.base_url, access.base_url_env, access.api_key_env) == (
-        f"http://gw:8080{base_url}",
-        base_url_env,
-        api_key_env,
+    config = point_agent_at_gateway_model(HarborRuntimeConfig(agent_name="codex"), target, "http://gw:8080")
+
+    assert config.env_vars == {base_url_env: f"http://gw:8080{base_url}"}
+    assert config.env_secrets == {api_key_env: SecretRef(GATEWAY_PLACEHOLDER_KEY)}
+    assert gateway_key_placeholder(target) == [EnvironmentVariable(name=api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
+
+
+def test_a_platform_key_in_env_secrets_replaces_the_placeholder() -> None:
+    """With platform auth on, the agent calls the gateway with the caller's access key, never the placeholder."""
+    key = SecretRef("ws/agent-access-key")
+    target = _codex(env_secrets={"OPENAI_API_KEY": key})
+
+    config = point_agent_at_gateway_model(
+        HarborRuntimeConfig(agent_name="codex", env_secrets=target.env_secrets), target, "http://gw:8080"
     )
+
+    assert config.env_secrets == {"OPENAI_API_KEY": key}
+    assert gateway_key_placeholder(target) == []
+
+
+def test_targets_without_a_gateway_model_get_no_placeholder() -> None:
+    assert gateway_key_placeholder(HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex"))) == []
 
 
 def test_the_agent_gets_the_bare_model_name() -> None:
@@ -192,8 +216,7 @@ def test_the_job_points_the_agent_at_the_route_for_its_environment(
     config = _job_config(tmp_path, _codex(), sandboxed=sandboxed)
 
     assert config.agent_model_name == "cb-gpt"
-    assert config.gateway is not None
-    assert config.gateway.base_url == f"{origin}{ROUTE}/v1"
+    assert config.env_vars["OPENAI_BASE_URL"] == f"{origin}{ROUTE}/v1"
 
 
 _NO_NETWORK = {"environment": {"allow_internet": False}}
@@ -231,3 +254,11 @@ def test_tasks_with_network_access_or_targets_without_a_gateway_model_are_not_ch
     check_tasks_reach_the_gateway(
         HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model_name="gpt")), [("t", _NO_NETWORK)], ()
     )
+
+
+def test_the_compiled_job_carries_the_placeholder_key(harbor_resolved_task) -> None:
+    spec = AgentEvalSpec(tasks=[harbor_resolved_task("hello")], target=_codex())
+
+    variables = {variable.name: variable for variable in agent_compiler._environment(spec, sandbox_plan=None)}
+
+    assert variables["OPENAI_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY

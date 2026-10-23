@@ -25,13 +25,11 @@ from harbor_fixtures import ErrorAwareQualityMetric, write_harbor_trial_result
 from nhx_evals_sdk.agent_eval.evaluator import AgentEvaluator
 from nhx_evals_sdk.agent_eval.metrics import AgentPhaseSuccessMetric
 from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
-from nhx_evals_sdk.agent_eval.runtimes.harbor.env import GATEWAY_PLACEHOLDER_API_KEY
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     HOST_ALIAS_JOB,
     NETWORK_RESTRICTED_JOB,
     HarborAgentTaskRunner,
     HarborEnvironmentConfig,
-    HarborGatewayAccess,
     HarborRewardMetric,
     HarborRuntimeConfig,
     HarborTasksetLoader,
@@ -1178,7 +1176,7 @@ async def test_under_covered_job_resumes_when_harbor_can(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "env_secrets", "env_vars", "gateway", "task", "option"])
+@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "env_secrets", "env_vars", "task", "option"])
 async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str) -> None:
     # Each of these changes what a run would produce, so the stamped dir must not be
     # served. Reaching run_job (and failing there) is the observable signal.
@@ -1200,8 +1198,6 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
         config = config.model_copy(update={"env_secrets": {"OPENAI_API_KEY": SecretRef("openai-api-key")}})
     elif mutation == "env_vars":
         config = config.model_copy(update={"env_vars": {"AGENT_MODE": "fast"}})
-    elif mutation == "gateway":
-        config = config.model_copy(update={"gateway": _GATEWAY})
     elif mutation == "task":
         (dataset_path / "t" / "task.toml").write_text('[task]\nname = "t"\nchanged = true\n')
     else:
@@ -1269,81 +1265,6 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
         assert agent_config.name == "oracle"
     else:
         assert agent_config.import_path is not None and agent_config.import_path.endswith(":WrappedAgent")
-
-
-_GATEWAY = HarborGatewayAccess(
-    base_url="http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/ws/model/cb-gpt-x/-/v1",
-    base_url_env="OPENAI_BASE_URL",
-    api_key_env="OPENAI_API_KEY",
-)
-
-
-def test_a_config_without_a_gateway_keeps_its_cache_stamp(tmp_path: Path) -> None:
-    """Jobs cached before ``gateway`` existed must still hit; an unset gateway leaves the option hash alone."""
-    from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import _CACHE_IRRELEVANT_OPTIONS, _cache_stamp
-
-    config, _, task = _seed_cached_job(tmp_path)
-    dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
-    options = config.model_dump(exclude={*_CACHE_IRRELEVANT_OPTIONS, "gateway"}, mode="json")
-
-    stamp = _cache_stamp(config, dataset_path, [task])
-
-    assert stamp["options"] == hashlib.sha256(json.dumps(options, sort_keys=True, default=str).encode()).hexdigest()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("env_secrets", "expected_key"),
-    [
-        ({}, GATEWAY_PLACEHOLDER_API_KEY),
-        ({"OPENAI_API_KEY": SecretRef("ws/agent-access-key")}, "${WS_AGENT_ACCESS_KEY}"),
-    ],
-    ids=["placeholder-key", "platform-key"],
-)
-async def test_gateway_sets_the_agent_base_url_and_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env_secrets: dict[str, SecretRef], expected_key: str
-) -> None:
-    """The agent reaches the gateway route; a platform key from env_secrets wins over the placeholder."""
-    import harbor.job
-
-    jobs_dir = tmp_path / "jobs"
-    jobs_dir.mkdir()
-    config = HarborRuntimeConfig(
-        jobs_dir=jobs_dir, job_name="gw-job", agent_name="codex", gateway=_GATEWAY, env_secrets=env_secrets
-    )
-    created: list[Any] = []
-
-    class FakeJob:
-        @classmethod
-        async def create(cls, job_config: Any) -> "FakeJob":
-            created.append(job_config)
-            return cls()
-
-        async def run(self) -> None:
-            return None
-
-    monkeypatch.setattr(harbor.job, "Job", FakeJob)
-    templates = {name: "${WS_AGENT_ACCESS_KEY}" for name in env_secrets}
-    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="gw-job", env_templates=templates)
-    await run_job()
-
-    (agent_config,) = created[0].agents
-    assert agent_config.env == {"OPENAI_BASE_URL": _GATEWAY.base_url, "OPENAI_API_KEY": expected_key}
-
-
-@pytest.mark.parametrize(
-    ("env_vars", "env_secrets"),
-    [
-        ({"OPENAI_BASE_URL": "http://elsewhere/v1"}, {}),
-        ({}, {"OPENAI_BASE_URL": SecretRef("ws/url")}),
-    ],
-    ids=["base-url-literal", "base-url-secret"],
-)
-def test_gateway_refuses_a_base_url_the_caller_also_sets(
-    env_vars: dict[str, str], env_secrets: dict[str, SecretRef]
-) -> None:
-    with pytest.raises(ValidationError, match="OPENAI_BASE_URL is set from the gateway model"):
-        HarborRuntimeConfig(agent_name="codex", gateway=_GATEWAY, env_vars=env_vars, env_secrets=env_secrets)
 
 
 @pytest.mark.asyncio
