@@ -26,12 +26,11 @@ _ANTHROPIC = GatewayAgentEnv(base_url_env="ANTHROPIC_BASE_URL", api_key_env="ANT
 #: Claude Code won't start without one.
 GATEWAY_PLACEHOLDER_KEY = "inference-gateway-no-key"
 
-#: Keyed by built-in agent name or import path.
+#: Keyed by built-in agent name.
 GATEWAY_AGENTS: Mapping[str, GatewayAgentEnv] = MappingProxyType(
     {
         "codex": _OPENAI,
         "claude-code": _ANTHROPIC,
-        "nemo_evals.harbor.agents:SandboxedCodex": _OPENAI,
     }
 )
 

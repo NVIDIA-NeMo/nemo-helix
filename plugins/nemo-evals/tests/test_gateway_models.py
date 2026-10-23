@@ -15,7 +15,6 @@ from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
     HarborBuiltinAgentSource,
-    HarborImportedAgentSource,
     HarborRunnerTarget,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
@@ -90,24 +89,16 @@ def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
             "OPENAI_API_KEY",
         ),
         (
-            HarborImportedAgentSource(
-                import_path="nemo_evals.harbor.agents:SandboxedCodex", model=ModelRef("ws/cb-gpt")
-            ),
-            f"{ROUTE}/v1",
-            "OPENAI_BASE_URL",
-            "OPENAI_API_KEY",
-        ),
-        (
             HarborBuiltinAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")),
             ROUTE,
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_API_KEY",
         ),
     ],
-    ids=["codex", "sandboxed-codex", "claude-code"],
+    ids=["codex", "claude-code"],
 )
 def test_each_agent_gets_the_route_on_the_variables_it_reads(
-    source: HarborBuiltinAgentSource | HarborImportedAgentSource, base_url: str, base_url_env: str, api_key_env: str
+    source: HarborBuiltinAgentSource, base_url: str, base_url_env: str, api_key_env: str
 ) -> None:
     """OpenAI clients take the ``/v1`` root; the Anthropic client appends ``/v1`` itself."""
     target = HarborRunnerTarget(source=source)
