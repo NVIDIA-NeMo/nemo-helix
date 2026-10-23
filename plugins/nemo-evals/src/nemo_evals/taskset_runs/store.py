@@ -22,7 +22,7 @@ from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError as Plan
 from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorageError
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
-from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
 from nemo_helix_plugin.entities.base import EntityUpdateClientProtocol
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -218,8 +218,14 @@ class TasksetRunStore:
     share one copy of the run invariants and the retry policy.
     """
 
-    def __init__(self, entities_client: AsyncEntitiesClient, files_client: AsyncFilesClient) -> None:
-        """Production constructor: applies ``_ACCEPT_RETRY_POLICY`` (no 409 retries).
+    def __init__(
+        self,
+        entities_client: AsyncEntitiesClient,
+        files_client: AsyncFilesClient,
+        *,
+        retry: RetryPolicy = _ACCEPT_RETRY_POLICY,
+    ) -> None:
+        """Production constructor: applies ``retry``, by default ``_ACCEPT_RETRY_POLICY`` (no 409 retries).
 
         The policy is applied to a copy of ``entities_client`` before it is wrapped,
         so 5xx and transport errors are still retried but a 409 reaches ``accept``
@@ -229,8 +235,9 @@ class TasksetRunStore:
         Args:
             entities_client: Raw authorized client; its own retry policy is not mutated.
             files_client: Authorized client for the same workspace's plan files.
+            retry: Entity Store retries; the run controller passes none, so one hung call can't hold a cycle.
         """
-        self._bind(EntityClient(entities_client.with_retry(_ACCEPT_RETRY_POLICY)), files_client)
+        self._bind(EntityClient(entities_client.with_retry(retry)), files_client)
 
     @classmethod
     def _with_entity_adapter(cls, entity_client: RunEntityClient, files_client: AsyncFilesClient) -> Self:
@@ -607,17 +614,23 @@ class TasksetRunStore:
     async def update_member(self, member: TasksetRunMemberEntity, **changes: object) -> TasksetRunMemberEntity:
         """A versioned write of ``changes`` to ``member``.
 
-        The phase must pass ``assert_member_transition``, and ``task_job`` is write-once.
+        The phase must pass ``assert_member_transition``, ``task_job`` and ``job_id`` are write-once, and a
+        registered member has its Job's ``job_id``.
 
         Raises:
-            ValueError: An illegal phase change, or ``task_job`` rewritten.
+            ValueError: An illegal phase change, ``task_job`` or ``job_id`` rewritten, or registered without a
+                ``job_id``.
             NemoEntityConflictError: Another write landed first; the next cycle re-reads the member.
         """
         phase = changes.get("phase", member.phase)
         assert isinstance(phase, MemberPhase)
         assert_member_transition(member.phase, phase)
-        if member.task_job is not None and changes.get("task_job", member.task_job) != member.task_job:
-            raise ValueError(f"member {member.name}'s task_job is write-once ({member.task_job})")
+        for key in ("task_job", "job_id"):
+            old = getattr(member, key)
+            if old is not None and changes.get(key, old) != old:
+                raise ValueError(f"member {member.name}'s {key} is write-once ({old})")
+        if phase is MemberPhase.REGISTERED and changes.get("job_id", member.job_id) is None:
+            raise ValueError(f"member {member.name} can't be registered without its Job's id")
         member_client = cast(EntityUpdateClientProtocol[TasksetRunMemberEntity], self.entity_client)
         return await member_client.update(member.model_copy(update=changes))
 

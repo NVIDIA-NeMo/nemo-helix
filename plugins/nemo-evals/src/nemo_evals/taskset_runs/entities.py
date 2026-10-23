@@ -166,6 +166,13 @@ class TasksetRunMemberEntity(EntityBase):
             "intent: the task holds a slot from then on) and never changed after; None while queued."
         ),
     )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Id of the Job registered under task_job (created, or adopted as ours); written with registered and "
+            "never changed. A Job under task_job with another id isn't ours: ours ended and was deleted."
+        ),
+    )
     error: str | None = Field(default=None, description="Why this task failed or expired; None otherwise.")
     bundle_ref: str | None = Field(
         default=None, description="The task's agent-eval-results bundle; set when the member succeeds."
@@ -180,6 +187,18 @@ class TasksetRunMemberEntity(EntityBase):
             "When the last create of task_job with an unknown outcome was sent. Until create_grace after it, "
             "a 404 or stepless read of the Job doesn't prove that no create of ours is still saving."
         ),
+    )
+
+
+def is_queued(member: TasksetRunMemberEntity) -> bool:
+    """Waiting for a slot: images in the plan, no create intent yet."""
+    return member.phase is MemberPhase.IMAGE_READY and member.task_job is None
+
+
+def holds_slot(member: TasksetRunMemberEntity) -> bool:
+    """Counted against the caps: registered, or a create intent (``task_job`` written before the create)."""
+    return member.phase is MemberPhase.REGISTERED or (
+        member.phase is MemberPhase.IMAGE_READY and member.task_job is not None
     )
 
 
