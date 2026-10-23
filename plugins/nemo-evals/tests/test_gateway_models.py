@@ -165,6 +165,14 @@ def test_model_name_is_read_as_model_name_and_written_in_the_new_shape() -> None
     assert target.model_dump(mode="json")["source"] == {"name": "codex", "model": {"name": "gpt-x"}}
 
 
+def test_an_imported_source_with_model_name_is_not_reported_as_deprecated(caplog: pytest.LogCaptureFixture) -> None:
+    """`model_name` is current on an imported source; only the built-in source's is deprecated."""
+    target = HarborRunnerTarget.model_validate({"source": {"import_path": "x:Y", "model_name": "m"}})
+
+    assert target.agent_model_name == "m"
+    assert "deprecated" not in caplog.text
+
+
 @pytest.mark.parametrize(
     "source",
     [

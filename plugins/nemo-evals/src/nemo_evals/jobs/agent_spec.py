@@ -267,7 +267,7 @@ class HarborBuiltinAgentSource(BaseModel):
     @classmethod
     def _lift_legacy_model_name(cls, data: Any) -> Any:
         """Accept ``model_name`` for one release. Deprecated since 0.10; remove in 0.11."""
-        if not isinstance(data, dict) or "model_name" not in data:
+        if not isinstance(data, dict) or "name" not in data or "model_name" not in data:
             return data
         if data.get("model") is not None:
             raise ValueError("`model_name` is the deprecated spelling of `model.name`; give only `model`")
