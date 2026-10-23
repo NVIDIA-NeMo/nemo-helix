@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { isConflictError } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
@@ -35,7 +36,6 @@ import {
   Upload,
 } from '@nvidia/foundations-react-core';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
-import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
   DATASET_FILE_ACCEPT,
@@ -71,8 +71,6 @@ import {
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import {
   entityNameField,
-  nameCheckStatus,
-  nameFieldSlots,
   submitErrorMessage,
   unsalvageableNameError,
 } from '@studio/components/evaluation/shared/entityNameField';
@@ -99,6 +97,7 @@ import {
   parseUploadedDatasetConfig,
   serializeEvalConfig,
 } from '@studio/components/evaluation/submitEvaluationJob';
+import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityNameCheck';
 import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';

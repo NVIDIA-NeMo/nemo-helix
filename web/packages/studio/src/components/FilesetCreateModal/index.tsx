@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { getErrorMessage as getApiErrorMessage } from '@nemo/common/src/api/common/utils';
+import {
+  getErrorMessage as getApiErrorMessage,
+  isConflictError,
+} from '@nemo/common/src/api/common/utils';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
@@ -22,6 +25,10 @@ import {
   StorageMode,
   type SupportedPurpose,
 } from '@studio/components/FilesetCreateModal/constants';
+import { FilesetNameField } from '@studio/components/filesets/FilesetNameField';
+import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
+import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
+import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useRemoteRepoMetadata } from '@studio/hooks/useRemoteRepoMetadata';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
@@ -63,6 +70,8 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
 
   const [storageMode, setStorageMode] = useState<StorageMode>(StorageMode.Local);
   const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
+  const [nameStatus, setNameStatus] = useState<NameCheckStatus>();
+  const nameTaken = nameStatus === 'conflict';
 
   const {
     control,
@@ -70,6 +79,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
     setValue,
     watch,
     reset,
+    setError,
     formState: { errors, isValid, dirtyFields },
   } = useForm<FilesetCreateFormData>({
     resolver: zodResolver(filesetCreateFormSchema),
@@ -178,6 +188,12 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
           },
         });
       } catch (err) {
+        // The live check can lose a race with another create; say so on the field.
+        if (isConflictError(err)) {
+          void invalidateFilesetNameCheck(queryClient, workspace, data.name);
+          setError('name', { message: filesetNameTakenMessage(data.name, workspace) });
+          return;
+        }
         toast.error(getApiErrorMessage(err as Error, 'Failed to create fileset'));
         return;
       }
@@ -192,7 +208,17 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
         })
       );
     },
-    [storageMode, createFileset, workspace, purpose, toast, navigate, handleClose]
+    [
+      storageMode,
+      createFileset,
+      workspace,
+      purpose,
+      queryClient,
+      setError,
+      toast,
+      navigate,
+      handleClose,
+    ]
   );
 
   return (
@@ -203,7 +229,7 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
         title={PURPOSE_COPY[purpose].title}
         submitButtonText={isPending ? 'Creating…' : PURPOSE_COPY[purpose].submit}
         loading={isPending}
-        submitDisabled={!isValid}
+        submitDisabled={!isValid || nameTaken}
         onSubmit={handleSubmit(
           onSubmit,
           handleFormErrorsGeneric({ title: 'Fileset Create Form Errors' })
@@ -246,11 +272,13 @@ export const FilesetCreateModal: FC<FilesetCreateModalProps> = ({
             </>
           )}
 
-          <ControlledTextInput
-            label="Name"
+          <FilesetNameField
+            control={control}
+            name="name"
+            workspace={workspace}
+            onStatusChange={setNameStatus}
             disabled={isPending || (isExternalMode && isRemoteFetching)}
             autoFocus={!isExternalMode}
-            useControllerProps={{ name: 'name', control }}
           />
           <ControlledTextArea
             label="Description (optional)"

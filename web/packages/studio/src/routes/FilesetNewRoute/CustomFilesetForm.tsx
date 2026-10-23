@@ -19,6 +19,8 @@ import {
   TabsList,
   Upload,
 } from '@nvidia/foundations-react-core';
+import { FilesetNameField } from '@studio/components/filesets/FilesetNameField';
+import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { DatasetQualityReportView } from '@studio/routes/FilesetNewRoute/components/DatasetQualityReportView';
 import { PURPOSE_OPTIONS, DATASET_TYPE_CUSTOM } from '@studio/routes/FilesetNewRoute/constants';
 import { toFileList } from '@studio/routes/FilesetNewRoute/helpers';
@@ -35,6 +37,9 @@ interface CustomFilesetFormProps {
   purpose: FilesetPurpose;
   activeTab: DatasetType;
   workspace: string;
+  /** A fileset this form already created, which the name check must not count as taken. */
+  ownName?: string;
+  onNameStatusChange: (status: NameCheckStatus) => void;
   storageTab: 'local' | 'external';
   setStorageTab: (value: 'local' | 'external') => void;
   selectedSecretName: string | undefined;
@@ -56,6 +61,8 @@ export const CustomFilesetForm: FC<CustomFilesetFormProps> = ({
   purpose,
   activeTab,
   workspace,
+  ownName,
+  onNameStatusChange,
   storageTab,
   setStorageTab,
   selectedSecretName,
@@ -77,13 +84,14 @@ export const CustomFilesetForm: FC<CustomFilesetFormProps> = ({
       <form onSubmit={onFormSubmit}>
         <Stack gap="density-2xl">
           <Flex direction="col" gap="density-lg">
-            <ControlledTextInput
+            <FilesetNameField
+              control={control}
+              name="name"
               label="Fileset Name"
+              workspace={workspace}
+              ownName={ownName}
+              onStatusChange={onNameStatusChange}
               disabled={isSubmitPending}
-              useControllerProps={{
-                name: 'name',
-                control,
-              }}
             />
 
             <ControlledTextArea
