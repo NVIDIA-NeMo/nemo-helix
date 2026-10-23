@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+import respx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import agents as agents_router_module
@@ -28,6 +30,7 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     DeploymentStatus,
 )
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -553,3 +556,315 @@ class TestDeleteAgent:
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
         assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# GET /agents/{name}/status — runtime status incl. MCP servers
+# ---------------------------------------------------------------------------
+
+
+def _mcp_agent_config() -> dict[str, Any]:
+    config = _fabric_agent_config()
+    config["mcp"] = {
+        "servers": {
+            "iocs": {"transport": "stdio", "url": "email-security-triage-iocs"},
+        }
+    }
+    return config
+
+
+class TestGetAgentStatus:
+    def test_missing_agent_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents/calc/status")
+
+        assert resp.status_code == 404
+
+    def test_declares_mcp_servers_without_any_deployment(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        """The servers an agent expects are listed even when nothing is deployed."""
+        agent = _make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        mock_entity_client.get = AsyncMock(return_value=agent)
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["deployments"] == []
+        [declared] = body["declared_mcp_servers"]
+        assert declared["name"] == "iocs"
+        assert declared["transport"] == "stdio"
+        assert declared["target"] == "email-security-triage-iocs"
+        assert declared["state"] == "not_started"
+
+    def test_nat_format_agent_declares_no_mcp_servers(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_make_agent("calc", config={"llms": {}}))
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents/calc/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["declared_mcp_servers"] == []
+
+    def test_pending_deployment_reports_not_started_without_probing(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        """A deployment that is not up yet must not look like a failed server."""
+        dep = _make_deployment(agent="triage", status="pending")
+        dep.config = _mcp_agent_config()
+        mock_entity_client.get = AsyncMock(
+            return_value=_make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        [deployment] = resp.json()["deployments"]
+        assert deployment["status"] == "pending"
+        assert deployment["probe_error"] == ""
+        assert [s["state"] for s in deployment["mcp_servers"]] == ["not_started"]
+
+    def test_running_deployment_reports_the_runtime_probe(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        dep = _make_deployment(agent="triage", status="running")
+        dep.config = _mcp_agent_config()
+        dep.endpoint = "http://localhost:9001"
+        mock_entity_client.get = AsyncMock(
+            return_value=_make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+
+        with respx.mock:
+            respx.get("http://localhost:9001/mcp/status").respond(
+                200,
+                json={
+                    "runtime_instance_id": "runtime-1",
+                    "checked_at": NOW.isoformat(),
+                    "servers": [
+                        {
+                            "name": "iocs",
+                            "transport": "stdio",
+                            "target": "email-security-triage-iocs",
+                            "state": "unresolved",
+                            "detail": "Command not found.",
+                        }
+                    ],
+                },
+            )
+            resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        [deployment] = resp.json()["deployments"]
+        assert deployment["endpoint"] == "http://localhost:9001"
+        assert deployment["probe_error"] == ""
+        [server] = deployment["mcp_servers"]
+        assert server["state"] == "unresolved"
+        assert server["detail"] == "Command not found."
+
+    def test_runtime_is_dialed_through_the_executor_transport(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        """An openshell runtime is reached at the executor's service address, with the advertised Host."""
+        dep = _make_deployment(agent="triage", status="running")
+        dep.config = _mcp_agent_config()
+        dep.endpoint = "https://default--triage--http.openshell.localhost:8080"
+        mock_entity_client.get = AsyncMock(
+            return_value=_make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+        transport = EndpointTransport(connect_base="https://openshell.openshell.svc.cluster.local:8080")
+
+        with (
+            patch.object(agents_router_module, "get_deployment_transport", return_value=transport),
+            respx.mock,
+        ):
+            route = respx.get("https://openshell.openshell.svc.cluster.local:8080/mcp/status").respond(
+                200,
+                json={"runtime_instance_id": "runtime-1", "checked_at": NOW.isoformat(), "servers": []},
+            )
+            resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        [deployment] = resp.json()["deployments"]
+        assert deployment["probe_error"] == ""
+        assert route.calls.last.request.headers["Host"] == "default--triage--http.openshell.localhost:8080"
+
+    def test_unreachable_runtime_marks_servers_unknown(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        """A runtime we cannot ask is reported as such, not as a healthy or failed server."""
+        dep = _make_deployment(agent="triage", status="running")
+        dep.config = _mcp_agent_config()
+        dep.endpoint = "http://localhost:9001"
+        mock_entity_client.get = AsyncMock(
+            return_value=_make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+
+        with respx.mock:
+            respx.get("http://localhost:9001/mcp/status").mock(side_effect=httpx.ConnectError("refused"))
+            resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        [deployment] = resp.json()["deployments"]
+        assert deployment["probe_error"] == "Could not reach the runtime."
+        assert [s["state"] for s in deployment["mcp_servers"]] == ["unknown"]
+
+    def test_runtime_without_mcp_status_route_is_reported(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        dep = _make_deployment(agent="triage", status="running")
+        dep.config = _mcp_agent_config()
+        dep.endpoint = "http://localhost:9001"
+        mock_entity_client.get = AsyncMock(
+            return_value=_make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+        )
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+
+        with respx.mock:
+            respx.get("http://localhost:9001/mcp/status").respond(404)
+            resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        [deployment] = resp.json()["deployments"]
+        assert deployment["probe_error"] == "Runtime does not report MCP status."
+
+    def test_only_deployments_for_this_agent_are_reported(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        other = _make_deployment(name="other-dep", agent="other-agent", status="running")
+        mock_entity_client.get = AsyncMock(return_value=_make_agent("triage"))
+        mock_entity_client.list = AsyncMock(return_value=_list_response([other]))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents/triage/status")
+
+        assert resp.json()["deployments"] == []
+
+
+# ---------------------------------------------------------------------------
+# GET /agents/{name}/tools — MCP tool listing
+# ---------------------------------------------------------------------------
+
+_TOOLS_URL = "/apis/agents/v2/workspaces/default/agents/triage/tools"
+
+
+def _running_triage_deployment() -> AgentDeployment:
+    dep = _make_deployment(name="triage-dep", agent="triage", status="running")
+    dep.config = _mcp_agent_config()
+    dep.endpoint = "http://localhost:9001"
+    return dep
+
+
+def _triage_agent() -> Agent:
+    return _make_agent("triage", config=_mcp_agent_config(), config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT)
+
+
+_RUNTIME_TOOLS = {
+    "runtime_instance_id": "runtime-1",
+    "checked_at": NOW.isoformat(),
+    "servers": [
+        {
+            "name": "iocs",
+            "transport": "stdio",
+            "target": "email-security-triage-iocs",
+            "state": "running",
+            "server_info": {"name": "iocs", "version": "1.0.0"},
+            "latency_ms": 42,
+            "tools": [{"name": "extract_iocs", "description": "Pull indicators out of text.", "enabled": True}],
+        }
+    ],
+}
+
+
+class TestListAgentTools:
+    def test_returns_the_runtime_listing_in_one_call(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_triage_agent())
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_triage_deployment()]))
+
+        with respx.mock:
+            route = respx.get("http://localhost:9001/mcp/tools").respond(200, json=_RUNTIME_TOOLS)
+            resp = client.get(_TOOLS_URL)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert (body["deployment"], body["probe_error"]) == ("triage-dep", "")
+        assert body["checked_at"] is not None
+        [server] = body["servers"]
+        assert (server["state"], server["server_info"], server["latency_ms"]) == (
+            "running",
+            {"name": "iocs", "version": "1.0.0"},
+            42,
+        )
+        assert [(tool["name"], tool["enabled"]) for tool in server["tools"]] == [("extract_iocs", True)]
+        assert route.call_count == 1
+        assert route.calls.last.request.url.query == b""
+
+    def test_refresh_is_forwarded_to_the_runtime(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_triage_agent())
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_triage_deployment()]))
+
+        with respx.mock:
+            route = respx.get("http://localhost:9001/mcp/tools").respond(200, json=_RUNTIME_TOOLS)
+            client.get(_TOOLS_URL, params={"refresh": "true"})
+
+        assert route.calls.last.request.url.query == b"refresh=true"
+
+    def test_declared_servers_are_not_started_without_a_running_deployment(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        pending = _make_deployment(agent="triage", status="pending")
+        other = _make_deployment(name="other-dep", agent="other-agent", status="running")
+        mock_entity_client.get = AsyncMock(return_value=_triage_agent())
+        mock_entity_client.list = AsyncMock(return_value=_list_response([pending, other]))
+
+        with respx.mock:
+            resp = client.get(_TOOLS_URL)
+
+        body = resp.json()
+        assert (body["deployment"], body["checked_at"]) == (None, None)
+        assert [(s["name"], s["state"], s["tools"]) for s in body["servers"]] == [("iocs", "not_started", [])]
+
+    def test_agent_without_mcp_servers_skips_the_runtime(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        dep = _running_triage_deployment()
+        dep.config = _fabric_agent_config()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent("triage"))
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+
+        with respx.mock:
+            resp = client.get(_TOOLS_URL)
+
+        assert resp.json()["servers"] == []
+
+    @pytest.mark.parametrize(
+        ("runtime", "probe_error"),
+        [
+            ({"status_code": 404}, "Runtime does not report MCP status."),
+            ({"side_effect": httpx.ConnectError("refused")}, "Could not reach the runtime."),
+        ],
+    )
+    def test_runtime_that_cannot_answer_marks_servers_unknown(
+        self,
+        client: TestClient,
+        mock_entity_client: AsyncMock,
+        runtime: dict[str, Any],
+        probe_error: str,
+    ) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_triage_agent())
+        mock_entity_client.list = AsyncMock(return_value=_list_response([_running_triage_deployment()]))
+
+        with respx.mock:
+            route = respx.get("http://localhost:9001/mcp/tools")
+            if "side_effect" in runtime:
+                route.mock(side_effect=runtime["side_effect"])
+            else:
+                route.respond(runtime["status_code"])
+            resp = client.get(_TOOLS_URL)
+
+        body = resp.json()
+        assert (body["deployment"], body["probe_error"]) == ("triage-dep", probe_error)
+        assert [(s["name"], s["state"], s["detail"]) for s in body["servers"]] == [("iocs", "unknown", probe_error)]
+
+    def test_missing_agent_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+
+        assert client.get(_TOOLS_URL).status_code == 404
