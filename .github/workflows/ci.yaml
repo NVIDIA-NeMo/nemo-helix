@@ -1820,8 +1820,8 @@ jobs:
           fi
           WHEEL="${wheels[0]}"
           # Supply-chain: partial-pin the wheel's direct external deps to a committed constraints
-          # file. Regenerate with script/compile-wheel-constraints.sh.
-          CONSTRAINTS="${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-helix-services.txt"
+          # file. Regenerate with tools/wheel-constraints/compile-wheel-constraints.sh.
+          CONSTRAINTS="${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-services.txt"
           # --no-config: this step runs inside the checkout, so uv would otherwise apply the
           # repo's [tool.uv] override-dependencies and resolve a dependency set no user can get.
           if [[ "${INSTALL_METHOD}" == "tool" ]]; then
@@ -1861,7 +1861,7 @@ jobs:
           cd "${RUNNER_TEMP}/wheelcheck"
           uv venv .venv --python "${PYTHON_VERSION}"
           uv pip install --no-config --python .venv/bin/python \
-            --constraint "${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-helix-plugin.txt" \
+            --constraint "${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-plugin.txt" \
             "${WHEEL}"
           unset PYTHONPATH VIRTUAL_ENV
           # Import the package + a couple of representative submodules
