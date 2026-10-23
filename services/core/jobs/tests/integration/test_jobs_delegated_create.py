@@ -109,6 +109,15 @@ def test_service_creates_job_for_user(client: NemoClient, group_workspace: tuple
     job = JobsClient.from_client(_on_behalf_of(client, user)).create_job(workspace=workspace, body=_job(name)).data()
 
     assert job.name == name
+    # Only service principals see a step's auth_context, which the task runs as.
+    service = JobsClient.from_client(as_user(client, SERVICE_PRINCIPAL))
+    steps = list(service.list_steps(name=name, workspace=workspace).items())
+    assert len(steps) == 1
+    auth_context = steps[0].auth_context
+    assert auth_context is not None
+    assert auth_context.principal_id == SERVICE_PRINCIPAL
+    assert auth_context.principal_on_behalf_of == email
+    assert auth_context.principal_on_behalf_of_groups == [group]
 
 
 def test_service_create_for_user_without_access_is_forbidden(
