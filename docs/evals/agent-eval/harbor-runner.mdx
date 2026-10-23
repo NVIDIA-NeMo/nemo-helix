@@ -729,20 +729,20 @@ default. To keep a run closed-book, send the agent's model calls through a virtu
 the `nemo-evals-closed-book` middleware. Create one as shown in
 [Keep Evaluations Closed-Book](/documentation/models-and-inference/virtual-models#keep-evaluations-closed-book),
 then point the agent at it ([Closed-book evaluations](/documentation/evaluate-models/agent-eval/targets-and-runners#closed-book-evaluations)
-covers the other targets). Name it with `model`:
+covers the other targets). Name it with a gateway source:
 
 ```python
-from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
+from nemo_evals.jobs.agent_spec import HarborGatewayAgentSource, HarborRunnerTarget
 from nhx_evals_sdk.values import ModelRef
 
 target = HarborRunnerTarget(
-    source=HarborBuiltinAgentSource(name="codex", model=ModelRef("my-workspace/closed-book-model")),
+    source=HarborGatewayAgentSource(name="codex", model=ModelRef("my-workspace/closed-book-model")),
     agent_kwargs={"version": "0.162.1"},
 )
 ```
 
-`model` names any model the gateway serves, a model or a virtual model, in place of `model_name`.
-It works for `codex` and `claude-code`. Evals then sets:
+`model` names any model the gateway serves, a model or a virtual model. The gateway source takes
+`codex` or `claude-code` as its `name`, and no `model_name`. Evals then sets:
 
 | Agent | Model name | Base URL variable | Key variable |
 |---|---|---|---|

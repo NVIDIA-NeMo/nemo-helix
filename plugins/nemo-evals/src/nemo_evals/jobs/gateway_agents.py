@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal, TypeAlias
 
 
 @dataclass(frozen=True)
@@ -26,8 +27,9 @@ _ANTHROPIC = GatewayAgentEnv(base_url_env="ANTHROPIC_BASE_URL", api_key_env="ANT
 #: Claude Code won't start without one.
 GATEWAY_PLACEHOLDER_KEY = "inference-gateway-no-key"
 
-#: Keyed by built-in agent name.
-GATEWAY_AGENTS: Mapping[str, GatewayAgentEnv] = MappingProxyType(
+GatewayAgentName: TypeAlias = Literal["codex", "claude-code"]
+
+GATEWAY_AGENTS: Mapping[GatewayAgentName, GatewayAgentEnv] = MappingProxyType(
     {
         "codex": _OPENAI,
         "claude-code": _ANTHROPIC,

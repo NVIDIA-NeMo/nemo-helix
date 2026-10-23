@@ -15,6 +15,7 @@ from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
     HarborBuiltinAgentSource,
+    HarborGatewayAgentSource,
     HarborRunnerTarget,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
@@ -40,7 +41,7 @@ def _codex(
     *, env_vars: dict[str, str] | None = None, env_secrets: dict[str, SecretRef] | None = None
 ) -> HarborRunnerTarget:
     return HarborRunnerTarget(
-        source=HarborBuiltinAgentSource(name="codex", model=ModelRef("ws/cb-gpt")),
+        source=HarborGatewayAgentSource(name="codex", model=ModelRef("ws/cb-gpt")),
         env_vars=env_vars or {},
         env_secrets=env_secrets or {},
     )
@@ -83,13 +84,13 @@ def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
     ("source", "base_url", "base_url_env", "api_key_env"),
     [
         (
-            HarborBuiltinAgentSource(name="codex", model=ModelRef("ws/cb-gpt")),
+            HarborGatewayAgentSource(name="codex", model=ModelRef("ws/cb-gpt")),
             f"{ROUTE}/v1",
             "OPENAI_BASE_URL",
             "OPENAI_API_KEY",
         ),
         (
-            HarborBuiltinAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")),
+            HarborGatewayAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")),
             ROUTE,
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_API_KEY",
@@ -98,7 +99,7 @@ def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
     ids=["codex", "claude-code"],
 )
 def test_each_agent_gets_the_route_on_the_variables_it_reads(
-    source: HarborBuiltinAgentSource, base_url: str, base_url_env: str, api_key_env: str
+    source: HarborGatewayAgentSource, base_url: str, base_url_env: str, api_key_env: str
 ) -> None:
     """OpenAI clients take the ``/v1`` root; the Anthropic client appends ``/v1`` itself."""
     target = HarborRunnerTarget(source=source)
@@ -131,14 +132,30 @@ def test_the_agent_gets_the_bare_model_name() -> None:
     assert _codex().agent_model_name == "cb-gpt"
 
 
-def test_model_and_model_name_are_exclusive() -> None:
-    with pytest.raises(ValidationError, match="set `model` or `model_name`, not both"):
-        HarborBuiltinAgentSource(name="codex", model=ModelRef("ws/cb-gpt"), model_name="cb-gpt")
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ({"name": "codex", "model_name": "gpt-x"}, HarborBuiltinAgentSource),
+        ({"name": "codex", "model": "ws/cb-gpt"}, HarborGatewayAgentSource),
+    ],
+    ids=["model-name", "gateway-model"],
+)
+def test_a_source_document_is_the_one_shape_its_keys_fit(source: dict[str, str], expected: type) -> None:
+    assert type(HarborRunnerTarget.model_validate({"source": source}).source) is expected
 
 
-def test_an_agent_without_known_gateway_variables_is_refused() -> None:
-    with pytest.raises(ValidationError, match="for 'oracle', set `model_name`"):
-        HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model=ModelRef("ws/cb-gpt")))
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"name": "codex", "model": "ws/cb-gpt", "model_name": "gpt-x"},
+        {"name": "oracle", "model": "ws/cb-gpt"},
+    ],
+    ids=["model-and-model-name", "agent-without-gateway-support"],
+)
+def test_a_source_document_no_shape_fits_is_refused(source: dict[str, str]) -> None:
+    """Both shapes are closed, so the spec itself rules these out; no validator decides it."""
+    with pytest.raises(ValidationError):
+        HarborRunnerTarget.model_validate({"source": source})
 
 
 def test_a_base_url_the_caller_also_sets_is_refused() -> None:
