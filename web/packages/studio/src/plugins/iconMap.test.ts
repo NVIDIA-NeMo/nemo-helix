@@ -24,7 +24,7 @@ describe('isPluginIconName', () => {
     expect(isPluginIconName('')).toBe(false);
   });
 
-  it('rejects a legacy Lucide-only name not in NVIDIA', () => {
-    expect(isPluginIconName('flask-conical')).toBe(false);
+  it('rejects a name with a trailing hyphen', () => {
+    expect(isPluginIconName('flask-')).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ import { getHumanReadableFileSize } from '@studio/util/files';
 export interface FileEntry {
   path: string;
   size: number;
-  /** IconDocument identifier - maps to `oid` from HF or `file_ref` from v2 API */
+  /** File identifier - maps to `oid` from HF or `file_ref` from v2 API */
   oid: string;
 }
 

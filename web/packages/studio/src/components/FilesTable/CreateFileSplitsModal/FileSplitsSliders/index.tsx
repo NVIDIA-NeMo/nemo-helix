@@ -32,7 +32,7 @@ export const FileSplitsSliders: FC = () => {
       if (prev === field) {
         return null; // Unlock if already locked
       }
-      return field; // LockClosed the new field (automatically unlocks previous)
+      return field; // lock the new field (automatically unlocks previous)
     });
   }, []);
 
