@@ -1010,7 +1010,9 @@ async def test_request_cancel_gives_up_when_every_write_conflicts(store, entity_
     assert (await entity_store.get(TasksetRunEntity, name=run.name, workspace=run.workspace)) == run
 
 
-async def test_members_are_created_once_queued_and_task_job_is_write_once(store, entity_store, acceptance) -> None:
+async def test_members_are_created_once_queued_and_task_job_and_job_id_are_write_once(
+    store, entity_store, acceptance
+) -> None:
     run = await entity_store.create(make_run(acceptance))
     member = await store.create_member(run, 3)
     assert member is not None and (member.name, member.task_index, member.phase) == ("task-3", 3, "image_ready")
@@ -1022,7 +1024,13 @@ async def test_members_are_created_once_queued_and_task_job_is_write_once(store,
         await store.update_member(member, task_job=f"{run.name}-task-3")  # stale version
     with pytest.raises(ValueError, match="write-once"):
         await store.update_member(intent, task_job="other")
-    registered = await store.update_member(intent, phase=MemberPhase.REGISTERED, job_status=HelixJobStatus.ACTIVE)
+    with pytest.raises(ValueError, match="registered without its Job's id"):
+        await store.update_member(intent, phase=MemberPhase.REGISTERED)
+    registered = await store.update_member(
+        intent, phase=MemberPhase.REGISTERED, job_id="job-1", job_status=HelixJobStatus.ACTIVE
+    )
+    with pytest.raises(ValueError, match="job_id is write-once"):
+        await store.update_member(registered, job_id="job-2")
     done = await store.update_member(registered, phase=MemberPhase.SUCCEEDED, bundle_ref="ref")
     with pytest.raises(ValueError, match="illegal taskset run member transition"):
         await store.update_member(done, phase=MemberPhase.FAILED)
