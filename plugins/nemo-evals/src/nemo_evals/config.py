@@ -153,10 +153,11 @@ class RunControllerConfig(BaseModel):
     )
     create_grace_seconds: int = Field(
         default=600,
-        gt=0,
+        ge=60,
         description=(
             "How long after a task Job create with an unknown outcome a 404 or stepless read of the Job is "
-            "conclusive: Jobs keeps saving after the controller's client times out."
+            "conclusive: Jobs keeps saving after the controller's client times out. At least 60 s, twice the "
+            "controller's 30 s create timeout."
         ),
     )
 
