@@ -36,6 +36,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Protocol
 
+import httpx
 import openai
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, PermissionDeniedError
@@ -57,6 +58,19 @@ from nemo_helix_plugin.models.types import ModelDeployment, ModelEntity, ModelPr
 from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient, VirtualModelsClient
 
 _INFERENCE_GATEWAY_PREFIX = "/apis/inference-gateway/v2/workspaces"
+
+
+class UnroutableModelError(NotFoundError):
+    """A model entity exists, but no VirtualModel routes it and no provider serves it."""
+
+    def __init__(self, ref: str, url: str) -> None:
+        detail = (
+            f"Model {ref} has no VirtualModel and no provider the Inference Gateway can reach it through: add a "
+            "provider to the model entity, or create a VirtualModel for it"
+        )
+        super().__init__(httpx.Response(404, json={"detail": detail}, request=httpx.Request("POST", url)))
+
+
 # Sent as the OpenAI API key when the platform client has no token provider; the
 # gateway authenticates platform callers, never with an OpenAI key.
 _UNUSED_OPENAI_API_KEY = "not-used"
@@ -256,6 +270,34 @@ class _ModelsUrlMixin:
             route = f"{route}/v1"
         return route
 
+    def _entity_reference(
+        self, ref: str, model_entity: ModelEntity, provider: ModelProvider | None, *, passthrough: bool
+    ) -> ResolvedModelReference:
+        """The route a model entity is served on: its passthrough VirtualModel's, else its provider's."""
+        served_model_name = served_model_name_for_entity(provider, model_entity) if provider is not None else None
+        if passthrough:
+            return resolved_model_reference(
+                base_url=self.base_url,
+                name=model_entity.name,
+                route_workspace=model_entity.workspace,
+                route_model_name=model_entity.name,
+                host_url=provider.host_url if provider is not None else None,
+                served_model_name=served_model_name,
+            )
+        if provider is None:
+            raise UnroutableModelError(
+                ref,
+                model_entity_route_openai_url(
+                    base_url=self.base_url, workspace=model_entity.workspace, name=model_entity.name
+                ),
+            )
+        return ResolvedModelReference(
+            url=self.get_provider_route_openai_url(provider),
+            name=served_model_name or model_entity.name,
+            host_url=provider.host_url,
+            served_model_name=served_model_name,
+        )
+
     def get_model_entity_route_openai_url(self, model_entity: ModelEntityLike) -> str:
         """OpenAI SDK-compatible URL for a model-entity proxy route (always ``/v1``)."""
         return model_entity_route_openai_url(
@@ -267,21 +309,24 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
     """Sync client for the Models service API."""
 
     def resolve_model_reference(self, ref: str) -> ResolvedModelReference:
-        """Resolve ``workspace/name`` to the inference-gateway route it reaches.
+        """Resolve ``workspace/name`` to an inference-gateway route that serves it.
 
         The gateway routes by VirtualModel name, so the VirtualModel decides: a user-managed one is the
-        reference; the platform's passthrough for a model entity, or no VirtualModel yet, means the entity. A
-        VirtualModel the caller can't read may be a user-managed one, so the entity must exist but only the
-        gateway route is returned, without its provider's details.
+        reference; the platform's passthrough for a model entity means the entity, on its own route. A model
+        entity with no VirtualModel, such as one created by hand for a provider without model discovery, is
+        reached through its provider's route instead, under the provider's name for it. A VirtualModel the caller
+        can't read may be a user-managed one, so the entity must exist but only the gateway route is returned,
+        without its provider's details.
 
         Raises:
             NotFoundError: Neither a VirtualModel nor a model entity has that name.
+            UnroutableModelError: The model entity has no VirtualModel and no provider that can be resolved.
             PermissionDeniedError: The caller can't read the model entity, and no readable VirtualModel has the name.
             NemoHTTPError | NemoTransportError: The VirtualModel lookup failed otherwise; resolving without it could
                 name the entity when a VirtualModel owns the name.
         """
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
-        route_only = False
+        route_only = passthrough = False
         try:
             virtual_model = VirtualModelsClient.from_client(self).get_virtual_model(name=name, workspace=workspace)
         except NotFoundError:
@@ -291,18 +336,12 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
         else:
             if not is_passthrough_virtual_model(virtual_model.data(), workspace, name):
                 return resolved_virtual_model_reference(base_url=self.base_url, workspace=workspace, name=name)
+            passthrough = True
         model_entity = self.get_model(name=name, workspace=workspace).data()
         if route_only:
             return resolved_virtual_model_reference(base_url=self.base_url, workspace=workspace, name=name)
         provider = self._try_resolve_model_provider_with_warning(model_entity)
-        return resolved_model_reference(
-            base_url=self.base_url,
-            name=name,
-            route_workspace=model_entity.workspace,
-            route_model_name=model_entity.name,
-            host_url=provider.host_url if provider is not None else None,
-            served_model_name=served_model_name_for_entity(provider, model_entity) if provider is not None else None,
-        )
+        return self._entity_reference(ref, model_entity, provider, passthrough=passthrough)
 
     def _try_resolve_model_provider_with_warning(self, model_entity: ModelEntity) -> ModelProvider | None:
         """Resolve the Model Entity's first provider, if available."""
@@ -459,21 +498,24 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
     """Async client for the Models service API."""
 
     async def resolve_model_reference(self, ref: str) -> ResolvedModelReference:
-        """Resolve ``workspace/name`` to the inference-gateway route it reaches.
+        """Resolve ``workspace/name`` to an inference-gateway route that serves it.
 
         The gateway routes by VirtualModel name, so the VirtualModel decides: a user-managed one is the
-        reference; the platform's passthrough for a model entity, or no VirtualModel yet, means the entity. A
-        VirtualModel the caller can't read may be a user-managed one, so the entity must exist but only the
-        gateway route is returned, without its provider's details.
+        reference; the platform's passthrough for a model entity means the entity, on its own route. A model
+        entity with no VirtualModel, such as one created by hand for a provider without model discovery, is
+        reached through its provider's route instead, under the provider's name for it. A VirtualModel the caller
+        can't read may be a user-managed one, so the entity must exist but only the gateway route is returned,
+        without its provider's details.
 
         Raises:
             NotFoundError: Neither a VirtualModel nor a model entity has that name.
+            UnroutableModelError: The model entity has no VirtualModel and no provider that can be resolved.
             PermissionDeniedError: The caller can't read the model entity, and no readable VirtualModel has the name.
             NemoHTTPError | NemoTransportError: The VirtualModel lookup failed otherwise; resolving without it could
                 name the entity when a VirtualModel owns the name.
         """
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
-        route_only = False
+        route_only = passthrough = False
         try:
             virtual_model = await AsyncVirtualModelsClient.from_client(self).get_virtual_model(
                 name=name, workspace=workspace
@@ -485,18 +527,12 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
         else:
             if not is_passthrough_virtual_model(virtual_model.data(), workspace, name):
                 return resolved_virtual_model_reference(base_url=self.base_url, workspace=workspace, name=name)
+            passthrough = True
         model_entity = (await self.get_model(name=name, workspace=workspace)).data()
         if route_only:
             return resolved_virtual_model_reference(base_url=self.base_url, workspace=workspace, name=name)
         provider = await self._try_resolve_model_provider_with_warning(model_entity)
-        return resolved_model_reference(
-            base_url=self.base_url,
-            name=name,
-            route_workspace=model_entity.workspace,
-            route_model_name=model_entity.name,
-            host_url=provider.host_url if provider is not None else None,
-            served_model_name=served_model_name_for_entity(provider, model_entity) if provider is not None else None,
-        )
+        return self._entity_reference(ref, model_entity, provider, passthrough=passthrough)
 
     async def _try_resolve_model_provider_with_warning(self, model_entity: ModelEntity) -> ModelProvider | None:
         """Resolve the Model Entity's first provider, if available."""

@@ -34,7 +34,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -162,6 +162,8 @@ class HelixMetricModelResolver(ModelResolver):
         readable = await _readable_kind(self.authorize, workspace, name)
         try:
             resolved = await self.models_client.resolve_model_reference(model_ref.root)
+        except UnroutableModelError as exc:
+            raise ValueError(str(exc.detail)) from exc
         except NotFoundError as exc:
             raise _model_not_found_error(model_ref, workspace, name) from exc
         if resolved.virtual_model and readable == "model":

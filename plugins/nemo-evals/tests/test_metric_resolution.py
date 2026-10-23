@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver, HelixMetricSecretResolver
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.refs import ResolvedModelReference
 from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.values import ModelRef
@@ -174,6 +174,18 @@ async def test_model_resolver_accepts_read_access_to_either_kind(
     await HelixMetricModelResolver(models_client, authorize=authorize).resolve_model(ModelRef(root="default/mm"))
 
     assert checked == expected_checks
+
+
+async def test_model_resolver_says_why_an_existing_model_cannot_be_called(mocker: MockerFixture) -> None:
+    """The model exists, so the generic "not found" advice would send the caller looking for the wrong fix."""
+    unroutable = UnroutableModelError("default/mm", "http://nemo-api:8080/model/mm")
+    mocker.patch.object(AsyncModelsClient, "resolve_model_reference", AsyncMock(side_effect=unroutable))
+    models_client = AsyncModelsClient.from_client(
+        AsyncNemoClient(base_url="http://nemo-api:8080", http_client=AsyncMock(spec=httpx.AsyncClient))
+    )
+
+    with pytest.raises(ValueError, match="no VirtualModel and no provider"):
+        await HelixMetricModelResolver(models_client).resolve_model(ModelRef(root="default/mm"))
 
 
 async def test_model_resolver_refuses_a_caller_who_can_read_neither(mocker: MockerFixture) -> None:
