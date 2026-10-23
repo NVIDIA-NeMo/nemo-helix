@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: nemo-model-selection
-description: Recommends an LLM for a NeMo Helix agent based on what the agent actually has to do, explained in plain English before any benchmark name appears. Use when the user is choosing a model for a new agent, assessing a model they already selected, or choosing a model for Platform agent.yaml.
+description: Recommends an LLM for a NeMo Helix agent
 triggers:
   - which model should I use
   - what model is best for this
@@ -28,8 +28,7 @@ metadata:
 Recommend a model for a new agent from NIM or another provider configured on
 the running Platform. Explain the capability fit first and benchmark evidence
 second. Return the model choice in a form suitable for the
-Platform-managed `agent.yaml`. Preserve NAT model configuration only when the
-user is explicitly maintaining a legacy NAT workflow.
+Platform-managed `agent.yaml`.
 
 ## Pre-flight
 
