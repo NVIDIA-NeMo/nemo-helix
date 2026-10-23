@@ -1154,6 +1154,36 @@ jobs:
             await github.rest.repos.createDispatchEvent(request);
             core.info("Dispatched post-release cleanup.");
 
+  schedule-smoke:
+    name: Schedule post-release smoke checks
+    needs: [plan-release, poll-final-release]
+    if: ${{ !cancelled() && needs.poll-final-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scheduled: ${{ steps.smoke.outputs.scheduled }}
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Schedule smoke checks for a full published release
+        id: smoke
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # Enable after stable and nightly manual validation.
+          SMOKE_ENABLED: ${{ vars.RELEASE_SMOKE_ENABLED }}
+          RELEASE_SCOPE: ${{ needs.plan-release.outputs.release_scope }}
+          RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
+          DRY_RUN: ${{ needs.plan-release.outputs.dry_run }}
+          ACT: ${{ needs.plan-release.outputs.act }}
+          POLL_RESULT: ${{ needs.poll-final-release.result }}
+        with:
+          script: |
+            const { smokeEligible } = require("./.github/scripts/release-smoke.cjs");
+            core.setOutput("scheduled", smokeEligible(process.env));
+
   notify-end:
     name: Notify release result
     needs:
@@ -1162,6 +1192,7 @@ jobs:
       - create-github-release
       - signal-deployment
       - stage-helm
+      - schedule-smoke
     if: >-
       !cancelled() &&
       needs.plan-release.outputs.send_notifications == 'true' &&
@@ -1197,6 +1228,7 @@ jobs:
           POLL_RESULT: ${{ needs.poll-final-release.result }}
           GITHUB_RELEASE_RESULT: ${{ needs.create-github-release.result }}
           DEPLOYMENT_RESULT: ${{ needs.signal-deployment.result }}
+          SMOKE_CHECKS_PENDING: ${{ needs.schedule-smoke.outputs.scheduled }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
         with:
@@ -1209,3 +1241,23 @@ jobs:
             if (!response.ok) {
               core.setFailed(`Slack webhook returned ${response.status}.`);
             }
+
+  smoke-checks:
+    name: Post-release smoke checks
+    needs: [plan-release, poll-final-release, stage-helm, schedule-smoke, notify-end]
+    # Explicit status check allows a skipped/failed Slack notification.
+    if: >-
+      !cancelled() &&
+      needs.poll-final-release.result == 'success' &&
+      needs.schedule-smoke.outputs.scheduled == 'true'
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/release-smoke.yaml
+    with:
+      release-version: ${{ needs.stage-helm.outputs.chart_version }}
+      check-latest: ${{ needs.plan-release.outputs.release_type == 'stable' && !contains(needs.stage-helm.outputs.chart_version, '-') }}
+      send-notifications: ${{ needs.plan-release.outputs.send_notifications == 'true' }}
+    secrets:
+      AIRE_DOCKERHUB_ACCESS_TOKEN: ${{ secrets.AIRE_DOCKERHUB_ACCESS_TOKEN }}
+      SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
