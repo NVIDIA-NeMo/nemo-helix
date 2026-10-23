@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 const assert = require("node:assert/strict");
+const console = require("node:console");
 const test = require("node:test");
 const {
   resolveRelease,
@@ -95,6 +96,7 @@ test("one combined release-channel notification for each terminal outcome", asyn
     ["cancelled", "cancelled/incomplete"],
   ]) {
     const calls = [];
+    let lookups = 0;
     const result = await finishSmoke({
       env: {
         PREPARE_RESULT: "success",
@@ -104,6 +106,32 @@ test("one combined release-channel notification for each terminal outcome", asyn
         SEND_NOTIFICATIONS: "true",
         SLACK_RELEASE_WEBHOOK: "https://example.test/release",
         RUN_URL: "https://example.test/run",
+      },
+      context: { repo: { owner: "test", repo: "helix" }, runId: 123 },
+      github: {
+        rest: { actions: { listJobsForWorkflowRun: "list-jobs" } },
+        paginate: async (method, options) => {
+          lookups++;
+          assert.equal(method, "list-jobs");
+          assert.equal(options.run_id, 123);
+          assert.equal(options.filter, "latest");
+          return [
+            {
+              name: "Post-release smoke checks / Published wheel (macOS)",
+              html_url: "https://example.test/job/1",
+              steps: [
+                {
+                  name: "Install published package and launch CLI",
+                  conclusion: macos,
+                },
+              ],
+            },
+            {
+              name: "Notify release result",
+              steps: [{ name: "Send Slack alert", conclusion: "failure" }],
+            },
+          ];
+        },
       },
       fetchImpl: async (url, request) => {
         calls.push({ url, body: JSON.parse(request.body) });
@@ -115,7 +143,40 @@ test("one combined release-channel notification for each terminal outcome", asyn
     assert.equal(calls[0].url, "https://example.test/release");
     assert.match(calls[0].body.text, /0\.8\.0/);
     assert.match(calls[0].body.text, /https:\/\/example.test\/run/);
+    assert.equal(lookups, expected === "failed" ? 1 : 0);
+    if (expected === "failed")
+      assert.match(
+        calls[0].body.text,
+        /Failed step:\* <https:\/\/example.test\/job\/1\|Published wheel \(macOS\): Install published package and launch CLI>/,
+      );
+    else assert.doesNotMatch(calls[0].body.text, /Failed step:/);
+    assert.doesNotMatch(calls[0].body.text, /Send Slack alert/);
   }
+});
+
+test("job lookup failure still sends the failure alert", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  let sent = false;
+  const { result } = await finishSmoke({
+    env: {
+      KUBERNETES_RESULT: "failure",
+      SEND_NOTIFICATIONS: "true",
+      SLACK_RELEASE_WEBHOOK: "https://example.test/release",
+    },
+    context: { repo: {}, runId: 123 },
+    github: {
+      rest: { actions: {} },
+      paginate: async () => {
+        throw new Error("GitHub unavailable");
+      },
+    },
+    fetchImpl: async () => {
+      sent = true;
+      return { ok: true };
+    },
+  });
+  assert.equal(result, "failed");
+  assert.equal(sent, true);
 });
 
 test("Slack delivery failure fails the result job", async () => {
