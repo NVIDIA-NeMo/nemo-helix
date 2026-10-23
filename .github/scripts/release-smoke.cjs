@@ -29,10 +29,8 @@ function resolveRelease(version) {
   };
 }
 
-// The rollout switch stays off until stable/nightly manual validation is complete.
 function smokeEligible(env) {
   return (
-    env.SMOKE_ENABLED === "true" &&
     env.RELEASE_SCOPE === "all" &&
     ["stable", "nightly"].includes(env.RELEASE_TYPE) &&
     env.POLL_RESULT === "success" &&
