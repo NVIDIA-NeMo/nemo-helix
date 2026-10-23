@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from harbor.agents.model_connection import ModelConnectionSpec, ProviderAccess
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
-from nemo_evals.jobs import agent_compiler, gateway_models
+from nemo_evals.jobs import agent_compiler, gateway_agents, gateway_models
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
@@ -315,6 +317,24 @@ def test_a_no_network_task_off_the_agent_channel_is_refused(
         check_tasks_reach_the_gateway(_codex(), [("online", {}), ("offline", _NO_NETWORK)], agent_channel)
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"agent": {"network_mode": "no-network"}},
+        {"steps": [{"name": "build"}, {"name": "solve", "agent": {"network_mode": "no-network"}}]},
+    ],
+    ids=["agent-phase", "one-step"],
+)
+def test_a_task_that_takes_only_the_agent_offline_is_checked(
+    monkeypatch: pytest.MonkeyPatch, config: dict[str, object]
+) -> None:
+    """Harbor runs the agent under its own or a step's network mode, ahead of the environment's."""
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+
+    with pytest.raises(ValueError, match=r"gateway_unreachable: no-network tasks \['offline'\]"):
+        check_tasks_reach_the_gateway(_codex(), [("offline", config)], ())
+
+
 def test_tasks_with_network_access_or_targets_without_a_gateway_model_are_not_checked() -> None:
     check_tasks_reach_the_gateway(_codex(), [("online", {})], ())
     check_tasks_reach_the_gateway(
@@ -330,3 +350,17 @@ def test_the_compiled_job_carries_the_placeholder_key(harbor_resolved_task) -> N
     variables = {variable.name: variable for variable in agent_compiler._environment(spec, sandbox_plan=None)}
 
     assert variables["OPENAI_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
+
+
+def test_an_agent_whose_connection_names_no_variables_cannot_call_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Evals would have nowhere to put the gateway's URL or key, so the agent is refused like one with no connection."""
+    agent = SimpleNamespace(MODEL_CONNECTION=ModelConnectionSpec(default_provider="anthropic"))
+    monkeypatch.setattr(gateway_agents.AgentFactory, "get_agent_class", lambda name: agent)
+    monkeypatch.setitem(
+        gateway_agents.PROVIDERS, "anthropic", ProviderAccess(api_key_envs=(), base_url="https://x", base_url_envs=())
+    )
+    gateway_agents.gateway_agent_env.cache_clear()
+    try:
+        assert gateway_agents.gateway_agent_env("claude-code") is None
+    finally:
+        gateway_agents.gateway_agent_env.cache_clear()

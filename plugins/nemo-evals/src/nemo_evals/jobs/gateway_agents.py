@@ -57,9 +57,13 @@ def gateway_agent_env(name: str) -> GatewayAgentEnv | None:
     if provider != "openai" and provider != "anthropic":
         return None
     access = PROVIDERS[provider]
+    base_url_envs = (*spec.base_url_envs, *access.base_url_envs)
+    api_key_envs = (*spec.api_key_envs, *access.api_key_envs)
+    if not base_url_envs or not api_key_envs:
+        return None
     return GatewayAgentEnv(
-        base_url_env=(*spec.base_url_envs, *access.base_url_envs)[0],
-        api_key_env=(*spec.api_key_envs, *access.api_key_envs)[0],
+        base_url_env=base_url_envs[0],
+        api_key_env=api_key_envs[0],
         api_style=provider,
         model_prefix="" if spec.default_provider else f"{provider}/",
     )

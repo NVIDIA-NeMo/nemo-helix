@@ -11,6 +11,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from harbor.models.task.config import NetworkMode, TaskConfig
+from harbor.models.trial.config import AgentConfig as TrialAgentConfig
+from harbor.trial.network_policy import resolve_agent_phase_policy
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource
@@ -123,6 +125,19 @@ def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dic
         agent_kwargs["fabric_config"] = rewrite_fabric_config_base_urls(config, origin)
 
 
+def no_network_task_ids(tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> list[str]:
+    """The ids of the tasks among (task id, task.toml config) pairs whose agent runs, in any step, with no network."""
+    return [task_id for task_id, config in tasks if _agent_runs_without_network(TaskConfig.model_validate(config))]
+
+
+def _agent_runs_without_network(task: TaskConfig) -> bool:
+    baseline = task.environment.resolve_baseline()
+    return any(
+        resolve_agent_phase_policy(task, TrialAgentConfig(), baseline, step).network_mode == NetworkMode.NO_NETWORK
+        for step in task.steps or [None]
+    )
+
+
 def check_tasks_reach_the_gateway(
     target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]], agent_channel: Sequence[str]
 ) -> None:
@@ -136,11 +151,7 @@ def check_tasks_reach_the_gateway(
     """
     if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
         return
-    no_network = [
-        task_id
-        for task_id, config in tasks
-        if TaskConfig.model_validate(config).environment.resolve_baseline().network_mode == NetworkMode.NO_NETWORK
-    ]
+    no_network = no_network_task_ids(tasks)
     if not no_network:
         return
     host = urlsplit(agent_gateway_origin(sandboxed=True)).hostname or ""

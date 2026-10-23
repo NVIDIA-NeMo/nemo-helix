@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from nemo_helix_plugin.client.auth import StaticToken
-from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 from nemo_helix_plugin.models.types import (
     CreateModelDeploymentRequest,
@@ -295,21 +295,48 @@ def test_resolve_model_reference_ignores_missing_provider() -> None:
     assert result.host_url is None
 
 
-@pytest.mark.parametrize(
-    ("status", "detail"), [(404, "no virtual model"), (403, "Forbidden")], ids=["not-served-yet", "unreadable"]
-)
-def test_resolve_model_reference_falls_back_to_the_entity_without_a_readable_virtual_model(
-    status: int, detail: str
-) -> None:
-    """An entity not served yet has no VirtualModel; a caller may also read models but not VirtualModels."""
+def test_resolve_model_reference_falls_back_to_the_entity_without_a_virtual_model() -> None:
+    """An entity the gateway doesn't serve yet has no VirtualModel."""
     http = MagicMock(spec=httpx.Client)
-    http.request.side_effect = [_response(status, {"detail": detail}), _response(200, _model_json("judge"))]
+    http.request.side_effect = [_response(404, {"detail": "no virtual model"}), _response(200, _model_json("judge"))]
     client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
 
     result = client.resolve_model_reference("default/judge")
 
     assert result.name == "judge"
     assert not result.virtual_model
+
+
+def test_resolve_model_reference_gives_only_the_route_for_an_unreadable_virtual_model() -> None:
+    """It may be a user-managed VirtualModel the calls reach instead of the entity, so the entity's provider is
+    never described as the model; the entity must still exist."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        _response(403, {"detail": "Forbidden"}),
+        _response(200, _model_json("judge", model_providers=["default/provider"])),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = client.resolve_model_reference("default/judge")
+
+    assert [call.args[1] for call in http.request.call_args_list] == [
+        f"{VM_PATH}/judge",
+        f"{BASE}/apis/models/v2/workspaces/default/models/judge",
+    ]
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    assert result.virtual_model
+    assert result.host_url is None
+    assert result.served_model_name is None
+
+
+def test_resolve_model_reference_fails_when_the_virtual_model_lookup_fails() -> None:
+    """Falling back to the entity could name it while a VirtualModel owns the name."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [_response(500, {"detail": "gateway down"})]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(NemoHTTPError, match="gateway down"):
+        client.resolve_model_reference("default/judge")
 
 
 def test_resolve_model_reference_names_a_user_managed_virtual_model() -> None:
@@ -618,14 +645,16 @@ async def test_async_resolve_model_reference_names_a_user_managed_virtual_model(
 
 
 @pytest.mark.asyncio
-async def test_async_resolve_model_reference_falls_back_to_the_entity_without_a_readable_virtual_model() -> None:
+async def test_async_resolve_model_reference_gives_only_the_route_for_an_unreadable_virtual_model() -> None:
     http = AsyncMock(spec=httpx.AsyncClient)
     http.request.side_effect = [_response(403, {"detail": "Forbidden"}), _response(200, _model_json("judge"))]
     client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
 
     result = await client.resolve_model_reference("default/judge")
 
-    assert not result.virtual_model
+    assert len(http.request.call_args_list) == 2
+    assert result.virtual_model
+    assert result.host_url is None
 
 
 @pytest.mark.asyncio

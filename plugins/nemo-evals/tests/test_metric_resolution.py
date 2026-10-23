@@ -188,3 +188,32 @@ async def test_model_resolver_refuses_a_caller_who_can_read_neither(mocker: Mock
     with pytest.raises(HTTPException, match="/models/mm"):
         await HelixMetricModelResolver(models_client, authorize=authorize).resolve_model(ModelRef(root="default/mm"))
     resolve.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("allowed", "expected_host"), [({"virtual-models"}, None), ({"models"}, "http://nim:8000")])
+async def test_only_a_caller_who_may_read_the_entity_gets_its_provider_address(
+    mocker: MockerFixture, allowed: set[str], expected_host: str | None
+) -> None:
+    """The provider's address bypasses the gateway and its middleware, so reading the VirtualModel isn't enough."""
+    resolved = ResolvedModelReference(
+        url="http://nemo-api:8080/apis/inference-gateway/v2/workspaces/default/model/mm/-/v1",
+        name="mm",
+        host_url="http://nim:8000",
+        served_model_name="org/mm",
+    )
+    mocker.patch.object(AsyncModelsClient, "resolve_model_reference", AsyncMock(return_value=resolved))
+    models_client = AsyncModelsClient.from_client(
+        AsyncNemoClient(base_url="http://nemo-api:8080", http_client=AsyncMock(spec=httpx.AsyncClient))
+    )
+
+    async def authorize(method: str, path: str) -> None:
+        if path.split("/")[-2] not in allowed:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    model = await HelixMetricModelResolver(models_client, authorize=authorize).resolve_model(
+        ModelRef(root="default/mm")
+    )
+
+    assert model.url.endswith("/model/mm/-/v1")
+    assert model.host_url == expected_host
+    assert model.served_model_name == (None if expected_host is None else "org/mm")
