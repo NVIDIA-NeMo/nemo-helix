@@ -8829,15 +8829,6 @@ declare const filterFunctions: {
 //#region src/components/DataView/internal/module-augmentation.d.ts
 type DataViewFilterFns = typeof filterFunctions;
 /**
- * Extends LucideProps so icons accept the `variant` prop used by the KUI design system.
- * The KUI runtime maps this to the appropriate icon styling.
- */
-declare module 'lucide-react' {
-  interface LucideProps {
-    variant?: 'fill' | 'line';
-  }
-}
-/**
  * Extends the ColumnMeta interface from react-table to include the filter definition and other
  * data-view-specific column meta fields.
  * https://tanstack.com/table/latest/docs/api/core/column-def#meta
