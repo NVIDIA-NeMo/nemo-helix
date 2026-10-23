@@ -6,7 +6,6 @@ import { GradientBackground } from '@nemo/common/src/components/GradientBackgrou
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import { Warning } from '@nvidia/react-gui-icons/icons';
-import { AGENTS_ENABLED, JOBS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';

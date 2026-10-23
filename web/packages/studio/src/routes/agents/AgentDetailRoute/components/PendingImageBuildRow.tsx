@@ -3,7 +3,6 @@
 
 import { Badge, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { Warning } from '@nvidia/react-gui-icons/icons';
-import { JOBS_ENABLED } from '@studio/constants/environment';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';

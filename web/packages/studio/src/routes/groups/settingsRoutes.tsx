@@ -3,10 +3,9 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { Cog } from '@nvidia/react-gui-icons/icons';
-import { SETTINGS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateSettingsRoutes, getWorkspaceSettingsRoute } from '@studio/routes/utils';
+import { getWorkspaceSettingsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -24,14 +23,11 @@ export const settingsRoutes: RouteObject[] = [
   },
 ];
 
-export const getSettingsSideNavItems = (workspace: string) =>
-  SETTINGS_ENABLED
-    ? [
-        {
-          id: 'settings',
-          slotIcon: <Cog className={iconColorClass} />,
-          slotLabel: 'Settings',
-          href: getWorkspaceSettingsRoute(workspace),
-        },
-      ]
-    : [];
+export const getSettingsSideNavItems = (workspace: string) => [
+  {
+    id: 'settings',
+    slotIcon: <Cog className={iconColorClass} />,
+    slotLabel: 'Settings',
+    href: getWorkspaceSettingsRoute(workspace),
+  },
+];
