@@ -10,6 +10,7 @@ mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 from __future__ import annotations
 
 import math
+import shlex
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -30,7 +31,12 @@ from nemo_deployments_plugin.entities import (
 )
 from nemo_helix_plugin.models.types import K8sNIMOperatorConfig, ModelEntity
 from nhx.common.config import Runtime
-from nhx.core.models.app import is_multi_llm_image, parse_model_name_revision
+from nhx.core.models.app import (
+    is_model_free_nim_image,
+    is_multi_llm_image,
+    is_sglang_model_free_nim_image,
+    parse_model_name_revision,
+)
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
@@ -42,6 +48,9 @@ _SCRATCH_MOUNT = "/scratch"
 _TOOL_CALL_PLUGIN_PATH = "/model-store/plugin/plugin.py"
 _TOOL_CALL_PLUGIN_SCRATCH_PATH = "/scratch/plugin/plugin.py"
 _TOOL_CALL_PLUGIN_SCRATCH_DIR = "/scratch/plugin"
+_CHAT_TEMPLATE_SCRATCH_PATH = "/scratch/chat_template.jinja"
+_CHAT_TEMPLATE_ENV = "NHX_CHAT_TEMPLATE"
+_NIM_PASSTHROUGH_ARGS_ENV = "NIM_PASSTHROUGH_ARGS"
 _TOOL_CALL_PLUGIN_FINALIZE_SCRIPT = """set -euo pipefail
 py_files="$(find "{scratch_dir}" -type f -name '*.py' || true)"
 count="$(printf '%s\\n' "$py_files" | sed '/^$/d' | wc -l | tr -d ' ')"
@@ -99,6 +108,20 @@ def nim_legacy_weight_env(view: DeploymentConfigView) -> bool:
 
 
 _NIM_WEIGHT_PATH_ENV_KEYS = ("NIM_ENGINE_MODEL_PATH", "NIM_MODEL_PATH")
+
+
+def uses_model_free_nim(view: DeploymentConfigView, config: DeploymentsPluginConfig) -> bool:
+    """Whether the server runs the model-free NIM (NIM 2.x), which reads a different env contract than NIM 1.x."""
+    return is_model_free_nim_image(view.image_name or config.default_nimservice_image)
+
+
+def resolve_chat_template(view: DeploymentConfigView, model_entity: ModelEntity | None) -> str | None:
+    """The deployment config's chat template, else the model entity's."""
+    if view.chat_template:
+        return view.chat_template
+    if model_entity and model_entity.spec and model_entity.spec.chat_template:
+        return model_entity.spec.chat_template
+    return None
 
 
 def normalize_nim_weights_path(raw: str) -> str:
@@ -213,14 +236,47 @@ def tool_call_plugin_init_containers(
     ]
 
 
+def chat_template_init_container(
+    resolved: ResolvedPluginDeployment,
+    config: DeploymentsPluginConfig,
+    *,
+    names_scratch: str,
+) -> Container | None:
+    """Write the chat template to scratch for the model-free NIM, which takes a template only as a file path."""
+    if not uses_model_free_nim(resolved.view, config):
+        return None
+    chat_template = resolve_chat_template(resolved.view, resolved.model_entity)
+    if chat_template is None:
+        return None
+    return Container(
+        name="chat-template-write",
+        image=_image(config.busybox_image, config.busybox_image_tag),
+        command=["sh", "-c", f"printf '%s' \"${_CHAT_TEMPLATE_ENV}\" > {_CHAT_TEMPLATE_SCRATCH_PATH}"],
+        env=[EnvVar(name=_CHAT_TEMPLATE_ENV, value=chat_template)],
+        volumeMounts=[VolumeMount(name=names_scratch, mountPath=_SCRATCH_MOUNT)],
+    )
+
+
+def chat_template_install_path() -> str:
+    """Return the in-container path where :func:`chat_template_init_container` writes the chat template."""
+    return _CHAT_TEMPLATE_SCRATCH_PATH
+
+
 def compile_nim_server_env(
     resolved: ResolvedPluginDeployment,
     config: DeploymentsPluginConfig,
     *,
     weighted: bool,
     tool_call_plugin_path: str | None,
+    chat_template_path: str | None = None,
 ) -> dict[str, str]:
-    """Compile NIM server environment variables."""
+    """Compile NIM server environment variables.
+
+    The model-free NIM (NIM 2.x) reads only ``NIM_MODEL_PATH``, ``NIM_SERVED_MODEL_NAME`` and
+    ``NIM_TRUST_CUSTOM_CODE`` of the variables set here, and takes tool calling and the chat template
+    as backend (vLLM or SGLang) flags in ``NIM_PASSTHROUGH_ARGS``. ``chat_template_path`` is where
+    :func:`chat_template_init_container` wrote the chat template for it.
+    """
     view = resolved.view
     env: dict[str, str] = dict(view.additional_envs or {})
 
@@ -241,16 +297,19 @@ def compile_nim_server_env(
     if model_fqdn:
         env["NIM_SERVED_MODEL_NAME"] = model_fqdn
 
+    model_free = uses_model_free_nim(view, config)
     legacy = nim_legacy_weight_env(view)
     if weighted:
         weights_path = resolve_nim_weights_path(view)
-        if legacy:
+        if model_free:
+            env["NIM_MODEL_PATH"] = weights_path
+        elif legacy:
             env["NIM_MODEL_NAME"] = weights_path
             env["NIM_MODEL_PATH"] = weights_path
         else:
             env["NIM_ENGINE_MODEL_PATH"] = weights_path
         effective_image = view.image_name or config.default_nimservice_image
-        if not is_multi_llm_image(effective_image):
+        if not model_free and not is_multi_llm_image(effective_image):
             env["NIM_FT_MODEL"] = weights_path
             env["NIM_CUSTOM_MODEL"] = weights_path
     elif resolved.model_name:
@@ -259,7 +318,7 @@ def compile_nim_server_env(
         )
         env.setdefault("NIM_SERVED_MODEL_NAME", served)
 
-    if not legacy:
+    if not legacy and not model_free:
         # NIM 2.x advertises this as the /v1/models id, which provider discovery
         # matches against the model entity.
         entity = resolved.model_entity
@@ -272,31 +331,54 @@ def compile_nim_server_env(
         env["NHX_MODEL_ENTITY_WORKSPACE"] = model_entity.workspace
         env["NHX_MODEL_ENTITY_NAME"] = model_entity.name
         if model_entity.trust_remote_code:
-            env["NIM_FORCE_TRUST_REMOTE_CODE"] = "1"
+            if not model_free:
+                env["NIM_FORCE_TRUST_REMOTE_CODE"] = "1"
             env["NIM_TRUST_CUSTOM_CODE"] = "1"
-        if model_entity.spec:
-            if model_entity.spec.chat_template:
-                env["NIM_CHAT_TEMPLATE"] = model_entity.spec.chat_template
-            tool_cfg = model_entity.spec.tool_call_config
-            if tool_cfg:
-                if tool_cfg.tool_call_parser:
-                    env["NIM_TOOL_CALL_PARSER"] = tool_cfg.tool_call_parser
-                if tool_call_plugin_path:
-                    env["NIM_TOOL_PARSER_PLUGIN"] = tool_call_plugin_path
-                if tool_cfg.auto_tool_choice is not None:
-                    env["NIM_ENABLE_AUTO_TOOL_CHOICE"] = "1" if tool_cfg.auto_tool_choice else "0"
 
-    if view.chat_template:
-        env["NIM_CHAT_TEMPLATE"] = view.chat_template
+    # The deployment config's tool calling settings override the model entity's, field by field.
+    tool_call_parser: str | None = None
+    auto_tool_choice: bool | None = None
+    entity_tool_cfg = model_entity.spec.tool_call_config if model_entity and model_entity.spec else None
+    for tool_cfg in (entity_tool_cfg, view.tool_call_config):
+        if tool_cfg is None:
+            continue
+        if tool_cfg.tool_call_parser:
+            tool_call_parser = tool_cfg.tool_call_parser
+        if tool_cfg.auto_tool_choice is not None:
+            auto_tool_choice = tool_cfg.auto_tool_choice
+    chat_template = resolve_chat_template(view, model_entity)
 
-    deploy_tool_cfg = view.tool_call_config
-    if deploy_tool_cfg:
-        if deploy_tool_cfg.tool_call_parser:
-            env["NIM_TOOL_CALL_PARSER"] = deploy_tool_cfg.tool_call_parser
-        if deploy_tool_cfg.tool_call_plugin and tool_call_plugin_path:
-            env["NIM_TOOL_PARSER_PLUGIN"] = tool_call_plugin_path
-        if deploy_tool_cfg.auto_tool_choice is not None:
-            env["NIM_ENABLE_AUTO_TOOL_CHOICE"] = "1" if deploy_tool_cfg.auto_tool_choice else "0"
+    if model_free:
+        if chat_template and not chat_template_path:
+            raise ValueError("the model-free NIM needs chat_template_path to apply a chat template")
+        passthrough_args: list[str] = []
+        if chat_template_path and chat_template:
+            passthrough_args.extend(["--chat-template", chat_template_path])
+        if tool_call_parser:
+            passthrough_args.extend(["--tool-call-parser", tool_call_parser])
+        # The SGLang model-free NIM takes the same NIM_* variables, but its passthrough args are SGLang
+        # flags: SGLang rejects --enable-auto-tool-choice and has no tool parser plugins.
+        sglang = is_sglang_model_free_nim_image(view.image_name or config.default_nimservice_image)
+        if tool_call_plugin_path:
+            if sglang:
+                raise ValueError("tool_call_plugin is not supported on the SGLang model-free NIM")
+            passthrough_args.extend(["--tool-parser-plugin", tool_call_plugin_path])
+        if auto_tool_choice and not sglang:
+            passthrough_args.append("--enable-auto-tool-choice")
+        if passthrough_args:
+            # NIM keeps the last value of a repeated flag, so the user's own passthrough args still win.
+            user_args = env.get(_NIM_PASSTHROUGH_ARGS_ENV)
+            env[_NIM_PASSTHROUGH_ARGS_ENV] = " ".join(filter(None, [shlex.join(passthrough_args), user_args]))
+        return env
+
+    if chat_template:
+        env["NIM_CHAT_TEMPLATE"] = chat_template
+    if tool_call_parser:
+        env["NIM_TOOL_CALL_PARSER"] = tool_call_parser
+    if tool_call_plugin_path:
+        env["NIM_TOOL_PARSER_PLUGIN"] = tool_call_plugin_path
+    if auto_tool_choice is not None:
+        env["NIM_ENABLE_AUTO_TOOL_CHOICE"] = "1" if auto_tool_choice else "0"
 
     return env
 
