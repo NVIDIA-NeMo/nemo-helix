@@ -291,7 +291,7 @@ builder-steps = ["nemo-builder-plugin"]
 generate-config-docs = "script.generate_config_docs:main"
 
 [tool.uv]
-prerelease = "if-necessary-or-explicit"
+prerelease = "if-necessary"
 index-strategy = "unsafe-best-match"
 required-version = ">=0.13.4"
 cache-keys = [{ file = "pyproject.toml" }]
