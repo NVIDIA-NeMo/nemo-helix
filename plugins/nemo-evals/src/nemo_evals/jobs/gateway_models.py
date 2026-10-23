@@ -14,14 +14,17 @@ from harbor.models.task.config import NetworkMode, TaskConfig
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource
+from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import model_entity_route_openai_url, parse_workspace_name_ref
-from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborGatewayAccess
+from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.values.common import SecretRef
 
 
 async def check_gateway_model(
@@ -66,16 +69,35 @@ def agent_gateway_origin(*, sandboxed: bool) -> str:
     return resolve_agent_gateway_url(base_url, mode="k8s", internal_base_url=internal_base_url)
 
 
-def harbor_gateway_access(target: HarborRunnerTarget, origin: str) -> HarborGatewayAccess | None:
-    """The gateway route and variables for a Harbor agent that names a gateway model."""
+def point_agent_at_gateway_model(
+    config: HarborRuntimeConfig, target: HarborRunnerTarget, origin: str
+) -> HarborRuntimeConfig:
+    """``config`` with the agent's base URL set to its gateway model's route, and its key read from ``env_secrets``.
+
+    Without a key in the target's ``env_secrets``, the key is the placeholder :func:`gateway_key_placeholder` puts in
+    the job's environment.
+    """
     env = target.gateway_agent_env
     if target.gateway_model is None or env is None:
-        return None
+        return config
     workspace, name = parse_workspace_name_ref(target.gateway_model.root, label="Gateway model")
     route = model_entity_route_openai_url(base_url=origin, workspace=workspace, name=name).removesuffix("/v1")
-    return HarborGatewayAccess(
-        base_url=route + env.route_suffix, base_url_env=env.base_url_env, api_key_env=env.api_key_env
+    env_secrets = config.env_secrets
+    if env.api_key_env not in env_secrets:
+        env_secrets = {**env_secrets, env.api_key_env: SecretRef(GATEWAY_PLACEHOLDER_KEY)}
+    return config.model_copy(
+        update={"env_vars": {**config.env_vars, env.base_url_env: route + env.route_suffix}, "env_secrets": env_secrets}
     )
+
+
+def gateway_key_placeholder(target: object) -> list[EnvironmentVariable]:
+    """The job variable holding a gateway agent's placeholder key, when its target supplies no key of its own."""
+    if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
+        return []
+    env = target.gateway_agent_env
+    if env is None or env.api_key_env in target.env_secrets:
+        return []
+    return [EnvironmentVariable(name=env.api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
 
 
 def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dict[str, Any], origin: str) -> None:

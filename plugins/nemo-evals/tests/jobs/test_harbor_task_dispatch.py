@@ -28,6 +28,7 @@ from nemo_evals.jobs.agent_spec import (
     HarborRunnerTarget,
     RegisteredAgentSource,
 )
+from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.harbor_task_dispatch import (
     DISPATCH_COMMAND,
     OPENSANDBOX_ENVIRONMENT,
@@ -389,3 +390,16 @@ def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_s
 
     with pytest.raises(ValueError, match="gateway_unreachable"):
         HarborTaskAgentEvalJob().run(blocked.model_dump(mode="json"), ctx=MagicMock(), async_client=MagicMock())
+
+
+async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_spec):
+    """The agent reads it like any other key; the gateway checks none with platform auth off."""
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")))
+    spec = task_spec.model_copy(update={"spec": task_spec.spec.model_copy(update={"target": target})})
+
+    compiled = await HarborTaskDispatchJob.compile(spec=spec, profile="k8s-cpu")
+
+    (step,) = compiled.steps
+    variables = {variable.name: variable for variable in step.environment or []}
+    assert variables["ANTHROPIC_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
+    assert variables["ANTHROPIC_API_KEY"].from_secret is None

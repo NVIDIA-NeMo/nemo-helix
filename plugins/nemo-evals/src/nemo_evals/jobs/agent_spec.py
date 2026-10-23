@@ -26,12 +26,12 @@ from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskR
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.filesets import FilesetRef
-from nemo_evals.jobs.gateway_agents import GATEWAY_AGENTS, GatewayAgentEnv
+from nemo_evals.jobs.gateway_agents import GATEWAY_AGENTS, GatewayAgentEnv, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
-from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_gateway_env, validate_harbor_env
+from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nhx_evals_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
@@ -386,7 +386,7 @@ class HarborRunnerTarget(BaseModel):
                 f"`model` points the agent at the Inference Gateway, which evals can do for {sorted(GATEWAY_AGENTS)}; "
                 f"for {agent!r}, set `model_name` and the agent's own endpoint variables instead"
             )
-        validate_gateway_env(env.base_url_env, env.api_key_env, self.env_vars, self.env_secrets)
+        validate_gateway_env(env, self.env_vars, self.env_secrets)
         return self
 
     @property

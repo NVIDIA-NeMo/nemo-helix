@@ -53,7 +53,7 @@ from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gateway_models import (
     agent_gateway_origin,
     check_gateway_model,
-    harbor_gateway_access,
+    point_agent_at_gateway_model,
     rebase_registered_agent_config,
 )
 from nemo_evals.jobs.gym_sandbox import (
@@ -539,8 +539,8 @@ class _AgentEvalJobBase(NemoJob):
                 origin = agent_gateway_origin(sandboxed=harbor_config.environment is not None)
                 agent_kwargs = dict(harbor_config.agent_kwargs)
                 rebase_registered_agent_config(target, agent_kwargs, origin)
-                harbor_config = harbor_config.model_copy(
-                    update={"agent_kwargs": agent_kwargs, "gateway": harbor_gateway_access(target, origin)}
+                harbor_config = point_agent_at_gateway_model(
+                    harbor_config.model_copy(update={"agent_kwargs": agent_kwargs}), target, origin
                 )
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
