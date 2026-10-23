@@ -62,7 +62,7 @@ export const CodingAgentPromptEditor: FC<CodingAgentPromptEditorProps> = ({
             <Button
               kind="tertiary"
               size="tiny"
-              aria-label="CopyGeneric to clipboard"
+              aria-label="Copy to clipboard"
               onClick={copyToClipboard}
             >
               <CopyGeneric size="16" className="text-brand" aria-hidden />

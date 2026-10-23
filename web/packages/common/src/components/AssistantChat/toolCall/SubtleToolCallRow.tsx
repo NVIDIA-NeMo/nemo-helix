@@ -39,7 +39,7 @@ const InvocationPanel = ({
         aria-label={`CopyGeneric invocation${invocationCount === 1 ? '' : ` ${invocationIndex + 1}`}`}
         className="absolute right-density-xs top-density-xs z-10 rounded p-0.5 hover:bg-surface-sunken"
         onClick={() => copyInvocation(invocation)}
-        title="CopyGeneric invocation"
+        title="Copy invocation"
         type="button"
       >
         <CopyGeneric aria-hidden className="size-3.5" />

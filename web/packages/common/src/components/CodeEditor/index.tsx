@@ -124,7 +124,7 @@ export const CodeEditor: FC<CodeEditorProps> = ({
                 onClick={copyToClipboard}
                 kind="tertiary"
                 size="tiny"
-                aria-label="CopyGeneric to clipboard"
+                aria-label="Copy to clipboard"
               >
                 <CopyGeneric />
               </Button>

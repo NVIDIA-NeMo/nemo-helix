@@ -198,8 +198,8 @@ export const LogViewer: FC<LogViewerProps> = ({
           </Flex>
           <CodeSnippetCopyButton
             value={logText}
-            title="CopyGeneric logs"
-            aria-label="CopyGeneric logs"
+            title="Copy logs"
+            aria-label="Copy logs"
             onClick={() => notify('Copied to clipboard!', 'success', { durationMs: 3000 })}
           >
             <CopyGeneric />
