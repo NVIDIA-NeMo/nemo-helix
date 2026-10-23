@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
+from nemo_helix_plugin.images import normalize_reference
 from nemo_helix_plugin.jobs.schemas import (
     HelixJobListResultResponse,
     HelixJobLog,
@@ -15,8 +16,9 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 JsonMap: TypeAlias = dict[str, Any]
 JsonObject: TypeAlias = JsonMap
@@ -230,8 +232,34 @@ class AgentInline(BaseModel):
     )
 
 
+class ReferenceConfig(BaseModel):
+    """Optional source and container references associated with an agent."""
+
+    fileset: FilesetRef | None = Field(
+        default=None,
+        pattern=ENTITY_REF_PATTERN,
+        # StrRef's input schema otherwise omits the field's pattern.
+        json_schema_extra={"pattern": ENTITY_REF_PATTERN},
+        description="Fileset containing agent source and supporting files, as name or workspace/name.",
+    )
+    container_image: str | None = Field(
+        default=None, description="Container image reference; accepts Docker shorthand, tags, and SHA-256 digests."
+    )
+
+    @field_validator("container_image")
+    @classmethod
+    def _validate_container_image(cls, value: str | None) -> str | None:
+        if value is not None:
+            if value != value.strip():
+                raise ValueError("Container image reference must not contain surrounding whitespace.")
+            normalize_reference(value)
+        return value
+
+
 class Agent(EntityMetadata, AgentInline):
     """An agent definition stored in the Agents service."""
+
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
 
 
 class AgentComputeSpec(EntityMetadata, ComputeSpecInline):
@@ -300,6 +328,7 @@ class RegisterAgentRequest(BaseModel):
 
     name: str = Field(description="Unique agent name within the workspace.")
     description: str = Field(default="", description="Human-readable description.")
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     config: JsonMap = Field(
         default_factory=dict, description="Agent config dict interpreted according to config_format."
     )

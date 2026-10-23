@@ -2746,6 +2746,10 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
+        reference:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceConfigOutput'
+          description: Agent source and container references.
         id:
           type: string
           title: Id
@@ -5641,6 +5645,38 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    ReferenceConfigInput:
+      properties:
+        fileset:
+          pattern: ^[\w\-.]+(/[\w\-.]+)?$
+          title: Fileset
+          description: Fileset containing agent source and supporting files, as name
+            or workspace/name.
+          type: string
+        container_image:
+          title: Container Image
+          description: Container image reference; accepts Docker shorthand, tags,
+            and SHA-256 digests.
+          type: string
+      type: object
+      title: ReferenceConfigInput
+      description: Optional source and container references associated with an agent.
+    ReferenceConfigOutput:
+      properties:
+        fileset:
+          pattern: ^[\w\-.]+(/[\w\-.]+)?$
+          title: Fileset
+          description: Fileset containing agent source and supporting files, as name
+            or workspace/name.
+          type: string
+        container_image:
+          title: Container Image
+          description: Container image reference; accepts Docker shorthand, tags,
+            and SHA-256 digests.
+          type: string
+      type: object
+      title: ReferenceConfigOutput
+      description: Optional source and container references associated with an agent.
     RegisterAgentRequest:
       properties:
         name:
@@ -5652,6 +5688,10 @@ components:
           title: Description
           description: Human-readable description.
           default: ''
+        reference:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceConfigInput'
+          description: Agent source and container references.
         config:
           additionalProperties: true
           type: object

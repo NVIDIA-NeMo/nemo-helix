@@ -48,6 +48,7 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.agents.types import (
     ModelProviderOverride as ModelProviderOverride,
 )
+from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import FilesetRef
@@ -275,6 +276,8 @@ class Agent(NemoEntity, AgentInline, entity_type="agent"):
     are **not** stored on the entity because the paths are fully derivable
     from ``(workspace, name)``.
     """
+
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
 
 
 class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
