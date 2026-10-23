@@ -5915,11 +5915,10 @@ components:
       properties:
         name:
           type: string
-          enum:
-          - codex
-          - claude-code
           title: Name
-          description: Built-in Harbor agent to run.
+          description: 'Built-in Harbor agent to run. It must declare a model connection
+            the gateway can serve: an OpenAI- or Anthropic-style provider, or one
+            taken from the model name (for example `codex`, `claude-code`, `mini-swe-agent`).'
         model:
           allOf:
           - $ref: '#/components/schemas/ModelRef'
@@ -5969,13 +5968,13 @@ components:
           - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
           description: "The agent Harbor runs in each task container: a built-in agent\
-            \ by `name` (with an optional `model_name`, or a gateway `model` for `codex`\
-            \ and `claude-code`), your own by `import_path`, or a registered platform\
-            \ `agent` (with an optional `environment`). A registered agent is resolved\
-            \ at submit into the SDK's installed Fabric agent with the agent's translated\
-            \ config in `agent_kwargs.fabric_config`, so it runs as registered \u2014\
-            \ identity, skills, MCP servers, and telemetry included \u2014 and stays,\
-            \ qualified, as the run's provenance."
+            \ by `name` (with an optional `model_name`, or a gateway `model` for an\
+            \ agent that declares a model connection), your own by `import_path`,\
+            \ or a registered platform `agent` (with an optional `environment`). A\
+            \ registered agent is resolved at submit into the SDK's installed Fabric\
+            \ agent with the agent's translated config in `agent_kwargs.fabric_config`,\
+            \ so it runs as registered \u2014 identity, skills, MCP servers, and telemetry\
+            \ included \u2014 and stays, qualified, as the run's provenance."
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'

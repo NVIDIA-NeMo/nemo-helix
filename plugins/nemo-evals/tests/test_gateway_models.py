@@ -81,28 +81,24 @@ def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "base_url", "base_url_env", "api_key_env"),
+    ("agent", "base_url", "base_url_env", "api_key_env", "model_name"),
     [
-        (
-            HarborGatewayAgentSource(name="codex", model=ModelRef("ws/cb-gpt")),
-            f"{ROUTE}/v1",
-            "OPENAI_BASE_URL",
-            "OPENAI_API_KEY",
-        ),
-        (
-            HarborGatewayAgentSource(name="claude-code", model=ModelRef("ws/cb-gpt")),
-            ROUTE,
-            "ANTHROPIC_BASE_URL",
-            "ANTHROPIC_API_KEY",
-        ),
+        ("codex", f"{ROUTE}/v1", "OPENAI_BASE_URL", "OPENAI_API_KEY", "cb-gpt"),
+        ("claude-code", ROUTE, "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "cb-gpt"),
+        ("mini-swe-agent", f"{ROUTE}/v1", "OPENAI_BASE_URL", "MSWEA_API_KEY", "openai/cb-gpt"),
     ],
-    ids=["codex", "claude-code"],
+    ids=["openai-provider", "anthropic-provider", "provider-from-model-name"],
 )
-def test_each_agent_gets_the_route_on_the_variables_it_reads(
-    source: HarborGatewayAgentSource, base_url: str, base_url_env: str, api_key_env: str
+def test_each_agent_gets_the_route_on_the_variables_its_model_connection_declares(
+    agent: str, base_url: str, base_url_env: str, api_key_env: str, model_name: str
 ) -> None:
-    """OpenAI clients take the ``/v1`` root; the Anthropic client appends ``/v1`` itself."""
-    target = HarborRunnerTarget(source=source)
+    """Harbor's declared model connection decides the variables and the API style.
+
+    OpenAI clients take the ``/v1`` root; the Anthropic client appends ``/v1`` itself. An agent that takes its provider
+    from the model name is sent ``openai/<name>``, so it picks the OpenAI-style route.
+    """
+    target = HarborRunnerTarget(source=HarborGatewayAgentSource(name=agent, model=ModelRef("ws/cb-gpt")))
+    assert target.agent_model_name == model_name
 
     config = point_agent_at_gateway_model(HarborRuntimeConfig(agent_name="codex"), target, "http://gw:8080")
 
@@ -149,11 +145,12 @@ def test_a_source_document_is_the_one_shape_its_keys_fit(source: dict[str, str],
     [
         {"name": "codex", "model": "ws/cb-gpt", "model_name": "gpt-x"},
         {"name": "oracle", "model": "ws/cb-gpt"},
+        {"name": "gemini-cli", "model": "ws/cb-gpt"},
     ],
-    ids=["model-and-model-name", "agent-without-gateway-support"],
+    ids=["model-and-model-name", "no-model-connection", "provider-the-gateway-does-not-serve"],
 )
 def test_a_source_document_no_shape_fits_is_refused(source: dict[str, str]) -> None:
-    """Both shapes are closed, so the spec itself rules these out; no validator decides it."""
+    """Neither source takes both fields, and only agents whose model connection the gateway can serve take `model`."""
     with pytest.raises(ValidationError):
         HarborRunnerTarget.model_validate({"source": source})
 
