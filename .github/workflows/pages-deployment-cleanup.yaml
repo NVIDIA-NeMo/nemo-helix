@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Cleanup GitHub Pages Deployments
+
+on:
+  schedule:
+    # Sunday morning Pacific (07:37 PDT / 06:37 PST).
+    - cron: "37 14 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Log old Pages deployment records without deleting them.
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: pages-deployment-cleanup-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Delete old Pages deployment records
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DRY_RUN: ${{ inputs['dry-run'] || 'false' }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { cleanupPagesDeployments } = require("./.github/scripts/cleanup-pages-deployments.cjs");
+            await cleanupPagesDeployments({
+              core,
+              github,
+              context,
+              dryRun: process.env.DRY_RUN === "true",
+            });
