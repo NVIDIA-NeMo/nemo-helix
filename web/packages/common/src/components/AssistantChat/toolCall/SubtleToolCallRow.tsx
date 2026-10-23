@@ -36,7 +36,7 @@ const InvocationPanel = ({
   >
     <Stack className="relative w-full min-w-0 max-w-full">
       <button
-        aria-label={`CopyGeneric invocation${invocationCount === 1 ? '' : ` ${invocationIndex + 1}`}`}
+        aria-label={`Copy invocation${invocationCount === 1 ? '' : ` ${invocationIndex + 1}`}`}
         className="absolute right-density-xs top-density-xs z-10 rounded p-0.5 hover:bg-surface-sunken"
         onClick={() => copyInvocation(invocation)}
         title="Copy invocation"
