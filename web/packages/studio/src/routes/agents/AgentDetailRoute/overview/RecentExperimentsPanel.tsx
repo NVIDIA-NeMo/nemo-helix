@@ -3,6 +3,7 @@
 
 import { formatSignedDelta } from '@nemo/common/src/components/DeltaText';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
+import { Beaker } from '@nemo/icons/icons';
 import {
   Anchor,
   Block,
@@ -13,7 +14,6 @@ import {
   StatusMessage,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Beaker } from '@nvidia/react-gui-icons/icons';
 import { MetricTrendPanel } from '@studio/components/charts/MetricTrendPanel';
 import { StackedSkeleton } from '@studio/components/StackedSkeleton';
 import { LINK_DOCS_EXPERIMENTS_CLI } from '@studio/constants/links';

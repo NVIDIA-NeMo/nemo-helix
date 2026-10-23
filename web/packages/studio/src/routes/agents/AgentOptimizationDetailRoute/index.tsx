@@ -9,6 +9,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
+import { FolderOpen, IconDocument } from '@nemo/icons/icons';
 import {
   useAgentOptimizationGetRunStrategyJob,
   useAgentOptimizationListRunStrategyJobResults,
@@ -24,7 +25,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { FolderOpen, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

@@ -4,10 +4,10 @@
 import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/components/StatTile';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
+import { GraphNode, Gpu } from '@nemo/icons/icons';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
-import { GraphNode, Gpu } from '@nvidia/react-gui-icons/icons';
 import type {
   CustomizationMetricValue,
   CustomizationStatusDetailsWithMetrics,

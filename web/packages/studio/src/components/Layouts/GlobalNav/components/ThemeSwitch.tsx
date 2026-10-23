@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Moon, SunHigh } from '@nemo/icons/icons';
 import { Button, Theme, Tooltip, useTheme } from '@nvidia/foundations-react-core';
-import { Moon, SunHigh } from '@nvidia/react-gui-icons/icons';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { UI_THEME } from '@studio/util/localStorage';
 

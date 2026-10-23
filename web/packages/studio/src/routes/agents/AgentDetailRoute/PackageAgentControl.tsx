@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { Package } from '@nemo/icons/icons';
 import {
   Accordion,
   Badge,
@@ -19,7 +20,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { Package } from '@nvidia/react-gui-icons/icons';
 import {
   type DeploymentMode,
   enabledImageModes,

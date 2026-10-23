@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronLeft, ChevronRight, LockClosed, LayoutRows, Trash } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -12,13 +13,6 @@ import {
   TextArea,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import {
-  ChevronLeft,
-  ChevronRight,
-  LockClosed,
-  LayoutRows,
-  Trash,
-} from '@nvidia/react-gui-icons/icons';
 import { COLUMN_TYPE_TAG_COLOR } from '@studio/components/FileRowEditor/constants';
 import { formatCellValue } from '@studio/components/FileRowEditor/schema';
 import {

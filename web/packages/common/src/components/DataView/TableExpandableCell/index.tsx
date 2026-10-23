@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Expand } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { Expand } from '@nvidia/react-gui-icons/icons';
 import type { FC, ReactNode } from 'react';
 
 export interface TableExpandableCellState {

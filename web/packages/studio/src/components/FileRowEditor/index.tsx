@@ -4,8 +4,8 @@
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Trash } from '@nemo/icons/icons';
 import { Button, Stack } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { makeDataFileColumns } from '@studio/components/FileRowEditor/columns';
 import { COLUMN_PINNING, DEFAULT_SORT } from '@studio/components/FileRowEditor/constants';
 import { FileHeader } from '@studio/components/FileRowEditor/FileHeader';

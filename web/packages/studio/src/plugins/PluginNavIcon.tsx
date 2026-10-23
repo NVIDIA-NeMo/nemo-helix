@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NvidiaGuiIcon } from '@nvidia/react-gui-icons';
+import { NvidiaGuiIcon } from '@nemo/icons';
 import { isPluginIconName } from '@studio/plugins/iconMap';
 import { Component, type FC, type ReactNode } from 'react';
 

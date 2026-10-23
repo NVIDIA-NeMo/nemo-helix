@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ActionBarPrimitive, MessagePrimitive } from '@assistant-ui/react';
+import { Check, CopyGeneric } from '@nemo/icons/icons';
 import { Tooltip } from '@nvidia/foundations-react-core';
-import { Check, CopyGeneric } from '@nvidia/react-gui-icons/icons';
 
 export const ACTION_BUTTON_CLASS =
   'flex cursor-pointer size-7 items-center justify-center rounded border border-transparent text-base bg-transparent text-secondary hover:border-base hover:bg-surface-raised hover:text-primary disabled:cursor-not-allowed disabled:opacity-50';

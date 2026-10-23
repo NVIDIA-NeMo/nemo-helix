@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
+import { InfoCircle } from '@nemo/icons/icons';
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   Banner,
@@ -16,7 +17,6 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
 import { ConfigureStep } from '@studio/components/evaluation/ModelEvaluationWizard/ConfigureStep';
 import { EvaluationStep } from '@studio/components/evaluation/ModelEvaluationWizard/EvaluationStep';

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Trash } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { columnReference, type CustomTemplateRow } from '@studio/components/transform/template';
 import { type FC } from 'react';
 

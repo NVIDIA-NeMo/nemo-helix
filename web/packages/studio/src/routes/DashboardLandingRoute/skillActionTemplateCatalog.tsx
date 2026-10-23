@@ -13,7 +13,7 @@ import {
   Wrench,
   Key,
   MagnifyingGlass,
-} from '@nvidia/react-gui-icons/icons';
+} from '@nemo/icons/icons';
 import type { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 import type { ReactNode } from 'react';
 

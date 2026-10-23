@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { ArrowDown, ArrowUp, CopyGeneric, Trash } from '@nemo/icons/icons';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
-import { ArrowDown, ArrowUp, CopyGeneric, Trash } from '@nvidia/react-gui-icons/icons';
 import type { GuardrailCheckMessage } from '@studio/api/guardrail-checks/types';
 import cn from 'classnames';
 import { type FC, useRef } from 'react';

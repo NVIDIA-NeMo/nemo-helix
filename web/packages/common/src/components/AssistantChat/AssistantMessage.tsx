@@ -15,8 +15,8 @@ import {
   MESSAGE_ACTIONS_CLASS,
 } from '@nemo/common/src/components/AssistantChat/messageActions';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
+import { Refresh } from '@nemo/icons/icons';
 import { Skeleton, Tooltip } from '@nvidia/foundations-react-core';
-import { Refresh } from '@nvidia/react-gui-icons/icons';
 
 const ASSISTANT_MESSAGE_SURFACE_CLASS =
   'w-full max-w-full rounded-lg border border-base border-l-4 border-l-[var(--border-color-brand)] bg-surface-base px-density-lg py-density-md shadow ring-1 ring-black/5 dark:ring-white/10';

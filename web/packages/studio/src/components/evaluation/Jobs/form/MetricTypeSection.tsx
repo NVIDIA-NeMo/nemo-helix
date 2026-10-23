@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
+import { ScaleBalance } from '@nemo/icons/icons';
 import { Anchor, Badge, Flex, RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
-import { ScaleBalance } from '@nvidia/react-gui-icons/icons';
 import { LINK_EVAL_DOCS_METRICS } from '@studio/constants/links';
 import { type FC, useState } from 'react';
 

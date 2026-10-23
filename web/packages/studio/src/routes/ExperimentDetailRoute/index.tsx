@@ -3,16 +3,10 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { ChartPerformance, ChartScatterplot, Pencil, Star, LayoutDetail } from '@nemo/icons/icons';
 import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insights';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import {
-  ChartPerformance,
-  ChartScatterplot,
-  Pencil,
-  Star,
-  LayoutDetail,
-} from '@nvidia/react-gui-icons/icons';
 import {
   isTrendChoiceCurrent,
   resolveTrendVisible,

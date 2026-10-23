@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Trash } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import {
   Badge,
@@ -13,7 +14,6 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { RAIL_DEFINITIONS } from '@studio/routes/guardrails/rails/registry';
 import type { RailDefinition, RailScope } from '@studio/routes/guardrails/rails/types';
 import type { FC } from 'react';

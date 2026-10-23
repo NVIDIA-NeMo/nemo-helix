@@ -4,9 +4,9 @@
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { Eye } from '@nemo/icons/icons';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Button, Flex, FormField, Tag, Text } from '@nvidia/foundations-react-core';
-import { Eye } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPanel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

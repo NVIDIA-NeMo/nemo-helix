@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
+import { Star } from '@nemo/icons/icons';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Anchor, Card, Text } from '@nvidia/foundations-react-core';
-import { Star } from '@nvidia/react-gui-icons/icons';
 import { MetricTrend } from '@studio/components/charts/MetricTrend';
 import {
   DELTA_COMPARISON_LABEL,

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { UploadModal } from '@nemo/common/src/components/UploadModal';
+import { Add } from '@nemo/icons/icons';
 import { Button, Flex, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Add } from '@nvidia/react-gui-icons/icons';
 import { StatsBadge } from '@studio/components/chat/StatsBadge';
 import { ModelCompareTable } from '@studio/components/ModelComparePrompts/ModelCompareTable';
 import type { ModelComparePromptsProps } from '@studio/components/ModelComparePrompts/types';

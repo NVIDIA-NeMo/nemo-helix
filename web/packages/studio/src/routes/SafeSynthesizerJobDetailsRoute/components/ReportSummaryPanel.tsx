@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
+import { IconDocument } from '@nemo/icons/icons';
 import { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Button, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { IconDocument } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getGenerateJobReportRoute } from '@studio/routes/utils';
 import { FC } from 'react';

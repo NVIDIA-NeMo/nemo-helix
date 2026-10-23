@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Download, IconDocument, FolderOpen, Add, Floppy } from '@nemo/icons/icons';
 import { Button, Flex, Spinner, Stack, Tag, Text } from '@nvidia/foundations-react-core';
-import { Download, IconDocument, FolderOpen, Add, Floppy } from '@nvidia/react-gui-icons/icons';
 import { FILE_FORMAT_TAG_COLOR } from '@studio/components/FileRowEditor/constants';
 import type { DataFileFormat } from '@studio/components/FileRowEditor/parse';
 import { type ChangeEvent, type FC, type ReactNode, type RefObject } from 'react';

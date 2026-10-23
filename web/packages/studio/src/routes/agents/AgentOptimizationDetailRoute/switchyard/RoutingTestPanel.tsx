@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AssistantMessageCompletion } from '@nemo/common/src/components/AssistantChat/types';
+import { ChatMulti } from '@nemo/icons/icons';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import {
   Anchor,
@@ -16,7 +17,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChatMulti } from '@nvidia/react-gui-icons/icons';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
 import {

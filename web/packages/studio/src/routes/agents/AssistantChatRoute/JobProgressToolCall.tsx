@@ -3,9 +3,9 @@
 
 import type { AssistantToolArgs } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { IconClipboard } from '@nemo/icons/icons';
 import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
 import { Banner, Button, Card, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { IconClipboard } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   getJobProgressDetailRoute,

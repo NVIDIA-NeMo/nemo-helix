@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
+import { MoreVert } from '@nemo/icons/icons';
 import { Dropdown, type DropdownProps } from '@nvidia/foundations-react-core';
-import { MoreVert } from '@nvidia/react-gui-icons/icons';
 import type { CellContext } from '@tanstack/react-table';
 import type { JSX } from 'react';
 

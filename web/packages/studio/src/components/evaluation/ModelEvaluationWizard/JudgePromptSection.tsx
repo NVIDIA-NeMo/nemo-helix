@@ -6,8 +6,8 @@ import {
   VariableTextArea,
   type VariableTextAreaHandle,
 } from '@nemo/common/src/components/form/VariableTextArea';
+import { Pencil } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Pencil } from '@nvidia/react-gui-icons/icons';
 import {
   composeJudgeUserPrompt,
   type EvaluationFormValues,

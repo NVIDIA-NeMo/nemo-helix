@@ -8,8 +8,8 @@ import {
   TraceQueueEvent,
   TraceSpan,
 } from '@nemo/common/src/utils/TraceQueue';
+import { CopyGeneric, Paperplane, ArrowLeft } from '@nemo/icons/icons';
 import { Modal, Button, Flex, Stack, Text, Badge, Switch } from '@nvidia/foundations-react-core';
-import { CopyGeneric, Paperplane, ArrowLeft } from '@nvidia/react-gui-icons/icons';
 import {
   formatTags,
   formatTimestamp,

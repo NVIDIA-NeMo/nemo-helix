@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChartLegend } from '@nemo/common/src/components/charts/ChartLegend';
+import { HourglassMid } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { HeadToHeadChart } from '@studio/components/charts/EvaluationCompareChart/HeadToHeadChart';
 import { ImprovementChart } from '@studio/components/charts/EvaluationCompareChart/ImprovementChart';
 import { ScoresChart } from '@studio/components/charts/EvaluationCompareChart/ScoresChart';

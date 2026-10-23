@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Robot, ChartPerformance, Cog, Upload } from '@nemo/icons/icons';
 import { Grid } from '@nvidia/foundations-react-core';
-import { Robot, ChartPerformance, Cog, Upload } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DashboardPanel } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
 import type { ComponentType } from 'react';

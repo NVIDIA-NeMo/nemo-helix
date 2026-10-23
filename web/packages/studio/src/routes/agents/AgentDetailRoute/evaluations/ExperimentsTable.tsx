@@ -9,13 +9,13 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { ChartTree, Trash } from '@nemo/icons/icons';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   deleteExperiment,
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
-import { ChartTree, Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import type { AgentExperimentRow } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { getExperimentDetailRoute } from '@studio/routes/utils';

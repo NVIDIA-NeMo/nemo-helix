@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Cube } from '@nvidia/react-gui-icons/icons';
+import { Cube } from '@nemo/icons/icons';
 import { CardIconBadge, SelectableCard } from '@studio/components/common/SelectableCard';
 import type { DagNodeData, DagNodeStatus } from '@studio/components/DagCanvas/types';
 import { Handle, type Node, type NodeProps, Position } from '@xyflow/react';

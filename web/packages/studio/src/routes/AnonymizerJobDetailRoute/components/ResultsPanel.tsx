@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { triggerDownload } from '@nemo/common/src/utils/file';
+import { Download } from '@nemo/icons/icons';
 import { anonymizerDownloadRunJobResult } from '@nemo/sdk/generated/anonymizer/anonymizer';
 import type { HelixJobResultResponse } from '@nemo/sdk/generated/anonymizer/schema';
 import { Banner, Button, Flex, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { Download } from '@nvidia/react-gui-icons/icons';
 import { useState, type FC } from 'react';
 
 interface ResultsPanelProps {

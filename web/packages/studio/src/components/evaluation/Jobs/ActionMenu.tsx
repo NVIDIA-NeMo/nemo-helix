@@ -3,6 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
+import { ArrowRight, MoreVert, Trash } from '@nemo/icons/icons';
 import { useEvalsDeleteEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
@@ -16,7 +17,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ArrowRight, MoreVert, Trash } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationJobName } from '@studio/selectors/evaluationJob';
 import { FC, useState } from 'react';

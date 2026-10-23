@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { Beaker, IconDocument } from '@nemo/icons/icons';
 import { useEvalsGetEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -16,7 +17,6 @@ import {
   Spinner,
   Stack,
 } from '@nvidia/foundations-react-core';
-import { Beaker, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { EvalAggregateScoresTable } from '@studio/components/evaluation/EvalAggregateScoresTable';
 import { DatasetEvalRowResultsPanel } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import { useDatasetEvalResults } from '@studio/components/evaluation/Jobs/datasetEval/useDatasetEvalResults';

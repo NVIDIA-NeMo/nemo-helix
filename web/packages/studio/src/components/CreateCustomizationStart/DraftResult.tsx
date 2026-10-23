@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
+import { IconDocument, Pencil } from '@nemo/icons/icons';
 import {
   Banner,
   Button,
@@ -12,7 +13,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { IconDocument, Pencil } from '@nvidia/react-gui-icons/icons';
 import type { DraftSetting } from '@studio/components/CreateCustomizationStart/aiDraft';
 import type { DraftResultProps } from '@studio/components/CreateCustomizationStart/types';
 import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';

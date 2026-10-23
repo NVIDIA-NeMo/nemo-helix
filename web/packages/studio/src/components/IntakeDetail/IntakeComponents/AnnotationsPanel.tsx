@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { DEFAULT_PAGE_SIZE } from '@nemo/common/src/constants/api';
+import { ChatNew, Trash } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
@@ -20,7 +21,6 @@ import {
   Text,
   TextArea,
 } from '@nvidia/foundations-react-core';
-import { ChatNew, Trash } from '@nvidia/react-gui-icons/icons';
 import { ThumbButton } from '@studio/components/buttons/ThumbButton';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
 import { type FC, useEffect, useMemo, useRef } from 'react';

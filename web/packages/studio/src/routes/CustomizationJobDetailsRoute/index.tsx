@@ -6,6 +6,7 @@ import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTim
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
+import { ShapeCircle } from '@nemo/icons/icons';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import {
   Flex,
@@ -17,7 +18,6 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ShapeCircle } from '@nvidia/react-gui-icons/icons';
 import { CustomizationFilesetDetailsPanel } from '@studio/components/CustomizationFilesetDetailsPanel';
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { Loading } from '@studio/components/Layouts/Loading';

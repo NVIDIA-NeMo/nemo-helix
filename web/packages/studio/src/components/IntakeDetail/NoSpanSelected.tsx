@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { HandPoint } from '@nemo/icons/icons';
 import { Flex, StatusMessage } from '@nvidia/foundations-react-core';
-import { HandPoint } from '@nvidia/react-gui-icons/icons';
 import { type FC } from 'react';
 
 export const NoSpanSelected: FC = () => (

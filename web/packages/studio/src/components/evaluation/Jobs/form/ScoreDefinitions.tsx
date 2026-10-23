@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { InputErrorText } from '@nemo/common/src/components/InputErrorText';
+import { Pencil, Add, Trash } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Pencil, Add, Trash } from '@nvidia/react-gui-icons/icons';
 import {
   ScoreModal,
   type MetricPanelFormData,

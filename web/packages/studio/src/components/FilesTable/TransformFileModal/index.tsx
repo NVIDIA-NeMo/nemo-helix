@@ -5,8 +5,8 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ScmBranch } from '@nemo/icons/icons';
 import { Banner, Divider, Flex, Stack } from '@nvidia/foundations-react-core';
-import { ScmBranch } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import {
   isTransformableFilePath,

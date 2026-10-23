@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
+import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Table, Tooltip } from '@nvidia/foundations-react-core';
-import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { tooltipClassName } from '@studio/styles/common';
 import { FC } from 'react';
 

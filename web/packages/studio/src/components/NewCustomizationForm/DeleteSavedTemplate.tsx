@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { Trash } from '@nemo/icons/icons';
 import {
   getCustomizationListJobTemplatesQueryKey,
   useCustomizationDeleteJobTemplate,
 } from '@nemo/sdk/generated/customizer/customization-job-templates';
 import type { CustomizationJobTemplate } from '@nemo/sdk/generated/customizer/schema';
 import { Banner, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState, type FC } from 'react';
 

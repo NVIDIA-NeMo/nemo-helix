@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Paperplane } from '@nemo/icons/icons';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Paperplane } from '@nvidia/react-gui-icons/icons';
 import type { AgentBlockingInputFrameProps } from '@studio/components/agents/AgentBlockingInput/types';
 import type { FC } from 'react';
 

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconDocument, Sparkle, Wand } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { IconDocument, Sparkle, Wand } from '@nvidia/react-gui-icons/icons';
 import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';
 import type { GeneratedConfigResultProps } from '@studio/components/CreateFilesetStart/types';
 import { type FC, useState } from 'react';

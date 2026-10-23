@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Trash, Close } from '@nemo/icons/icons';
 import { Button, Flex, FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
-import { Trash, Close } from '@nvidia/react-gui-icons/icons';
 import { ICON_COLOR_CLASS } from '@studio/components/AddColumnPalette/constants';
 import { FieldControl } from '@studio/components/ColumnConfigPanel/FieldControl';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';

@@ -11,6 +11,7 @@ import type {
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference, getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { filterModel, isBaseModel } from '@nemo/common/src/utils/models';
+import { ChevronDown, HourglassMid } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -21,7 +22,6 @@ import {
   SegmentedControl,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { useDebounce } from 'use-debounce';
 

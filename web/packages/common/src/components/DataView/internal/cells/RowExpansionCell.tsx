@@ -2,13 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
+import { ChevronDown, ChevronUp, ChevronDoubleDown, ChevronDoubleUp } from '@nemo/icons/icons';
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
-import {
-  ChevronDown,
-  ChevronUp,
-  ChevronDoubleDown,
-  ChevronDoubleUp,
-} from '@nvidia/react-gui-icons/icons';
 import type { CellContext, HeaderContext } from '@tanstack/react-table';
 import type { JSX } from 'react';
 

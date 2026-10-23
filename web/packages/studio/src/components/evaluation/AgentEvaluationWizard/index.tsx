@@ -8,6 +8,7 @@ import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { InfoCircle } from '@nemo/icons/icons';
 import { evalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { AgentEvaluateJobRequest, EvaluateJobRequest } from '@nemo/sdk/generated/evals/schema';
 import { deleteEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
@@ -35,7 +36,6 @@ import {
   Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
-import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {

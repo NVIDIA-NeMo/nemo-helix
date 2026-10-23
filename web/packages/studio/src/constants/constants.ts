@@ -10,7 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
-import { Palette } from '@nvidia/react-gui-icons/icons';
+import { Palette } from '@nemo/icons/icons';
 
 export const CHAT_DEFAULT_MAX_TOKENS = 4096;
 export const DEFAULT_LARGE_PAGE_SIZE = 1000;

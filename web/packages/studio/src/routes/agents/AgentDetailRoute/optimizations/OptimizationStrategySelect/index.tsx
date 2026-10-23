@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronLeft } from '@nemo/icons/icons';
 import { useAgentOptimizationListStrategies } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import { Banner, Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronLeft } from '@nvidia/react-gui-icons/icons';
 import { StartOptionCards } from '@studio/components/StartOptions/StartOptionCards';
 import { CONTENT_WIDTH } from '@studio/components/StartOptions/tile';
 import {

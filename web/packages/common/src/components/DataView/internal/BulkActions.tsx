@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
+import { Close } from '@nemo/icons/icons';
 import { Button, Divider, Flex, Text } from '@nvidia/foundations-react-core';
-import { Close } from '@nvidia/react-gui-icons/icons';
 import type { Row, Table } from '@tanstack/react-table';
 import { Fragment, type JSX, type ReactNode } from 'react';
 

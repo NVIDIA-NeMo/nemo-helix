@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
+import { Sparkle, Upload, Close } from '@nemo/icons/icons';
 import { Button, Flex, Grid, Stack, Text } from '@nvidia/foundations-react-core';
-import { Sparkle, Upload, Close } from '@nvidia/react-gui-icons/icons';
 import {
   CUSTOMIZER_ENABLED,
   EVALS_ENABLED,

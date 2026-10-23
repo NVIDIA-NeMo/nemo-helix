@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SpanKind } from '@nemo/sdk/generated/platform/schema';
-import type { BadgeProps } from '@nvidia/foundations-react-core';
-import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
+import type { NvidiaGuiIconProps } from '@nemo/icons';
 import {
   ArrowUpDown,
   Robot,
@@ -15,7 +13,9 @@ import {
   Wrench,
   IconClipboard,
   Link,
-} from '@nvidia/react-gui-icons/icons';
+} from '@nemo/icons/icons';
+import { SpanKind } from '@nemo/sdk/generated/platform/schema';
+import type { BadgeProps } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 type BadgeColor = Exclude<BadgeProps['color'], null | undefined>;

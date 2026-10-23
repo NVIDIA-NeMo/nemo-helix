@@ -8,8 +8,8 @@ import {
   hadTooManyFilesError,
 } from '@nemo/common/src/components/FileUpload/util';
 import { InputErrorText } from '@nemo/common/src/components/InputErrorText';
+import { DocumentNew, IconDocument } from '@nemo/icons/icons';
 import { Block, Flex, Label, Stack, Text } from '@nvidia/foundations-react-core';
-import { DocumentNew, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { FC, MouseEvent, MouseEventHandler, ReactNode, useCallback, useState } from 'react';
 import { DropEvent, DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone';
 

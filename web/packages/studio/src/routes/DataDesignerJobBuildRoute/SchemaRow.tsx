@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cube, Trash } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
-import { Cube, Trash } from '@nvidia/react-gui-icons/icons';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
 import type { BuilderColumn } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import { describeColumn } from '@studio/routes/DataDesignerJobBuildRoute/describeColumn';

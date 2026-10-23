@@ -8,8 +8,8 @@ import { useExtensionWithDependency } from '@nemo/common/src/components/CodeEdit
 import { useLanguageExtension } from '@nemo/common/src/components/CodeEditor/extensions/useLanguageExtension';
 import { useLinter } from '@nemo/common/src/components/CodeEditor/extensions/useLinter';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { CopyGeneric } from '@nemo/icons/icons';
 import { Flex, Button, useTheme, Stack } from '@nvidia/foundations-react-core';
-import { CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import CodeMirror from '@uiw/react-codemirror';
 import { type FC, type MouseEvent, type ReactNode, useState, useMemo, useCallback } from 'react';

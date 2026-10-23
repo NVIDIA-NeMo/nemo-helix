@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Route } from '@nemo/icons/icons';
 import {
   Avatar,
   Button,
@@ -14,7 +15,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Route } from '@nvidia/react-gui-icons/icons';
 import { ReportTraceModal } from '@studio/components/ReportTraceModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';

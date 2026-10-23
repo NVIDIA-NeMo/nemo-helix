@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
+import { Sliders } from '@nemo/icons/icons';
 import {
   DropdownCheckboxItem,
   DropdownContent,
@@ -13,7 +14,6 @@ import {
   type DropdownTriggerProps,
 } from '@nvidia/foundations-react-core';
 import { childrenToText } from '@nvidia/foundations-react-core/lib';
-import { Sliders } from '@nvidia/react-gui-icons/icons';
 import { flexRender } from '@tanstack/react-table';
 import { Fragment, type JSX, type ReactNode } from 'react';
 

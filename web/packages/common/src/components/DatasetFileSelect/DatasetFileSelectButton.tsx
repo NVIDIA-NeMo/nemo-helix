@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ListItem } from '@nemo/common/src/components/FileList/ListItem';
+import { Db } from '@nemo/icons/icons';
 import { Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { Db } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 interface DatasetFileSelectButtonProps {

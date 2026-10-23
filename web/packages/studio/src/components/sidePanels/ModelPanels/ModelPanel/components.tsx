@@ -8,6 +8,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { getModelVersion, TagLabel, tagToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { kebabCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import { isDefined } from '@nemo/common/src/utils/list';
+import { ChatMulti, Eye, EyeOff, Layers, HAlignLeft, IconWindow } from '@nemo/icons/icons';
 import {
   ModelDeploymentStatus,
   type Adapter,
@@ -29,14 +30,6 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import {
-  ChatMulti,
-  Eye,
-  EyeOff,
-  Layers,
-  HAlignLeft,
-  IconWindow,
-} from '@nvidia/react-gui-icons/icons';
 import { CopyButton } from '@studio/components/CopyButton';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import { formatFinetuningType } from '@studio/util/customizations';

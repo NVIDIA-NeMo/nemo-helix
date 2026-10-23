@@ -4,9 +4,9 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ListCheckmark, Add } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import { Flex, SegmentedControl, Stack, Tabs, Text } from '@nvidia/foundations-react-core';
-import { ListCheckmark, Add } from '@nvidia/react-gui-icons/icons';
 import { useCreateGuardrailCheck, useRunGuardrailChecks } from '@studio/api/guardrail-checks/hooks';
 import type { GuardrailCheckEntity } from '@studio/api/guardrail-checks/types';
 import { GuardrailChecksDataView } from '@studio/components/dataViews/GuardrailChecksDataView';

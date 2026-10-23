@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
+import { Add, Close } from '@nemo/icons/icons';
 import {
   Button,
   FormField,
@@ -14,7 +15,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Add, Close } from '@nvidia/react-gui-icons/icons';
 import {
   DEFAULT_SORT,
   EVALUATOR_PREFIX,

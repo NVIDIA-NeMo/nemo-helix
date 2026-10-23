@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { OpenExternal } from '@nemo/icons/icons';
 import { Anchor, Badge } from '@nvidia/foundations-react-core';
-import { OpenExternal } from '@nvidia/react-gui-icons/icons';
 import { type FC } from 'react';
 
 interface ChangesetBadgeProps {

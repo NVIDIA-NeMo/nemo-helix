@@ -3,8 +3,8 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Add } from '@nemo/icons/icons';
 import { Button, Flex, Panel, SegmentedControl, Stack, Text } from '@nvidia/foundations-react-core';
-import { Add } from '@nvidia/react-gui-icons/icons';
 import { useUpdateGuardrailCheck } from '@studio/api/guardrail-checks/hooks';
 import type {
   GuardrailCheckEntity,

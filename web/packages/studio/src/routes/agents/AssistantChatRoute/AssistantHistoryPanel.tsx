@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Collapse, Expand } from '@nemo/icons/icons';
 import { Button, Flex, Tooltip } from '@nvidia/foundations-react-core';
-import { Collapse, Expand } from '@nvidia/react-gui-icons/icons';
 import { AssistantArtifactsPane } from '@studio/routes/agents/AssistantChatRoute/historyPanel/AssistantArtifactsPane';
 import { FloatingPanel } from '@studio/routes/agents/AssistantChatRoute/historyPanel/FloatingPanel';
 import { HistoryPanelContents } from '@studio/routes/agents/AssistantChatRoute/historyPanel/HistoryPanelContents';

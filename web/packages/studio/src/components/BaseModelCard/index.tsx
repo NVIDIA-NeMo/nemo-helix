@@ -14,9 +14,9 @@ import { getModelMetadata } from '@nemo/common/src/components/ModelDetailsToolti
 import { OverflowGroup } from '@nemo/common/src/components/OverflowGroup';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { ChatMulti, IconDocument, World } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Button, Card, Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
-import { ChatMulti, IconDocument, World } from '@nvidia/react-gui-icons/icons';
 import React, { useMemo } from 'react';
 
 export interface BaseModelCardProps {

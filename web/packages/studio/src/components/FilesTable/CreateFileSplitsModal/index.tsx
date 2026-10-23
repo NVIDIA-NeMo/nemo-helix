@@ -8,8 +8,8 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
+import { Split } from '@nemo/icons/icons';
 import { Banner, Divider, Flex, Label, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { Split } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { useSplitDatasetFile } from '@studio/api/datasets/useSplitDatasetFile';
 import {

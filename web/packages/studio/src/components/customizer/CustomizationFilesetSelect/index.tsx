@@ -12,6 +12,7 @@ import {
   getPartsFromReference,
   getURNFromNamedEntityRef,
 } from '@nemo/common/src/namedEntity';
+import { Db, FolderOpen } from '@nemo/icons/icons';
 import { useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import {
   Anchor,
@@ -27,7 +28,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Db, FolderOpen } from '@nvidia/react-gui-icons/icons';
 import { FileValidationPanel } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel';
 import { PatternsTooltipTrigger } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel/PatternsTooltip';
 import { Loading } from '@studio/components/Layouts/Loading';

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Db } from '@nemo/icons/icons';
 import { Button, Stack, TabItem, Tabs } from '@nvidia/foundations-react-core';
-import { Db } from '@nvidia/react-gui-icons/icons';
 import { DatasetFileSelect } from '@studio/components/DatasetFileSelect';
 import { DatasetSelect } from '@studio/components/DatasetSelect';
 import { ControlledFileUpload } from '@studio/components/form/ControlledFileUpload';

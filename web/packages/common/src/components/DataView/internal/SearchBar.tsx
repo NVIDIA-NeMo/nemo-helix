@@ -6,7 +6,7 @@ import {
   DebouncedTextInput,
   type DebouncedTextInputProps,
 } from '@nemo/common/src/components/DataView/internal/DebouncedTextInput';
-import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import { useCallback, type JSX } from 'react';
 
 export interface DataViewSearchBarProps extends Omit<

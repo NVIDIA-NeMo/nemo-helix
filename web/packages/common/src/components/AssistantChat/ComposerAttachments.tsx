@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type Attachment, AttachmentPrimitive, ComposerPrimitive } from '@assistant-ui/react';
+import { IconImage, Close } from '@nemo/icons/icons';
 import { Flex, Tooltip } from '@nvidia/foundations-react-core';
-import { IconImage, Close } from '@nvidia/react-gui-icons/icons';
 import { useEffect, useState } from 'react';
 
 const useImagePreviewUrl = (file?: File): string | undefined => {

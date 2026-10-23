@@ -5,9 +5,9 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect';
 import { SliderWithTextInput } from '@nemo/common/src/components/SliderWithTextInput';
+import { Cpu, Trash, Close } from '@nemo/icons/icons';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
-import { Cpu, Trash, Close } from '@nvidia/react-gui-icons/icons';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
 import {
   DEFAULT_MAX_PARALLEL_REQUESTS,

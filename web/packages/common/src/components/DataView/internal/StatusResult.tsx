@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
+import { IconError, Filter, Refresh } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
   StatusMessage,
   type StatusMessageProps,
 } from '@nvidia/foundations-react-core';
-import { IconError, Filter, Refresh } from '@nvidia/react-gui-icons/icons';
 import type { JSX } from 'react';
 
 export type TableStatusState = Pick<

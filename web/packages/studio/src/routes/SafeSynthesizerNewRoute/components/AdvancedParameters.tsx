@@ -5,6 +5,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import { InfoCircle, Retry } from '@nemo/icons/icons';
 import {
   Text,
   Stack,
@@ -14,7 +15,6 @@ import {
   Tooltip,
   Button,
 } from '@nvidia/foundations-react-core';
-import { InfoCircle, Retry } from '@nvidia/react-gui-icons/icons';
 import {
   DEFAULT_NUM_INPUT_RECORDS_TO_SAMPLE,
   PRETRAINED_MODEL_OPTIONS,

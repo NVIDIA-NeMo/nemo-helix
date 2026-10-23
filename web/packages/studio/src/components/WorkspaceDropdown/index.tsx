@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { logger } from '@nemo/common/src/utils/logger';
+import { Add, Filter } from '@nemo/icons/icons';
 import { useEntitiesListWorkspaces } from '@nemo/sdk/generated/platform/entity-store';
 import { Workspace } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -19,7 +20,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { Add, Filter } from '@nvidia/react-gui-icons/icons';
 import { dataTestIds } from '@studio/components/WorkspaceDropdown/constants';
 import { useRecentWorkspaces } from '@studio/components/WorkspaceDropdown/useRecentWorkspaces';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';

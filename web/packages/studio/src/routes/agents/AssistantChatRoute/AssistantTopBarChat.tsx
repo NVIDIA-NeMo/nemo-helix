@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Expand, Add, WindowTerminal, Close } from '@nemo/icons/icons';
 import { Button, Flex, Popover, Spinner, Stack, Tooltip } from '@nvidia/foundations-react-core';
-import { Expand, Add, WindowTerminal, Close } from '@nvidia/react-gui-icons/icons';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { ChatThreadErrorBoundary } from '@studio/routes/agents/AssistantChatRoute/ChatThreadErrorBoundary';

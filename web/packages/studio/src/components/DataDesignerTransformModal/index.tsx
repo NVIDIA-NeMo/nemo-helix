@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ScmBranch } from '@nemo/icons/icons';
 import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import {
   Banner,
@@ -19,7 +20,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { ScmBranch } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { buildTransformJobRequest } from '@studio/components/DataDesignerTransformModal/buildTransformJobRequest';
 import { DiscardTransformModal } from '@studio/components/transform/DiscardTransformModal';

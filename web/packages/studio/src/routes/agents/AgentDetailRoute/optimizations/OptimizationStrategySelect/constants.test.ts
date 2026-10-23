@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Puzzle, Route, Sliders } from '@nvidia/react-gui-icons/icons';
+import { Puzzle, Route, Sliders } from '@nemo/icons/icons';
 import {
   strategyOptions,
   UPLOAD_CONFIG_OPTION_ID,

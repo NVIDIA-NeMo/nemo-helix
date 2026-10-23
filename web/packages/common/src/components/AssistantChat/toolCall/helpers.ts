@@ -16,8 +16,8 @@ import {
   toAssistantToolArgs,
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
-import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
-import { WindowTerminal } from '@nvidia/react-gui-icons/icons';
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { WindowTerminal } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
 const getStringArg = (args: AssistantToolArgs, keys: string[]): string | undefined => {

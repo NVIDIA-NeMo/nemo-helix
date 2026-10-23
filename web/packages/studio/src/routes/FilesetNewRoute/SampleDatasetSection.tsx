@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DocumentCheckmark } from '@nemo/icons/icons';
 import {
   Badge,
   Block,
@@ -11,7 +12,6 @@ import {
   GridItem,
   Text,
 } from '@nvidia/foundations-react-core';
-import { DocumentCheckmark } from '@nvidia/react-gui-icons/icons';
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
 import {
   invalidateFilesetNameCheck,

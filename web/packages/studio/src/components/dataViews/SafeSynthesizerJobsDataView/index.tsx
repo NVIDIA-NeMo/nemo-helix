@@ -20,6 +20,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import { useJobsCancelJob, useJobsDeleteJob } from '@nemo/sdk/generated/platform/jobs';
 import {
   getSafeSynthesizerDownloadJobResultSummaryQueryOptions as getDownloadJobResultSummaryQueryOptions,
@@ -32,7 +33,6 @@ import {
   GenerateJobsSortField,
 } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Banner, Button, Stack } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { isCancellableJob } from '@studio/components/dataViews/SafeSynthesizerJobsDataView/utils';
 import { FilesetFilePreviewLink } from '@studio/components/SafeSynthesizerFilesetPreview/FilesetFilePreviewLink';

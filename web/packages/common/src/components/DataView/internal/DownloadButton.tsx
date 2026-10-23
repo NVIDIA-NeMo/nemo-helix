@@ -4,8 +4,8 @@
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
 import type { IntentionalAny } from '@nemo/common/src/components/DataView/internal/types';
 import { downloadFile, generateCSV } from '@nemo/common/src/components/DataView/internal/utils/csv';
+import { Download } from '@nemo/icons/icons';
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
-import { Download } from '@nvidia/react-gui-icons/icons';
 import type { Column, Row, Table } from '@tanstack/react-table';
 import { Fragment, type JSX } from 'react';
 

@@ -9,8 +9,8 @@ import {
   MESSAGE_ACTIONS_CLASS,
 } from '@nemo/common/src/components/AssistantChat/messageActions';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
+import { Pencil } from '@nemo/icons/icons';
 import { Tooltip } from '@nvidia/foundations-react-core';
-import { Pencil } from '@nvidia/react-gui-icons/icons';
 
 export const UserMessage = ({ messageContentProps, toolCallPartComponent }: MessageRenderProps) => (
   <MessagePrimitive.Root

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconError } from '@nemo/icons/icons';
 import {
   StatusMessage,
   StatusMessageProps,
@@ -8,7 +9,6 @@ import {
   Stack,
   Button,
 } from '@nvidia/foundations-react-core';
-import { IconError } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 

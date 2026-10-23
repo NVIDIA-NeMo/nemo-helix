@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Add, Sparkle } from '@nvidia/react-gui-icons/icons';
+import { Add, Sparkle } from '@nemo/icons/icons';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';

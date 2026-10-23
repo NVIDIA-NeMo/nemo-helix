@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Flag } from '@nemo/icons/icons';
 import {
   Badge,
   Button,
@@ -15,7 +16,6 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { Flag } from '@nvidia/react-gui-icons/icons';
 import { featureFlags, flagDefaults } from '@studio/constants/featureFlags';
 import { flagDefinitions } from '@studio/constants/featureFlags/featureFlags';
 import {

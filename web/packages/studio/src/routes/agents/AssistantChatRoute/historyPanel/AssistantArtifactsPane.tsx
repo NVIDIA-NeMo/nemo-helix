@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Collapse } from '@nemo/icons/icons';
 import { Button, Divider, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Collapse } from '@nvidia/react-gui-icons/icons';
 import { Empty } from '@studio/components/Empty';
 import {
   ArtifactRow,

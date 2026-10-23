@@ -3,8 +3,8 @@
 
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
+import { ArrowRight } from '@nemo/icons/icons';
 import { Badge, Text } from '@nvidia/foundations-react-core';
-import { ArrowRight } from '@nvidia/react-gui-icons/icons';
 import type { EntityReplacement } from '@studio/components/AnonymizerRecordView/types';
 import { entityTagColor } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import { memo, useCallback, useEffect, useMemo, type ComponentProps, type FC } from 'react';

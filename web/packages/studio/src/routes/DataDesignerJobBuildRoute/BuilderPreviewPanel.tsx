@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useStickToBottom } from '@nemo/common/src/hooks/useStickToBottom';
+import { ChevronDown, ChevronUp } from '@nemo/icons/icons';
 import {
   Button,
   CodeSnippet,
@@ -13,7 +14,6 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, ChevronUp } from '@nvidia/react-gui-icons/icons';
 import {
   formatPreviewLogsForDisplay,
   type PreviewRecord,

@@ -6,9 +6,9 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { Trash } from '@nemo/icons/icons';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { makeDatasetsTableColumns } from '@studio/components/DatasetsTable/columns';

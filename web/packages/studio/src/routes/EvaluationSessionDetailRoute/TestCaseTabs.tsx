@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
+import { Wrench } from '@nemo/icons/icons';
 import { type Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
 import {
@@ -16,7 +17,6 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Wrench } from '@nvidia/react-gui-icons/icons';
 import { PayloadPending } from '@studio/components/IntakeDetail/IntakeComponents/PayloadPending';
 import { SpanPayloadFormatToggle } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadFormatToggle';
 import { SpanPayloadView } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadView';

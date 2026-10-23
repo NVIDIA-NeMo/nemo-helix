@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { WorldOff } from '@nemo/icons/icons';
 import { Anchor, CodeSnippet, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
-import { WorldOff } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 interface PlatformUnavailableProps {

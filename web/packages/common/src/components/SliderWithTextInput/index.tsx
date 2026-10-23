@@ -3,6 +3,7 @@
 
 import { toScientificNotation } from '@nemo/common/src/utils/formatters';
 import { clamp } from '@nemo/common/src/utils/math';
+import { InfoCircle, Retry } from '@nemo/icons/icons';
 import {
   Block,
   Button,
@@ -16,7 +17,6 @@ import {
   TextInputProps,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { InfoCircle, Retry } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps, ReactNode, useState } from 'react';
 import { FieldValues } from 'react-hook-form';
 

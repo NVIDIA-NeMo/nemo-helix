@@ -6,6 +6,7 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
+import { FolderOpen, InfoCircle } from '@nemo/icons/icons';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import {
   Button,
@@ -21,7 +22,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { FolderOpen, InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFilesMove } from '@studio/api/datasets/useDatasetFilesMove';
 import {
   getParentFolder,

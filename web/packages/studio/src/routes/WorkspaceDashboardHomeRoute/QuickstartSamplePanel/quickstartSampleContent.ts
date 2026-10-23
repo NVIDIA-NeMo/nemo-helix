@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
-import { ChatMulti } from '@nvidia/react-gui-icons/icons';
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { ChatMulti } from '@nemo/icons/icons';
 import { AGENT_OPTIMIZATIONS_ENABLED, INTAKE_ENABLED } from '@studio/constants/environment';
 import {
   getAgentDetailRoute,

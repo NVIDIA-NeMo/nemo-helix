@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import {
   Robot,
   Code,
@@ -23,7 +22,8 @@ import {
   IconFunction,
   Power,
   Profile,
-} from '@nvidia/react-gui-icons/icons';
+} from '@nemo/icons/icons';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import type { ColumnTypeColor, ColumnTypeGroup } from '@studio/components/AddColumnPalette/types';
 
 /** Accent color → Tailwind text color utility for an option's icon. */

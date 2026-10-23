@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { InfoCircle } from '@nemo/icons/icons';
 import { Text, Tooltip } from '@nvidia/foundations-react-core';
-import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { tooltipClassName } from '@studio/styles/common';
 
 export const InfoTooltip = ({

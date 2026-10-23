@@ -6,6 +6,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { ChevronLeft } from '@nemo/icons/icons';
 import {
   Banner,
   Button,
@@ -17,7 +18,6 @@ import {
   Stepper,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronLeft } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 import {

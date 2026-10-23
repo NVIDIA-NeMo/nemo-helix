@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
+import { ChevronUpDown, IconError } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
@@ -11,7 +12,6 @@ import {
   type FeedbackAnnotationInputValue,
 } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronUpDown, IconError } from '@nvidia/react-gui-icons/icons';
 import { SpanListView } from '@studio/components/IntakeDetail/TraceSpanListView';
 import { type NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';
 import { useSessionTrajectories } from '@studio/components/IntakeDetail/useSessionTrajectories';

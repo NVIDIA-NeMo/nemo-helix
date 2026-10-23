@@ -8,8 +8,8 @@ import {
   type TableExpandableCellState,
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { LayoutRows } from '@nemo/icons/icons';
 import { Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
-import { LayoutRows } from '@nvidia/react-gui-icons/icons';
 import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 

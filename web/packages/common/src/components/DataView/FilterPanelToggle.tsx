@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal';
+import { Filter } from '@nemo/icons/icons';
 import { Button } from '@nvidia/foundations-react-core';
-import { Filter } from '@nvidia/react-gui-icons/icons';
 
 interface FilterPanelToggleProps {
   showFilters: boolean;

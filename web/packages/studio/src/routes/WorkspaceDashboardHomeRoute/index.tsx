@@ -4,8 +4,8 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { Warning } from '@nemo/icons/icons';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { Warning } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';

@@ -13,6 +13,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import { useGuardrailsListGuardrailConfigs } from '@nemo/sdk/generated/platform/guardrails';
 import type {
   GuardrailConfig,
@@ -20,7 +21,6 @@ import type {
   GuardrailsListGuardrailConfigsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Button, type DropdownEntry, Flex, Text } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import {
   getMainModelName,
   getRailCounts,

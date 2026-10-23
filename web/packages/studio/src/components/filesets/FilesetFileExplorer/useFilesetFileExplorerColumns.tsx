@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ArrowDown, ArrowUp } from '@nemo/icons/icons';
 import { Button, Checkbox } from '@nvidia/foundations-react-core';
-import { ArrowDown, ArrowUp } from '@nvidia/react-gui-icons/icons';
 import type { SortOrder } from '@studio/components/filesets/FilesetFileExplorer/hooks/useFileActions';
 import type { ExtraColumn } from '@studio/components/filesets/FilesetFileExplorer/types';
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';

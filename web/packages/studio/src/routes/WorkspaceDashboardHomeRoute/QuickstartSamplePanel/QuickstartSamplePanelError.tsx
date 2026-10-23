@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconError, HourglassMid } from '@nemo/icons/icons';
 import { Button, Panel, StatusMessage } from '@nvidia/foundations-react-core';
-import { IconError, HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { useState, type FC } from 'react';
 
 export interface QuickstartSamplePanelErrorProps {

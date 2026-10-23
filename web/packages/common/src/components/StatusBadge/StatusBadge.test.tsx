@@ -4,7 +4,7 @@
 import { BadgeStatus, badgeStatus } from '@nemo/common/src/components/StatusBadge/badgeStatus';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge/index';
 import * as customQueries from '@nemo/common/src/tests/customQueries';
-import { CheckCircle } from '@nvidia/react-gui-icons/icons';
+import { CheckCircle } from '@nemo/icons/icons';
 import { queries, render, screen } from '@testing-library/react';
 
 const allQueries = {

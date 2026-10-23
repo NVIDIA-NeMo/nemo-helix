@@ -16,7 +16,7 @@ import Mistral from '@nemo/common/src/svgs/model_icon_mistral.svg?react';
 import Nvidia from '@nemo/common/src/svgs/model_icon_nvidia.svg?react';
 import OpenAi from '@nemo/common/src/svgs/model_icon_openai.svg?react';
 import OpenRouter from '@nemo/common/src/svgs/model_icon_openrouter.svg?react';
-import { LinkBreak, ChartFlow } from '@nvidia/react-gui-icons/icons';
+import { LinkBreak, ChartFlow } from '@nemo/icons/icons';
 import { FC, SVGProps } from 'react';
 
 export type InferenceProviderPresetId =

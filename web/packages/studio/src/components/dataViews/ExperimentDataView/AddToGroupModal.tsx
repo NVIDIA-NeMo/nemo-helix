@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Add } from '@nemo/icons/icons';
 import {
   getListEvaluationsQueryKey,
   usePatchEvaluation,
@@ -25,7 +26,6 @@ import {
   TextArea,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { Add } from '@nvidia/react-gui-icons/icons';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { DefaultSortControl } from '@studio/components/DefaultSortControl';
 import { DEFAULT_SORT } from '@studio/components/DefaultSortControl/util';

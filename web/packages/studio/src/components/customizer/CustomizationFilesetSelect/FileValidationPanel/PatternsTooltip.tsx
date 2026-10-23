@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { HelpCircle } from '@nemo/icons/icons';
 import { Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { HelpCircle } from '@nvidia/react-gui-icons/icons';
 import { tooltipClassName } from '@studio/styles/common';
 import { FC } from 'react';
 

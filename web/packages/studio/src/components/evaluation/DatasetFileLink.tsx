@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { truncateText } from '@nemo/common/src/utils/formatters';
-import { OpenExternal } from '@nvidia/react-gui-icons/icons';
+import { OpenExternal } from '@nemo/icons/icons';
 import { FC } from 'react';
 import { Link } from 'react-router';
 

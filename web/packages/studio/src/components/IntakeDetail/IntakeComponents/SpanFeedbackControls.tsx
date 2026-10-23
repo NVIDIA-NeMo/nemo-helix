@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Notes, ThumbDown, ThumbUp } from '@nemo/icons/icons';
 import { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema';
 import { Button, Divider, Flex, Tooltip } from '@nvidia/foundations-react-core';
-import { Notes, ThumbDown, ThumbUp } from '@nvidia/react-gui-icons/icons';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
 import { type FC, type MouseEvent, useEffect } from 'react';
 

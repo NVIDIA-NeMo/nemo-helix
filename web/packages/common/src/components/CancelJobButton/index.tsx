@@ -5,6 +5,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Close } from '@nemo/icons/icons';
 import {
   getJobsGetJobQueryKey,
   getJobsListJobsQueryKey,
@@ -12,7 +13,6 @@ import {
 } from '@nemo/sdk/generated/platform/jobs';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { Close } from '@nvidia/react-gui-icons/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC, MouseEvent, useState } from 'react';
 

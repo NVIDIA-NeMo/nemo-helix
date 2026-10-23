@@ -3,9 +3,9 @@
 
 import { CodeEditor } from '@nemo/common/src/components/CodeEditor';
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
+import { Code } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import { Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { Code } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 /**

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { VariableDef } from '@nemo/common/src/components/form/VariableTextArea';
+import { Add } from '@nemo/icons/icons';
 import { Button, Popover, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Add } from '@nvidia/react-gui-icons/icons';
 import { type ComponentProps, useState } from 'react';
 
 export interface VariableButtonProps {

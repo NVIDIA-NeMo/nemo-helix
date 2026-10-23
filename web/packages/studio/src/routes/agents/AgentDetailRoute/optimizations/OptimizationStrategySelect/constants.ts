@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { Upload, Puzzle, Route, Sliders } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
-import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
-import { Upload, Puzzle, Route, Sliders } from '@nvidia/react-gui-icons/icons';
 import { STUDIO_OPTIMIZE_STRATEGY } from '@studio/api/agents/useLaunchOptimizeStudy';
 import type { StartOption } from '@studio/components/StartOptions/types';
 import type { FC } from 'react';

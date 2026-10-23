@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Library } from '@nvidia/react-gui-icons/icons';
+import { Library } from '@nemo/icons/icons';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { getWorkspaceBaseModelsRoute } from '@studio/routes/utils';

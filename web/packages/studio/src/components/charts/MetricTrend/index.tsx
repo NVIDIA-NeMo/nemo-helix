@@ -6,8 +6,8 @@ import {
   deltaTone,
   formatSignedDelta,
 } from '@nemo/common/src/components/DeltaText';
+import { ShapeTriangle } from '@nemo/icons/icons';
 import { Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
-import { ShapeTriangle } from '@nvidia/react-gui-icons/icons';
 import { SeriesButtonGroup } from '@studio/components/charts/MetricTrend/SeriesButtonGroup';
 import { useNvColorMode } from '@studio/components/DagCanvas/useNvColorMode';
 import { StackedSkeleton } from '@studio/components/StackedSkeleton';

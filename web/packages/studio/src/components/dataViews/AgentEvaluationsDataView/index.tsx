@@ -20,6 +20,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   getEvalsListAgentEvaluateJobsQueryKey,
   useEvalsDeleteAgentEvaluateJob,
@@ -31,7 +32,6 @@ import {
   AgentEvaluateJobsSortField,
 } from '@nemo/sdk/generated/evals/schema';
 import { Button, Flex } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { agentNameForJob, evalConfigName } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';

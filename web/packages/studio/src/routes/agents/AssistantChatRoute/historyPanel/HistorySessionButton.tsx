@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChatSingle, Trash } from '@nemo/icons/icons';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { ChatSingle, Trash } from '@nvidia/react-gui-icons/icons';
 import { ToolCallSummary } from '@studio/routes/agents/AssistantChatRoute/historyPanel/ArtifactSections';
 import {
   getCompactRelativeTime,

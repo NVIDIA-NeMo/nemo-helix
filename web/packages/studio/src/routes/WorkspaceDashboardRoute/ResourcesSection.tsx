@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Book, Bug, OpenExternal, Route } from '@nemo/icons/icons';
 import {
   Card,
   Divider,
@@ -11,7 +12,6 @@ import {
   VerticalNav,
   VerticalNavItem,
 } from '@nvidia/foundations-react-core';
-import { Book, Bug, OpenExternal, Route } from '@nvidia/react-gui-icons/icons';
 import { ReportTraceModal } from '@studio/components/ReportTraceModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
 import { LINK_DOCS_SDK, LINK_DOCS_STUDIO, LINK_GITHUB_ISSUES } from '@studio/constants/links';

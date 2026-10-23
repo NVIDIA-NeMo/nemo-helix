@@ -4,8 +4,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { ChevronLeft } from '@nemo/icons/icons';
 import { Button, FormField, Stack, Stepper, Text, TextInput } from '@nvidia/foundations-react-core';
-import { ChevronLeft } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { BudgetSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/BudgetSection';
 import { EvaluationSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/EvaluationSection';

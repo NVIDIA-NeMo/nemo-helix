@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Filter } from '@nemo/icons/icons';
 import { Panel } from '@nvidia/foundations-react-core';
-import { Filter } from '@nvidia/react-gui-icons/icons';
 import type { PropsWithChildren } from 'react';
 
 export const FilterPanel = ({

@@ -10,8 +10,8 @@
  * its affiliates is strictly prohibited.
  */
 import { RadioCard } from '@nemo/common/src/components/RadioCard/index';
+import { CubeStack } from '@nemo/icons/icons';
 import { Flex, RadioGroupRoot, Stack } from '@nvidia/foundations-react-core';
-import { CubeStack } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CopyGeneric, Download, FolderOpen, Trash } from '@nemo/icons/icons';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { CopyGeneric, Download, FolderOpen, Trash } from '@nvidia/react-gui-icons/icons';
 import { BulkDeleteModal } from '@studio/components/filesets/FilesetFileExplorer/BulkDeleteModal';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { getTextWithCount } from '@studio/util/strings';

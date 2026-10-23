@@ -15,8 +15,8 @@ import {
   type TanstackTable,
 } from '@nemo/common/src/components/DataView/internal';
 import { formatDateRange } from '@nemo/common/src/utils/formatDateRange';
+import { Close } from '@nemo/icons/icons';
 import { Button, Flex, Tag } from '@nvidia/foundations-react-core';
-import { Close } from '@nvidia/react-gui-icons/icons';
 
 type DataViewColumn = TanstackTable.Column<unknown>;
 

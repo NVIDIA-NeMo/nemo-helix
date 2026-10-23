@@ -6,13 +6,13 @@ import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMe
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { toError } from '@nemo/common/src/utils/logger';
+import { Cancel, Bookmark, CopyGeneric } from '@nemo/icons/icons';
 import { useCustomizationCancelAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
 import { useCustomizationCancelRlJob } from '@nemo/sdk/generated/customizer/rl-jobs';
 import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer/unsloth-jobs';
 import { getJobsGetJobQueryKey } from '@nemo/sdk/generated/platform/jobs';
 import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { Flex } from '@nvidia/foundations-react-core';
-import { Cancel, Bookmark, CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { SaveTemplateModal } from '@studio/routes/CustomizationJobDetailsRoute/SaveTemplateModal';

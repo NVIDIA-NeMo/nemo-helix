@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CheckCircle, Close, Refresh, IconError } from '@nemo/icons/icons';
 import { Button, Flex, Tag, TagProps } from '@nvidia/foundations-react-core';
-import { CheckCircle, Close, Refresh, IconError } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode, MouseEventHandler } from 'react';
 
 export type FileTagStatus = 'success' | 'pending' | 'error' | 'idle';

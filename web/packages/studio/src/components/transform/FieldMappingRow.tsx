@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Code } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -14,7 +15,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { Code } from '@nvidia/react-gui-icons/icons';
 import type { OutputFormatField } from '@studio/components/transform/formats';
 import { columnReference } from '@studio/components/transform/template';
 import { type FC } from 'react';

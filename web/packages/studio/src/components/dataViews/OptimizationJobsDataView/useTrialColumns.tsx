@@ -5,8 +5,8 @@ import type { StudioDataView } from '@nemo/common/src/components/DataView/Studio
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
 import { EM_DASH } from '@nemo/common/src/constants';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
+import { Cancel, CheckCircle, CloseCircle, Refresh } from '@nemo/icons/icons';
 import { Badge, Button, Text } from '@nvidia/foundations-react-core';
-import { Cancel, CheckCircle, CloseCircle, Refresh } from '@nvidia/react-gui-icons/icons';
 import {
   formatParamValue,
   METRIC_SORT_PREFIX,

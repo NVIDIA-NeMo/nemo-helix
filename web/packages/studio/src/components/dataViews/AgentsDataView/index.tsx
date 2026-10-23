@@ -16,6 +16,7 @@ import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   agentsListDeployments,
   getAgentsListDeploymentsQueryKey,
@@ -30,7 +31,6 @@ import {
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';

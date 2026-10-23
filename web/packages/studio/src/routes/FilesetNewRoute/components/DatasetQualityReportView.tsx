@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DatasetQualityReport } from '@nemo/common/src/utils/datasetQuality';
+import { Warning, CheckCircle, CloseCircle } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Warning, CheckCircle, CloseCircle } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 interface DatasetQualityReportViewProps {

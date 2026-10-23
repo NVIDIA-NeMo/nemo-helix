@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconDocument, FolderClosed, FolderOpen } from '@nemo/icons/icons';
 import {
   Checkbox,
   Flex,
   ProgressBar,
   type TableRowDefinition,
 } from '@nvidia/foundations-react-core';
-import { IconDocument, FolderClosed, FolderOpen } from '@nvidia/react-gui-icons/icons';
 import {
   INDENT_PER_LEVEL,
   PENDING_FILE_OID,

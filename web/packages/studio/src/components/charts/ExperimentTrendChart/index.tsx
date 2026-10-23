@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { HourglassMid } from '@nemo/icons/icons';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Text } from '@nvidia/foundations-react-core';
-import { HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { TrendTooltip } from '@studio/components/charts/ExperimentTrendChart/TrendTooltip';
 import {
   buildTrendPoints,

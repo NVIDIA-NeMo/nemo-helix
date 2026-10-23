@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronDown } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { ChevronDown } from '@nvidia/react-gui-icons/icons';
 import { type ReactNode } from 'react';
 
 interface FloatingPanelProps {

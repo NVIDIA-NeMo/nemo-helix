@@ -12,15 +12,15 @@ catalogs:
     '@mui/x-data-grid':
       specifier: ^7.28.3
       version: 7.29.12
+    '@nemo/icons':
+      specifier: npm:@nvidia/react-gui-icons@1.0.0
+      version: 1.0.0
     '@nvidia/foundations-react-core':
       specifier: 1.16.0
       version: 1.16.0
     '@nvidia/foundations-tailwind-plugin':
       specifier: 1.16.0
       version: 1.16.0
-    '@nvidia/react-gui-icons':
-      specifier: 1.0.0
-      version: 1.0.0
     '@storybook/addon-a11y':
       specifier: ^10.5.5
       version: 10.5.5
@@ -320,15 +320,15 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.7)
+      '@nemo/icons':
+        specifier: 'catalog:'
+        version: '@nvidia/react-gui-icons@1.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)'
       '@nemo/sdk':
         specifier: workspace:*
         version: link:../sdk
       '@nvidia/foundations-react-core':
         specifier: 'catalog:'
         version: 1.16.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@nvidia/react-gui-icons':
-        specifier: 'catalog:'
-        version: 1.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@opentelemetry/api-logs':
         specifier: ^0.219.0
         version: 0.219.0
@@ -644,15 +644,15 @@ importers:
       '@nemo/common':
         specifier: workspace:*
         version: link:../common
+      '@nemo/icons':
+        specifier: 'catalog:'
+        version: '@nvidia/react-gui-icons@1.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)'
       '@nemo/sdk':
         specifier: workspace:*
         version: link:../sdk
       '@nvidia/foundations-react-core':
         specifier: 'catalog:'
         version: 1.16.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@nvidia/react-gui-icons':
-        specifier: 'catalog:'
-        version: 1.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1

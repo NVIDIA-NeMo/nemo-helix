@@ -12,8 +12,8 @@
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { FileUpload } from '@nemo/common/src/components/UploadModal/FileUpload';
 import { SimpleFilesTable } from '@nemo/common/src/components/UploadModal/SimpleFilesTable';
+import { IconError } from '@nemo/icons/icons';
 import { Flex, FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
-import { IconError } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 /**

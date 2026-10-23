@@ -4,8 +4,8 @@
 import { CODE_BLOCK_SURFACE_CLASS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
 import { summarizeRepeatedSubtleToolActions } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
 import type { SubtleToolAction } from '@nemo/common/src/components/AssistantChat/toolCall/types';
+import { ChevronRight, CopyGeneric } from '@nemo/icons/icons';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, CopyGeneric } from '@nvidia/react-gui-icons/icons';
 
 interface SubtleToolCallRowProps {
   readonly actions: readonly SubtleToolAction[];

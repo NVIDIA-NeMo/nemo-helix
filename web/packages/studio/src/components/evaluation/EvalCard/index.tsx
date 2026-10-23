@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ScaleBalance } from '@nemo/icons/icons';
 import { Badge, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { ScaleBalance } from '@nvidia/react-gui-icons/icons';
 import { type FC, type ReactNode } from 'react';
 
 const METRIC_TYPE_LABELS: Record<string, string> = {

@@ -4,8 +4,8 @@
 import { TableExpandableCell } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import type { FileSampleMethod } from '@nemo/common/src/utils/sampleTextLines';
+import { Trash } from '@nemo/icons/icons';
 import { Button, Flex, Select, Text } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { StatsBadge } from '@studio/components/chat/StatsBadge';
 import { FileSamplingMethodSelect } from '@studio/components/FileSamplingSnippet/FileSamplingMethodSelect';
 import { ModelColumnSelect } from '@studio/components/ModelComparePrompts/ModelColumnSelect';

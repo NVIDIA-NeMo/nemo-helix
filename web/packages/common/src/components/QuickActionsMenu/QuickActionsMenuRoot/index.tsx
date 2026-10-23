@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ActionsMenu, type ActionMenuItem } from '@nemo/common/src/components/ActionsMenu';
-import { MoreVert } from '@nvidia/react-gui-icons/icons';
+import { MoreVert } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
 export type QuickActionItem = ActionMenuItem;

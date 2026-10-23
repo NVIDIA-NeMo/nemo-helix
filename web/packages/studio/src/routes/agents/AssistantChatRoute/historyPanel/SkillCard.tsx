@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Book } from '@nemo/icons/icons';
 import { Card, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Book } from '@nvidia/react-gui-icons/icons';
 import type { AssistantSkill } from '@studio/routes/agents/AssistantChatRoute/types';
 import { getSkillDisplayName } from '@studio/routes/DashboardLandingRoute/skillDisplayName';
 

@@ -11,6 +11,7 @@ import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { logger } from '@nemo/common/src/utils/logger';
+import { ChartBar, CloseCircle } from '@nemo/icons/icons';
 import {
   getEvalsGetEvaluateJobQueryKey,
   useEvalsCancelEvaluateJob,
@@ -18,7 +19,6 @@ import {
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { Banner, Button, Flex, Modal, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { ChartBar, CloseCircle } from '@nvidia/react-gui-icons/icons';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
 import { ButtonLaunchEvaluation } from '@studio/components/evaluation/ButtonLaunchEvaluation';

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import {
   Code,
   Beaker,
@@ -11,7 +10,8 @@ import {
   Envelope,
   MagnifyingGlass,
   IconFunction,
-} from '@nvidia/react-gui-icons/icons';
+} from '@nemo/icons/icons';
+import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_EMBEDDER_MODEL_NAME } from '@studio/constants/constants';
 

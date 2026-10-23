@@ -7,6 +7,7 @@ import type {
   FilterValue,
   IntentionalAny,
 } from '@nemo/common/src/components/DataView/internal/types';
+import { Close } from '@nemo/icons/icons';
 import {
   Button,
   DropdownContent,
@@ -17,7 +18,6 @@ import {
   Group,
   Tag,
 } from '@nvidia/foundations-react-core';
-import { Close } from '@nvidia/react-gui-icons/icons';
 import type { Column } from '@tanstack/react-table';
 import type { JSX } from 'react';
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { Cog } from '@nvidia/react-gui-icons/icons';
+import { Cog } from '@nemo/icons/icons';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { getWorkspaceSettingsRoute } from '@studio/routes/utils';

@@ -12,6 +12,7 @@ import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
+import { LayoutColumns } from '@nemo/icons/icons';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { useListEvaluatorResults } from '@nemo/sdk/generated/platform/evaluator-results';
 import {
@@ -25,7 +26,6 @@ import type {
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { LayoutColumns } from '@nvidia/react-gui-icons/icons';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';

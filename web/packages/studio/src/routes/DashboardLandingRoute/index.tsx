@@ -3,8 +3,8 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
+import { Paperplane, WindowTerminal } from '@nemo/icons/icons';
 import { Button, Flex, Text, TextArea, Tooltip } from '@nvidia/foundations-react-core';
-import { Paperplane, WindowTerminal } from '@nvidia/react-gui-icons/icons';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { writeStoredActiveSessionId } from '@studio/routes/agents/AssistantChatRoute/activeSessionStorage';

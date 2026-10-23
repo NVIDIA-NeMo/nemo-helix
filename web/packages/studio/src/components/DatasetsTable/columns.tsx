@@ -8,13 +8,13 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { Cloud, Db } from '@nemo/icons/icons';
 import {
   FilesetPurpose,
   StorageConfigType,
   type FilesetOutput as Dataset,
 } from '@nemo/sdk/generated/platform/schema';
 import { type DropdownEntry, Flex, Tag, Text } from '@nvidia/foundations-react-core';
-import { Cloud, Db } from '@nvidia/react-gui-icons/icons';
 import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/DatasetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/DatasetsTable/helpers';
 import {

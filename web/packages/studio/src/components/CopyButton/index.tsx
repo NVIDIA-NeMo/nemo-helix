@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { CopyGeneric } from '@nemo/icons/icons';
 import { Button } from '@nvidia/foundations-react-core';
-import { CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps, FC } from 'react';
 
 interface Props extends ComponentProps<typeof Button> {

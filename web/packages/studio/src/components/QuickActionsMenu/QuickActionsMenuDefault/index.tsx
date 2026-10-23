@@ -5,7 +5,7 @@ import {
   QuickActionItem,
   QuickActionsMenuRoot,
 } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
-import { Pencil, Trash, FolderOpen } from '@nvidia/react-gui-icons/icons';
+import { Pencil, Trash, FolderOpen } from '@nemo/icons/icons';
 import { FC, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 

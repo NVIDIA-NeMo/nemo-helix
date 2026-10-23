@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronUpDown } from '@nemo/icons/icons';
 import { Button, Flex, SegmentedControl } from '@nvidia/foundations-react-core';
-import { ChevronUpDown } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 export type TraceViewMode = 'tree' | 'graph' | 'list';

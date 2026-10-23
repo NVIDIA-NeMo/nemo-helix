@@ -16,6 +16,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerDeleteRunJob,
@@ -27,7 +28,6 @@ import type {
   RunJobsSortField as AnonymizerJobsSortField,
 } from '@nemo/sdk/generated/anonymizer/schema';
 import { Banner, Button, Text } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { AnonymizerJobActionsMenu } from '@studio/components/AnonymizerJobActionsMenu';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';

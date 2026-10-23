@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { FolderOpen } from '@nemo/icons/icons';
 import { Flex } from '@nvidia/foundations-react-core';
-import { FolderOpen } from '@nvidia/react-gui-icons/icons';
 import { FileActions } from '@studio/components/FilesetFilePreviewPanel/components/FileActions';
 import { FileBreadcrumbs } from '@studio/components/FilesetFilePreviewPanel/components/FileBreadcrumbs';
 import type { FileSystemFile } from '@studio/components/FilesTable/utils';

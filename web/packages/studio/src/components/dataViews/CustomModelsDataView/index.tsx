@@ -14,6 +14,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   getModelsListModelsQueryKey,
   useModelsDeleteModel,
@@ -29,7 +30,6 @@ import type {
   ModelsListModelsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Anchor, Button, type DropdownEntry, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Trash } from '@nvidia/react-gui-icons/icons';
 import { queryClient } from '@studio/api/queryClient';
 import {
   DEFAULT_CUSTOM_MODELS_FILTER,

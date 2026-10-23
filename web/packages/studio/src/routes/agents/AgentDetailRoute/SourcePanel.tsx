@@ -5,8 +5,8 @@ import { getErrorMessage, isNotFoundError } from '@nemo/common/src/api/common/ut
 import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Refresh } from '@nemo/icons/icons';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
-import { Refresh } from '@nvidia/react-gui-icons/icons';
 import {
   agentSpecSource,
   useAgentSpecFileset,

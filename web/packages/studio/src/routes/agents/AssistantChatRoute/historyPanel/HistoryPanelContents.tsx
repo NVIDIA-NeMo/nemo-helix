@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { ChatNew, Refresh } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { ChatNew, Refresh } from '@nvidia/react-gui-icons/icons';
 import { Empty } from '@studio/components/Empty';
 import {
   deleteAssistantSessionHistory,

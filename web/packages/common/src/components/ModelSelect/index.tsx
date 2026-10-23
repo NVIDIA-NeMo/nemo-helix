@@ -8,6 +8,7 @@ import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { UseControllerComponentProps } from '@nemo/common/src/types';
 import { filterModel } from '@nemo/common/src/utils/models';
+import { Filter } from '@nemo/icons/icons';
 import { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
@@ -25,7 +26,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { Filter } from '@nvidia/react-gui-icons/icons';
 import {
   type ChangeEvent,
   type FC,

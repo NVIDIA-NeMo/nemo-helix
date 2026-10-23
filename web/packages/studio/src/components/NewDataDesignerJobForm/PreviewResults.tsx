@@ -8,8 +8,8 @@ import {
   type TableExpandableCellState,
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { formatJsonlSampleCellValue } from '@nemo/common/src/utils/parseJsonlObjectSample';
+import { Stop } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Modal, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { Stop } from '@nvidia/react-gui-icons/icons';
 import {
   orderPreviewColumns,
   type PreviewRecord,

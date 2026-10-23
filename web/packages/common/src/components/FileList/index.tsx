@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ListItem } from '@nemo/common/src/components/FileList/ListItem';
+import { IconDocument, Eye, Trash } from '@nemo/icons/icons';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Divider, Text, Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { IconDocument, Eye, Trash } from '@nvidia/react-gui-icons/icons';
 import { FC } from 'react';
 
 const numberFormatter = new Intl.NumberFormat('en-US');

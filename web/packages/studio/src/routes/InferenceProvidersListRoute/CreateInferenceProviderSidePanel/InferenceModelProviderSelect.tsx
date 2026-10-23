@@ -10,6 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import {
   Block,
   Divider,
@@ -22,7 +23,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import {
   CUSTOM_ROW,
   getInferenceProviderPresetIcon,

@@ -5,8 +5,8 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import ModelEvaluationIcon from '@nemo/common/src/svgs/model_evaluation.svg?react';
 import SafeSynthesizerLogo from '@nemo/common/src/svgs/safe_synthesizer_logo.svg?react';
+import { CubeStack } from '@nemo/icons/icons';
 import { Grid, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { CubeStack } from '@nvidia/react-gui-icons/icons';
 import {
   CUSTOMIZER_ENABLED,
   EVALS_ENABLED,

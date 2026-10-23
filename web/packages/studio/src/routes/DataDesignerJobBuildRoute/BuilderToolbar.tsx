@@ -3,8 +3,8 @@
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { Stop, IconDocument, ChartTree, Pencil, HandPoint } from '@nemo/icons/icons';
 import { Button, Flex, SegmentedControl, Tag, Text } from '@nvidia/foundations-react-core';
-import { Stop, IconDocument, ChartTree, Pencil, HandPoint } from '@nvidia/react-gui-icons/icons';
 import type { StartOptionTag } from '@studio/components/CreateFilesetStart/types';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
 import { type FC, memo, useState } from 'react';

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { FolderClosed, Upload as UploadIcon } from '@nemo/icons/icons'; // UploadIcon alias needed: Upload name conflicts with KUI Upload component above
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -17,7 +18,6 @@ import {
   Upload,
   type UploadRootProps,
 } from '@nvidia/foundations-react-core';
-import { FolderClosed, Upload as UploadIcon } from '@nvidia/react-gui-icons/icons'; // UploadIcon alias needed: Upload name conflicts with KUI Upload component above
 import { collectFolderPathsFromDatasetFiles } from '@studio/util/files';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 

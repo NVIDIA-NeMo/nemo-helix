@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CheckmarkBadge, CheckCircle, Play } from '@nemo/icons/icons';
 import { Flex } from '@nvidia/foundations-react-core';
-import { CheckmarkBadge, CheckCircle, Play } from '@nvidia/react-gui-icons/icons';
 import { ReactNode } from 'react';
 
 /**

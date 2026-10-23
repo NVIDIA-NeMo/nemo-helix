@@ -21,9 +21,9 @@ import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataView
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
+import { ChartBar, FolderClosed, LayoutColumns, Pin, Sync } from '@nemo/icons/icons';
 import type { EvaluationFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Modal, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { ChartBar, FolderClosed, LayoutColumns, Pin, Sync } from '@nvidia/react-gui-icons/icons';
 import { EVAL_DURATION_METADATA_KEY, evalDurationMs } from '@studio/api/evaluation/utils';
 import { ChangesetBadge } from '@studio/components/ChangesetBadge';
 import { EvaluationCompareChart } from '@studio/components/charts/EvaluationCompareChart';

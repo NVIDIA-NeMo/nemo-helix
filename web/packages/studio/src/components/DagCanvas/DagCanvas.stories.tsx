@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Db, Beaker, ChatSingle, Rocket, Sparkle, Wand } from '@nvidia/react-gui-icons/icons';
+import { Db, Beaker, ChatSingle, Rocket, Sparkle, Wand } from '@nemo/icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { DagCanvas } from '@studio/components/DagCanvas';
 import type { DagEdge, DagNode } from '@studio/components/DagCanvas/types';

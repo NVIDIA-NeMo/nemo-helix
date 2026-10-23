@@ -4,8 +4,8 @@
 import { ComposerPrimitive, ThreadPrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
 import type { AssistantChatThreadProps } from '@nemo/common/src/components/AssistantChat/types';
+import { ArrowUp, IconImage, Retry, ShapeSquare } from '@nemo/icons/icons';
 import { Button, Tooltip } from '@nvidia/foundations-react-core';
-import { ArrowUp, IconImage, Retry, ShapeSquare } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
 
 type AssistantComposerProps = Pick<

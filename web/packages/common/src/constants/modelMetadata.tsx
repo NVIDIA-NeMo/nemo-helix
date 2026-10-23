@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cube, NeuralNetwork, Toolbox } from '@nemo/icons/icons';
 import { FinetuningType } from '@nemo/sdk/generated/platform/schema';
-import { Cube, NeuralNetwork, Toolbox } from '@nvidia/react-gui-icons/icons';
 import { ReactNode } from 'react';
 
 import DeepSeek from '../svgs/model_icon_deepseek.svg?react';

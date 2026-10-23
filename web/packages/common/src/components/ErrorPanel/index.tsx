@@ -4,8 +4,8 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { logger } from '@nemo/common/src/utils/logger';
+import { TrashDelete } from '@nemo/icons/icons';
 import { Flex, PageHeader, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { TrashDelete } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps, FC, ReactNode, useEffect } from 'react';
 import { useRouteError, isRouteErrorResponse } from 'react-router';
 

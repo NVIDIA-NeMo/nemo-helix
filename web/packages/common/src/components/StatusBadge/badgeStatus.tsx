@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
-import { BadgeProps as KuiBadgeProps } from '@nvidia/foundations-react-core';
 import {
   CheckCircle,
   CloseCircle,
@@ -11,7 +9,9 @@ import {
   HelpCircle,
   Warning,
   Pause,
-} from '@nvidia/react-gui-icons/icons';
+} from '@nemo/icons/icons';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { BadgeProps as KuiBadgeProps } from '@nvidia/foundations-react-core';
 import { type ComponentType, type SVGProps } from 'react';
 
 export interface BadgeProps {

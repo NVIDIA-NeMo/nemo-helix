@@ -3,8 +3,8 @@
 
 import { ComposerPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
+import { IconImage, Close } from '@nemo/icons/icons';
 import { Button, Flex, Text, TextArea, Tooltip } from '@nvidia/foundations-react-core';
-import { IconImage, Close } from '@nvidia/react-gui-icons/icons';
 
 export const UserEditComposer = ({
   enableImageAttachments = true,

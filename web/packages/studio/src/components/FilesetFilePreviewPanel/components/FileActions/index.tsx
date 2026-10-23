@@ -4,6 +4,7 @@
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
+import { Download, Pencil, Trash, Split, MoreVert } from '@nemo/icons/icons';
 import {
   Button,
   DropdownContent,
@@ -12,7 +13,6 @@ import {
   DropdownTrigger,
   Flex,
 } from '@nvidia/foundations-react-core';
-import { Download, Pencil, Trash, Split, MoreVert } from '@nvidia/react-gui-icons/icons';
 import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';

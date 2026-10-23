@@ -28,7 +28,9 @@ catalog:
   '@mui/x-data-grid': ^7.28.3
   '@nvidia/foundations-react-core': 1.16.0
   '@nvidia/foundations-tailwind-plugin': 1.16.0
-  '@nvidia/react-gui-icons': 1.0.0
+  # Alias so imports use @nemo/icons/icons rather than the real package name;
+  # if NVIDIA renames the package, update only this one line.
+  '@nemo/icons': 'npm:@nvidia/react-gui-icons@1.0.0'
   'lucide-react': ^1.30.0
   '@storybook/addon-a11y': ^10.5.5
   '@storybook/react': ^10.5.5

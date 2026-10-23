@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { GridColDef } from '@mui/x-data-grid';
+import { FolderClosed, IconDocument } from '@nemo/icons/icons';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { Flex } from '@nvidia/foundations-react-core';
-import { FolderClosed, IconDocument } from '@nvidia/react-gui-icons/icons';
 import { DirectoryQuickActions } from '@studio/components/FilesTable/DirectoryQuickActions';
 import { FileQuickActions } from '@studio/components/FilesTable/FileQuickActions';
 import { getHumanReadableFileSize } from '@studio/util/files';

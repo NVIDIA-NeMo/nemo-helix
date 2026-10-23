@@ -3,6 +3,7 @@
 
 import { ModelDetailsPanel } from '@nemo/common/src/components/ModelSelectV2/ModelDetailsPanel';
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
+import { Check } from '@nemo/icons/icons';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Divider,
@@ -14,7 +15,6 @@ import {
   Flex,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Check } from '@nvidia/react-gui-icons/icons';
 import { memo, useState, type FC } from 'react';
 
 interface ModelDropdownItemProps {

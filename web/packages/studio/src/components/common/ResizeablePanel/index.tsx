@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { GripEdgeVertical } from '@nvidia/react-gui-icons/icons';
+import { GripEdgeVertical } from '@nemo/icons/icons';
 import cn from 'classnames';
 import {
   type FC,

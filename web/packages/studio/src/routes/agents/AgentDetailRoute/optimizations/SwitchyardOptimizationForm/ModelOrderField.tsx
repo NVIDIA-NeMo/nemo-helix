@@ -3,8 +3,8 @@
 
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
+import { ArrowDown, ArrowUp, Close } from '@nemo/icons/icons';
 import { Badge, Button, Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { ArrowDown, ArrowUp, Close } from '@nvidia/react-gui-icons/icons';
 import type { SwitchyardFormValues } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
 import { type FC } from 'react';
 import { useController } from 'react-hook-form';

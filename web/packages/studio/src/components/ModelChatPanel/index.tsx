@@ -8,8 +8,8 @@ import {
 } from '@nemo/common/src/components/ModelSelectV2';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { hasModelProvider, toInferenceModelName } from '@nemo/common/src/utils/models';
+import { Collapse, Trash } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { Collapse, Trash } from '@nvidia/react-gui-icons/icons';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
 import { ModelChat } from '@studio/components/ModelChat';

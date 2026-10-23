@@ -5,9 +5,9 @@ import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { formatLogs } from '@nemo/common/src/utils/logs';
+import { Download } from '@nemo/icons/icons';
 import { useJobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import { Button, ButtonProps } from '@nvidia/foundations-react-core';
-import { Download } from '@nvidia/react-gui-icons/icons';
 import { FC, useCallback, useState } from 'react';
 
 interface Props {

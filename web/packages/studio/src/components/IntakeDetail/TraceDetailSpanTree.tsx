@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChatMulti, Warning, ChartFlow } from '@nemo/icons/icons';
 import { SpanStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   TreeNavBranch,
@@ -10,7 +11,6 @@ import {
   TreeNavRoot,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { ChatMulti, Warning, ChartFlow } from '@nvidia/react-gui-icons/icons';
 import { getSpanTemplate } from '@studio/components/IntakeDetail/SpanTemplates/registry';
 import {
   getSpanKindColorClass,

@@ -3,8 +3,8 @@
 
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect';
+import { Cpu } from '@nemo/icons/icons';
 import { Stack, Text } from '@nvidia/foundations-react-core';
-import { Cpu } from '@nvidia/react-gui-icons/icons';
 import { CardIconBadge, SelectableCard } from '@studio/components/common/SelectableCard';
 import {
   type BuilderModel,

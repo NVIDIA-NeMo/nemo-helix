@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ChevronDown, ChevronRight } from '@nemo/icons/icons';
 import {
   Button,
   CodeSnippet,
@@ -12,7 +13,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, ChevronRight } from '@nvidia/react-gui-icons/icons';
 import { type ComponentProps, type FC, useState } from 'react';
 
 type CodeSnippetLanguage = NonNullable<ComponentProps<typeof CodeSnippet>['language']>;

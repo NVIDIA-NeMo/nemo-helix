@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import { InfoCircle } from '@nemo/icons/icons';
 import { Stack } from '@nvidia/foundations-react-core';
-import { InfoCircle } from '@nvidia/react-gui-icons/icons';
 import { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { useFormContext } from 'react-hook-form';
 

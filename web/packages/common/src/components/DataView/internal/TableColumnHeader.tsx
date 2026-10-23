@@ -6,9 +6,9 @@ import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/in
 import { useHandleResize } from '@nemo/common/src/components/DataView/internal/hooks/useResizableColumns';
 import type { IntentionalAny } from '@nemo/common/src/components/DataView/internal/types';
 import { getHeaderId } from '@nemo/common/src/components/DataView/internal/utils/header-utils';
+import { ArrowUp, ArrowUpDown, GripEdgeVertical } from '@nemo/icons/icons';
 import { Button, TableHeaderCell } from '@nvidia/foundations-react-core';
 import { childrenToText } from '@nvidia/foundations-react-core/lib';
-import { ArrowUp, ArrowUpDown, GripEdgeVertical } from '@nvidia/react-gui-icons/icons';
 import { flexRender, type Header, type SortDirection } from '@tanstack/react-table';
 import classnames from 'classnames';
 import type { ComponentProps, JSX, ReactNode, Ref } from 'react';

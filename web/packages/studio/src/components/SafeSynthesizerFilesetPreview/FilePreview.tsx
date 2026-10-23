@@ -3,6 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { triggerDownload } from '@nemo/common/src/utils/file';
+import { Download, MoreVert } from '@nemo/icons/icons';
 import {
   Button,
   DropdownContent,
@@ -14,7 +15,6 @@ import {
   Spinner,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Download, MoreVert } from '@nvidia/react-gui-icons/icons';
 import { FC, ReactNode } from 'react';
 
 interface CSVPreviewProps {

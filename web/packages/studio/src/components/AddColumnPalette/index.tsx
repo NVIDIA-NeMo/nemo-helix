@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import { Stack, Text, TextInput } from '@nvidia/foundations-react-core';
-import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import { ColumnTypeGroupSection } from '@studio/components/AddColumnPalette/ColumnTypeGroupSection';
 import { COLUMN_TYPE_GROUPS } from '@studio/components/AddColumnPalette/constants';
 import type {

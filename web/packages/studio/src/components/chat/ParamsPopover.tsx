@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { InfoCircle, Retry, Sliders } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -11,7 +12,6 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { InfoCircle, Retry, Sliders } from '@nvidia/react-gui-icons/icons';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { type FC } from 'react';
 

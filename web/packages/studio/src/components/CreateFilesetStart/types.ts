@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { NvidiaGuiIconProps } from '@nemo/icons';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
-import type { NvidiaGuiIconProps } from '@nvidia/react-gui-icons';
 import type { AddColumnSelection } from '@studio/components/AddColumnPalette/types';
 import type {
   StartOption as SharedStartOption,

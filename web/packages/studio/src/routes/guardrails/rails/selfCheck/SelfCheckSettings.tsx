@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cog } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -11,7 +12,6 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { Cog } from '@nvidia/react-gui-icons/icons';
 import { PromptScopeSection } from '@studio/routes/guardrails/rails/components/PromptScopeSection';
 import {
   findPrompt,

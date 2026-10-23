@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChartPerformance, Numbers, Timer } from '@nvidia/react-gui-icons/icons';
+import { ChartPerformance, Numbers, Timer } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
 export interface ChatMetrics {

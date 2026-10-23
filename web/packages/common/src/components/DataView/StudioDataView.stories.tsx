@@ -5,6 +5,7 @@ import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFil
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { Eye, Trash } from '@nemo/icons/icons';
 import {
   Anchor,
   Badge,
@@ -16,7 +17,6 @@ import {
   TextInput,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { Eye, Trash } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ComponentProps, FC, useCallback } from 'react';
 

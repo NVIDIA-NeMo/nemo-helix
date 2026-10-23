@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatTile } from '@nemo/common/src/components/StatTile';
-import { Robot } from '@nvidia/react-gui-icons/icons';
+import { Robot } from '@nemo/icons/icons';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { IconError } from '@nemo/icons/icons';
 import { PageHeader, Stack, StatusMessage } from '@nvidia/foundations-react-core';
-import { IconError } from '@nvidia/react-gui-icons/icons';
 import { NoSpanSelected } from '@studio/components/IntakeDetail/NoSpanSelected';
 import { TraceDetailLayout } from '@studio/components/IntakeDetail/TraceDetailLayout';
 import { TraceSpanTree } from '@studio/components/IntakeDetail/TraceDetailSpanTree';

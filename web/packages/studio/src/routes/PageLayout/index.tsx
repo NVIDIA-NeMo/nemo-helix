@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { IconError, Enter, Refresh } from '@nemo/icons/icons';
 import { Button, Flex, Spinner, Text } from '@nvidia/foundations-react-core';
-import { IconError, Enter, Refresh } from '@nvidia/react-gui-icons/icons';
 import { GlobalNav } from '@studio/components/Layouts/GlobalNav';
 import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';

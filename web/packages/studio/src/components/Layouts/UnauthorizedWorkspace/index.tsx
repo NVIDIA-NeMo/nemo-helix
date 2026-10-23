@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { LockClosed } from '@nvidia/react-gui-icons/icons';
+import { LockClosed } from '@nemo/icons/icons';
 
 export const UnauthorizedWorkspace = () => (
   <ErrorMessage

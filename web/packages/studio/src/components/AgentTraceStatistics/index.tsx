@@ -3,6 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { ChartTree } from '@nemo/icons/icons';
 import {
   Button,
   Card,
@@ -15,7 +16,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChartTree } from '@nvidia/react-gui-icons/icons';
 import { TraceStatisticsChart } from '@studio/components/AgentTraceStatistics/TraceStatisticsChart';
 import { TraceStatisticsEmptyState } from '@studio/components/AgentTraceStatistics/TraceStatisticsEmptyState';
 import { TraceStatisticsTiles } from '@studio/components/AgentTraceStatistics/TraceStatisticsTiles';

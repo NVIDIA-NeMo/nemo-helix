@@ -3,12 +3,12 @@
 
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { FolderOpen } from '@nemo/icons/icons';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
 import { Flex } from '@nvidia/foundations-react-core';
-import { FolderOpen } from '@nvidia/react-gui-icons/icons';
 import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import type { FilesetRef } from '@studio/hooks/useModelLineage';

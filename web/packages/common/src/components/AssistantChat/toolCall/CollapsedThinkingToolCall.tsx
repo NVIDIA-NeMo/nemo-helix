@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { splitCollapsedThinkingParagraphs } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
+import { ChevronRight, IconClipboard } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, IconClipboard } from '@nvidia/react-gui-icons/icons';
 
 export const CollapsedThinkingToolCall = ({
   label = 'Earlier thinking',

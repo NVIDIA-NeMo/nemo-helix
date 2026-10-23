@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
+import { Cancel, CheckCircle, HelpCircle, CloseCircle } from '@nemo/icons/icons';
 import type { SpanStatus } from '@nemo/sdk/generated/platform/schema';
-import { Cancel, CheckCircle, HelpCircle, CloseCircle } from '@nvidia/react-gui-icons/icons';
 
 const STATUS_CONFIG: Record<SpanStatus, StatusConfigEntry> = {
   success: { label: 'Completed', color: 'green', icon: CheckCircle },

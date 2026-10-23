@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { Add } from '@nemo/icons/icons';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
@@ -16,7 +17,6 @@ import {
   SelectRoot,
   SelectTrigger,
 } from '@nvidia/foundations-react-core';
-import { Add } from '@nvidia/react-gui-icons/icons';
 import {
   FeedbackAddToDatasetFileSource,
   LOADING_FILES_OPTION,

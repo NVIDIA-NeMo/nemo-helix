@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Equal, ShapeTriangle } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { Equal, ShapeTriangle } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
 import type { ComponentProps, FC } from 'react';
 

@@ -7,9 +7,9 @@ import { DatasetRowPager } from '@nemo/common/src/components/DatasetRowPager';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { PreviewBox } from '@nemo/common/src/components/PreviewBox';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
+import { CheckCircle, HelpCircle } from '@nemo/icons/icons';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Banner, Block, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { CheckCircle, HelpCircle } from '@nvidia/react-gui-icons/icons';
 import {
   CANONICAL_FIELD_LABELS,
   type CanonicalField,

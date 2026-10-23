@@ -3,6 +3,7 @@
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
+import { Filter } from '@nemo/icons/icons';
 import {
   Badge,
   Block,
@@ -19,7 +20,6 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { Filter } from '@nvidia/react-gui-icons/icons';
 import { useAutofillFromSearchParams } from '@studio/hooks/evaluation/useAutofillFromSearchParams';
 import {
   type EvaluationModelItem,

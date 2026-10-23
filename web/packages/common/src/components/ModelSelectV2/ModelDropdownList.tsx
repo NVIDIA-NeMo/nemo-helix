@@ -6,9 +6,9 @@ import { ModelDropdownItem } from '@nemo/common/src/components/ModelSelectV2/Mod
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
+import { HourglassMid } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { DropdownHeading, Flex, Text } from '@nvidia/foundations-react-core';
-import { HourglassMid } from '@nvidia/react-gui-icons/icons';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FC } from 'react';
 

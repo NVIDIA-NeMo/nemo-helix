@@ -13,12 +13,12 @@ import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { utcToLocalDate } from '@nemo/common/src/utils/date';
+import { Beaker, Trash } from '@nemo/icons/icons';
 import {
   deleteEvaluation,
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { Beaker, Trash } from '@nvidia/react-gui-icons/icons';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';

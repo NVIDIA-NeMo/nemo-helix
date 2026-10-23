@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { Commit } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
@@ -17,7 +18,6 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Commit } from '@nvidia/react-gui-icons/icons';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';

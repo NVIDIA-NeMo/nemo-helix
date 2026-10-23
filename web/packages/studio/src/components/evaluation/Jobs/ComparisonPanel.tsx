@@ -4,6 +4,7 @@
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { renderMultipleSelectedValues } from '@nemo/common/src/utils/form';
 import { getColorsFromLength } from '@nemo/common/src/utils/formatters';
+import { ChartPerformance, ChartHierarchy, Warning } from '@nemo/icons/icons';
 import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
@@ -16,7 +17,6 @@ import {
   StatusMessage,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChartPerformance, ChartHierarchy, Warning } from '@nvidia/react-gui-icons/icons';
 import { prettifyName } from '@studio/util/evaluations';
 import { useQuery } from '@tanstack/react-query';
 import { useState, ReactNode } from 'react';

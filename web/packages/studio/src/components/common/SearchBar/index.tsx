@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import { FormField, TextInput } from '@nvidia/foundations-react-core';
-import { MagnifyingGlass } from '@nvidia/react-gui-icons/icons';
 import { ComponentProps } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 

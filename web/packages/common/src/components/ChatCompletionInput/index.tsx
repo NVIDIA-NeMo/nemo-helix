@@ -22,6 +22,7 @@ import type {
   VariableDef,
   VariableTextAreaHandle,
 } from '@nemo/common/src/components/form/VariableTextArea';
+import { ArrowDown, ArrowUp, ChevronDown, CopyGeneric, Trash } from '@nemo/icons/icons';
 import {
   Badge,
   Button,
@@ -31,7 +32,6 @@ import {
   Text,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { ArrowDown, ArrowUp, ChevronDown, CopyGeneric, Trash } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
 import { type ReactNode, useCallback, useMemo, useRef } from 'react';
 import {

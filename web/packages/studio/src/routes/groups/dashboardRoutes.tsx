@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { LayoutGrid } from '@nvidia/react-gui-icons/icons';
+import { LayoutGrid } from '@nemo/icons/icons';
 import {
   ASSISTANT_STUDIO_ENABLED,
   DASHBOARD_ROUTE_ENABLED,

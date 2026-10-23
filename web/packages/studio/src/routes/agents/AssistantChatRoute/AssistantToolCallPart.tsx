@@ -28,8 +28,8 @@ import {
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
+import { ChevronRight, IconClipboard } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { ChevronRight, IconClipboard } from '@nvidia/react-gui-icons/icons';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
 import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
 

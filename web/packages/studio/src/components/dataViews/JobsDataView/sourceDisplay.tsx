@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChartBar, Cog, LayoutList, Sliders, Sparkle } from '@nvidia/react-gui-icons/icons';
+import { ChartBar, Cog, LayoutList, Sliders, Sparkle } from '@nemo/icons/icons';
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
 import { iconColorClass } from '@studio/routes/constants';
 import type { ReactNode } from 'react';

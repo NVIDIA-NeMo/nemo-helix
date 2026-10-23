@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Cube, Bookmark } from '@nemo/icons/icons';
 import { Banner, Flex, Spinner } from '@nvidia/foundations-react-core';
-import { Cube, Bookmark } from '@nvidia/react-gui-icons/icons';
 import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,

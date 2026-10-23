@@ -9,8 +9,8 @@ import {
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { ListCheckmark } from '@nemo/icons/icons';
 import { Badge, Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
-import { ListCheckmark } from '@nvidia/react-gui-icons/icons';
 import type { AgentEvalTaskDetail } from '@studio/api/evaluation/agent-evaluations';
 import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
 import { isScalar } from '@studio/util/functions';

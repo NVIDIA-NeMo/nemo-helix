@@ -3,8 +3,8 @@
 
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { CopyGeneric } from '@nemo/icons/icons';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { CopyGeneric } from '@nvidia/react-gui-icons/icons';
 import { type FC, lazy, Suspense, useState } from 'react';
 
 const CodeEditor = lazy(() =>

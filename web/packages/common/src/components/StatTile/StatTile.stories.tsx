@@ -6,8 +6,8 @@ import {
   type StatTileActionableProps,
   type StatTileDiagnosticProps,
 } from '@nemo/common/src/components/StatTile/index';
+import { Beaker, Robot, Db, Lightbulb, Layers } from '@nemo/icons/icons';
 import { Grid } from '@nvidia/foundations-react-core';
-import { Beaker, Robot, Db, Lightbulb, Layers } from '@nvidia/react-gui-icons/icons';
 import type { Meta, StoryObj } from '@storybook/react';
 
 const meta: Meta<typeof StatTile> = {

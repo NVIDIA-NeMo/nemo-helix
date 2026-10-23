@@ -3,8 +3,8 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
+import { IconError } from '@nemo/icons/icons';
 import { Button, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { IconError } from '@nvidia/react-gui-icons/icons';
 import { AgentsTable, type AgentTableRow } from '@studio/components/dataViews/AgentsDataView';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {

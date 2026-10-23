@@ -6,6 +6,7 @@ import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { formatLogs, type LogLoadProgress } from '@nemo/common/src/utils/logs';
+import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
@@ -19,7 +20,6 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nvidia/react-gui-icons/icons';
 import classNames from 'classnames';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 

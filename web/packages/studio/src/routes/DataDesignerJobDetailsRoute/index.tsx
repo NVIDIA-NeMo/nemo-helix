@@ -5,6 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { ArrowLeft } from '@nemo/icons/icons';
 import {
   Banner,
   Button,
@@ -16,7 +17,6 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ArrowLeft } from '@nvidia/react-gui-icons/icons';
 import { DataDesignerJobActionsMenu } from '@studio/components/DataDesignerJobActionsMenu';
 import { DataDesignerTransformModal } from '@studio/components/DataDesignerTransformModal';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';

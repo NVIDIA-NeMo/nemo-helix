@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronRight } from '@nemo/icons/icons';
 import { Card, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { ChevronRight } from '@nvidia/react-gui-icons/icons';
 import cn from 'classnames';
 import type { ComponentProps, FC, ReactNode } from 'react';
 import { Link } from 'react-router';

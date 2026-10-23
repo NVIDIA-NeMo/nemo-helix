@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronLeft, ChevronRight } from '@nemo/icons/icons';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { ChevronLeft, ChevronRight } from '@nvidia/react-gui-icons/icons';
 import type { FC } from 'react';
 
 const ICON_SIZE = '16';

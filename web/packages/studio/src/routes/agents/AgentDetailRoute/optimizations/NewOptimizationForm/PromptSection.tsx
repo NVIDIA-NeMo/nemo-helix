@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2';
+import { Add, Close } from '@nemo/icons/icons';
 import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   Banner,
@@ -15,7 +16,6 @@ import {
   Text,
   TextArea,
 } from '@nvidia/foundations-react-core';
-import { Add, Close } from '@nvidia/react-gui-icons/icons';
 import {
   type OptimizationFormValues,
   sweepableVersions,

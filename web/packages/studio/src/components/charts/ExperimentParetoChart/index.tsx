@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { HourglassMid, Floppy } from '@nemo/icons/icons';
 import {
   getGetExperimentQueryKey,
   useUpdateExperiment,
 } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Text } from '@nvidia/foundations-react-core';
-import { HourglassMid, Floppy } from '@nvidia/react-gui-icons/icons';
 import { ParetoTooltip } from '@studio/components/charts/ExperimentParetoChart/ParetoTooltip';
 import {
   buildParetoPoints,

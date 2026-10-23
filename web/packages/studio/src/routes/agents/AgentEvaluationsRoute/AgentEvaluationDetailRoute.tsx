@@ -10,6 +10,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
+import { CloseCircle, IconClipboard, Beaker, IconDocument } from '@nemo/icons/icons';
 import { evalsCancelAgentEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
@@ -26,7 +27,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { CloseCircle, IconClipboard, Beaker, IconDocument } from '@nvidia/react-gui-icons/icons';
 import {
   aggregateScoresOf,
   agentNameForJob,
