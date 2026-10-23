@@ -43,6 +43,7 @@ from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
     _build_base_model,
     _build_peft,
     _configure_chat_dataset,
+    _configure_datasets,
     _configure_moe_backend,
     _configure_retrieval_dataset,
     _configure_sft_dataset,
@@ -77,6 +78,43 @@ def temp_dataset_files(tmp_path: Path) -> tuple[Path, Path]:
     train_file.write_text('{"messages": [{"role": "user", "content": "test"}]}\n')
     val_file.write_text('{"messages": [{"role": "user", "content": "test"}]}\n')
     return train_file, val_file
+
+
+def test_multimodal_fileset_is_left_for_the_vision_tower_recipe(
+    mock_customizer_config: MagicMock,
+    tmp_path: Path,
+) -> None:
+    row = (
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "images/receipt.png"}},
+                            {"type": "text", "text": "Describe this image."},
+                        ],
+                    }
+                ]
+            }
+        )
+        + "\n"
+    )
+    train_file = tmp_path / "train.jsonl"
+    val_file = tmp_path / "validation.jsonl"
+    train_file.write_text(row)
+    val_file.write_text(row)
+    mock_customizer_config.dataset.prompt_template = None
+    prepared = PreparedDataset(
+        merged_dir=tmp_path,
+        train_file=train_file,
+        validation_file=val_file,
+        train_samples=1,
+        validation_samples=1,
+    )
+
+    with pytest.raises(ValueError, match="multimodal chat"):
+        _configure_datasets({}, mock_customizer_config, prepared, seq_length=2048, seed=1)
 
 
 class TestConfigureChatDataset:

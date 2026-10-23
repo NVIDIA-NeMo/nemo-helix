@@ -51,6 +51,57 @@ describe('detectCustomizerSchema', () => {
       expect(detectCustomizerSchema({ messages: [{ content: 'hi' }] }, 'sft')).toBeNull();
     });
 
+    it('keeps a string-only messages row on sft-chat', () => {
+      const row = {
+        messages: [
+          { role: 'user', content: 'Describe this image.' },
+          { role: 'assistant', content: '<s_menu>' },
+        ],
+      };
+      expect(detectCustomizerSchema(row, 'sft')).toEqual({
+        variant: 'sft-chat',
+        label: CUSTOMIZER_SCHEMA_LABELS['sft-chat'],
+      });
+    });
+
+    it('detects a part list as multimodal chat', () => {
+      const row = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: 'images/receipt.png' } },
+              { type: 'text', text: 'Describe this image.' },
+            ],
+          },
+          { role: 'assistant', content: '<s_menu>' },
+        ],
+      };
+      expect(detectCustomizerSchema(row, 'sft')).toEqual({
+        variant: 'sft-multimodal-chat',
+        label: CUSTOMIZER_SCHEMA_LABELS['sft-multimodal-chat'],
+      });
+    });
+
+    it('detects a single image part as multimodal chat', () => {
+      const row = {
+        messages: [
+          {
+            role: 'user',
+            content: { type: 'image_url', image_url: { url: 'images/receipt.png' } },
+          },
+        ],
+      };
+      expect(detectCustomizerSchema(row, 'sft')?.variant).toBe('sft-multimodal-chat');
+    });
+
+    it('detects a nested chat message as multimodal chat', () => {
+      const row = {
+        messages: [{ role: 'user', content: { role: 'user', content: 'Describe this image.' } }],
+      };
+      expect(detectCustomizerSchema(row, 'sft')?.variant).toBe('sft-multimodal-chat');
+    });
+
     it('returns null for null input', () => {
       expect(detectCustomizerSchema(null, 'sft')).toBeNull();
     });
@@ -245,6 +296,74 @@ describe('validateRowCompleteness', () => {
     });
   });
 
+  describe('sft-multimodal-chat', () => {
+    const cordRow = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: 'images/receipt.png' } },
+            { type: 'text', text: 'Describe this image.' },
+          ],
+        },
+        { role: 'assistant', content: '<s_menu><s_nm>' },
+      ],
+    };
+
+    it('passes a part list, a string assistant label, a single part, and a nested chat message', () => {
+      expect(validateRowCompleteness(cordRow, 'sft-multimodal-chat')).toBeNull();
+      expect(
+        validateRowCompleteness(
+          {
+            messages: [
+              { role: 'user', content: { type: 'text', text: 'Describe this image.' } },
+              {
+                role: 'user',
+                content: {
+                  type: 'image_url',
+                  image_url: { url: 'data:image/png;base64,aGVsbG8=' },
+                },
+              },
+              { role: 'assistant', content: { role: 'assistant', content: '<s_menu>' } },
+            ],
+          },
+          'sft-multimodal-chat'
+        )
+      ).toBeNull();
+    });
+
+    it('rejects a part type other than text or image_url', () => {
+      const row = {
+        messages: [{ role: 'user', content: [{ type: 'image', image: 'images/receipt.png' }] }],
+      };
+      expect(validateRowCompleteness(row, 'sft-multimodal-chat')).toMatch(
+        /type must be "text" or "image_url"/
+      );
+    });
+
+    it('rejects an empty part list and a nested message whose content is not a string', () => {
+      expect(
+        validateRowCompleteness(
+          { messages: [{ role: 'user', content: [] }] },
+          'sft-multimodal-chat'
+        )
+      ).toMatch(/at least one part/);
+      expect(
+        validateRowCompleteness(
+          {
+            messages: [
+              {
+                role: 'user',
+                content: { role: 'assistant', content: [{ type: 'text', text: 'x' }] },
+              },
+            ],
+          },
+          'sft-multimodal-chat'
+        )
+      ).toMatch(/content must be a string/);
+    });
+  });
+
   describe('dpo-binary-preference', () => {
     it('passes for non-empty prompt/chosen/rejected strings', () => {
       expect(
@@ -372,6 +491,7 @@ describe('CUSTOMIZER_SCHEMA_LABELS', () => {
     // these values is a UX decision — fail this test loudly to force a review.
     expect(CUSTOMIZER_SCHEMA_LABELS).toEqual({
       'sft-chat': 'Chat Completion',
+      'sft-multimodal-chat': 'Multimodal Chat',
       'sft-prompt-completion': 'Completion',
       'dpo-preference': 'Preference',
       'dpo-helpsteer3': 'HelpSteer3',

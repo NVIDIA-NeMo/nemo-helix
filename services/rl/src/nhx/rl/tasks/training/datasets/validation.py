@@ -18,6 +18,11 @@ from typing import Any, Callable, Optional
 from jsonschema import exceptions
 from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
+from nhx.customization_common.schemas.datasets import (
+    MULTIMODAL_DATASET,
+    MULTIMODAL_SCHEMA,
+    row_has_multimodal_content,
+)
 from nhx.rl.entities.values import FinetuningType, TrainingType
 from nhx.rl.schemas.environment import GymDatasetRow
 from nhx.rl.tasks.training.datasets.preparation import DatasetFormatError
@@ -66,6 +71,9 @@ def SFT_SCHEMA(prompt_template: str | None = None):
     Uses the SFTDatasetSchemaType union which supports:
     - SFTPromptTemplateDatasetItemSchema: Flexible prompt template format
     - SFTChatDatasetItemSchema: Chat format with messages and tools
+
+    A part, a part list, or a nested chat message is MULTIMODAL_SCHEMA.
+    This factory keeps rejecting those rows.
 
     Args:
         prompt_template: Optional template string with placeholders like "{input} {output}".
@@ -136,9 +144,11 @@ def GRPO_SCHEMA(_: str | None = None) -> dict:
 
 
 # The RL backend trains DPO and GRPO; register schemas by TrainingType value.
+# MULTIMODAL_DATASET is an explicit dataset_type. String chat is not labeled multimodal.
 SCHEMAS: dict[str, Callable[[str | None], dict]] = {
     TrainingType.DPO.value: DPO_SCHEMA,
     TrainingType.GRPO.value: GRPO_SCHEMA,
+    MULTIMODAL_DATASET: MULTIMODAL_SCHEMA,
 }
 
 
@@ -231,6 +241,10 @@ class DatasetValidator:
             raise DatasetFormatError(f"{file_path} has an entry which is not valid JSON: {e}")
 
         for schema_name, schema_factory in SCHEMAS.items():
+            # String content is valid on MULTIMODAL_SCHEMA. Keep those rows off this key
+            # so a chat file is not reported as multimodal when DPO and GRPO miss.
+            if schema_name == MULTIMODAL_DATASET and not row_has_multimodal_content(obj):
+                continue
             try:
                 validator = _compile_validator(schema_factory(self.prompt_template))
                 self._validate_json_object(obj, validator)

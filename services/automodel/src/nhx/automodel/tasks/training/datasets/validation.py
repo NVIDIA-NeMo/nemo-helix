@@ -20,6 +20,11 @@ from jsonschema.validators import validator_for
 from nhx.automodel.entities.values import FinetuningType, TrainingType
 from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
 from nhx.automodel.tasks.training.datasets.schemas import SFTDatasetSchemaType
+from nhx.customization_common.schemas.datasets import (
+    MULTIMODAL_DATASET,
+    MULTIMODAL_SCHEMA,
+    row_has_multimodal_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +44,10 @@ def SFT_SCHEMA(prompt_template: str | None = None):
 
     Uses the SFTDatasetSchemaType union which supports:
     - SFTPromptTemplateDatasetItemSchema: Flexible prompt template format
-    - SFTPChatDatasetItemSchema: Chat format with messages and tools
+    - SFTChatDatasetItemSchema: Chat format with messages and tools
+
+    A part, a part list, or a nested chat message is MULTIMODAL_SCHEMA.
+    This factory keeps rejecting those rows.
 
     Args:
         prompt_template: Optional template string with placeholders like "{input} {output}".
@@ -97,6 +105,8 @@ def SFT_SCHEMA(prompt_template: str | None = None):
 SCHEMAS: dict[str, Callable[[str | None], dict]] = {
     TrainingType.SFT.value: SFT_SCHEMA,
     TrainingType.DISTILLATION.value: SFT_SCHEMA,
+    # Explicit dataset_type only. String chat still matches SFT_SCHEMA first.
+    MULTIMODAL_DATASET: MULTIMODAL_SCHEMA,
 }
 
 
@@ -186,6 +196,9 @@ class DatasetValidator:
             raise DatasetFormatError(f"{file_path} has entry which is not a valid json: {e}")
 
         for schema_name, schema_factory in SCHEMAS.items():
+            # String content is valid on MULTIMODAL_SCHEMA and on SFT chat. Keep string rows on SFT.
+            if schema_name == MULTIMODAL_DATASET and not row_has_multimodal_content(obj):
+                continue
             try:
                 validator = _compile_validator(schema_factory(self.prompt_template))
                 self._validate_json_object(obj, validator)
