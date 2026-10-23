@@ -398,6 +398,25 @@ async def test_failed_bundle_is_retried_then_given_up(harness, harbor_plan, jobs
     assert "bundle-3" in (run.error or "")
 
 
+async def test_a_bundle_result_from_another_job_under_the_name_is_not_saved(harness, harbor_plan, jobs):
+    run = await harness.submit(harbor_plan, name="run-a")
+    await harness.cycle()
+    jobs.finish_all()
+    await harness.cycle()
+    await harness.cycle()
+    bundle = jobs.created[-1]
+    jobs.finish(bundle.name, "completed")
+    key = (bundle.name, "agent-eval-results")
+    ours = jobs.results[key]
+    jobs.results[key] = ours.model_copy(update={"job": "job-someone-else", "artifact_url": "default/elsewhere"})
+    await harness.cycle()
+    assert not jobs.records and (await harness.run(run)).result_state is ResultState.PENDING
+    jobs.results[key] = ours
+    await harness.cycle()
+    (record,) = jobs.records
+    assert record.job_id == bundle.name and (await harness.run(run)).result_state is ResultState.READY
+
+
 def tampered(request: CreateHelixJobRequest) -> CreateHelixJobRequest:
     """``request`` under its own name, but running another image: someone else's Job squatting the name."""
     platform_spec = request.platform_spec.model_copy(deep=True)
