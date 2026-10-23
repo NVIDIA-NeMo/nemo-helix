@@ -281,16 +281,17 @@ def _configured_with_setup_hosts(task_spec, tmp_path, hosts: tuple[str, ...], **
     return configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, **runtime), ctx, spec)
 
 
-def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path):
+@pytest.mark.parametrize("agent", ["claude-code", "codex"])
+def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path, agent):
     configured = _configured_with_setup_hosts(
-        task_spec, tmp_path, ("registry.npmjs.org",), agent_name="claude-code", agent_kwargs={"version": "2.1.0"}
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, agent_kwargs={"version": "2.1.0"}
     )
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
     assert configured.agent_import_path == SETUP_EGRESS_AGENT
     assert configured.agent_kwargs == {
         "version": "2.1.0",
-        INNER_AGENT_KWARG: "claude-code",
+        INNER_AGENT_KWARG: agent,
         SETUP_HOSTS_KWARG: ["registry.npmjs.org"],
     }
 
@@ -330,10 +331,10 @@ def test_an_unwrapped_agent_keeps_the_callers_setup_multiplier(task_spec, tmp_pa
 
 def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):
     configured = _configured_with_setup_hosts(
-        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="nemo_evals.harbor.agents:SandboxedCodex"
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="harbor.agents.installed.codex:Codex"
     )
     assert configured.agent_import_path == SETUP_EGRESS_AGENT
-    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "nemo_evals.harbor.agents:SandboxedCodex"
+    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "harbor.agents.installed.codex:Codex"
 
 
 @pytest.mark.parametrize("agent", ["oracle", "nop"])

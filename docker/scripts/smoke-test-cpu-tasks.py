@@ -184,30 +184,11 @@ def check_bundled_harness_clis() -> list[str]:
     return failures
 
 
-def check_sandboxed_codex_archive() -> list[str]:
-    """Check that the bundled codex archive contains the codex binary.
-
-    nemo-evals' SandboxedCodex agent copies this archive into each Harbor sandbox and runs codex from it.
-    """
-    import tarfile
-
-    from nemo_evals.harbor.agents import CODEX_ARCHIVE_MEMBER, DEFAULT_CODEX_ARCHIVE
-
-    try:
-        with tarfile.open(DEFAULT_CODEX_ARCHIVE) as archive:
-            archive.getmember(CODEX_ARCHIVE_MEMBER)
-    except Exception as exc:  # noqa: BLE001 - report, do not abort the suite
-        return [f"{DEFAULT_CODEX_ARCHIVE}: {exc!r}"]
-    print(f"codex archive: {DEFAULT_CODEX_ARCHIVE} holds {CODEX_ARCHIVE_MEMBER}")
-    return []
-
-
 CHECKS = (
     check_evaluator_imports,
     check_task_entrypoints,
     check_fabric_adapters,
     check_bundled_harness_clis,
-    check_sandboxed_codex_archive,
 )
 
 
