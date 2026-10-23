@@ -43,6 +43,7 @@ from nemo_evals.source_authorization import remember_allowed
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
+from nemo_evals.taskset_runs.progress import build_progress
 from nemo_evals.taskset_runs.run_evaluation import (
     EvaluationDatasetMismatchError,
     ForeignEvaluationError,
@@ -220,18 +221,21 @@ class TasksetRunService:
         self._auth_context = auth_context
 
     async def get(self, workspace: str, run_id: str) -> TasksetRunStatus | None:
-        """Read one stored run without joining members, plans or Jobs.
+        """Read one stored run with its progress counted from its members, without loading plans or reading Jobs.
 
         Args:
             workspace: Workspace that scopes the record lookup.
             run_id: Public run name in that workspace.
 
         Returns:
-            Stored public status, or None only when the record is absent. Storage
-            and projection failures propagate for the route to report as errors.
+            Stored public status with ``progress`` (None while the run has no members), or None only
+            when the record is absent. Storage and projection failures propagate for the route to report as errors.
         """
         run = await self._store.find(workspace, run_id)
-        return to_status(run) if run is not None else None
+        if run is None:
+            return None
+        members = await self._store.list_all_members(run)
+        return to_status(run).model_copy(update={"progress": build_progress(members) if members else None})
 
     async def list_runs(
         self,
