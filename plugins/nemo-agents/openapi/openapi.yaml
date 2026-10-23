@@ -2748,7 +2748,7 @@ components:
           type: string
         reference:
           allOf:
-          - $ref: '#/components/schemas/ReferenceConfig'
+          - $ref: '#/components/schemas/ReferenceConfigOutput'
           description: Agent source and container references.
         id:
           type: string
@@ -5653,18 +5653,37 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    ReferenceConfig:
+    ReferenceConfigInput:
       properties:
         fileset:
+          pattern: ^[\w\-.]+(/[\w\-.]+)?$
           title: Fileset
-          description: Fileset containing agent source and supporting files.
+          description: Fileset containing agent source and supporting files, as name
+            or workspace/name.
           type: string
         container_image:
           title: Container Image
-          description: Container image reference with a tag or digest.
+          description: Container image reference; accepts Docker shorthand, tags,
+            and SHA-256 digests.
           type: string
       type: object
-      title: ReferenceConfig
+      title: ReferenceConfigInput
+      description: Optional source and container references associated with an agent.
+    ReferenceConfigOutput:
+      properties:
+        fileset:
+          pattern: ^[\w\-.]+(/[\w\-.]+)?$
+          title: Fileset
+          description: Fileset containing agent source and supporting files, as name
+            or workspace/name.
+          type: string
+        container_image:
+          title: Container Image
+          description: Container image reference; accepts Docker shorthand, tags,
+            and SHA-256 digests.
+          type: string
+      type: object
+      title: ReferenceConfigOutput
       description: Optional source and container references associated with an agent.
     RegisterAgentRequest:
       properties:
@@ -5679,7 +5698,7 @@ components:
           default: ''
         reference:
           allOf:
-          - $ref: '#/components/schemas/ReferenceConfig'
+          - $ref: '#/components/schemas/ReferenceConfigInput'
           description: Agent source and container references.
         config:
           additionalProperties: true
