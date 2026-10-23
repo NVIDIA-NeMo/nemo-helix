@@ -6,10 +6,10 @@
 # Collects the docs/fern/ sources and PR metadata from the (possibly untrusted)
 # PR branch and uploads them as an artifact. No secrets are used here, so this
 # is safe to run on fork PRs via the regular pull_request trigger. This also
-# materializes release versions (npm run materialize:versions), including any
-# selected docs/fern/release-branches.json pre-release entries, so the preview's
-# version selector matches what a real publish would produce; the branch fetch it
-# does is an anonymous `git fetch` against this public repo, so it needs no token.
+# materializes release versions (npm run materialize:versions) from origin's
+# release branches, so the preview's version selector matches a real publish.
+# Branch/tag fetches against this public repo need no token; tags only determine
+# whether each branch's version receives a preview badge.
 #
 # The companion workflow (fern-docs-preview-comment.yaml) picks up the artifact,
 # builds the preview with DOCS_FERN_TOKEN, and posts the PR comment.

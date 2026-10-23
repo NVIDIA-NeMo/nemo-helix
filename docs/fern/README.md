@@ -53,7 +53,7 @@ docs/                          # page content (.mdx), one tree per product area
     └── versions/latest.yml    # Latest navigation tree (ordinary docs authoring)
 ```
 
-Normal docs authoring targets `Latest`. `versions/latest.yml` defines the sidebar and maps each page file to its canonical route — and, because Fern only builds pages listed there, it is also what gates unready content (see below). Production publish additionally materializes frozen release versions from stable SemVer tags that already contain Fern config.
+Normal docs authoring targets `Latest`. `versions/latest.yml` defines the sidebar and maps each page file to its canonical route — and, because Fern only builds pages listed there, it is also what gates unready content (see below). Production publish additionally materializes one documentation version per release branch that contains Fern config.
 
 ## Authoring
 
@@ -103,44 +103,25 @@ For public publishing, `.github/workflows/publish-fern-docs.yaml` runs:
 npm run materialize:versions
 ```
 
-That script discovers stable SemVer tags in the full checkout, skips tags that predate `docs/fern/versions/latest.yml`, exports each tag's `docs/` tree into ignored `docs/fern/generated/release-versions/<version>/` snapshots, rewrites the tag's `versions/latest.yml` to point at the snapshot, and injects generated entries into `docs.yml` before `npm run generate` publishes. Tag pushes are publish signals; the workflow checks out the default branch so the current Fern publishing code and `Latest` docs remain the source for the live site.
+That script refreshes `release/X.Y` and `release/X.Y.Z` branches from `origin`, skips branches without `docs/fern/versions/latest.yml`, and exports each branch tip's `docs/` tree into ignored `docs/fern/generated/release-versions/<version>/` snapshots. It rewrites the branch's navigation and injects one entry per branch into `docs.yml`, sorted newest first. For example, `release/0.9` has label `0.9` and slug `v0.9`. Patch tags do not create extra selectors.
 
-This means early `0.1.x` tags that were cut before the Fern migration cannot appear as true Fern versions unless someone deliberately backports/migrates those docs into Fern. A release tag such as `0.2.0`, which already contains `docs/fern`, can be materialized.
+Docs always come from the branch, even after tagging. Removed branches disappear on the next materialization. There are no tag snapshots or release-branch configuration files. Individual patch release-note pages remain in their release branch's navigation.
+
+The script fetches branches and tags every run and unshallows when necessary, preventing stale content and incomplete ancestry checks. Network/auth failures stop materialization before generated files change. Production publishing still uses the default branch's publishing code and `Latest` docs.
 
 To preview the release selector locally, run `npm run materialize:versions` from `docs/fern/`, then `npm run dev`. The generated snapshots and generated version YAMLs are gitignored; restore `docs/fern/docs.yml` afterward if you only needed a local preview.
 
-### Pre-release branches
+### Preview status
 
-`docs/fern/release-branches.json` is an optional allowlist of release branches to preview before their tags are cut. Standard branch names derive their eventual tag automatically: `release/0.6` becomes `0.6.0`, and `release/0.6.1` becomes `0.6.1`.
+A version is marked `availability: preview` until a stable SemVer tag from its own release line is reachable from the branch tip. Both lightweight and annotated tags on `origin` count. Tags are refreshed in an isolated Git namespace; local-only tags cannot remove the badge, and developers' own tags are not modified.
 
-```json
-[
-  "release/0.6"
-]
-```
+For example, `release/0.9` accepts a reachable `0.9.0`, `v0.9.1`, or another stable `0.9.*` tag. A patch branch such as `release/0.9.1` requires exactly that patch. Prerelease tags, tags inherited from older release lines, and tags on unmerged commits do not remove the badge.
 
-If the tag (`0.6.0`) doesn't exist yet but the branch (`release/0.6`) does and contains `docs/fern/versions/latest.yml`, `materialize-release-versions.mjs` builds that version's docs from the branch instead, under the same version path the real tag will use, and marks it `availability: preview` in `docs.yml` (Fern's version-selector schema has no literal "pre-release" value; `preview` is the closest fit and still renders a badge). Once the real tag is pushed, it takes over automatically — the branch entry is skipped as soon as the tag exists.
+Tags only establish whether a release line has shipped; they never choose content or add selector entries. Stable tag pushes still trigger publishing to refresh the preview badge.
 
-For patch or nonstandard cases, use object form to map a branch to the exact future tag:
+The old per-tag selector slugs (such as `v0.9.0`) are no longer generated for a `release/0.9` branch; use its branch-line slug `v0.9` instead.
 
-```json
-{
-  "release/0.6": "0.6.1"
-}
-```
-
-If a released version needs docs-only fixes that should come from the release branch instead of the immutable tag, use the option-object form with `source: "branch"`. This replaces the tag snapshot for that version while the override is present, and does not mark the version as a preview when the tag already exists. `tag` may be a string or a list when multiple version snapshots should be sourced from the same branch:
-
-```json
-{
-  "release/0.6": {
-    "tag": ["0.6.0", "0.6.1"],
-    "source": "branch"
-  }
-}
-```
-
-The allowlist is not read by Fern itself, so it isn't subject to `docs.yml`'s schema (which is `additionalProperties: false`). It's optional: an absent file or empty array/object is a no-op. A listed branch that isn't already fetched locally is pulled from `origin` on demand (anonymously — this repo is public, so no token is needed), then treated the same as any other local ref. This is the same code path everywhere it runs, so no extra CI step is needed: `npm run materialize:versions` behaves identically locally, in `publish-fern-docs.yaml`, and in `fern-docs-preview-build.yaml` (so a PR's Fern preview shows the same version selector, including selected pre-release branches, that a real publish would produce — not just `main`). A confirmed-absent branch is a soft skip; any other fetch failure (network, auth) fails the run instead of silently dropping the preview version.
+Local materialization, CI previews, and production publishing use the same discovery and preview rules. Run `npm test` in this directory for isolated Git-fixture regression tests.
 
 ## Gated (unready) features
 
@@ -170,7 +151,7 @@ One difference from the old MkDocs hook: that hook ran at build time and kept th
 | `fern-docs-ci.yaml` | `pull_request` touching `docs/**`, `openapi/**`, `services/**/src/**/*.py`, `k8s/helm/values.yaml`, `pyproject.toml`, `uv.lock`, `Makefile`, `.nvmrc`, or `.github/workflows/fern-docs-ci.yaml` | `npm run check` (fern check + MDX + NotebookViewer artifacts + gated links), plus docs linter regression tests, Python/Helm/API snippet lint, and `npm run broken-links` |
 | `fern-docs-preview-build.yaml` | `pull_request` touching `docs/**` | Upload PR `docs/` sources as an artifact (no secrets — fork-safe) |
 | `fern-docs-preview-comment.yaml` | successful preview build (`workflow_run`) | Build a Fern preview with `DOCS_FERN_TOKEN` and post/update the PR comment |
-| `publish-fern-docs.yaml` | push to `main` touching `docs/**`, stable SemVer tag, `docs/v*` republish tag, or manual dispatch | Materialize release versions and publish the Fern docs site |
+| `publish-fern-docs.yaml` | push to `main` or `release/*` touching `docs/**`, stable SemVer tag, `docs/v*` republish tag, or manual dispatch | Materialize release versions and publish the Fern docs site |
 
 Required secret: `DOCS_FERN_TOKEN` (org-level), from `fern token` for an account that can publish to the NVIDIA Fern organization.
 
@@ -185,4 +166,4 @@ PRs that touch `docs/**` get a shared preview URL posted as a comment after the 
 | Page 404 in preview | Check that `versions/latest.yml` lists the page (gated pages are intentionally omitted and *will* 404) |
 | Broken internal link | Rewrite to the nav URL `/documentation/...`; if it targets a gated page, run `make docs-fix-links` to delink it. `make docs-broken-links` reports them all |
 | JSX or MDX parse error | Escape raw `{}`, `<`, or `>` in prose, and use Fern components instead of raw MkDocs syntax |
-| Release tag missing from version selector | Confirm the tag is stable SemVer and contains `docs/fern/versions/latest.yml`; pre-Fern tags are skipped by `npm run materialize:versions` |
+| Release branch missing from version selector | Confirm `origin` has a `release/X.Y` or `release/X.Y.Z` branch containing `docs/fern/versions/latest.yml`; run `npm run materialize:versions` |
