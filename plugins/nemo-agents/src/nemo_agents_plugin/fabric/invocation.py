@@ -102,7 +102,7 @@ async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest
             if request.agent_config.environment.provider != "local":
                 progress_logger.info("Live agent telemetry unavailable for a non-local environment.")
             else:
-                observer = LocalProgressObserver(fabric_config, request.base_dir, artifacts_dir)
+                observer = LocalProgressObserver(fabric_config, request.base_dir.resolve(), artifacts_dir)
                 observer_task = asyncio.create_task(observer.run())
         except Exception:
             progress_logger.warning("Live agent telemetry observer setup failed; invocation continues.")

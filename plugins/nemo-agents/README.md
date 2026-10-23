@@ -55,9 +55,10 @@ telemetry:
 With a local environment and the common Fabric adapter layout, this writes to
 `<fabric-base>/artifacts/relay/<runtime-id>/events.atof.jsonl`. Explicit
 `telemetry.atof.sinks` file sinks are also supported when their directory is
-beneath the configured local artifacts directory. Symlinks, path traversal, and
-non-regular files are rejected; remote environments and endpoint-only sinks are
-not observed. The observer does not change telemetry configuration.
+beneath the configured local artifacts directory. The trusted job base is
+normalized first, so a symlinked storage ancestor is supported. Symlinks within
+telemetry sink paths, path traversal, and non-regular files are rejected; remote
+environments and endpoint-only sinks are not observed. The observer does not change telemetry configuration.
 
 Example (counts describe **observed records**, not successful operations):
 
@@ -82,6 +83,14 @@ Jobs create fresh artifact directories; no recursive search is performed. Short
 jobs may finish before a poll, and terminal counters are not an authoritative or
 complete trace. Artifacts, usage, terminal result, invocation timeout, and
 after-invoke extensions remain authoritative and unchanged.
+
+Filesystem polling runs in one dedicated daemon thread, not the invocation event
+loop or its default executor. Observer shutdown waits at most 0.1 seconds for the
+worker, then warns and stops waiting, so a stalled filesystem call cannot hold
+up invocation timeout handling or `asyncio.run()` executor shutdown. Python
+cannot cancel a syscall already running: that worker may retain its bounded
+state/file descriptors until the syscall returns or the job process exits. On
+return it stops without reporting a late batch or starting another poll.
 
 This is a local-file workaround, **not** a native streaming fix. In Fabric SDK
 0.5.0, `InvokeStream.result()` shields its invocation task, while

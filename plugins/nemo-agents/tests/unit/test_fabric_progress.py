@@ -9,7 +9,9 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from pathlib import Path
+from time import monotonic
 from unittest.mock import patch
 
 import nemo_relay
@@ -129,6 +131,146 @@ async def test_real_relay_export_is_observable_before_tool_and_invocation_finish
     finally:
         exporter.deregister("job-progress-test")
         exporter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_symlinked_base_ancestor_keeps_progress_enabled(tmp_path, caplog):
+    """Normalize trusted job storage without allowing symlinked telemetry sinks."""
+    caplog.set_level(logging.INFO)
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    base = alias / "fabric"
+    terminal = FabricRuntimeResult(status="succeeded")
+
+    async def invoke(request):
+        path = _file(real / "fabric")
+        path.write_bytes(_record())
+        async with asyncio.timeout(2):
+            while "tool_start=1" not in caplog.text:
+                await asyncio.sleep(0.01)
+        return terminal
+
+    with patch("nemo_agents_plugin.fabric.invocation.run_fabric_agent_once", invoke):
+        result = await invoke_agent_config_request_once(
+            AgentConfigInvocationRequest(
+                agent_config=_config(),
+                input="private",
+                base_dir=base,
+                observe_progress=True,
+            )
+        )
+    assert result is terminal
+    assert "requires a local ATOF file sink" not in caplog.text
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_normal_observer_shutdown_releases_worker(tmp_path, caplog):
+    """Cancelling between polls wakes the worker rather than waiting a poll interval."""
+    entered = threading.Event()
+    threads = []
+
+    def poll(observer):
+        threads.append(threading.current_thread())
+        entered.set()
+
+    with patch.object(LocalProgressObserver, "poll", poll):
+        task = asyncio.create_task(_observer(tmp_path).run())
+        async with asyncio.timeout(1):
+            while not entered.is_set():
+                await asyncio.sleep(0.001)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    for thread in threads:
+        thread.join(timeout=0.1)
+    assert len(threads) == 1 and not threads[0].is_alive()
+    assert "shutdown timed out" not in caplog.text
+
+
+@pytest.mark.parametrize("outcome", ["result", "failure", "timeout", "cancel"])
+def test_stalled_poll_does_not_delay_invocation_or_asyncio_run_shutdown(tmp_path, caplog, outcome):
+    """An in-flight filesystem poll must not join the default executor at exit."""
+    caplog.set_level(logging.INFO)
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    threads = []
+    original_poll = LocalProgressObserver.poll
+    terminal = FabricRuntimeResult(status="succeeded")
+    failure = RuntimeError("private invocation error")
+    calls = 0
+    _file(tmp_path).write_bytes(_record())
+
+    def stalled_poll(observer):
+        threads.append(threading.current_thread())
+        entered.set()
+        try:
+            # Self-release on regressions so a default-executor shutdown cannot
+            # hang pytest indefinitely. Correct code exits before this expires.
+            release.wait(2)
+            original_poll(observer)
+        finally:
+            finished.set()
+
+    async def invoke(request):
+        nonlocal calls
+        calls += 1
+        async with asyncio.timeout(0.5):
+            while not entered.is_set():
+                await asyncio.sleep(0.001)
+        if outcome == "failure":
+            raise failure
+        if outcome == "timeout":
+            try:
+                await asyncio.wait_for(asyncio.Future(), timeout=0.02)
+            except TimeoutError as error:
+                raise FabricRuntimeTimeoutError("invocation timed out") from error
+        if outcome == "cancel":
+            raise asyncio.CancelledError()
+        return terminal
+
+    async def run():
+        expected = {"failure": RuntimeError, "timeout": FabricRuntimeTimeoutError, "cancel": asyncio.CancelledError}
+        request = AgentConfigInvocationRequest(
+            agent_config=_config(),
+            input="private",
+            base_dir=tmp_path,
+            observe_progress=True,
+        )
+        if outcome == "result":
+            assert await invoke_agent_config_request_once(request) is terminal
+        else:
+            with pytest.raises(expected[outcome]) as caught:
+                await invoke_agent_config_request_once(request)
+            if outcome == "failure":
+                assert caught.value is failure
+
+    try:
+        with (
+            patch.object(LocalProgressObserver, "poll", stalled_poll),
+            patch(
+                "nemo_agents_plugin.fabric.invocation.run_fabric_agent_once",
+                invoke,
+            ),
+        ):
+            started = monotonic()
+            asyncio.run(run())
+            assert monotonic() - started < 1
+            assert entered.is_set() and not finished.is_set()
+            assert calls == 1
+            assert len(threads) == 1 and threads[0].daemon
+            assert "observer shutdown timed out" in caplog.text
+            assert "private invocation error" not in caplog.text
+    finally:
+        release.set()
+        for thread in threads:
+            thread.join(timeout=1)
+        assert all(not thread.is_alive() for thread in threads)
+    # A resumed worker must not emit lifecycle records after invocation exit.
+    assert "Agent telemetry progress" not in caplog.text
 
 
 def test_fragmented_oversize_malformed_and_payload_records(tmp_path, caplog):

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import stat
+import threading
 from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -25,6 +26,7 @@ from nemo_fabric import FabricConfig
 logger = logging.getLogger(__name__)
 _POLL_SECONDS = 0.5
 _REPORT_SECONDS = 5.0
+_WORKER_SHUTDOWN_SECONDS = 0.1
 _MAX_FILES = 4
 _MAX_ENTRIES = 64
 _MAX_READ = 64 * 1024
@@ -83,6 +85,7 @@ class LocalProgressObserver:
         self.buffers: dict[tuple[int, int], bytes] = {}
         self.dropping: set[tuple[int, int]] = set()
         self.warned = False
+        self._stop = threading.Event()
 
     def _read(self, fd: int, seen: set[tuple[int, int]]) -> None:
         info = os.fstat(fd)
@@ -131,10 +134,14 @@ class LocalProgressObserver:
     def poll(self) -> None:
         seen: set[tuple[int, int]] = set()
         for parts, filename in self.sinks:
+            if self._stop.is_set():
+                return
             try:
                 with _directory(self.base, parts) as directory_fd:
                     with os.scandir(directory_fd) as entries:
                         for index, entry in enumerate(entries):
+                            if self._stop.is_set():
+                                return
                             if index >= _MAX_ENTRIES:
                                 break
                             if not entry.is_dir(follow_symlinks=False):
@@ -152,6 +159,10 @@ class LocalProgressObserver:
                                 continue
             except FileNotFoundError:
                 continue
+        # A cancelled observer may finish an in-flight syscall later. Do not
+        # publish a late batch after the invocation has already ended.
+        if self._stop.is_set():
+            return
         now = monotonic()
         if self.last_event is not None and now - self.last_report >= _REPORT_SECONDS:
             logger.info(
@@ -185,12 +196,40 @@ class LocalProgressObserver:
                 logger.info("Live agent telemetry unavailable: requires a local ATOF file sink beneath artifacts.")
             return
         logger.info("Observing local agent telemetry; waiting for lifecycle records (payloads omitted).")
+        loop = asyncio.get_running_loop()
+        done = asyncio.Event()
+
+        def observe() -> None:
+            """Keep blocking filesystem work outside the invocation event loop."""
+            try:
+                while not self._stop.is_set():
+                    self.poll()
+                    if self._stop.wait(_POLL_SECONDS):
+                        break
+            except Exception:
+                # Neither exception text nor paths are safe telemetry output.
+                if not self._stop.is_set():
+                    logger.warning("Live agent telemetry observer failed; invocation continues without observation.")
+            finally:
+                try:
+                    loop.call_soon_threadsafe(done.set)
+                except RuntimeError:
+                    # A stalled syscall can return after asyncio.run has exited.
+                    pass
+
+        # Do not use asyncio.to_thread/default executors: asyncio.run waits for
+        # those workers on exit. A syscall cannot be forcibly cancelled; one
+        # daemon worker may remain until it returns or the job process exits.
+        worker = threading.Thread(target=observe, name="agent-job-telemetry", daemon=True)
         try:
-            while True:
-                self.poll()
-                await asyncio.sleep(_POLL_SECONDS)
-        except asyncio.CancelledError:
-            raise
+            worker.start()
+            await done.wait()
         except Exception:
-            # Neither exception text nor paths are safe telemetry output.
             logger.warning("Live agent telemetry observer failed; invocation continues without observation.")
+        finally:
+            self._stop.set()
+            if worker.ident is not None:
+                try:
+                    await asyncio.wait_for(done.wait(), timeout=_WORKER_SHUTDOWN_SECONDS)
+                except TimeoutError:
+                    logger.warning("Live agent telemetry observer shutdown timed out; abandoning daemon worker.")
