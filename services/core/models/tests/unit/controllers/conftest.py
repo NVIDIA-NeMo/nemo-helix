@@ -15,6 +15,7 @@ from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFou
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayProviderClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.config import HelixConfig
 
 
@@ -282,14 +283,16 @@ def make_mock_platform_client(models_client: MagicMock | None = None) -> MagicMo
     client.virtual_models_client.delete_virtual_model = AsyncMock(return_value=_ModelResponse())
     client.gateway_provider_client = MagicMock()
     client.gateway_provider_client.get_provider_models = AsyncMock()
+    client.workspaces_client = MagicMock()
+    client.workspaces_client.get_workspace = AsyncMock(return_value=_ModelResponse())
     client.with_retry = MagicMock(return_value=client)
     return client
 
 
 @contextmanager
 def patch_typed_clients() -> Iterator[None]:
-    """Make ``AsyncModelsClient``/``AsyncVirtualModelsClient``/``AsyncInferenceGatewayProviderClient``
-    ``.from_client(client)`` return the matching typed-client mock on *client*."""
+    """Make ``AsyncModelsClient``/``AsyncVirtualModelsClient``/``AsyncInferenceGatewayProviderClient``/
+    ``AsyncWorkspacesClient`` ``.from_client(client)`` return the matching typed-client mock on *client*."""
     with (
         patch.object(AsyncModelsClient, "from_client", side_effect=lambda client: client.models_client),
         patch.object(AsyncVirtualModelsClient, "from_client", side_effect=lambda client: client.virtual_models_client),
@@ -298,6 +301,7 @@ def patch_typed_clients() -> Iterator[None]:
             "from_client",
             side_effect=lambda client: client.gateway_provider_client,
         ),
+        patch.object(AsyncWorkspacesClient, "from_client", side_effect=lambda client: client.workspaces_client),
     ):
         yield
 
