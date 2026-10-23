@@ -119,7 +119,9 @@ For example, `release/0.9` accepts a reachable `0.9.0`, `v0.9.1`, or another sta
 
 Tags only establish whether a release line has shipped; they never choose content or add selector entries. Stable tag pushes still trigger publishing to refresh the preview badge.
 
-The old per-tag selector slugs (such as `v0.9.0`) are no longer generated for a `release/0.9` branch; use its branch-line slug `v0.9` instead.
+The picker contains release lines, not individual patch releases. To preserve old links during migration, materialization generates redirects for reachable stable **0.5.x through 0.8.x** tags to the matching release-branch slug. For example, `/v0.8.1` redirects to `/nemo-helix/v0.8`, and `/v0.8.1/:path*` redirects to `/nemo-helix/v0.8/:path*` (with the configured instance basepath in destinations). Root and nested-page URLs are covered without adding picker entries or duplicate docs builds.
+
+Redirect aliases are discovered from tags, not maintained in a JSON list. Authored redirects take precedence, generated aliases are refreshed idempotently, and a dedicated patch branch is never redirected away. No aliases are generated for versions before 0.5 or from 0.9 onward; newer release lines use branch-line URLs from the start.
 
 Local materialization, CI previews, and production publishing use the same discovery and preview rules. Run `npm test` in this directory for isolated Git-fixture regression tests.
 

@@ -70,7 +70,8 @@ function fixture(t, { shallow = false } = {}) {
     git(seed, "add", "docs/overview.mdx");
     git(seed, "commit", "-m", text);
   };
-  return { root, seed, checkout, run, versions, branch, commit };
+  const redirects = () => parse(readFileSync(join(checkout, "docs/fern/docs.yml"), "utf8")).redirects ?? [];
+  return { root, seed, checkout, run, versions, redirects, branch, commit };
 }
 
 test("discovers and sorts branch lines, not tag snapshots or local-only branches", (t) => {
@@ -187,6 +188,67 @@ test("unshallows history so older same-line tags still mark a branch as released
   f.run();
   assert.equal(git(f.checkout, "rev-parse", "--is-shallow-repository"), "false");
   assert.equal(f.versions()[1].availability, undefined);
+});
+
+test("redirects legacy 0.5 through 0.8 patch URLs without adding picker entries", (t) => {
+  const f = fixture(t);
+  for (const version of ["0.4.0", "0.5.0", "0.5.1", "0.6.0", "0.7.2", "v0.8.1", "0.9.0"]) {
+    git(f.seed, "tag", version);
+  }
+  git(f.seed, "push", "origin", "--tags");
+  for (const line of ["0.4", "0.5", "0.6", "0.7", "0.8", "0.9"]) {
+    f.branch(`release/${line}`);
+  }
+  const config = join(f.checkout, "docs/fern/docs.yml");
+  writeFileSync(config, "instances:\n  - url: example.com/nemo-helix\n    custom-domain: docs.example.com/nemo-helix\n" + readFileSync(config, "utf8"));
+  f.run();
+  const aliases = ["0.5.0", "0.5.1", "0.6.0", "0.7.2", "0.8.0", "0.8.1"];
+  assert.equal(f.redirects().length, aliases.length * 2);
+  for (const version of aliases) {
+    const line = version.split(".").slice(0, 2).join(".");
+    for (const suffix of ["", "/:path*"]) {
+      assert.deepEqual(f.redirects().find((r) => r.source === `/v${version}${suffix}`), {
+        source: `/v${version}${suffix}`, destination: `/nemo-helix/v${line}${suffix}`,
+      });
+    }
+  }
+  assert.deepEqual(f.versions().slice(1).map((v) => v["display-name"]), ["0.9", "0.8", "0.7", "0.6", "0.5", "0.4"]);
+  assert.ok(!f.redirects().some((r) => r.source.startsWith("/v0.4") || r.source.startsWith("/v0.9")));
+});
+
+test("preserves authored redirects and refreshes generated aliases idempotently", (t) => {
+  const f = fixture(t);
+  f.branch("release/0.8");
+  git(f.seed, "tag", "0.8.1");
+  git(f.seed, "push", "origin", "--tags");
+  const config = join(f.checkout, "docs/fern/docs.yml");
+  writeFileSync(config, readFileSync(config, "utf8") + 'redirects:\n  - source: /v0.8.0\n    destination: /manual\n');
+  f.run();
+  const first = f.redirects();
+  assert.equal(first.find((r) => r.source === "/v0.8.0").destination, "/manual");
+  assert.equal(first.length, 4);
+  f.run();
+  assert.deepEqual(f.redirects(), first);
+  git(f.seed, "push", "origin", "--delete", "refs/tags/0.8.1");
+  f.run();
+  assert.equal(f.redirects().length, 2);
+  assert.ok(!f.redirects().some((r) => r.source.startsWith("/v0.8.1")));
+  git(f.seed, "push", "origin", "--delete", "release/0.8");
+  f.run();
+  assert.deepEqual(f.redirects(), [{ source: "/v0.8.0", destination: "/manual" }]);
+});
+
+test("does not redirect away an existing patch-branch version, even a preview", (t) => {
+  const f = fixture(t);
+  f.branch("release/0.8.1");
+  f.commit("Minor branch release not yet merged to patch branch");
+  git(f.seed, "tag", "0.8.1");
+  git(f.seed, "push", "origin", "--tags");
+  f.branch("release/0.8");
+  f.run();
+  assert.deepEqual(f.versions().slice(1).map((v) => v["display-name"]), ["0.8.1", "0.8"]);
+  assert.ok(!f.redirects().some((r) => r.source.startsWith("/v0.8.1")));
+  assert.equal(f.redirects().find((r) => r.source === "/v0.8.0").destination, "/v0.8");
 });
 
 test("retains stable-tag publish eligibility without supporting tag snapshots", (t) => {

@@ -110,12 +110,12 @@ function compareReleases(a, b) {
   return a.branch.localeCompare(b.branch);
 }
 
-function hasReleasedTag(ref, line) {
+function releasedTags(ref, line) {
   return git([
     "for-each-ref", "--merged", ref, "--format=%(refname:strip=3)", "refs/nemo-docs/tags/",
   ])
     .split("\n")
-    .some((tag) => {
+    .filter((tag) => {
       const tagged = releaseTagPattern.exec(tag)?.groups;
       return tagged !== undefined
         && tagged.major === line.major
@@ -153,6 +153,7 @@ function discoverBranchReleases() {
     }
     const version = branch.slice("release/".length);
     const slug = `v${version}`;
+    const tags = releasedTags(ref, line);
     releases.push({
       branch,
       // Pin all reads in this run to the same branch tip.
@@ -161,7 +162,8 @@ function discoverBranchReleases() {
       slug,
       dirName: slug,
       semver: [Number(line.major), Number(line.minor), Number(line.patch ?? 0)],
-      ...(!hasReleasedTag(ref, line) ? { availability: branchReleaseAvailability } : {}),
+      tags,
+      ...(tags.length === 0 ? { availability: branchReleaseAvailability } : {}),
     });
   }
   return releases.sort(compareReleases);
@@ -268,7 +270,62 @@ function updateDocsYml(releases, previousGeneratedVersionPaths) {
     versionsNode.items.push(...generatedNode.items);
   }
 
+  updateReleaseRedirects(doc, releases);
   writeFileSync(docsYmlPath, String(doc));
+}
+
+// Fern adds the instance basepath to redirect sources, but destinations must
+// include it explicitly (the same convention as authored docs.yml redirects).
+function updateReleaseRedirects(doc, releases) {
+  const marker = "Generated release-version alias; do not edit.";
+  let redirects = doc.contents.get("redirects", true);
+  if (redirects === undefined) {
+    redirects = doc.createNode([]);
+    doc.contents.set("redirects", redirects);
+  }
+  if (!isSeq(redirects)) {
+    throw new Error(`${docsYmlPath} redirects must be a sequence`);
+  }
+  redirects.items = redirects.items.filter((item) => item?.commentBefore?.trim() !== marker);
+  const existingSources = new Set(
+    redirects.items.filter(isMap).map((item) => item.get("source")),
+  );
+  const instance = doc.toJS().instances?.[0];
+  const instanceUrl = instance?.["custom-domain"] ?? instance?.url;
+  const basepath = instanceUrl
+    ? new URL(instanceUrl.includes("://") ? instanceUrl : `https://${instanceUrl}`).pathname.replace(/\/$/, "")
+    : "";
+  const aliases = new Map();
+  const activeSlugs = new Set(releases.map((release) => release.slug));
+  for (const release of releases) {
+    for (const tag of release.tags) {
+      // Only migrate the old per-patch URLs for 0.5 through 0.8. New release
+      // lines use branch-line URLs from the start; earlier versions are retired.
+      const tagged = releaseTagPattern.exec(tag).groups;
+      if (tagged.major !== "0" || Number(tagged.minor) < 5 || Number(tagged.minor) > 8) {
+        continue;
+      }
+      const alias = `v${tag.replace(/^v/, "")}`.replace(/[^A-Za-z0-9._-]/g, "-");
+      if (!aliases.has(alias)) {
+        aliases.set(alias, release.slug);
+      }
+    }
+  }
+  for (const [alias, target] of aliases) {
+    if (alias === target || activeSlugs.has(alias)) {
+      continue;
+    }
+    for (const suffix of ["", "/:path*"]) {
+      const source = `/${alias}${suffix}`;
+      if (existingSources.has(source)) {
+        continue; // Authored redirects take precedence.
+      }
+      const redirect = doc.createNode({ source, destination: `${basepath}/${target}${suffix}` });
+      redirect.commentBefore = marker;
+      redirects.items.push(redirect);
+      existingSources.add(source);
+    }
+  }
 }
 
 function syncColabLinks(release, outputRoot) {
