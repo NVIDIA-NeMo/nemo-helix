@@ -67,7 +67,7 @@ def add_tasksets_commands(app: typer.Typer, client_factory: Callable[[], NemoCli
         ),
         output_json: bool = typer.Option(False, "--json", help="Print the taskset as JSON."),
     ) -> None:
-        """Publish the selected tasks and a taskset of exactly those; the last line printed is its ref."""
+        """Publish the selected tasks and a taskset of exactly those; without --json the last line printed is its ref."""
         sources = [
             flag
             for flag, value in (

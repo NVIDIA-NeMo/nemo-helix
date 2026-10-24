@@ -176,6 +176,19 @@ def test_a_dead_job_is_noticed_by_the_repair_request_and_counts_as_an_ended_atte
     assert f"[0/1] retrying  default/a#{DIGEST}  attempt 1 failed: Job ended (error) without a result" in lines
 
 
+def test_a_second_dead_job_settles_the_task_and_names_the_attempt_it_no_longer_follows():
+    builds = FakeBuilds({"a": ["dead", "dead"]})
+    now = [0.0]
+
+    def clock() -> float:
+        now[0] += BUILD_REPAIR_SECONDS / 4
+        return now[0]
+
+    result, lines = wait(builds, names=("a",), clock=clock)
+    assert result[f"default/a#{DIGEST}"].status == "failed"
+    assert lines[-2].endswith("attempt 2 failed: Job ended (error) without a result; attempt 3 started, not followed")
+
+
 def test_reads_that_fail_keep_the_last_state_until_too_many_in_a_row():
     builds = FakeBuilds()
     real_get, failures = builds.get_image_build, [BUILD_READ_FAILURES - 1]
