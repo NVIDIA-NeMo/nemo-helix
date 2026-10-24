@@ -13,7 +13,7 @@ Each test talks to a real ``nemo services run`` platform, with auth off (``subpr
 
 No real task Job runs: task Jobs need a Kubernetes dispatcher profile. A trivial ``python -c 'sleep'`` Job on
 the harness's ``subprocess/default`` profile stands in for one. Submit itself needs that profile too, so the
-group-only submit check (M1 story 6) goes through the read routes, which use the same ``get_taskset_run_service``
+group-only submit check goes through the read routes, which use the same ``get_taskset_run_service``
 dependency and its full-principal delegation.
 """
 
@@ -372,7 +372,7 @@ async def test_a_forbidden_delegated_job_create_is_a_403(auth_subprocess_platfor
 
 
 async def test_submit_dependency_delegates_group_only_caller(auth_subprocess_platform: str) -> None:
-    """``get_taskset_run_service`` with a group-only caller reads the workspace's run records (M1 story 6).
+    """``get_taskset_run_service`` with a group-only caller reads the workspace's run records.
 
     Submit needs a Kubernetes dispatcher profile, so this goes through the run read routes, which build their
     service with the same dependency: an id-only delegation would not find the run.
