@@ -132,11 +132,21 @@ class CreateRequest:
     expires_at: datetime | None = None
 
     def lifetime_sec(self) -> float:
-        """``sandbox_timeout_sec``, cut to the seconds left before ``expires_at`` now (at least 1)."""
+        """``sandbox_timeout_sec``, cut to the seconds left before ``expires_at`` now (at least 1 while any is left).
+
+        Raises:
+            SandboxExpiredError: ``expires_at`` has passed, so no sandbox may be created.
+        """
         if self.expires_at is None:
             return self.sandbox_timeout_sec
         left = math.ceil(self.expires_at.timestamp() - time.time())
-        return max(1, min(self.sandbox_timeout_sec, left))
+        if left <= 0:
+            raise SandboxExpiredError(f"no sandbox is created after its expiry, {self.expires_at.isoformat()}")
+        return min(self.sandbox_timeout_sec, left)
+
+
+class SandboxExpiredError(RuntimeError):
+    """A create was asked for after the request's ``expires_at``; not retried."""
 
 
 @dataclass(frozen=True)
