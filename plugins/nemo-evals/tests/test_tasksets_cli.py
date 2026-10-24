@@ -146,6 +146,22 @@ def test_a_failed_attempt_is_retried_once_then_the_task_settles_failed():
     assert lines[-1] == "Image builds: 1 of 2 tasks ready (1 images), 1 failed."
 
 
+def test_a_retry_request_that_fails_does_not_use_up_the_retry():
+    builds = FakeBuilds({"a": ["fail"]})
+    real_request, failures = builds.build_images, [0]
+
+    def request(name, *, revision, workspace):
+        if builds.attempts.get(name) and builds.attempts[name][-1].status == "failed" and not failures[0]:
+            failures[0] += 1  # the retry's first request doesn't get through
+            raise NemoTransportError(httpx.ConnectError("connection refused"))
+        return real_request(name, revision=revision, workspace=workspace)
+
+    builds.build_images = request  # ty: ignore[invalid-assignment]
+    result, lines = wait(builds, names=("a",))
+    assert result[f"default/a#{DIGEST}"].status == "ready"  # the next poll retried after all
+    assert sum("retrying" in line for line in lines) == 1
+
+
 def test_a_dead_job_is_noticed_by_the_repair_request_and_counts_as_an_ended_attempt():
     builds = FakeBuilds({"a": ["dead"]})
     now = [0.0]
