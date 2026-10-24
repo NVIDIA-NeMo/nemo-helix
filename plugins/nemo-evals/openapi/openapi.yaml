@@ -9422,7 +9422,7 @@ components:
         Job/error.
 
 
-        Construction takes the six public fields only. Instances contain no parent,
+        Construction takes the public fields only. Instances contain no parent,
 
         persistence metadata or live Job state; read routes omit unset details.'
     TasksetRunTasksPage:
