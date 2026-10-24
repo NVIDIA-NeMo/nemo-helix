@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
@@ -126,6 +128,15 @@ class CreateRequest:
     health_check_poll_interval_sec: float
     # The sandbox container's command; None keeps the server's default.
     entrypoint: Sequence[str] | None = None
+    # No sandbox outlives this; each create gets ``sandbox_timeout_sec`` cut to the time left. None: no cut.
+    expires_at: datetime | None = None
+
+    def lifetime_sec(self) -> float:
+        """``sandbox_timeout_sec``, cut to the seconds left before ``expires_at`` now (at least 1)."""
+        if self.expires_at is None:
+            return self.sandbox_timeout_sec
+        left = math.ceil(self.expires_at.timestamp() - time.time())
+        return max(1, min(self.sandbox_timeout_sec, left))
 
 
 @dataclass(frozen=True)
@@ -243,7 +254,8 @@ class OpenSandboxDriver:
         # which polls far less often than the SDK's own 200 ms health check.
         sandbox = await sdk["Sandbox"].create(
             request.image,
-            timeout=timedelta(seconds=request.sandbox_timeout_sec),
+            # Cut again on every attempt: a retry's sandbox must not outlive ``expires_at`` by the failed attempts.
+            timeout=timedelta(seconds=request.lifetime_sec()),
             ready_timeout=timedelta(seconds=request.ready_timeout_sec),
             env=dict(request.env),
             metadata=dict(metadata),
