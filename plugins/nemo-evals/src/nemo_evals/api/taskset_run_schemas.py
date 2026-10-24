@@ -302,7 +302,7 @@ _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
 class TasksetRunTask(BaseModel):
     """Expose one stored member's task identity, progress and optional Job/error.
 
-    Construction takes the six public fields only. Instances contain no parent,
+    Construction takes the public fields only. Instances contain no parent,
     persistence metadata or live Job state; read routes omit unset details.
     """
 
@@ -329,7 +329,7 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
         member: Persisted child record with an optional task Job name, Job status and error.
 
     Returns:
-        Six-field task DTO with task_job renamed to job and absent values retained
+        The task DTO, with task_job renamed to job and absent values retained
         as None until HTTP serialization.
     """
     return TasksetRunTask(

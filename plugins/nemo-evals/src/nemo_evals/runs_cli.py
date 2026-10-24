@@ -844,18 +844,31 @@ class TaskStateView:
     job: str | None
     error: str | None = None
     publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
+    job_status: str | None = None  # the Job's status as the controller last read it
+
+
+# The Job status each settled phase implies; the state cell shows another one, e.g. a cancel after the Job finished.
+_EXPECTED_JOB_STATUS = {
+    MemberPhase.SUCCEEDED: "completed",
+    MemberPhase.FAILED: "error",
+    MemberPhase.CANCELLED: "cancelled",
+    MemberPhase.EXPIRED: "cancelled",
+}
 
 
 def task_state(task: dict[str, Any]) -> str:
     """The state cell of one ``/tasks`` item: ``queued``, ``queued (creating)``, ``registered (active)``, or its phase.
 
-    A queued task with a Job name has a create in flight: it holds a slot, but its Job may not exist yet.
+    A queued task with a Job name has a create in flight: it holds a slot, but its Job may not exist yet. A
+    settled task shows its Job's status when the phase doesn't imply it: ``cancelled (completed)``.
     """
-    phase = task["phase"]
+    phase, job_status = task["phase"], task.get("job_status")
     if phase == MemberPhase.IMAGE_READY:
         return "queued (creating)" if task.get("job") else "queued"
-    if phase == MemberPhase.REGISTERED and task.get("job_status"):
-        return f"registered ({task['job_status']})"
+    if phase == MemberPhase.REGISTERED and job_status:
+        return f"registered ({job_status})"
+    if job_status and _EXPECTED_JOB_STATUS.get(phase, job_status) != job_status:
+        return f"{phase} ({job_status})"
     return phase
 
 
@@ -1017,8 +1030,13 @@ def run_tasks(client: NemoClient, run: dict[str, Any], *, workspace: str) -> lis
                 publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
             except NotFoundError:
                 pass
-        task = _split_ref(str(refs[index]))[1] if index < len(refs) else item["task"]
-        views.append(TaskStateView(index, task, task_state(item), job_name, item.get("error"), publication))
+        member = refs[index] if index < len(refs) else None
+        task = _split_ref(member.root if isinstance(member, TaskRef) else str(member))[1] if member else item["task"]
+        views.append(
+            TaskStateView(
+                index, task, task_state(item), job_name, item.get("error"), publication, item.get("job_status")
+            )
+        )
     return views
 
 
@@ -1227,7 +1245,12 @@ def _tasks_table(page: dict[str, Any]) -> list[str]:
     tasks = page["data"]
     if not tasks:
         return ["No tasks."]
-    views = [TaskStateView(t["task_index"], t["task"], task_state(t), t.get("job"), t.get("error")) for t in tasks]
+    views = [
+        TaskStateView(
+            t["task_index"], t["task"], task_state(t), t.get("job"), t.get("error"), None, t.get("job_status")
+        )
+        for t in tasks
+    ]
     return [*_task_lines(views), _page_footer(page, "task")]
 
 

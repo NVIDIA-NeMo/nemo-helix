@@ -723,6 +723,14 @@ def test_status_counts_done_and_failed():
         ({"phase": "registered", "job": "run-x-task-0"}, "registered"),  # no status read yet
         ({"phase": "failed", "job": "run-x-task-0", "job_status": "error", "error": "job_failed"}, "failed"),
         ({"phase": "expired"}, "expired"),
+        # A settled task shows its Job's status only when the phase doesn't imply it.
+        ({"phase": "succeeded", "job": "run-x-task-0", "job_status": "completed"}, "succeeded"),
+        ({"phase": "cancelled", "job": "run-x-task-0", "job_status": "completed"}, "cancelled (completed)"),
+        ({"phase": "expired", "job": "run-x-task-0", "job_status": "cancelled"}, "expired"),
+        (
+            {"phase": "failed", "job": "run-x-task-0", "job_status": "completed", "error": "no_result"},
+            "failed (completed)",
+        ),
     ],
 )
 def test_task_state_names_the_queue_and_the_jobs_status(task, state):
@@ -1045,6 +1053,7 @@ def test_status_json_lists_each_tasks_state():
     assert result.exit_code == 0, result.output
     body = json.loads(result.output)
     assert body["run"]["progress"] == RECORDED_PROGRESS
+    assert body["tasks"][1]["job_status"] == "active"  # the raw status, beside the state cell
     assert [(t["index"], t["task"], t["state"]) for t in body["tasks"]] == [
         (0, "greet", "succeeded"),
         (1, "sum", "registered (active)"),
