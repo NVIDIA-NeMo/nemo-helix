@@ -4,7 +4,7 @@
 """Task Jobs of a run: the request each task's Job is created from, and how the run controller registers one.
 
 Every Job input comes from the stored plan, so a create after a config change is exactly what the first
-attempt would have sent. The controller registers a task in three steps (M4 story 0): write the create
+attempt would have sent. The controller registers a task in three steps: write the create
 intent (``task_job``) on its member, send one named create, then mark the member registered. A create whose
 outcome is unknown keeps its slot until the Job is found, or until ``create_grace`` proves none is coming.
 """

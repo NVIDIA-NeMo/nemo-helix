@@ -3,7 +3,7 @@
 
 """Evaluator run controller: start each run's task Jobs under the caps, settle them, merge their bundles.
 
-M4 story 0, the controller MVP. Submit only accepts a run (its images are built and frozen in the plan); this
+Submit only accepts a run (its images are built and frozen in the plan); this
 controller does the rest, in cycles of two phases:
 
 - **Phase 1** settles every open run, oldest first: it creates the run's members (one per task, queued in
@@ -27,7 +27,7 @@ run would create there: someone else's Job is never adopted, bundled or cancelle
 known by its id (``job_id``): a Job under the name with another id took it after ours ended and was deleted,
 so it is never read for a result, counted or cancelled.
 
-Expiry and cancel keep no partial result. TODO(M4 stories 5, 7): merge the tasks that finished.
+Expiry and cancel keep no partial result. TODO: merge the tasks that finished.
 """
 
 from __future__ import annotations
@@ -89,6 +89,8 @@ from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 logger = logging.getLogger(__name__)
 
 TERMINAL_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
+NOT_STARTED = " before it started"
+"""Ends the error of a member a stop settled while it was still queued."""
 FAILED_JOB_STATUSES = frozenset({"error", "cancelled"})
 MAX_BUNDLE_ATTEMPTS = 3
 STALLED_CREATE_SECONDS = 60
@@ -601,7 +603,7 @@ class TasksetRunReconciler:
         An unreadable plan never reaches _stop: _fail_unreadable ends that run without the plan.
         A Job still refusing to cancel at finalization_deadline_at is logged and its member settled anyway.
 
-        TODO(M4 story 8): delete the run's sandboxes by their ``nemo-run`` label. A dispatcher that is
+        TODO: delete the run's sandboxes by their ``nemo-run`` label. A dispatcher that is
         cancelled, OOM-killed or evicted leaves its sandboxes until OpenSandbox's ``max_sandbox_lifetime_s`` TTL.
         """
         phase = _member_phase(stop)
@@ -609,7 +611,7 @@ class TasksetRunReconciler:
         reason = "run cancelled" if stop is TasksetRunPhase.CANCELLED else "execution deadline passed"
         for member in _rotated([m for m in state.members if not _settled(m)], self._cycle):
             if is_queued(member):
-                state.replace(await self.store.update_member(member, phase=phase, error=f"{reason} before it started"))
+                state.replace(await self.store.update_member(member, phase=phase, error=f"{reason}{NOT_STARTED}"))
             elif member.phase is MemberPhase.IMAGE_READY:  # an intent: its Job wasn't proven ours this pass
                 if member.name in state.missing and past_grace(member.create_sent_at, now, self.grace):
                     state.replace(await self.store.update_member(member, phase=phase, error=f"{reason}; no Job"))
@@ -681,6 +683,10 @@ class TasksetRunReconciler:
             stopped = sum(m.phase is member_phase for m in members)
             if stopped:
                 error = f"{stopped} of {len(members)} tasks {what}"
+                # Queue time counts against the run's timeout: say how many never got a slot.
+                queued = sum(m.phase is member_phase and (m.error or "").endswith(NOT_STARTED) for m in members)
+                if queued:
+                    error += f", {queued} of them still queued"
                 await _finish(run, plan, jobs, self.store, now, phase, ResultState.NONE, error=error)
                 return f"{phase.value}: {error}"
         outcome = await finalize_run(run, plan, members, jobs, self.store, now=now)
