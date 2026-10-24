@@ -62,7 +62,6 @@ from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityN
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
 from nemo_helix_plugin.intake.types import EvaluationCreateRequest, EvaluationPatchRequest, EvaluationResponse
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatus
 from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -439,57 +438,13 @@ def fake_preparer() -> FakePreparer:
 
 
 class FakeTaskJobs:
-    """In-memory ``TaskJobs``: Jobs keyed by name, with scripted failures.
-
-    - ``subprocess_profiles``: profiles Jobs would run as host subprocesses.
-    - ``refuse``: names whose create answers 409 before any Job exists (a missing secret).
-    - ``fail_create``: names whose create raises a 500 after saving the Job without its first step.
-    - ``lose_reply``: names whose create commits, then raises (a lost response).
-    """
+    """In-memory ``TaskJobs``: ``subprocess_profiles`` are the profiles Jobs would run as host subprocesses."""
 
     def __init__(self) -> None:
-        self.jobs: dict[str, HelixJobResponse] = {}
-        self.steps: dict[str, int] = {}
         self.subprocess_profiles: set[str] = set()
-        self.refuse: set[str] = set()
-        self.fail_create: set[str] = set()
-        self.lose_reply: set[str] = set()
-        self.created: list[CreateHelixJobRequest] = []
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         return profile in self.subprocess_profiles
-
-    async def create(self, workspace: str, request: CreateHelixJobRequest) -> None:
-        assert request.name is not None
-        if request.name in self.refuse:
-            raise _http_error(ConflictError, 409)
-        if request.name in self.jobs:
-            raise _http_error(ConflictError, 409)
-        self.jobs[request.name] = HelixJobResponse(
-            id=f"job-{len(self.jobs)}",
-            attempt_id=f"attempt-{len(self.jobs)}",
-            name=request.name,
-            workspace=workspace,
-            source=request.source,
-            spec=request.spec,
-            platform_spec=request.platform_spec,
-            fileset=f"{workspace}/{request.name}",
-            status=HelixJobStatus.CREATED,
-        )
-        if request.name in self.fail_create:
-            self.fail_create.discard(request.name)
-            raise _http_error(InternalServerError, 500)
-        self.steps[request.name] = len(request.platform_spec.steps)
-        self.created.append(request)
-        if request.name in self.lose_reply:
-            self.lose_reply.discard(request.name)
-            raise httpx.ReadTimeout("reply lost")
-
-    async def get(self, workspace: str, name: str) -> HelixJobResponse | None:
-        return self.jobs.get(name)
-
-    async def has_steps(self, workspace: str, name: str) -> bool:
-        return self.steps.get(name, 0) > 0
 
 
 def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT:

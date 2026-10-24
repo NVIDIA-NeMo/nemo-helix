@@ -603,7 +603,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         no_build_images: bool = typer.Option(
             False,
             "--no-build-images",
-            help="Don't request or wait for image builds here; submit starts a first build for a task that has none.",
+            help="Don't request or wait for image builds here; submit rejects a task whose image isn't built yet.",
         ),
         idempotency_key: str | None = typer.Option(
             None,
