@@ -8,9 +8,12 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from nhx.customization_common.schemas.datasets import MULTIMODAL_DATASET
 from nhx.rl.entities.values import TrainingType
 from nhx.rl.schemas.environment import GymDatasetRow, GymVerifiersDatasetRow
 from nhx.rl.tasks.training.datasets import validation as validation_mod
+from nhx.rl.tasks.training.datasets.preparation import DatasetFormatError, DatasetSchema
+from nhx.rl.tasks.training.datasets.preparation import detect_dataset_schema as detect_prepared_schema
 from nhx.rl.tasks.training.datasets.validation import GRPO_SCHEMA, DatasetValidator
 
 VERIFIERS_ROW = {
@@ -60,6 +63,57 @@ def test_agent_specific_fields_are_preserved() -> None:
     """Unknown keys pass through: the resources server reads expected_answer itself."""
     parsed = GymDatasetRow.model_validate(RESOURCES_SERVER_ROW)
     assert parsed.model_dump()["expected_answer"] == "4"
+
+
+CORD_ROW = {
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "images/receipt.png"}},
+                {"type": "text", "text": "Describe this image."},
+            ],
+        },
+        {"role": "assistant", "content": "<s_menu><s_nm>"},
+    ]
+}
+
+CHAT_ROW = {
+    "messages": [
+        {"role": "user", "content": "Describe this image."},
+        {"role": "assistant", "content": "<s_menu>"},
+    ]
+}
+
+
+def test_multimodal_schema_accepts_a_part_list(tmp_path: Path) -> None:
+    path = tmp_path / "train.jsonl"
+    path.write_text(json.dumps(CORD_ROW) + "\n")
+    DatasetValidator(training_type=TrainingType.GRPO).validate_dataset(str(path), dataset_type=MULTIMODAL_DATASET)
+
+
+def test_multimodal_schema_rejects_an_unknown_part_type(tmp_path: Path) -> None:
+    path = tmp_path / "train.jsonl"
+    path.write_text(
+        json.dumps({"messages": [{"role": "user", "content": [{"type": "image", "image": "images/receipt.png"}]}]})
+        + "\n"
+    )
+    with pytest.raises(DatasetFormatError):
+        DatasetValidator(training_type=TrainingType.GRPO).validate_dataset(str(path), dataset_type=MULTIMODAL_DATASET)
+
+
+def test_detect_labels_part_content_multimodal_and_leaves_string_chat_unmatched(tmp_path: Path) -> None:
+    chat = tmp_path / "chat.jsonl"
+    image = tmp_path / "image.jsonl"
+    chat.write_text(json.dumps(CHAT_ROW) + "\n")
+    image.write_text(json.dumps(CORD_ROW) + "\n")
+
+    validator = DatasetValidator(training_type=TrainingType.GRPO)
+    with pytest.raises(DatasetFormatError):
+        validator.detect_dataset_schema(str(chat))
+    assert validator.detect_dataset_schema(str(image)) == MULTIMODAL_DATASET
+    assert detect_prepared_schema(chat)[0] == DatasetSchema.CHAT
+    assert detect_prepared_schema(image)[0] == DatasetSchema.MULTIMODAL
 
 
 def test_validate_dataset_compiles_schema_once(tmp_path: Path, mocker) -> None:

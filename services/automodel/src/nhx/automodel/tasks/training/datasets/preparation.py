@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from nhx.automodel.app.constants import DEFAULT_SEED
+from nhx.customization_common.schemas.datasets import MULTIMODAL_DATASET, row_has_multimodal_content
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,8 @@ VAL_DIRS = ["val", "validation", "dev"]
 class DatasetSchema(str, Enum):
     """Detected dataset schema type."""
 
-    CHAT = "chat"  # OpenAI messages format: {"messages": [...]}
+    CHAT = "chat"  # OpenAI messages format: {"messages": [...]} with string content
+    MULTIMODAL = MULTIMODAL_DATASET  # messages whose content is a part, a part list, or a nested chat message
     SFT = "sft"  # Prompt/completion: {"prompt": ..., "completion": ...}
     CUSTOM = "custom"  # Custom columns via prompt_template
     EMBEDDING = "embedding"  # Retrieval format: {"query": ..., "pos_doc": ..., "neg_doc": [...]}
@@ -73,11 +75,12 @@ def detect_dataset_schema(
     """
     Detect dataset schema by sampling the first line.
 
-    Supports four formats:
-    1. Chat format: {"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}
-    2. Embedding format: {"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}
-    3. SFT format: {"prompt": "...", "completion": "..."}
-    4. Custom format: Any two-column format specified via prompt_template like "{input} {output}"
+    Supports:
+    1. Multimodal chat: messages whose content is a part, a part list, or a nested chat message
+    2. Chat format: {"messages": [{"role": "user", "content": "..."}, {"role": "assistant", ...}]}
+    3. Embedding format: {"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}
+    4. SFT format: {"prompt": "...", "completion": "..."}
+    5. Custom format: Any two-column format specified via prompt_template like "{input} {output}"
 
     Args:
         file_path: Path to the JSONL dataset file.
@@ -85,6 +88,7 @@ def detect_dataset_schema(
 
     Returns:
         Tuple of (schema_type, column_keys) where:
+        - MULTIMODAL: column_keys is None
         - CHAT: column_keys is None
         - EMBEDDING: column_keys is ("query", "pos_doc", "neg_doc")
         - SFT/CUSTOM: column_keys is (question_col, answer_col)
@@ -100,12 +104,14 @@ def detect_dataset_schema(
     except json.JSONDecodeError as e:
         raise DatasetFormatError(f"Invalid JSON in {file_path}: {e}")
 
-    # Check for chat format (OpenAI messages)
-    if "messages" in obj and isinstance(obj["messages"], list):
-        if len(obj["messages"]) > 0 and isinstance(obj["messages"][0], dict):
-            if "role" in obj["messages"][0]:
-                logger.info(f"Detected chat dataset format in {file_path}")
-                return DatasetSchema.CHAT, None
+    # Part content is multimodal. String content stays chat.
+    if "messages" in obj and isinstance(obj["messages"], list) and len(obj["messages"]) > 0:
+        if row_has_multimodal_content(obj):
+            logger.info(f"Detected multimodal chat dataset format in {file_path}")
+            return DatasetSchema.MULTIMODAL, None
+        if isinstance(obj["messages"][0], dict) and "role" in obj["messages"][0]:
+            logger.info(f"Detected chat dataset format in {file_path}")
+            return DatasetSchema.CHAT, None
 
     # Check for embedding/retrieval format
     # Format: {"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}
