@@ -9185,7 +9185,8 @@ nemo evals runs [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `list`: List a workspace's runs, newest first.
-* `status`: Show each task Job of a run and its status.
+* `status`: Show a run's progress and each task's state.
+* `tasks`: List a run's tasks with their state and Job.
 * `cancel`: Request a run's cancel; the run controller acts on it,...
 * `download`: Download a run's merged result bundle (report.html,...
 * `results`: Show each completed task's scores (every Harbor reward)...
@@ -9216,7 +9217,7 @@ nemo evals runs list [OPTIONS]
 
 ##### nemo evals runs status
 
-Show each task Job of a run and its status.
+Show a run's progress and each task's state.
 
 **Usage:**
 
@@ -9234,6 +9235,32 @@ nemo evals runs status [OPTIONS] RUN_ID
 * `--watch`: Refresh until every task Job is done.
 * `--poll-seconds <FLOAT>`: Refresh interval with --watch. [default: 15.0]
 * `--json`: Print JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs tasks
+
+List a run's tasks with their state and Job.
+
+**Usage:**
+
+```shell
+nemo evals runs tasks [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--phase <CHOICE>`: Only tasks in this phase. [possible values: image_preparing, image_ready, registered, succeeded, failed, cancelled, expired]
+* `--page <INTEGER RANGE>`: One-based page number. [default: 1]
+* `--page-size <INTEGER RANGE>`: Tasks per page. [default: 100]
+* `--workspace`: Workspace of the run; default: configured.
+* `--json`: Print the API page as JSON.
 
 **Help:**
 
