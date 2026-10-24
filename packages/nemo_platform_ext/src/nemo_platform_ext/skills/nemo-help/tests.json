@@ -1,0 +1,65 @@
+{
+  "skill": "nemo-help",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use the nemo-help skill to tell me what's possible here.",
+      "expected_skill": "nemo-help"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run nemo-help. I just opened this repo.",
+      "expected_skill": "nemo-help"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Invoke nemo-help so I can see the menu of journeys.",
+      "expected_skill": "nemo-help"
+    },
+    {
+      "type": "implicit",
+      "prompt": "What can you do?",
+      "expected_skill": "nemo-help"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Where do I start?",
+      "expected_skill": "nemo-help"
+    },
+    {
+      "type": "implicit",
+      "prompt": "I just cloned this repo. Never used NeMo before. What's in here?",
+      "expected_skill": "nemo-help"
+    },
+    {
+      "type": "contextual",
+      "prompt": "Build me an agent that classifies support tickets by urgency.",
+      "expected_skill_not": "nemo-help"
+    },
+    {
+      "type": "contextual",
+      "prompt": "My agent is deployed and I want to make it cheaper to run.",
+      "expected_skill_not": "nemo-help"
+    },
+    {
+      "type": "contextual",
+      "prompt": "Tear down the local NeMo Platform.",
+      "expected_skill_not": "nemo-help"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "What's the weather in San Francisco today?",
+      "expected_skill_not": "nemo-help"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Help me set up a Postgres database on my laptop.",
+      "expected_skill_not": "nemo-help"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Write a recursive function in Rust to flatten a nested list.",
+      "expected_skill_not": "nemo-help"
+    }
+  ]
+}
