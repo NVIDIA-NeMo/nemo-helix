@@ -422,13 +422,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             extensions[EXTENSION_KEY] = self._services.to_json()
         return extensions
 
-    def _sandbox_lifetime_sec(self) -> float:
-        """``sandbox_timeout_sec``, cut to the seconds left before ``sandbox_expires_at`` at this create (at least 1)."""
-        if self._sandbox_expires_at is None:
-            return self._sandbox_timeout_sec
-        left = math.ceil(self._sandbox_expires_at.timestamp() - time.time())
-        return max(1, min(self._sandbox_timeout_sec, left))
-
     async def _create_sandbox(self) -> Any:
         """Create the sandbox, then verify its egress; it is killed if the policy can't be read or doesn't match."""
         uses_extension = self._services is not None or self._agent_bundle is not None
@@ -450,7 +443,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 resource=self._resource(),
                 network_policy=to_opensandbox_policy(egress_policy),
                 extensions=self._extensions(),
-                sandbox_timeout_sec=self._sandbox_lifetime_sec(),
+                sandbox_timeout_sec=self._sandbox_timeout_sec,
+                expires_at=self._sandbox_expires_at,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,
