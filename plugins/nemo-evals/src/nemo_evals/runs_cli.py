@@ -385,9 +385,10 @@ def wait_for_builds(
         """``attempt`` ended without images: start the task's retry, or settle the task ``failed``."""
         error = f"  attempt {attempt.id} failed: {attempt.error or 'its Job ended'}"
         if retries[ref] < BUILD_RETRIES:
-            retries[ref] += 1
             workspace, name, digest = _split_ref(ref)
+            # Counted once the retry is followed: a request that raises leaves the failed attempt for the next poll.
             followed[ref] = nxt or evaluator.tasks.build_images(name, revision=digest, workspace=workspace)
+            retries[ref] += 1
             requested_at[ref] = clock()
             line("retrying", ref, error)
         else:
