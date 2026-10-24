@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import ClassVar
 
 from nemo_helix_plugin.entities import EntityBase
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import Field
 
 
@@ -160,15 +161,53 @@ class TasksetRunMemberEntity(EntityBase):
     phase: MemberPhase = Field(description="Image preparation and execution progress of this task.")
     task_job: str | None = Field(
         default=None,
-        description="Name of this task's Jobs Service Job (<run_id>-task-<index>); None until registered.",
+        description=(
+            "Name of this task's Jobs Service Job (<run_id>-task-<index>). Written before the create (the create "
+            "intent: the task holds a slot from then on) and never changed after; None while queued."
+        ),
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Id of the Job registered under task_job (created, or adopted as ours); written with registered and "
+            "never changed. A Job under task_job with another id isn't ours: ours ended and was deleted."
+        ),
     )
     error: str | None = Field(default=None, description="Why this task failed or expired; None otherwise.")
+    bundle_ref: str | None = Field(
+        default=None, description="The task's agent-eval-results bundle; set when the member succeeds."
+    )
+    job_status: HelixJobStatus | None = Field(
+        default=None,
+        description="The task Job's status as the controller last read it; display only, at most one cycle old.",
+    )
+    create_sent_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the last create of task_job with an unknown outcome was sent. Until create_grace after it, "
+            "a 404 or stepless read of the Job doesn't prove that no create of ours is still saving."
+        ),
+    )
+
+
+def is_queued(member: TasksetRunMemberEntity) -> bool:
+    """Waiting for a slot: images in the plan, no create intent yet."""
+    return member.phase is MemberPhase.IMAGE_READY and member.task_job is None
+
+
+def holds_slot(member: TasksetRunMemberEntity) -> bool:
+    """Counted against the caps: registered, or a create intent (``task_job`` written before the create)."""
+    return member.phase is MemberPhase.REGISTERED or (
+        member.phase is MemberPhase.IMAGE_READY and member.task_job is not None
+    )
 
 
 _ALLOWED_RUN_TRANSITIONS = {
     TasksetRunPhase.ACCEPTED: frozenset(
         {
             TasksetRunPhase.RUNNING,
+            # A crash or a lost write can skip running; the run still ends (display only).
+            TasksetRunPhase.COMPLETED,
             TasksetRunPhase.FAILED,
             TasksetRunPhase.CANCELLED,
             TasksetRunPhase.EXPIRED,
@@ -193,3 +232,32 @@ def assert_run_transition(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
     """
     if new not in _ALLOWED_RUN_TRANSITIONS.get(old, frozenset()):
         raise ValueError(f"illegal taskset run transition: {old} -> {new}")
+
+
+# Members are created in image_ready (their images are in the plan), so image_preparing is unused. Settled phases
+# have no way out. Same-phase writes are allowed: image_ready → image_ready (the create intent, create_sent_at) and
+# registered → registered (job_status).
+_ALLOWED_MEMBER_TRANSITIONS = {
+    MemberPhase.IMAGE_READY: frozenset(
+        {
+            MemberPhase.IMAGE_READY,
+            MemberPhase.REGISTERED,
+            MemberPhase.FAILED,
+            MemberPhase.CANCELLED,
+            MemberPhase.EXPIRED,
+        }
+    ),
+    MemberPhase.REGISTERED: frozenset(
+        {MemberPhase.REGISTERED, MemberPhase.SUCCEEDED, MemberPhase.FAILED, MemberPhase.CANCELLED, MemberPhase.EXPIRED}
+    ),
+}
+
+
+def assert_member_transition(old: MemberPhase, new: MemberPhase) -> None:
+    """Guard member writes: a settled member never changes, and a member never goes back to the queue.
+
+    Raises:
+        ValueError: The transition is illegal or starts at a settled phase.
+    """
+    if new not in _ALLOWED_MEMBER_TRANSITIONS.get(old, frozenset()):
+        raise ValueError(f"illegal taskset run member transition: {old} -> {new}")

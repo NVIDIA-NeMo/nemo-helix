@@ -52,6 +52,7 @@ import stat
 import tarfile
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, override
 
@@ -176,6 +177,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         use_server_proxy: Route execd traffic through the server instead of to the pod directly.
         ready_timeout_sec: How long a new sandbox may take to become healthy.
         sandbox_timeout_sec: The sandbox's server-side lifetime.
+        sandbox_expires_at: ISO-8601 time, with its UTC offset, no sandbox may outlive. Each create gets ``sandbox_timeout_sec``
+            cut to the time left then (at least 1 s), so a sandbox created late (a retry, a separate verifier)
+            ends at the same time as the first. ``None`` keeps ``sandbox_timeout_sec`` as is.
         request_timeout_sec: Per-request SDK timeout; ``None`` keeps the SDK default.
         health_check_poll_interval_sec: How often the readiness wait polls.
         metadata: Labels for every sandbox, such as the ownership labels cleanup selects on.
@@ -215,6 +219,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         use_server_proxy: bool = False,
         ready_timeout_sec: float = DEFAULT_READY_TIMEOUT_SEC,
         sandbox_timeout_sec: float = DEFAULT_SANDBOX_TIMEOUT_SEC,
+        sandbox_expires_at: str | None = None,
         request_timeout_sec: float | None = None,
         health_check_poll_interval_sec: float = DEFAULT_HEALTH_CHECK_POLL_INTERVAL_SEC,
         metadata: dict[str, str] | None = None,
@@ -250,6 +255,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         )
         self._ready_timeout_sec = ready_timeout_sec
         self._sandbox_timeout_sec = sandbox_timeout_sec
+        self._sandbox_expires_at = datetime.fromisoformat(sandbox_expires_at) if sandbox_expires_at else None
         self._health_check_poll_interval_sec = health_check_poll_interval_sec
         self._metadata = dict(metadata or {})
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
@@ -431,6 +437,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 network_policy=to_opensandbox_policy(egress_policy),
                 extensions=self._extensions(),
                 sandbox_timeout_sec=self._sandbox_timeout_sec,
+                expires_at=self._sandbox_expires_at,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,

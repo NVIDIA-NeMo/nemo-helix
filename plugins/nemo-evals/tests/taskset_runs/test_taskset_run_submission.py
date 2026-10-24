@@ -136,3 +136,21 @@ def test_deadlines_measure_elapsed_seconds_across_dst(accepted, timeout, grace):
     assert finalization.timestamp() - execution.timestamp() == grace
     assert execution.tzinfo is accepted.tzinfo
     assert finalization.tzinfo is accepted.tzinfo
+
+
+def test_controller_caps_have_defaults_and_refuse_a_creator_cap_above_the_cluster_cap():
+    controller = TasksetRunsConfig().controller
+    assert (controller.max_cluster_concurrent_jobs, controller.default_max_concurrent_task_jobs) == (50, 20)
+    assert controller.max_concurrent_task_jobs_per_creator is None and controller.create_grace_seconds == 600
+    assert TasksetRunsConfig.model_validate(
+        {"controller": {"max_cluster_concurrent_jobs": 25, "max_concurrent_task_jobs_per_creator": 25}}
+    )
+    with pytest.raises(ValidationError, match="max_concurrent_task_jobs_per_creator must be ≤"):
+        TasksetRunsConfig.model_validate(
+            {"controller": {"max_cluster_concurrent_jobs": 25, "max_concurrent_task_jobs_per_creator": 26}}
+        )
+    with pytest.raises(ValidationError, match="typo"):
+        TasksetRunsConfig.model_validate({"controller": {"typo": 1}})
+    # Shorter than a create may take, a 404 could be read while the timed-out create is still saving.
+    with pytest.raises(ValidationError, match="create_grace_seconds"):
+        TasksetRunsConfig.model_validate({"controller": {"create_grace_seconds": 30}})
