@@ -19,7 +19,7 @@ changelog:
     - title: "🔧 Improvements"
       labels: [perf, refactor]
     - title: "🐛 Bug Fixes"
-      labels: [fix, revert, cp]
+      labels: [fix, revert]
     - title: "📝 Documentation"
       labels: [docs]
     - title: "🧰 Maintenance"

@@ -18,7 +18,6 @@ autolabeler:
   - { label: ci,       title: ['/^ci/'] }
   - { label: chore,    title: ['/^chore/'] }
   - { label: revert,   title: ['/^revert/'] }
-  - { label: cp,       title: ['/^cp/'] }
   - { label: breaking, title: ['/!: /'] }
   # Identify release-to-main forward merges regardless of the merge outcome.
   - { label: forward-merge, title: ['/^Forward-merge release\/[0-9]+\.[0-9]+ into main$/'] }
