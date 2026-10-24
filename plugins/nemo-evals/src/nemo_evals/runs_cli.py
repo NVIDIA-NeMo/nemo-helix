@@ -393,7 +393,8 @@ def wait_for_builds(
             line("retrying", ref, error)
         else:
             followed[ref] = attempt.model_copy(update={"status": "failed"})
-            line("failed", ref, error)
+            # A repair request that found the Job dead has already started the next attempt: say it isn't followed.
+            line("failed", ref, error + (f"; attempt {nxt.id} started, not followed" if nxt is not None else ""))
 
     read_failures = 0
     while unsettled := [ref for ref in refs if followed[ref].status not in TERMINAL_BUILD_STATUSES]:
