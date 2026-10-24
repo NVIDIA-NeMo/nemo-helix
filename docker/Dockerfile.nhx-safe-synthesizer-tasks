@@ -131,7 +131,7 @@ RUN printf '%s\n' \
         > /tmp/safe-synthesizer-runtime.txt && \
     printf '%s\n' \
         'wandb>=0.30.0' \
-        'aiohttp>=3.14.3,<4' \
+        'aiohttp>=3.14.5,<4' \
         'cryptography>=50.0.0,<51' \
         'pyarrow>=23.0.1,<24' \
         'vllm==0.27.0+cu129' \
