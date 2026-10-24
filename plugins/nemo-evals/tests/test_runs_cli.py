@@ -17,9 +17,11 @@ import typer
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult
 from nemo_evals.harbor.remote.profile import SandboxSelection
+from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
     BundleJobView,
     Candidate,
+    CreatedTaskset,
     ScoreRollup,
     SelectionError,
     TaskJobView,
@@ -29,7 +31,6 @@ from nemo_evals.runs_cli import (
     _view_json,
     _workspace_flag,
     add_runs_commands,
-    build_images,
     check_git_source,
     download_git_tasks,
     job_error,
@@ -85,53 +86,139 @@ def test_selection_suffix_ignores_order():
     assert selection_suffix(["a#1", "b#2"]) == selection_suffix(["b#2", "a#1"]) != selection_suffix(["a#1"])
 
 
-class _Tasks:
-    """Image builds that finish on the second poll.
-
-    ``fail`` names tasks whose build fails; ``abandon`` names tasks whose first attempt's Job dies, so
-    requesting again records it failed and starts attempt 2, as ``request_build`` does.
-    """
-
-    def __init__(self, fail: frozenset[str] = frozenset(), abandon: frozenset[str] = frozenset()) -> None:
-        self.fail, self.abandon = fail, abandon
-        self.requested: list[str] = []
-        self.polls: dict[str, int] = {}
-
-    def build_images(self, name, *, revision, workspace):
-        self.requested.append(f"{workspace}/{name}#{revision}")
-        polls = self.polls[name] = self.polls.get(name, -1) + 1
-        if polls == 0:
-            return SimpleNamespace(id="1", status="pending", images=[], error=None)
-        if name in self.abandon:
-            return SimpleNamespace(id="2", status="pending", images=[], error=None)
-        if polls < 2:
-            return SimpleNamespace(id="1", status="running", images=[], error=None)
-        if name in self.fail:
-            return SimpleNamespace(id="2", status="pending", images=[], error=None)  # failed, so a new attempt
-        return SimpleNamespace(id="1", status="ready", images=[object()], error=None)
-
-    def get_image_build(self, name, build_id, *, revision, workspace):
-        assert build_id == "1"
-        error = "Job ended (error) without a result" if name in self.abandon else "no Dockerfile"
-        return SimpleNamespace(id=build_id, status="failed", images=[], error=error)
+STORED = "ac9/deep-swe-162c7ea7#" + "2" * 64
+MEMBERS: list[str] = [f"ac9/deep-swe-{name}#" + "1" * 64 for name in ("a", "b")]
 
 
-def test_build_images_waits_for_every_task_prebuilt_included():
-    tasks, lines = _Tasks(), []
-    refs = ["default/dockerfile#r1", "default/prebuilt#r2"]
-    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
-    build_images(evaluator, refs, poll_seconds=0, echo=lines.append, sleep=lambda _: None)
-    assert tasks.polls == {"dockerfile": 2, "prebuilt": 2}
-    assert lines == ["Image builds: 2 tasks ready (2 images)"]
+@pytest.fixture
+def submitting(monkeypatch):
+    """``runs submit`` over a fake evaluator and submit; returns what it published, requested and sent."""
+    seen = SimpleNamespace(bodies=[], published=[], posts=[], created=[])
+    builds = SimpleNamespace(
+        build_images=lambda name, revision, workspace: seen.posts.append(name) or _ready(name),
+        get_image_build=lambda name, build_id, revision, workspace: _ready(name),
+    )
+    tasks = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(revision=1, spec=SimpleNamespace()),
+        build_images=builds.build_images,
+        get_image_build=builds.get_image_build,
+    )
+    tasksets = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=MEMBERS),
+        replace=lambda name, taskset, workspace: seen.published.append(name),
+        list_revisions=lambda name, workspace, page_size: SimpleNamespace(
+            data=[SimpleNamespace(content_hash="3" * 64)]
+        ),
+    )
+    fake = SimpleNamespace(tasks=tasks, tasksets=tasksets)
+    monkeypatch.setattr("nemo_evals.runs_cli.Evaluator", SimpleNamespace(from_client=lambda _: fake))
+
+    def submit(client, body, *, workspace, echo):
+        seen.bodies.append(body)
+        if seen.refuse:
+            raise RuntimeError('submit failed (422): "tasks without images: ac9/deep-swe-b#..."')
+        return {"run_id": "run-1", "warnings": []}
+
+    seen.refuse = False
+    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", submit)
+    client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "ac9")
+
+    def invoke(*args: str):
+        app = typer.Typer()
+        add_runs_commands(app, lambda: client)  # ty: ignore[invalid-argument-type]
+        return CliRunner().invoke(app, ["runs", "submit", *args])
+
+    seen.invoke = invoke
+    return seen
 
 
-@pytest.mark.parametrize(("kind", "error"), [("fail", "no Dockerfile"), ("abandon", "without a result")])
-def test_build_images_stops_at_the_attempt_that_ended(kind, error):
-    """Polling requests again, which repairs a dead Job; a new attempt means the followed one ended."""
-    tasks = _Tasks(**{kind: frozenset({"broken"})})
-    evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks))
-    with pytest.raises(RuntimeError, match=f"default/broken#r1: .*{error}"):
-        build_images(evaluator, ["default/broken#r1"], poll_seconds=0, echo=print, sleep=lambda _: None)
+def _image_build(build_id: str = "1", status: str = "ready") -> ImageBuild:
+    return ImageBuild(
+        id=build_id,
+        task="ac9/deep-swe-a",
+        revision="1" * 64,
+        status=status,  # ty: ignore[invalid-argument-type]
+        job=f"task-image-build-{build_id}",
+        allowed_registries=[],
+        images=[BuildImage(role="main", source="prebuilt")] if status == "ready" else [],
+        error="no Dockerfile" if status == "failed" else None,
+    )
+
+
+def _ready(name):
+    return _image_build()
+
+
+def test_submit_with_a_taskset_uploads_nothing_and_requests_no_builds(submitting):
+    result = submitting.invoke(
+        "--taskset", STORED, "--experiment", "m4", "--dataset", "datacurve/deep-swe@sha256:" + "a" * 64
+    )
+    assert result.exit_code == 0, result.output
+    assert submitting.published == [] and submitting.posts == []
+    (body,) = submitting.bodies
+    assert body["spec"]["tasks"] == STORED
+    assert body["publication"]["intake"] == {
+        "experiment": "m4",
+        "dataset_name": "datacurve/deep-swe",
+        "dataset_version": "sha256:" + "a" * 64,
+    }
+    assert "Run run-1 accepted: 2 task Jobs" in result.output
+
+
+def test_submit_narrows_a_taskset_by_publishing_a_selection_without_uploading_tasks(submitting):
+    result = submitting.invoke("--taskset", STORED, "--tasks", "1")
+    assert result.exit_code == 0, result.output
+    assert len(submitting.published) == 1 and submitting.published[0].startswith("deep-swe-162c7ea7-sel-")
+    assert submitting.posts == [] and submitting.bodies[0]["spec"]["tasks"].endswith("#" + "3" * 64)
+
+
+def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting):
+    submitting.refuse = True
+    result = submitting.invoke("--taskset", "deep-swe-162c7ea7#" + "2" * 64)
+    assert result.exit_code == 1
+    assert f"Check with: nemo evals tasksets build-images {STORED} --status" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--taskset", STORED, "--harbor-hub", "x/y@1"],
+        ["--taskset", STORED, "--dataset", "x/y"],  # no --experiment
+        ["--harbor-hub", "x/y@1", "--experiment", "e", "--dataset", "x/y"],  # the source sets the dataset
+    ],
+)
+def test_taskset_flags_that_do_not_combine(submitting, args):
+    assert submitting.invoke(*args).exit_code == 2 and submitting.bodies == []
+
+
+@pytest.mark.parametrize(("failures", "submitted"), [(0, True), (1, True), (2, False)])
+def test_the_wrapper_follows_one_retry_and_never_submits_after_a_failed_build(
+    submitting, monkeypatch, failures, submitted
+):
+    created = CreatedTaskset(STORED, MEMBERS[:1], 1, ("datacurve/deep-swe", None))
+    monkeypatch.setattr("nemo_evals.runs_cli.create_taskset", lambda *a, **k: created)
+    attempts = []
+
+    def build_images(name, revision, workspace):
+        attempts.append(name)
+        return _image_build(str(len(attempts)), "pending")
+
+    def get_image_build(name, build_id, revision, workspace):
+        return _image_build(build_id, "failed" if int(build_id) <= failures else "ready")
+
+    submitting_tasks = SimpleNamespace(build_images=build_images, get_image_build=get_image_build)
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.Evaluator",
+        SimpleNamespace(from_client=lambda _: SimpleNamespace(tasks=submitting_tasks)),
+    )
+    result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--experiment", "m4", "--poll-seconds", "0")
+    assert bool(submitting.bodies) is submitted, result.output
+    assert len(attempts) == min(failures, 1) + 1  # at most one retry
+    assert "Submit later with: nemo evals runs submit --taskset " + STORED in result.output
+    if submitted:
+        assert submitting.bodies[0]["publication"]["intake"]["dataset_name"] == "datacurve/deep-swe"
+    else:
+        assert result.exit_code == 1 and "image builds failed" in result.output
 
 
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
