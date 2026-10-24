@@ -68,6 +68,13 @@ class TestTheSandbox:
         sandbox = BuilderConfig().sandbox
         assert (sandbox.image, sandbox.dns_nameservers) == ("kaniko:1", ["10.0.0.53"])
 
+    def test_sandboxes_are_plain_pods_by_default(self) -> None:
+        assert BuilderConfig().sandbox.provider == "kubernetes_pod"
+
+    def test_a_provider_the_builder_does_not_have_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="provider"):
+            BuilderConfig.model_validate({"sandbox": {"provider": "docker"}})
+
     def test_a_misspelt_setting_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="imgae"):
             BuilderConfig.model_validate({"sandbox": {"imgae": "kaniko:1"}})
