@@ -8,6 +8,6 @@
  */
 
 /**
- * Non-secret environment variables for the victim (agent-hardener's agent.env) — a host-backend URL, a feature flag. Stored in plaintext on this entity, so never put credentials here: those belong in `secrets`, which names them and resolves the values from the platform Secrets store at run time.
+ * Non-secret environment variables for the victim (agent-hardener's agent.env) — a host-backend URL, a feature flag. Stored in plaintext on this entity, so never put credentials here: those belong in `secrets`.
  */
 export type AgentHardenerManifestEnv = {[key: string]: string};
