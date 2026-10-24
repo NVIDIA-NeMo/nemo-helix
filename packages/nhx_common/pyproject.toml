@@ -52,7 +52,7 @@ dependencies = [
     "prometheus-client>=0.23.0",
     "structlog>=24.1.0",
     "nvidia-ml-py>=13.0.0",
-    "pyjwt[crypto]>=2.13.0",
+    "pyjwt[crypto]>=2.15.1",
 ]
 version = "0.0.0"
 

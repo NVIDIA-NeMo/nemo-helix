@@ -247,7 +247,7 @@ models-service = [
   "pydantic-settings>=2.8.1",
   "sqlmodel>=0.0.22",
   "pyyaml>=6.0.2",
-  "urllib3>=2.7.0",
+  "urllib3>=2.8.0",
   "nhx-common",
   "nemo-helix-plugin",
   "tenacity>=8.5.0",
@@ -552,7 +552,7 @@ nhx-common = [
   "prometheus-client>=0.23.0",
   "structlog>=24.1.0",
   "nvidia-ml-py>=13.0.0",
-  "pyjwt[crypto]>=2.13.0",
+  "pyjwt[crypto]>=2.15.1",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
