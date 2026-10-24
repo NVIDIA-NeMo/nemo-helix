@@ -3,7 +3,7 @@
 
 """A taskset run's Intake Evaluation: one per run, named after it, in the Experiment the request named.
 
-M0 story 1 Part 1. Submit creates the Evaluation (``ensure_run_evaluation``) before it accepts the run;
+Submit creates the Evaluation (``ensure_run_evaluation``) before it accepts the run;
 each task Job publishes its own trials under it when it finishes; the controller stamps the run's
 outcome and duration onto it once (``stamp_run_evaluation``). Nothing here publishes trials.
 """

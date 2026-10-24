@@ -4,7 +4,7 @@
 """Task Jobs of a run: the request each task's Job is created from, and submit's one Jobs check.
 
 Every Job input comes from the stored plan, so a create after a config change is exactly what the first
-attempt would have sent. TODO(M4 story 4): the controller registers task Jobs.
+attempt would have sent. The run controller registers the task Jobs.
 """
 
 import logging
