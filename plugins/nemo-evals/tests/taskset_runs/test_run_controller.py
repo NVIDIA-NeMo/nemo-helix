@@ -940,7 +940,7 @@ async def test_the_deadline_expires_queued_tasks_at_once_and_running_ones_when_t
     assert await harness.phases(run) == ["expired", "succeeded", "expired", "expired"]
     run = await harness.run(run)
     assert run.phase is TasksetRunPhase.EXPIRED and run.result_state is ResultState.NONE
-    assert run.error == "3 of 4 tasks expired at the execution deadline"
+    assert run.error == "3 of 4 tasks expired at the execution deadline, 2 of them still queued"
 
 
 async def test_an_error_while_cancelling_is_cancelled_and_past_the_deadline_stays_failed(harness, harbor_plan, jobs):

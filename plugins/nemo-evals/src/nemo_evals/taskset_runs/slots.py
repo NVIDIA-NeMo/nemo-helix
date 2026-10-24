@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Task-Job slots: how the run controller counts its caps and hands out free slots (M4 story 0).
+"""Task-Job slots: how the run controller counts its caps and hands out free slots.
 
 Phase 1 of each cycle settles every open run and reports a :class:`RunTally`; phase 2 hands out what is left
 with :func:`allocate`: each free slot goes to the creator holding the fewest, and within that creator to its

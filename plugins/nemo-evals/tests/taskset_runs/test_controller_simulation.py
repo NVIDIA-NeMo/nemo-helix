@@ -1,20 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tier 3 of the M4 story 0 test plan: the run controller over a simulated Jobs cluster.
+"""The run controller over a simulated Jobs cluster.
 
 ``TasksetRunReconciler.reconcile()`` runs in a loop over a :class:`FakeJobsCluster`, a fake clock that moves
-15 s per cycle, and the in-memory Entity Store. Every expectation comes from the story's spec, not from the
+15 s per cycle, and the in-memory Entity Store. Every expectation comes from the controller's specified behavior, not from the
 controller's own tests:
 
 - The 9 **invariants** are checked after every cycle, and invariants 1, 3 and 9 also at the instant each Job
   is saved and each slot is taken (a create intent written), so an overload shows where it happens.
 - Invariant 8 is checked on ``allocate()``'s inputs and output (the module global is wrapped), and on the
   order of the create intents phase 2 then writes.
-- The spec's two accepted exceptions to invariants 1 and 9 are honored: a stuck Job forgotten by a controller
+- The two accepted exceptions to invariants 1 and 9 are honored: a stuck Job forgotten by a controller
   restart is marked exempt (and logged), and creates that outlive ``create_grace`` are never injected.
 
-Jobs semantics follow the spec: Jobs answers 409 before saving anything; GET is 404 until the attempt is
+Jobs semantics follow the Jobs service: Jobs answers 409 before saving anything; GET is 404 until the attempt is
 linked; a Job saved without its first step never runs; cancel moves a Job to ``cancelling``; only ended Jobs
 can be deleted. Member listings bypass the fake store's filter evaluation (far too slow for 1,130 members)
 but read the same records.
@@ -144,7 +144,7 @@ class SimJob:
     status: HelixJobStatus = HelixJobStatus.CREATED
     cancel_ticks: int = 0
     updated_at: datetime = SIM_START
-    exempt: str | None = None  # why this Job no longer counts against invariants 1/9 (spec's accepted exception)
+    exempt: str | None = None  # why this Job no longer counts against invariants 1/9 (an accepted exception)
     error_details: dict[str, Any] | None = None
     id: str = field(default_factory=lambda: f"job-{next(_JOB_IDS)}")  # a new one per save, as in Jobs
 
@@ -191,7 +191,7 @@ class FakeJobsCluster:
         self.outage: str | None = None  # "5xx" or "hang": every Jobs call fails that way
         self.scripted_create: dict[str, list[str]] = defaultdict(list)  # job name -> outcomes, one per POST
         self.refusing: set[str] = set()  # job names whose cancel answers 409 while they run
-        self.hanging: set[str] = set()  # job names whose every call times out (one bad Job, R16-9)
+        self.hanging: set[str] = set()  # job names whose every call times out (one bad Job)
         self.forbidden: set[str] = set()  # creators who lost access: their creates answer 403 before saving
         self.read_latency = timedelta(0)  # how long each answered read or cancel takes
         self.create_latency = timedelta(0)  # how long each answered create takes
@@ -214,7 +214,7 @@ class FakeJobsCluster:
         # Phase 1's Jobs calls stop at its first timeout; phase 2 still runs (each drain ends at its first
         # ambiguous create), so a hanging read can't stop every grant in the cluster.
         if sim.phase1_timed_out and sim.grant_order is None:
-            sim.violate("M14", f"Jobs {kind} of {name} after a phase-1 Jobs timeout, still in phase 1")
+            sim.violate("phase-1 breaker", f"Jobs {kind} of {name} after a phase-1 Jobs timeout, still in phase 1")
         if name in self.hanging:
             self._time_out(kind)
         if self.outage == "5xx":
@@ -274,7 +274,7 @@ class FakeJobsCluster:
         self.cancels.append((self.sim.cycle, workspace, name))
         job = self.jobs.get((workspace, name))
         if job is not None and not job.by_controller:
-            self.sim.violate("M13", f"the controller cancelled foreign Job {workspace}/{name}")
+            self.sim.violate("foreign Job", f"the controller cancelled foreign Job {workspace}/{name}")
         if job is None or not job.visible(self.sim.clock.now) or job.status in TERMINAL_JOB:
             return  # missing or already ended: not an error (RunJobs contract)
         if job.refuse_cancel:
@@ -692,7 +692,7 @@ class Sim:
         return sim_run
 
     async def cancel(self, sim_run: SimRun, *, mid_cycle: bool = False) -> None:
-        """The cancel route: a versioned write of cancel_requested_at (M1 story 4)."""
+        """The cancel route: a versioned write of cancel_requested_at."""
         stored = await self.entity_store.get(TasksetRunEntity, sim_run.entity.name, workspace=sim_run.entity.workspace)
         if stored.phase in TERMINAL_RUN_PHASES or stored.cancel_requested_at is not None:
             return
@@ -898,7 +898,9 @@ class Sim:
         if written.phase is not member.phase and written.phase in (MemberPhase.REGISTERED, MemberPhase.SUCCEEDED):
             job = self.cluster.by_id.get(written.job_id or "")
             if job is None or not job.by_controller:
-                self.violate("M15", f"{written.task_job} {written.phase.value} on a Job that isn't the controller's")
+                self.violate(
+                    "foreign settle", f"{written.task_job} {written.phase.value} on a Job that isn't the controller's"
+                )
         if written.task_job is not None:
             shown = {k: (v.value if hasattr(v, "value") else v) for k, v in changes.items() if k != "bundle_ref"}
             self.note(written.task_job, f"member {member.phase.value} -> {written.phase.value} {shown}")
@@ -911,7 +913,7 @@ class Sim:
         return written
 
     def _check_stop_table(self, sim_run: SimRun, member: TasksetRunMemberEntity, changes: dict[str, object]) -> None:
-        """A registered member settled from its ended Job: the phase the spec's stop table gives."""
+        """A registered member settled from its ended Job: the phase its stop's reason gives."""
         phase, status = changes.get("phase"), changes.get("job_status")
         if member.phase is not MemberPhase.REGISTERED or phase not in SETTLED_MEMBER_PHASES:
             return
@@ -1346,7 +1348,7 @@ async def test_ac9_replay(make_sim: MakeSim) -> None:
         if held["user:alice"] == held["user:bob"] == 25:
             balanced = True
         elif balanced and min(capacity.values()) >= 25:
-            sim.violate("AC9", f"25/25 lost while both creators have work: {dict(held)}, capacity {capacity}")
+            sim.violate("full use", f"25/25 lost while both creators have work: {dict(held)}, capacity {capacity}")
         for r in runs:
             members = sim.members(r)
             assert len(members) == 113 or sim.cycle == 1
@@ -1906,7 +1908,7 @@ async def test_creator_loses_access_mid_run(make_sim: MakeSim) -> None:
     """Creates answer 403 for the creator: queued tasks fail job_forbidden, Jobs still settle, the run ends.
 
     The bundle Job is created for the creator too, so it can't start either: the run ends at its
-    finalization deadline, completed with result_state=failed (the bound the spec gives a bundle Job).
+    finalization deadline, completed with result_state=failed (the bound a bundle Job has).
     """
     sim = make_sim(caps(10, per_run=3))
     sim.cluster.duration = lambda name: 3
@@ -1985,7 +1987,7 @@ async def test_a_hanging_stuck_job_doesnt_stop_the_grants(make_sim: MakeSim) -> 
 
 
 async def test_a_hanging_intent_get_doesnt_starve_its_runs_registered_jobs(make_sim: MakeSim) -> None:
-    """R16-9: "one Job whose GET always times out can't keep the others from being read".
+    """One Job whose GET always times out can't keep the others from being read.
 
     One create intent whose GET always times out: intents and registered Jobs are read in one loop that starts
     at a rotating offset, so the run's registered Jobs are read and settle ``succeeded`` in other cycles.
@@ -2014,7 +2016,7 @@ async def test_a_hanging_intent_get_doesnt_starve_its_runs_registered_jobs(make_
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Residual, accepted (story 0 S17-6, display only): only phase 2 writes running, so a run whose only Job "
+        "Residual, accepted (display only): only phase 2 writes running, so a run whose only Job "
         "P3 adopted stays accepted until it ends; the guard allows accepted -> completed"
     ),
 )

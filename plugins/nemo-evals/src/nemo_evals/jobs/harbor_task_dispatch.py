@@ -180,7 +180,7 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
     No sandbox outlives the run's execution deadline: the environment cuts each sandbox's lifetime to the time
     left when it creates it, so a later one (a retry, a separate verifier) ends then too. A dispatcher that is
     cancelled, OOM-killed or evicted leaks its sandboxes only until the deadline, not for the profile's whole
-    ``max_sandbox_lifetime_s``. TODO(M4 story 8): the controller deletes them on stop.
+    ``max_sandbox_lifetime_s``. TODO: the controller deletes them on stop.
     """
     policy = spec.sandbox_policy
     deadline = spec.execution_deadline_at
