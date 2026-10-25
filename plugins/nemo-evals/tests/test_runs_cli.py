@@ -713,6 +713,17 @@ def test_status_counts_done_and_failed():
     assert _status_table(RUN, views)[-1] == "3/5 done (1 succeeded, 2 failed)"
 
 
+def test_status_counts_settled_tasks_whose_state_shows_an_unexpected_job_status():
+    views = [
+        TaskStateView(0, "a", "succeeded", "j0"),
+        TaskStateView(1, "b", "failed (completed)", "j1", "no_result"),
+        TaskStateView(2, "c", "cancelled (completed)", "j2"),
+    ]
+    lines = _status_table(RUN | {"result_state": "failed"}, views)
+    assert lines[-1] == "3/3 done (1 succeeded, 2 failed)"
+    assert any(line.startswith("  completed tasks' scores:") for line in lines)
+
+
 @pytest.mark.parametrize(
     ("task", "state"),
     [

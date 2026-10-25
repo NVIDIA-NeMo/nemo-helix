@@ -846,6 +846,11 @@ class TaskStateView:
     publication: dict[str, Any] | None = None  # the task's Intake publish outcome, once it published
     job_status: str | None = None  # the Job's status as the controller last read it
 
+    @property
+    def phase(self) -> str:
+        """The member phase the state cell starts with: ``failed`` for ``failed (completed)``."""
+        return self.state.partition(" ")[0]
+
 
 # The Job status each settled phase implies; the state cell shows another one, e.g. a cancel after the Job finished.
 _EXPECTED_JOB_STATUS = {
@@ -1182,12 +1187,12 @@ def _status_table(
     # The controller's "bundle Job … ended …" only repeats the bundle line; any other error (a deadline) is news.
     if error and not (bundle is not None and error.startswith(f"bundle Job {bundle.job} ended")):
         lines.append(f"  error     {error}")
-    if result == "failed" and any(v.state == MemberPhase.SUCCEEDED for v in views):
+    if result == "failed" and any(v.phase == MemberPhase.SUCCEEDED for v in views):
         lines.append(f"  completed tasks' scores: nemo evals runs results {run['run_id']}{workspace_flag}")
     lines.append("")
     lines += _task_lines(views)
-    done = [v for v in views if v.state in SETTLED_MEMBER_PHASES]
-    succeeded = sum(v.state == MemberPhase.SUCCEEDED for v in done)
+    done = [v for v in views if v.phase in SETTLED_MEMBER_PHASES]
+    succeeded = sum(v.phase == MemberPhase.SUCCEEDED for v in done)
     lines.append(f"{len(done)}/{len(views)} done ({succeeded} succeeded, {len(done) - succeeded} failed)")
     return lines
 
