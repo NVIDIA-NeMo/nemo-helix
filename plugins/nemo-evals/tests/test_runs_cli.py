@@ -7,6 +7,7 @@ import io
 import json
 import subprocess
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -765,9 +766,19 @@ def test_a_deadline_error_shows_whatever_the_bundle_did(status):
     assert any(line.strip().startswith("logs:") for line in lines) is (status == "cancelled")
 
 
-def test_an_accepted_run_whose_tasks_all_finished_reads_as_merging():
-    lines = _status_table(RUN, [TaskJobView(0, "j0", "a", "completed")], BundleJobView("run-x-bundle-1", 1, "active"))
-    assert lines[3] == "  status    merging task results (phase accepted, result -)"
+def test_the_status_screen_shows_how_long_the_run_queued():
+    started = RUN | {"phase": "running", "started_at": "2026-10-16T12:50:12Z"}
+    assert "  started   2026-10-16 12:50:12 (queued 50m12s)" in _status_table(started, [])
+    waiting = _status_table(RUN, [], now=datetime(2026, 10, 16, 13, 10, 5, tzinfo=UTC))
+    assert waiting[3] == "  queued    1h10m so far"
+    never_started = RUN | {"phase": "expired", "error": "no task started within the queue timeout (48 h)"}
+    assert not any(line.startswith(("  started", "  queued")) for line in _status_table(never_started, []))
+
+
+def test_a_running_run_whose_bundle_job_runs_reads_as_merging():
+    run = RUN | {"phase": "running", "started_at": RUN["accepted_at"]}
+    lines = _status_table(run, [TaskJobView(0, "j0", "a", "completed")], BundleJobView("run-x-bundle-1", 1, "active"))
+    assert "  status    merging task results (phase running, result -)" in lines
 
 
 FAILED_POD = {

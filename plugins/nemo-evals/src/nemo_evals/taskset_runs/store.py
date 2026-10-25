@@ -22,6 +22,7 @@ from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError as Plan
 from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorageError
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
+from nemo_evals.taskset_runs.submission import resolve_deadlines
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
 from nemo_helix_plugin.entities.base import EntityUpdateClientProtocol
@@ -85,10 +86,12 @@ class RunAcceptance:
         request_digest: Digest of the logical submit request. A same-key retry with
             a different digest raises ``RunRequestConflict``.
         accepted_at: When submit accepted the request; copied onto the run.
-        execution_deadline_at: ``accepted_at`` plus the effective timeout; unfinished
-            tasks expire then. Fixed here so retries do not extend it.
-        finalization_deadline_at: ``execution_deadline_at`` plus operator grace; the
-            final result must be saved by then.
+        timeout_seconds: The effective execution budget, counted from the run's first
+            slot (``TasksetRunStore.start``).
+        execution_deadline_at: ``accepted_at`` plus the queue timeout; the run expires
+            then unless its first task gets a slot. Fixed here so retries do not extend it.
+        finalization_deadline_at: ``execution_deadline_at`` plus the operator grace;
+            ``start`` keeps that grace, so a later config change doesn't move it.
         discard_on_loss: Qualified refs to uniquely named filesets owned only by this
             request (for example its agent-files snapshot). They are deleted, best
             effort, once another request's run is proven to have won; shared
@@ -99,6 +102,7 @@ class RunAcceptance:
     idempotency_key: str
     request_digest: str
     accepted_at: datetime
+    timeout_seconds: int
     execution_deadline_at: datetime
     finalization_deadline_at: datetime
     discard_on_loss: tuple[str, ...] = ()
@@ -338,6 +342,7 @@ class TasksetRunStore:
             idempotency_key=acceptance.idempotency_key,
             request_digest=acceptance.request_digest,
             accepted_at=acceptance.accepted_at,
+            timeout_seconds=acceptance.timeout_seconds,
             execution_deadline_at=acceptance.execution_deadline_at,
             finalization_deadline_at=acceptance.finalization_deadline_at,
             phase=TasksetRunPhase.ACCEPTED,
@@ -508,6 +513,25 @@ class TasksetRunStore:
             update["error"] = error
         if not update:
             return run
+        return await self.entity_client.update(run.model_copy(update=update))
+
+    async def start(self, run: TasksetRunEntity, *, now: datetime) -> TasksetRunEntity:
+        """The run's first slot: start its execution clock; one versioned write, before its first create intent.
+
+        Writes ``running``, ``started_at`` and both deadlines, counted from ``now``. Every task Job carries the
+        run's execution deadline, so this happens once, before any member has a ``task_job``.
+        Raises ``NemoEntityConflictError`` when another writer (a cancel) updated the run first.
+        """
+        assert run.started_at is None, f"run {run.name} already started"
+        assert_run_transition(run.phase, TasksetRunPhase.RUNNING)
+        grace = (run.finalization_deadline_at - run.execution_deadline_at).total_seconds()  # submit's grace
+        execution, finalization = resolve_deadlines(now, run.timeout_seconds, int(grace))
+        update = {
+            "phase": TasksetRunPhase.RUNNING,
+            "started_at": now,
+            "execution_deadline_at": execution,
+            "finalization_deadline_at": finalization,
+        }
         return await self.entity_client.update(run.model_copy(update=update))
 
     async def request_cancel(self, workspace: str, run_id: str, *, now: datetime) -> TasksetRunEntity:

@@ -570,6 +570,7 @@ def harbor_run() -> TasksetRunEntity:
         request_digest="0" * 64,
         taskset_ref="default/debug#" + "e" * 64,
         accepted_at=accepted,
+        timeout_seconds=3600,
         execution_deadline_at=accepted + timedelta(hours=1),
         finalization_deadline_at=accepted + timedelta(hours=2),
     )

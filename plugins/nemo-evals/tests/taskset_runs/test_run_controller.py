@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+import nemo_evals.taskset_runs.controller as controller_module
 import pytest
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
@@ -24,7 +25,7 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
-from nemo_evals.taskset_runs.run_evaluation import RESULT_STATE_KEY, ensure_run_evaluation
+from nemo_evals.taskset_runs.run_evaluation import QUEUE_DURATION_KEY, RESULT_STATE_KEY, ensure_run_evaluation
 from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetBundleSpec, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanDigestMismatchError, TasksetRunStore
 from nemo_evals.taskset_runs.task_jobs import task_job_request
@@ -240,6 +241,8 @@ class Harness:
             request_digest="0" * 64,
             taskset_ref=plan.taskset_ref,
             accepted_at=accepted,
+            # Started by the first cycle at T0, the run's deadlines are still AFTER_EXECUTION and AFTER_FINALIZATION.
+            timeout_seconds=run.pop("timeout_seconds", int((AFTER_EXECUTION - T0).total_seconds())),
             execution_deadline_at=run.pop("execution_deadline_at", accepted + timedelta(hours=1)),
             finalization_deadline_at=run.pop("finalization_deadline_at", accepted + timedelta(hours=2)),
             **run,
@@ -486,6 +489,20 @@ async def test_a_publishing_run_stamps_its_evaluation_once_at_the_end(harness, p
     assert name == run.name and patch.status == "completed" and patch.metadata is not None
     assert patch.metadata[RESULT_STATE_KEY] == "ready"
     assert float(patch.metadata["eval_duration_sec"]) == (done - run.accepted_at).total_seconds()
+    assert float(patch.metadata[QUEUE_DURATION_KEY]) == (T0 - run.accepted_at).total_seconds()  # its first slot
+
+
+async def test_a_publishing_run_that_never_started_stamps_its_whole_life_as_queued(
+    harness, publishing, jobs, fake_evaluations
+):
+    jobs.evaluations = fake_evaluations
+    run = await harness.submit(publishing, name="run-a")
+    await ensure_run_evaluation(fake_evaluations, run.workspace, run.name, harness.plans[run.name])
+    await harness.cycle(at=AFTER_EXECUTION)  # its queue timeout passed before any slot
+    ((_, patch),) = fake_evaluations.patches
+    assert patch.status == "expired" and patch.metadata is not None
+    waited = (AFTER_EXECUTION - run.accepted_at).total_seconds()
+    assert float(patch.metadata[QUEUE_DURATION_KEY]) == float(patch.metadata["eval_duration_sec"]) == waited
 
 
 async def test_an_expired_publishing_run_stamps_expired_and_a_failed_stamp_never_blocks(
@@ -1072,25 +1089,111 @@ async def test_finished_tasks_are_bundled_after_the_execution_deadline(harness, 
     assert (await harness.run(run)).phase is TasksetRunPhase.RUNNING
 
 
-async def test_a_crash_before_the_running_write_leaves_the_run_accepted_until_it_completes(
+# ---- the execution clock -------------------------------------------------------------------------------
+
+
+async def test_the_first_grant_starts_the_clock_and_later_grants_keep_it(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 2, cap=1), name="run-a")
+    assert run.started_at is None and run.execution_deadline_at == run.accepted_at + timedelta(hours=1)
+    started = T0 + timedelta(minutes=20)  # queued until now: none of it comes out of the budget
+    await harness.cycle(at=started)
+    stored = await harness.run(run)
+    assert stored.phase is TasksetRunPhase.RUNNING and stored.started_at == started
+    assert stored.execution_deadline_at == started + timedelta(seconds=stored.timeout_seconds)
+    assert stored.finalization_deadline_at == stored.execution_deadline_at + timedelta(hours=1)  # submit's grace
+    assert jobs.created == [await harness.request(stored, 0)]  # the Job carries the started deadline
+    jobs.finish(task(run, 0), "completed")
+    await harness.cycle()
+    await harness.cycle()
+    later = await harness.run(run)
+    assert jobs.created[1] == await harness.request(later, 1)
+    assert (later.started_at, later.execution_deadline_at) == (started, stored.execution_deadline_at)
+
+
+async def test_the_queue_timeout_expires_a_run_that_never_started(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 2), name="run-a")  # its queue timeout ends at 13:00
+    await harness.cycle(at=AFTER_EXECUTION)
+    stored = await harness.run(run)
+    assert not jobs.created and await harness.phases(run) == ["expired", "expired"]
+    assert stored.phase is TasksetRunPhase.EXPIRED and stored.result_state is ResultState.NONE
+    assert stored.started_at is None
+    assert stored.error == "no task started within the queue timeout (1 h)"
+
+
+async def test_a_failed_start_write_creates_nothing_and_the_next_cycle_starts_the_run(
     harness, harbor_plan, jobs, monkeypatch
 ):
     run = await harness.submit(sized(harbor_plan, 1), name="run-a")
-    real = harness.store.set_state
+    real = harness.store.start
 
     async def crash(*args, **kwargs):
         raise RuntimeError("crashed")
 
-    monkeypatch.setattr(harness.store, "set_state", crash)
+    monkeypatch.setattr(harness.store, "start", crash)
     await harness.cycle()
-    monkeypatch.setattr(harness.store, "set_state", real)
-    assert (await harness.run(run)).phase is TasksetRunPhase.ACCEPTED and await harness.phases(run) == ["registered"]
-    jobs.finish_all()
+    assert not jobs.created and [m.task_job for m in await harness.members(run)] == [None]
+    assert (await harness.run(run)).phase is TasksetRunPhase.ACCEPTED
+    monkeypatch.setattr(harness.store, "start", real)
     await harness.cycle()
+    stored = await harness.run(run)
+    assert stored.started_at == T0 + CYCLE and jobs.created == [await harness.request(stored, 0)]
+
+
+async def test_a_start_whose_reply_was_lost_is_never_written_again(harness, harbor_plan, jobs, monkeypatch):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    real = harness.store.start
+    starts = []
+
+    async def commit_then_lose_the_reply(run, **kwargs):
+        starts.append(run.name)
+        await real(run, **kwargs)
+        raise httpx.ReadTimeout("reply lost")
+
+    monkeypatch.setattr(harness.store, "start", commit_then_lose_the_reply)
     await harness.cycle()
-    jobs.finish(f"{run.name}-bundle-1", "completed")
+    assert not jobs.created
+    committed = await harness.run(run)
+    assert committed.started_at == T0
     await harness.cycle()
-    assert (await harness.run(run)).phase is TasksetRunPhase.COMPLETED
+    stored = await harness.run(run)
+    assert starts == [run.name]  # the next cycle read started_at: no second start
+    assert (stored.started_at, stored.execution_deadline_at) == (T0, committed.execution_deadline_at)
+    assert jobs.created == [await harness.request(stored, 0)]
+
+
+async def test_a_crash_after_the_start_creates_the_job_with_the_same_deadline(harness, harbor_plan, jobs, monkeypatch):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+
+    async def crash(*args, **kwargs):
+        raise RuntimeError("crashed")
+
+    monkeypatch.setattr(controller_module, "register_member", crash)
+    await harness.cycle()
+    started = await harness.run(run)
+    assert started.phase is TasksetRunPhase.RUNNING and await harness.phases(run) == ["image_ready"]
+    monkeypatch.undo()
+    await harness.cycle()
+    stored = await harness.run(run)
+    assert stored.execution_deadline_at == started.execution_deadline_at
+    assert jobs.created == [await harness.request(stored, 0)]
+
+
+async def test_a_start_write_slower_than_the_budget_sends_no_job(harness, harbor_plan, jobs, monkeypatch):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a", timeout_seconds=5)
+    real = harness.store.start
+
+    async def slow(run, **kwargs):
+        written = await real(run, **kwargs)
+        harness.clock.now += timedelta(seconds=10)  # the write outlasts the 5 s budget it just started
+        return written
+
+    monkeypatch.setattr(harness.store, "start", slow)
+    await harness.cycle()
+    assert not jobs.created and [m.task_job for m in await harness.members(run)] == [None]
+    await harness.cycle()
+    stored = await harness.run(run)
+    assert stored.phase is TasksetRunPhase.EXPIRED
+    assert stored.error == "1 of 1 tasks expired at the execution deadline, 1 of them still queued"
 
 
 # ---- unreadable plans and isolation ---------------------------------------------------------------------
@@ -1168,20 +1271,22 @@ async def test_a_files_outage_never_fails_a_run_until_its_finalization_deadline(
     assert (await harness.run(gone)).phase is TasksetRunPhase.FAILED  # a Files 404: unreadable at once
 
 
-async def test_a_409_on_one_runs_running_write_skips_only_its_grants(harness, harbor_plan, jobs, monkeypatch):
+async def test_a_409_on_one_runs_start_skips_only_its_grants(harness, harbor_plan, jobs, monkeypatch):
     first = await harness.submit(sized(harbor_plan, 2), name="run-a")
     second = await harness.submit(sized(harbor_plan, 2), name="run-b")
-    real = harness.store.set_state
+    real = harness.store.start
 
     async def lose_first(run, **kwargs):
         if run.name == first.name:
             raise NemoEntityConflictError("a cancel landed")
         return await real(run, **kwargs)
 
-    monkeypatch.setattr(harness.store, "set_state", lose_first)
+    monkeypatch.setattr(harness.store, "start", lose_first)
     report = await harness.cycle()
-    assert len(jobs.active(first.name)) == 1 and len(jobs.active(second.name)) == 2
-    assert report.created == 3
+    # The start comes before the first intent, so the run that lost it has no Job at all.
+    assert not jobs.active(first.name) and len(jobs.active(second.name)) == 2
+    assert report.created == 2
+    assert (await harness.run(first)).started_at is None
 
 
 async def test_a_member_listing_failure_skips_phase_2(harness, harbor_plan, jobs, monkeypatch):

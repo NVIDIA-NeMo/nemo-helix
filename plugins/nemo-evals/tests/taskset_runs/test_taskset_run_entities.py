@@ -54,12 +54,11 @@ def test_enum_contracts() -> None:
 def test_transition_matrix(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
     """Check each parametrized old/new pair against the complete lifecycle contract.
 
-    The guard must return None for the nine allowed changes and raise ValueError
+    The guard must return None for the eight allowed changes and raise ValueError
     for every other pair, preventing self-transitions and reopening terminal runs.
     """
     allowed = {
         ("accepted", "running"),
-        ("accepted", "completed"),  # a crash or a lost write skipped running
         ("accepted", "failed"),
         ("accepted", "cancelled"),
         ("accepted", "expired"),
@@ -90,6 +89,7 @@ def test_record_defaults_and_json_roundtrip() -> None:
         request_digest="b" * 64,
         taskset_ref="default/suite#3",
         accepted_at=NOW,
+        timeout_seconds=3600,
         execution_deadline_at=NOW,
         finalization_deadline_at=NOW,
     )

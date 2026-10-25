@@ -21,7 +21,7 @@ class TasksetRunPhase(StrEnum):
     """
 
     ACCEPTED = "accepted"  # Created by submit with its plan; no task Job started yet. There is no earlier phase.
-    RUNNING = "running"  # The controller has started work on the run's tasks.
+    RUNNING = "running"  # The run's first task got a slot; its execution clock started (started_at).
     COMPLETED = "completed"  # Every task settled and at least one succeeded, within the failure tolerance.
     FAILED = (
         "failed"  # The run could not proceed, e.g. too many failed tasks, no task succeeded, or a plan digest mismatch.
@@ -107,11 +107,23 @@ class TasksetRunEntity(EntityBase):
         description="Availability of the combined results, tracked independently of phase.",
     )
     accepted_at: datetime = Field(description="When submit accepted the run.")
+    timeout_seconds: int = Field(gt=0, description="Execution budget in seconds, counted from started_at.")
+    started_at: datetime | None = Field(
+        default=None,
+        description="When the run's first task got a slot and its execution clock started; None until then.",
+    )
     execution_deadline_at: datetime = Field(
-        description="accepted_at plus the effective timeout; unfinished tasks expire then. Retries do not reset it."
+        description=(
+            "Unfinished tasks expire then. Until the run starts, accepted_at plus the queue timeout; from its "
+            "first slot, started_at plus timeout_seconds. Fixed before the run's first task Job; retries do not "
+            "reset it."
+        )
     )
     finalization_deadline_at: datetime = Field(
-        description="execution_deadline_at plus operator grace; the final result must be saved by then."
+        description=(
+            "execution_deadline_at plus the operator grace at submit; the final result must be saved by then. "
+            "Starting the run keeps that grace."
+        )
     )
     cancel_requested_at: datetime | None = Field(
         default=None,
@@ -206,8 +218,6 @@ _ALLOWED_RUN_TRANSITIONS = {
     TasksetRunPhase.ACCEPTED: frozenset(
         {
             TasksetRunPhase.RUNNING,
-            # A crash or a lost write can skip running; the run still ends (display only).
-            TasksetRunPhase.COMPLETED,
             TasksetRunPhase.FAILED,
             TasksetRunPhase.CANCELLED,
             TasksetRunPhase.EXPIRED,

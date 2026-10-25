@@ -39,14 +39,18 @@ def test_operator_budget_defaults():
     runs = TasksetRunsConfig()
     assert check_timeout(None, runs) == 86_400
     assert check_timeout(259_200, runs) == 259_200
+    assert runs.queue_timeout_seconds == 172_800
+    assert runs.finalization_grace_seconds == 600
     accepted = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
-    assert resolve_deadlines(accepted, 3600, runs) == (
+    assert resolve_deadlines(accepted, 3600, runs.finalization_grace_seconds) == (
         datetime(2026, 10, 12, 13, tzinfo=timezone.utc),
         datetime(2026, 10, 12, 13, 10, tzinfo=timezone.utc),
     )
 
 
-@pytest.mark.parametrize("field", ["default_timeout_seconds", "max_timeout_seconds", "finalization_grace_seconds"])
+@pytest.mark.parametrize(
+    "field", ["default_timeout_seconds", "max_timeout_seconds", "queue_timeout_seconds", "finalization_grace_seconds"]
+)
 @pytest.mark.parametrize("value", [0, -1])
 def test_operator_budget_requires_positive_values(field, value):
     with pytest.raises(ValidationError):
@@ -101,8 +105,8 @@ def test_timeout_above_operator_maximum_has_typed_error():
     [datetime(2026, 10, 12, 12), datetime(2026, 10, 12, 12, tzinfo=_TimezoneWithoutOffset())],
 )
 def test_deadlines_reject_naive_acceptance_timestamp(accepted: datetime) -> None:
-    with pytest.raises(ValueError, match="^accepted_at must be timezone-aware$"):
-        resolve_deadlines(accepted, 3600, TasksetRunsConfig())
+    with pytest.raises(ValueError, match="^start must be timezone-aware$"):
+        resolve_deadlines(accepted, 3600, 600)
 
 
 @pytest.mark.parametrize(
@@ -114,9 +118,7 @@ def test_deadlines_reject_naive_acceptance_timestamp(accepted: datetime) -> None
     ],
 )
 def test_deadlines_preserve_timezone_and_roll_over_midnight(accepted, timeout, grace, execution, finalization):
-    actual = resolve_deadlines(
-        datetime.fromisoformat(accepted), timeout, TasksetRunsConfig(finalization_grace_seconds=grace)
-    )
+    actual = resolve_deadlines(datetime.fromisoformat(accepted), timeout, grace)
     assert tuple(value.isoformat() for value in actual) == (execution, finalization)
     assert all(value.tzinfo is not None for value in actual)
 
@@ -130,8 +132,7 @@ def test_deadlines_preserve_timezone_and_roll_over_midnight(accepted, timeout, g
     ],
 )
 def test_deadlines_measure_elapsed_seconds_across_dst(accepted, timeout, grace):
-    runs = TasksetRunsConfig(finalization_grace_seconds=grace)
-    execution, finalization = resolve_deadlines(accepted, timeout, runs)
+    execution, finalization = resolve_deadlines(accepted, timeout, grace)
     assert execution.timestamp() - accepted.timestamp() == timeout
     assert finalization.timestamp() - execution.timestamp() == grace
     assert execution.tzinfo is accepted.tzinfo

@@ -9095,8 +9095,10 @@ components:
             nowhere.
         timeout_seconds:
           title: Timeout Seconds
-          description: Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds.
-            Must not exceed evals.runs.max_timeout_seconds.
+          description: Execution budget in seconds, counted from when the run's first
+            task gets a slot. Omit to use evals.runs.default_timeout_seconds. Must
+            not exceed evals.runs.max_timeout_seconds. Until its first slot, the run
+            waits at most evals.runs.queue_timeout_seconds.
           type: integer
           exclusiveMinimum: 0.0
       additionalProperties: false
@@ -9212,18 +9214,29 @@ components:
           format: date-time
           title: Accepted At
           description: When submit accepted the run.
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
+          description: Execution budget in seconds, counted from started_at.
+        started_at:
+          title: Started At
+          description: When the run's first task got a slot and its execution clock
+            started; None while it waits.
+          type: string
+          format: date-time
         execution_deadline_at:
           type: string
           format: date-time
           title: Execution Deadline At
-          description: accepted_at plus the effective timeout; unfinished tasks expire
-            then. Retries do not reset it.
+          description: Unfinished tasks expire then. Until the run starts, accepted_at
+            plus the queue timeout; from its first slot, started_at plus timeout_seconds.
+            Retries do not reset it.
         finalization_deadline_at:
           type: string
           format: date-time
           title: Finalization Deadline At
-          description: execution_deadline_at plus operator grace; the final result
-            must be saved by then.
+          description: execution_deadline_at plus the operator grace at submit; the
+            final result must be saved by then.
         cancel_requested_at:
           title: Cancel Requested At
           description: When a caller requested cancellation; None if never requested.
@@ -9252,6 +9265,7 @@ components:
       - phase
       - result_state
       - accepted_at
+      - timeout_seconds
       - execution_deadline_at
       - finalization_deadline_at
       title: TasksetRunStatus
@@ -9315,18 +9329,29 @@ components:
           format: date-time
           title: Accepted At
           description: When submit accepted the run.
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
+          description: Execution budget in seconds, counted from started_at.
+        started_at:
+          title: Started At
+          description: When the run's first task got a slot and its execution clock
+            started; None while it waits.
+          type: string
+          format: date-time
         execution_deadline_at:
           type: string
           format: date-time
           title: Execution Deadline At
-          description: accepted_at plus the effective timeout; unfinished tasks expire
-            then. Retries do not reset it.
+          description: Unfinished tasks expire then. Until the run starts, accepted_at
+            plus the queue timeout; from its first slot, started_at plus timeout_seconds.
+            Retries do not reset it.
         finalization_deadline_at:
           type: string
           format: date-time
           title: Finalization Deadline At
-          description: execution_deadline_at plus operator grace; the final result
-            must be saved by then.
+          description: execution_deadline_at plus the operator grace at submit; the
+            final result must be saved by then.
         cancel_requested_at:
           title: Cancel Requested At
           description: When a caller requested cancellation; None if never requested.
@@ -9362,6 +9387,7 @@ components:
       - phase
       - result_state
       - accepted_at
+      - timeout_seconds
       - execution_deadline_at
       - finalization_deadline_at
       title: TasksetRunSubmitResponse

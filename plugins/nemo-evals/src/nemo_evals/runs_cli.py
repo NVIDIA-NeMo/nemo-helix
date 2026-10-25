@@ -22,6 +22,7 @@ import time
 import uuid
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.sdk.resources import Evaluator
 from nemo_evals.taskset_runs.controller import MAX_BUNDLE_ATTEMPTS
 from nemo_evals.taskset_runs.identifiers import bundle_job_name, task_job_name
+from nemo_helix_plugin.cli_timestamps import parse_timestamp
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.jobs.archive import safe_extract_tar
@@ -1027,8 +1029,7 @@ def job_error(job: HelixJobResponse) -> str | None:
 def _run_state(run: dict[str, Any], bundle: BundleJobView | None) -> str:
     """The run's state in words; phase and result state alone read as contradictions ("completed", "failed")."""
     phase, result = run["phase"], run.get("result_state")
-    # A run whose tasks all finished before the controller's first pass is still `accepted` while it bundles.
-    if phase in ("accepted", "running") and bundle is not None and bundle.status not in _TERMINAL:
+    if phase == "running" and bundle is not None and bundle.status not in _TERMINAL:
         return "merging task results"
     if phase in ("accepted", "running"):
         return phase
@@ -1041,15 +1042,41 @@ def _run_state(run: dict[str, Any], bundle: BundleJobView | None) -> str:
     return phase
 
 
+def _instant(value: object) -> datetime:
+    """A status timestamp as an aware datetime; a naive one is UTC."""
+    parsed = parse_timestamp(str(value))
+    if parsed is None:
+        raise ValueError(f"not an ISO timestamp: {value!r}")
+    return parsed if parsed.utcoffset() is not None else parsed.replace(tzinfo=UTC)
+
+
+def _queue_line(run: dict[str, Any], now: datetime | None) -> str | None:
+    """How long the run waited for its first task slot; its clock starts there, not at acceptance."""
+    accepted = _instant(run["accepted_at"])
+    if run.get("started_at"):
+        waited = _duration((_instant(run["started_at"]) - accepted).total_seconds())
+        return f"  started   {str(run['started_at'])[:19].replace('T', ' ')} (queued {waited})"
+    if run["phase"] == "accepted":
+        return f"  queued    {_duration(((now or datetime.now(UTC)) - accepted).total_seconds())} so far"
+    return None
+
+
 def _status_table(
-    run: dict[str, Any], views: Sequence[TaskJobView], bundle: BundleJobView | None = None, *, workspace_flag: str = ""
+    run: dict[str, Any],
+    views: Sequence[TaskJobView],
+    bundle: BundleJobView | None = None,
+    *,
+    workspace_flag: str = "",
+    now: datetime | None = None,
 ) -> list[str]:
     """The status screen; ``workspace_flag`` (see ``_workspace_flag``) completes its printed commands."""
     phase, result = run["phase"], run.get("result_state", "-")
+    queue = _queue_line(run, now)
     lines = [
         f"Run {run['run_id']}",
         f"  taskset   {_short_ref(run['taskset_ref'])}",
         f"  accepted  {str(run['accepted_at'])[:19].replace('T', ' ')}",
+        *([queue] if queue else []),
         f"  status    {_run_state(run, bundle)} (phase {phase}, result {result})",
     ]
     if bundle is not None:

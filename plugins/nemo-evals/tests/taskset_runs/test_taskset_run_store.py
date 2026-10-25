@@ -60,6 +60,7 @@ def make_run(acceptance, *, phase=TasksetRunPhase.ACCEPTED) -> TasksetRunEntity:
         request_digest=acceptance.request_digest,
         idempotency_key=acceptance.idempotency_key,
         accepted_at=acceptance.accepted_at,
+        timeout_seconds=acceptance.timeout_seconds,
         execution_deadline_at=acceptance.execution_deadline_at,
         finalization_deadline_at=acceptance.finalization_deadline_at,
         phase=phase,
@@ -1039,13 +1040,31 @@ async def test_members_are_created_once_queued_and_task_job_and_job_id_are_write
 
 async def test_set_state_checks_transitions(store, entity_store, acceptance) -> None:
     run = await entity_store.create(make_run(acceptance))
-    assert (await store.set_state(run, phase=TasksetRunPhase.COMPLETED)).phase is TasksetRunPhase.COMPLETED
+    # Its first slot writes running before any Job, so an accepted run never completes without it.
+    with pytest.raises(ValueError, match="illegal taskset run transition"):
+        await store.set_state(run, phase=TasksetRunPhase.COMPLETED)
+    assert (await store.set_state(run, phase=TasksetRunPhase.EXPIRED)).phase is TasksetRunPhase.EXPIRED
     running = await entity_store.create(
         make_run(acceptance, phase=TasksetRunPhase.RUNNING).model_copy(update={"name": "r2"})
     )
     with pytest.raises(ValueError, match="illegal taskset run transition"):
         await store.set_state(running, phase=TasksetRunPhase.ACCEPTED)
     assert (await store.set_state(running, phase=TasksetRunPhase.RUNNING)).phase is TasksetRunPhase.RUNNING  # no-op
+
+
+async def test_start_counts_both_deadlines_from_the_first_slot_in_one_versioned_write(
+    store, entity_store, acceptance
+) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    now = acceptance.accepted_at + timedelta(minutes=50)
+    started = await store.start(run, now=now)
+    assert (started.phase, started.started_at) == (TasksetRunPhase.RUNNING, now)
+    assert started.execution_deadline_at == now + timedelta(seconds=acceptance.timeout_seconds)
+    grace = acceptance.finalization_deadline_at - acceptance.execution_deadline_at
+    assert started.finalization_deadline_at == started.execution_deadline_at + grace  # submit's grace, kept
+    assert (await store.find(run.workspace, run.name)) == started
+    with pytest.raises(NemoEntityConflictError):  # a stale copy: another writer (here, the start) went first
+        await store.start(run, now=now + timedelta(minutes=1))
 
 
 async def test_open_runs_repeated_across_pages_are_listed_once(store, entity_store, acceptance, monkeypatch) -> None:

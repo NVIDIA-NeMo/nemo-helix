@@ -681,9 +681,15 @@ class TasksetRunReconciler:
             (TasksetRunPhase.EXPIRED, MemberPhase.EXPIRED, "expired at the execution deadline"),
         ):
             stopped = sum(m.phase is member_phase for m in members)
+            if stopped and phase is TasksetRunPhase.EXPIRED and run.started_at is None:
+                # Its deadline was the queue timeout from acceptance: no task ever got a slot.
+                waited = _utc(run.execution_deadline_at) - _utc(run.accepted_at)
+                error = f"no task started within the queue timeout ({_duration(waited)})"
+                await _finish(run, plan, jobs, self.store, now, phase, ResultState.NONE, error=error)
+                return f"{phase.value}: {error}"
             if stopped:
                 error = f"{stopped} of {len(members)} tasks {what}"
-                # Queue time counts against the run's timeout: say how many never got a slot.
+                # Say how many never got a slot before the deadline.
                 queued = sum(m.phase is member_phase and (m.error or "").endswith(NOT_STARTED) for m in members)
                 if queued:
                     error += f", {queued} of them still queued"
@@ -835,23 +841,28 @@ class TasksetRunReconciler:
     ) -> bool:
         """Create ``member``'s task Job; False when its drain must end (an ambiguous create).
 
-        A run past its execution deadline, or one whose registration failed (a 409 on its ``running`` write
-        after a cancel landed), gets no more creates this cycle.
+        The run's first grant starts its execution clock (``TasksetRunStore.start``) before the create intent, so
+        every create, retry and adoption of its Jobs carries the same deadline. A run past its execution deadline,
+        or one whose start or registration failed (a 409 after a cancel landed), gets no more creates this cycle.
         """
         now = self._clock()
-        if now >= _utc(state.run.execution_deadline_at):
+        if now >= _utc(state.run.execution_deadline_at):  # the queue timeout until it starts, its budget after
             state.no_grant = True
             return True
         assert state.plan is not None
         try:
+            if state.run.started_at is None:
+                state.run = await self.store.start(state.run, now=now)
+                now = self._clock()  # a slow write must not send a Job already past the deadline it just set
+                if now >= _utc(state.run.execution_deadline_at):
+                    state.no_grant = True
+                    return True
             outcome, written = await register_member(
                 member, state.run, state.plan, jobs, self.store, now=now, grace=self.grace
             )
             state.replace(written)
             if outcome is Registration.REGISTERED:
                 report.created += 1
-                if state.run.phase is TasksetRunPhase.ACCEPTED:
-                    state.run = await self.store.set_state(state.run, phase=TasksetRunPhase.RUNNING)
         except Exception:
             logger.exception("Run %s/%s: registering %s failed", state.run.workspace, state.run.name, member.name)
             state.no_grant = True
@@ -1179,6 +1190,12 @@ async def _own_bundle_job(
     if not runs_request(job, expected):
         raise ForeignBundleJobError(job.name)
     return job
+
+
+def _duration(value: timedelta) -> str:
+    """``value`` in whole hours when it is one ("48 h"), else in seconds ("90 s")."""
+    seconds = int(value.total_seconds())
+    return f"{seconds // 3600} h" if seconds % 3600 == 0 else f"{seconds} s"
 
 
 def _utc(value: datetime) -> datetime:

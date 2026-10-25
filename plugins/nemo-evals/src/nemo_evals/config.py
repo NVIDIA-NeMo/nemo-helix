@@ -192,6 +192,11 @@ class TasksetRunsConfig(BaseModel):
     max_timeout_seconds: int = Field(
         default=259_200, gt=0, description="Largest timeout_seconds a request may ask for (72 h)."
     )
+    queue_timeout_seconds: int = Field(
+        default=172_800,
+        gt=0,
+        description="How long an accepted run may wait for its first task slot (48 h); past it, the run expires.",
+    )
     finalization_grace_seconds: int = Field(
         default=600,
         gt=0,

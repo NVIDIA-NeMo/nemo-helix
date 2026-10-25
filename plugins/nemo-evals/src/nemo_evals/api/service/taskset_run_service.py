@@ -372,14 +372,19 @@ class TasksetRunService:
             # Before accept, so every stored run has its Evaluation. An accept that fails after this leaves the
             # Evaluation behind; a retry with the same idempotency_key derives the same run id and adopts it.
             notices = await self._ensure_run_evaluation(plan) if intake is not None else []
-            # After every pre-accept call, so their time doesn't come out of the run's execution budget.
+            # Until its first task gets a slot, the run's deadlines count the queue timeout from acceptance; the
+            # run controller restarts them from that slot with the execution budget (TasksetRunStore.start).
+            runs = self._config.runs
             accepted_at = self._clock()
-            execution, finalization = resolve_deadlines(accepted_at, timeout, self._config.runs)
+            execution, finalization = resolve_deadlines(
+                accepted_at, runs.queue_timeout_seconds, runs.finalization_grace_seconds
+            )
             acceptance = RunAcceptance(
                 plan=plan,
                 idempotency_key=req.idempotency_key,
                 request_digest=digest,
                 accepted_at=accepted_at,
+                timeout_seconds=timeout,
                 execution_deadline_at=execution,
                 finalization_deadline_at=finalization,
                 discard_on_loss=(snapshot.root,) if snapshot is not None else (),

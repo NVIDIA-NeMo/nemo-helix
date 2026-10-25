@@ -150,8 +150,9 @@ class TasksetRunInput(BaseModel):
     timeout_seconds: int | None = Field(
         default=None,
         gt=0,
-        description="Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds. "
-        "Must not exceed evals.runs.max_timeout_seconds.",
+        description="Execution budget in seconds, counted from when the run's first task gets a slot. Omit to use "
+        "evals.runs.default_timeout_seconds. Must not exceed evals.runs.max_timeout_seconds. Until its first slot, "
+        "the run waits at most evals.runs.queue_timeout_seconds.",
     )
 
     @model_validator(mode="after")
@@ -256,11 +257,19 @@ class TasksetRunStatus(BaseModel):
         description="Availability of the combined results, tracked independently of phase."
     )
     accepted_at: datetime = Field(description="When submit accepted the run.")
+    timeout_seconds: int = Field(description="Execution budget in seconds, counted from started_at.")
+    started_at: datetime | None = Field(
+        default=None,
+        description="When the run's first task got a slot and its execution clock started; None while it waits.",
+    )
     execution_deadline_at: datetime = Field(
-        description="accepted_at plus the effective timeout; unfinished tasks expire then. Retries do not reset it."
+        description=(
+            "Unfinished tasks expire then. Until the run starts, accepted_at plus the queue timeout; from its "
+            "first slot, started_at plus timeout_seconds. Retries do not reset it."
+        )
     )
     finalization_deadline_at: datetime = Field(
-        description="execution_deadline_at plus operator grace; the final result must be saved by then."
+        description="execution_deadline_at plus the operator grace at submit; the final result must be saved by then."
     )
     cancel_requested_at: datetime | None = Field(
         default=None, description="When a caller requested cancellation; None if never requested."

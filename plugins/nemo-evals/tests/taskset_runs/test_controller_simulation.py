@@ -526,6 +526,7 @@ class SimRun:
     plan: TasksetRunPlan
     creator: str
     tasks: int
+    started_at: datetime | None = None  # the clock start the first create saw; it must never change
     unreadable: bool = False
     files_5xx: bool = False
     ever_loaded: bool = False
@@ -634,9 +635,13 @@ class Sim:
         request_cap: int | None = None,
         timeout: timedelta = timedelta(hours=2),
         finalization_grace: timedelta = timedelta(minutes=30),
+        queue_timeout: timedelta = timedelta(hours=48),
         squat: set[int] | None = None,
     ) -> SimRun:
-        """Accept a run now, as submit would: the run record, its frozen plan (served by the fake Files)."""
+        """Accept a run now, as submit would: the run record, its frozen plan (served by the fake Files).
+
+        Its deadlines count ``queue_timeout`` from now until its first slot, then ``timeout`` from that slot.
+        """
         name = f"run-{label}"
         spec = AgentEvalSpec(
             tasks=[self._make_task(f"{label}-t{i}") for i in range(tasks)],
@@ -675,8 +680,9 @@ class Sim:
                 request_digest=_hex(f"{label}-request"),
                 taskset_ref=f"{workspace}/sim#1",
                 accepted_at=now,
-                execution_deadline_at=now + timeout,
-                finalization_deadline_at=now + timeout + finalization_grace,
+                timeout_seconds=int(timeout.total_seconds()),
+                execution_deadline_at=now + queue_timeout,
+                finalization_deadline_at=now + queue_timeout + finalization_grace,
             )
         )
         sim_run = SimRun(label, entity, plan, creator or DEVELOPMENT_CALLER, tasks)
@@ -1004,6 +1010,17 @@ class Sim:
             self.violate(2, f"{request.name} isn't created with plan.task_environments[{index}]")
         if sent_at >= stored.execution_deadline_at:
             self.violate(5, f"{request.name} created after execution_deadline_at")
+        # The clock: a run starts once, before its first create, and every Job carries the run's deadline.
+        if stored.started_at is None:
+            self.violate("clock", f"{request.name} created before run {sim_run.label} started its clock")
+        elif sim_run.started_at not in (None, stored.started_at):
+            self.violate("clock", f"{sim_run.label} started again: {sim_run.started_at}, then {stored.started_at}")
+        sim_run.started_at = stored.started_at
+        deadline = datetime.fromisoformat(request.spec["execution_deadline_at"])
+        if deadline.timestamp() != stored.execution_deadline_at.timestamp():
+            self.violate(
+                "clock", f"{request.name} carries {deadline}, its run's deadline is {stored.execution_deadline_at}"
+            )
         if sim_run.cancel_from_cycle is not None and self.cycle >= sim_run.cancel_from_cycle:
             self.violate(5, f"{request.name} created in a cycle that started after cancel_requested_at")
         member = self.entity_store.entities.get((MEMBER_TYPE, workspace, f"task-{index}", sim_run.id))
@@ -1457,29 +1474,55 @@ async def test_two_creators_converge_to_25_25(make_sim: MakeSim) -> None:
     sim.assert_clean()
 
 
-async def test_overloaded_youngest_runs_expire(make_sim: MakeSim) -> None:
-    """Work above deadline x capacity, 2 creators: each creator's youngest runs expire, none loses all its runs."""
+async def _overloaded(sim: Sim, queue_timeout: timedelta = timedelta(hours=48)) -> list[SimRun]:
+    """Six 10-task runs from 2 creators, 3 per creator, on a cluster of 10 slots: far more than one budget's work."""
+    return [
+        await sim.submit(
+            f"{creator[-1]}{i}",
+            tasks=10,
+            creator=creator,
+            timeout=timedelta(seconds=300),
+            finalization_grace=timedelta(seconds=120),
+            queue_timeout=queue_timeout,
+        )
+        for i in range(3)
+        for creator in ("user:a", "user:b")
+    ]
+
+
+async def test_overloaded_runs_wait_then_finish_within_their_budget(make_sim: MakeSim) -> None:
+    """Work above capacity: runs queue, and each one's 300 s budget counts from its first slot, so none expires."""
     sim = make_sim(caps(10, per_run=5))
     sim.cluster.duration = lambda name: 3
-    runs = []
-    for i in range(3):
-        for creator in ("user:a", "user:b"):
-            runs.append(
-                await sim.submit(
-                    f"{creator[-1]}{i}",
-                    tasks=10,
-                    creator=creator,
-                    timeout=timedelta(seconds=300),
-                    finalization_grace=timedelta(seconds=120),
-                )
-            )
+    runs = await _overloaded(sim)
+    await sim.run_until_final(120)
+    for run in runs:
+        stored = sim.stored(run)
+        assert stored.phase is TasksetRunPhase.COMPLETED, (run.label, stored.error)
+        assert stored.started_at is not None and stored.started_at >= stored.accepted_at
+        assert stored.execution_deadline_at == stored.started_at + timedelta(seconds=300)
+    waited = [stored.started_at - stored.accepted_at for stored in map(sim.stored, runs) if stored.started_at]
+    # The youngest runs queued 240 s: counted from acceptance, that left 60 s of a 300 s budget and they expired.
+    assert max(waited) >= timedelta(seconds=240), waited
+    sim.assert_clean()
+
+
+async def test_overloaded_youngest_runs_expire_at_the_queue_timeout(make_sim: MakeSim) -> None:
+    """The same work with a 120 s queue timeout: each creator's youngest runs never start and expire, oldest first
+    keeps completing, and no creator loses all its runs."""
+    sim = make_sim(caps(10, per_run=5))
+    sim.cluster.duration = lambda name: 3
+    runs = await _overloaded(sim, queue_timeout=timedelta(seconds=120))
     await sim.run_until_final(60)
     for creator in ("user:a", "user:b"):
-        mine = [sim.phase(r) for r in runs if r.creator == creator]  # oldest first
-        assert TasksetRunPhase.COMPLETED in mine, mine
-        assert TasksetRunPhase.EXPIRED in mine, mine
-        first_expired = mine.index(TasksetRunPhase.EXPIRED)
-        assert all(p is TasksetRunPhase.EXPIRED for p in mine[first_expired:]), mine
+        mine = [sim.stored(r) for r in runs if r.creator == creator]  # oldest first
+        phases = [r.phase for r in mine]
+        assert TasksetRunPhase.COMPLETED in phases and TasksetRunPhase.EXPIRED in phases, phases
+        first_expired = phases.index(TasksetRunPhase.EXPIRED)
+        assert all(p is TasksetRunPhase.EXPIRED for p in phases[first_expired:]), phases
+        for expired in mine[first_expired:]:
+            assert expired.started_at is None
+            assert expired.error == "no task started within the queue timeout (120 s)"
     sim.assert_clean()
 
 
@@ -1889,18 +1932,19 @@ async def test_deadline_mid_grant_stops_the_creates(make_sim: MakeSim) -> None:
 
 
 async def test_deadline_between_phase_1_and_phase_2_creates_nothing(make_sim: MakeSim) -> None:
-    """Phase 1 takes long enough that a run passes its deadline before phase 2: it gets no Job."""
+    """Phase 1 takes long enough that a queued run passes its queue timeout before phase 2: it gets no Job."""
     sim = make_sim(caps(10, per_run=3))
     sim.cluster.duration = lambda name: 20
     busy = await sim.submit("busy", tasks=3)
     await sim.step()  # busy holds 3 registered Jobs
     sim.cluster.read_latency = timedelta(seconds=8)  # each Jobs read takes 8 s from now on
-    late = await sim.submit("late", tasks=3, creator="user:bob", timeout=timedelta(seconds=20))
+    late = await sim.submit("late", tasks=3, creator="user:bob", queue_timeout=timedelta(seconds=20))
     report = await sim.step()  # starts at t+15; phase 1 reads 3 Jobs (24 s): phase 2 runs after t+35
     assert report is not None and late.entity.name in report.grants
     assert not [name for _, name in sim.cluster.jobs if name.startswith("run-late-")]
     await sim.run_until_final(60)
     assert sim.phase(late) is TasksetRunPhase.EXPIRED and sim.phase(busy) is TasksetRunPhase.COMPLETED
+    assert sim.stored(late).error == "no task started within the queue timeout (20 s)"
     sim.assert_clean()
 
 
@@ -2013,19 +2057,9 @@ async def test_a_hanging_intent_get_doesnt_starve_its_runs_registered_jobs(make_
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Residual, accepted (display only): only phase 2 writes running, so a run whose only Job "
-        "P3 adopted stays accepted until it ends; the guard allows accepted -> completed"
-    ),
-)
-async def test_an_adopted_first_job_leaves_the_run_accepted(make_sim: MakeSim) -> None:
-    """Spec: "accepted -> running happens when the run's first Job is created or adopted" (phase 2 moves the run).
-
-    A run whose only Job is adopted by P3 (its create timed out, then the Job showed up) stays ``accepted``
-    while that Job runs: P3 writes the member ``registered`` but never the run's ``running``.
-    """
+async def test_an_adopted_first_job_finds_the_run_running(make_sim: MakeSim) -> None:
+    """The run's first grant writes ``running`` before the create, so a first Job P3 adopts (its create timed
+    out, then the Job showed up) never leaves the run ``accepted``."""
     sim = make_sim(caps(5))
     sim.cluster.duration = lambda name: 5
     run = await sim.submit("adopted", tasks=1)
