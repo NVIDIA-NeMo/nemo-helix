@@ -24,7 +24,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
-from nhx.common.auth import ALL_WORKSPACES
+from nhx.common.auth import ALL_WORKSPACES, is_service_principal
 from nhx.common.auth.client import AuthClient
 from nhx.core.entities.api.dependencies import (
     AuthClientDep,
@@ -57,6 +57,10 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ENTITY_TYPE = "project"
 
+# Creator principal that delegating plugins (agent deployments, evals runs) persist in entity data
+# so their controllers can act on the creator's behalf. Only direct service principals may read it.
+STORED_AUTH_CONTEXT_KEY = "_auth_context"
+
 _ENTITY_CREATE_OPENAPI_EXAMPLES = {
     "entity": {
         "summary": "Create an entity with required data",
@@ -81,6 +85,18 @@ _ENTITY_UPDATE_OPENAPI_EXAMPLES = {
         },
     }
 }
+
+
+def redact_stored_auth_context(entity: Entity, auth_client: AuthClient) -> Entity:
+    """Return ``entity`` without its stored creator auth context unless a direct service principal reads it.
+
+    Delegated calls (service principal acting on behalf of a user) are redacted too: their effective
+    caller is the user.
+    """
+    if STORED_AUTH_CONTEXT_KEY not in entity.data or is_service_principal(auth_client.principal.effective_id):
+        return entity
+    data = {key: value for key, value in entity.data.items() if key != STORED_AUTH_CONTEXT_KEY}
+    return entity.model_copy(update={"data": data})
 
 
 async def validate_project_exists(repository: EntityRepository, workspace: str, project: str | None) -> None:
@@ -265,7 +281,7 @@ async def create_entity(
             principal = entity.data.get("principal")
             if principal is not None:
                 await bindings_cache_delete(str(principal))
-        return new_entity
+        return redact_stored_auth_context(new_entity, auth_client)
     except IntegrityError as e:
         error_msg = str(e.orig) if hasattr(e, "orig") else str(e)
         error_msg_lower = error_msg.lower()
@@ -412,7 +428,7 @@ async def list_entities(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     return EntitiesPage(
-        data=entities,
+        data=[redact_stored_auth_context(entity, auth_client) for entity in entities],
         pagination=PaginationData(
             page=page,
             page_size=page_size,
@@ -467,7 +483,7 @@ async def get_entity_by_name(
     )
     if entity is None:
         raise HTTPException(status_code=404, detail="Entity not found")
-    return entity
+    return redact_stored_auth_context(entity, auth_client)
 
 
 @router.put(
@@ -532,7 +548,7 @@ async def update_entity_by_name(
             updated_by=auth_client.principal.effective_id,
             expected_db_version=entity_data.expected_db_version,
         )
-        return entity
+        return redact_stored_auth_context(entity, auth_client)
     except EntityVersionConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -683,4 +699,4 @@ async def get_entity_by_id(
 
     await validate_workspace_not_deleting(workspace_repository, auth_client, entity.workspace)
 
-    return entity
+    return redact_stored_auth_context(entity, auth_client)
