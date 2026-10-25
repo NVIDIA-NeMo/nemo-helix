@@ -198,9 +198,12 @@ class TasksetRunsConfig(BaseModel):
         description="How long an accepted run may wait for its first task slot (48 h); past it, the run expires.",
     )
     finalization_grace_seconds: int = Field(
-        default=600,
+        default=1_800,
         gt=0,
-        description="Time after the execution deadline to finish scoring and bundling (10 min).",
+        description=(
+            "Time after the execution deadline to finish scoring and bundling (30 min): an expired run's Jobs "
+            "must end and the tasks that finished must be bundled by then."
+        ),
     )
     harbor: HarborTaskJobsConfig | None = Field(
         default=None, description="Kubernetes taskset runs; None leaves them off in this deployment."

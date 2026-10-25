@@ -775,6 +775,21 @@ def test_the_status_screen_shows_how_long_the_run_queued():
     assert not any(line.startswith(("  started", "  queued")) for line in _status_table(never_started, []))
 
 
+@pytest.mark.parametrize("phase", ["expired", "cancelled"])
+@pytest.mark.parametrize(
+    "result,words",
+    [
+        ("ready", "a result over the tasks that finished is ready"),
+        ("failed", "merging the finished tasks' results failed"),
+        ("none", None),
+    ],
+)
+def test_a_stopped_run_says_whether_its_finished_tasks_have_a_result(phase, result, words):
+    run = RUN | {"phase": phase, "result_state": result, "started_at": RUN["accepted_at"]}
+    state = f"{phase}; {words}" if words else phase
+    assert f"  status    {state} (phase {phase}, result {result})" in _status_table(run, [])
+
+
 def test_a_running_run_whose_bundle_job_runs_reads_as_merging():
     run = RUN | {"phase": "running", "started_at": RUN["accepted_at"]}
     lines = _status_table(run, [TaskJobView(0, "j0", "a", "completed")], BundleJobView("run-x-bundle-1", 1, "active"))

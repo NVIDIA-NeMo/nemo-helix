@@ -946,7 +946,11 @@ class Sim:
             )
 
     def _check_outcome(self, sim_run: SimRun, stored: TasksetRunEntity, members: list[TasksetRunMemberEntity]) -> None:
-        """A finished run's phase follows its members: any cancelled, else any expired, else bundled or failed."""
+        """A finished run's phase follows its members: any cancelled, else any expired, else bundled or failed.
+
+        Its result follows them too: whatever the phase, a run with a succeeded task bundles it (ready, or failed
+        when the bundle missed its deadline), and a run with none has no result.
+        """
         if "plan_unreadable" in (stored.error or ""):
             return
         phases = {m.phase for m in members}
@@ -960,8 +964,8 @@ class Sim:
             expected = TasksetRunPhase.FAILED
         if stored.phase is not expected:
             self.violate("run outcome", f"{sim_run.label} ended {stored.phase}; its members give {expected.value}")
-        ready = stored.result_state in (ResultState.READY, ResultState.FAILED)
-        if ready != (stored.phase is TasksetRunPhase.COMPLETED):
+        bundled = stored.result_state in (ResultState.READY, ResultState.FAILED)
+        if bundled != (MemberPhase.SUCCEEDED in phases):
             self.violate("run outcome", f"{sim_run.label} ended {stored.phase} with result_state {stored.result_state}")
 
     def _allocate(
@@ -1811,7 +1815,8 @@ async def test_job_completing_before_the_deadline_succeeds(make_sim: MakeSim) ->
     await sim.run_until_final(30)
     phases = [m.phase for m in sim.members(run)]
     assert phases == [MemberPhase.SUCCEEDED, MemberPhase.EXPIRED]
-    assert sim.phase(run) is TasksetRunPhase.EXPIRED
+    assert (sim.phase(run), sim.stored(run).result_state) == (TasksetRunPhase.EXPIRED, ResultState.READY)
+    assert sim.stored(run).error == "1 of 2 tasks expired at the execution deadline; the result covers 1 of 2 tasks"
     sim.assert_clean()
 
 

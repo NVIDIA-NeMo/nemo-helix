@@ -254,7 +254,10 @@ class TasksetRunStatus(BaseModel):
     )
     phase: TasksetRunPhase = Field(description="Execution progress. Starts accepted; terminal phases never change.")
     result_state: ResultState = Field(
-        description="Availability of the combined results, tracked independently of phase."
+        description=(
+            "Availability of the combined results, tracked independently of phase. An expired or cancelled run "
+            "can be ready: its result covers the tasks that finished."
+        )
     )
     accepted_at: datetime = Field(description="When submit accepted the run.")
     timeout_seconds: int = Field(description="Execution budget in seconds, counted from started_at.")

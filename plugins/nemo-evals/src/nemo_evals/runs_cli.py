@@ -1039,6 +1039,10 @@ def _run_state(run: dict[str, Any], bundle: BundleJobView | None) -> str:
         return "tasks finished, but merging their results into the run's result failed"
     if phase == "failed":
         return "failed; no task completed"
+    if phase in ("expired", "cancelled") and result == "ready":
+        return f"{phase}; a result over the tasks that finished is ready"
+    if phase in ("expired", "cancelled") and result == "failed":
+        return f"{phase}; merging the finished tasks' results failed"
     return phase
 
 

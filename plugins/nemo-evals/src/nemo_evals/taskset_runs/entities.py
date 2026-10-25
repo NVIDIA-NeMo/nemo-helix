@@ -26,8 +26,8 @@ class TasksetRunPhase(StrEnum):
     FAILED = (
         "failed"  # The run could not proceed, e.g. too many failed tasks, no task succeeded, or a plan digest mismatch.
     )
-    CANCELLED = "cancelled"  # A caller cancelled the run; remaining task Jobs are cancelled.
-    EXPIRED = "expired"  # execution_deadline_at passed before every task settled.
+    CANCELLED = "cancelled"  # A caller cancelled the run; remaining task Jobs are cancelled, finished tasks bundled.
+    EXPIRED = "expired"  # execution_deadline_at passed before every task settled; finished tasks are bundled.
 
 
 TERMINAL_RUN_PHASES = frozenset(
@@ -48,7 +48,7 @@ class ResultState(StrEnum):
     """
 
     PENDING = "pending"  # Combined results are not finalized yet.
-    READY = "ready"  # Combined results are saved and readable.
+    READY = "ready"  # Combined results are saved and readable; for an expired or cancelled run, the finished tasks'.
     FAILED = "failed"  # The finalization deadline passed before the result was saved.
     NONE = "none"  # Nothing to combine, e.g. no task succeeded.
 

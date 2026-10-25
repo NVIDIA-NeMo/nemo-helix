@@ -40,11 +40,11 @@ def test_operator_budget_defaults():
     assert check_timeout(None, runs) == 86_400
     assert check_timeout(259_200, runs) == 259_200
     assert runs.queue_timeout_seconds == 172_800
-    assert runs.finalization_grace_seconds == 600
+    assert runs.finalization_grace_seconds == 1800  # an expired run's Jobs must end and its finished tasks bundle
     accepted = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
     assert resolve_deadlines(accepted, 3600, runs.finalization_grace_seconds) == (
         datetime(2026, 10, 12, 13, tzinfo=timezone.utc),
-        datetime(2026, 10, 12, 13, 10, tzinfo=timezone.utc),
+        datetime(2026, 10, 12, 13, 30, tzinfo=timezone.utc),
     )
 
 

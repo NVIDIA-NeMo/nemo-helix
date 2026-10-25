@@ -27,7 +27,8 @@ run would create there: someone else's Job is never adopted, bundled or cancelle
 known by its id (``job_id``): a Job under the name with another id took it after ours ended and was deleted,
 so it is never read for a result, counted or cancelled.
 
-Expiry and cancel keep no partial result. TODO: merge the tasks that finished.
+A run that expires or is cancelled keeps its phase and still bundles the tasks that finished: a partial result
+over them, ``result_state=ready``.
 """
 
 from __future__ import annotations
@@ -306,6 +307,36 @@ def stop_phase(run: TasksetRunEntity, now: datetime) -> TasksetRunPhase | None:
     if now >= _utc(run.execution_deadline_at):
         return TasksetRunPhase.EXPIRED
     return None
+
+
+def _stopped(run: TasksetRunEntity, members: list[TasksetRunMemberEntity]) -> tuple[TasksetRunPhase, str] | None:
+    """The stop that ended ``members``, with the run's error; None when no member was stopped.
+
+    Only a stop writes a member ``cancelled`` or ``expired``, so a stop that crashed before the run's write still
+    ends ``cancelled`` (cancel wins) or ``expired``; a late cancel leaves none, and the run completes.
+    """
+    for phase, member_phase, what in (
+        (TasksetRunPhase.CANCELLED, MemberPhase.CANCELLED, "cancelled"),
+        (TasksetRunPhase.EXPIRED, MemberPhase.EXPIRED, "expired at the execution deadline"),
+    ):
+        stopped = sum(m.phase is member_phase for m in members)
+        if not stopped:
+            continue
+        if phase is TasksetRunPhase.EXPIRED and run.started_at is None:
+            # Its deadline was the queue timeout from acceptance: no task ever got a slot.
+            waited = _utc(run.execution_deadline_at) - _utc(run.accepted_at)
+            return phase, f"no task started within the queue timeout ({_duration(waited)})"
+        # Say how many never got a slot before the stop.
+        queued = sum(m.phase is member_phase and (m.error or "").endswith(NOT_STARTED) for m in members)
+        return phase, f"{stopped} of {len(members)} tasks {what}" + (
+            f", {queued} of them still queued" if queued else ""
+        )
+    return None
+
+
+def _join(*parts: str | None) -> str | None:
+    """The non-empty parts of a run's error, joined with ``"; "``; None when there are none."""
+    return "; ".join(part for part in parts if part) or None
 
 
 def _member_phase(stop: TasksetRunPhase | None) -> MemberPhase:
@@ -670,32 +701,9 @@ class TasksetRunReconciler:
         self.stuck[(entry.workspace, entry.name)] = entry
 
     async def _end(self, state: _RunState, plan: TasksetRunPlan, jobs: RunJobs, now: datetime) -> str:
-        """Every member has settled: end a stopped run, else finalize it (bundle Job, result record).
-
-        Only a stop writes a member ``cancelled`` or ``expired``, so a stop that crashed before the run's write
-        still ends ``cancelled`` (cancel wins) or ``expired``; a late cancel leaves none, and the run finalizes.
-        """
-        run, members = state.run, state.members
-        for phase, member_phase, what in (
-            (TasksetRunPhase.CANCELLED, MemberPhase.CANCELLED, "cancelled"),
-            (TasksetRunPhase.EXPIRED, MemberPhase.EXPIRED, "expired at the execution deadline"),
-        ):
-            stopped = sum(m.phase is member_phase for m in members)
-            if stopped and phase is TasksetRunPhase.EXPIRED and run.started_at is None:
-                # Its deadline was the queue timeout from acceptance: no task ever got a slot.
-                waited = _utc(run.execution_deadline_at) - _utc(run.accepted_at)
-                error = f"no task started within the queue timeout ({_duration(waited)})"
-                await _finish(run, plan, jobs, self.store, now, phase, ResultState.NONE, error=error)
-                return f"{phase.value}: {error}"
-            if stopped:
-                error = f"{stopped} of {len(members)} tasks {what}"
-                # Say how many never got a slot before the deadline.
-                queued = sum(m.phase is member_phase and (m.error or "").endswith(NOT_STARTED) for m in members)
-                if queued:
-                    error += f", {queued} of them still queued"
-                await _finish(run, plan, jobs, self.store, now, phase, ResultState.NONE, error=error)
-                return f"{phase.value}: {error}"
-        outcome = await finalize_run(run, plan, members, jobs, self.store, now=now)
+        """Every member has settled: finalize the run (bundle Job, result record), keeping a stop's phase."""
+        stopped = _stopped(state.run, state.members)
+        outcome = await finalize_run(state.run, plan, state.members, jobs, self.store, now=now, stopped=stopped)
         return f"{outcome.action} {outcome.detail}".strip()
 
     async def _fail_unreadable(self, state: _RunState, now: datetime, breaker: JobsBreaker, *, reason: str) -> None:
@@ -917,7 +925,7 @@ class TasksetRunReconciler:
 class PassOutcome:
     """What finalization did, for logs and tests."""
 
-    action: str  # failed | bundling | completed | bundle_failed | finalization_missed
+    action: str  # failed | bundling | completed | cancelled | expired | bundle_failed | finalization_missed
     detail: str = ""
 
 
@@ -929,18 +937,23 @@ async def finalize_run(
     store: TasksetRunStore,
     *,
     now: datetime,
+    stopped: tuple[TasksetRunPhase, str] | None = None,
 ) -> PassOutcome:
-    """Every member has settled with no stop: bundle the succeeded tasks and save the run's result; safe to repeat.
+    """Every member has settled: bundle the succeeded tasks and save the run's result; safe to repeat.
 
-    - none succeeded → ``failed``, ``result_state=none``;
+    The run ends ``completed``, or with its stop's phase and error (``stopped``, from ``_stopped``):
+
+    - none succeeded → ``failed`` (a stopped run: its stop's phase), ``result_state=none``;
     - otherwise → create (or adopt) the bundle Job; once it completes, save the run's result record
-      (name = run id) and mark the run ``completed``, ``result_state=ready``;
+      (name = run id) and end the run, ``result_state=ready``. A stopped run's result covers the tasks that
+      finished, and its error says how many;
     - no result saved by ``finalization_deadline_at`` → cancel the bundle Job; ``result_state=failed``.
 
     Runs even after ``execution_deadline_at``: a run whose tasks all finished isn't expired while it bundles.
     A bundle Job whose create failed midway never runs, so the next attempt's name is used (see
     ``STALLED_CREATE_SECONDS``).
     """
+    ending, error = stopped or (TasksetRunPhase.COMPLETED, None)
     succeeded = [m for m in members if m.phase is MemberPhase.SUCCEEDED]
     accepted = [
         AcceptedTaskOutput(task_index=m.task_index, job=m.task_job, bundle_ref=m.bundle_ref)
@@ -948,10 +961,13 @@ async def finalize_run(
         if m.task_job is not None and m.bundle_ref is not None
     ]
     if not accepted:
-        await _finish(run, plan, jobs, store, now, TasksetRunPhase.FAILED, ResultState.NONE, error="no task succeeded")
-        return PassOutcome("failed", "no task succeeded")
+        phase, why = stopped or (TasksetRunPhase.FAILED, "no task succeeded")
+        await _finish(run, plan, jobs, store, now, phase, ResultState.NONE, error=why)
+        return PassOutcome(phase.value, why)
+    if stopped is not None:
+        error = f"{error}; the result covers {len(accepted)} of {len(members)} tasks"
     if now >= _utc(run.finalization_deadline_at):
-        return await _miss_finalization(run, plan, accepted, jobs, store, now)
+        return await _miss_finalization(run, plan, accepted, jobs, store, now, ending=ending, error=error)
     # Fixed once the members settle, so the bundle request is the same on every pass and adoption still matches.
     finished_at = max(_utc(m.updated_at or run.accepted_at) for m in succeeded)
     try:
@@ -986,12 +1002,12 @@ async def finalize_run(
             existing = await jobs.get_record(run.name)
             if existing is None or existing.job_id != bundle.name:
                 raise
-        await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.READY)
-        return PassOutcome("completed", bundle_ref)
+        await _finish(run, plan, jobs, store, now, ending, ResultState.READY, error=error)
+        return PassOutcome(ending.value, bundle_ref)
     # The newest attempt failed and no further attempt is allowed.
-    error = f"bundle Job {bundle.name} ended {_status(bundle)}"
-    await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.FAILED, error=error)
-    return PassOutcome("bundle_failed", error)
+    failed = f"bundle Job {bundle.name} ended {_status(bundle)}"
+    await _finish(run, plan, jobs, store, now, ending, ResultState.FAILED, error=_join(error, failed))
+    return PassOutcome("bundle_failed", failed)
 
 
 async def _finish(
@@ -1027,8 +1043,13 @@ async def _miss_finalization(
     jobs: RunJobs,
     store: TasksetRunStore,
     now: datetime,
+    *,
+    ending: TasksetRunPhase,
+    error: str | None,
 ) -> PassOutcome:
     """Past the finalization deadline without a saved result: cancel the bundle Job and fail the result.
+
+    The run ends ``ending`` (``completed``, or a stop's phase) with ``error`` first, in both branches.
 
     The bundle Job GETs and cancels are best effort, so a Jobs outage that spans the deadline can't keep the
     run open. Residual: a bundle Job that couldn't be cancelled may still finish, with no one to save its record.
@@ -1037,8 +1058,8 @@ async def _miss_finalization(
     record = await jobs.get_record(run.name)
     if record is not None and record.job_id in names:
         # An earlier pass saved the result, then failed before marking the run done.
-        await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.READY)
-        return PassOutcome("completed", record.bundle_ref)
+        await _finish(run, plan, jobs, store, now, ending, ResultState.READY, error=error)
+        return PassOutcome(ending.value, record.bundle_ref)
     for name in names:
         try:
             bundle = await jobs.get(name)
@@ -1050,9 +1071,9 @@ async def _miss_finalization(
             logger.warning("Run %s: not cancelling: %s", run.name, exc)
         except Exception as exc:
             logger.warning("Run %s: bundle Job %s couldn't be read or cancelled: %s", run.name, name, exc)
-    error = "finalization deadline passed before the result was saved"
-    await _finish(run, plan, jobs, store, now, TasksetRunPhase.COMPLETED, ResultState.FAILED, error=error)
-    return PassOutcome("finalization_missed", error)
+    missed = "finalization deadline passed before the result was saved"
+    await _finish(run, plan, jobs, store, now, ending, ResultState.FAILED, error=_join(error, missed))
+    return PassOutcome("finalization_missed", missed)
 
 
 class ForeignBundleJobError(Exception):

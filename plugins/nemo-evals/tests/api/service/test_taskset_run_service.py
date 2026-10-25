@@ -107,7 +107,7 @@ async def test_accept_freezes_resolved_harbor_content(
     assert result.status.timeout_seconds == 86_400
     assert result.status.started_at is None
     assert result.status.execution_deadline_at == NOW + timedelta(seconds=172_800)
-    assert result.status.finalization_deadline_at == NOW + timedelta(seconds=173_400)
+    assert result.status.finalization_deadline_at == NOW + timedelta(seconds=172_800 + 1_800)
     run = await run_store.find("default", result.status.run_id)
     plan = await run_store.load_plan(run)
     assert plan.taskset_ref == f"default/suite#{published[1].content_hash}"

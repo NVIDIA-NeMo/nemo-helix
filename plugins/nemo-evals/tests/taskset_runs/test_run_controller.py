@@ -522,6 +522,18 @@ async def test_an_expired_publishing_run_stamps_expired_and_a_failed_stamp_never
     assert patch.status == "expired" and patch.metadata is not None and patch.metadata[RESULT_STATE_KEY] == "none"
 
 
+async def test_an_expired_publishing_run_with_a_partial_result_stamps_expired_and_ready(
+    harness, publishing, jobs, fake_evaluations
+):
+    jobs.evaluations = fake_evaluations
+    run = await stopped_with_one_finished(harness, publishing, jobs, "expired")
+    await ensure_run_evaluation(fake_evaluations, run.workspace, run.name, harness.plans[run.name])
+    jobs.finish(f"{run.name}-bundle-1", "completed")
+    await harness.cycle()
+    ((_, patch),) = fake_evaluations.patches
+    assert patch.status == "expired" and patch.metadata is not None and patch.metadata[RESULT_STATE_KEY] == "ready"
+
+
 # ---- caps and slot order --------------------------------------------------------------------------------
 
 
@@ -955,9 +967,118 @@ async def test_the_deadline_expires_queued_tasks_at_once_and_running_ones_when_t
     jobs.finish(task(run, 1), "completed")  # finished just before the deadline
     await harness.cycle()
     assert await harness.phases(run) == ["expired", "succeeded", "expired", "expired"]
+    # The task that finished is bundled: a partial result over it, and the run stays expired.
+    bundle = jobs.created[-1]
+    assert bundle.name == f"{run.name}-bundle-1"
+    assert [a.task_index for a in TasksetBundleSpec.model_validate(bundle.spec).accepted] == [1]
+    jobs.finish(bundle.name, "completed")
+    await harness.cycle()
+    (record,) = jobs.records
+    assert record.name == run.name and record.job_id == bundle.name
     run = await harness.run(run)
-    assert run.phase is TasksetRunPhase.EXPIRED and run.result_state is ResultState.NONE
-    assert run.error == "3 of 4 tasks expired at the execution deadline, 2 of them still queued"
+    assert run.phase is TasksetRunPhase.EXPIRED and run.result_state is ResultState.READY
+    assert run.error == (
+        "3 of 4 tasks expired at the execution deadline, 2 of them still queued; the result covers 1 of 4 tasks"
+    )
+
+
+# ---- partial results of a stopped run --------------------------------------------------------------------
+
+
+async def stopped_with_one_finished(harness, harbor_plan, jobs, stop: str) -> TasksetRunEntity:
+    """A 2-task run: task 1 completed, then ``stop`` ("expired" or "cancelled"); its bundle Job is created."""
+    run = await harness.submit(sized(harbor_plan, 2), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 1), "completed")
+    if stop == "cancelled":
+        await harness.cancel(run, BEFORE_DEADLINE)
+        await harness.cycle(at=BEFORE_DEADLINE)
+    else:
+        await harness.cycle(at=AFTER_EXECUTION)
+    jobs.finish(task(run, 0), "cancelled")
+    await harness.cycle()  # every member settled: the bundle Job is created
+    assert await harness.phases(run) == [stop, "succeeded"]
+    assert jobs.created[-1].name == f"{run.name}-bundle-1"
+    return run
+
+
+STOP_ERRORS = {
+    "expired": "1 of 2 tasks expired at the execution deadline; the result covers 1 of 2 tasks",
+    "cancelled": "1 of 2 tasks cancelled; the result covers 1 of 2 tasks",
+}
+
+
+@pytest.mark.parametrize("stop", ["expired", "cancelled"])
+async def test_a_stopped_run_keeps_its_phase_and_a_result_over_the_tasks_that_finished(
+    harness, harbor_plan, jobs, stop
+):
+    run = await stopped_with_one_finished(harness, harbor_plan, jobs, stop)
+    assert (await harness.run(run)).phase is TasksetRunPhase.RUNNING  # open while it bundles
+    jobs.finish(f"{run.name}-bundle-1", "completed")
+    await harness.cycle()
+    stored = await harness.run(run)
+    assert (stored.phase.value, stored.result_state) == (stop, ResultState.READY)
+    assert stored.error == STOP_ERRORS[stop]
+
+
+async def test_a_stopped_run_with_no_finished_task_has_no_result(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    await harness.cycle(at=AFTER_EXECUTION)
+    jobs.finish(task(run, 0), "cancelled")
+    await harness.cycle()
+    stored = await harness.run(run)
+    assert (stored.phase, stored.result_state) == (TasksetRunPhase.EXPIRED, ResultState.NONE)
+    assert stored.error == "1 of 1 tasks expired at the execution deadline"
+    assert not any(r.name.startswith(f"{run.name}-bundle") for r in jobs.created)
+
+
+async def test_a_stopped_runs_failed_bundles_fail_its_result_and_keep_its_stop(harness, harbor_plan, jobs):
+    run = await stopped_with_one_finished(harness, harbor_plan, jobs, "expired")
+    for attempt in (1, 2, 3):
+        jobs.finish(f"{run.name}-bundle-{attempt}", "error")
+        await harness.cycle()
+    stored = await harness.run(run)
+    assert (stored.phase, stored.result_state) == (TasksetRunPhase.EXPIRED, ResultState.FAILED)
+    assert stored.error == f"{STOP_ERRORS['expired']}; bundle Job {run.name}-bundle-3 ended error"
+
+
+async def test_a_stopped_run_past_its_finalization_deadline_fails_its_result_and_keeps_its_stop(
+    harness, harbor_plan, jobs
+):
+    run = await stopped_with_one_finished(harness, harbor_plan, jobs, "expired")
+    await harness.cycle(at=AFTER_FINALIZATION)
+    stored = await harness.run(run)
+    assert (stored.phase, stored.result_state) == (TasksetRunPhase.EXPIRED, ResultState.FAILED)
+    assert stored.error == f"{STOP_ERRORS['expired']}; finalization deadline passed before the result was saved"
+    assert f"{run.name}-bundle-1" in jobs.cancelled
+
+
+@pytest.mark.parametrize("stop", ["expired", "cancelled"])
+@pytest.mark.parametrize("retry_after_the_deadline", [False, True])
+async def test_a_saved_result_whose_terminal_write_failed_keeps_the_stop(
+    harness, harbor_plan, jobs, monkeypatch, stop, retry_after_the_deadline
+):
+    """The record is saved, then the run's write fails; the next pass ends the run with the stop, ready, its error.
+
+    Before the finalization deadline the record's create conflicts and is adopted; after it, ``_miss_finalization``
+    finds it. Both write the same phase and error as the first attempt.
+    """
+    run = await stopped_with_one_finished(harness, harbor_plan, jobs, stop)
+    jobs.finish(f"{run.name}-bundle-1", "completed")
+    real = harness.store.set_state
+
+    async def lost(*args, **kwargs):
+        raise RuntimeError("the run's write failed")
+
+    monkeypatch.setattr(harness.store, "set_state", lost)
+    await harness.cycle()
+    assert len(jobs.records) == 1 and (await harness.run(run)).result_state is ResultState.PENDING
+    monkeypatch.setattr(harness.store, "set_state", real)
+    await harness.cycle(at=AFTER_FINALIZATION if retry_after_the_deadline else None)
+    stored = await harness.run(run)
+    assert (stored.phase.value, stored.result_state, stored.error) == (stop, ResultState.READY, STOP_ERRORS[stop])
+    assert len(jobs.records) == 1
 
 
 async def test_an_error_while_cancelling_is_cancelled_and_past_the_deadline_stays_failed(harness, harbor_plan, jobs):
