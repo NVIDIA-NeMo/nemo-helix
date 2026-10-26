@@ -15,19 +15,20 @@ import { useFormContext, useWatch } from 'react-hook-form';
  * the row is ``field_mapping``'s job -- a column for a flat file, a role path
  * into the array for an OpenAI messages file (see ``useMessagesBinding``).
  */
+export const toDatasetBindings = (
+  fieldMapping: EvaluationFormValues['fieldMapping'] | undefined
+): DatasetBindings => ({
+  messagesColumn: fieldMapping?.messages || null,
+  input: '{{input}}',
+  reference: fieldMapping?.reference ? '{{reference}}' : null,
+  context: fieldMapping?.context ? '{{context}}' : null,
+  inputPath: fieldMapping?.input || null,
+  referencePath: fieldMapping?.reference || null,
+});
+
 export function useDatasetBindings(): DatasetBindings {
   const { control } = useFormContext<EvaluationFormValues>();
   const fieldMapping = useWatch({ control, name: 'fieldMapping' });
 
-  return useMemo(
-    () => ({
-      messagesColumn: fieldMapping?.messages || null,
-      input: '{{input}}',
-      reference: fieldMapping?.reference ? '{{reference}}' : null,
-      context: fieldMapping?.context ? '{{context}}' : null,
-      inputPath: fieldMapping?.input || null,
-      referencePath: fieldMapping?.reference || null,
-    }),
-    [fieldMapping]
-  );
+  return useMemo(() => toDatasetBindings(fieldMapping), [fieldMapping]);
 }

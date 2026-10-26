@@ -77,7 +77,7 @@ describe('buildAgentTarget', () => {
 
 describe('buildDatasetAgentTarget', () => {
   it('renders the row prompt into the chat message', () => {
-    const target = buildDatasetAgentTarget('ws-a', 'support-bot');
+    const target = buildDatasetAgentTarget('ws-a', 'support-bot', '{{ item.question }}');
     expect(target.format).toBe('generic');
     expect(target.response_path).toBe('$.choices[0].message.content');
     expect(target.body).toEqual({
@@ -86,6 +86,22 @@ describe('buildDatasetAgentTarget', () => {
       stream: false,
     });
     expect(target.url).toContain('/agents/support-bot/-/v1/chat/completions');
+  });
+
+  it('passes a chat-messages prompt template through whole', () => {
+    const target = buildDatasetAgentTarget('ws-a', 'support-bot', {
+      messages: [{ role: 'user', content: '{{input}}' }],
+    });
+    expect(target.body).toEqual({
+      model: 'support-bot',
+      messages: '{{ messages }}',
+      stream: false,
+    });
+  });
+
+  it('keeps the prompt message for a dict template that renders to a prompt', () => {
+    const target = buildDatasetAgentTarget('ws-a', 'support-bot', { prompt: '{{input}}' });
+    expect(target.body.messages).toEqual([{ role: 'user', content: '{{ prompt }}' }]);
   });
 });
 

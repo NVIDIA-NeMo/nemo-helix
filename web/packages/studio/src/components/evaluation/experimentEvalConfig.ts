@@ -85,6 +85,7 @@ export const createRunEvaluation = async (
     name: explicitName,
     nameStem,
     filesetName,
+    datasetName = filesetName,
     parentEvaluationId,
     signal,
   }: {
@@ -92,6 +93,8 @@ export const createRunEvaluation = async (
     name?: string;
     nameStem: string;
     filesetName: string;
+    /** The fileset the dataset is read from, when it is not the config's own fileset. */
+    datasetName?: string;
     parentEvaluationId?: string;
     signal?: AbortSignal;
   }
@@ -102,7 +105,7 @@ export const createRunEvaluation = async (
     {
       name,
       experiment_ids: experimentIds,
-      dataset_name: filesetName,
+      dataset_name: datasetName,
       metadata: { [EVAL_CONFIG_FILESET_KEY]: filesetName },
       ...(parentEvaluationId ? { parent_evaluation_id: parentEvaluationId } : {}),
     },

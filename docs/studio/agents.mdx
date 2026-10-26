@@ -65,7 +65,15 @@ Select **Run Evaluation** in the page header to open the **Run Agent Evaluation*
 
 1. **Begin**: Choose **Re-run an existing evaluation** or **Create a new experiment**. Re-running reuses the eval config from a previous run, adds the new run to that run's experiment, and skips directly to **Run Evaluation**.
 2. **Create experiment**: Enter a **Name** for the new experiment and, optionally, its description and default sort order.
-3. **Run Evaluation**: Name the run and set **Parallel requests**. When re-running, select the evaluation to base the run on and enter a **New Evaluation Name**. When creating an experiment, enter an **Evaluation Name** and choose the evaluation dataset and evaluator config. Upload the dataset or choose it from a fileset; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern. Upload the evaluator config as a JSON or YAML file, or choose one from a fileset.
+3. **Configuration**: Select a dataset file from a fileset or upload one; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files. When the selected Parquet file shares its folder with other Parquet files, **Use all N Parquet files** reads them as one dataset through a `<folder>/*.parquet` pattern. Then choose how to provide the eval config:
+   - **Build with form**: Map the dataset fields for **Input** and **Reference**. Optionally edit the **Agent Prompt** to combine several fields.
+   - **Use existing config**: Upload a JSON or YAML eval config or choose one from a fileset. Model evaluation configs work too. The wizard blocks a config that reads fields the dataset doesn't have.
+
+   Set **Parallel requests** on this step.
+4. **Metrics**: With **Build with form**, select the metrics and, for LLM-as-a-Judge, the judge model, prompt, and scores. With an existing config, review its metrics and optionally override its judge models. Either way, the run targets this agent.
+5. **Run Evaluation**: Enter an **Evaluation Name**. When re-running, select the evaluation to base the run on, enter a **New Evaluation Name**, and set **Parallel requests**.
+
+The run saves its eval config as `eval-config.json` (or `.yaml`) in the `<experiment>-data` fileset, where **Use existing config** can find it later.
 
 The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
 

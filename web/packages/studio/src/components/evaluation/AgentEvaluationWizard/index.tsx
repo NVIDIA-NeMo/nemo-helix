@@ -3,6 +3,8 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { isConflictError } from '@nemo/common/src/api/common/utils';
+import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
+import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
@@ -22,6 +24,7 @@ import {
   filesDeleteFileset,
   filesDownloadFile,
   filesUploadFile,
+  useFilesListFilesetFiles,
 } from '@nemo/sdk/generated/platform/files';
 import {
   Anchor,
@@ -39,17 +42,18 @@ import {
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
-  DATASET_FILE_ACCEPT,
+  buildAgentEvaluationSpec,
+  configFitIssues,
+} from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
+import {
+  DATASET_FILE_TYPES,
   EVAL_CONFIG_FILE_ACCEPT,
 } from '@studio/components/evaluation/AgentEvaluationWizard/consts';
 import { EvaluationSourceSelect } from '@studio/components/evaluation/AgentEvaluationWizard/EvaluationSourceSelect';
 import { FilesetConfigPicker } from '@studio/components/evaluation/AgentEvaluationWizard/FilesetConfigPicker';
-import { FilesetDatasetPicker } from '@studio/components/evaluation/AgentEvaluationWizard/FilesetDatasetPicker';
-import {
-  type InspectedDataset,
-  inspectDatasetFiles,
-  type StoredDatasetFile,
-} from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
+import { inspectDatasetFile } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
+import { parquetBatchGroups } from '@studio/components/evaluation/AgentEvaluationWizard/parquetBatchGroups';
+import { PromptTemplateSection } from '@studio/components/evaluation/AgentEvaluationWizard/PromptTemplateSection';
 import { useEvaluationSources } from '@studio/components/evaluation/AgentEvaluationWizard/useEvaluationSources';
 import {
   type EvaluationMode,
@@ -70,6 +74,22 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
+import { DatasetPanel } from '@studio/components/evaluation/ModelEvaluationWizard/DatasetPanel';
+import {
+  classifyJudgePromptVariables,
+  hasMalformedBraces,
+} from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
+import { MetricPanel } from '@studio/components/evaluation/ModelEvaluationWizard/MetricPanel';
+import {
+  composeJudgeUserPrompt,
+  datasetConfigShape,
+  EMPTY_FIELD_MAPPING,
+  EVALUATION_FORM_DEFAULTS,
+  refineDatasetConfig,
+  toFieldMapping,
+} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import { toDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
+import { useDatasetPreview } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
 import {
   entityNameField,
   submitErrorMessage,
@@ -103,7 +123,7 @@ import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FormProvider,
   type SubmitErrorHandler,
@@ -160,18 +180,18 @@ const FILE_SOURCE_ITEMS = [
   { value: FILE_SOURCE_FILESET, children: 'Choose from a fileset' },
 ];
 
+const CONFIG_KIND_FORM = 'form';
+const CONFIG_KIND_EXISTING = 'existing';
+
+const CONFIG_KIND_ITEMS = [
+  { value: CONFIG_KIND_FORM, children: 'Build with form' },
+  { value: CONFIG_KIND_EXISTING, children: 'Use existing config' },
+];
+
 const MAX_PARALLELISM = 16;
 
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
-
-/** Why the step's primary action is disabled. A reason already shown under its field is not
- *  repeated beside the action. */
-type StepBlocker = { kind: 'field' } | { kind: 'hint'; hint: string };
-
-const SHOWN_ON_FIELD: StepBlocker = { kind: 'field' };
-
-const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
 
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
@@ -186,9 +206,13 @@ const submitEvaluationBaseSchema = z.object({
   evaluationRecordName: entityNameField(),
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
-  datasetFileset: z.string(),
-  datasetFile: z.string(),
-  datasetBatchGlob: z.string(),
+  /** Read every Parquet file beside the picked one as one dataset. */
+  useAllShards: z.boolean(),
+  /** Whether the eval config is built here or brought as a file. */
+  configKind: z.enum([CONFIG_KIND_FORM, CONFIG_KIND_EXISTING]),
+  /** The edited user message sent to the agent; ``null`` while it follows the Input mapping. */
+  promptTemplate: z.string().nullable(),
+  ...datasetConfigShape,
   configFileset: z.string(),
   configFile: z.string(),
   parallelism: z.coerce
@@ -221,6 +245,25 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
       if (nameError) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: nameError, path: ['newName'] });
       }
+      if (data.configKind === CONFIG_KIND_FORM) {
+        refineDatasetConfig(data, ctx);
+        if (
+          data.promptTemplate !== null &&
+          (!data.promptTemplate.trim() || hasMalformedBraces(data.promptTemplate))
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Write a prompt with matched {{ }} braces, or reset it to the Input field.',
+            path: ['promptTemplate'],
+          });
+        }
+      } else if (!data.dataset) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Select an input file.',
+          path: ['dataset'],
+        });
+      }
     }
     if (data.mode === MODE_EXPERIMENT && !data.evaluationName) {
       ctx.addIssue({
@@ -250,9 +293,12 @@ const makeDefaultValues = (
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
-  datasetFileset: '',
-  datasetFile: '',
-  datasetBatchGlob: '',
+  useAllShards: false,
+  configKind: CONFIG_KIND_FORM,
+  promptTemplate: null,
+  dataset: null,
+  fieldMapping: EMPTY_FIELD_MAPPING,
+  body: EVALUATION_FORM_DEFAULTS.body,
   configFileset: '',
   configFile: '',
   parallelism: DEFAULT_PARALLELISM,
@@ -275,6 +321,14 @@ interface ConfigPick extends FilePick {
 
 const configFormatForFile = (name: string): EvalConfigFormat =>
   /\.ya?ml$/i.test(name) ? 'yaml' : 'json';
+
+const isConcreteModel = (model: unknown): model is { url: string; name: string } =>
+  typeof model === 'object' &&
+  model !== null &&
+  'url' in model &&
+  typeof model.url === 'string' &&
+  'name' in model &&
+  typeof model.name === 'string';
 
 const readConfigPick = async (file: File): Promise<ConfigPick> => {
   try {
@@ -338,40 +392,36 @@ const discardSeeded = async (
   );
 };
 
-/** The two files uploaded on the "new experiment" path, already validated. */
-interface UploadedEvalInputs {
-  /** Copied into the run's fileset; empty when the dataset is read in place. */
-  datasetFiles: StoredDatasetFile[];
-  /** Where the eval config reads the dataset within the run's fileset. */
-  datasetPath: string;
-  /** Read the dataset in place from this ref instead of from the run's fileset. */
-  datasetRef?: string;
+/** The eval config of the "new experiment" path, built or picked, and the dataset it reads. */
+interface EvalInputs {
   spec: DatasetEvalSpec;
   /** Serialization the config was uploaded in; the stored file keeps it. */
   configFormat: EvalConfigFormat;
+  /** The dataset, read in place: a file, or a glob over Parquet shards. */
+  datasetRef: string;
 }
 
 /** Resolves the persisted yardstick spec for this submission. On the "new experiment" path it
- *  takes the uploaded config, bakes in the picked judge and a ref to the dataset that is
- *  about to be uploaded beside it, and seeds both into a new fileset; on the re-run path it
- *  reads the saved spec back verbatim (no re-bake, no judge re-pick). */
+ *  takes the built or picked config, bakes in the picked judge and the dataset ref, and seeds it
+ *  into a new fileset; on the re-run path it reads the saved spec back verbatim (no re-bake, no
+ *  judge re-pick). */
 const loadPersistedSpec = async (
   workspace: string,
   formData: SubmitEvaluationFormData,
   configFileset: string | null,
-  uploads: UploadedEvalInputs | null
+  inputs: EvalInputs | null
 ): Promise<EvalSpec> => {
   if (formData.mode === MODE_DEFAULT) {
-    if (!uploads) throw new Error('Upload a dataset and an eval config before submitting');
+    if (!inputs) throw new Error('Pick a dataset and an eval config before submitting');
     const signal = new AbortController().signal;
     const name = filesetNameForExperiment(formData.newName);
     const judgeModel = formData.judgeModel || null;
     const spec: DatasetEvalSpec = {
-      ...uploads.spec,
-      dataset: uploads.datasetRef ?? `${workspace}/${name}#${uploads.datasetPath}`,
+      ...inputs.spec,
+      dataset: inputs.datasetRef,
       metrics: judgeModel
-        ? uploads.spec.metrics.map((m) => injectJudgeModel(m, judgeModel))
-        : uploads.spec.metrics,
+        ? inputs.spec.metrics.map((m) => injectJudgeModel(m, judgeModel))
+        : inputs.spec.metrics,
     };
 
     try {
@@ -385,17 +435,12 @@ const loadPersistedSpec = async (
       throw err;
     }
     try {
-      await Promise.all(
-        uploads.datasetFiles.map(({ name: path, file }) =>
-          filesUploadFile(workspace, name, path, file, signal)
-        )
-      );
       await filesUploadFile(
         workspace,
         name,
-        evalConfigFilename(uploads.configFormat),
-        new Blob([serializeEvalConfig(spec, uploads.configFormat)], {
-          type: uploads.configFormat === 'yaml' ? 'application/yaml' : 'application/json',
+        evalConfigFilename(inputs.configFormat),
+        new Blob([serializeEvalConfig(spec, inputs.configFormat)], {
+          type: inputs.configFormat === 'yaml' ? 'application/yaml' : 'application/json',
         }),
         signal
       );
@@ -434,14 +479,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // one. Back still walks all the way out, so the choice stays reviewable rather than assumed.
   const [step, setStep] = useState<WizardStep>(sourceEvaluation ? 'evaluation' : 'start');
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [datasetPick, setDatasetPick] = useState<InspectedDataset | null>(null);
-  const [datasetSource, setDatasetSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
   const [configPick, setConfigPick] = useState<ConfigPick | null>(null);
   const [configSource, setConfigSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
 
   // Bumped whenever a pick is replaced, removed, or reset, so an async validation that is
   // still running when that happens knows to drop its result instead of committing it.
-  const datasetToken = useRef(0);
   const configToken = useRef(0);
 
   const methods = useForm<SubmitEvaluationFormData>({
@@ -496,33 +538,69 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const evaluationFileset = selectedEvaluation ? evaluationFilesetName(selectedEvaluation) : null;
   const evaluationFieldError = errors.evaluationName?.message ?? evaluationConfigIssue ?? undefined;
 
-  const datasetFileset = useWatch({ control, name: 'datasetFileset' });
-  const datasetFilePath = useWatch({ control, name: 'datasetFile' });
-  const datasetBatchGlob = useWatch({ control, name: 'datasetBatchGlob' });
-  const isFilesetSource = datasetSource === FILE_SOURCE_FILESET;
-  // Downloaded raw rather than through useDatasetFileContent, which hands Parquet back as JSONL
-  // text; the run stores the file as-is so the evaluator reads it with its own loader.
-  const filesetFile = useFilesetFile({
-    workspace,
-    fileset: datasetFileset,
-    path: datasetFilePath,
-    enabled: isFilesetSource,
+  const configKind = useWatch({ control, name: 'configKind' });
+  const isFormConfig = configKind === CONFIG_KIND_FORM;
+  const [dataset, fieldMapping, promptTemplate, useAllShards, judgePrompt, judgeSelected] =
+    useWatch({
+      control,
+      name: [
+        'dataset',
+        'fieldMapping',
+        'promptTemplate',
+        'useAllShards',
+        'body.judgePrompt',
+        'body.metrics.llm-judge',
+      ],
+    });
+  const datasetLocation = dataset ? parseFilesetLocation(dataset) : null;
+  // Reading the sibling shards is opted into per file: another pick may share a folder with
+  // files that are not part of it, such as a test split beside a train split.
+  useEffect(() => setValue('useAllShards', false), [dataset, setValue]);
+  const preview = useDatasetPreview(dataset ?? null);
+  const columns = useMemo(
+    () => preview.keyOptions.map((option) => option.value),
+    [preview.keyOptions]
+  );
+  // The preview reads only what it needs to show a row, so the whole file is read here to hold it
+  // to the evaluator's loader before the run is created.
+  const datasetFile = useFilesetFile({
+    workspace: datasetLocation?.workspace ?? workspace,
+    fileset: datasetLocation?.name ?? '',
+    path: datasetLocation?.objectPath ?? '',
+    enabled: !!datasetLocation,
   });
-  const downloadedFile = filesetFile.data;
-  const filesetInspection = useQuery({
-    queryKey: [
-      'evaluation-dataset-pick',
-      workspace,
-      datasetFileset,
-      datasetFilePath,
-      filesetFile.dataUpdatedAt,
-    ],
-    queryFn: downloadedFile ? () => inspectDatasetFiles([downloadedFile]) : skipToken,
+  const downloadedDataset = datasetFile.data;
+  const datasetInspection = useQuery({
+    queryKey: ['evaluation-dataset-pick', dataset, datasetFile.dataUpdatedAt],
+    queryFn: downloadedDataset ? () => inspectDatasetFile(downloadedDataset) : skipToken,
     gcTime: 0,
   });
-  const isLoadingFilesetFile = filesetFile.isFetching || filesetInspection.isFetching;
-  const filesetPick = isFilesetSource ? (filesetInspection.data ?? null) : null;
-  const activeDatasetPick = isFilesetSource ? filesetPick : datasetPick;
+  const isReadingDataset =
+    preview.isLoading || datasetFile.isFetching || datasetInspection.isFetching;
+  const datasetError =
+    datasetInspection.data?.error ?? datasetFile.error?.message ?? preview.error ?? undefined;
+
+  // Parquet shards beside the picked file, read together through one glob when the user keeps
+  // the box ticked.
+  const filesetFiles = useFilesListFilesetFiles(
+    datasetLocation?.workspace ?? '',
+    datasetLocation?.name ?? '',
+    undefined,
+    { query: { enabled: !!datasetLocation } }
+  );
+  const pickedDir = datasetLocation?.objectPath.slice(
+    0,
+    datasetLocation.objectPath.lastIndexOf('/') + 1
+  );
+  const shards = datasetLocation?.objectPath.endsWith('.parquet')
+    ? parquetBatchGroups((filesetFiles.data?.data ?? []).map((file) => file.path)).find(
+        (group) => group.dir === pickedDir
+      )
+    : undefined;
+  const datasetRef =
+    datasetLocation && shards && useAllShards
+      ? `${datasetLocation.workspace}/${datasetLocation.name}#${shards.glob}`
+      : dataset;
 
   const configFileset = useWatch({ control, name: 'configFileset' });
   const configFilePath = useWatch({ control, name: 'configFile' });
@@ -548,20 +626,32 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const isLoadingFilesetConfig = configFilesetFile.isFetching || filesetConfigRead.isFetching;
   const activeConfigPick = isConfigFromFileset ? (filesetConfigRead.data ?? null) : configPick;
 
-  const uploads: UploadedEvalInputs | null =
-    activeDatasetPick?.storedName &&
-    !activeDatasetPick.error &&
-    activeConfigPick?.spec &&
-    !activeConfigPick.error
-      ? {
-          ...(isFilesetSource && datasetBatchGlob
-            ? { datasetFiles: [], datasetRef: `${workspace}/${datasetFileset}#${datasetBatchGlob}` }
-            : { datasetFiles: activeDatasetPick.stored }),
-          datasetPath: activeDatasetPick.storedName,
-          spec: activeConfigPick.spec,
-          configFormat: activeConfigPick.format ?? 'json',
-        }
-      : null;
+  const pickedSpec = activeConfigPick?.error ? undefined : activeConfigPick?.spec;
+
+  // Checked against the row the preview read, so nothing is reported before the columns are known.
+  const configIssues =
+    !isFormConfig && pickedSpec && preview.row ? configFitIssues(pickedSpec, columns) : [];
+  const promptIssues =
+    isFormConfig && promptTemplate && preview.row
+      ? configFitIssues(
+          {
+            dataset: '',
+            metrics: [],
+            prompt_template: promptTemplate,
+            field_mapping: toFieldMapping(fieldMapping) ?? null,
+          },
+          columns
+        )
+      : [];
+  const judgePromptReport = classifyJudgePromptVariables(
+    judgePrompt ?? composeJudgeUserPrompt(toDatasetBindings(fieldMapping)),
+    columns,
+    fieldMapping
+  );
+  const judgePromptInvalid =
+    isFormConfig &&
+    judgeSelected &&
+    (judgePromptReport.invalid.length > 0 || judgePromptReport.malformed);
 
   const rawExperimentName = useWatch({ control, name: 'newName' });
   const rawRecordName = useWatch({ control, name: 'evaluationRecordName' });
@@ -608,10 +698,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     { query: { enabled: !!debouncedRecordName } }
   );
 
-  const datasetError =
-    activeDatasetPick?.error ??
-    (isFilesetSource ? filesetFile.error?.message : undefined) ??
-    (submitAttempted && !activeDatasetPick && !isLoadingFilesetFile ? 'Add a dataset' : undefined);
   const configError =
     activeConfigPick?.error ??
     (isConfigFromFileset ? configFilesetFile.error?.message : undefined) ??
@@ -644,6 +730,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       : 'Names this run alongside the one it re-runs — say what changed, e.g. a new temperature.',
   });
 
+  // Only a conflict blocks here. The schema's own errors already stop handleSubmit; a conflict
+  // lives outside formState, so without this the request would fire and come back a 409.
+  const hasNameConflict =
+    recordNameStatus === 'conflict' || (isCreateMode && experimentNameStatus === 'conflict');
+
   // Mirrors injectJudgeModel's own guard, so the picker is shown exactly when a metric would
   // have a model written into it — not just for the llm-judge type. Every match is collected,
   // not just the first: the override rewrites all of them, so all of them must be checked.
@@ -652,7 +743,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       (metric) => metric.metric_type === 'llm-judge' || 'model' in metric.payload.metric
     ) ?? [];
 
-  const isLlmJudge = mode === MODE_DEFAULT && judgeMetrics.length > 0;
+  const isLlmJudge = mode === MODE_DEFAULT && !isFormConfig && judgeMetrics.length > 0;
 
   // A different query from the one behind the dropdown (lazy, paginated for search); this is the
   // only complete workspace list, so it decides what counts as valid.
@@ -664,9 +755,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       .filter((urn): urn is NonNullable<typeof urn> => urn !== undefined) ?? []
   );
 
-  // Nothing to validate, but it still cannot run — so it requires the override just the same.
+  // A ref string is checked against the workspace below, and a concrete `{url, name}` Model (what
+  // the model wizard writes) runs as-is. Anything else cannot run, so it requires the override.
   const hasModellessJudge =
-    isLlmJudge && judgeMetrics.some((metric) => typeof metric.payload.metric.model !== 'string');
+    isLlmJudge &&
+    judgeMetrics.some((metric) => {
+      const model = metric.payload.metric.model;
+      return typeof model !== 'string' && !isConcreteModel(model);
+    });
 
   // Full `workspace/name` ModelRefs: an unqualified bare name is unreachable to the evaluator's
   // resolver. Empty while loading, or every model would read as unusable.
@@ -691,32 +787,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const judgeRequired = isLlmJudge && (invalidModelRefs.length > 0 || hasModellessJudge);
   judgeRequiredRef.current = judgeRequired;
 
-  const clearDatasetPick = () => {
-    datasetToken.current += 1;
-    setDatasetPick(null);
-  };
-
   const clearConfigPick = () => {
     configToken.current += 1;
     setConfigPick(null);
   };
 
-  // Both handlers clear first: validation is async, and leaving the previous pick in place
-  // would keep the submit gate open against a file the user has already replaced. Each also
-  // drops its own result if the pick it belongs to is no longer current — a slow read of a
-  // replaced file would otherwise land after a faster one and submit a file the card no
-  // longer shows. The tokens are per input: one shared counter would let a config pick
-  // cancel an in-flight dataset read, stranding the form with no pick and no error.
-  // Removing a dataset file calls onValueChange with the files left, so this handles removal too.
-  const handleDatasetPicked = async (items: readonly { file: File }[]) => {
-    clearDatasetPick();
-    if (items.length === 0) return;
-    const token = datasetToken.current;
-    const inspected = await inspectDatasetFiles(items.map(({ file }) => file));
-    if (token !== datasetToken.current) return;
-    setDatasetPick(inspected);
-  };
-
+  // Clears first: validation is async, and leaving the previous pick in place would keep the
+  // submit gate open against a file the user has already replaced. It also drops its result if
+  // the pick is no longer current — a slow read of a replaced file would otherwise land after a
+  // faster one and submit a file the card no longer shows.
   // A fresh config also means a fresh judge: the preselect effect above bails once judgeModel
   // is set, so leaving it would keep the previous file's judge.
   const handleConfigPicked = async (item?: { file: File }) => {
@@ -727,6 +806,13 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     const pick = await readConfigPick(item.file);
     if (token !== configToken.current) return;
     setConfigPick(pick);
+  };
+
+  // The override belongs to a picked config; a built one chose its judge on the Metrics step.
+  const handleConfigKindChanged = (value: string) => {
+    setValue('judgeModel', '');
+    clearErrors();
+    setValue('configKind', value as typeof CONFIG_KIND_FORM | typeof CONFIG_KIND_EXISTING);
   };
 
   const handleConfigSourceChanged = (value: string) => {
@@ -743,7 +829,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     isPending,
   } = useMutation({
     mutationFn: async (formData: SubmitEvaluationFormData) => {
-      const spec = await loadPersistedSpec(workspace, formData, evaluationFileset, uploads);
+      const configInputs =
+        formData.configKind === CONFIG_KIND_FORM
+          ? {
+              spec: buildAgentEvaluationSpec(formData, workspace, formData.promptTemplate),
+              configFormat: 'json' as const,
+            }
+          : pickedSpec && { spec: pickedSpec, configFormat: activeConfigPick?.format ?? 'json' };
+      const inputs = configInputs && datasetRef ? { ...configInputs, datasetRef } : null;
+      const spec = await loadPersistedSpec(workspace, formData, evaluationFileset, inputs);
 
       const isNew = formData.mode === MODE_DEFAULT;
       const filesetName = isNew
@@ -779,6 +873,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           name: formData.evaluationRecordName,
           nameStem,
           filesetName,
+          datasetName: isNew ? datasetLocation?.name : undefined,
           parentEvaluationId,
         }).catch((err: unknown) => {
           if (isConflictError(err)) {
@@ -825,76 +920,52 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // What the current step still needs before Next means anything. Kept separate from the zod
   // schema: the schema judges the whole submission, and a step must only answer for its own
   // fields — otherwise step one would refuse to advance over a field two steps away.
-  const stepBlocker = (): StepBlocker | undefined => {
-    if (step === 'start') {
-      return selectedAgent ? undefined : blockedWith('Pick an agent to evaluate.');
-    }
+  const stepBlocker = (): string | undefined => {
+    if (step === 'start') return selectedAgent ? undefined : 'Pick an agent to evaluate.';
     if (step === 'experiment') {
-      if (!experimentPreview) {
-        return blockedWith('Name the experiment to continue.');
-      }
-      if (experimentNameStatus === 'checking' || experimentNameStatus === 'conflict') {
-        return SHOWN_ON_FIELD;
-      }
-      return errors.newName ? SHOWN_ON_FIELD : undefined;
+      if (!experimentPreview) return 'Name the experiment to continue.';
+      if (experimentNameStatus === 'checking') return 'Checking the name...';
+      if (experimentNameStatus === 'conflict')
+        return `An experiment named ${experimentPreview} already exists.`;
+      return errors.newName?.message;
     }
     if (step === 'configuration') {
-      if (isLoadingFilesetFile || isLoadingFilesetConfig) {
-        return blockedWith('Reading the selected file...');
-      }
-      if (isLlmJudge && isJudgeModelsLoading) {
-        return blockedWith('Loading judge models...');
-      }
+      if (isReadingDataset || isLoadingFilesetConfig) return 'Reading the selected file...';
+      if (datasetError) return datasetError;
+      if (configIssues.length > 0)
+        return 'This eval config reads fields the dataset does not have.';
+      if (promptIssues.length > 0)
+        return 'The agent prompt reads fields the dataset does not have.';
     }
-    // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
-    // click. Schema errors stay out: those only show once a submit is tried.
-    if (step === 'evaluation') {
-      if (mode === MODE_EXPERIMENT) {
-        if (hasNoEvaluations) {
-          return SHOWN_ON_FIELD;
-        }
-        // Nothing can be picked, and a handed-in source cannot be resolved or checked, until the
-        // list arrives.
-        if (sources.isLoading) {
-          return blockedWith('Loading evaluations...');
-        }
-        if (evaluationName && !selectedEvaluation) {
-          return blockedWith(`Evaluation ${evaluationName} no longer exists. Pick another.`);
-        }
-        if (isValidatingEvaluation) {
-          return blockedWith('Checking the saved eval config...');
-        }
-        if (evaluationConfigIssue) {
-          return SHOWN_ON_FIELD;
-        }
-      }
-      // invalidModelRefs is empty while the list is in flight, so submitting inside that window
-      // would skip the judge-model check entirely.
-      if (mode === MODE_DEFAULT && isLlmJudge && isJudgeModelsLoading) {
-        return blockedWith('Loading judge models...');
-      }
-      if (recordNameStatus === 'checking' || recordNameStatus === 'conflict') {
-        return SHOWN_ON_FIELD;
-      }
-      // The experiment's name field is a step back, so its conflict is spelled out here.
-      if (isCreateMode && experimentNameStatus === 'conflict') {
-        return blockedWith(`An experiment named ${experimentPreview} already exists.`);
-      }
+    if (step === 'metrics') {
+      if (isLlmJudge && isJudgeModelsLoading) return 'Loading judge models...';
+      if (judgePromptInvalid) return 'Fix the judge prompt to continue.';
+    }
+    // The re-run path picks its source on this step too, so the source's own problems are
+    // reported here rather than swallowed by a Submit that quietly does nothing.
+    if (step === 'evaluation' && mode === MODE_EXPERIMENT) {
+      if (hasNoEvaluations) return NO_EVALUATIONS_MESSAGE;
+      if (isValidatingEvaluation) return 'Checking the saved eval config...';
+      return evaluationConfigIssue ?? undefined;
     }
     return undefined;
   };
   const blocker = stepBlocker();
 
   const goNext = async () => {
-    if (blocker) {
-      return;
-    }
+    if (blocker) return;
     if (step === 'configuration') {
       setSubmitAttempted(true);
-      const valid = await trigger(['judgeModel', 'parallelism']);
-      if (!valid || !uploads) {
-        return;
-      }
+      const valid = await trigger(
+        isFormConfig
+          ? ['parallelism', 'dataset', 'fieldMapping', 'promptTemplate']
+          : ['parallelism', 'dataset']
+      );
+      if (!valid || (!isFormConfig && !pickedSpec)) return;
+    }
+    if (step === 'metrics') {
+      const valid = await trigger(isFormConfig ? ['body'] : ['judgeModel']);
+      if (!valid || (isLlmJudge && isJudgeModelsLoading)) return;
     }
     setStep(nextStep(steps, step));
   };
@@ -905,15 +976,23 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   };
 
   const onSubmit: SubmitHandler<SubmitEvaluationFormData> = async (formData) => {
-    // EvalWizard already drops clicks and Enter while blocked; this keeps a submit from ever
-    // skipping a gate.
-    if (blocker) {
-      return;
-    }
-    if (mode === MODE_DEFAULT && !uploads) {
+    // The resolver has passed; these are the gates held outside form state.
+    // isJudgeModelsLoading blocks too: invalidModelRefs is empty while the list is in flight, so
+    // submitting inside that window would skip the check entirely.
+    if (hasNameConflict) return;
+    if (
+      mode === MODE_DEFAULT &&
+      ((!isFormConfig && !pickedSpec) || configIssues.length > 0 || promptIssues.length > 0)
+    ) {
       setStep('configuration');
       return;
     }
+    if (mode === MODE_DEFAULT && isLlmJudge && isJudgeModelsLoading) return;
+    if (
+      mode === MODE_EXPERIMENT &&
+      (isValidatingEvaluation || !selectedEvaluation || evaluationConfigIssue)
+    )
+      return;
     try {
       await submitEvaluation(formData);
     } catch {
@@ -922,8 +1001,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   };
 
   const onInvalid: SubmitErrorHandler<SubmitEvaluationFormData> = (invalid) => {
-    if (steps.includes('configuration') && ('judgeModel' in invalid || 'parallelism' in invalid)) {
+    const failed = (fields: string[]) => fields.some((field) => field in invalid);
+    if (
+      steps.includes('configuration') &&
+      failed(['parallelism', 'dataset', 'fieldMapping', 'promptTemplate'])
+    ) {
       setStep('configuration');
+    } else if (steps.includes('metrics') && failed(['body', 'judgeModel'])) {
+      setStep('metrics');
     }
   };
 
@@ -982,8 +1067,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
       continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
       continueLoading={isPending}
-      canContinue={!blocker}
-      blockedHint={blocker?.kind === 'hint' ? blocker.hint : undefined}
+      canContinue={onLastStep || !blocker}
       onContinue={handleContinue}
     >
       <FormProvider {...methods}>
@@ -1063,107 +1147,139 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
           {step === 'configuration' && (
             <>
-              <Text kind="label/bold/xl">Dataset File</Text>
-              <SegmentedControl
-                aria-label="Dataset source"
-                size="tiny"
-                className="w-full"
-                value={datasetSource}
-                onValueChange={(value) => {
-                  clearDatasetPick();
-                  setValue('datasetFileset', '');
-                  setValue('datasetFile', '');
-                  setValue('datasetBatchGlob', '');
-                  setDatasetSource(value as FileSource);
-                }}
-                items={FILE_SOURCE_ITEMS}
-              />
+              <DatasetPanel
+                acceptedFileTypes={DATASET_FILE_TYPES}
+                filesetPurpose={null}
+                allowMultipleUpload
+                showMapping={isFormConfig}
+              >
+                {shards ? (
+                  <ControlledCheckbox
+                    useControllerProps={{ control, name: 'useAllShards' }}
+                    slotLabel={`Use all ${shards.count} Parquet files in ${shards.dir || 'the fileset root'}`}
+                  />
+                ) : null}
 
-              {datasetSource === FILE_SOURCE_FILESET ? (
-                <FilesetDatasetPicker<SubmitEvaluationFormData>
-                  workspace={workspace}
-                  control={control}
-                  filesetName="datasetFileset"
-                  fileName="datasetFile"
-                  batchGlobName="datasetBatchGlob"
-                  disabled={isPending}
-                  loading={isLoadingFilesetFile}
-                  error={datasetError}
-                />
-              ) : (
-                <Upload
-                  attributes={{ UploadInputElement: { 'aria-label': 'Dataset file' } }}
-                  accept={DATASET_FILE_ACCEPT}
-                  multiple
-                  onValueChange={handleDatasetPicked}
-                  status={datasetError ? 'error' : undefined}
-                  renderInput={(slotInput) => (
-                    <FormField
-                      name="dataset"
-                      slotHelp="JSONL, a JSON array of objects, CSV, or Parquet. Select several Parquet files to combine them."
-                      slotError={datasetError}
-                      status={datasetError ? 'error' : undefined}
-                    >
-                      {datasetPick ? null : slotInput}
-                    </FormField>
-                  )}
-                />
-              )}
+                {dataset ? (
+                  <Stack gap="density-md">
+                    <Text kind="label/bold/xl">Eval Configuration</Text>
+                    <SegmentedControl
+                      aria-label="Eval configuration source"
+                      size="tiny"
+                      className="w-full"
+                      value={configKind}
+                      onValueChange={handleConfigKindChanged}
+                      items={CONFIG_KIND_ITEMS}
+                    />
+                  </Stack>
+                ) : null}
 
-              <Text kind="label/bold/xl">Eval Configuration File</Text>
-              <SegmentedControl
-                aria-label="Evaluator config source"
-                size="tiny"
-                className="w-full"
-                value={configSource}
-                onValueChange={handleConfigSourceChanged}
-                items={FILE_SOURCE_ITEMS}
-              />
+                {dataset && !isFormConfig ? (
+                  <Stack gap="density-md">
+                    <SegmentedControl
+                      aria-label="Evaluator config source"
+                      size="tiny"
+                      className="w-full"
+                      value={configSource}
+                      onValueChange={handleConfigSourceChanged}
+                      items={FILE_SOURCE_ITEMS}
+                    />
 
-              {isConfigFromFileset ? (
-                <FilesetConfigPicker<SubmitEvaluationFormData>
-                  workspace={workspace}
-                  control={control}
-                  filesetName="configFileset"
-                  fileName="configFile"
-                  onPick={() => setValue('judgeModel', '')}
-                  disabled={isPending}
-                  loading={isLoadingFilesetConfig}
-                  error={configError}
-                />
-              ) : (
-                <Upload
-                  attributes={{ UploadInputElement: { 'aria-label': 'Eval configuration file' } }}
-                  accept={EVAL_CONFIG_FILE_ACCEPT}
-                  onValueChange={handleConfigPicked}
-                  onFileRemove={clearConfigPick}
-                  status={configError ? 'error' : undefined}
-                  renderInput={(slotInput) => (
-                    <FormField
-                      name="evalConfig"
-                      slotHelp="Select a JSON or YAML config."
-                      slotError={configError}
-                      status={configError ? 'error' : undefined}
-                    >
-                      {configPick ? null : slotInput}
-                    </FormField>
-                  )}
-                />
-              )}
+                    {isConfigFromFileset ? (
+                      <FilesetConfigPicker<SubmitEvaluationFormData>
+                        workspace={workspace}
+                        control={control}
+                        filesetName="configFileset"
+                        fileName="configFile"
+                        onPick={() => setValue('judgeModel', '')}
+                        disabled={isPending}
+                        loading={isLoadingFilesetConfig}
+                        error={configError}
+                      />
+                    ) : (
+                      <Upload
+                        attributes={{
+                          UploadInputElement: { 'aria-label': 'Eval configuration file' },
+                        }}
+                        accept={EVAL_CONFIG_FILE_ACCEPT}
+                        onValueChange={handleConfigPicked}
+                        onFileRemove={clearConfigPick}
+                        status={configError ? 'error' : undefined}
+                        renderInput={(slotInput) => (
+                          <FormField
+                            name="evalConfig"
+                            slotHelp="Select a JSON or YAML config."
+                            slotError={configError}
+                            status={configError ? 'error' : undefined}
+                          >
+                            {configPick ? null : slotInput}
+                          </FormField>
+                        )}
+                      />
+                    )}
 
-              {isLlmJudge && (
-                <JudgeModelSelect<SubmitEvaluationFormData>
-                  formFieldName="judgeModel"
-                  slotLabel={
-                    judgeRequired ? 'Override All LLM Models' : 'Override All LLM Models (Optional)'
-                  }
-                  slotError={invalidModelsError}
-                />
-              )}
+                    {configIssues.map((issue) => (
+                      <Banner key={issue} kind="inline" status="error">
+                        {issue}
+                      </Banner>
+                    ))}
+                  </Stack>
+                ) : null}
+              </DatasetPanel>
+
+              {dataset && isFormConfig ? (
+                <PromptTemplateSection columns={columns} issues={promptIssues} />
+              ) : null}
 
               {parallelismField}
             </>
           )}
+
+          {step === 'metrics' &&
+            (isFormConfig ? (
+              <MetricPanel />
+            ) : (
+              <>
+                <Text kind="label/bold/xl">Metrics</Text>
+                <Text className="text-secondary" kind="body/regular/md">
+                  Scored as the eval config defines them, against agent{' '}
+                  <code>{bareName(selectedAgent)}</code>. Any target in the config is replaced by
+                  this agent.
+                </Text>
+                <Stack gap="density-sm">
+                  {pickedSpec?.metrics.map((metric, index) => {
+                    const model = metric.payload.metric.model;
+                    const judge =
+                      typeof model === 'string' ? model : isConcreteModel(model) ? model.name : '';
+                    const description = metric.metadata?.description;
+                    return (
+                      <Stack key={index} gap="density-xs">
+                        <Text kind="label/bold/md">
+                          {metric.metric_type}
+                          {judge ? ` · judge ${judge}` : ''}
+                        </Text>
+                        {typeof description === 'string' ? (
+                          <Text className="text-secondary" kind="body/regular/sm">
+                            {description}
+                          </Text>
+                        ) : null}
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+                {isLlmJudge && (
+                  <JudgeModelSelect<SubmitEvaluationFormData>
+                    formFieldName="judgeModel"
+                    slotLabel={
+                      judgeRequired
+                        ? 'Override All LLM Models'
+                        : 'Override All LLM Models (Optional)'
+                    }
+                    slotError={invalidModelsError}
+                  />
+                )}
+              </>
+            ))}
 
           {step === 'evaluation' && (
             <>
@@ -1200,6 +1316,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               />
               {mode === MODE_EXPERIMENT && parallelismField}
             </>
+          )}
+
+          {blocker && step !== 'start' && step !== 'experiment' && (
+            <Text className="text-secondary" kind="body/regular/sm">
+              {blocker}
+            </Text>
           )}
         </Stack>
       </FormProvider>

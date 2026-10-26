@@ -108,6 +108,7 @@ export const UploadModal: FC<UploadModalProps> = ({
   acceptableFileSize,
   invalidFileMode,
   allowNewDataset,
+  filesetPurpose,
   ...props
 }) => {
   const initialState = useMemo(
@@ -119,6 +120,7 @@ export const UploadModal: FC<UploadModalProps> = ({
       acceptableFileSize: acceptableFileSize ?? uploadModalInitialState.acceptableFileSize,
       invalidFileMode: invalidFileMode ?? uploadModalInitialState.invalidFileMode,
       allowNewDataset: allowNewDataset ?? uploadModalInitialState.allowNewDataset,
+      filesetPurpose,
     }),
     [
       allowMultipleFileSelection,
@@ -126,6 +128,7 @@ export const UploadModal: FC<UploadModalProps> = ({
       acceptableFileSize,
       invalidFileMode,
       allowNewDataset,
+      filesetPurpose,
     ]
   );
   return (

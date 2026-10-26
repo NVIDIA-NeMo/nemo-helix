@@ -5,7 +5,7 @@ import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form
 import {
   composeGenerationPrompt,
   composeJudgePromptTemplate,
-  type EvaluationFormValues,
+  type DatasetConfigValues,
   renderScoreGuidance,
   type SelectableMetric,
   selectedMetrics,
@@ -109,7 +109,7 @@ const OUTPUT_TEMPLATE = '{{sample.output_text}}';
 
 const buildMetricBundle = (
   metric: SelectableMetric,
-  values: EvaluationFormValues,
+  values: DatasetConfigValues,
   bindings: DatasetBindings,
   workspace: string
 ): InlineMetricBundle | null => {
@@ -206,7 +206,7 @@ const buildMetricBundle = (
 };
 
 export const buildMetricBundles = (
-  values: EvaluationFormValues,
+  values: DatasetConfigValues,
   bindings: DatasetBindings,
   workspace: string
 ): InlineMetricBundle[] =>
@@ -219,7 +219,7 @@ export const buildMetricBundles = (
  * chosen per run. This is what gets written to ``eval-config.json``.
  */
 export const buildEvaluationSpec = (
-  values: EvaluationFormValues,
+  values: DatasetConfigValues,
   bindings: DatasetBindings,
   workspace: string
 ): DatasetEvalSpec => ({

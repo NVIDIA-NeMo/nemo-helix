@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { parquetRead } from 'hyparquet';
+import { parquetMetadata, parquetRead } from 'hyparquet';
 import Papa from 'papaparse';
 
 import { FileFormatType } from '../types';
@@ -105,16 +105,7 @@ export async function getFirstRow(
 export async function getFileRowCount(file: File, format: FileFormatType): Promise<number> {
   try {
     if (format === 'parquet') {
-      let count = 0;
-      const buffer = await file.arrayBuffer();
-      await parquetRead({
-        file: buffer,
-        rowFormat: 'object',
-        onComplete: (rows) => {
-          count = rows.length;
-        },
-      });
-      return count;
+      return Number(parquetMetadata(await file.arrayBuffer()).num_rows);
     }
 
     const text = await file.text();
