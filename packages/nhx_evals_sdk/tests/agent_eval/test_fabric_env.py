@@ -146,6 +146,23 @@ def test_host_keeps_bare_bindings_and_returns_an_independent_config() -> None:
     assert config["models"]["default"] == _ROLE
 
 
+def test_host_forwards_process_tls_settings_without_overriding_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SSL_CERT_FILE", "/runtime/ca.pem")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/runtime/requests.pem")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", "/runtime/client.pem")
+    config = {"environment": {"env": {"SSL_CERT_FILE": "/agent/ca.pem", "MODE": "test"}}}
+
+    prepared = host_fabric_config(config, {}, _Source(), model=None)
+
+    assert prepared["environment"]["env"] == {
+        "NHX_CLIENT_SSL_CERT_FILE": "/runtime/client.pem",
+        "REQUESTS_CA_BUNDLE": "/runtime/requests.pem",
+        "SSL_CERT_FILE": "/agent/ca.pem",
+        "MODE": "test",
+    }
+    assert config == {"environment": {"env": {"SSL_CERT_FILE": "/agent/ca.pem", "MODE": "test"}}}
+
+
 @pytest.mark.parametrize("models", [{}, {"default": {"provider": "nvidia", "model": "m"}}])
 def test_unusable_prefixed_secret_has_conditional_model_and_tool_advice(models: dict[str, Any]) -> None:
     config = {"models": models}
