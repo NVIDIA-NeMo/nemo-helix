@@ -319,10 +319,11 @@ async def test_cancelling_async_upload_cancels_handler_and_body_read():
 
 def test_create_test_client_injects_provider_transport_for_typed_service_clients():
     """Test that DependencyProvider typed clients route through the in-process transport."""
-    with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
+    service = EntitiesService()
+    with create_test_client(lambda: service, client_type=ClientContext) as ctx:
         app = ctx.test_client.app
         assert isinstance(app, FastAPI)
-        provider = app.state.entities_service.dependency_provider
+        provider = service.dependency_provider
         service_client = provider.get_service_nemo_client("entities")
         assert service_client._http is ctx.async_client._http
 

@@ -108,9 +108,14 @@ def clean_clickhouse(clickhouse_client: ClickHouseSpanClient, run_async):
 
 
 @pytest.fixture
-def client(intake_config: IntakeConfig):
+def intake_service() -> IntakeService:
+    return IntakeService()
+
+
+@pytest.fixture
+def client(intake_config: IntakeConfig, intake_service: IntakeService):
     with create_test_client(
-        IntakeService,
+        lambda: intake_service,
         client_type=TestClient,
         service_configs={IntakeService: intake_config},
     ) as test_client:

@@ -18,10 +18,9 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Generator, cast
+from typing import Generator
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.common.entities import SYSTEM_WORKSPACE
 from nhx.core.auth.service import AuthService
@@ -102,13 +101,9 @@ def wait_for_default_configs(
     raise TimeoutError(f"Expected configs {expected} not all present after {timeout}s. Last had: {last_names}")
 
 
-async def _run_platform_seed_async(client: TestClient) -> None:
+async def _run_platform_seed_async(guardrails_service: GuardrailsService) -> None:
     """Run platform seed using the test app's dependency provider (no HelixSeedService)."""
-    app = cast(FastAPI, client.app)
-    guardrails_svc = getattr(app.state, "guardrails_service", None)
-    if guardrails_svc is None:
-        raise RuntimeError("guardrails_service not on app.state")
-    provider = guardrails_svc.dependency_provider
+    provider = guardrails_service.dependency_provider
     entity_client = provider.get_service_entity_client("platform-seed")
     client = provider.get_service_nemo_client("platform-seed")
     # Use the test config store while preserving the same enabled seed steps as startup.
@@ -118,11 +113,11 @@ async def _run_platform_seed_async(client: TestClient) -> None:
     await run_platform_seed(entity_client, client, config)
 
 
-def _run_platform_seed_for_test_client(client: TestClient) -> None:
+def _run_platform_seed_for_test_client(guardrails_service: GuardrailsService) -> None:
     """Synchronously run the platform seed task using the test client's in-memory app."""
 
     async def run_with_timeout() -> None:
-        await asyncio.wait_for(_run_platform_seed_async(client), timeout=30.0)
+        await asyncio.wait_for(_run_platform_seed_async(guardrails_service), timeout=30.0)
 
     asyncio.run(run_with_timeout())
 
@@ -138,9 +133,10 @@ def http_client() -> Generator[TestClient, None, None]:
     ~14s per setup. Tests use uuid-suffixed config names so they don't collide.
     """
     os.environ["CONFIG_STORE_PATH"] = str(_CONFIG_STORE_PATH)
+    guardrails_service = GuardrailsService()
     try:
         with create_test_client(
-            GuardrailsService,
+            lambda: guardrails_service,
             AuthService,
             SecretsService,
             FilesService,
@@ -151,7 +147,7 @@ def http_client() -> Generator[TestClient, None, None]:
             },
         ) as client:
             wait_for_service_ready(client)
-            _run_platform_seed_for_test_client(client)
+            _run_platform_seed_for_test_client(guardrails_service)
             wait_for_default_configs(client)
             yield client
     finally:

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.config import IntakeConfig
+from nhx.intake.dependencies import IntakeConfigDep
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
 from nhx.intake.spans.domain import TraceBatch
 from nhx.intake.spans.ingest.atif_domain import (
@@ -37,15 +37,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 router = APIRouter(dependencies=[Depends(require_workspace_access)])
 API_TAG = "Ingest"
 EntityClientDep = Annotated[EntityClient, Depends(get_entity_client)]
-
-
-def _atif_max_subagent_depth(request: Request) -> int:
-    """Read the configured ATIF subagent depth cap from the Intake service."""
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    cfg: IntakeConfig | None = getattr(service, "service_config", None) if service is not None else None
-    if cfg is None:
-        cfg = IntakeConfig()
-    return cfg.atif_max_subagent_depth
 
 
 def _evaluation_context_from_extra(extra: dict[str, Any] | None) -> EvaluationContext | None:
@@ -158,7 +149,7 @@ class AtifIngestRequest(BaseModel):
 async def ingest_atif(
     workspace: str,
     body: AtifIngestRequest,
-    request: Request,
+    config: IntakeConfigDep,
     service: SpansServiceDep,
     entity_client: EntityClientDep,
     denormalizer: DenormalizerDep,
@@ -170,7 +161,7 @@ async def ingest_atif(
     )
     ingested_at = utc_now()
     trajectory = body.to_trajectory()
-    max_subagent_depth = _atif_max_subagent_depth(request)
+    max_subagent_depth = config.atif_max_subagent_depth
     try:
         spans = trajectory_to_spans(
             workspace=workspace,

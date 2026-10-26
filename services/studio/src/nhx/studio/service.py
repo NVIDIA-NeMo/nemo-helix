@@ -16,7 +16,6 @@ from fastapi.responses import FileResponse, HTMLResponse
 from nemo_helix_plugin.authz import Permission
 from nhx.common.http_clients import shared_async_http_client
 from nhx.common.service import RouterConfig, Service
-from nhx.studio import assistant
 from nhx.studio.config import StudioConfig
 from nhx.studio.plugins import build_plugins_router, discover_plugins
 from nhx.studio.static_files import SPAStaticFiles, build_csp
@@ -118,6 +117,8 @@ class StudioService(Service[StudioConfig]):
         Studio exposes API routes for local-only UI integrations in addition to
         serving static files.
         """
+        from nhx.studio import assistant
+
         return [
             RouterConfig(
                 assistant.router,
@@ -142,6 +143,8 @@ class StudioService(Service[StudioConfig]):
 
     def _mount_assistant_mcp(self, app: FastAPI) -> None:
         """Mount the auth-bypassed MCP callback before the /studio static app."""
+        from nhx.studio import assistant
+
         assistant.mount_public_mcp_route(app)
 
     def _get_config(self) -> StudioConfig:

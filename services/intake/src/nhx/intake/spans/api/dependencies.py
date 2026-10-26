@@ -9,7 +9,8 @@ from fastapi import Depends, HTTPException, Request, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.service.dependencies import get_nemo_client
-from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
+from nhx.intake.dependencies import DenormalizerDep as DenormalizerDep
+from nhx.intake.dependencies import get_clickhouse_client
 from nhx.intake.repository.annotations import AnnotationsRepository
 from nhx.intake.repository.clickhouse.annotations import ClickHouseAnnotationsRepository
 from nhx.intake.repository.clickhouse.evaluator_results import ClickHouseEvaluatorResultsRepository
@@ -21,7 +22,7 @@ from nhx.intake.repository.evaluator_results import EvaluatorResultsRepository
 from nhx.intake.repository.session import SessionRepository
 from nhx.intake.repository.span import SpanRepository
 from nhx.intake.repository.trace import TraceRepository
-from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient, get_clickhouse_client
+from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient
 from nhx.intake.spans.service import IntakeSpansService
 
 
@@ -107,12 +108,3 @@ def get_spans_service(
 
 
 SpansServiceDep = Annotated[IntakeSpansService, Depends(get_spans_service)]
-
-
-def get_denormalizer(request: Request) -> EvaluationDenormalizer | None:
-    """Reach the service-owned denormalizer from the request (absent if startup didn't create one)."""
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    return getattr(service, "denormalizer", None) if service is not None else None
-
-
-DenormalizerDep = Annotated[EvaluationDenormalizer | None, Depends(get_denormalizer)]

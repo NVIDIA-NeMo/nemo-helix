@@ -5,40 +5,33 @@
 
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
+from nhx.intake.dependencies import DenormalizerDep as DenormalizerDep
+from nhx.intake.dependencies import IntakeServiceDep
 from nhx.intake.experiments.read_service import EvaluationReadService
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.evaluation_session import ClickHouseEvaluationSessionRepository
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor
 from nhx.intake.repository.evaluation_rollup import EvaluationRollupRepository
 from nhx.intake.repository.evaluation_session import EvaluationSessionRepository
-from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient
 
 EntityClientDep = Annotated[EntityClient, Depends(get_entity_client)]
 
 
-def _get_clickhouse_client(request: Request) -> ClickHouseSpanClient | None:
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    if service is None:
-        return None
-    return getattr(service, "clickhouse_client", None)
-
-
-def get_evaluation_rollup_repository(request: Request) -> EvaluationRollupRepository | None:
+def get_evaluation_rollup_repository(intake: IntakeServiceDep) -> EvaluationRollupRepository | None:
     # Rollups are enrichment only. Evaluation entity reads should continue when
     # ClickHouse is disabled or temporarily unavailable.
-    client = _get_clickhouse_client(request)
+    client = intake.clickhouse_client
     return ClickHouseEvaluationRollupRepository(ClickHouseExecutor(client)) if client is not None else None
 
 
 EvaluationRollupRepositoryDep = Annotated[EvaluationRollupRepository | None, Depends(get_evaluation_rollup_repository)]
 
 
-def get_evaluation_session_repository(request: Request) -> EvaluationSessionRepository | None:
-    client = _get_clickhouse_client(request)
+def get_evaluation_session_repository(intake: IntakeServiceDep) -> EvaluationSessionRepository | None:
+    client = intake.clickhouse_client
     return ClickHouseEvaluationSessionRepository(ClickHouseExecutor(client)) if client is not None else None
 
 
@@ -60,12 +53,3 @@ def get_evaluation_read_service(
 
 
 EvaluationReadServiceDep = Annotated[EvaluationReadService, Depends(get_evaluation_read_service)]
-
-
-def get_denormalizer(request: Request) -> EvaluationDenormalizer | None:
-    """Reach the service-owned denormalizer from the request (absent if startup didn't create one)."""
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    return getattr(service, "denormalizer", None) if service is not None else None
-
-
-DenormalizerDep = Annotated[EvaluationDenormalizer | None, Depends(get_denormalizer)]
