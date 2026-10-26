@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import socket
+from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
@@ -87,6 +89,36 @@ def test_rebases_all_gateway_models_without_mutating_input(workload: Mock) -> No
     assert config.model_dump() == before
     workload.assert_called_once()
     _assert_closed(proxy_url)
+
+
+def test_rebases_translated_fabric_config_without_mutating_input() -> None:
+    config = {
+        "harness": {"adapter_id": "nvidia.fabric.deepagents"},
+        "models": {
+            "default": {
+                "provider": "openai",
+                "model": "test",
+                "base_url": f"http://platform{GATEWAY_PATH}?version=1",
+            },
+            "legacy": {
+                "provider": "openai",
+                "model": "test",
+                "settings": {"base_url": f"http://platform{GATEWAY_PATH}"},
+            },
+            "direct": {"provider": "openai", "model": "test", "base_url": "https://provider.test/v1"},
+        },
+    }
+    before = copy.deepcopy(config)
+
+    assert gateway_proxy.routes_inference_through_gateway(config)
+    runtime = gateway_proxy.rewrite_gateway_models(config, "http://127.0.0.1:9019")
+
+    assert isinstance(runtime, Mapping)
+    assert runtime["models"]["default"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}?version=1"
+    assert runtime["models"]["legacy"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}"
+    assert "base_url" not in runtime["models"]["legacy"]["settings"]
+    assert runtime["models"]["direct"]["base_url"] == "https://provider.test/v1"
+    assert config == before
 
 
 @pytest.mark.parametrize("principal", [None, ""])

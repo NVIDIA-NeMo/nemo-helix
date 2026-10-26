@@ -18,15 +18,16 @@ in this process, where the agent subprocess cannot read it back out.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import socket
 import threading
 import time
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 from urllib.parse import urlsplit
 
 import uvicorn
@@ -44,15 +45,39 @@ _STARTUP_TIMEOUT_SECONDS = 10.0
 _SHUTDOWN_TIMEOUT_SECONDS = 5
 
 
-def _gateway_models(config: AgentConfig) -> Iterator[tuple[ModelConfig, str]]:
-    models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
+def _gateway_models(config: AgentConfig | Mapping[str, Any]) -> Iterator[tuple[ModelConfig | dict[str, Any], str]]:
+    if isinstance(config, AgentConfig):
+        models: list[ModelConfig | dict[str, Any]] = [
+            *config.models.values(),
+            *(h.model for h in config.harnesses.values() if h.model is not None),
+        ]
+    else:
+        model_entries = config.get("models")
+        harness_entries = config.get("harnesses")
+        models = (
+            [model for model in model_entries.values() if isinstance(model, dict)]
+            if isinstance(model_entries, Mapping)
+            else []
+        )
+        if isinstance(harness_entries, Mapping):
+            models.extend(
+                model
+                for harness in harness_entries.values()
+                if isinstance(harness, Mapping) and isinstance((model := harness.get("model")), dict)
+            )
     for model in models:
-        base_url = model.base_url or model.settings.get("base_url")
+        if isinstance(model, ModelConfig):
+            base_url = model.base_url or model.settings.get("base_url")
+        else:
+            base_url = model.get("base_url")
+            settings = model.get("settings")
+            if not base_url and isinstance(settings, Mapping):
+                base_url = settings.get("base_url")
         if isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/"):
             yield model, base_url
 
 
-def routes_inference_through_gateway(config: AgentConfig) -> bool:
+def routes_inference_through_gateway(config: AgentConfig | Mapping[str, Any]) -> bool:
     """Whether any of *config*'s models point at Inference Gateway.
 
     One of the two reasons to run a proxy; the caller ORs it with the other
@@ -61,7 +86,17 @@ def routes_inference_through_gateway(config: AgentConfig) -> bool:
     return any(_gateway_models(config))
 
 
-def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConfig:
+@overload
+def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConfig: ...
+
+
+@overload
+def rewrite_gateway_models(config: Mapping[str, Any], origin: str | None) -> Mapping[str, Any]: ...
+
+
+def rewrite_gateway_models(
+    config: AgentConfig | Mapping[str, Any], origin: str | None
+) -> AgentConfig | Mapping[str, Any]:
     """Return *config* with its gateway models pointed at *origin*.
 
     Returns the config itself when there is no proxy to route through or no
@@ -73,10 +108,17 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
         return config
 
     proxy = urlsplit(origin)
-    runtime_config = config.model_copy(deep=True)
+    runtime_config = config.model_copy(deep=True) if isinstance(config, AgentConfig) else copy.deepcopy(config)
     for model, original_url in _gateway_models(runtime_config):
-        model.base_url = urlsplit(original_url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
-        model.settings.pop("base_url", None)
+        rewritten = urlsplit(original_url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+        if isinstance(model, ModelConfig):
+            model.base_url = rewritten
+            model.settings.pop("base_url", None)
+        else:
+            model["base_url"] = rewritten
+            settings = model.get("settings")
+            if isinstance(settings, dict):
+                settings.pop("base_url", None)
     return runtime_config
 
 
