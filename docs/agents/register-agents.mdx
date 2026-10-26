@@ -440,3 +440,40 @@ nemo agents delete calculator-agent
 An agent's config and references cannot be edited in place. To change them, register a new agent, or use
 `nemo agents redeploy` to replace a deployed agent; see
 [Update a Deployed Agent](/documentation/agents/deploy-agents#update-a-deployed-agent).
+
+## Label Agents
+
+Labels are key/value pairs you attach to an agent when you register it, then filter on
+when you list agents.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo agents register --name support-analyst --agent-config ./agent.yaml --label team=support
+
+nemo agents list --label team=support
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+agents.register(name="support-analyst", config=config, labels={"team": "support"})
+agents.list(labels={"team": "support"})
+```
+
+</Tab>
+
+</Tabs>
+
+A key is `<name>` or `<prefix>/<name>`. Each part is 1–63 letters, digits, `-`, or `_`, and
+starts and ends with a letter or digit. Unlike Kubernetes labels, keys cannot contain dots.
+A value is empty or up to 253 letters, digits, `-`, `_`, `.`, or `/`.
+
+NeMo Helix plugins may apply labels when registering agents for you, using the prefix `helix-<plugin>/`,
+for example `helix-agents/managed-by` or `helix-compass/target-agent`. Avoid that prefix for your own
+keys. The API does not enforce this convention.
+
+Labels are for filtering and display only. Never rely on them for authorization.

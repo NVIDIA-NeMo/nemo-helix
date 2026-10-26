@@ -89,6 +89,8 @@ from nemo_helix_plugin.agents.types import (
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateSessionRequest,
+    Labels,
+    ListAgentsQueryParams,
     ListSessionsQueryParams,
     ReferenceConfig,
     RegisterAgentRequest,
@@ -132,13 +134,14 @@ from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoRespons
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from typer.main import get_command as _typer_get_command
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WORKSPACE = "default"
 _DEPLOYMENT_RESOLUTION_PAGE_SIZE = 100
+_LABELS_ADAPTER: TypeAdapter[dict[str, str]] = TypeAdapter(Labels)
 _T = TypeVar("_T")
 
 _AGENT_LIST_COLUMNS = [
@@ -1067,15 +1070,23 @@ def _register_platform_commands(app: typer.Typer) -> None:
             dir_okay=False,
         ),
         description: str = typer.Option("", "--description"),
+        label: list[str] = typer.Option(
+            [],
+            "--label",
+            "-l",
+            help="Agent label as KEY=VALUE, e.g. team=search. Repeatable.",
+        ),
         workspace: WorkspaceOption = None,
     ) -> None:
         """Register an agent on the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
         config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=name)
+        labels = _parse_labels(label)
         resp = _register_agent_from_validated_config(
             name=name,
             description=description,
+            labels=labels,
             config_dict=config_dict,
             config_format=config_format,
             reference=reference,
@@ -1094,16 +1105,25 @@ def _register_platform_commands(app: typer.Typer) -> None:
         no_truncate: NoTruncateOption = None,
         columns: OutputColumnsOption = None,
         all_pages: AllPagesOption = False,
+        label: list[str] = typer.Option(
+            [],
+            "--label",
+            "-l",
+            help="Only list agents with this label, as KEY=VALUE. Repeat to require several labels.",
+        ),
     ) -> None:
         """List agents on the platform."""
         workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
+        query_params: ListAgentsQueryParams = {}
+        if labels := _parse_labels(label):
+            query_params["filter"] = json.dumps({f"labels.{key}": value for key, value in labels.items()})
         _print_list(
             ctx,
             client,
             "list_agents",
-            {"workspace": workspace},
+            {"workspace": workspace, "query_params": query_params},
             default_columns=_AGENT_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
@@ -1274,6 +1294,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
             dir_okay=False,
         ),
         description: str = typer.Option("", "--description", help="Agent description (as on register)."),
+        label: list[str] = typer.Option(
+            [], "--label", "-l", help="Agent label as KEY=VALUE (as on register). Repeatable."
+        ),
         name: Optional[str] = typer.Option(
             None, "--name", "-n", help="Deployment name for the new deployment (auto-generated if omitted)."
         ),
@@ -1358,6 +1381,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 lambda: files_client.get_fileset(workspace=ref.workspace, name=ref.name).data(),
             )
             reference.fileset = FilesetRef(f"{ref.workspace}/{ref.name}")
+        labels = _parse_labels(label)
 
         client = _agents_client(base_url, workspace)
 
@@ -1457,6 +1481,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             _register_agent_from_validated_config(
                 name=agent,
                 description=description,
+                labels=labels,
                 config_dict=config_dict,
                 config_format=config_format,
                 reference=reference,
@@ -3084,10 +3109,27 @@ def _validate_agent_config_for_register(
     return config_dict, config_format, request.reference
 
 
+def _parse_labels(values: list[str]) -> dict[str, str]:
+    """Parse repeated ``KEY=VALUE`` options into validated agent labels, or exit 2."""
+    labels: dict[str, str] = {}
+    for value in values:
+        key, separator, label_value = value.partition("=")
+        if not separator:
+            typer.echo(f"Error: --label {value!r} must be KEY=VALUE.", err=True)
+            raise typer.Exit(code=2)
+        labels[key] = label_value
+    try:
+        return _LABELS_ADAPTER.validate_python(labels)
+    except ValidationError as exc:
+        typer.echo(f"Error: invalid --label: {exc.errors()[0]['msg']}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
 def _register_agent_from_validated_config(
     *,
     name: str,
     description: str,
+    labels: dict[str, str],
     config_dict: dict[str, Any],
     config_format: str,
     reference: ReferenceConfig | None,
@@ -3106,6 +3148,8 @@ def _register_agent_from_validated_config(
         payload["description"] = description
     if reference is not None:
         payload["reference"] = reference
+    if labels:
+        payload["labels"] = labels
     if agent_config is not None:
         payload.update(config=config_dict, config_format=config_format)
     client = _agents_client(base_url, workspace)

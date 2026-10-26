@@ -206,6 +206,33 @@ read in memory. The same calls exist on `AsyncAgentsResource`.
 
 </Tabs>
 
+### List an Agent's Runs
+
+Each execute job records the `workspace/name` reference of the agent it ran as
+`spec.agent_ref`. Use it as a filter to list an agent's runs. Cross-workspace agent
+references are supported. Jobs that ran an [inline agent](#inline-agents) are not runs
+of any persisted agent and thus never match.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo jobs list --filter.source nemo-agents-plugin-execute \
+  --filter '{"spec.agent_ref": {"$in": ["default/calc", "research/calc"]}}'
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+runs = agents.jobs.execute.list(agents=["default/calc", "research/calc"])
+```
+
+</Tab>
+
+</Tabs>
+
 ### Result Names
 
 Results download as gzipped tarballs of a directory, or as a single JSON file.

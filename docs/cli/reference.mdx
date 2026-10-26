@@ -6407,6 +6407,7 @@ nemo agents register [OPTIONS]
 * `--name, -n`: Agent name.
 * `--agent-config, -c <FILE>`: Optional path to an agent YAML config file.
 * `--description`: [default: ]
+* `--label, -l`: Agent label as KEY=VALUE, e.g. team=search. Repeatable. [default: ]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Help:**
@@ -6426,6 +6427,7 @@ nemo agents list [OPTIONS]
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+* `--label, -l`: Only list agents with this label, as KEY=VALUE. Repeat to require several labels. [default: ]
 
 **Help:**
 
@@ -6554,6 +6556,7 @@ nemo agents redeploy [OPTIONS]
 * `--agent, -a`: Name of the deployed agent to rebuild.
 * `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
 * `--description`: Agent description (as on register). [default: ]
+* `--label, -l`: Agent label as KEY=VALUE (as on register). Repeatable. [default: ]
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
 * `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
 * `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.
