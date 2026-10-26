@@ -20,7 +20,7 @@ Cross-Workspace Queries:
 
 import logging
 import textwrap
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
@@ -99,21 +99,14 @@ def redact_stored_auth_context(entity: Entity, auth_client: AuthClient) -> Entit
     return entity.model_copy(update={"data": data})
 
 
-def guard_stored_auth_context_write(
-    data: dict[str, Any], auth_client: AuthClient, stored_data: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Keep callers that are not services from setting the stored creator auth context.
+def server_owned_data_keys(auth_client: AuthClient) -> tuple[str, ...]:
+    """``data`` keys the caller may not write: the stored creator auth context, unless a service calls.
 
     Services write it, including while delegating for a user, so the direct caller is checked. For anyone
-    else the stored value (``stored_data``, ``None`` on create) wins over what was sent. That covers
-    forged values and the ``None`` that SDK read-modify-write sends after a redacted read.
+    else the stored value wins over what was sent, which covers forged values and the ``None`` that SDK
+    read-modify-write sends after a redacted read.
     """
-    if is_service_principal(auth_client.principal.id):
-        return data
-    guarded = {key: value for key, value in data.items() if key != STORED_AUTH_CONTEXT_KEY}
-    if stored_data is not None and STORED_AUTH_CONTEXT_KEY in stored_data:
-        guarded[STORED_AUTH_CONTEXT_KEY] = stored_data[STORED_AUTH_CONTEXT_KEY]
-    return guarded
+    return () if is_service_principal(auth_client.principal.id) else (STORED_AUTH_CONTEXT_KEY,)
 
 
 async def validate_project_exists(repository: EntityRepository, workspace: str, project: str | None) -> None:
@@ -289,7 +282,7 @@ async def create_entity(
             workspace=workspace,
             entity_type=entity_type,
             name=name,
-            data=guard_stored_auth_context_write(entity.data, auth_client),
+            data={key: value for key, value in entity.data.items() if key not in server_owned_data_keys(auth_client)},
             parent=entity.parent,
             project=entity.project,
             created_by=auth_client.principal.effective_id,
@@ -553,24 +546,18 @@ async def update_entity_by_name(
     # Validate project exists if specified
     await validate_project_exists(repository, workspace, entity_data.project)
 
-    data = entity_data.data
-    if not is_service_principal(auth_client.principal.id):
-        stored = await repository.get_entity_by_name(
-            workspace=workspace, entity_type=entity_type, name=name, parent=parent
-        )
-        data = guard_stored_auth_context_write(data, auth_client, stored.data if stored else None)
-
     try:
         entity = await repository.update_entity_by_name(
             workspace=workspace,
             entity_type=entity_type,
             name=name,
-            data=data,
+            data=entity_data.data,
             new_name=entity_data.new_name,
             parent=parent,
             project=entity_data.project,
             updated_by=auth_client.principal.effective_id,
             expected_db_version=entity_data.expected_db_version,
+            preserve_data_keys=server_owned_data_keys(auth_client),
         )
         return redact_stored_auth_context(entity, auth_client)
     except EntityVersionConflictError as e:

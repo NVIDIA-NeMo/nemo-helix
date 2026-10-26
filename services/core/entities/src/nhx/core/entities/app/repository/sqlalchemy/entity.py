@@ -5,7 +5,7 @@
 
 from asyncio import Lock
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Collection, Dict, List, Optional
 
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
@@ -318,6 +318,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         project: str | None = None,
         updated_by: str | None = None,
         expected_db_version: int | None = None,
+        preserve_data_keys: Collection[str] = (),
         session: AsyncSession | None = None,
     ) -> Entity:
         """Update an entity by name, optionally changing its name."""
@@ -346,6 +347,10 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                     f"Expected version {expected_db_version}, but current version is {existing_entity.db_version}. Please refetch and retry."
                 )
 
+            if preserve_data_keys:
+                stored_data = existing_entity.data or {}
+                data = {key: value for key, value in data.items() if key not in preserve_data_keys}
+                data.update({key: stored_data[key] for key in preserve_data_keys if key in stored_data})
             existing_entity.data = data
             if new_name is not None:
                 existing_entity.name = new_name

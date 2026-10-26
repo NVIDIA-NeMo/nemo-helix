@@ -4,7 +4,7 @@
 """Repository interface for Entity operations."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Collection, Dict, List, Optional
 
 from nhx.common.api.filter import FilterOperation
 from nhx.core.entities.entities import Entity
@@ -152,6 +152,7 @@ class EntityRepositoryInterface(ABC):
         project: Optional[str] = None,
         updated_by: str | None = None,
         expected_db_version: Optional[int] = None,
+        preserve_data_keys: Collection[str] = (),
         session: AsyncSession | None = None,
     ) -> Entity:
         """Update an entity by name, optionally changing its name.
@@ -167,6 +168,8 @@ class EntityRepositoryInterface(ABC):
             updated_by: Optional principal ID for the updater
             expected_db_version: Optional expected database version for optimistic locking. If provided,
                 update will fail if current version doesn't match.
+            preserve_data_keys: Top-level ``data`` keys that keep their stored values (or stay absent)
+                whatever ``data`` holds, read in the same transaction as the write.
 
         Returns:
             Updated entity
