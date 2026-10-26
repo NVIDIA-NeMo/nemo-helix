@@ -22,6 +22,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.ragas.metrics import TopicAdherenceMetric
+from nhx_evals_sdk.resolver_protocols import ModelResolver
 from nhx_evals_sdk.values import Model, ModelRef
 from nhx_evals_sdk.values.common import SecretRef
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
@@ -153,6 +154,35 @@ def test_gateway_models_point_at_the_job_proxy_for_the_block_and_are_restored(
 
     assert _url(ragas.judge_model) == _url(judge.model) == resolved
     assert ragas._llm_model is not None and ragas._llm_model["base_url"].startswith("http://nemo-api:8080/")
+
+
+def test_a_failed_rebind_still_restores_the_metrics_already_moved(
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer
+) -> None:
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setattr(
+        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
+    )
+    resolved = f"http://nemo-api:8080{JUDGE_ROUTE}"
+    moved = _judge(Model(url=resolved, name="judge"))
+    failing = _judge(Model(url=resolved, name="judge"))
+    real_resolve_models = LLMJudgeMetric.resolve_models
+    failures = [RuntimeError("rebind failed")]
+
+    async def resolve_models(self: LLMJudgeMetric, model_resolver: ModelResolver) -> None:
+        if self is failing and failures:
+            raise failures.pop()
+        await real_resolve_models(self, model_resolver)
+
+    monkeypatch.setattr(LLMJudgeMetric, "resolve_models", resolve_models)
+
+    with pytest.raises(RuntimeError, match="rebind failed"):
+        with gateway_metric_models_as_job([moved, failing]):
+            pass
+
+    assert _url(moved.model) == resolved
 
 
 def test_gateway_models_are_left_alone_when_the_job_has_no_identity(monkeypatch: pytest.MonkeyPatch) -> None:

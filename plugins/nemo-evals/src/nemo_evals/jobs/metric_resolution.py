@@ -295,17 +295,19 @@ def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
             yield
             return
         proxy = urlsplit(origin)
-        for metric, models in bound:
-            _rebind_models(
-                metric,
-                {
-                    field: model.model_copy(
-                        update={"url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()}
-                    )
-                    for field, model in models.items()
-                },
-            )
         try:
+            for metric, models in bound:
+                _rebind_models(
+                    metric,
+                    {
+                        field: model.model_copy(
+                            update={
+                                "url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+                            }
+                        )
+                        for field, model in models.items()
+                    },
+                )
             yield
         finally:
             for metric, models in bound:
