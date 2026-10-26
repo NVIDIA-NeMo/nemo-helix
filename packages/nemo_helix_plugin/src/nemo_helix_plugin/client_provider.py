@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from nemo_helix_plugin.auth import RuntimePrincipal
-from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, TokenProvider
+from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, StaticToken, TokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
@@ -324,6 +324,13 @@ class DefaultNemoClientProvider:
         workspace: str | None = None,
     ) -> NemoClient:
         base_url = _base_url()
+        if access_token := os.environ.get("NHX_ACCESS_TOKEN", "").strip():
+            return NemoClient(
+                base_url=base_url,
+                workspace=workspace,
+                auth=StaticToken(access_token),
+                default_headers={_INTERNAL_REQUEST_HEADER: "true"},
+            )
         if is_workload_identity_token_file_set():
             return NemoClient(
                 base_url=base_url,
@@ -344,6 +351,13 @@ class DefaultNemoClientProvider:
         workspace: str | None = None,
     ) -> AsyncNemoClient:
         base_url = _base_url()
+        if access_token := os.environ.get("NHX_ACCESS_TOKEN", "").strip():
+            return AsyncNemoClient(
+                base_url=base_url,
+                workspace=workspace,
+                auth=StaticToken(access_token),
+                default_headers={_INTERNAL_REQUEST_HEADER: "true"},
+            )
         if is_workload_identity_token_file_set():
             return AsyncNemoClient(
                 base_url=base_url,

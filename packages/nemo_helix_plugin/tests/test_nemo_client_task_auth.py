@@ -39,6 +39,7 @@ def _force_default_provider(monkeypatch):
     set_nemo_client_provider(DefaultNemoClientProvider())
     monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
     monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_ACCESS_TOKEN", raising=False)
     yield
     set_nemo_client_provider(None)
 
@@ -102,6 +103,26 @@ def test_general_as_service_stays_undelegated(monkeypatch):
 # ---------------------------------------------------------------------------
 # Claim 2 — workload identity bootstraps bearer auth, drops trusted headers
 # ---------------------------------------------------------------------------
+def test_task_client_uses_injected_subprocess_access_token(monkeypatch):
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "subprocess-task-token")
+    monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
+
+    client = get_task_nemo_client("evals")
+
+    assert client._auth is not None
+    assert client._auth.get_access_token() == "subprocess-task-token"
+    assert client._default_headers == {"X-NHX-Internal": "true"}
+
+
+async def test_async_task_client_uses_injected_subprocess_access_token(monkeypatch):
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "subprocess-task-token")
+    client = get_async_task_nemo_client("evals")
+
+    assert client._auth is not None
+    assert await client._auth.get_access_token_or_none_async() == "subprocess-task-token"
+    assert client._default_headers == {"X-NHX-Internal": "true"}
+
+
 class _FakeExchangeProvider:
     def get_access_token(self) -> str:
         return "exchanged-token"

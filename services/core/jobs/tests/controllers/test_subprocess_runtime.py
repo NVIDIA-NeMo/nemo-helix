@@ -20,6 +20,7 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     _build_otlp_log_exporter,
     _UnixSocketOTLPSession,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
     parse_secret_references,
     start_log_capture,
 )
@@ -103,9 +104,11 @@ def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled():
         patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
     ):
         provider_cls.return_value.get_access_token.return_value = "jobs-workload-token"
+        inject_subprocess_task_auth(env)
         updated_env = inject_secret_env_vars(env.copy())
 
     assert updated_env["HF_TOKEN"] == "secret-value"
+    assert updated_env["NHX_ACCESS_TOKEN"] == "jobs-workload-token"
     provider_cls.assert_called_once_with(auth_config, "jobs", principal)
     request = mock_urlopen.call_args.args[0]
     assert request.get_header("Authorization") == "Bearer jobs-workload-token"
