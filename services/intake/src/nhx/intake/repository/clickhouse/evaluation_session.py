@@ -511,7 +511,7 @@ def _usage_by_session_sql(span_relation_sql: str) -> str:
 
     ``span_relation_sql`` is a FROM item of current span rows (a table, CTE, or subquery) exposing
     ``workspace``, ``session_id``, ``source_format``, ``trace_id``, ``kind``, ``external_parent_span_id``,
-    ``attributes_number`` and ``is_deleted``.
+    ``attributes_bool``, ``attributes_number`` and ``is_deleted``.
     """
     return f"""
         SELECT

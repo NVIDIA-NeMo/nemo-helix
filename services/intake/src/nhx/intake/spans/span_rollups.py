@@ -6,11 +6,13 @@
 Agent and root spans repeat the usage of the model calls beneath them, so a sum over every span counts the same
 tokens and cost two or three times. Instead, each trace sums a metric over the first of these tiers that reports it:
 
-1. Model calls: non-root ``LLM`` and ``EMBEDDING`` spans, other non-root spans of unknown kind, and every ATIF
+1. Inference Gateway call spans (``nemo.inference_gateway.call``): the usage the provider reported for each call
+   the gateway served. When a trace has them, the agent's own spans for those same calls don't count again.
+2. Model calls: non-root ``LLM`` and ``EMBEDDING`` spans, other non-root spans of unknown kind, and every ATIF
    span. ATIF ingest already reconciles step and trajectory usage, so an ATIF root only carries a metric when no
    step reported it. A root model span is not a second call: it is the publisher total in the next tier.
-2. The trace's other roots.
-3. Any other span.
+3. The trace's other roots.
+4. Any other span.
 
 A metric that no span in the trace reports is NULL. A stored 0 counts as reported, so it blocks the next tier.
 Queries apply the rule at three levels:
@@ -50,6 +52,7 @@ multiIf(
     minIf(usage_tier, reports_{metric}) = 1, sumIf({metric}_value, usage_tier = 1),
     minIf(usage_tier, reports_{metric}) = 2, sumIf({metric}_value, usage_tier = 2),
     minIf(usage_tier, reports_{metric}) = 3, sumIf({metric}_value, usage_tier = 3),
+    minIf(usage_tier, reports_{metric}) = 4, sumIf({metric}_value, usage_tier = 4),
     NULL
 )"""
 
@@ -60,26 +63,39 @@ class UsageSql:
 
     span_columns: str
     """``usage_tier``, then ``reports_<metric>`` and ``<metric>_value`` for each metric. They read the span's
-    ``source_format``, ``kind``, ``external_parent_span_id`` and ``attributes_number`` without a table alias."""
+    ``source_format``, ``kind``, ``external_parent_span_id``, ``attributes_bool`` and ``attributes_number`` without a
+    table alias."""
     trace_columns: str
     """One aggregate per metric, named after it: the metric's total for the trace, or NULL."""
     parameters: dict[str, Any]
     """Each metric's attribute name, bound as ``%(<metric>_key)s``."""
 
 
-# Per span: the usage tier number. Callers alias it as ``usage_tier``.
-# 1 is model calls, 2 is other roots, 3 is everything else. A root LLM or EMBEDDING span is tier 2 so it
-# cannot be summed with the calls beneath it. Reads ``source_format``, ``kind``, and ``external_parent_span_id``.
-USAGE_TIER_EXPRESSION = """\
+GATEWAY_CALL_ATTRIBUTE = "nemo.inference_gateway.call"
+_GATEWAY_CALL = f"attributes_bool['{GATEWAY_CALL_ATTRIBUTE}']"
+
+
+def usage_tier_expression(gateway_call: str = _GATEWAY_CALL) -> str:
+    """Per span: the usage tier number. Callers alias it as ``usage_tier``.
+
+    1 is gateway call spans, 2 is model calls, 3 is other roots, 4 is everything else. A root LLM or EMBEDDING span
+    is tier 3 so it cannot be summed with the calls beneath it. Reads ``source_format``, ``kind``,
+    ``external_parent_span_id`` and ``gateway_call``, an expression that is true for a gateway call span.
+    """
+    return f"""\
 multiIf(
+    {gateway_call}, 1,
     source_format = 'atif'
         OR (
             external_parent_span_id != ''
             AND kind IN ('LLM', 'EMBEDDING', 'UNKNOWN')
-        ), 1,
-    external_parent_span_id = '', 2,
-    3
+        ), 2,
+    external_parent_span_id = '', 3,
+    4
 )"""
+
+
+USAGE_TIER_EXPRESSION = usage_tier_expression()
 _USAGE_TIER = f"{USAGE_TIER_EXPRESSION} AS usage_tier"
 
 
