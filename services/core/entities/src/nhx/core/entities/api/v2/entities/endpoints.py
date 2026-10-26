@@ -201,6 +201,7 @@ async def _invalidate_role_binding_cache_if_present(
     tags=[API_TAG],
     status_code=201,
     summary="Create a new entity",
+    responses={403: {"description": "Not allowed to create entities in the requested workspace."}},
     description=textwrap.dedent("""
         Create a new entity of the specified type in the given workspace.
 
@@ -247,6 +248,7 @@ async def create_entity(
     accessible = await require_workspace_access(
         repository,
         workspace,
+        detail=f"Not allowed to create entities in workspace '{workspace}'",
     )
 
     if entity.parent is not None:
@@ -329,6 +331,7 @@ async def create_entity(
     response_model=EntitiesPage,
     tags=[API_TAG],
     summary="List entities",
+    responses={403: {"description": "Not allowed to list entities in the requested workspace."}},
     description=textwrap.dedent("""
         List all entities of a specific type in the given workspace.
 
@@ -385,7 +388,7 @@ async def list_entities(
         accessible_workspaces = await require_workspace_access(
             repository,
             workspace,
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Not allowed to list entities in workspace '{workspace}'",
         )
         # Check if workspace is being deleted (404 for user requests)
         await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
@@ -438,6 +441,7 @@ async def list_entities(
     response_model=Entity,
     tags=[API_TAG],
     summary="Get entity by name",
+    responses={403: {"description": "Not allowed to read entities in the requested workspace."}},
     description=textwrap.dedent("""
         Get a specific entity by its workspace, type, and name.
 
@@ -463,7 +467,7 @@ async def get_entity_by_name(
     await require_workspace_access(
         repository,
         workspace,
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Not allowed to read entities in workspace '{workspace}'",
     )
 
     entity = await repository.get_entity_by_name(
@@ -482,6 +486,7 @@ async def get_entity_by_name(
     response_model=Entity,
     tags=[API_TAG],
     summary="Update entity by name",
+    responses={403: {"description": "Not allowed to update entities in the requested workspace."}},
     description=textwrap.dedent("""
         Update an entity by its name. Optionally change the entity's name.
 
@@ -519,7 +524,7 @@ async def update_entity_by_name(
     await require_workspace_access(
         repository,
         workspace,
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Not allowed to update entities in workspace '{workspace}'",
     )
 
     await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
@@ -609,6 +614,7 @@ async def update_entity_by_name(
     response_model=DeleteResponse,
     tags=[API_TAG],
     summary="Delete entity by name",
+    responses={403: {"description": "Not allowed to delete entities in the requested workspace."}},
     description=textwrap.dedent("""
         Delete an entity by its name.
 
@@ -637,7 +643,7 @@ async def delete_entity_by_name(
     await require_workspace_access(
         repository,
         workspace,
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Not allowed to delete entities in workspace '{workspace}'",
     )
 
     await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
