@@ -45,6 +45,7 @@ API_TAG = "Spans"
 ATTRIBUTE_EQ_FILTER_FIELD_MAP = {
     "agent_id": "agent_id",
     "agent_name": "agent_name",
+    "client_address": "client_address",
     "evaluation_name": "evaluation_name",
     "evaluation_id": "evaluation_name",
     "model": "model",
@@ -66,7 +67,7 @@ ATTRIBUTE_EQ_FILTER_FIELDS = frozenset(ATTRIBUTE_EQ_FILTER_FIELD_MAP)
         filter_schema=SpanFilter,
         filter_description=(
             "Filter spans by session_id, trace_id, parent_span_id, project, evaluation_name, test_case_name, "
-            "source, kind, status, model, tool_name, provider, agent_id, agent_name, and started_at. "
+            "source, kind, status, model, tool_name, provider, agent_id, agent_name, client_address, and started_at. "
             "Every field takes one exact value, except started_at, which takes gte and lte."
         ),
     ),

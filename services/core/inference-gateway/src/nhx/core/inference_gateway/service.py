@@ -12,6 +12,8 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.service import RouterConfig, Service
+from nhx.core.inference_gateway.api.call_recording import CallRecorder, intake_sink, set_global_call_recorder
+from nhx.core.inference_gateway.api.lease_cache import global_lease_cache, refresh_lease_cache_task
 from starlette import status
 from starlette.responses import JSONResponse
 
@@ -29,6 +31,7 @@ class InferenceGatewayService(Service):
         self._http_client: Optional[aiohttp.ClientSession] = None
         self._background_tasks: Set[asyncio.Task] = set()
         self._middleware_registry = None
+        self._call_recorder: CallRecorder | None = None
 
     @property
     def title(self) -> str:
@@ -40,7 +43,7 @@ class InferenceGatewayService(Service):
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the inference gateway service."""
-        from nhx.core.inference_gateway.api.v2 import call_leases, models, openai, providers, virtual_models
+        from nhx.core.inference_gateway.api.v2 import call_leases, models, openai, providers, telemetry, virtual_models
 
         return [
             RouterConfig(
@@ -67,6 +70,11 @@ class InferenceGatewayService(Service):
                 call_leases.router,
                 tag="Call Leases",
                 description="Lease a sandbox's address to its trial so its model calls and telemetry join the trial.",
+            ),
+            RouterConfig(
+                telemetry.router,
+                tag="Inference Gateway",
+                description="OTLP trace ingress for agents in leased sandboxes.",
             ),
         ]
 
@@ -177,6 +185,18 @@ class InferenceGatewayService(Service):
         )
         logger.debug("Initialized HTTP client for inference-gateway service")
 
+        if inference_gateway_config.record_calls:
+            self._call_recorder = CallRecorder(intake_sink(client))
+            self._call_recorder.start()
+            set_global_call_recorder(self._call_recorder)
+            self._background_tasks.add(
+                asyncio.create_task(
+                    refresh_lease_cache_task(
+                        global_lease_cache(), client, inference_gateway_config.lease_cache_refresh_interval_sec
+                    )
+                )
+            )
+
     async def on_shutdown(self) -> None:
         """Cleanup resources on shutdown."""
 
@@ -187,6 +207,11 @@ class InferenceGatewayService(Service):
         if self._middleware_registry is not None:
             await self._middleware_registry.shutdown()
             logger.debug("Shut down inference middleware plugins")
+
+        if self._call_recorder is not None:
+            await self._call_recorder.stop()
+            set_global_call_recorder(None)
+            self._call_recorder = None
 
         if self._http_client is not None:
             await self._http_client.close()

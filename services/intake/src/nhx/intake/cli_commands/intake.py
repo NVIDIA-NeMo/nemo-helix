@@ -93,7 +93,7 @@ _FILTER_HELP_PREFIX = (
 )
 _SPAN_FILTER_DESCRIPTION = (
     "Filter spans by session_id, trace_id, parent_span_id, project, evaluation_name, test_case_name, source, "
-    "kind, status, model, tool_name, provider, agent_id, agent_name, and started_at. Every field takes one exact "
+    "kind, status, model, tool_name, provider, agent_id, agent_name, client_address, and started_at. Every field takes one exact "
     "value, except started_at, which takes gte and lte."
 )
 _SPAN_GROUP_FILTER_DESCRIPTION = (
@@ -356,6 +356,9 @@ def list_spans(
     filter_agent_name: Annotated[
         str | None, typer.Option("--filter.agent-name", rich_help_panel="Filter Options")
     ] = None,
+    filter_client_address: Annotated[
+        str | None, typer.Option("--filter.client-address", rich_help_panel="Filter Options")
+    ] = None,
     filter_evaluation_id: Annotated[
         str | None, typer.Option("--filter.evaluation-id", rich_help_panel="Filter Options")
     ] = None,
@@ -415,6 +418,7 @@ def list_spans(
                 filter,
                 agent_id=filter_agent_id,
                 agent_name=filter_agent_name,
+                client_address=filter_client_address,
                 evaluation_id=filter_evaluation_id,
                 evaluation_name=filter_evaluation_name,
                 kind=filter_kind,
@@ -499,6 +503,9 @@ def list_groups(
     filter_agent_name: Annotated[
         str | None, typer.Option("--filter.agent-name", rich_help_panel="Filter Options")
     ] = None,
+    filter_client_address: Annotated[
+        str | None, typer.Option("--filter.client-address", rich_help_panel="Filter Options")
+    ] = None,
     filter_evaluation_id: Annotated[
         str | None, typer.Option("--filter.evaluation-id", rich_help_panel="Filter Options")
     ] = None,
@@ -558,6 +565,7 @@ def list_groups(
                 filter,
                 agent_id=filter_agent_id,
                 agent_name=filter_agent_name,
+                client_address=filter_client_address,
                 evaluation_id=filter_evaluation_id,
                 evaluation_name=filter_evaluation_name,
                 kind=filter_kind,

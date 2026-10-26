@@ -28,6 +28,7 @@ class SpanSemanticAttributes(BaseModel):
     agent_id: str | None = None
     agent_name: str | None = None
     agent_version: str | None = None
+    client_address: str | None = None
     tool_name: str | None = None
     project: str | None = None
     evaluation_name: str | None = None

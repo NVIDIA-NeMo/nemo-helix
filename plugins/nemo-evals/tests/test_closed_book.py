@@ -15,7 +15,7 @@ import pytest
 from nemo_evals.closed_book import (
     CONFIG_TYPE,
     MIDDLEWARE_NAME,
-    REMOVED_TOOLS_STATE_KEY,
+    REMOVED_TOOLS_TELEMETRY_ATTRIBUTE,
     ClosedBookConfig,
     ClosedBookMiddleware,
     client_tool_label,
@@ -325,7 +325,7 @@ async def test_responses_request_is_stripped_and_removed_tools_are_recorded() ->
 
     assert result.body["tools"] == [{"type": "function", "name": "f"}]
     assert result.body["stream"] is True
-    assert ctx.state(MIDDLEWARE_NAME).get(REMOVED_TOOLS_STATE_KEY) == ["web_search"]
+    assert ctx.telemetry_attributes[REMOVED_TOOLS_TELEMETRY_ATTRIBUTE] == ["web_search"]
 
 
 async def test_messages_request_falls_back_to_anthropic_auto_tool_choice() -> None:
@@ -350,7 +350,7 @@ async def test_request_with_nothing_to_strip_records_an_empty_list() -> None:
 
     await middleware.process_request(ctx, request, ClosedBookConfig())
 
-    assert ctx.state(MIDDLEWARE_NAME).get(REMOVED_TOOLS_STATE_KEY) == []
+    assert ctx.telemetry_attributes[REMOVED_TOOLS_TELEMETRY_ATTRIBUTE] == []
 
 
 @pytest.mark.parametrize(

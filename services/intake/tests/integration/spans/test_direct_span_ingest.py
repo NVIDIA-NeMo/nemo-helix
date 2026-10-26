@@ -213,3 +213,52 @@ def test_direct_span_ingest_accepts_parent_outside_batch(client: TestClient):
     listed = client.get(SPANS_URL, params={"filter[trace_id]": "partial-trace", "page_size": 10})
     assert listed.status_code == 200, listed.text
     assert listed.json()["data"][0]["parent_span_id"] == "not-in-batch"
+
+
+def test_spans_are_listed_by_the_address_they_came_from_within_a_time_range(client: TestClient):
+    """The gateway's call spans are found by caller address and call time, the join a run's sandbox records need."""
+    body = {
+        "source": "inference-gateway",
+        "spans": [
+            _span(
+                span_id="early",
+                trace_id="call-early",
+                kind="LLM",
+                started_at=_timestamp(0),
+                ended_at=_timestamp(1),
+                attributes={"client.address": "10.244.0.7"},
+            ),
+            _span(
+                span_id="late",
+                trace_id="call-late",
+                kind="LLM",
+                started_at=_timestamp(100),
+                ended_at=_timestamp(101),
+                attributes={"client.address": "10.244.0.7"},
+            ),
+            _span(
+                span_id="other",
+                trace_id="call-other",
+                kind="LLM",
+                started_at=_timestamp(0),
+                ended_at=_timestamp(1),
+                attributes={"client.address": "10.244.0.8"},
+            ),
+        ],
+    }
+    assert client.post(INGEST_URL, json=body).status_code == 201
+
+    listed = client.get(
+        SPANS_URL,
+        params={
+            "filter[client_address]": "10.244.0.7",
+            "filter[started_at][$gte]": _timestamp(-10),
+            "filter[started_at][$lte]": _timestamp(50),
+            "page_size": 10,
+        },
+    )
+
+    assert listed.status_code == 200, listed.text
+    spans = listed.json()["data"]
+    assert [span["trace_id"] for span in spans] == ["call-early"]
+    assert spans[0]["client_address"] == "10.244.0.7"

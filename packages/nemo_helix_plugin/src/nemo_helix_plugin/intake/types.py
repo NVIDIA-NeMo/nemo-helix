@@ -356,6 +356,7 @@ class Span(BaseModel):
     prompt_id: str | None = None
     agent_id: str | None = None
     agent_name: str | None = None
+    client_address: str | None = None
     tool_name: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
@@ -445,6 +446,7 @@ class SpanFilterParam(TypedDict, total=False):
     provider: str
     agent_id: str
     agent_name: str
+    client_address: str
     started_at: dict[str, str]
 
 

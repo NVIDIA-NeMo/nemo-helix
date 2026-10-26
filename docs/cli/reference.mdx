@@ -11429,9 +11429,10 @@ nemo intake spans list [OPTIONS]
 JSON-only fields:
   started_at: \{gte: str, lte: str}
 
-Filter spans by session_id, trace_id, parent_span_id, project, evaluation_name, test_case_name, source, kind, status, model, tool_name, provider, agent_id, agent_name, and started_at. Every field takes one exact value, except started_at, which takes gte and lte.
+Filter spans by session_id, trace_id, parent_span_id, project, evaluation_name, test_case_name, source, kind, status, model, tool_name, provider, agent_id, agent_name, client_address, and started_at. Every field takes one exact value, except started_at, which takes gte and lte.
 * `--filter.agent-id`
 * `--filter.agent-name`
+* `--filter.client-address`
 * `--filter.evaluation-id`
 * `--filter.evaluation-name`
 * `--filter.kind`
@@ -11577,6 +11578,7 @@ JSON-only fields:
 Filter spans by the same fields as the span list endpoint, then group matching spans by the comma-separated fields in the by query parameter.
 * `--filter.agent-id`
 * `--filter.agent-name`
+* `--filter.client-address`
 * `--filter.evaluation-id`
 * `--filter.evaluation-name`
 * `--filter.kind`

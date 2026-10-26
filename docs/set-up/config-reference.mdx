@@ -255,6 +255,10 @@ inference_gateway:
   refresh_model_cache_interval_sec: 3
   # Time-to-live (in seconds) for cached secrets before they expire and need refreshing. If set to 0, we will refresh this each time the model providers are refreshed. | default: 0
   secrets_ttl_sec: 0
+  # Record each VirtualModel call from a sandbox with a call lease to Intake, as a span in the sandbox's trial, and accept the trial's agent traces over OTLP. Recording is best effort and never delays or fails the call. | default: True
+  record_calls: true
+  # How often (in seconds) to re-read call leases another gateway replica created or ended. | default: 3.0
+  lease_cache_refresh_interval_sec: 3.0
 ```
 
 ### `jobs`

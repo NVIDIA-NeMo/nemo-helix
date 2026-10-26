@@ -3808,6 +3808,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/inference-gateway/v2/workspaces/{workspace}/otlp/v1/traces:
+    post:
+      tags:
+      - Inference Gateway
+      summary: Ingest Agent Traces
+      description: Accept an OTLP/HTTP protobuf trace export from an agent in a leased
+        sandbox.
+      operationId: ingest_agent_traces
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: OTLP export response
+        '403':
+          description: No call lease holds the caller's address in this workspace.
+        '413':
+          description: The export is larger than 5 MiB.
+        '415':
+          description: The body is not OTLP protobuf.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/-/{trailing_uri}:
     patch:
       tags:
@@ -5504,8 +5534,8 @@ paths:
           $ref: '#/components/schemas/SpanFilter'
         description: Filter spans by session_id, trace_id, parent_span_id, project,
           evaluation_name, test_case_name, source, kind, status, model, tool_name,
-          provider, agent_id, agent_name, and started_at. Every field takes one exact
-          value, except started_at, which takes gte and lte.
+          provider, agent_id, agent_name, client_address, and started_at. Every field
+          takes one exact value, except started_at, which takes gte and lte.
       responses:
         '200':
           description: Successful Response
@@ -21190,6 +21220,9 @@ components:
         agent_name:
           title: Agent Name
           type: string
+        client_address:
+          title: Client Address
+          type: string
         tool_name:
           title: Tool Name
           type: string
@@ -21342,6 +21375,11 @@ components:
         agent_name:
           description: Filter by agent application name (e.g. 'claude-code', 'codex').
           title: Agent Name
+          type: string
+        client_address:
+          description: Filter by the network address the call came from, as the service
+            that recorded the span saw it.
+          title: Client Address
           type: string
         parent_span_id:
           description: Filter by parent span id. Use to fetch direct children of a

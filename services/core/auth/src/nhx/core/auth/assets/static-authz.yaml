@@ -905,6 +905,13 @@ authz:
         scopes:
         - inference:write
         - platform:write
+    /apis/inference-gateway/v2/workspaces/{workspace}/otlp/v1/traces:
+      post:
+        permissions:
+        - inference.gateway.model.exec
+        scopes:
+        - inference:write
+        - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/-/{trailing_uri}:
       delete:
         permissions:

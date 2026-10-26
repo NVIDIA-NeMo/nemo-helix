@@ -76,6 +76,10 @@ class SpanFilter(BaseModel):
     agent_name: str | None = Field(
         default=None, description="Filter by agent application name (e.g. 'claude-code', 'codex')."
     )
+    client_address: str | None = Field(
+        default=None,
+        description="Filter by the network address the call came from, as the service that recorded the span saw it.",
+    )
     parent_span_id: str | None = Field(
         default=None, description="Filter by parent span id. Use to fetch direct children of a span."
     )
@@ -124,6 +128,7 @@ class Span(BaseModel):
     prompt_id: str | None = None
     agent_id: str | None = None
     agent_name: str | None = None
+    client_address: str | None = None
     tool_name: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
@@ -182,6 +187,7 @@ class Span(BaseModel):
             prompt_id=semantic_attributes.prompt_id,
             agent_id=semantic_attributes.agent_id,
             agent_name=semantic_attributes.agent_name,
+            client_address=semantic_attributes.client_address,
             tool_name=semantic_attributes.tool_name,
             input_tokens=semantic_attributes.input_tokens,
             output_tokens=semantic_attributes.output_tokens,

@@ -39,6 +39,17 @@ class InferenceGatewayConfig(create_service_config_class("inference_gateway")): 
         default=SECRETS_TTL_SEC,
         description="Time-to-live (in seconds) for cached secrets before they expire and need refreshing. If set to 0, we will refresh this each time the model providers are refreshed.",
     )
+    record_calls: bool = Field(
+        default=True,
+        description="Record each VirtualModel call from a sandbox with a call lease to Intake, as a span in the "
+        "sandbox's trial, and accept the trial's agent traces over OTLP. Recording is best effort and never "
+        "delays or fails the call.",
+    )
+    lease_cache_refresh_interval_sec: float = Field(
+        default=3.0,
+        gt=0,
+        description="How often (in seconds) to re-read call leases another gateway replica created or ended.",
+    )
     mock_provider_prefix: str | None = internal_field(
         default=None,
         description="When set, providers whose name starts with this prefix return mock "

@@ -32,11 +32,13 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
+from nhx.core.inference_gateway.api.call_recording import CallObserver, CallStatus, global_call_recorder
 from nhx.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
     raise_no_providers_for_model_entity,
     raise_unresolved_provider_secret,
 )
+from nhx.core.inference_gateway.api.lease_cache import global_lease_cache
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     build_inference_response,
@@ -1000,6 +1002,9 @@ async def virtual_model_proxy(
 ) -> Response:
     """Execute the full VirtualModel middleware pipeline and return a streaming response.
 
+    Each call is also recorded to Intake (see :mod:`~nhx.core.inference_gateway.api.call_recording`)
+    when the caller has the whole response, or when the call fails.
+
     Shared implementation for both ``openai_proxy`` and ``model_entity_proxy``.
     The caller is responsible for:
 
@@ -1018,6 +1023,62 @@ async def virtual_model_proxy(
     instead of silently bypassing the middleware chain. Recovery is automatic
     once the next IGW polling cycle re-resolves the VM cleanly.
     """
+    recorder = global_call_recorder()
+    observer = (
+        None
+        if recorder is None
+        else CallObserver(
+            recorder,
+            global_lease_cache(),
+            workspace=workspace,
+            virtual_model=vm_name,
+            trailing_uri=trailing_uri,
+            client_address=request.client.host if request.client else None,
+            headers=request.headers,
+        )
+    )
+    try:
+        return await _virtual_model_proxy(
+            request=request,
+            workspace=workspace,
+            vm_name=vm_name,
+            virtual_model=virtual_model,
+            trailing_uri=trailing_uri,
+            json_body=json_body,
+            http_client=http_client,
+            model_cache=model_cache,
+            registry=registry,
+            request_nemo_client=request_nemo_client,
+            observer=observer,
+        )
+    except HTTPException as exc:
+        if observer is not None:
+            observer.finish(CallStatus.ERROR, exc.status_code)
+        raise
+    except asyncio.CancelledError:
+        if observer is not None:
+            observer.finish(CallStatus.CANCELLED, 499)
+        raise
+    except Exception:
+        if observer is not None:
+            observer.finish(CallStatus.ERROR, http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+        raise
+
+
+async def _virtual_model_proxy(
+    *,
+    request: Request,
+    workspace: str,
+    vm_name: str,
+    virtual_model: VirtualModel,
+    trailing_uri: str,
+    json_body: dict[str, Any],
+    http_client: ClientSession,
+    model_cache: "ModelCache",
+    registry: "MiddlewareRegistry",
+    request_nemo_client: AsyncNemoClient | None,
+    observer: CallObserver | None,
+) -> Response:
     if (workspace, vm_name) in registry.broken_vms:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1082,6 +1143,8 @@ async def virtual_model_proxy(
         original_request=original_request,
         request_nemo_client=request_nemo_client,
     )
+    if observer is not None:
+        observer.telemetry_attributes = ctx.telemetry_attributes
     initial_request = build_inference_request(
         body=json_body,
         headers=dict(request.headers),
@@ -1151,6 +1214,9 @@ async def virtual_model_proxy(
             model_name=restored_model_id,
             purpose=f"proxying {proxy_path!r}",
         )
+        if observer is not None:
+            observer.model = restored_model_id
+            observer.provider = resolved_model_provider_info.model_provider.name
 
         if (
             resolved_model_provider_info.model_provider.api_key_secret_name
@@ -1269,6 +1335,11 @@ async def virtual_model_proxy(
         # any chunks that legitimately do not carry a `model` field (e.g. Anthropic
         # `content_block_*` / `message_delta` / `message_stop` / `ping` events).
         restored_model_id = f"{modified_model_ref.workspace}/{modified_model_ref.name}"
+        if observer is not None:
+            if isinstance(proxy_response_result, dict):
+                observer.observe(proxy_response_result)
+            else:
+                proxy_response_result = observer.observe_stream(proxy_response_result)
         if isinstance(proxy_response_result, dict):
             _rewrite_model_field(proxy_response_result, resolved_served_model_name, restored_model_id)
         else:
@@ -1310,6 +1381,8 @@ async def virtual_model_proxy(
         response_with_annotations.headers,
         named_events=_uses_named_sse_events(trailing_uri),
     )
+    if observer is not None:
+        final_response.body_iterator = observer.follow_body(final_response.body_iterator, response_status)
 
     # Post-response middleware (fire-and-forget, non-streaming only).
     post_response_middleware_calls = registry.post_response_middleware_calls.get((workspace, vm_name), [])

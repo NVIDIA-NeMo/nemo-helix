@@ -204,6 +204,7 @@ inference-gateway-service = [
   "nhx-common",
   "nemo-helix-plugin",
   "aiohttp[speedups]>=3.14.1",
+  "opentelemetry-proto>=1.38.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.

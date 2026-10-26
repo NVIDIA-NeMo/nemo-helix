@@ -16,12 +16,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from nemo_helix_plugin.call_leases.types import CallLease, CreateCallLeaseRequest, EndCallLeaseRequest
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.entities.values import DatetimeFilter, Filter, StringFilter
 from nhx.common.service.dependencies import get_entity_client
+from nhx.core.inference_gateway.api.call_recording import global_call_recorder
+from nhx.core.inference_gateway.api.lease_cache import global_lease_cache
+from nhx.core.inference_gateway.api.trial_spans import trial_root_span
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
@@ -66,16 +70,17 @@ async def create_call_lease(
     """Lease a sandbox's address to its trial. Repeating an identical create returns the existing lease."""
     lease = CallLease(workspace=workspace, **body.model_dump())
     try:
-        return await entity_client.create(lease)
+        created = await entity_client.create(lease)
     except EntityConflictError:
-        existing = await entity_client.get(CallLease, name=body.name, workspace=workspace)
-        if existing.model_dump(include=_LEASE_FIELDS) != lease.model_dump(include=_LEASE_FIELDS):
+        created = await entity_client.get(CallLease, name=body.name, workspace=workspace)
+        if created.model_dump(include=_LEASE_FIELDS) != lease.model_dump(include=_LEASE_FIELDS):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"A different call lease '{body.name}' already exists in workspace '{workspace}'.",
             ) from None
         response.status_code = status.HTTP_200_OK
-        return existing
+    global_lease_cache().put(created)
+    return created
 
 
 @router.patch(
@@ -111,11 +116,36 @@ async def end_call_lease(
             detail=f"ended_at {body.ended_at.isoformat()} is before the lease started at {lease.started_at.isoformat()}.",
         )
     try:
-        return await entity_client.update(lease.model_copy(update={"ended_at": body.ended_at}))
+        ended = await entity_client.update(lease.model_copy(update={"ended_at": body.ended_at}))
     except EntityConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from exc
+    global_lease_cache().put(ended)
+    await _record_trial_root(workspace, ended, entity_client)
+    return ended
+
+
+async def _record_trial_root(workspace: str, ended: CallLease, entity_client: EntityClient) -> None:
+    """Record the trial's root span, spanning every one of its sandboxes' leases ended so far."""
+    recorder = global_call_recorder()
+    if recorder is None:
+        return
+    try:
+        trial = await entity_client.list(
+            CallLease,
+            workspace=workspace,
+            page_size=100,
+            filter_operation=ComparisonOperation(
+                operator=FilterOperator.EQ, field="data.session_id", value=ended.session_id
+            ),
+        )
+        root = trial_root_span({lease.name: lease for lease in [*trial.data, ended]}.values())
+    except Exception:
+        logger.warning("Could not build the root span of trial %s", ended.session_id, exc_info=True)
+        return
+    if root is not None:
+        recorder.record(workspace, root)
 
 
 @router.get(
