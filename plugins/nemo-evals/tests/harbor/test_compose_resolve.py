@@ -105,14 +105,14 @@ def _error(tmp_path: Path, compose: str, **kwargs: Any) -> ComposeError:
 )
 def test_interpolation_follows_compose(text: str, expected: str) -> None:
     problems = ComposeProblems()
-    assert Interpolator({"A": "one", "EMPTY": ""}, problems).string(text, "x") == expected
+    assert Interpolator({"A": "one", "EMPTY": ""}, problems).interpolate_string(text, "x") == expected
     problems.raise_if_any("compose.yaml")
 
 
 @pytest.mark.parametrize("text", ["${NOPE:?set NOPE}", "${EMPTY:?set EMPTY}", "${NOPE?set NOPE}"])
 def test_a_required_variable_that_is_missing_is_invalid(text: str) -> None:
     problems = ComposeProblems()
-    Interpolator({"EMPTY": ""}, problems).string(text, "services.a.environment.X")
+    Interpolator({"EMPTY": ""}, problems).interpolate_string(text, "services.a.environment.X")
 
     with pytest.raises(ComposeError) as caught:
         problems.raise_if_any("compose.yaml")
@@ -120,6 +120,47 @@ def test_a_required_variable_that_is_missing_is_invalid(text: str) -> None:
     assert caught.value.code == "compose_invalid"
     assert "services.a.environment.X:" in caught.value.detail
     assert "is required: set" in caught.value.detail
+
+
+def _interpolation_error(text: str) -> ComposeError:
+    """The error interpolating ``text`` at ``services.a.image``, with no variables set, records."""
+    problems = ComposeProblems()
+    Interpolator({}, problems).interpolate_string(text, "services.a.image")
+    with pytest.raises(ComposeError) as caught:
+        problems.raise_if_any("compose.yaml")
+    return caught.value
+
+
+@pytest.mark.parametrize("text", ["${A:=x}", "${A/a/b}", "a${A", "${}"])
+def test_a_reference_compose_cannot_read_is_invalid(text: str) -> None:
+    error = _interpolation_error(text)
+
+    assert error.code == "compose_invalid"
+    assert "services.a.image: invalid interpolation format" in error.detail
+
+
+def test_a_run_of_unclosed_references_is_invalid_without_rescanning_it() -> None:
+    # Each `${` used to rescan the rest of the string for its `}`, so this took minutes.
+    assert _interpolation_error("${" * 100_000).code == "compose_invalid"
+
+
+def _nested_fallbacks(levels: int) -> str:
+    """A reference whose fallback is another reference, ``levels`` deep, that falls back to ``x``."""
+    return "${A:-" * levels + "x" + "}" * levels
+
+
+def test_references_nested_up_to_the_cap_expand() -> None:
+    problems = ComposeProblems()
+    assert Interpolator({}, problems).interpolate_string(_nested_fallbacks(32), "services.a.image") == "x"
+    problems.raise_if_any("compose.yaml")
+
+
+@pytest.mark.parametrize("levels", [33, 500])
+def test_references_nested_past_the_cap_are_invalid(levels: int) -> None:
+    error = _interpolation_error(_nested_fallbacks(levels))
+
+    assert error.code == "compose_invalid"
+    assert "services.a.image: references nest more than 32 deep" in error.detail
 
 
 def test_an_invalid_value_does_not_hide_unsupported_features() -> None:
@@ -176,6 +217,29 @@ def test_task_toml_env_and_harbor_infra_variables_interpolate(tmp_path: Path) ->
     assert resolved.services["db"]["image"] == "postgres:17"
     assert resolved.services["db"]["environment"] == {"PASSWORD": "from-task"}
     assert resolved.main["environment"] == {"DB_HOST": "db", "CPUS": "2", "MEM": "4096M"}
+
+
+def test_task_toml_templates_take_their_default_as_harbor_fills_them_in(tmp_path: Path) -> None:
+    # Harbor fills in a value that is all one `${...}` and passes any other value through as written.
+    resolved = _resolved(
+        tmp_path,
+        "services:\n  db:\n    image: x:${TAG}\n    environment: {NOTE: '${NOTE}'}\n",
+        task_toml='[environment]\nenv = { TAG = "${UNSET:-v1}", NOTE = "x-${A}" }\n',
+    )
+
+    assert resolved.services["db"]["image"] == "x:v1"
+    assert resolved.services["db"]["environment"] == {"NOTE": "x-${A}"}
+
+
+def test_a_task_toml_variable_harbor_reads_from_the_host_is_unsupported_where_used(tmp_path: Path) -> None:
+    task_toml = '[environment]\nenv = { TAG = "${HOST_TAG}", TOKEN = "${HOST_TOKEN}" }\n'
+
+    error = _error(tmp_path / "used", "services:\n  db:\n    image: x:${TAG}\n", task_toml=task_toml)
+    unused = _resolved(tmp_path / "unused", "services:\n  db:\n    image: x\n", task_toml=task_toml)
+
+    assert error.code == "compose_unsupported"
+    assert error.paths == ("services.db.image: task.toml sets TAG from the host's HOST_TAG",)
+    assert unused.services["db"]["image"] == "x"
 
 
 REGISTRY_COMPOSE = "services:\n  cache:\n    image: ${REGISTRY:-docker.io}/library/redis:7\n"
@@ -238,6 +302,30 @@ def test_a_dotenv_value_quoted_across_lines_is_refused(tmp_path: Path) -> None:
 
     with pytest.raises(ComposeError, match="multi-line"):
         _resolve(task)
+
+
+def test_dotenv_values_refer_to_earlier_lines_and_task_toml_as_compose_reads_them(tmp_path: Path) -> None:
+    resolved = _resolved(
+        tmp_path,
+        "services:\n  db:\n    image: ${IMAGE}\n",
+        task_toml='[environment]\nenv = { TAG = "7" }\n',
+        files={".env": "REGISTRY=mirror\nIMAGE=${REGISTRY}/redis:$TAG\n"},
+    )
+    assert resolved.services["db"]["image"] == "mirror/redis:7"
+
+
+def test_value_less_environment_entries_are_kept_to_be_looked_up(tmp_path: Path) -> None:
+    resolved = _resolved(
+        tmp_path,
+        "services:\n  db:\n    image: x\n    environment: {TOKEN: , A: null}\n  cache:\n    image: x\n"
+        "    environment: [TOKEN]\n",
+        files={".env": "TOKEN=from-dotenv\n"},
+    )
+
+    assert resolved.services["db"]["environment"] == {"TOKEN": None, "A": None}
+    assert resolved.services["cache"]["environment"] == {"TOKEN": None}
+    assert resolved.interpolator.variable_value("TOKEN", "services.db.environment.TOKEN") == "from-dotenv"
+    assert resolved.interpolator.variable_value("A", "services.db.environment.A") is None
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -316,10 +404,10 @@ def test_harbors_base_files_set_only_what_the_merge_is_checked_against(base_path
 # env_file
 
 
-def _env_files(task: Path, value: Any) -> dict[str, str]:
-    """Read a service's ``env_file`` value from the task, raising everything recorded as one error."""
+def _env_files(task: Path, value: Any, project: dict[str, str] | None = None) -> dict[str, str]:
+    """Read a service's ``env_file`` value from the task, with these project variables, raising everything recorded."""
     problems = ComposeProblems()
-    variables = read_env_files(value, "services.a.env_file", task, problems)
+    variables = read_env_files(value, "services.a.env_file", task, Interpolator(project or {}, problems), problems)
     problems.raise_if_any("demo/environment/docker-compose.yaml")
     return variables
 
@@ -372,6 +460,59 @@ def test_an_env_file_that_is_a_symlink_is_refused(tmp_path: Path) -> None:
         _env_files(task, "data.env")
 
 
+def test_an_env_file_under_a_symlinked_folder_is_refused(tmp_path: Path) -> None:
+    task = _task(tmp_path, None)
+    (task / "tests").mkdir()
+    (task / "tests" / "answers.env").write_text("ANSWER=42\n", encoding="utf-8")
+    (task / "environment" / "sub").symlink_to("../tests")
+
+    with pytest.raises(ComposeError, match="sub/answers.env is a symlink or sits under one"):
+        _env_files(task, "sub/answers.env")
+
+
+def test_env_file_values_are_read_as_compose_reads_them(tmp_path: Path) -> None:
+    # Each expected value is what `docker compose config` gives for the same line.
+    lines = [
+        "A=${PROJ}",
+        "B=$PROJ",
+        "C=${LOCAL}",
+        "LOCAL=late",
+        "D=${LOCAL}",
+        "G=${MISSING:-dflt}",
+        'NL="a\\nb"',
+        'E="tab\\there \\$ x"',
+        'JSON="{\\"ok\\":true}"',
+        "F=unq\\nesc",
+        "SQ='a\\nb $PROJ'",
+    ]
+    task = _task(tmp_path, None, files={"a.env": "\n".join(lines) + "\n"})
+
+    assert _env_files(task, "a.env", project={"PROJ": "bob"}) == {
+        "A": "bob",
+        "B": "bob",
+        "C": "",
+        "LOCAL": "late",
+        "D": "late",
+        "G": "dflt",
+        "NL": "a\nb",
+        "E": "tab\there $ x",
+        "JSON": '{"ok":true}',
+        "F": "unq\\nesc",
+        "SQ": "a\\nb $PROJ",
+    }
+
+
+@pytest.mark.parametrize("entry", [{"path": "a.env", "format": "raw"}, {"path": "a.env", "colour": "blue"}])
+def test_an_env_file_key_other_than_path_and_required_is_unsupported(tmp_path: Path, entry: dict[str, str]) -> None:
+    task = _task(tmp_path, None, files={"a.env": 'V="quoted"\n'})
+
+    with pytest.raises(ComposeError) as caught:
+        _env_files(task, [entry])
+
+    assert caught.value.code == "compose_unsupported"
+    assert caught.value.paths == (f"services.a.env_file[0].{next(key for key in entry if key != 'path')}",)
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Hostile and malformed input
 
@@ -408,6 +549,76 @@ def test_yaml_aliases_that_expand_without_bound_are_refused(tmp_path: Path) -> N
 
     assert error.code == "compose_invalid"
     assert "expands to more than" in error.detail
+
+
+def test_yaml_merge_keys_that_expand_without_bound_are_refused(tmp_path: Path) -> None:
+    # Each level merges the level below it twice. The merged mappings stay one key wide, so only a count taken before
+    # PyYAML builds them sees the doubling: 30 levels in under 1 KB would otherwise take minutes and gigabytes.
+    levels = ["x-0: &a0 {k: v}"]
+    levels += [f"x-{level}: &a{level} {{<<: [*a{level - 1}, *a{level - 1}]}}" for level in range(1, 31)]
+    compose = "services:\n  db:\n    image: redis\n" + "".join(f"{level}\n" for level in levels)
+
+    error = _error(tmp_path, compose)
+
+    assert error.code == "compose_invalid"
+    assert "expands to more than" in error.detail
+
+
+def test_a_merge_key_and_the_keys_beside_it_load_as_compose_reads_them(tmp_path: Path) -> None:
+    compose = """\
+        x-common: &common {image: redis, restart: always}
+        services:
+          db:
+            <<: *common
+            image: postgres
+        """
+
+    db = _resolved(tmp_path, compose).services["db"]
+
+    assert db["image"] == "postgres"
+    assert db["restart"] == "always"
+
+
+def test_values_are_read_by_yaml_1_2_rules_as_compose_reads_them(tmp_path: Path) -> None:
+    # PyYAML's YAML 1.1 rules read `on` / `no` as booleans and `22:22` / `1:30` as base-60 numbers; Compose doesn't.
+    compose = (
+        "services:\n  db:\n    image: x\n    ports: [22:22]\n"
+        "    environment: {A: on, B: no, C: yes, D: off, E: 1:30, F: true}\n"
+    )
+
+    db = _resolved(tmp_path, compose).services["db"]
+
+    assert db["ports"] == ["22:22"]
+    assert db["environment"] == {"A": "on", "B": "no", "C": "yes", "D": "off", "E": "1:30", "F": "true"}
+
+
+def test_a_key_written_twice_in_one_mapping_is_refused(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  db:\n    image: x\n    image: y\n")
+
+    assert error.code == "compose_invalid"
+    assert "found duplicate key 'image'" in error.detail
+
+
+def test_a_list_as_a_key_is_invalid(tmp_path: Path) -> None:
+    assert _error(tmp_path, "services:\n  db:\n    image: x\n? [a, b]\n: 1\n").code == "compose_invalid"
+
+
+def test_a_symlinked_compose_file_is_refused(tmp_path: Path) -> None:
+    task = _task(tmp_path, None)
+    (task / "elsewhere.yaml").write_text("services:\n  db:\n    image: x\n", encoding="utf-8")
+    (task / "environment" / "docker-compose.yaml").symlink_to("../elsewhere.yaml")
+
+    with pytest.raises(ComposeError, match="the compose file is a symlink"):
+        _resolve(task)
+
+
+def test_a_symlinked_task_toml_is_refused(tmp_path: Path) -> None:
+    task = _task(tmp_path, "services:\n  db:\n    image: x\n")
+    (task / "real.toml").write_text("[environment]\n", encoding="utf-8")
+    (task / "task.toml").symlink_to("real.toml")
+
+    with pytest.raises(ComposeError, match="task.toml is a symlink"):
+        _resolve(task)
 
 
 def test_a_file_nested_too_deeply_is_refused(tmp_path: Path) -> None:

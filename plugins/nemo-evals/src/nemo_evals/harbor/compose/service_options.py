@@ -24,11 +24,13 @@ def _scalar(value: Any) -> str | None:
     return None
 
 
-def parse_environment(value: Any, path: str, problems: ComposeProblems) -> dict[str, str]:
+def parse_environment(value: Any, path: str, problems: ComposeProblems) -> dict[str, str | None]:
     """Read ``environment`` (or a build's ``args``) as ``{name: value}`` from either of compose's forms.
 
-    ``{A: 1}`` and ``["A=1"]`` both give ``{"A": "1"}``. A name with no value, such as ``["A"]``, is left out:
-    Compose copies it from the host's environment, and on a host that doesn't define it, the container doesn't get it.
+    ``{A: 1}`` and ``["A=1"]`` both give ``{"A": "1"}``. A name with no value, such as ``["A"]`` or ``{A: null}``,
+    gives ``{"A": None}``: Compose looks it up in the variables it interpolates with (see
+    :meth:`Interpolator.variable_value`), and when none has it, the container doesn't get it, even if an ``env_file``
+    set it.
     """
     if value is None:
         return {}
@@ -50,10 +52,11 @@ def parse_environment(value: Any, path: str, problems: ComposeProblems) -> dict[
         problems.invalid(path, "expected a mapping or a list")
         return {}
 
-    environment: dict[str, str] = {}
+    environment: dict[str, str | None] = {}
     for name, entry_value in pairs:
-        # The sandbox has no host environment to copy a value-less name from, so it is unset, as on a clean host.
+        # Kept as None, so it's still looked up, and still overrides an `env_file`, once the service's files are read.
         if entry_value is None:
+            environment[name] = None
             continue
         text = _scalar(entry_value)
         if text is None:
