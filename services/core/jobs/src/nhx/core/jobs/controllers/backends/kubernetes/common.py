@@ -1320,6 +1320,19 @@ def reclaim_job_persistent_storage(
     labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
+    # Providers may use the same profile name with different PVCs. A cleanup of one
+    # PVC must not count as completion of another. Inspect the mounted claim rather
+    # than adding a selector label, so existing cleanup Jobs remain discoverable.
+    cleanup_jobs = [
+        cleanup_job
+        for cleanup_job in cleanup_jobs
+        if any(
+            volume.name == "job-storage"
+            and volume.persistent_volume_claim is not None
+            and volume.persistent_volume_claim.claim_name == pvc_name
+            for volume in cleanup_job.spec.template.spec.volumes or []
+        )
+    ]
     if not cleanup_jobs:
         cleanup_job_name, cleanup_job = _storage_cleanup_job(
             namespace=namespace,
