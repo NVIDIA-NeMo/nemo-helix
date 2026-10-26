@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { formatLogs, formatLogsForDisplay } from '@nemo/common/src/utils/logs';
 import { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
-
-import { formatLogs, formatLogsForDisplay } from './logs';
 
 const createLog = (message: string, timestamp: string): HelixJobLog => ({
   timestamp,
