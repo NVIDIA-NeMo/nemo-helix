@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { Add } from '@nemo/icons/icons';
 import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
@@ -21,7 +22,6 @@ import {
   LOADING_FILES_OPTION,
 } from '@studio/components/DatasetFileSelect/constants';
 import { MultiselectOption } from '@studio/constants/mutliselect';
-import { Plus } from 'lucide-react';
 import { FC, ReactNode, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -141,7 +141,7 @@ export const DatasetFileSelect: FC<Props> = ({
                         value="Other"
                       >
                         <Flex gap="density-md">
-                          <Plus /> Create New File
+                          <Add /> Create New File
                         </Flex>
                       </SelectItem>
                     )}

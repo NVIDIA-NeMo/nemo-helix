@@ -520,8 +520,10 @@ class _CreateCapturingSdk:
             stored = json.loads(self.body_json)
             job_resp = SimpleNamespace(
                 id="job-1",
+                attempt_id="attempt-1",
                 name=body.name or "job-1",
                 description=None,
+                project=None,
                 workspace=workspace,
                 created_at=None,
                 updated_at=None,

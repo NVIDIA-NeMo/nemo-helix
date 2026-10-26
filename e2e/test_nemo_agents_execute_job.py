@@ -205,7 +205,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(client: NemoClient, 
         content=b"This file proves the input workdir was staged.\n",
     )
 
-    agents_resource(client).create(
+    agents_resource(client).register(
         workspace=workspace,
         name=agent_name,
         config=_mock_backed_workspace_agent_config(agent_name, f"{workspace}/{model_name}"),
@@ -323,7 +323,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         content=b"This file proves the failed invocation still saves the input snapshot.\n",
     )
 
-    agents_resource(client).create(
+    agents_resource(client).register(
         workspace=workspace,
         name=agent_name,
         config=_mock_backed_workspace_agent_config(agent_name, f"{workspace}/{model_name}"),
@@ -420,7 +420,7 @@ def _register_mock_backed_agent(client: NemoClient, workspace: str, *, agent_nam
         },
         served_models={model_name: model_name},
     )
-    agents_resource(client).create(
+    agents_resource(client).register(
         workspace=workspace,
         name=agent_name,
         config=mock_backed_fabric_agent_config(agent_name, f"{workspace}/{model_name}"),

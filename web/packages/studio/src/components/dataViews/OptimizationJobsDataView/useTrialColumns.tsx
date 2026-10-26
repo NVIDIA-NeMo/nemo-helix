@@ -5,6 +5,7 @@ import type { StudioDataView } from '@nemo/common/src/components/DataView/Studio
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
 import { EM_DASH } from '@nemo/common/src/constants';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
+import { Cancel, CheckCircle, CloseCircle, Refresh } from '@nemo/icons/icons';
 import { Badge, Button, Text } from '@nvidia/foundations-react-core';
 import {
   formatParamValue,
@@ -13,7 +14,6 @@ import {
   paramValue,
 } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
 import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
-import { Ban, CircleCheck, CircleX, RefreshCw } from 'lucide-react';
 import { type ComponentProps, useCallback } from 'react';
 
 const formatMetric = (value: number | null): string => {
@@ -33,11 +33,11 @@ const formatState = (state: string): string =>
  * Optuna's `TrialState` names, mapped onto the shared badge vocabulary.
  */
 const TRIAL_STATUS_CONFIG: Record<string, StatusConfigEntry> = {
-  COMPLETE: { label: 'Complete', color: 'green', icon: CircleCheck },
-  FAIL: { label: 'Failed', color: 'red', icon: CircleX },
-  PRUNED: { label: 'Pruned', color: 'yellow', icon: Ban },
-  RUNNING: { label: 'Running', color: 'blue', icon: RefreshCw },
-  WAITING: { label: 'Waiting', color: 'gray', icon: RefreshCw },
+  COMPLETE: { label: 'Complete', color: 'green', icon: CheckCircle },
+  FAIL: { label: 'Failed', color: 'red', icon: CloseCircle },
+  PRUNED: { label: 'Pruned', color: 'yellow', icon: Cancel },
+  RUNNING: { label: 'Running', color: 'blue', icon: Refresh },
+  WAITING: { label: 'Waiting', color: 'gray', icon: Refresh },
 };
 
 type MakeTrialColumns = NonNullable<ComponentProps<typeof StudioDataView<Trial>>['makeColumns']>;

@@ -312,6 +312,12 @@ class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
         default_factory=dict, description="Pod security context for the Kubernetes job pods."
     )
 
+    step_network_policies_enabled: bool = Field(
+        default=False,
+        description="Create an ingress NetworkPolicy for each step that declares `network`. Requires a "
+        "NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies.",
+    )
+
     # Image pull secrets
     image_pull_secrets: list[ImagePullSecret] = Field(
         default_factory=list, description="Image pull secrets for the Kubernetes job pods."
@@ -548,8 +554,9 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
     policy_path: str | None = Field(
         default=None,
         description=(
-            "Path to a hand-written OpenShell SandboxPolicy YAML applied to created sandboxes. When unset, "
-            "a default-deny policy is generated from platform_egress plus the sandbox filesystem defaults."
+            "Path to a hand-written OpenShell SandboxPolicy YAML layered over the generated default-deny "
+            "policy. Mappings merge recursively, lists and scalars replace, and null keeps the generated "
+            "value."
         ),
     )
     image: str | None = Field(
@@ -564,7 +571,7 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
         description=(
             "Entrypoint for job steps that do not declare one. The OpenShell supervisor ignores "
             "the image ENTRYPOINT, so the sandbox command must name the binary explicitly. "
-            "When unset, defaults to the nhx-tasks entrypoint (/app/.venv/bin/nemo-helix)."
+            "When unset, defaults to `nemo-helix`, resolved on the PATH from the image ENV."
         ),
     )
     egress_proxy: str | None = Field(

@@ -6,6 +6,7 @@ import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTim
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
+import { ShapeCircle } from '@nemo/icons/icons';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import {
   Flex,
@@ -43,7 +44,6 @@ import {
 } from '@studio/util/customizations';
 import { resolveCustomizationTransfer } from '@studio/util/customizationTransfer';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { Dot } from 'lucide-react';
 import { type FC, Fragment, useState } from 'react';
 
 export const CustomizationJobDetailsRoute: FC = () => {
@@ -61,7 +61,7 @@ export const CustomizationJobDetailsRoute: FC = () => {
         slotLabel: 'Customizations',
       },
       {
-        slotLabel: job?.id || '',
+        slotLabel: job?.name || customizationJobName,
       },
     ],
   });
@@ -112,7 +112,7 @@ export const CustomizationJobDetailsRoute: FC = () => {
                 <Flex align="center" gap="1">
                   {metadata.map((segment, index) => (
                     <Fragment key={segment}>
-                      {index > 0 && <Dot className="size-2" aria-hidden />}
+                      {index > 0 && <ShapeCircle className="size-2" aria-hidden />}
                       <Text kind="body/regular/sm" className="text-secondary">
                         {segment}
                       </Text>

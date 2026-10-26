@@ -5,12 +5,14 @@
 
 import asyncio
 import threading
+from collections.abc import Mapping
 
 import httpx
 import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import Runtime
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient, WorkspacesClient
 from nhx.common.auth import Principal
@@ -158,6 +160,15 @@ def test_create_test_client_auth_defaults_use_platform_base_url():
         platform_base_url = Configuration.get_platform_config().base_url
         assert platform_base_url == "http://127.0.0.1"
         assert Configuration.get_service_config(AuthConfig).policy_decision_point_base_url == platform_base_url
+
+
+def test_create_test_client_uses_docker_runtime_without_probing_docker(monkeypatch, mocker):
+    """Test that the default platform config keeps the docker runtime without pinging the daemon."""
+    monkeypatch.delenv("NHX_RUNTIME", raising=False)
+    probe = mocker.patch("nemo_helix_plugin.capabilities._probe_docker_uncached")
+    with create_test_client(EntitiesService, client_type=ClientContext):
+        assert Configuration.get_platform_config().runtime == Runtime.DOCKER
+    probe.assert_not_called()
 
 
 def test_create_test_client_creates_default_workspace():
@@ -530,3 +541,45 @@ def test_request_scoped_nemo_client_overrides_carry_request_headers():
         assert headers["X-NHX-Principal-Id"] == "user@example.com"
         assert headers["traceparent"] == "00-trace-span-01"
     assert "X-NHX-Principal-Id" not in base_async.default_headers
+
+
+class _ScriptedPostClient:
+    def __init__(self, status_codes: list[int]) -> None:
+        self.status_codes = list(status_codes)
+        self.calls = 0
+
+    def post(self, url: str, *, json: Mapping[str, str], headers: Mapping[str, str]) -> httpx.Response:
+        self.calls += 1
+        self.last = (url, json, headers)
+        return httpx.Response(self.status_codes.pop(0), text="denied")
+
+
+def test_post_after_auth_warmup_retries_the_first_forbidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.testing.client import _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    client = _ScriptedPostClient([403, 201])
+
+    _post_after_auth_warmup(
+        client,
+        "/apis/entities/v2/workspaces",
+        json={"name": "destination"},
+        headers={"X-NHX-Principal-Id": "user@example.com"},
+    )
+
+    assert client.calls == 2
+
+
+def test_post_after_auth_warmup_raises_when_the_denial_is_not_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nhx.testing.client import _post_after_auth_warmup
+
+    monkeypatch.setattr("nhx.testing.client.time.sleep", lambda _seconds: None)
+    client = _ScriptedPostClient([422])
+
+    with pytest.raises(RuntimeError, match="422"):
+        _post_after_auth_warmup(
+            client,
+            "/apis/entities/v2/workspaces",
+            json={"name": "destination"},
+            headers={"X-NHX-Principal-Id": "user@example.com"},
+        )

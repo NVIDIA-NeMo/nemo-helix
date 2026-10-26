@@ -39,6 +39,7 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
     ModelTarget,
     RegisteredAgentSource,
@@ -512,6 +513,36 @@ def test_agent_eval_job_passes_async_client_to_publication(tmp_path: Path, mocke
     assert intake.default_headers == _SDK_IDENTITY_HEADERS
 
 
+def test_agent_eval_job_records_the_publish_outcome_in_status_details(tmp_path: Path, mocker: MockerFixture) -> None:
+    """The job's output isn't persisted, so `runs status` reads the publish outcome from status details."""
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch("nemo_evals.jobs.agent_evaluate.persist_agent_eval_result")
+    mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=HelixJobStatus.ERROR, evaluation_id="eval-a", error="intake 503"),
+    )
+    report = mocker.patch("nemo_evals.jobs.agent_evaluate.report_status_details")
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target("openai/gpt-5.4"),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+
+    AgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity())
+
+    (call,) = report.call_args_list
+    assert call.args[0] == {
+        "publication": {
+            "status": "error",
+            "evaluation_id": "eval-a",
+            "trial_count": 0,
+            "evaluator_result_count": 0,
+            "skipped": [],
+            "error": "intake 503",
+        }
+    }
+
+
 def test_agent_eval_job_reports_the_run_outcome_on_success(tmp_path: Path, mocker: MockerFixture) -> None:
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     report = mocker.patch("nemo_evals.jobs.agent_evaluate.report_run_outcome")
@@ -600,7 +631,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     ctx = _job_context(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
-        source=HarborBuiltinAgentSource(name="oracle", model_name="openai/gpt-5.4"),
+        source=HarborBuiltinAgentSource(name="oracle", model=HarborModelName(name="openai/gpt-5.4")),
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         env_vars={"FABRIC_LOG": "debug"},

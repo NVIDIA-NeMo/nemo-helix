@@ -3,11 +3,11 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
+import { Trash } from '@nemo/icons/icons';
 import { useEvalsDeleteEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import { Button, Flex, Modal } from '@nvidia/foundations-react-core';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { Trash } from 'lucide-react';
 import { FC, useState } from 'react';
 
 interface EvaluationJobBulkDeleteModalProps {

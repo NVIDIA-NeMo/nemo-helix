@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconError } from '@nemo/icons/icons';
 import type { Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
 import { Spinner, Stack, StatusMessage } from '@nvidia/foundations-react-core';
 import { mergeSpanDetails } from '@studio/components/IntakeDetail/IntakeComponents/spanKeyValues';
 import { SpanMetadataAccordions } from '@studio/components/IntakeDetail/SpanMetadataAccordions';
-import { CircleAlert } from 'lucide-react';
 import { type FC, useMemo } from 'react';
 
 interface TraceSpanAccordionContentProps {
@@ -54,7 +54,7 @@ export const TraceSpanAccordionContent: FC<TraceSpanAccordionContentProps> = ({
     return (
       <StatusMessage
         size="small"
-        slotMedia={<CircleAlert width={40} height={40} />}
+        slotMedia={<IconError width={40} height={40} />}
         slotHeading="Error loading span"
         slotSubheading={error.message}
       />

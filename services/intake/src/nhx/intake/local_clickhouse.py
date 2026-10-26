@@ -62,7 +62,10 @@ _DATA_IDENTITY_FILE = ".nhx-clickhouse-identity"
 _DATA_INSTANCE_FILE_PREFIX = f"{_DATA_IDENTITY_FILE}-"
 _READINESS_TIMEOUT_SECONDS = 60.0
 _READINESS_POLL_SECONDS = 0.5
-_CLICKHOUSE_HTTP_LOGGER_NAME = "clickhouse_connect.driver.httpclient"
+_CLICKHOUSE_HTTP_LOGGER_NAMES = (
+    "clickhouse_connect.driver.httpclient",
+    "clickhouse_connect.driver._backend.http_sync",
+)
 _TRANSIENT_HTTP_WARNING = "Unexpected Http Driver Exception"
 _DOCKER_UNAVAILABLE_GUIDANCE = (
     "Docker daemon is unavailable. Start Docker Desktop on macOS/Windows or the Docker service on Linux, "
@@ -667,9 +670,10 @@ def _container_http_url(container: Container) -> str:
 def _wait_until_ready(settings: ClickHouseSettings) -> None:
     deadline = monotonic() + _READINESS_TIMEOUT_SECONDS
     last_error: Exception | None = None
-    driver_logger = logging.getLogger(_CLICKHOUSE_HTTP_LOGGER_NAME)
     transient_warning_filter = _TransientClickHouseStartupFilter()
-    driver_logger.addFilter(transient_warning_filter)
+    driver_loggers = [logging.getLogger(name) for name in _CLICKHOUSE_HTTP_LOGGER_NAMES]
+    for dl in driver_loggers:
+        dl.addFilter(transient_warning_filter)
     try:
         while monotonic() < deadline:
             try:
@@ -679,7 +683,8 @@ def _wait_until_ready(settings: ClickHouseSettings) -> None:
                 last_error = exc
                 sleep(_READINESS_POLL_SECONDS)
     finally:
-        driver_logger.removeFilter(transient_warning_filter)
+        for dl in driver_loggers:
+            dl.removeFilter(transient_warning_filter)
     raise LocalClickHouseProvisioningError(
         f"ClickHouse at {settings.url} did not become ready within {_READINESS_TIMEOUT_SECONDS:g} seconds"
     ) from last_error

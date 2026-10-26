@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-testing
-description: Tests NeMo Helix plugin surfaces without a running platform. Use when writing tests for entity CRUD routes, mocking the entity client, testing NemoJob run() methods, setting up config overrides, or verifying FastAPI route error handling. Trigger keywords: test, pytest, mock entity client, TestClient, dependency_overrides, AsyncMock, test job, test config, test service, test controller.
+description: 'Tests NeMo Helix plugin surfaces without a running platform. Use when writing tests for entity CRUD routes, mocking the entity client, testing NemoJob run() methods, setting up config overrides, or verifying FastAPI route error handling. Trigger keywords: test, pytest, mock entity client, TestClient, dependency_overrides, AsyncMock, test job, test config, test service, test controller.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Testing NeMo Helix Plugins

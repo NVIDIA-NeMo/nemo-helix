@@ -97,6 +97,9 @@ PROXY_OPENAPI_EXTRA: dict = {
     },
 }
 
+_NAMED_EVENT_STREAM_PATH = re.compile(r"(?:^|/)(?:messages|responses(?:/[^/]+)?)/?$")
+_SSE_EVENT_NAME = re.compile(r"[A-Za-z0-9_.-]+")
+
 REQUEST_HEADERS_TO_DROP = frozenset(
     {
         "host",  # upstream shouldn't see the host header of our server
@@ -919,10 +922,16 @@ def _build_inference_response_with_annotations(inference_response: InferenceResp
     )
 
 
+def _uses_named_sse_events(trailing_uri: str) -> bool:
+    return _NAMED_EVENT_STREAM_PATH.search(trailing_uri) is not None
+
+
 async def stream_response_result(
     response_result: Any,
     status_code: int,
     headers: CIMultiDict[str] | dict,
+    *,
+    named_events: bool,
 ) -> StreamingResponse:
     """Convert a response result or envelope back into a :class:`StreamingResponse`.
 
@@ -930,7 +939,9 @@ async def stream_response_result(
     - Pydantic model → dumped as JSON and streamed as a single JSON body.
     - ``AsyncIterator`` → re-encoded as SSE (``data: {...}\\n\\n`` per chunk,
       terminated with ``data: [DONE]\\n\\n``). Pydantic chunks are dumped with
-      ``mode="json"`` before serialization.
+      ``mode="json"`` before serialization. With *named_events* (Anthropic Messages,
+      OpenAI Responses), a chunk whose ``type`` is a plain event name is preceded by
+      ``event: <type>``, and no ``[DONE]`` sentinel is sent.
 
     Body-framing headers (``content-length``, ``content-encoding``,
     ``transfer-encoding``, ``content-type``) are stripped from *headers* and
@@ -956,8 +967,16 @@ async def stream_response_result(
         # AsyncIterator — re-encode as SSE
         async def _sse_gen():
             async for chunk in response_payload:
-                yield f"data: {json.dumps(_json_ready_payload(chunk))}\n\n".encode()
-            yield b"data: [DONE]\n\n"
+                payload = _json_ready_payload(chunk)
+                event_type = payload.get("type") if named_events and isinstance(payload, dict) else None
+                event_line = (
+                    f"event: {event_type}\n"
+                    if isinstance(event_type, str) and _SSE_EVENT_NAME.fullmatch(event_type)
+                    else ""
+                )
+                yield f"{event_line}data: {json.dumps(payload)}\n\n".encode()
+            if not named_events:
+                yield b"data: [DONE]\n\n"
 
         return StreamingResponse(
             _sse_gen(),
@@ -1289,6 +1308,7 @@ async def virtual_model_proxy(
         response_with_annotations,
         response_status,
         response_with_annotations.headers,
+        named_events=_uses_named_sse_events(trailing_uri),
     )
 
     # Post-response middleware (fire-and-forget, non-streaming only).

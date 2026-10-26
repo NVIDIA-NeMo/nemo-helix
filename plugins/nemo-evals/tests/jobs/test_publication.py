@@ -30,6 +30,7 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
     ModelTarget,
     ResolvedTask,
@@ -149,7 +150,10 @@ def _publish(
     [
         (AgentTarget(agent=NemoAgentToolkitAgent(name="my-agent", url="http://agent")), ("my-agent", None)),
         (ModelTarget(model=Model(name="gpt-4o", url="http://model")), (None, "gpt-4o")),
-        (HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model_name="m")), ("oracle", "m")),
+        (
+            HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model=HarborModelName(name="m"))),
+            ("oracle", "m"),
+        ),
         (HarborRunnerTarget(source=HarborImportedAgentSource(import_path="pkg:Agent")), ("pkg:Agent", None)),
         (
             GymRunnerTarget(
@@ -286,6 +290,20 @@ def test_durations_are_stamped_without_dropping_existing_metadata(intake: InMemo
     assert metadata["eval_config_fileset"] == "fs-1"
     assert float(metadata[EVAL_DURATION_KEY]) > 0
     assert float(metadata[PUBLISH_DURATION_KEY]) >= 0
+
+
+def test_a_taskset_task_job_publishes_without_touching_the_shared_evaluation(intake: InMemoryIntakeService) -> None:
+    # A taskset run's task Jobs share one Evaluation; each stamping its own duration would race.
+    outcome = publish_agent_eval_result(
+        _result(),
+        spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", required=False),
+        target=None,
+        workspace="default",
+        intake=intake.client(),
+        record_durations=False,
+    )
+    assert outcome.status == HelixJobStatus.COMPLETED and outcome.trial_count == 1
+    assert intake.evaluation_patches == []
 
 
 def test_a_started_at_only_result_does_not_count_publish_time_as_run_time(intake: InMemoryIntakeService) -> None:

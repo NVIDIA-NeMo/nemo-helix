@@ -17,7 +17,7 @@ A customization job references a **Model Entity** that contains the base model c
 
 This design keeps adapters organized with their parent models and simplifies deployment workflows.
 
-Submission is backend-specific (you submit to the automodel or unsloth backend), but every job runs on the shared platform **Jobs** service. As a result, you poll status, list, and cancel jobs through that service the same way regardless of which backend you used.
+Submission is backend-specific (you submit to the automodel or unsloth backend), but every job runs on the shared platform **Jobs** service. As a result, you poll status, list, cancel, pause, resume, and rerun jobs through that service the same way regardless of which backend you used.
 
 ## Prerequisites
 
@@ -54,6 +54,11 @@ List all active customization jobs to find a job name for use with Get Status or
 <Card title="Cancel a Job" href="/documentation/customizer-reference/manage-customization-jobs/cancel-job">
 
 Cancel a customization job using its name and workspace.
+
+</Card>
+<Card title="Pause, Resume, and Rerun a Job" href="/documentation/customizer-reference/manage-customization-jobs/pause-resume-rerun">
+
+Pause a job and resume it later, or rerun a failed job from its last checkpoint.
 
 </Card>
 

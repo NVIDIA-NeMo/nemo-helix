@@ -74,7 +74,7 @@ Requires an interactive terminal (TTY). In non-interactive contexts
 
 Use --auto for non-interactive setup from environment variables
 (NEMO_DEFAULT_INFERENCE_KEY with optional NEMO_DEFAULT_INFERENCE_BASE_URL,
-NVIDIA_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
+OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY).
 Override the provider URL with --inference-base-url. Override the selected
 pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 
@@ -307,7 +307,7 @@ nemo auth access-keys create [OPTIONS]
 * `--service-account`: Bind the key to a non-human service account (HelixAdmin only).
 * `--scope`: Comma-separated service names to scope this key to, e.g. 'intake,entities'. Omit for an unscoped key.
 * `--rotate`: JTI of a previous Scoped Access Key owned by the caller to revoke once this key is created. Primarily for rotating personal keys, which have no service-account identity to correlate rotations against automatically.
-* `--workspace`: Grant the key's principal workspace membership, formatted '\<workspace>' or '\<workspace>:\<role1>,\<role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call.
+* `--workspace`: Grant the key's principal workspace membership, formatted '&lt;workspace>' or '&lt;workspace>:&lt;role1>,&lt;role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call.
 
 **Help:**
 
@@ -4128,11 +4128,13 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `list-execution-profiles`: Get all currently configured execution profiles.
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
+* `rerun`: Rerun a failed platform job from surviving storage.
 * `control`: Change mutable job behavior, such as how long a pause...
 * `get`: Get a platform job by name or ID.
-* `update-status-details`: Update the status details of a platform job.
+* `update`: Update a job description or the definition used by future...
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
+* `attempts`: Inspect job attempts
 * `results`: Manage results
 * `steps`: Manage steps
 * `tasks`: Manage tasks
@@ -4259,7 +4261,7 @@ nemo jobs get-logs [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
-* `--attempt-id <INTEGER>`: Filter logs by job attempt ID
+* `--attempt-id`: Filter logs by attempt ID or 'current'
 * `--limit <INTEGER>`: Maximum number of logs to return
 * `--page-cursor`: Page cursor
 * `--step-id`: Filter logs by step name
@@ -4425,6 +4427,32 @@ nemo jobs resume [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
+#### nemo jobs rerun
+
+Rerun a failed platform job from surviving storage.
+
+**Usage:**
+
+```shell
+nemo jobs rerun [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
 #### nemo jobs control
 
 Change mutable job behavior, such as how long a pause keeps storage.
@@ -4478,35 +4506,26 @@ nemo jobs get [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-#### nemo jobs update-status-details
+#### nemo jobs update
 
-Update the status details of a platform job.
-
-**Required fields:** body
-
-**Examples:**
-
-```shell
-nemo jobs update-status-details <name> --input-file config.json
-nemo jobs update-status-details <name> --input-data '`{"body": {}}`'
-echo '{"json": "data"}' | nemo jobs update-status-details <name> --input-file -
-nemo jobs update-status-details <name> --<option> "value"
-```
+Update a job description or the definition used by future attempts.
 
 **Usage:**
 
 ```shell
-nemo jobs update-status-details [OPTIONS] NAME
+nemo jobs update [OPTIONS] NAME
 ```
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
 * `--workspace`
-* `--body`: JSON string
+* `--description`
+* `--spec`: JSON string
+* `--platform-spec`: JSON string
 
 **Help:**
 
@@ -4538,7 +4557,7 @@ nemo jobs watch [OPTIONS] NAME
 **Options:**
 
 * `--workspace`: Workspace containing the job
-* `--attempt-id <INTEGER>`: Filter logs to an attempt ID
+* `--attempt-id`: Filter logs to an attempt ID or 'current'
 * `--step-id`: Filter logs to a step ID
 * `--task-id`: Filter logs to a task ID
 * `--limit <INTEGER RANGE>`: Maximum logs to fetch per page
@@ -4568,13 +4587,93 @@ nemo jobs tail [OPTIONS] NAME
 
 * `-n, --lines <INTEGER RANGE>`: Number of lines to show [default: 100]
 * `--workspace`: Workspace containing the job
-* `--attempt-id <INTEGER>`: Filter logs to an attempt ID
+* `--attempt-id`: Filter logs to an attempt ID or 'current'
 * `--step-id`: Filter logs to a step ID
 * `--task-id`: Filter logs to a task ID
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+#### nemo jobs attempts
+
+Inspect job attempts
+
+**Usage:**
+
+```shell
+nemo jobs attempts [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list`: List execution attempts for a job.
+* `get`: Get one execution attempt.
+
+##### nemo jobs attempts list
+
+List execution attempts for a job.
+
+**Usage:**
+
+```shell
+nemo jobs attempts list [OPTIONS] JOB
+```
+
+**Arguments:**
+
+* `<JOB>`: Job name or ID.
+
+**Options:**
+
+* `--workspace`
+* `--filter FILTER_JSON`
+* `--page <INTEGER RANGE>`
+* `--page-size <INTEGER RANGE>`
+* `--sort <CHOICE>`: [possible values: seq, -seq]
+* `--all-pages`: Fetch all pages
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+* `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+##### nemo jobs attempts get
+
+Get one execution attempt.
+
+**Usage:**
+
+```shell
+nemo jobs attempts get [OPTIONS] ATTEMPT
+```
+
+**Arguments:**
+
+* `<ATTEMPT>`: Attempt ID or 'current'.
+
+**Options:**
+
+* `--job`: Job name or ID (required).
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo jobs results
 
@@ -4595,19 +4694,19 @@ nemo jobs results [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new result for a job.
 * `download`: Download a job result file.
 * `list`: List results for a job.
-* `get`: Get a specific job result.
+* `get`: Get a result by its job-wide unique name.
 
 ##### nemo jobs results create
 
 Create a new result for a job.
 
-**Required fields:** job, artifact_storage_type, artifact_url
+**Required fields:** job, attempt_id, artifact_storage_type, artifact_url
 
 **Examples:**
 
 ```shell
 nemo jobs results create <name> --input-file config.json
-nemo jobs results create <name> --input-data '{"job": "value", "artifact_storage_type": "value", "artifact_url": "value"}'
+nemo jobs results create <name> --input-data '{"job": "value", "attempt_id": "value", "artifact_storage_type": "value", "artifact_url": "value"}'
 echo '{"json": "data"}' | nemo jobs results create <name> --input-file -
 nemo jobs results create <name> --<option> "value"
 ```
@@ -4626,6 +4725,7 @@ nemo jobs results create [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Producing attempt ID
 * `--artifact-storage-type <CHOICE>`: (required) [possible values: fileset]
 * `--artifact-url`: (required)
 
@@ -4683,6 +4783,7 @@ nemo jobs results list [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--attempt-id`: Attempt ID or 'current'
 * `--sort <CHOICE>`: The field to sort by. [possible values: created_at, -created_at, updated_at, -updated_at]
 
 **Help:**
@@ -4698,7 +4799,7 @@ nemo jobs results list [OPTIONS] NAME
 
 ##### nemo jobs results get
 
-Get a specific job result.
+Get a result by its job-wide unique name.
 
 **Usage:**
 
@@ -4712,8 +4813,8 @@ nemo jobs results get [OPTIONS] NAME
 
 **Options:**
 
+* `--job`: Job name or ID
 * `--workspace`
-* `--job`: (required)
 
 **Help:**
 
@@ -4760,6 +4861,7 @@ nemo jobs steps list [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--attempt-id`: Attempt ID or 'current'
 * `--page <INTEGER>`: Page number.
 * `--page-size <INTEGER>`: Page size.
 * `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at]
@@ -4804,6 +4906,7 @@ nemo jobs steps get [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 
 **Help:**
 
@@ -4842,6 +4945,7 @@ nemo jobs steps update-status [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--error-details`: Optional error details related to the status update. (JSON string)
 * `--status-details`: Optional status details related to the status update. (JSON string)
@@ -4908,6 +5012,7 @@ nemo jobs tasks create-or-update [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--step`: (required)
 * `--error-details`: JSON string
 * `--error-stack`
@@ -4945,6 +5050,7 @@ nemo jobs tasks list [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 
 **Help:**
 
@@ -4975,6 +5081,7 @@ nemo jobs tasks get [OPTIONS] NAME
 
 * `--workspace`
 * `--job`: (required)
+* `--attempt-id`: Attempt ID or 'current'
 * `--step`: (required)
 
 **Help:**
@@ -5799,7 +5906,7 @@ nemo workspaces list [OPTIONS]
 **Options:**
 
 * `--filter`: Query filter expression. Supports text and JSON syntaxes:
-- Text: name:"value" AND status>500 with operators : ~ > >= \< \<= IN NOT IN AND OR and negation prefix -
+- Text: name:"value" AND status>500 with operators : ~ > >= &lt; &lt;= IN NOT IN AND OR and negation prefix -
 - Object (JSON): `{"name":{"$like":"value"}}` with operators `$eq`, `$like`, `$lt`, `$lte`, `$gt`, `$gte`, `$in`, `$nin`, `$and`, `$or`, `$not`
 * `--page <INTEGER>`: Page number
 * `--page-size <INTEGER>`: Items per page
@@ -6116,7 +6223,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 *Agent Resources:*
 
-* `create`: Register an agent on the platform.
+* `register`: Register an agent on the platform.
 * `list`: List agents on the platform.
 * `get`: Get an agent by name.
 * `delete`: Delete an agent from the platform.
@@ -6165,7 +6272,7 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `list-strategies`: List installed strategies and what each one optimizes.
-* `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
+* `prepare-fileset`: Validate a Fabric optimize bundle and upload it to a...
 
 *Jobs:*
 
@@ -6204,7 +6311,7 @@ nemo agents optimize list-strategies [OPTIONS]
 
 ##### nemo agents optimize prepare-fileset
 
-Validate a NAT optimize bundle and upload it to a fileset for `optimize run-strategy`.
+Validate a Fabric optimize bundle and upload it to a fileset for `optimize run-strategy`.
 
 **Usage:**
 
@@ -6285,20 +6392,20 @@ nemo agents optimize run-strategy explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo agents create
+#### nemo agents register
 
 Register an agent on the platform.
 
 **Usage:**
 
 ```shell
-nemo agents create [OPTIONS]
+nemo agents register [OPTIONS]
 ```
 
 **Options:**
 
 * `--name, -n`: Agent name.
-* `--agent-config, -c <FILE>`: Path to an agent YAML config file.
+* `--agent-config, -c <FILE>`: Optional path to an agent YAML config file.
 * `--description`: [default: ]
 * `--workspace, -w`: Target workspace. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
@@ -6428,7 +6535,7 @@ nemo agents deploy [OPTIONS]
 Redeploy an agent from a new config, in one command.
 
 Wraps the four steps you would otherwise run by hand to push a changed
-agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
+agent config to a running agent: ``undeploy`` → ``delete`` → ``register``
 → ``deploy`` (the agent entity is immutable by name, so it must be torn
 down and rebuilt). The new config is validated before any teardown, so a
 bad config is a safe no-op; once teardown starts the operation is not
@@ -6446,7 +6553,7 @@ nemo agents redeploy [OPTIONS]
 
 * `--agent, -a`: Name of the deployed agent to rebuild.
 * `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
-* `--description`: Agent description (as on create). [default: ]
+* `--description`: Agent description (as on register). [default: ]
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
 * `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
 * `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.
@@ -6469,7 +6576,7 @@ Reads the log file written by the local in-memory runner backend.
 NAT subprocess deployments write process output there; Fabric-backed
 deployments write validation/preparation entries there. The log file
 location is the same convention the backend uses internally:
-``nhx_user_data_dir() / 'agents' / 'system' / \<deployment-name>.log``
+``nhx_user_data_dir() / 'agents' / 'system' / <deployment-name>.log``
 by default. This command is therefore only meaningful when the CLI runs
 on the same host as the platform — once a remote backend lands, log
 retrieval should move to a server-side endpoint.
@@ -7164,7 +7271,7 @@ nemo agents evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--agent AGENT_REF | URL`: Agent to evaluate against — either a platform-managed agent reference (e.g. 'calculator', 'workspace/calculator') or an HTTP(S) endpoint URL (e.g. 'http://localhost:8080').  Bare names resolve to the platform gateway URL '\{base_url}/apis/agents/v2/workspaces/\{workspace}/agents/\{name}/-'; URLs are passed through to 'nat eval --endpoint' verbatim.  When omitted, the eval config must include an inline agent workflow.
 * `--eval-config`: Path to the NAT evaluation YAML config file.
 * `--eval-config-fileset FILESET_REF`: Optional fileset reference (``name`` or ``workspace/name``).  When set, the runner downloads the fileset's contents into a tempdir and resolves ``eval_config`` relative to that dir.  Local CLI runs leave this ``None``.
-* `--output PATH | FILESET_REF`: Where to write eval outputs — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  Defaults to \<ctx.storage.persistent>/results (the platform-injected persistent volume) when not provided.
+* `--output PATH | FILESET_REF`: Where to write eval outputs — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  Defaults to &lt;ctx.storage.persistent>/results (the platform-injected persistent volume) when not provided.
 
 **Spec Source:**
 
@@ -7297,7 +7404,7 @@ nemo agents package-agent [OPTIONS] [COMMAND] [ARGS]...
 * `--agent-author`: OCI image authors label override.
 * `--skip-validation`: Bypass Fabric package validation before building.
 * `--registry`: Push the built image to this registry (e.g. 'nvcr.io/my-org'). The host executing the push must already be authenticated to it: the local machine for direct CLI invocation, or the platform's job-execution host for remote execution or the REST API. Credentials are never accepted over this API.
-* `--push-tag`: Fully-qualified remote tag. Defaults to '\<registry>/\<image>', where \<image> is the namespaced local reference 'nemo-agents/\{workspace}/\{tag}'. Requires 'registry'. Must start with '\<registry>/nemo-agents/\{workspace}/' — Docker tags are daemon-global while the auth boundary here is the workspace, so an unscoped push_tag would let this workspace overwrite another workspace's image, or redirect the push to a registry other than the one declared.
+* `--push-tag`: Fully-qualified remote tag. Defaults to '&lt;registry>/&lt;image>', where &lt;image> is the namespaced local reference 'nemo-agents/\{workspace}/\{tag}'. Requires 'registry'. Must start with '&lt;registry>/nemo-agents/\{workspace}/' — Docker tags are daemon-global while the auth boundary here is the workspace, so an unscoped push_tag would let this workspace overwrite another workspace's image, or redirect the push to a registry other than the one declared.
 
 **Spec Source:**
 
@@ -7413,10 +7520,10 @@ nemo agents package [OPTIONS]
 * `--publish`: After building, tag and push to --registry.
 * `--format`: Packaging format: 'docker' (Jinja2 Dockerfile). 'whl' is reserved for future wheel-based builds and is currently rejected. [default: docker]
 * `--dockerfile <FILE>`: Use an existing Dockerfile instead of rendering (skips render stage).
-* `--tag, -t`: Image tag.  Defaults to '\<agent-name>-\<agent-id>:\<agent-version>'.
+* `--tag, -t`: Image tag.  Defaults to '&lt;agent-name>-&lt;agent-id>:&lt;agent-version>'.
 * `--platform`: Target platform (e.g. 'linux/amd64' or 'linux/arm64'). When omitted, defaults to the local daemon's native platform. Multi-arch builds via buildx are not yet implemented; pass at most one value.
 * `--registry, -r`: Remote registry URL (required when --publish is set).
-* `--push-tag`: Fully-qualified remote tag.  Defaults to '\<registry>/\<tag>'.
+* `--push-tag`: Fully-qualified remote tag.  Defaults to '&lt;registry>/&lt;tag>'.
 * `--output, -o <PATH>`: Output path for rendered Dockerfile (only used with --no-build). Defaults to 'Dockerfile' next to --pyproject when given (project root, so COPY statements resolve), otherwise next to the agent config.
 * `--base-image-url`: [env: NEMO_AGENTS_BASE_IMAGE_URL=]
 * `--base-image-tag`: [env: NEMO_AGENTS_BASE_IMAGE_TAG=]
@@ -7591,7 +7698,7 @@ nemo data-designer personas make-fileset [OPTIONS]
 
 **Options:**
 
-* `--locale <CHOICE>`: Locale fileset to create. [possible values: en_IN, en_SG, en_US, fr_FR, hi_Deva_IN, hi_Latn_IN, ja_JP, ko_KR, pt_BR]
+* `--locale <CHOICE>`: Locale fileset to create. [possible values: de_DE, en_GB, en_IN, en_SG, en_US, fr_FR, hi_Deva_IN, hi_Latn_IN, ja_JP, ko_KR, pt_BR]
 * `--api-key-secret`: Fully qualified NGC API key secret reference (WORKSPACE/NAME).
 * `--api-key-env-var`: Environment variable containing an NGC API key to create at --api-key-secret.
 
@@ -9078,6 +9185,7 @@ nemo evals runs [OPTIONS] COMMAND [ARGS]...
 
 * `list`: List a workspace's runs, newest first.
 * `status`: Show each task Job of a run and its status.
+* `cancel`: Request a run's cancel; the run controller acts on it,...
 * `download`: Download a run's merged result bundle (report.html,...
 * `results`: Show each completed task's scores (every Harbor reward)...
 * `submit`: Publish the selected tasks as a taskset, build their...
@@ -9130,6 +9238,29 @@ nemo evals runs status [OPTIONS] RUN_ID
 
 * `--help, -h`: Show this message and exit.
 
+##### nemo evals runs cancel
+
+Request a run's cancel; the run controller acts on it, and the run keeps its phase until then.
+
+**Usage:**
+
+```shell
+nemo evals runs cancel [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--workspace`: Workspace of the run; default: configured.
+* `--json`: Print the run's status as JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
 ##### nemo evals runs download
 
 Download a run's merged result bundle (report.html, summary.json, every trial and score).
@@ -9146,7 +9277,7 @@ nemo evals runs download [OPTIONS] RUN_ID
 
 **Options:**
 
-* `--output-dir, -o <PATH>`: Directory to unpack agent-eval-results/ into; default ./\<run_id>.
+* `--output-dir, -o <PATH>`: Directory to unpack agent-eval-results/ into; default ./&lt;run_id>.
 * `--workspace`: Workspace of the run; default: configured.
 
 **Help:**
@@ -9190,16 +9321,21 @@ nemo evals runs submit [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--spec-file <PATH>`: TasksetRunInput JSON naming a taskset.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: &lt;url>@&lt;ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>.
+* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
-* `--sandbox-policy`: Operator sandbox profile. [default: harbor-standard]
+* `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
 * `--dispatcher-profile`: Jobs profile for task Jobs.
+* `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
+* `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
+* `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
 * `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
 * `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
 * `--poll-seconds <FLOAT>`: Image-build polling interval. [default: 10.0]
+* `--experiment`: Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.
 
 **Help:**
 
@@ -9225,7 +9361,7 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--fail-fast`: Fail on the first metric error instead of recording an errored score. On Kubernetes runs it fails that task's Job.
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 
 **Spec Source:**
@@ -9286,7 +9422,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--prompt-template`: Optional prompt template for online target generation. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
-* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to 'unknown' unless the submitter supplies one.
+* `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
 * `--publication.intake.test-case-id-field`: Dataset column identifying each row, recorded as the published test case id. Defaults to a hash of the row's content, which keeps a row's id stable across dataset reorderings and revisions so the same test case can be compared run over run; editing a row makes it a new test case. Name a column here when the dataset has a real identifier — it reads better and survives content edits. Values must be unique per row; the run is rejected if they are not.
 
@@ -9436,8 +9572,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 The command prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
+id. Track the job with 'nemo jobs watch &lt;job id>', or check its status with
+'nemo jobs get-status &lt;job id>'.
 
 Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
@@ -9544,8 +9680,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 The command prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
+id. Track the job with 'nemo jobs watch &lt;job id>', or check its status with
+'nemo jobs get-status &lt;job id>'.
 
 Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
@@ -9651,8 +9787,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 The command prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
+id. Track the job with 'nemo jobs watch &lt;job id>', or check its status with
+'nemo jobs get-status &lt;job id>'.
 
 Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
@@ -10061,14 +10197,14 @@ nemo customization unsloth.jobs explain [OPTIONS]
 
 * `--help, -h`: Show this message and exit.
 
-### nemo insights
+### nemo compass
 
-Plugin commands for insights.
+Plugin commands for compass.
 
 **Usage:**
 
 ```shell
-nemo insights [OPTIONS] COMMAND [ARGS]...
+nemo compass [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -10080,14 +10216,14 @@ nemo insights [OPTIONS] COMMAND [ARGS]...
 * `analysis`: Manage periodic agent analysis opt-in state.
 * `analysis-runs`: Submit and inspect on-demand analysis runs.
 
-#### nemo insights analysis
+#### nemo compass analysis
 
 Manage periodic agent analysis opt-in state.
 
 **Usage:**
 
 ```shell
-nemo insights analysis [OPTIONS] COMMAND [ARGS]...
+nemo compass analysis [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -10100,14 +10236,14 @@ nemo insights analysis [OPTIONS] COMMAND [ARGS]...
 * `disable`: Disable periodic analysis for an agent.
 * `status`: Show periodic analysis opt-in state.
 
-##### nemo insights analysis enable
+##### nemo compass analysis enable
 
 Enable periodic analysis for an agent.
 
 **Usage:**
 
 ```shell
-nemo insights analysis enable [OPTIONS]
+nemo compass analysis enable [OPTIONS]
 ```
 
 **Options:**
@@ -10125,14 +10261,14 @@ nemo insights analysis enable [OPTIONS]
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo insights analysis disable
+##### nemo compass analysis disable
 
 Disable periodic analysis for an agent.
 
 **Usage:**
 
 ```shell
-nemo insights analysis disable [OPTIONS]
+nemo compass analysis disable [OPTIONS]
 ```
 
 **Options:**
@@ -10148,14 +10284,14 @@ nemo insights analysis disable [OPTIONS]
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo insights analysis status
+##### nemo compass analysis status
 
 Show periodic analysis opt-in state.
 
 **Usage:**
 
 ```shell
-nemo insights analysis status [OPTIONS]
+nemo compass analysis status [OPTIONS]
 ```
 
 **Options:**
@@ -10179,14 +10315,14 @@ nemo insights analysis status [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-#### nemo insights analysis-runs
+#### nemo compass analysis-runs
 
 Submit and inspect on-demand analysis runs.
 
 **Usage:**
 
 ```shell
-nemo insights analysis-runs [OPTIONS] COMMAND [ARGS]...
+nemo compass analysis-runs [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -10199,7 +10335,7 @@ nemo insights analysis-runs [OPTIONS] COMMAND [ARGS]...
 * `list`: List analysis runs.
 * `get`: Get one analysis run, joined with the live state of its...
 
-##### nemo insights analysis-runs create
+##### nemo compass analysis-runs create
 
 Submit an analysis run for an agent.
 
@@ -10209,7 +10345,7 @@ With --wait, exits non-zero if that job does not complete.
 **Usage:**
 
 ```shell
-nemo insights analysis-runs create [OPTIONS]
+nemo compass analysis-runs create [OPTIONS]
 ```
 
 **Options:**
@@ -10218,7 +10354,7 @@ nemo insights analysis-runs create [OPTIONS]
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
-* `--since`: ISO-8601 lower bound enforced on the analyst's trace/span reads.
+* `--since`: ISO-8601 lower bound enforced on Compass's trace/span reads.
 * `--ethos <PATH>`: Path to the agent's Ethos Markdown. Its contents are sent with the run.
 * `--evaluation-id`: Restrict the run to spans from one evaluation.
 * `--timeout-seconds <FLOAT>`: Timeout applied to the backing execute-agent job.
@@ -10234,14 +10370,14 @@ nemo insights analysis-runs create [OPTIONS]
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo insights analysis-runs list
+##### nemo compass analysis-runs list
 
 List analysis runs. Job state is not joined — read one run to get it.
 
 **Usage:**
 
 ```shell
-nemo insights analysis-runs list [OPTIONS]
+nemo compass analysis-runs list [OPTIONS]
 ```
 
 **Options:**
@@ -10266,7 +10402,7 @@ nemo insights analysis-runs list [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-##### nemo insights analysis-runs get
+##### nemo compass analysis-runs get
 
 Get one analysis run, joined with the live state of its backing job.
 
@@ -10276,7 +10412,7 @@ run's name, and the run can be resubmitted.
 **Usage:**
 
 ```shell
-nemo insights analysis-runs get [OPTIONS] NAME
+nemo compass analysis-runs get [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -10408,7 +10544,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--config.enable-synthesis`: Whether to run LLM training and generation phases. When false the task only performs PII replacement and returns the processed data.
 * `--config.enable-replace-pii`: Whether to run the default PII replacement pipeline before synthesis.
 * `--hf-token-secret`: Name of platform secret containing the HuggingFace token. Must exist in the same workspace as the job.
-* `--pretrained-model-job`: Optional previous NSS job whose stored adapter artifact is reused for generation-only synthesis. Accepts either '\<job>' in the current workspace or '\<workspace>/\<job>'. The plugin resolves the prior job's 'adapter' result from Files.
+* `--pretrained-model-job`: Optional previous NSS job whose stored adapter artifact is reused for generation-only synthesis. Accepts either '&lt;job>' in the current workspace or '&lt;workspace>/&lt;job>'. The plugin resolves the prior job's 'adapter' result from Files.
 * `--enable-synthesis`: Whether to run LLM training and generation phases. When False the task only performs PII replacement and returns the processed data.
 
 **Spec Source:**
@@ -10425,7 +10561,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`, `config.unknown_fields`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `config.data.max_sequences_per_example (other union forms)`, `config.evaluation.mia_excluded_columns`, `config.evaluation.pii_replay_entities`, `config.evaluation.pii_replay_columns`, `config.training.num_input_records_to_sample (other union forms)`, `config.training.learning_rate (other union forms)`, `config.training.lora_target_modules`, `config.training.rope_scaling_factor (other union forms)`, `config.training.quantization_bits`, `config.generation.structured_generation.backend`, `config.generation.structured_generation.schema_method`, `config.privacy.delta (other union forms)`, `config.time_series.start_timestamp`, `config.time_series.stop_timestamp`, `config.replace_pii.globals.locales`, `config.replace_pii.globals.classify.entities`, `config.replace_pii.globals.ner.ner_entities`, `config.replace_pii.globals.lock_columns`, `config.replace_pii.steps`, `config.preflight.disabled_checks`, `config.unknown_fields`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -10570,7 +10706,7 @@ nemo experiments list [OPTIONS]
 JSON-only fields:
   metadata: dict[str, str]
 
-Filter experiments by name, insight_id, is_favorite, show_evaluations_over_time, baseline_evaluation_name, is_deleted, or a metadata key/value (filter[metadata.\<key>]=\<value>). Pass is_deleted=true to return only soft-deleted experiments; omit to see only live ones.
+Filter experiments by name, insight_id, is_favorite, show_evaluations_over_time, baseline_evaluation_name, is_deleted, or a metadata key/value (filter[metadata.&lt;key>]=&lt;value>). Pass is_deleted=true to return only soft-deleted experiments; omit to see only live ones.
 * `--filter.baseline-evaluation-name`
 * `--filter.insight-id`
 * `--filter.is-deleted`

@@ -12,6 +12,7 @@ from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import get_workload_delegation_audience
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.constants import (
+    JOB_ATTEMPT_ID_LABEL,
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -29,6 +30,7 @@ from nhx.core.jobs.app.constants import (
 from nhx.core.jobs.app.lifecycle import (
     configured_pause_deadline_seconds,
     describe_paused_exit,
+    image_digest_updates,
     pause_deadline_exceeded,
 )
 from nhx.core.jobs.app.providers import DistributedGPUExecutionProvider
@@ -38,10 +40,12 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     require_staleness_timeout_seconds,
     staleness_error_message,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     BaseKubernetesExecutionProfileConfig,
+    adopt_step_network_policy,
     build_event_field_selector,
     build_metadata,
     classify_task_containers,
@@ -49,14 +53,19 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     common_labels_for_step,
     create_configmap,
     create_pod_template_spec,
+    create_step_network_policy,
     delete_configmap,
+    delete_step_network_policy,
+    first_task_image_id,
     get_namespace_from_environment,
     image_pull_backoff_failure,
     last_task_exit_time,
     list_pods_by_labels,
     load_kubernetes_config,
     name_for_step,
+    reclaim_job_persistent_storage,
     update_all_tasks,
+    update_tasks_with_pause_outcome,
 )
 from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
@@ -117,12 +126,15 @@ class VolcanoJobBackend(
         self._core_v1 = client.CoreV1Api()
         self._custom_v1 = client.CustomObjectsApi()
         self._batch_v1 = client.BatchV1Api()
+        self._networking_v1 = client.NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
         self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
             namespace=self.namespace,
-            ttl_seconds_active=lambda: self._execution_profile_config.ttl_seconds_active,
+            ttl_seconds_active=lambda step: step_ttl_seconds_active(
+                step, self._execution_profile_config.ttl_seconds_active
+            ),
             workload_audience=get_workload_delegation_audience,
             register_workload_delegation=self._workload_delegation_store.register,
             revoke_workload_delegation=self._workload_delegation_store.revoke,
@@ -131,6 +143,7 @@ class VolcanoJobBackend(
     def shutdown(self):
         self._core_v1.api_client.close()
         self._custom_v1.api_client.close()
+        self._networking_v1.api_client.close()
         return
 
     def _workload_delegation_target_for_volcano_job(
@@ -253,6 +266,11 @@ class VolcanoJobBackend(
             namespace=self.namespace,
             step=step,
         )
+        network_policy_name = (
+            create_step_network_policy(self._networking_v1, self.namespace, step)
+            if self._execution_profile_config.step_network_policies_enabled
+            else None
+        )
 
         pod_template = create_pod_template_spec(
             step,
@@ -273,13 +291,18 @@ class VolcanoJobBackend(
         )
         job_metadata.name = job_name
 
-        # Volcano job policies
-        job_policies = [
-            {
-                "event": "PodFailed",
-                "action": "RestartJob",
-            }
-        ]
+        # Volcano job policies. Unless the profile sets max_retry, a failed or deleted pod ends the
+        # job, as a Kubernetes Job with no retries does: TerminateJob stops the other pods and keeps
+        # the failed one. Volcano reads a maxRetry of 0 as unset and would restart the job three
+        # times, training on after the step is marked error and writing checkpoints into the
+        # storage a rerun resumes from.
+        if self._execution_profile_config.max_retry:
+            job_policies = [{"event": "PodFailed", "action": "RestartJob"}]
+        else:
+            job_policies = [
+                {"event": "PodFailed", "action": "TerminateJob"},
+                {"event": "PodEvicted", "action": "TerminateJob"},
+            ]
         leader_policies = [
             {
                 "event": "TaskCompleted",
@@ -289,7 +312,7 @@ class VolcanoJobBackend(
         worker_policies: list[dict[str, Any]] = []
         if configured_pause_deadline_seconds(step) > 0:
             # A pod that exits 75 has written its pause checkpoint. Without this rule, the
-            # PodFailed policy above restarts the whole job. Task rules are checked before
+            # PodFailed policy above stops the pods still saving. Task rules are checked before
             # job rules, and ResumeJob does nothing to a running job, so the other pods keep
             # running until they exit too. The job then ends Failed with every pod kept,
             # and sync_pausing reads the exit codes.
@@ -297,7 +320,7 @@ class VolcanoJobBackend(
             # Volcano reads a failed pod's exit code from its first container status, and
             # the kubelet sorts those by container name. A classic sidecar named before the
             # task container (istio-proxy, for example) hides the 75, so this rule cannot
-            # match and the job restarts. sync_pausing does not rely on this rule: it deletes
+            # match and the job is terminated. sync_pausing does not rely on this rule: it deletes
             # the job as soon as every task container has exited, which usually happens before
             # such a sidecar exits. Native sidecars are init containers and are not affected.
             pause_policy = {"exitCode": PAUSE_EXIT_CODE, "action": "ResumeJob"}
@@ -372,15 +395,12 @@ class VolcanoJobBackend(
             volcano_job_spec["maxRetry"] = self._execution_profile_config.max_retry
 
         try:
-            self._custom_v1.create_namespaced_custom_object(
+            created = self._custom_v1.create_namespaced_custom_object(
                 group="batch.volcano.sh",
                 version="v1alpha1",
                 namespace=self.namespace,
                 plural="jobs",
                 body=volcano_job,
-            )
-            logger.info(
-                "Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace}
             )
         except ApiException as e:
             if e.status == 404:
@@ -400,6 +420,7 @@ class VolcanoJobBackend(
                     namespace=self.namespace,
                     name=configmap_name,
                 )
+                self._delete_step_network_policy(network_policy_name)
                 return JobUpdate(
                     status=HelixJobStatus.ERROR,
                     error_details={
@@ -407,15 +428,25 @@ class VolcanoJobBackend(
                         "reason": "VolcanoNotInstalled",
                     },
                 )
-            else:
-                logger.exception(
-                    "Failed to create Volcano Job",
-                    extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
-                )
-                raise
+            logger.exception(
+                "Failed to create Volcano Job",
+                extra={"job_name": job_name, "namespace": self.namespace, "error_message": e.reason},
+            )
+            self._delete_step_network_policy(network_policy_name)
+            raise
         except Exception:
             logger.exception("Failed to create Volcano Job", extra={"job_name": job_name, "namespace": self.namespace})
+            self._delete_step_network_policy(network_policy_name)
             raise
+        logger.info("Scheduled job step with Volcano job", extra={"job_name": job_name, "namespace": self.namespace})
+        uid = created.get("metadata", {}).get("uid") if isinstance(created, dict) else None
+        if network_policy_name and uid:
+            adopt_step_network_policy(
+                self._networking_v1,
+                self.namespace,
+                network_policy_name,
+                client.V1OwnerReference(api_version="batch.volcano.sh/v1alpha1", kind="Job", name=job_name, uid=uid),
+            )
         return JobUpdate(
             status=HelixJobStatus.PENDING, status_details={"message": "Job scheduled with Volcano backend"}
         )
@@ -430,7 +461,10 @@ class VolcanoJobBackend(
         if step.status == HelixJobStatus.ACTIVE:
             if volcano_job is not None and (
                 result := self.enforce_sync_ttl(
-                    step, self._execution_profile_config.ttl_seconds_active, volcano_job, before_active=False
+                    step,
+                    step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active),
+                    volcano_job,
+                    before_active=False,
                 )
             ):
                 return result
@@ -471,7 +505,7 @@ class VolcanoJobBackend(
         The task containers are read on every tick, whatever the job's phase: a classic
         sidecar keeps the pod running after the task exits, so the job may never reach
         Completed or Failed on its own. Only when no task container is readable does
-        the job's phase decide, with Completed as exit 0 and Failed as exit 1.
+        the job's phase decide, with Completed as exit 0 and Failed or Terminated as exit 1.
 
         An exit counts when the task exited before the deadline, even if it is seen
         later. When the exit time is unreadable, the deadline is checked against now.
@@ -482,34 +516,66 @@ class VolcanoJobBackend(
 
         phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
         pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
+        digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
         running, exit_code = classify_task_containers(pods)
-        if not running and exit_code is None and phase in ("Completed", "Failed"):
+        if not running and exit_code is None and phase in ("Completed", "Failed", "Terminated"):
             exit_code = 0 if phase == "Completed" else 1
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
             status, message, error_details = describe_paused_exit(exit_code)
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, status, error_details
+            )
             if status == HelixJobStatus.PAUSED:
                 self.terminate_job(volcano_job)
             return JobUpdate(
                 status=status,
-                status_details={"message": message},
+                status_details={"message": message, **digest_details},
                 error_details=error_details or None,
             )
         if pause_deadline_exceeded(step):
+            # Not sync_remove_job_with_status: it records each task by its pod's phase, so a
+            # task still running would stay active.
             message = "Pause deadline exceeded"
-            return self.sync_remove_job_with_status(
-                step,
-                HelixJobStatus.ERROR,
-                volcano_job,
-                status_details={"message": message},
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.ERROR, {"message": message}
+            )
+            events = self.get_volcano_job_events(volcano_job)
+            events.extend(self.get_volcano_pod_group_events(volcano_job))
+            self.terminate_job(volcano_job)
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": message, "events": events},
                 error_details={"message": message},
             )
-        return JobUpdate(status=HelixJobStatus.PAUSING, status_details={"message": "Job is being paused"})
+        return JobUpdate(
+            status=HelixJobStatus.PAUSING,
+            status_details={"message": "Job is being paused", **digest_details},
+        )
+
+    def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
+        storage = self._execution_profile_config.storage
+        if storage is None:
+            return True
+        return reclaim_job_persistent_storage(
+            namespace=self.namespace,
+            batch_v1=self._batch_v1,
+            pvc_name=storage.pvc_name,
+            workspace=workspace,
+            job_id=job,
+            permissions_image=storage.volume_permissions_image,
+            execution_backend=self.BACKEND_NAME,
+            execution_profile=self._profile_name,
+            job_metadata=self._execution_profile_config.job_metadata,
+            pod_metadata=self._execution_profile_config.pod_metadata,
+            pod_security_context=self._execution_profile_config.pod_security_context,
+        )
 
     def cleanup_steps(self):
         jobs = self.get_volcano_job_list_by_labels(labels=KUBE_JOB_SELECTOR_LABELS)
         for job in jobs:
             # Extract job_id and step_name from labels
             job_id = job.get("metadata", {}).get("labels", {}).get(JOB_ID_LABEL)
+            attempt_id = job.get("metadata", {}).get("labels", {}).get(JOB_ATTEMPT_ID_LABEL)
             step_name = job.get("metadata", {}).get("labels", {}).get(JOB_STEP_NAME_LABEL)
             workspace_id = job.get("metadata", {}).get("labels", {}).get(JOB_WORKSPACE_ID_LABEL)
 
@@ -533,7 +599,12 @@ class VolcanoJobBackend(
 
             # Verify the step is terminal before cleaning up, or that the job entity is gone (e.g. workspace deleted).
             # check_step_is_terminal returns True when terminal or when step entity is not found (404).
-            if not self.check_step_is_terminal(job=job_id, step_name=step_name, workspace=workspace_id):
+            if not self.check_step_is_terminal(
+                job=job_id,
+                step_name=step_name,
+                workspace=workspace_id,
+                attempt_id=attempt_id,
+            ):
                 logger.debug(
                     "Skipping cleanup for job as step is not in terminal state",
                     extra={"job_id": job_id, "step_name": step_name, "workspace_id": workspace_id},
@@ -548,7 +619,10 @@ class VolcanoJobBackend(
                 )
                 if uses_persistent_storage and self._execution_profile_config.storage:
                     if self.check_job_persistent_storage_cleanup_allowed(
-                        job=job_id, step_name=step_name, workspace=workspace_id
+                        job=job_id,
+                        step_name=step_name,
+                        workspace=workspace_id,
+                        attempt_id=attempt_id,
                     ):
                         logger.info(
                             "Cleaning up persistent storage for successful job",
@@ -597,7 +671,10 @@ class VolcanoJobBackend(
                         )
                         if uses_persistent_storage and self._execution_profile_config.storage:
                             if self.check_job_persistent_storage_cleanup_allowed(
-                                job=job_id, step_name=step_name, workspace=workspace_id
+                                job=job_id,
+                                step_name=step_name,
+                                workspace=workspace_id,
+                                attempt_id=attempt_id,
                             ):
                                 logger.info(
                                     "Cleaning up persistent storage for successful volcano job",
@@ -697,6 +774,8 @@ class VolcanoJobBackend(
 
     def create_step_update(self, step: HelixJobStepWithContext, job: dict) -> JobUpdate:
         status, status_details = map_volcano_job_status_to_platform_status(job["status"])
+        pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
+        status_details.update(image_digest_updates(step.status_details, first_task_image_id(pods)))
         status_details["events"] = self.get_volcano_job_events(job)
         status_details["events"].extend(self.get_volcano_pod_group_events(job))
         tasks_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
@@ -713,7 +792,12 @@ class VolcanoJobBackend(
                     self._workload_delegations.revoke_for_target(target)
                 else:
                     self._workload_delegations.ensure_for_target(step, target)
-        return JobUpdate(status=status, status_details=status_details)
+        phase = (job.get("status") or {}).get("state", {}).get("phase")
+        # A failed job ends Terminated: a pod failure or eviction terminates it rather than failing it.
+        if status in HelixJobStatus.terminals() and phase in ("Completed", "Failed", "Terminated"):
+            self._delete_step_network_policy(job.get("metadata", {}).get("name"))
+        error_details = {"message": status_details["message"]} if status == HelixJobStatus.ERROR else {}
+        return JobUpdate(status=status, status_details=status_details, error_details=error_details)
 
     def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, volcano_job: dict) -> JobUpdate | None:
         """Fail a step whose image the kubelet has been retrying for too long.
@@ -856,13 +940,20 @@ class VolcanoJobBackend(
                 namespace=self.namespace,
                 name=job_name,
             )
+            self._delete_step_network_policy(job_name)
+
+    def _delete_step_network_policy(self, name: str | None) -> None:
+        if not name or not self._execution_profile_config.step_network_policies_enabled:
+            return
+        delete_step_network_policy(self._networking_v1, self.namespace, name)
 
 
 def map_volcano_job_status_to_platform_status(status: dict) -> tuple[HelixJobStatus, dict]:
     """Map Kubernetes job status to HelixJobStatus."""
     if status["state"]["phase"] == "Completed":
         return HelixJobStatus.COMPLETED, {"message": "Job completed successfully"}
-    elif status["state"]["phase"] == "Failed":
+    elif status["state"]["phase"] in ("Failed", "Terminating", "Terminated"):
+        # The job-level policies terminate the job when a pod fails or is deleted.
         return HelixJobStatus.ERROR, {"message": "Job failed"}
     elif status["state"]["phase"] == "Running":
         return HelixJobStatus.ACTIVE, {"message": "Job is currently running"}

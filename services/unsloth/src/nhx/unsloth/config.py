@@ -36,6 +36,15 @@ class UnslothConfig(create_service_config_class("unsloth")):  # ty: ignore[unsup
     default_job_resource_cpu_limit: str = Field(default="4")
     default_job_resource_memory_limit: str = Field(default="16Gi")
 
+    training_pause_deadline_seconds: int = Field(
+        default=1800,
+        ge=0,
+        description=(
+            "How long a paused training step may take to finish its current step, save a checkpoint, "
+            "and exit. Past this, the step is stopped and fails. 0 means training cannot be paused."
+        ),
+    )
+
     default_training_execution_profile: str = Field(
         default="gpu",
         description="Default GPU execution profile when the job spec omits training.execution_profile.",

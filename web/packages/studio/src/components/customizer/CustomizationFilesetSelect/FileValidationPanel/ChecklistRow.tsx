@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Warning, CheckCircle, CloseCircle } from '@nemo/icons/icons';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { FC, ReactNode } from 'react';
 
 // Validation rows are strictly binary: pass (green check), warn (yellow triangle),
@@ -13,10 +13,10 @@ export type ChecklistStatus = 'ok' | 'warning' | 'fail';
 
 const StatusIcon: FC<{ status: ChecklistStatus }> = ({ status }) => {
   if (status === 'ok')
-    return <CheckCircle2 width={16} height={16} className="text-feedback-success" />;
+    return <CheckCircle width={16} height={16} className="text-feedback-success" />;
   if (status === 'warning')
-    return <AlertTriangle width={16} height={16} className="text-feedback-warning" />;
-  return <XCircle width={16} height={16} className="text-feedback-danger" />;
+    return <Warning width={16} height={16} className="text-feedback-warning" />;
+  return <CloseCircle width={16} height={16} className="text-feedback-danger" />;
 };
 
 export interface ChecklistRowProps {

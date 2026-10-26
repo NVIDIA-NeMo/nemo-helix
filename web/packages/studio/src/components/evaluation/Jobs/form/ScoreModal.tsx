@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import { Trash } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -17,7 +18,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { Trash } from 'lucide-react';
 import { FC, useEffect, useRef } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';

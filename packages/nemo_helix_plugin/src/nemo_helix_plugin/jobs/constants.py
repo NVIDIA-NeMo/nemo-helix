@@ -16,6 +16,8 @@ NEMO_JOB_STEP_CONFIG_FILE_NAME = "job_step_config.json"
 DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH = f"{DEFAULT_CONFIG_STORAGE_PATH}/{NEMO_JOB_STEP_CONFIG_FILE_NAME}"
 
 NEMO_JOB_ID_ENVVAR = "NEMO_JOB_ID"
+# The platform job's entity ID. NEMO_JOB_ID holds the job name, which a later job can reuse.
+NEMO_JOB_UID_ENVVAR = "NEMO_JOB_UID"
 NEMO_JOB_ATTEMPT_ID_ENVVAR = "NEMO_JOB_ATTEMPT_ID"
 NEMO_JOB_STEP_ENVVAR = "NEMO_JOB_STEP"
 NEMO_JOB_TASK_ENVVAR = "NEMO_JOB_TASK"
@@ -28,6 +30,10 @@ TERMINAL_EXIT_CODES = (0, 137)
 
 # sysexits EX_TEMPFAIL. A pausable step exits with this after it writes its pause checkpoint.
 PAUSE_EXIT_CODE = 75
+
+# Default OpenShell job task image, and where every OpenShell job image carries the launcher.
+OPENSHELL_JOB_TASK_IMAGE = "nhx-tasks-openshell"
+OPENSHELL_JOB_LAUNCHER_PATH = "/tools/jobs-launcher"
 
 
 def job_storage_subpath(workspace: str, job_id: str) -> str:

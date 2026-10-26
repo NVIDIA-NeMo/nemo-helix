@@ -12,10 +12,8 @@ import {
   getPartsFromReference,
   getURNFromNamedEntityRef,
 } from '@nemo/common/src/namedEntity';
-import {
-  useFilesListFilesets as useListFilesets,
-  useFilesRetrieveFileset,
-} from '@nemo/sdk/generated/platform/files';
+import { Db, FolderOpen } from '@nemo/icons/icons';
+import { useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import {
   Anchor,
   Block,
@@ -35,6 +33,7 @@ import { PatternsTooltipTrigger } from '@studio/components/customizer/Customizat
 import { Loading } from '@studio/components/Layouts/Loading';
 import { LINK_DOCS_FINE_TUNE_DATASET_FORMAT_REQUIREMENTS } from '@studio/constants/links';
 import { useCustomizationDatasetValidation } from '@studio/hooks/useCustomizationDatasetValidation';
+import { useOwnedFirstDatasets } from '@studio/hooks/useOwnedFirstDatasets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { usesChatTemplate } from '@studio/util/customizerSchema';
 import { inferJsonContentType, isJsonFile } from '@studio/util/files';
@@ -43,7 +42,6 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { Database, FolderOpen } from 'lucide-react';
 import { FC, useEffect, useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 
@@ -84,17 +82,9 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     fieldState: { error: fieldError },
   } = useController({ control, name: fieldName });
 
-  const {
-    data: filesetsResponse,
-    isPending,
-    isFetching,
-    error,
-  } = useListFilesets(workspace, {
-    page_size: 100,
-    sort: 'created_at',
-    filter: { purpose: 'dataset' },
-  });
-  const filesets = useMemo(() => filesetsResponse?.data ?? [], [filesetsResponse?.data]);
+  // Newest first, with the signed-in user's own datasets ahead of the rest.
+  const { datasets, isPending, isFetching, error } = useOwnedFirstDatasets(workspace, 100);
+  const filesets = useMemo(() => datasets ?? [], [datasets]);
   const dropdownDisabled = isPending || isFetching || !!error;
 
   const selectedParts = selectedRef ? getPartsFromReference(selectedRef) : undefined;
@@ -221,7 +211,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
             placeholder="Select a dataset"
             slotStart={
               selectedDropdownValue && selectedDropdownValue !== NEW_DATASET_VALUE ? (
-                <Database width={16} height={16} className="text-fg-subdued" />
+                <Db width={16} height={16} className="text-fg-subdued" />
               ) : undefined
             }
           />

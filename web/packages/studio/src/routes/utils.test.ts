@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import {
   getEvaluationBenchmarkDetailsRoute,
   getEvaluationBenchmarkListRoute,
@@ -15,6 +16,7 @@ import {
   getIntakeTracesRoute,
   getWorkspaceBaseModelsRoute,
   getWorkspaceInferenceProvidersRoute,
+  getModelDetailRoute,
 } from '@studio/routes/utils';
 
 describe('Evaluation route helpers', () => {
@@ -222,5 +224,20 @@ describe('getIntakeTracesRoute', () => {
     expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters') ?? ''))).toEqual([
       { id: 'agent_name', value: 'email-security-triage' },
     ]);
+  });
+});
+
+describe('getModelDetailRoute', () => {
+  it('builds model and adapter paths under fine-tune', () => {
+    expect(getModelDetailRoute('ws', 'my-model')).toBe('/workspaces/ws/fine-tune/models/my-model');
+    expect(getModelDetailRoute('ws', 'my-model', { adapterName: 'my-adapter' })).toBe(
+      '/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter'
+    );
+  });
+
+  it('adds the tab as a query parameter', () => {
+    expect(getModelDetailRoute('ws', 'my-model', { tab: ModelDetailTab.Training })).toBe(
+      '/workspaces/ws/fine-tune/models/my-model?tab=training'
+    );
   });
 });

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import type { FilesetLocation } from '@studio/api/files/types';
 import type { UseMutationOptions } from '@tanstack/react-query';
 
@@ -11,7 +11,7 @@ export interface CreateAgentFromTrialParams {
   name: string;
   /** The agent the study optimized, whose spec fileset the new agent needs a copy of. */
   source: FilesetLocation & Pick<Agent, 'description' | 'config_format'>;
-  config: CreateAgentRequestConfig;
+  config: RegisterAgentRequestConfig;
   replaceOrphanedFileset?: boolean;
 }
 

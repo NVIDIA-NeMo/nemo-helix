@@ -19,6 +19,7 @@ from typing import Literal, Protocol, Self, get_args
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
+from nemo_evals.harbor.remote.sandbox_policy import task_resources_violation
 from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
 from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config
 from nemo_evals.image_builds.runner import read_task_archive
@@ -29,6 +30,7 @@ from nemo_evals.revisions import RevisionNotFoundError
 from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, PermissionDeniedError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -46,6 +48,7 @@ PreparationErrorCode = Literal[
     "registry_not_allowed",
     "main_dockerfile_missing",
     "dockerfile_missing",
+    "unsupported_compose_build_option",
     # Task shape (M3 story 1)
     "invalid_task_config",
     "shared_verifier_unsupported",
@@ -56,6 +59,7 @@ PreparationErrorCode = Literal[
     "unsupported_gpu_type",
     "gpu_request_exceeds_policy",
     "gpu_unsupported_by_backend",
+    "resources_exceed_policy",
     # Prebuilt images (M3 story 2)
     "image_unavailable",
     # Building (M3 stories 4-5)
@@ -167,7 +171,8 @@ class ImageBuildPreparer:
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
     ) -> PreparationErrorInfo | None:
-        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks.
+        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks, and tasks whose sandboxes exceed
+        the profile's ceilings.
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
@@ -181,6 +186,8 @@ class ImageBuildPreparer:
                 return PreparationErrorInfo(
                     code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet"
                 )
+            if (violation := task_resources_violation(task_config, policy)) is not None:
+                return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
             archive = await read_task_archive(clients.files, task.spec.source)
         except ImagePlanError as exc:
             return _plan_error(exc)
@@ -246,10 +253,12 @@ async def _current_build(builds: ImageBuildService, workspace: str, name: str, r
     attempt, recreates a lost Job, or replaces a build whose Job ended without a result. ``request_build``
     checks build permission first, so a caller without it still learns that someone else's build is running.
     """
-    page = await builds.list_builds(workspace, name, revision, page_size=1)
-    if page is None:
+    # A run takes images for the deployment's default platform, as ``request_build`` below asks for: another
+    # platform's build, ready or failed, is no answer.
+    try:
+        newest = await builds.newest_build(workspace, name, revision)
+    except NemoEntityNotFoundError:
         return None
-    newest = page.data[0] if page.data else None
     if newest is not None and newest.status in ("ready", "failed"):
         return newest
     try:

@@ -78,7 +78,7 @@ export const TemplateGroups: FC<TemplateGroupsProps> = ({
                         template.id === pendingId ? (
                           <Spinner size="small" aria-label={pendingLabel ?? 'Setting up'} />
                         ) : (
-                          <template.icon size={16} color={group.accent} aria-hidden />
+                          <template.icon size="16" color={group.accent} aria-hidden />
                         )
                       }
                       compact

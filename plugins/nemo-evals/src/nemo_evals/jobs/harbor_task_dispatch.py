@@ -13,16 +13,31 @@ TODO(M2 story 6b): replace the agent evaluation with a dedicated dispatcher.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping, MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
+from nemo_evals.harbor.agent_setup_egress import (
+    INNER_AGENT_KWARG,
+    SETUP_EGRESS_AGENT,
+    SETUP_HOSTS_KWARG,
+    setup_timeout_multiplier,
+)
+from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
+from nemo_evals.jobs.gateway_models import (
+    AGENT_CHANNEL_HOSTS_KWARG,
+    add_gateway_key_placeholder,
+    check_tasks_reach_the_gateway,
+)
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.jobs.secret_env import build_task_environment
+from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -32,6 +47,8 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 TASK_JOB_SOURCE = "evals.harbor-task"
 """Jobs ``source`` of every task Job; with the name, spec and platform spec it marks a Job as ours."""
 
@@ -39,6 +56,8 @@ DISPATCH_STEP_NAME = "harbor-task-dispatch"
 DISPATCH_ENTRYPOINT = ["python", "-m"]
 DISPATCH_COMMAND = ["nemo_evals.tasks.harbor_task_dispatch"]
 OPENSANDBOX_ENVIRONMENT = "nemo_evals.harbor.opensandbox_environment:AgentChannelOpenSandboxEnvironment"
+UNWRAPPED_AGENTS = frozenset({"oracle", "nop"})
+"""Agents that install nothing, and that Harbor constructs or scores differently by name, so they stay unwrapped."""
 """Harbor environment the task Job runs trials in: nhx-sandbox's environment plus the agent channel."""
 
 SANDBOX_READY_TIMEOUT_S = 600
@@ -82,7 +101,9 @@ class HarborTaskDispatchJob(NemoJob):
                     ),
                 ),
                 config=spec.model_dump(mode="json"),
-                environment=build_task_environment(_secret_refs(spec.spec)),
+                environment=add_gateway_key_placeholder(
+                    build_task_environment(_secret_refs(spec.spec)), spec.spec.target
+                ),
             )
         )
         return HelixJobSpec(steps=steps)
@@ -94,11 +115,16 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Fails before any sandbox if the run's execution deadline has passed: the controller only cancels the
       Jobs it sees when it expires the run, so a Job a submit retry creates after that must stop itself.
     - Fails before any sandbox if the platform's OpenSandbox server isn't the one the run was accepted for.
+    - Fails before any sandbox if a no-network task's sandbox couldn't reach the gateway model its agent calls.
     - Binds the materialized task to its prepared image digests.
     - Never deletes the agent-files snapshot: sibling task Jobs and Jobs retries still stage it.
+    - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
+      have stable sessions (``<run_id>-task-<i>:<trial>``) and a re-publish replaces them.
+    - Never writes the shared Evaluation's metadata: the run controller stamps the run's duration once.
     """
 
     discard_agent_files: ClassVar[bool] = False
+    record_publication_durations: ClassVar[bool] = False
     _task_spec: HarborTaskJobSpec
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
@@ -106,10 +132,18 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         spec = HarborTaskJobSpec.model_validate(config)
         check_execution_deadline(spec)
         check_sandbox_server(spec)
+        check_tasks_reach_the_gateway(
+            spec.spec.target,
+            [(t.id, t.spec.config) for t in spec.spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)],
+            spec.sandbox_policy.agent_channel,
+        )
         self._task_spec = spec
         return self._run_with_client(
             spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client
         )
+
+    def _run_id(self) -> str | None:
+        return task_job_name(self._task_spec.run_id, self._task_spec.task_index)
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
         environment = self._task_spec.environment
@@ -151,7 +185,12 @@ def check_sandbox_server(spec: HarborTaskJobSpec) -> None:
 
 
 def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: HarborTaskJobSpec) -> HarborRuntimeConfig:
-    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time."""
+    """Select ``NemoOpenSandboxEnvironment`` with the run's frozen policy, labels and one trial at a time.
+
+    The request's resource overrides size the agent sandbox only; a separate verifier keeps task.toml's
+    resources. Every sandbox gets ``resource_defaults(policy)`` for unset cpus and memory_mb, the values
+    submit checked against the profile's ceilings. No Harbor resource mode is set, so every value is a limit.
+    """
     policy = spec.sandbox_policy
     connection = policy.connection
     environment = HarborEnvironmentConfig(
@@ -164,8 +203,13 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "request_timeout_sec": connection.request_timeout_s,
             "sandbox_timeout_sec": policy.max_sandbox_lifetime_s,
             "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
-            "agent_channel_hosts": list(policy.agent_channel),
+            AGENT_CHANNEL_HOSTS_KWARG: list(policy.agent_channel),
+            "agent_setup_hosts": list(policy.agent_setup_egress),
             "egress_verification": policy.egress_verification,
+            "enforce_disk_limit": policy.enforce_disk_limit,
+            "max_disk_mb": policy.max_disk_mb,
+            "agent_resource_overrides": policy.resource_overrides.model_dump(exclude_none=True),
+            "sandbox_resource_defaults": resource_defaults(policy),
             "metadata": {
                 "nemo-run": spec.run_id,
                 "nemo-task-index": str(spec.task_index),
@@ -173,7 +217,24 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             },
         },
     )
-    return config.model_copy(update={"environment": environment, "n_concurrent_trials": 1})
+    update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
+    agent = config.agent_import_path or config.agent_name or "oracle"
+    if policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
+        reason = "a loose agent file (agent_dir)" if config.agent_dir is not None else "it installs nothing"
+        logger.info("Agent %s runs setup without the agent setup egress window: %s", agent, reason)
+    elif policy.agent_setup_egress:
+        update["agent_import_path"] = SETUP_EGRESS_AGENT
+        update["agent_kwargs"] = {
+            **config.agent_kwargs,
+            INNER_AGENT_KWARG: agent,
+            SETUP_HOSTS_KWARG: list(policy.agent_setup_egress),
+        }
+        # Harbor falls back to the global multiplier, then 1.0, when the setup one is unset.
+        multiplier = config.agent_setup_timeout_multiplier
+        if multiplier is None:
+            multiplier = config.timeout_multiplier if config.timeout_multiplier is not None else 1.0
+        update["agent_setup_timeout_multiplier"] = setup_timeout_multiplier(agent, multiplier)
+    return config.model_copy(update=update)
 
 
 def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str | None = None) -> bool:

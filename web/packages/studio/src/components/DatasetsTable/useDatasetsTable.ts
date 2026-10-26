@@ -12,11 +12,19 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import {
+  checkedPurposes,
+  DEFAULT_PURPOSE_FILTER,
+  isDefaultPurposeFilter,
+  VISIBLE_PURPOSES,
+} from '@studio/components/DatasetsTable/constants';
+import {
   type DatasetWithId,
   type DatasetsTableProps,
   type ModalOpenState,
 } from '@studio/components/DatasetsTable/types';
+import { useOwnedFirstFilesets } from '@studio/components/DatasetsTable/useOwnedFirstFilesets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { keepPreviousData } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -49,7 +57,25 @@ export function useDatasetsTable({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
 
-  const hasActiveFilters = dataViewState.debouncedColumnFilters.length > 0;
+  // Seed the default purposes as checked (generic stays off) once on load, alongside any
+  // filters already in the URL. A later deliberate "uncheck all" is not re-seeded.
+  const seededDefaults = useRef(false);
+  useEffect(() => {
+    if (!enableFilters || seededDefaults.current) return;
+    seededDefaults.current = true;
+    const current = dataViewState.columnFiltering.state;
+    if (!current.some((f) => f.id === 'purpose')) {
+      dataViewState.columnFiltering.set([
+        ...current,
+        { id: 'purpose', value: DEFAULT_PURPOSE_FILTER },
+      ]);
+    }
+  }, [enableFilters, dataViewState.columnFiltering]);
+
+  // The seeded default doesn't count as the user filtering, so empty states stay "no filesets yet".
+  const hasActiveFilters = dataViewState.debouncedColumnFilters.some(
+    (f) => !(f.id === 'purpose' && isDefaultPurposeFilter(f.value))
+  );
   const hasSearchOrFilters = !!(dataViewState.debouncedSearchBar || hasActiveFilters);
 
   const [modalDataset, setModalDataset] = useState<Dataset>();
@@ -62,42 +88,63 @@ export function useDatasetsTable({
     },
   });
 
-  // Reset filters and selections
+  // Reset filters and selections; the default purposes come back checked.
   const resetFilters = useCallback(() => {
     onDatasetsSelected?.([]);
     dataViewState.resetFilters();
-  }, [dataViewState, onDatasetsSelected]);
+    if (enableFilters) {
+      dataViewState.columnFiltering.set([{ id: 'purpose', value: DEFAULT_PURPOSE_FILTER }]);
+    }
+  }, [dataViewState, enableFilters, onDatasetsSelected]);
 
+  const page = dataViewState.pagination.state.pageIndex + 1;
+  const pageSize = dataViewState.pagination.state.pageSize;
+  const sort = enableFilters
+    ? (getSortParam(dataViewState.sorting.state) as GenericSortField)
+    : undefined;
+  // The Purpose column is a multi-select, so its filter value is `{ [purpose]: true }`.
+  const selectedPurposes = checkedPurposes(
+    enableFilters ? dataViewState.apiFilter.filter?.purpose : undefined
+  );
+  const filter: FilesetFilter = {
+    ...(enableFilters ? dataViewState.apiFilter.filter : undefined),
+    ...(enableFilters && dataViewState.apiFilter.searchText
+      ? withOperators<FilesetFilter>({
+          name: { $like: `%${dataViewState.apiFilter.searchText}%` },
+        })
+      : {}),
+    // Management view only: nothing checked means every purpose except "generic". Pickers
+    // (filters off) list everything unless `purposeFilter` narrows them.
+    ...(enableFilters
+      ? withOperators<FilesetFilter>({
+          purpose: { $in: selectedPurposes.length > 0 ? selectedPurposes : VISIBLE_PURPOSES },
+        })
+      : {}),
+    ...(purposeFilter !== undefined ? { purpose: purposeFilter } : {}),
+  };
+
+  // On the management view, a signed-in user's own filesets come first.
+  const ownerId = useAuthProfile()?.id;
+  const ownedFirst = useOwnedFirstFilesets({
+    workspace,
+    ownerId: enableFilters ? ownerId : undefined,
+    page,
+    pageSize,
+    sort,
+    filter,
+  });
+  const plain = useFilesListFilesets(
+    workspace,
+    { page, page_size: pageSize, sort, filter },
+    { query: { enabled: !(enableFilters && ownerId), placeholderData: keepPreviousData } }
+  );
   const {
     data: datasetsResponse,
     refetch,
     isPending,
     isFetching,
     error,
-  } = useFilesListFilesets(
-    workspace,
-    {
-      page: dataViewState.pagination.state.pageIndex + 1,
-      page_size: dataViewState.pagination.state.pageSize,
-      sort: enableFilters
-        ? (getSortParam(dataViewState.sorting.state) as GenericSortField)
-        : undefined,
-      filter: {
-        ...(enableFilters ? dataViewState.apiFilter.filter : undefined),
-        ...(enableFilters && dataViewState.apiFilter.searchText
-          ? withOperators<FilesetFilter>({
-              name: { $like: `%${dataViewState.apiFilter.searchText}%` },
-            })
-          : {}),
-        ...(purposeFilter !== undefined ? { purpose: purposeFilter } : {}),
-      },
-    },
-    {
-      query: {
-        placeholderData: keepPreviousData,
-      },
-    }
-  );
+  } = enableFilters && ownerId ? ownedFirst : plain;
 
   // Ensure each dataset has a unique id for DataView row selection
   const datasets = useMemo<DatasetWithId[]>(

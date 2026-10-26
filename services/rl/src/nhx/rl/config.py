@@ -36,6 +36,15 @@ class RlConfig(create_service_config_class("rl")):  # type: ignore[misc]  # ty: 
     default_job_resource_cpu_limit: str = Field(default="4")
     default_job_resource_memory_limit: str = Field(default="16Gi")
 
+    training_pause_deadline_seconds: int = Field(
+        default=3600,
+        ge=0,
+        description=(
+            "How long a paused training step may take to finish its current step, save a checkpoint, "
+            "and exit. Past this, the step is stopped and fails. 0 means training cannot be paused."
+        ),
+    )
+
     default_training_execution_profile: str = Field(
         default="gpu",
         description="Default single-node GPU profile when training.execution_profile is omitted.",
@@ -139,10 +148,10 @@ class RlConfig(create_service_config_class("rl")):  # type: ignore[misc]  # ty: 
     )
 
     sandbox_resources: dict[str, str] | None = Field(
-        default_factory=lambda: {"cpu": "2", "memory": "4Gi"},
+        default_factory=lambda: {"cpu": "4", "memory": "8Gi"},
         description=(
             "CPU/memory requested for the Gym sandbox pod, as env.nemo_gym.sandbox.resources. "
-            "Defaults to 2 CPU / 4Gi. The OpenSandbox SDK default (1 CPU / 2Gi) OOMKills a "
+            "Defaults to 4 CPU / 8Gi. The OpenSandbox SDK default (1 CPU / 2Gi) OOMKills a "
             "Gym server process per config entry plus its own Ray instance mid-rollout, "
             "surfacing as a proxy 502 rather than as a memory error. Raise further if the "
             "environment is larger. Operator-scoped: jobs cannot set it, since it spends "

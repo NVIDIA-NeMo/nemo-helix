@@ -154,7 +154,7 @@ def test_member_defaults_and_index() -> None:
 def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
     """Verify the plan fixture round-trips while retaining its strict frozen schema.
 
-    Assertions pin the nine stored fields and expect validation errors for
+    Assertions pin the ten stored fields and expect validation errors for
     rebinding, extras, an invalid cap, and a missing nullable cap field,
     protecting the resolved-input contract of stored plans.
     """
@@ -169,6 +169,7 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "dispatcher_image",
         "dispatcher_profile",
         "task_environments",
+        "intake",
     }
     with pytest.raises(ValidationError, match="frozen"):
         setattr(plan, "run_id", "changed")  # setattr: ty already rejects a direct write to a frozen field
@@ -194,12 +195,13 @@ def test_execution_input() -> None:
     """Verify caller configuration defaults and reject unsupported execution inputs.
 
     Locally built sandbox settings must apply documented defaults; an invalid
-    limit, unknown fields/kinds (including the removed max_failed_tasks), and a
-    missing sandbox policy must raise ValidationError before submit resolution.
+    limit, unknown fields/kinds (including the removed max_failed_tasks and
+    sandbox_policy) must raise ValidationError before submit resolution.
     """
-    input_model = HarborTaskJobsExecutionInput(sandbox_policy="sandbox")
+    input_model = HarborTaskJobsExecutionInput()
     assert input_model.kind == "harbor-task-jobs"
     assert input_model.dispatcher_profile is None  # submit resolves the operator's first profile
+    assert input_model.sandbox is None  # submit resolves the operator's default sandbox profile
     assert input_model.max_concurrent_task_jobs is None
     for changes in (
         {"max_failed_tasks": 1},
@@ -207,10 +209,12 @@ def test_execution_input() -> None:
         {"max_concurrent_task_jobs": 0},
         {"unexpected": True},
         {"kind": "other"},
+        {"sandbox_policy": "harbor-standard"},
+        {"sandbox": {"profile": ""}},
+        {"sandbox": {"gpus": 1}},
+        {"sandbox": {"root_template": "harbor-cpu-root"}},
     ):
         with pytest.raises(ValidationError):
             HarborTaskJobsExecutionInput.model_validate({**input_model.model_dump(), **changes})
-    data = input_model.model_dump()
-    del data["sandbox_policy"]
-    with pytest.raises(ValidationError):
-        HarborTaskJobsExecutionInput.model_validate(data)
+    selected = HarborTaskJobsExecutionInput.model_validate({"sandbox": {"profile": "harbor-open"}}).sandbox
+    assert selected is not None and selected.profile == "harbor-open"

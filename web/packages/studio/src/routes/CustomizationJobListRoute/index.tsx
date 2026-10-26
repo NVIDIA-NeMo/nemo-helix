@@ -8,11 +8,16 @@ import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsD
 import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsDataView/CustomizeModelButton';
 import { InProgressCustomizationsTable } from '@studio/components/dataViews/InProgressCustomizationsTable';
 import { ModelPanel, ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
-import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { INTAKE_ENABLED, MODEL_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { getEvaluationResultsRoute, getIntakeTracesRoute } from '@studio/routes/utils';
+import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import {
+  getEvaluationResultsRoute,
+  getIntakeTracesRoute,
+  getModelDetailRoute,
+} from '@studio/routes/utils';
 import { type FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -52,6 +57,15 @@ export const CustomizationJobListRoute: FC = () => {
         <CustomModelsDataView
           workspace={workspace}
           onRowClick={(model: ModelEntity, tab: ModelPanelTab, adapter?: Adapter) => {
+            if (MODEL_DETAILS_ENABLED) {
+              navigate(
+                getModelDetailRoute(workspace, model.name, {
+                  adapterName: adapter?.name,
+                  tab: tab === 'chat-playground' ? ModelDetailTab.Chat : undefined,
+                })
+              );
+              return;
+            }
             setSelectedModel(model);
             setSelectedAdapter(adapter ?? null);
             setSelectedTab(tab);

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
+import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Table, Tooltip } from '@nvidia/foundations-react-core';
 import { tooltipClassName } from '@studio/styles/common';
-import { Info } from 'lucide-react';
 import { FC } from 'react';
 
 interface ScoreTableProps {
@@ -45,7 +45,7 @@ export const ScoreTable: FC<ScoreTableProps> = ({ scores }) => {
                     side="bottom"
                     className={tooltipClassName}
                   >
-                    <Info className="inline shrink-0" />
+                    <InfoCircle className="inline shrink-0" />
                   </Tooltip>
                 )}
               </Flex>

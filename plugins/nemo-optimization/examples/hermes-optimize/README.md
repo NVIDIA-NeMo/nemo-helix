@@ -204,7 +204,7 @@ source "$REPO_ROOT/.venv/bin/activate"
 # Values are stored as-is at create time — no ${...} expansion — so edit
 # base_url before create if your NHX_BASE_URL differs.
 
-nemo agents create \
+nemo agents register \
   --name hermes-optimize-chatonly \
   --agent-config "$BUNDLE/agents/chatonly/agent.yaml" \
   --workspace default

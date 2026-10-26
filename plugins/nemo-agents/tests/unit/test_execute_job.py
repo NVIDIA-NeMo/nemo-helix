@@ -196,16 +196,23 @@ async def test_to_spec_rejects_non_fabric_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_to_spec_rejects_malformed_fabric_agent_config() -> None:
+@pytest.mark.parametrize(
+    ("config", "error"),
+    [
+        ({}, "Agent 'default/calc' has no configuration"),
+        ({"config_format": "nemo-agents-spec-v1", "name": "calc"}, "default_harness"),
+    ],
+)
+async def test_to_spec_rejects_malformed_fabric_agent_config(config: dict, error: str) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = Agent(
         name="calc",
         workspace="default",
-        config={"config_format": "nemo-agents-spec-v1", "name": "calc"},
+        config=config,
         config_format="nemo-agents-spec-v1",
     )
 
-    with pytest.raises(ValueError, match="default_harness"):
+    with pytest.raises(ValueError, match=error):
         await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent="calc", input="hello"),
             workspace="default",
@@ -927,6 +934,7 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
         assert request.input == "hello"
         assert request.base_dir == ctx.storage.ephemeral / "fabric"
         assert request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
+        assert request.observe_progress is True
         (request.base_dir / "workspace" / "answer.txt").write_text("done\n")
         (request.base_dir / "artifacts" / "trace.json").write_text("{}\n")
         return FabricRuntimeResult(
@@ -1316,8 +1324,10 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         response = MagicMock()
         response.data.return_value = SimpleNamespace(
             id="job-1",
+            attempt_id="attempt-1",
             name="execute-1",
             description=None,
+            project=None,
             workspace="default",
             created_at=None,
             updated_at=None,

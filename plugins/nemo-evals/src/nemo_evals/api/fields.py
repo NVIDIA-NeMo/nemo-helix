@@ -168,7 +168,7 @@ class MetricRef(RootModel[str]):
 class AgentRef(RootModel[str]):
     """Reference to an agent registered on the platform (format: ``workspace/name`` or ``name``).
 
-    Names an ``Agent`` entity (``nemo agents create``) so an evaluation can run it without repeating
+    Names an ``Agent`` entity (``nemo agents register``) so an evaluation can run it without repeating
     its configuration. Same shape as :class:`MetricRef`: a bare name resolves in the job workspace.
     Agents carry no revision fragment — the entity is looked up as it is at submit time.
     """

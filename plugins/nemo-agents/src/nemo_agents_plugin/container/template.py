@@ -34,6 +34,13 @@ from typing import Any, Mapping
 
 import jinja2
 import yaml
+from nemo_agents_plugin.container.sandbox import (
+    render_apt_packages,
+    render_image_files,
+    render_user_setup,
+    render_workdir_setup,
+    resolve_sandbox_profile,
+)
 
 # Marker written as the first line of every plugin-generated ``.dockerignore``
 # / ``Dockerfile``.  ``render_dockerignore`` and the CLI no-build path only
@@ -111,7 +118,8 @@ _DEFAULTS: dict[str, str] = {
     "base_image_url": "nvcr.io/nvidia/base/ubuntu",
     "base_image_tag": "noble-20260217",
     "python_version": "3.13",
-    "uv_version": "0.9.14",
+    "uv_version": "0.13.4",
+    "sandbox_image_registry": "nvcr.io/nvidia/nemo-helix",
     # Default NAT version — used ONLY as a last-resort fallback.  Callers are
     # expected to pass ``--nat-version`` (or set ``NAT_VERSION``) explicitly
     # so that image tags, labels, and the ``nvidia-nat[most]`` constraint
@@ -127,12 +135,18 @@ _DEFAULTS: dict[str, str] = {
     "nat_version": "1.8.0",
 }
 
+#: Registry and tag of the images sandbox profiles copy files from.
+SANDBOX_IMAGE_REGISTRY_ENV = "NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY"
+SANDBOX_IMAGE_TAG_ENV = "NEMO_AGENTS_SANDBOX_IMAGE_TAG"
+
 _ENV_MAP: dict[str, str] = {
     "base_image_url": "NEMO_AGENTS_BASE_IMAGE_URL",
     "base_image_tag": "NEMO_AGENTS_BASE_IMAGE_TAG",
     "python_version": "NEMO_AGENTS_PYTHON_VERSION",
     "nat_version": "NAT_VERSION",
     "uv_version": "NEMO_AGENTS_UV_VERSION",
+    "sandbox_image_registry": SANDBOX_IMAGE_REGISTRY_ENV,
+    "sandbox_image_tag": SANDBOX_IMAGE_TAG_ENV,
 }
 
 #: Local nemo-helix wheel to install instead of resolving the pinned contract
@@ -293,6 +307,10 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
 # write the WORKDIR itself; the contents keep their ownership.
 RUN {{ sandbox_workdir_setup }}
 {% endif %}
+{% if sandbox_image_files %}
+# Files the {{ sandbox_runtime }} runtime needs from other images.
+{{ sandbox_image_files }}
+{% endif %}
 {% if not allow_root %}
 USER agent
 {% endif %}
@@ -431,6 +449,10 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
 # write the WORKDIR itself; the contents keep their ownership.
 RUN {{ sandbox_workdir_setup }}
 {% endif %}
+{% if sandbox_image_files %}
+# Files the {{ sandbox_runtime }} runtime needs from other images.
+{{ sandbox_image_files }}
+{% endif %}
 {% if not allow_root %}
 USER agent
 {% endif %}
@@ -479,6 +501,7 @@ class SharedRenderParams:
     sandbox_apt_packages: str = ""
     sandbox_user_setup: str = ""
     sandbox_workdir_setup: str = ""
+    sandbox_image_files: str = ""
     agent_id: str = ""
     agent_name: str = ""
     agent_version: str = ""
@@ -515,17 +538,19 @@ class FabricRenderParams(SharedRenderParams):
 # -- Public API -------------------------------------------------------------
 
 
-def resolve_value(name: str, explicit: str | None = None) -> str:
+def resolve_value(name: str, explicit: str | None = None, *, default: str | None = None) -> str:
     """Return the first non-empty value from *explicit*, env var, or default.
+
+    *default* applies when the parameter has no static default.
 
     Raises ``ValueError`` for required parameters (those without a default)
     when no value can be resolved.
     """
-    value, _ = resolve_value_with_source(name, explicit)
+    value, _ = resolve_value_with_source(name, explicit, default=default)
     return value
 
 
-def resolve_value_with_source(name: str, explicit: str | None = None) -> tuple[str, str]:
+def resolve_value_with_source(name: str, explicit: str | None = None, *, default: str | None = None) -> tuple[str, str]:
     """Same as :func:`resolve_value` but also returns where the value came from.
 
     Returns:
@@ -539,7 +564,7 @@ def resolve_value_with_source(name: str, explicit: str | None = None) -> tuple[s
         env_val = os.environ.get(env_var, "")
         if env_val:
             return env_val, "env"
-    default = _DEFAULTS.get(name)
+    default = _DEFAULTS.get(name) or default
     if default:
         return default, "default"
     raise ValueError(
@@ -635,19 +660,25 @@ def resolve_shared_render_params(
     sandbox_apt_packages = ""
     sandbox_user_setup = ""
     sandbox_workdir_setup = ""
+    sandbox_image_files = ""
+    contract_version = get_contract_version()
     if sandbox_runtime:
-        from nemo_agents_plugin.container.sandbox import (
-            render_apt_packages,
-            render_user_setup,
-            render_workdir_setup,
-            resolve_sandbox_profile,
-        )
-
         profile = resolve_sandbox_profile(sandbox_runtime)
         sandbox_runtime_name = profile.name
         sandbox_apt_packages = render_apt_packages(profile)
         sandbox_user_setup = render_user_setup(profile)
         sandbox_workdir_setup = render_workdir_setup(profile, _IMAGE_WORKDIR)
+        # Sandbox images default to the release matching the installed nemo-helix.
+        tag, tag_source = resolve_value_with_source("sandbox_image_tag", default=contract_version)
+        try:
+            sandbox_image_files = render_image_files(profile, registry=resolve_value("sandbox_image_registry"), tag=tag)
+        except ValueError as exc:
+            if tag_source != "default":
+                raise
+            raise ValueError(
+                f"nemo-helix {tag} has no published sandbox images. Set {SANDBOX_IMAGE_TAG_ENV} "
+                f"(and {SANDBOX_IMAGE_REGISTRY_ENV} if needed) to the tag and registry holding them."
+            ) from exc
 
     if metadata is None:
         metadata = extract_agent_metadata(
@@ -669,7 +700,8 @@ def resolve_shared_render_params(
         sandbox_apt_packages=sandbox_apt_packages,
         sandbox_user_setup=sandbox_user_setup,
         sandbox_workdir_setup=sandbox_workdir_setup,
-        contract_version=get_contract_version(),
+        sandbox_image_files=sandbox_image_files,
+        contract_version=contract_version,
         agent_id=metadata["agent_id"],
         agent_name=metadata["agent_name"],
         agent_version=metadata["agent_version"],

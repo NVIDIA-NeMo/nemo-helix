@@ -15,6 +15,11 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router';
 
+const mockProfile = vi.hoisted(() => ({ current: undefined as { id: string } | undefined }));
+vi.mock('@studio/providers/auth/useAuthProfile', () => ({
+  useAuthProfile: () => mockProfile.current,
+}));
+
 // Mock child components to isolate testing
 vi.mock('@studio/routes/FilesetListRoute/ActionMenu', () => ({
   ActionMenu: vi.fn(({ dataset, onNavigateToDetails, onDatasetUpdated, onDatasetDeleted }) => (
@@ -154,6 +159,7 @@ describe('FilesetListRoute', () => {
   };
 
   beforeEach(() => {
+    mockProfile.current = undefined;
     user = userEvent.setup();
     mockUseParams({
       [ROUTE_PARAMS.workspace]: workspace1.workspace,
@@ -259,6 +265,99 @@ describe('FilesetListRoute', () => {
       await screen.findByTestId('navigate-to-details-dataset-1', undefined, {
         timeout: LG_SELECTOR_TIMEOUT,
       });
+    });
+  });
+
+  describe('Default view (ASTD-830)', () => {
+    const make = (
+      name: string,
+      purpose: FilesetOutput['purpose'],
+      over: Partial<FilesetOutput> = {}
+    ) =>
+      ({
+        ...mockDatasets[0],
+        id: `${name}-id`,
+        name,
+        purpose,
+        ...over,
+      }) as FilesetOutput;
+
+    it('shows dataset/environment/model by default with distinct pills, hides generic, and sorts by recency', async () => {
+      const requests: URL[] = [];
+      const rows = [
+        make('a-dataset', 'dataset'),
+        make('b-environment', 'environment'),
+        make('c-model', 'model'),
+        make('d-generic', 'generic'),
+      ];
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`,
+          ({ request }) => {
+            const url = new URL(request.url);
+            requests.push(url);
+            const allowed = url.searchParams.getAll('filter[purpose][$in]').join(',').split(',');
+            const data = allowed.includes('')
+              ? rows
+              : rows.filter((r) => allowed.includes(r.purpose));
+            return HttpResponse.json(pageEnvelope(data));
+          }
+        )
+      );
+
+      renderRoute();
+      await screen.findByText('a-dataset', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      // (a) single $in filter of dataset/environment/model, default sort is recency
+      const lastUrl = requests.at(-1)!;
+      expect(
+        lastUrl.searchParams.getAll('filter[purpose][$in]').join(',').split(',').sort()
+      ).toEqual(['dataset', 'environment', 'model']);
+      expect(lastUrl.searchParams.get('sort')).toBe('-created_at');
+
+      // (b) generic never rendered
+      expect(screen.queryByText('d-generic')).not.toBeInTheDocument();
+
+      // (c) one pill per purpose, each with a distinct color class
+      const purposes = ['dataset', 'environment', 'model'] as const;
+      const classes = purposes.map((p) => screen.getAllByTestId(`purpose-pill-${p}`)[0].className);
+      expect(new Set(classes).size).toBe(purposes.length);
+
+      // Purpose is a checkbox filter: the default purposes are checked, generic is off
+      await user.click(screen.getByRole('button', { name: /^filter$/i }));
+      ['Dataset', 'Environment', 'Model'].forEach((name) =>
+        expect(screen.getByRole('checkbox', { name })).toBeChecked()
+      );
+      expect(screen.getByRole('checkbox', { name: 'Generic' })).not.toBeChecked();
+
+      // checking Generic opts those filesets in
+      await user.click(screen.getByRole('checkbox', { name: 'Generic' }));
+      await screen.findByText('d-generic', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+    });
+
+    it('lists the signed-in user’s filesets before everyone else’s', async () => {
+      mockProfile.current = { id: 'me@example.com' };
+      const rows = [
+        make('a-other', 'dataset', { created_by: 'someone@example.com' }),
+        make('z-mine', 'model', { created_by: 'me@example.com' }),
+      ];
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`,
+          ({ request }) => {
+            // owned query carries a created_by filter; the "everyone else" query a JSON filter
+            const owned = new URL(request.url).searchParams.get('filter[created_by]');
+            const data = owned ? rows.filter((r) => r.created_by === owned) : rows.slice(0, 1);
+            return HttpResponse.json(pageEnvelope(data));
+          }
+        )
+      );
+
+      renderRoute();
+      await screen.findByText('z-mine', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+
+      const names = screen.getAllByText(/^(a-other|z-mine)$/).map((el) => el.textContent);
+      expect(names).toEqual(['z-mine', 'a-other']);
     });
   });
 });

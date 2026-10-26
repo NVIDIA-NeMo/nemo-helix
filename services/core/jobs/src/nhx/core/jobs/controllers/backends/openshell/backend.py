@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
+from nemo_helix_plugin.jobs.constants import OPENSHELL_JOB_TASK_IMAGE
 from nemo_helix_plugin.jobs.execution_profiles import (
     OpenShellJobEgressConfig,
 )
@@ -38,14 +39,12 @@ from nhx.common.auth import AuthContext
 from nhx.common.config import get_platform_config, nhx_user_data_dir
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
-    DEFAULT_CONFIG_STORAGE_PATH,
-    DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
-    DEFAULT_TASK_STORAGE_PATH,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_SECRETS_ENVVAR,
+    NEMO_JOB_STEP_CONFIG_FILE_NAME,
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
@@ -70,6 +69,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_job_runtime_shared_envvars,
     get_logs_endpoint_from_fileset,
+    step_ttl_seconds_active,
 )
 from nhx.core.jobs.controllers.backends.openshell.policy import (
     DEFAULT_EGRESS_BINARIES,
@@ -78,8 +78,8 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
     build_sandbox_policy,
     generate_policy_dict,
     inject_platform_egress,
+    layer_policy_dict,
     load_policy_dict,
-    normalize_loaded_policy,
 )
 
 if TYPE_CHECKING:
@@ -98,23 +98,19 @@ _OPENSHELL_INSTALL_HINT = (
 # OpenShell rejects a longer sandbox name with INVALID_ARGUMENT (63-char DNS label).
 _MAX_ROUTABLE_NAME_LEN = 19
 
-# The openshell image variant bakes the launcher at this path (Dockerfile.nhx-tasks),
-# matching JobExecutionProfileConfig.launcher_tool_path.
-_LAUNCHER_PATH = "/tools/jobs-launcher"
-
-# Default task image for OpenShell job steps: the openshell variant of the CPU tasks
-# image (sandbox user, supervisor apt deps, baked jobs-launcher).
-_OPENSHELL_TASK_IMAGE = "nhx-tasks-openshell"
-
 # Default entrypoint for job steps that do not declare one. The supervisor ignores the
-# image ENTRYPOINT, so the sandbox command must name the binary explicitly.
-_DEFAULT_ENTRYPOINT = ("/app/.venv/bin/nemo-helix",)
+# image ENTRYPOINT, so the sandbox command must name the binary explicitly. It resolves
+# on the image's own PATH: the supervisor applies the image ENV and WORKDIR to the
+# workload, so the backend sets neither PATH, VIRTUAL_ENV, HOME, nor a working directory.
+_DEFAULT_ENTRYPOINT = ("nemo-helix",)
 
-# The supervisor resets PATH and ignores image ENV, so the venv must be injected
-# explicitly. Values mirror Dockerfile.nhx-tasks.
-_SANDBOX_PATH = "/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-_SANDBOX_VIRTUAL_ENV = "/app/.venv"
-_SANDBOX_HOME = "/home/sandbox"
+# Job scratch storage, inside the sandbox's private /tmp so a job image needs no
+# pre-created scratch tree. The task storage is /tmp itself, which exists and is
+# world-writable in every image. The launcher creates the step-config directory
+# when it writes the fetched config.
+_TASK_STORAGE_PATH = "/tmp"
+_CONFIG_STORAGE_PATH = "/tmp/nhx-job-config"
+_STEP_CONFIG_FILE_PATH = f"{_CONFIG_STORAGE_PATH}/{NEMO_JOB_STEP_CONFIG_FILE_NAME}"
 
 # Platform URLs the backend injects into the sandbox environment. The sandbox
 # can only reach the platform at the egress host (the policy allows exactly that
@@ -244,11 +240,12 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
     def _build_executor_policy(self) -> Any:
         """The SandboxPolicy applied to created sandboxes.
 
-        A hand-written YAML (``policy_path``) if given, else a generated default-deny
-        policy. The platform egress rule is always injected as mandatory so a job can
-        never lose its path back to the platform. When ``platform_egress`` is null the
-        sandbox gets no direct egress at all, which breaks the launcher's config and
-        secrets fetch and OTLP log export; the profile default sets it.
+        A generated default-deny policy, with the hand-written YAML (``policy_path``)
+        layered over it when given (see ``layer_policy_dict``). The platform egress rule
+        is always injected as mandatory so a job can never lose its path back to the
+        platform. When ``platform_egress`` is null the sandbox gets no direct egress at
+        all, which breaks the launcher's config and secrets fetch and OTLP log export;
+        the profile default sets it.
         """
         cfg = self._executor_config.platform_egress
         egress = (
@@ -258,19 +255,20 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 protocol=cfg.protocol,
                 tls=cfg.tls,
                 access=cfg.access,
-                binaries=tuple(cfg.binaries) or DEFAULT_EGRESS_BINARIES,
+                # The launcher fetches the step config and secrets, so it always needs egress.
+                binaries=tuple(
+                    dict.fromkeys(
+                        (self._executor_config.launcher_tool_path, *(cfg.binaries or DEFAULT_EGRESS_BINARIES))
+                    )
+                ),
             )
             if cfg is not None
             else None
         )
+        policy_dict = generate_policy_dict(filesystem=SandboxFilesystem(), egress=egress)
         path = self._executor_config.policy_path
         if path:
-            policy_dict = normalize_loaded_policy(load_policy_dict(path))
-        else:
-            policy_dict = generate_policy_dict(
-                filesystem=SandboxFilesystem(),
-                egress=egress,
-            )
+            policy_dict = layer_policy_dict(policy_dict, load_policy_dict(path))
         if egress is not None:
             inject_platform_egress(policy_dict, egress)
         return build_sandbox_policy(policy_dict)
@@ -328,9 +326,9 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
-                EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: DEFAULT_TASK_STORAGE_PATH,
-                CONFIG_TASK_STORAGE_PATH_ENVVAR: DEFAULT_CONFIG_STORAGE_PATH,
-                NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
+                EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: _TASK_STORAGE_PATH,
+                CONFIG_TASK_STORAGE_PATH_ENVVAR: _CONFIG_STORAGE_PATH,
+                NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: _STEP_CONFIG_FILE_PATH,
                 # The launcher fetches the step config from the jobs API instead of a
                 # pre-written file, so it must be able to reach the platform.
                 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR: get_logs_endpoint_from_fileset(
@@ -364,11 +362,6 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         # URL at the egress host.
         _rewrite_platform_urls(env, egress)
 
-        # The supervisor resets PATH and ignores image ENV; the venv must be explicit.
-        env.setdefault("PATH", _SANDBOX_PATH)
-        env.setdefault("VIRTUAL_ENV", _SANDBOX_VIRTUAL_ENV)
-        env.setdefault("HOME", _SANDBOX_HOME)
-
         # The docker driver gives the sandbox no network of its own: all egress goes
         # through the supervisor's HTTP proxy, which enforces the sandbox policy. The
         # k8s driver fences with NetworkPolicies instead, so the proxy is injected only
@@ -382,7 +375,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         image = (
             (container.image if container is not None else None)
             or self._execution_profile_config.image
-            or get_qualified_image(_OPENSHELL_TASK_IMAGE)
+            or get_qualified_image(OPENSHELL_JOB_TASK_IMAGE)
         )
         entrypoint = list(container.entrypoint or []) if container is not None else []
         if not entrypoint:
@@ -391,7 +384,8 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
 
         # The launcher is the canonical main process: it fetches the step config,
         # injects secrets, then execs the task command.
-        sandbox_command = [_LAUNCHER_PATH, "run", "--fetch-step-config", "--"] + entrypoint + command
+        launcher = self._executor_config.launcher_tool_path
+        sandbox_command = [launcher, "run", "--fetch-step-config", "--"] + entrypoint + command
 
         sandbox_name = _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
         labels = {
@@ -517,7 +511,8 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         """The exceeded TTL in seconds for a non-terminal sandbox, or None."""
         config = self._execution_profile_config
         if step_status == HelixJobStatus.ACTIVE:
-            return config.ttl_seconds_active if self.check_step_ttl(step, config.ttl_seconds_active) else None
+            ttl_seconds = step_ttl_seconds_active(step, config.ttl_seconds_active)
+            return ttl_seconds if self.check_step_ttl(step, ttl_seconds) else None
         not_started = _PHASE_TO_STATUS.get(_phase_name(phase)) == HelixJobStatus.PENDING
         if (
             step_status == HelixJobStatus.PENDING
@@ -542,13 +537,19 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 continue
             workspace = labels.get(JOB_WORKSPACE_ID_LABEL)
             job = labels.get(JOB_ID_LABEL)
+            attempt_id = labels.get(JOB_ATTEMPT_ID_LABEL)
             step_name = labels.get(JOB_STEP_NAME_LABEL)
             if not workspace or not job or not step_name:
                 continue
 
             # Verify the step is terminal before cleaning up, so a resource that was
             # marked active is never reclaimed early and then reported as error.
-            step = self.get_step_safe(job=job, step_name=step_name, workspace=workspace)
+            step = self.get_step_safe(
+                job=job,
+                step_name=step_name,
+                workspace=workspace,
+                attempt_id=attempt_id,
+            )
             if step is not None and step.status not in ("cancelled", "error", "completed"):
                 continue
 

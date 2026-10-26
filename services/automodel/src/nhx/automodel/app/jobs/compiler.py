@@ -53,6 +53,7 @@ from nhx.customization_common.schemas.file_io import (
     FileIOTaskConfig,
     FileSetRef,
     UploadItem,
+    model_upload_lifecycle,
 )
 from nhx.customization_common.schemas.model_entity import (
     ModelEntityTaskConfig,
@@ -488,6 +489,7 @@ async def platform_job_config_compiler(
             executor=_cpu_tasks_executor(FILE_IO_TASK_COMMAND, cpu_resources, task_profile),
             environment=base_env,
             config=file_io_upload_config.model_dump(mode="json"),
+            lifecycle=model_upload_lifecycle(),
         ),
         # Step 4: Create model entity
         HelixJobStep(

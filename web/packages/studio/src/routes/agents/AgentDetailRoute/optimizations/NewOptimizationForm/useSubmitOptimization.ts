@@ -10,9 +10,11 @@ import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/opti
 import {
   buildStudyBundle,
   gatewayAgentModel,
+  agentSystemPrompt,
   OPTIMIZE_CONFIG_PATH,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizeConfig';
 import { studyRowsQueryOptions } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
+import { SYSTEM_PROMPT_PATH } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { getAgentOptimizationsTabRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -52,6 +54,15 @@ export const useSubmitOptimization = ({
         queryClient.fetchQuery(studyRowsQueryOptions(workspace, target.evaluation)),
         agentsGetAgent(workspace, agentName),
       ]);
+      if (
+        values.prompt.enabled &&
+        values.prompt.mode === 'rewrite' &&
+        agentSystemPrompt(agent.config) === undefined
+      ) {
+        throw new Error(
+          `${agentName} has no system prompt at ${SYSTEM_PROMPT_PATH} to rewrite. Turn off prompt optimization or add one to the agent.`
+        );
+      }
       const agentModel = gatewayAgentModel(workspace, agent.config);
       const job = await launchOptimizeStudy({
         workspace,

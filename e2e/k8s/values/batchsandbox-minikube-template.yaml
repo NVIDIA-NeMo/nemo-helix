@@ -29,7 +29,7 @@ data:
           imagePullSecrets:
             - name: nvcrimagepullsecret
           # Create-time default for the sandbox container. Requests must not exceed
-          # limits. These match platformConfig.rl.sandbox_resources (2 CPU, 4Gi).
+          # limits. These match platformConfig.rl.sandbox_resources (4 CPU, 8Gi).
           containers:
             - name: sandbox
               volumeMounts:
@@ -37,11 +37,11 @@ data:
                   mountPath: /dev/shm
               resources:
                 requests:
-                  cpu: "2"
-                  memory: 4Gi
+                  cpu: "4"
+                  memory: 8Gi
                 limits:
-                  cpu: "2"
-                  memory: 4Gi
+                  cpu: "4"
+                  memory: 8Gi
           tolerations:
             - key: nvidia.com/gpu
               operator: Exists
@@ -49,4 +49,4 @@ data:
             - name: dshm
               emptyDir:
                 medium: Memory
-                sizeLimit: 1Gi
+                sizeLimit: 8Gi

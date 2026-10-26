@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Close } from '@nemo/icons/icons';
 import { useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import { Button, Flex, Spinner, Stack, Table, Text } from '@nvidia/foundations-react-core';
 import { PENDING_FILE_OID } from '@studio/components/filesets/FilesetFileExplorer/constants';
@@ -21,7 +22,6 @@ import { useBulkDownload } from '@studio/components/filesets/hooks/useBulkDownlo
 import { useBulkDuplicate } from '@studio/components/filesets/hooks/useBulkDuplicate';
 import type { FileSystemFile } from '@studio/components/FilesTable/utils';
 import { useDatasetNavigator } from '@studio/hooks/useDatasetNavigator';
-import { X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export type { ExtraColumn, FilesetFileExplorerProps };
@@ -245,7 +245,7 @@ export const FilesetFileExplorer: FC<FilesetFileExplorerProps> = ({
                       onClick={() => handleSearchQueryChange('', clearSelectedItems)}
                       data-testid="dataset-details-clear-filters"
                     >
-                      <X className="text-brand" /> Clear filters
+                      <Close className="text-brand" /> Clear filters
                     </Button>
                   </Flex>
                 )}

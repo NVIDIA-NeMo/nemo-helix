@@ -68,12 +68,13 @@ class DistributedContext:
         """
         Create distributed context from environment variables.
 
-        The caller is responsible for constructing the barrier_dir path,
-        including any task-specific namespacing for pause/resume support.
+        The caller is responsible for constructing the barrier_dir path. Every pod of
+        a run must get the same one, so it cannot include the task, which is the pod.
+        A later run that reuses it, such as a resume, relies on the coordinator having
+        cleared it with ``clear_barriers``.
 
         Args:
             barrier_dir: Directory for barrier files (on shared storage).
-                         Caller should namespace this by task ID for pause/resume support.
 
         Environment Variables:
             RANK: This node's rank (default: 0)
@@ -121,6 +122,19 @@ class DistributedContext:
     def is_distributed(self) -> bool:
         """True if running in multi-node mode."""
         return self.world_size > 1
+
+    def clear_barriers(self) -> None:
+        """Remove this run's barrier markers, so a later run of the same attempt cannot take them.
+
+        Only the coordinator clears, and only in multi-node mode. Raises if they cannot be removed.
+        """
+        if not self.is_distributed or not self.is_coordinator:
+            return
+        try:
+            shutil.rmtree(self.barrier_dir)
+        except FileNotFoundError:
+            pass
+        logger.info(f"Cleared barriers: {self.barrier_dir}")
 
     # --- Barrier Implementation ---
 

@@ -4,6 +4,8 @@
 
 name: benchmark-execution
 description: "Benchmark task execution contract: complete every numbered requirement, execute tool calls directly (never plan-only), and verify final state with a direct retrieve/list before responding. Use for every benchmark task."
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 # Benchmark execution contract
 

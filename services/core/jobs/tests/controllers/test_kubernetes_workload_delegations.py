@@ -73,7 +73,7 @@ def _manager(
     return KubernetesPodBoundWorkloadDelegationManager(
         core_v1=core_v1 or MagicMock(),
         namespace="test-namespace",
-        ttl_seconds_active=lambda: 900,
+        ttl_seconds_active=lambda step: 900,
         workload_audience=lambda: "nemo-helix",
         register_workload_delegation=register or MagicMock(),
         revoke_workload_delegation=revoke or MagicMock(),

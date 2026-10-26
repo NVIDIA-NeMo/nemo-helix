@@ -24,6 +24,7 @@ from nemo_helix_plugin.sandbox import SandboxImageProfile
 _APT_RE = re.compile(r"^[a-z0-9][a-z0-9._+-]*$")
 _NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]*$")
 _PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
+_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@-]*$")
 
 
 def resolve_sandbox_profile(name: str) -> SandboxImageProfile:
@@ -76,6 +77,21 @@ def render_user_setup(profile: SandboxImageProfile) -> str:
         useradd += f" --shell {shell} {name}"
         parts.append(f"{groupadd} && \\\n    {useradd}")
     return " && \\\n    ".join(parts)
+
+
+def render_image_files(profile: SandboxImageProfile, *, registry: str, tag: str) -> str:
+    """Return one ``COPY --from`` instruction per profile file, or ``""``.
+
+    A bare image name is qualified as ``{registry}/{image}:{tag}``.
+    """
+    lines: list[str] = []
+    for item in profile.files:
+        ref = item.image if any(sep in item.image for sep in "/:@") else f"{registry}/{item.image}:{tag}"
+        image = _validate(ref, _IMAGE_RE, "image")
+        source = _validate(item.source, _PATH_RE, "source path")
+        dest = _validate(item.dest, _PATH_RE, "destination path")
+        lines.append(f"COPY --from={image} {source} {dest}")
+    return "\n".join(lines)
 
 
 def render_workdir_setup(profile: SandboxImageProfile, workdir: str) -> str:

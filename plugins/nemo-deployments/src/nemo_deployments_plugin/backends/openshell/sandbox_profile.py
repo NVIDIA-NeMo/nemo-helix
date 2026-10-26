@@ -14,7 +14,8 @@ works even when the ``nemo-deployments[openshell]`` extra is not installed.
 
 from __future__ import annotations
 
-from nemo_helix_plugin.sandbox import SandboxImageProfile, SandboxUser
+from nemo_helix_plugin.jobs.constants import OPENSHELL_JOB_LAUNCHER_PATH, OPENSHELL_JOB_TASK_IMAGE
+from nemo_helix_plugin.sandbox import SandboxImageFile, SandboxImageProfile, SandboxUser
 
 # Without ``nftables`` the supervisor falls back to a degraded policy mode. The
 # glibc >= 2.39 floor its binary needs is described rather than enforced: the
@@ -24,7 +25,8 @@ PROFILE = SandboxImageProfile(
     description=(
         "OpenShell sandbox supervisor: non-root 'sandbox' user that can write the "
         "image WORKDIR, iproute2 for network-namespace setup, nftables for full "
-        "policy enforcement, and a glibc >= 2.39 base image."
+        "policy enforcement, and a glibc >= 2.39 base image. Also carries the jobs-launcher "
+        "so the image can run as an OpenShell job step."
     ),
     apt_packages=("iproute2", "nftables"),
     users=(
@@ -39,4 +41,12 @@ PROFILE = SandboxImageProfile(
     # The docker driver runs the sandbox in the image WORKDIR and the supervisor refuses
     # to start unless the sandbox identity can create entries there.
     workdir_group="sandbox",
+    # The OpenShell job backend runs the launcher as the sandbox main process.
+    files=(
+        SandboxImageFile(
+            image=OPENSHELL_JOB_TASK_IMAGE,
+            source=OPENSHELL_JOB_LAUNCHER_PATH,
+            dest=OPENSHELL_JOB_LAUNCHER_PATH,
+        ),
+    ),
 )

@@ -9,6 +9,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
+import { FolderOpen, IconDocument } from '@nemo/icons/icons';
 import {
   useAgentOptimizationGetRunStrategyJob,
   useAgentOptimizationListRunStrategyJobResults,
@@ -46,7 +47,6 @@ import {
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
-import { FolderOpen, ScrollText } from 'lucide-react';
 import { type FC, useCallback, useEffect, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
@@ -144,7 +144,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
     data: artifacts,
     isLoading: isLoadingArtifacts,
     error: artifactsError,
-  } = useAgentOptimizationListRunStrategyJobResults(workspace, jobName, {
+  } = useAgentOptimizationListRunStrategyJobResults(workspace, jobName, undefined, {
     query: {
       queryKey: ['optimization-artifacts', workspace, jobName, status],
       enabled: !!job,
@@ -253,7 +253,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             />
           </>
         )}
-        <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
+        <Panel slotHeading="Logs" slotIcon={<IconDocument />} elevation="high" density="compact">
           {logsError && logs.length === 0 ? (
             <Banner
               kind="inline"

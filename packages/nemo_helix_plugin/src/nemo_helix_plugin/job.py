@@ -73,6 +73,7 @@ from typing import Any, ClassVar
 from nemo_helix_plugin._base import _NamedPlugin
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -185,7 +186,7 @@ class NemoJob(_NamedPlugin):
 
     # Plugin-defined list filter passed to ``job_route_factory``. When set,
     # replaces the generated ``{job_type}JobsListFilter``.
-    jobs_list_filter: ClassVar[type | None] = None
+    jobs_list_filter: ClassVar[type[BaseJobsListFilter] | None] = None
 
     # ------------------------------------------------------------------ #
     # Plugin-owned options (inert; see class docstring)                  #

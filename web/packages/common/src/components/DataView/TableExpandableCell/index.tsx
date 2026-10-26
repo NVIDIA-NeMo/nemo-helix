@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Expand } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
-import { Maximize2 } from 'lucide-react';
 import type { FC, ReactNode } from 'react';
 
 export interface TableExpandableCellState {
@@ -24,7 +24,7 @@ export const TableExpandableCell: FC<{
         className="absolute right-1 top-1 z-10 cursor-pointer rounded bg-surface-base/80 p-1 opacity-0 hover:bg-surface-sunken group-hover:opacity-100 focus-visible:opacity-100"
         aria-label="Expand cell"
       >
-        <Maximize2 size={12} />
+        <Expand size="12" />
       </button>
       <div className="max-h-[130px] overflow-y-auto px-3 py-2">
         <Text

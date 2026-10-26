@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Route } from '@nemo/icons/icons';
 import {
   Avatar,
   Button,
@@ -18,7 +19,6 @@ import { ReportTraceModal } from '@studio/components/ReportTraceModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { useAuthSignOut } from '@studio/providers/auth/useWebSession';
-import { Route } from 'lucide-react';
 import { useState } from 'react';
 
 export const UserPopover = () => {

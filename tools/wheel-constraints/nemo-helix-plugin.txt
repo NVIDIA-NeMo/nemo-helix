@@ -1,0 +1,20 @@
+# Partial dependency constraints for the CI wheel install-smoke-test.
+# Pins the DIRECT external deps of the built nemo-helix-plugin wheel (plus any pre-release
+# transitive, which uv resolves only when named) to vetted versions for
+# reproducibility; deep transitives resolve normally and cannot self-conflict.
+# Regenerate with: tools/wheel-constraints/compile-wheel-constraints.sh <dir-with-built-wheels>
+#
+anthropic==2.1.0
+anyio==4.15.1
+certifi==2026.10.19
+fastapi==0.161.1
+fsspec==2026.9.0
+httpx==0.28.1
+jsonschema==4.26.0
+lark==1.3.1
+openai==3.37.0
+pydantic-settings==2.16.1
+pydantic==2.14.1
+pyyaml==6.0.3
+rich==15.0.0
+typer==0.25.1

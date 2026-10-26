@@ -6,16 +6,26 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.lifecycle import (
     active_ttl_anchor,
     attempt_can_transition,
+    clear_image_comparison,
     describe_paused_exit,
+    effective_pause_ttl_seconds,
+    image_digest_updates,
     pause_deadline_exceeded,
+    storage_targets,
+    storage_window_expired,
     with_lifecycle_timestamps,
 )
+from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
+from nhx.core.jobs.config import JobsStorageConfig
 from nhx.core.jobs.controllers.backends.base import JobBackend
-from nhx.core.jobs.entities import HelixJobStep
+from nhx.core.jobs.entities import HelixJobStep, JobStorageTarget
 
 
 def test_lifecycle_timestamps_accept_the_step_entity_and_injected_clock():
@@ -111,3 +121,84 @@ def test_active_ttl_does_not_count_paused_time():
     one_day = 24 * 3600
     assert not JobBackend.check_step_ttl(MagicMock(), step, one_day, now=resumed + datetime.timedelta(hours=1))
     assert JobBackend.check_step_ttl(MagicMock(), step, one_day, now=resumed + datetime.timedelta(days=2))
+
+
+def test_stopping_snapshots_the_image_digest():
+    now = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.timezone.utc)
+    step = SimpleNamespace(status=HelixJobStatus.ACTIVE, status_details={"image_digest": "sha256:old"})
+
+    details = with_lifecycle_timestamps(step, HelixJobStatus.ERROR, {}, now=now)
+
+    assert details == {"stopped_at": now.isoformat(), "image_digest_at_save": "sha256:old"}
+
+
+def test_image_digest_comparison():
+    assert image_digest_updates({}, "sha256:a") == {"image_digest": "sha256:a"}
+    saved = {"image_digest_at_save": "sha256:a"}
+    assert image_digest_updates(saved, "sha256:a") == {"image_digest": "sha256:a"}
+    assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
+    # The warning is written once.
+    warned = {**saved, "image_digest_warning": "changed"}
+    assert image_digest_updates(warned, "sha256:c") == {"image_digest": "sha256:c"}
+
+
+def test_a_pod_that_has_not_started_its_container_decides_nothing():
+    """While the new pod pulls its image there is no digest yet, and a later reconcile compares."""
+    saved = {"image_digest_at_save": "sha256:a", "resumed_at": "2026-10-14T00:00:00+00:00"}
+
+    assert image_digest_updates(saved, None) == {}
+    assert "image_digest_warning" in image_digest_updates(saved, "sha256:b")
+
+
+def test_a_resume_without_a_saved_digest_gets_one_note():
+    resumed = {"resumed_at": "2026-10-14T00:00:00+00:00"}
+
+    note = image_digest_updates(resumed, "sha256:a")
+
+    assert set(note) == {"image_digest", "image_digest_comparison_skipped"}
+    assert image_digest_updates({**resumed, **note}, "sha256:a") == {}
+
+
+def test_a_resume_compares_again():
+    """A second pause saves a newer digest, and the warning from the first resume must not block that comparison."""
+    details = {"image_digest": "sha256:b", "image_digest_at_save": "sha256:b", "image_digest_warning": "was a, now b"}
+
+    clear_image_comparison(details)
+
+    assert "image_digest_warning" not in details
+    assert "image_digest_warning" in image_digest_updates(details, "sha256:c")
+
+
+def test_storage_targets_lists_each_backend_that_mounts_storage_once():
+    storage = [HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/storage")]
+    cpu = CPUExecutionProvider(provider="cpu", profile="default", container=ContainerSpec(image="busybox"))
+    large = CPUExecutionProvider(provider="cpu", profile="large", container=ContainerSpec(image="busybox"))
+    spec = HelixJobSpec(
+        steps=[
+            HelixJobStepSpec(name="download", executor=cpu, environment=storage),
+            HelixJobStepSpec(name="train", executor=large, environment=storage),
+            HelixJobStepSpec(name="upload", executor=cpu, environment=storage),
+            HelixJobStepSpec(name="notify", executor=large),
+        ]
+    )
+
+    assert storage_targets(spec) == [
+        JobStorageTarget(provider="cpu", profile="default"),
+        JobStorageTarget(provider="cpu", profile="large"),
+    ]
+
+
+def test_storage_window():
+    stopped = datetime.datetime(2026, 10, 9, 12, 0, tzinfo=datetime.timezone.utc)
+    assert not storage_window_expired(stopped, 3600, now=stopped + datetime.timedelta(minutes=59))
+    assert storage_window_expired(stopped, 3600, now=stopped + datetime.timedelta(minutes=61))
+    assert storage_window_expired(stopped, 0, now=stopped)
+
+
+def test_effective_pause_window_combines_job_control_and_platform_settings():
+    settings = JobsStorageConfig(paused_storage_ttl_seconds=600, maximum_pause_ttl_seconds=900)
+
+    assert effective_pause_ttl_seconds(JobControl(), settings) == 600
+    assert effective_pause_ttl_seconds(JobControl(pause_ttl_seconds=300), settings) == 300
+    # A maximum lowered after a job saved its value still caps that value.
+    assert effective_pause_ttl_seconds(JobControl(pause_ttl_seconds=1200), settings) == 900

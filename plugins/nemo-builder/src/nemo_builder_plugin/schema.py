@@ -10,7 +10,13 @@ from pathlib import PurePosixPath
 from typing import Annotated, Literal, Self
 
 from nemo_builder_plugin.entities import ContainerImage
-from nemo_builder_plugin.identity import normalize_reference, validate_caller_tag, validate_repository
+from nemo_builder_plugin.identity import (
+    PLATFORM_PATTERN,
+    normalize_reference,
+    platform_name,
+    validate_caller_tag,
+    validate_repository,
+)
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator, model_validator
 
@@ -171,7 +177,16 @@ class BuildSpec(BaseModel):
         description="Where to publish. Omit to publish under the workspace, with the system tag only (see `name`).",
     )
     dockerfile: str = Field(default="Dockerfile", description="Path to the Dockerfile, relative to the context.")
-    platform: str = Field(default="linux/amd64", pattern=r"^[a-z0-9]+/[a-z0-9]+(/[a-z0-9]+)?$")
+    platform: str | None = Field(
+        default=None,
+        pattern=PLATFORM_PATTERN,
+        description=(
+            "The platform to build or copy, as `os/architecture`. BuildKit's spellings, such as `linux/x86_64`, are "
+            "taken and named as it names them. Omit for the deployment's `default_platform`."
+        ),
+    )
+
+    _platform_name = field_validator("platform", mode="before")(platform_name)
 
     @model_validator(mode="after")
     def _dockerfile_stays_within_the_context(self) -> Self:
@@ -201,6 +216,11 @@ class BuildSet(BaseModel):
         ),
     )
     build_specs: list[BuildSpec] = Field(min_length=1, max_length=MAX_BUILD_SPECS)
+
+    def with_default_platform(self, platform: str) -> BuildSet:
+        """This set with ``platform`` for every spec that names none: the request as it is built and recorded."""
+        specs = [spec if spec.platform else spec.model_copy(update={"platform": platform}) for spec in self.build_specs]
+        return self.model_copy(update={"build_specs": specs})
 
     @model_validator(mode="after")
     def _spec_names_are_unique(self) -> Self:

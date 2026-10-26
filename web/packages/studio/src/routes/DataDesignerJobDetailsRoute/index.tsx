@@ -5,6 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { ArrowLeft } from '@nemo/icons/icons';
 import {
   Banner,
   Button,
@@ -31,7 +32,6 @@ import { useDataDesignerArtifactsFileset } from '@studio/routes/DataDesignerJobD
 import { useDataDesignerJobFromRoute } from '@studio/routes/DataDesignerJobDetailsRoute/useDataDesignerJobFromRoute';
 import { getDataDesignerJobListRoute } from '@studio/routes/utils';
 import { formatDateTime } from '@studio/util/date';
-import { ArrowLeft } from 'lucide-react';
 import { useRef, useState, type FC } from 'react';
 import { Link, useNavigate } from 'react-router';
 

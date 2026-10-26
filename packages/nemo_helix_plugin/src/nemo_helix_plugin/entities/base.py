@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from collections.abc import Mapping
@@ -282,9 +283,14 @@ class ListResponse(BaseModel, Generic[EntityT]):
 
 
 class EntityToken(Protocol):
-    """Entity identifier token used for typed unions and entity classes."""
+    """Entity identifier token used for typed unions and entity classes.
+
+    Tokens are hashable because converted entity types are cached per token.
+    """
 
     __entity_type__: str
+
+    def __hash__(self) -> int: ...
 
 
 EntityTypeLike = Type[EntityT] | EntityToken
@@ -461,6 +467,21 @@ def _convert_sort_to_api_sort(sort: str) -> str:
     return sort
 
 
+@functools.cache
+def _type_adapter(type_: Any) -> TypeAdapter[Any]:
+    return TypeAdapter(type_)
+
+
+@functools.cache
+def _stored_private_attr_types(model_type: type[EntityBase]) -> dict[str, Any]:
+    type_hints = get_type_hints(model_type)
+    return {
+        field_name: type_hints.get(field_name)
+        for field_name in model_type.__private_attributes__
+        if field_name not in model_type.__base_private_attrs__
+    }
+
+
 def _convert_api_entity_to_model(
     entity: Entity,
     entity_type: EntityTypeLike,
@@ -469,8 +490,7 @@ def _convert_api_entity_to_model(
     """Convert an API entity to an EntityBase model."""
     entity_dict = entity.model_dump()
     entity_dict.update(entity.data)
-    type_adapter = TypeAdapter(entity_type)
-    result = type_adapter.validate_python(entity_dict)
+    result = _type_adapter(entity_type).validate_python(entity_dict)
     result._id = entity.id
     if entity.parent:
         result._parent = entity.parent
@@ -482,13 +502,11 @@ def _convert_api_entity_to_model(
     # Set PrivateAttr fields from stored data, excluding base attrs (already set above)
     # Use TypeAdapter to properly deserialize values (handles BaseModel, Optional, etc.)
     # Note: use type(result) not entity_type, since entity_type may be an Annotated union
-    type_hints = get_type_hints(type(result))
-    for field_name in type(result).__private_attributes__:
-        if field_name not in type(result).__base_private_attrs__ and field_name in entity.data:
+    for field_name, attr_type in _stored_private_attr_types(type(result)).items():
+        if field_name in entity.data:
             raw_value = entity.data[field_name]
-            attr_type = type_hints.get(field_name)
             if attr_type is not None:
-                validated = TypeAdapter(attr_type).validate_python(raw_value)
+                validated = _type_adapter(attr_type).validate_python(raw_value)
                 setattr(result, field_name, validated)
             else:
                 setattr(result, field_name, raw_value)

@@ -16,6 +16,7 @@ import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   agentsListDeployments,
   getAgentsListDeploymentsQueryKey,
@@ -36,7 +37,6 @@ import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 

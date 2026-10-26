@@ -4,14 +4,13 @@
     "schema-version": "1.14.0",
     "install": {
       "nodejs": {
-        "pkg-path": "nodejs_22",
-        "pkg-group": "node",
-        "version": "22.23.2"
+        "flake": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a#nodejs_22"
       }
     },
     "vars": {
       "COREPACK_HOME": "${FLOX_ENV_CACHE}/corepack",
       "COREPACK_SHIMS": "${FLOX_ENV_CACHE}/corepack/bin",
+      "NODE_VERSION": "22.23.4",
       "PNPM_VERSION": "10.34.5"
     },
     "hook": {
@@ -27,90 +26,90 @@
   },
   "packages": [
     {
-      "attr_path": "nodejs_22",
-      "broken": false,
-      "derivation": "/nix/store/98iw9769gchj4vs8vkfvkdnxczaarami-nodejs-22.23.2.drv",
-      "description": "Event-driven I/O framework for the V8 JavaScript engine",
       "install_id": "nodejs",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "nodejs-22.23.2",
-      "pname": "nodejs_22",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T04:55:15.826463Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "22.23.2",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-darwin.nodejs_22",
+      "derivation": "/nix/store/s1kd274p1n6cbnbqbxmj0hi8bj0ifmk4-nodejs-22.23.4.drv",
+      "outputs": {
+        "out": "/nix/store/dwm5sm9a4287fdim8cxyc5v6v8sq6iww-nodejs-22.23.4"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/s0qzknz77k3lzikgywx2piilfp8w0581-nodejs-22.23.2"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-darwin",
       "system": "aarch64-darwin",
-      "group": "node",
+      "name": "nodejs-22.23.4",
+      "pname": "nodejs",
+      "version": "22.23.4",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "licenses": [
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "nodejs_22",
-      "broken": false,
-      "derivation": "/nix/store/i9h6nligglciwssrc0zdri9zji0hx20c-nodejs-22.23.2.drv",
-      "description": "Event-driven I/O framework for the V8 JavaScript engine",
       "install_id": "nodejs",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "nodejs-22.23.2",
-      "pname": "nodejs_22",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T05:24:46.217099Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "22.23.2",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.aarch64-linux.nodejs_22",
+      "derivation": "/nix/store/17rdnkqvjj8lq8l6g5jh0ps1qfidzyxl-nodejs-22.23.4.drv",
+      "outputs": {
+        "out": "/nix/store/bwkaqhf9650zqdk497yifczi89xxg573-nodejs-22.23.4"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/i7dq81ramvcyrzasgv8qbf07rgfiqiai-nodejs-22.23.2"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "aarch64-linux",
       "system": "aarch64-linux",
-      "group": "node",
+      "name": "nodejs-22.23.4",
+      "pname": "nodejs",
+      "version": "22.23.4",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "licenses": [
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     },
     {
-      "attr_path": "nodejs_22",
-      "broken": false,
-      "derivation": "/nix/store/1x2rjyk2j93jmsl6myl8nrv7b95viv21-nodejs-22.23.2.drv",
-      "description": "Event-driven I/O framework for the V8 JavaScript engine",
       "install_id": "nodejs",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "name": "nodejs-22.23.2",
-      "pname": "nodejs_22",
-      "rev": "f13ff45afd1bb73e640eaa08a7066dbed07e3238",
-      "rev_count": 1049422,
-      "rev_date": "2026-08-07T12:45:23Z",
-      "scrape_date": "2026-08-09T05:59:03.273842Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "22.23.2",
-      "outputs_to_install": [
+      "locked-url": "github:NixOS/nixpkgs/0f584e7c37a52b38bb201f5e7b8d66a74bf62d6a?narHash=sha256-Jyf1RAg7n1FGKEATWLl2IX0b5oHGv0QCSqk/dGeTfpI%3D",
+      "flake-description": "A collection of packages for the Nix package manager",
+      "locked-flake-attr-path": "legacyPackages.x86_64-linux.nodejs_22",
+      "derivation": "/nix/store/154w5kksq9140bhc4fjjcx0kf50a17dw-nodejs-22.23.4.drv",
+      "outputs": {
+        "out": "/nix/store/lr2c5f2y7q62pzfrkclgsy5yj31hsn5l-nodejs-22.23.4"
+      },
+      "output-names": [
         "out"
       ],
-      "outputs": {
-        "out": "/nix/store/3vm4j8im8bzdal3dsgmhv9gb5kvanbp1-nodejs-22.23.2"
-      },
+      "outputs-to-install": [
+        "out"
+      ],
+      "requested-outputs-to-install": [],
+      "package-system": "x86_64-linux",
       "system": "x86_64-linux",
-      "group": "node",
+      "name": "nodejs-22.23.4",
+      "pname": "nodejs",
+      "version": "22.23.4",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "licenses": [
+        "MIT"
+      ],
+      "broken": false,
+      "unfree": false,
       "priority": 5
     }
   ]

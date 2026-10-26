@@ -12,7 +12,7 @@ from nemo_helix_plugin.jobs.api_factory import HelixJobSpec, HelixJobStep
 from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_executor, resolve_secret_environment
 from pydantic import BaseModel
-from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
+from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
 from scaled_evals.dispatch.worker import Dispatcher
 
 
@@ -57,11 +57,7 @@ class BenchmarkArchiveBuildJob(NemoJob):
         """Claim the archive here, so the lease starts only once the pod runs."""
         spec = BenchmarkArchiveBuildSpec.model_validate(config)
         dispatcher = Dispatcher()
-        with dispatcher.connect() as conn:
-            claimed = BenchmarkArchiveRepository(conn).claim(
-                claim_timeout=dispatcher.claim_timeout,
-                run_id=spec.benchmark_run_id,
-            )
+        claimed = BenchmarkArchiveStore().claim(claim_timeout=dispatcher.claim_timeout, run_id=spec.benchmark_run_id)
         # None means another attempt holds a live lease; "failed" means the
         # claim exhausted its attempts. Neither leaves work for this Job.
         built = claimed is not None and claimed["status"] == "building"

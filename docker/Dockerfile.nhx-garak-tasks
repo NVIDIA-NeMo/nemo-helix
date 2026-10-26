@@ -22,9 +22,11 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     libpq-dev \
     libssl-dev \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1"
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
 COPY docker/scripts/collect-python-sdists.py /usr/local/bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -64,13 +66,14 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 RUN uv venv --no-project --python /usr/local/bin/python /app/.garak_venv
 # CVE remediation for garak venv (transitive deps pinned by garak that are below safe versions)
-# litellm: CVE-2026-35029 (affects <1.83.0)
+# Pin LiteLLM in the initial resolution to avoid installing compromised 1.107.0.
+# https://docs.litellm.ai/blog/security-incident-oct-21-2026
 # langchain-core: CVE-2025-68664 (affects <1.2.5) + GHSA-qh6h-p6c9-ff54 (affects <1.2.22)
+# When bumping garak version here, be sure to update packages/garak-api and docs
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip --no-config install garak==0.17.0 --python /app/.garak_venv/bin/python && \
+    uv pip --no-config install garak==0.17.1 "litellm==1.106.2" --python /app/.garak_venv/bin/python && \
     uv pip install --python /app/.garak_venv/bin/python "setuptools>=78.1.1" && \
     uv pip install --no-deps --python /app/.garak_venv/bin/python \
-    "litellm>=1.83.0" \
     "urllib3>=2.6.3" \
     "aiohttp>=3.14.3,<4" \
     "pyasn1>=0.6.4" \
@@ -94,6 +97,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-python-sdists.py \
@@ -115,11 +125,13 @@ ARG USER_GID=1000
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 WORKDIR /app
-COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
 COPY docker/scripts/collect-apt-sources.sh \
     docker/scripts/collect-cpython-source.py \
     /usr/local/bin/
 RUN apt-get update && apt-get upgrade -y && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1" && \
     list_installed_perl_cve_packages() { \
     dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' \
     perl-base perl 'perl-modules-*' 'libperl[0-9]*' 2>/dev/null | sed -n 's/^\([^ ]*\) ii .*$/\1/p'; \
@@ -135,6 +147,9 @@ RUN apt-get update && apt-get upgrade -y && \
     test -z "$(list_installed_perl_cve_packages)"
 RUN groupadd --gid ${USER_GID} ${USERNAME} && \
     useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash ${USERNAME}
+
+RUN --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    python3 /tmp/update-python-trust.py --root /usr/local --bundles-only
 
 RUN mkdir -p /source-distributions/nhx-garak-tasks && \
     bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-garak-tasks/apt --installed && \
@@ -187,6 +202,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy installed packages and application
 COPY --chown=nvs:nvs --from=py-builder /app /app
+COPY --from=py-builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --chown=nvs:nvs --from=py-builder /source-distributions/nhx-garak-tasks/ /usr/share/nemo-helix/source-distributions/nhx-garak-tasks/
 COPY --chown=nvs:nvs --from=base /source-distributions/nhx-garak-tasks/ /usr/share/nemo-helix/source-distributions/nhx-garak-tasks/
 ARG CACHE_HOME

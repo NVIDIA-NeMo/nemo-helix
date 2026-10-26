@@ -17,7 +17,6 @@ from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.schemas.tasks import Task
 from scaled_evals.api.schemas.users import CurrentUserResponse
 from scaled_evals.api.settings import settings
-from scaled_evals.api.tenancy import record_principal
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -27,8 +26,7 @@ Db = Annotated[Database, Depends(get_db)]
 
 @router.get("/me", response_model=CurrentUserResponse)
 def users_me(current: Principal, db: Db) -> CurrentUserResponse:
-    record_principal(db, current)
-    usage = db.users.quota_usage(current.owner_id)
+    usage = db.evaluations.quota_usage(current.owner_id)
     return CurrentUserResponse(
         **{
             "id": current.owner_id,
@@ -58,9 +56,8 @@ def users_me(current: Principal, db: Db) -> CurrentUserResponse:
 
 @router.get("/me/summary", response_model=UserSummaryResponse)
 def users_me_summary(current: Principal, db: Db) -> UserSummaryResponse:
-    record_principal(db, current)
-    summary = db.users.summary(current.owner_id)
-    recent = db.users.recent_activity(current.owner_id, limit=10)
+    summary = db.evaluations.summary(current.owner_id)
+    recent = db.evaluations.recent_activity(current.owner_id, limit=10)
     return UserSummaryResponse(**summary, recent=recent)
 
 
@@ -107,5 +104,5 @@ def users_me_activity(
         from scaled_evals.api.schemas.common import decode_cursor
 
         decode_cursor(cursor)
-    rows = db.users.recent_activity(current.owner_id, limit=limit)
+    rows = db.evaluations.recent_activity(current.owner_id, limit=limit)
     return ListEnvelope(data=[ActivityRecord(**row) for row in rows])

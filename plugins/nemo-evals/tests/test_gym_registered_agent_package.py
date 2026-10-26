@@ -39,7 +39,7 @@ def _spec(**overrides) -> GymRegisteredAgentPackageSpec:
         requirements=["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"],
     )
     fields.update(overrides)
-    return GymRegisteredAgentPackageSpec(**fields)
+    return GymRegisteredAgentPackageSpec.model_validate(fields)
 
 
 def _fake_download(calls: list):

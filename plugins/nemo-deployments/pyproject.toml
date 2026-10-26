@@ -52,12 +52,8 @@ dev = [
   "fastapi>=0.115",
   "docker>=7.0",
   "kubernetes>=30.1.0",
-  # openshell/grpcio/protobuf are intentionally NOT in this dev group. openshell is a
-  # platform-restricted wheel (manylinux_2_39 / macOS 13 arm64, no sdist); a dev-group
-  # entry would make `uv sync --all-packages` (bootstrap) hard-fail on any host with
-  # glibc < 2.39 or older macOS, because the lock marker gates arch/OS but cannot
-  # express glibc. They live in the `[openshell]` extra instead, and the dedicated CI
-  # job (make test-deployments-openshell) installs that extra to cover the backend.
+  # openshell/grpcio/protobuf come from the `[openshell]` extra, which the root
+  # `enabled-plugins` group installs in the default workspace sync.
 ]
 
 [tool.pytest.ini_options]

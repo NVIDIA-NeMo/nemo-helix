@@ -135,7 +135,7 @@ async def _resolve_copies(
             digests[image.name] = pinned
             continue
         try:
-            digests[image.name] = await resolve_upstream(upstream, image.spec.platform)
+            digests[image.name] = await resolve_upstream(upstream, image.platform)
         except UpstreamNotFound as exc:
             raise InvalidBuildRequest(f"{image.name}: {exc}") from exc
         except UpstreamError as exc:
@@ -170,8 +170,12 @@ async def submit_build_set(
     get_job_fields: GetJobFields,
     secret_readable: SecretReadable,
     resolve_upstream: ResolveUpstream,
+    default_platform: str,
 ) -> SubmitResult:
     """Resolve, check, place, compile; then write the rows and create the job. In that order."""
+    # Filled in before anything reads the set, the request digest included: a spec that names no platform is the
+    # same request as one naming the default, as it was when the default was fixed at linux/amd64.
+    build_set = build_set.with_default_platform(default_platform)
     digest = request_digest(build_set)
     # Everything that can refuse the request runs before anything is written.
     try:

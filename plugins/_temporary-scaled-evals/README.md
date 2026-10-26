@@ -31,72 +31,25 @@ Restart `nemo services run` after install.
 
 | Variable | Notes |
 |---|---|
-| `SCALED_EVALS_DATABASE_URL` | scaled-evals' own Postgres. **Not** `DATABASE_URL` — the platform injects that into the same process, and reusing it would run these migrations and claim queues inside the platform database. |
-| `SCALED_EVALS_DATABASE_SCHEMA` | Default `scaled_evals`. Every table lives here. Redundant in a dedicated database, but it keeps the vendored SQL safe to point at a shared one. |
-| `CREDENTIALS_ENCRYPTION_KEY` | Fernet key for BYOK credentials. |
-| `SCALED_EVALS_RUN_MIGRATIONS` | Default `true`. Set `false` where an external Job owns schema rollout. |
 | `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` | Comma-separated registries allowed as public source images for dataset-only Harbor imports. Defaults to `docker.io,ghcr.io`; this is separate from the managed destination-image allowlist. |
 
 Settings resolve lazily, so the plugin still loads when these are unset; the failure
 surfaces on the first request that needs them rather than making the plugin vanish
 from service discovery.
 
-## Database and migrations
+## Storage
 
-**scaled-evals runs on its own Postgres.** It shares the platform's *process* but
-not its database: the plugin reads `SCALED_EVALS_DATABASE_URL` and never consults the
-platform's `DatabaseConfig` or `DATABASE_*` variables. Point it at an empty Postgres
-and it does the rest.
-
-The DSN resolves in this order:
-
-1. `SCALED_EVALS_DATABASE_URL`, when set. Every deployment sets it.
-2. A `localhost:5432` development default, matching the standalone repo, so a local
-   `docker run postgres:16` is the only setup step.
-
-**Postgres is required.** The claim queues need `FOR UPDATE SKIP LOCKED`, plus JSONB,
-advisory locks, and enum types, so the platform's own SQLite default is not a usable
-target — which is a second reason not to inherit it. When the database is unreachable
-the plugin degrades rather than failing the boot: the platform starts normally, other
-services are unaffected, and `/v1/readyz` returns `503 degraded`.
-
-Tables live in a `scaled_evals` schema, reached through a `search_path` option that
-`resolved_database_url()` appends to the DSN — the one choke point the API pool, both
-workers, and the migration applier share. In a dedicated database this is redundant,
-and `public` would work; it is kept because the vendored SQL is unqualified, so the
-schema is the whole reason this code is *also* safe against a shared database. Startup
-creates the schema and then **verifies** the connection resolves there, since Postgres
-silently drops an unknown schema from `search_path` instead of erroring.
-
-The plugin migrates on startup, so the database it points at needs no manual
-`psql` step. `db/schema` loads only when the schema is fresh
-(sentinel: `evaluations`), then every `db/migrations` file is applied in filename
-order. The migration set has no version ledger and each file is written to be
-re-appliable, so re-applying all of it on each boot is the upstream contract rather
-than a shortcut.
-
-**Vendored-SQL divergence:** migrations `001`, `005`, `008`, and `013` had 25 hardcoded
-`public` qualifiers (`table_schema = 'public'`, `schemaname = 'public'`,
-`to_regclass('public.x')`). These are now `current_schema()` / unqualified so they work
-in any schema. Enum literals such as `visibility = 'public'` were left alone.
-
-Concurrent replicas are serialized with a Postgres advisory lock. Migration failure
-is logged and **not** raised: an ephemeral plugin should not take the platform API
-down because its own database is unreachable, and `/v1/readyz` already reports
-`schema` as a required check.
-
-Same logic runs one-shot for a compose service, k8s Job, or manual rollout:
-
-```bash
-uv run scaled-evals-migrate            # same resolution order as the plugin
-uv run scaled-evals-migrate --dsn ...  # or an explicit target
-```
+scaled-evals has no database of its own. Its state is platform entities (see
+[Background execution](#background-execution)), credentials are platform Secrets, and
+artifacts live in the object store. There are no migrations to run. Controller health
+is reported by the platform controller manager, so `/v1/readyz` checks only the object
+store, plus BuildKit and the registry when they are enabled.
 
 ## Routes
 
 | Path | Notes |
 |---|---|
-| `GET /apis/scaled-evals/healthz` | Plugin liveness stub — static, does not check Postgres |
+| `GET /apis/scaled-evals/healthz` | Plugin liveness stub — static, checks no dependency |
 | `/apis/scaled-evals/v1/{healthz,readyz,metrics}` | Vendored ops probes; `readyz` checks dependencies |
 | `/apis/scaled-evals/v1/*` | scaled-evals `/v1` semantics (tasks, evaluations, …) |
 
@@ -112,6 +65,16 @@ Dataset-only image imports perform unauthenticated registry reads and reject
 registries outside `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` before network
 I/O. Bearer-token challenges must remain on the registry host; Docker Hub may
 also use `auth.docker.io`.
+
+Evaluation and benchmark-run `credentials` map a provider (`openai`,
+`anthropic`, `nvidia`, `nhx`, `openshift`) to a platform Secret reference
+`workspace/name`. Create the Secret with the platform Secrets API; preflight
+and create reject a reference the caller cannot read. The value never touches
+scaled-evals storage: the evaluation Job resolves it from the platform at
+launch.
+
+**Removed:** the `/v1/credentials` store and its encryption key. Credentials
+are platform Secrets referenced by name.
 
 **Removed:** OAuth client discovery (`/v1/auth/config`), which existed only to
 hand the CLI login flow the coordinates of a fixed internal identity provider.
@@ -155,17 +118,18 @@ one `scaled-evals.benchmark-archive-build` Job per claim attempt, and the Job ta
 the lease when it starts. Each evaluation Job builds its own evidence and archive;
 the controller rebuilds any a Job left behind. Leases survive restarts, and changed member executions/archives
 prevent publication of the in-progress export. Upload failures and lease loss
-trigger cleanup of unpublished claim-token objects. Cleanup rechecks the archive
-row under a lock before deleting: a lost commit acknowledgement must not delete
-a successfully published archive. If the database or object store is unavailable,
+trigger cleanup of unpublished claim-token objects. Cleanup rereads the archive's
+references before deleting: a lost write acknowledgement must not delete a
+successfully published archive. If the entity store or object store is unavailable,
 cleanup defers rather than guessing.
 
 The controller also reconciles archive prefixes periodically, retaining the
 published object and the current building claim's object. This recovers objects
 left by process crashes, failed deletions, superseded generations, or an upload
-that completed after a revoked worker exited. The per-run throttle is persisted
-in Postgres (`BENCHMARK_ARCHIVE_CLEANUP_INTERVAL_SECONDS`, default 300 seconds);
-sweeps repeat, rather than treating an initially empty prefix as permanently clean.
+that completed after a revoked worker exited. The per-run throttle is stored
+on the run's archive (`BENCHMARK_ARCHIVE_CLEANUP_INTERVAL_SECONDS`, default 300 seconds),
+and sweeps also reach deleted runs. They repeat, rather than treating an initially
+empty prefix as permanently clean.
 The dispatcher handles evaluation/archive work before these maintenance sweeps.
 
 The API records the completed
@@ -208,8 +172,7 @@ Source extraction is bounded across members and shared artifacts by
 `BENCHMARK_ARCHIVE_MAX_FILES` (default 100,000) and
 `BENCHMARK_ARCHIVE_MAX_SOURCE_BYTES` (default 10,000,000,000). These are not total
 scratch-space or tenant quotas; workers need space for extracted inputs and the
-compressed output. New migration `042_benchmark_run_archives.sql` is schema-scoped
-and safe to replay at startup. No new platform database or Studio UI is introduced.
+compressed output. No Studio UI is introduced.
 
 ### Provider boundary
 
@@ -238,13 +201,20 @@ on — `CurrentPrincipal.owner_id` — and one function that produces it.
 
 Consequences worth knowing before you rely on this:
 
-- **`/v1` is single-tenant.** Every caller resolves to owner `dev`, so all
-  callers share one view of tasks, evaluations, and credentials. Bridging
-  platform identity means setting `request.state.principal` upstream; no route
-  changes.
-- **`CONTROL_PLANE_AUTH_ENABLED=true` now fails closed with 401** rather than
-  gating on a provider. There is nothing left to consult, and silently falling
-  back to the shared owner would hand one caller another caller's data.
+- **Ownership is the platform principal.** With platform auth enabled, the owner
+  of every row is the authenticated principal, or the user a service acts on
+  behalf of. With platform auth disabled every caller is owner `dev`.
+- **Admin is a platform permission.** `scaled-evals.admin` gates the
+  `/v1/admin/*` routes and image qualification and promotion. The platform
+  grants it, and `HelixAdmin` in the `system` workspace holds it implicitly.
+  Admins also see every owner's agent bundles and can edit any config profile.
+  Non-admins get 403 from the platform. There is no plugin allowlist.
+- **Admin analytics come from Intake.** Each terminal evaluation records one
+  span (source `scaled-evals-executions`) in the platform jobs workspace.
+  `/v1/admin/usage`, `/compute`, and `/failures` aggregate those spans over a
+  window of at most 90 days. Queued and active counts still come from the
+  evaluation store. A span that fails to record is logged and skipped, so
+  analytics can undercount during an Intake outage.
 - **The CLI takes a token, it does not obtain one.** `--token` /
   `SCALED_EVALS_TOKEN` is the only credential source; `scaled-evals auth
   login|status|logout` are gone and `auth whoami` is now top-level
@@ -265,52 +235,19 @@ print('in groups:', [g for g, v in get_service_groups().items() if 'scaled-evals
 uv run pytest plugins/_temporary-scaled-evals/tests/ -q
 ```
 
-Expect `discovered: True`, `in groups: ['api', 'all']`, passing tests. To include the
-real-Postgres migration check, point the suite at a throwaway server — it creates and
-drops its own scratch database per run:
+Expect `discovered: True`, `in groups: ['api', 'all']`, passing tests.
+
+**2. Run the platform.** scaled-evals stores everything in the platform's own default
+store (SQLite locally), so there is nothing else to start.
 
 ```bash
-SCALED_EVALS_TEST_DATABASE_URL=postgresql://scaled_evals:scaled_evals@127.0.0.1:5434/scaled_evals \
-  uv run pytest plugins/_temporary-scaled-evals/tests/ -q
+uv run nemo services run --services scaled-evals,entities,secrets,jobs --port 8080
 ```
 
-**2. Postgres.** scaled-evals' own, so an empty server is all it needs.
+Banner should list `scaled-evals`. If the port is held by a previous run,
+`nemo services stop` first.
 
-```bash
-docker run -d --name scaled-evals-pg \
-  -e POSTGRES_USER=scaled_evals -e POSTGRES_PASSWORD=scaled_evals -e POSTGRES_DB=scaled_evals \
-  -p 5434:5432 postgres:16
-```
-
-**3. Run the platform.** The platform keeps its own default store (SQLite locally);
-only scaled-evals is pointed at Postgres. Generating the key via command substitution
-keeps it out of shell history.
-
-```bash
-export SCALED_EVALS_DATABASE_URL="postgresql://scaled_evals:scaled_evals@127.0.0.1:5434/scaled_evals"
-export CREDENTIALS_ENCRYPTION_KEY="$(uv run python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-
-uv run nemo services run --services scaled-evals --port 8080
-```
-
-Banner should read `Services (1): scaled-evals`. If the port is held by a previous run,
-`nemo services stop` first. Startup logs the migration result — `8 schema files` on a
-fresh schema, `0 schema files` on every boot after that:
-
-```text
-scaled-evals: database ready in schema 'scaled_evals' (8 schema files, 41 migrations)
-```
-
-Confirm the tables landed, and that nothing leaked into `public`:
-
-```bash
-docker exec scaled-evals-pg psql -U scaled_evals -d scaled_evals -tAc \
-  "select table_schema, count(*) from information_schema.tables \
-   where table_schema in ('public','scaled_evals') group by 1 order by 1;"
-# scaled_evals|19
-```
-
-**4. Fire the API.**
+**3. Fire the API.**
 
 ```bash
 B=http://127.0.0.1:8080/apis/scaled-evals
@@ -321,39 +258,91 @@ curl -s -X POST $B/v1/tasks -H 'content-type: application/json' \
   -d '{"name":"smoke-task","description":"phase1 plugin smoke"}'
 ```
 
-`readyz` returns 503 `degraded` with `postgres: ok` and `schema: ok`. The failing
-`object_store`, `buildkit`, and `registry` checks are expected until
-T1.3/T1.5 stand those up; the control plane itself is healthy. `POST /v1/tasks` returns
+`readyz` returns 503 `degraded` until an object store is configured; the control plane
+itself is healthy. `POST /v1/tasks` returns
 201 with a presigned upload URL, which needs an object store before the upload
 completes.
 
-**5. Teardown.** `nemo services run` spawns a child uvicorn that outlives its parent, so
+**4. Teardown.** `nemo services run` spawns a child uvicorn that outlives its parent, so
 kill the listener rather than the wrapper.
 
 ```bash
 lsof -ti tcp:8080 | xargs kill
-docker rm -f scaled-evals-pg
 ```
 
 ## Background execution
 
 The `scaled-evals-jobs` controller submits task builds and evaluation executions to
 Platform Jobs. Creating or retrying a single evaluation also submits its Job
-from the API right after the row commits, if the admission caps allow it; the
-controller submits anything that path misses, including benchmark-run members. Postgres remains the admission
-queue and metadata source of truth during this migration.
+from the API right after the evaluation is stored, if the admission caps allow it; the
+controller submits anything that path misses, including benchmark-run members.
 
 There is no separate worker process. The controller also runs execution cleanup,
 the evidence and archive backstops, and benchmark archive cleanup.
 
 Before creating an evaluation Job, the submitter writes that execution's
 immutable launch inputs to a `scaled_evals_execution` entity, and the Job
-launches from it. The Job reads only the changing run state from Postgres and
-writes status and results there. Because the inputs include prompt content and
+launches from it. The Job reads the changing run state from the evaluation
+entity and writes status and results there. Because the inputs include prompt content and
 the private execution snapshot, they are stored in
 `SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE` (default `scaled-evals-internal`).
 The service creates that workspace itself, so only the service has a role in
 it, and it refuses to use a workspace of that name that someone else created.
+
+Config profiles (`scaled_evals_config_profile`) and agent bundles
+(`scaled_evals_agent_bundle`) are also stored as entities in that workspace,
+so the plugin's owner and admin checks cannot be bypassed through the Entities
+API. Deleting either one removes the entity. Editing a profile or bundle that
+changed since it was read returns `409 profile_changed` or
+`409 agent_bundle_changed`. A profile referenced by a non-terminal evaluation
+can be renamed, but its config cannot change and it cannot be deleted
+(`409 profile_in_use`).
+
+Tasks are `scaled_evals_task` entities in the same workspace, with their
+revisions and build state embedded. The build queue claims a revision by
+rewriting its task entity, so build heartbeats also move the task's
+`updated_at`. A write that loses a concurrent update retries, then returns
+`409 task_changed`. Slug uniqueness is checked before the write, and of two
+simultaneous creates with the same slug the later one is withdrawn with
+`409 slug_conflict`; a simultaneous rename onto a taken slug can still land. A
+task referenced by
+a non-terminal evaluation cannot be deleted (`409 task_in_use`). Benchmark and
+benchmark-run member lists skip tasks or revisions that no longer exist.
+
+Benchmarks are `scaled_evals_benchmark` entities with their revisions and
+member pins embedded; a write that loses a concurrent update returns
+`409 benchmark_changed`, and slugs are kept unique as for tasks. A benchmark
+run's preflight blocks a member whose task was deleted. Benchmark imports are
+`scaled_evals_benchmark_import` entities whose id is derived from the owner,
+manifest digest, and visibility, so a repeated create resumes the existing
+import. A create racing an identical one returns
+`409 benchmark_import_in_progress` until the first has finished populating it.
+A create that fails partway deletes its import; task revisions it already
+allocated remain as unused uploads.
+
+Evaluations are `scaled_evals_evaluation` entities with their status events,
+per-execution telemetry, resource usage, and cleanups embedded; benchmark runs
+are `scaled_evals_benchmark_run` entities. Every queue claims work by rewriting
+the entity under a compare-and-swap, and a write that keeps losing returns
+`409 evaluation_changed` or `409 benchmark_run_changed`. Differences from the
+Postgres version:
+
+- Admission caps are counted without a lock, so claimants running at the same
+  time can each admit one evaluation past a cap.
+- List endpoints, admin counts, and queue scans read every live evaluation or
+  run, and run status is derived from all members on each read.
+- A benchmark run and its members are separate writes. A failed create deletes
+  what it wrote; a crash in between can leave queued members of a missing run.
+  Cancelling a run likewise cancels members one at a time.
+- A superseded execution is detected with a check, not a lock, so it can
+  publish once more if a retry lands in between.
+- Cleanup ids are strings (`<evaluation>/<execution>`), not integers.
+- A run's combined archive and its build lease are embedded in the run entity.
+  Claims, heartbeats and publication are fenced by the claim token. Object
+  cleanup reads the archive's references without a lock: objects are listed
+  first, so a later claim's upload is never a candidate.
+- `SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED`, `_READS_ENABLED`,
+  `_WORKSPACE`, and `_PROJECTION_BATCH_SIZE` are gone with the projection.
 
 Each evaluation Job may run for every sequential trial wave
 (`ceil(n_attempts / parallelism)`) times the profile's sandbox

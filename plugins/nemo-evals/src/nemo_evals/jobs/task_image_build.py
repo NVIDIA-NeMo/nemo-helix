@@ -90,4 +90,5 @@ def is_job_for(custom_fields: dict | None, spec: TaskImageBuildSpec) -> bool:
 
 
 def _build_key(spec: TaskImageBuildSpec) -> str:
-    return f"{spec.workspace}/{spec.task}#{spec.revision_digest}/{spec.attempt}"
+    # ``by-contents`` as in ``build_job_name``: a Job started for a build kept under a revision isn't this build's.
+    return f"by-contents:{spec.workspace}/{spec.task}#{spec.revision_digest}/{spec.attempt}"

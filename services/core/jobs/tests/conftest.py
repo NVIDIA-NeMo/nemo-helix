@@ -290,7 +290,11 @@ def mock_jobs_client():
     ``JobsClient.from_client(client).get_job_step(...).data()`` work. Tests
     set ``.return_value`` on the individual methods and assert against them.
     """
-    return MagicMock()
+    client = MagicMock()
+    client.get_attempt_step = client.get_job_step
+    client.list_attempt_step_tasks = client.list_job_step_tasks
+    client.update_attempt_step_status = client.update_job_step_status
+    return client
 
 
 @fixture
@@ -387,6 +391,7 @@ def create_step_with_status(status: HelixJobStatus) -> HelixJobStepWithContext:
     return HelixJobStepWithContext(
         id="test-step-id",
         job="test-job-id",
+        job_id="platform-job-test-uid",
         workspace="default",
         attempt_id="test-job-attempt-id",
         name="test-step",

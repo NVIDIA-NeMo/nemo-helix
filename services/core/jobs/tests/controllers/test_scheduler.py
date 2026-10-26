@@ -210,6 +210,7 @@ def test_scheduler_does_not_mark_step_error_when_pending_update_conflicts_with_c
         name=test_step_created.name,
         workspace=test_step_created.workspace,
         job=test_step_created.job,
+        attempt=test_step_created.attempt_id,
     )
 
 
@@ -241,6 +242,7 @@ def test_scheduler_does_not_ignore_pending_update_conflict_when_step_remains_res
         name=resuming_step.name,
         workspace=resuming_step.workspace,
         job=resuming_step.job,
+        attempt=resuming_step.attempt_id,
     )
 
 

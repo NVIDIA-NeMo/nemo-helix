@@ -576,6 +576,36 @@ def test_base_model_forwards_only_the_mtp_fields_that_were_set(
     assert {k: v for k, v in cfg["model"].items() if k in mtp_keys} == expected
 
 
+def test_compile_prepares_training_for_pause_and_resume(tmp_path: Path) -> None:
+    """Resume restores the newest checkpoint, and the pause poller's signal makes Automodel checkpoint and stop."""
+    fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora.json"
+    raw = json.loads(fixture.read_text())
+    raw.pop("backend")
+    config = TrainingStepConfig.model_validate(raw)
+    prepared = PreparedDataset(
+        merged_dir=tmp_path,
+        train_file=tmp_path / "train.jsonl",
+        validation_file=tmp_path / "validation.jsonl",
+        train_samples=100,
+        validation_samples=10,
+    )
+
+    with (
+        patch(f"{CONFIG_MODULE}.prepare_dataset", return_value=prepared),
+        patch(f"{CONFIG_MODULE}.DatasetValidator"),
+        patch(f"{CONFIG_MODULE}.estimate_dataset_sequence_lengths", return_value=None),
+        patch(f"{CONFIG_MODULE}._configure_datasets"),
+        patch(f"{CONFIG_MODULE}._configure_moe_backend"),
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+    ):
+        compiled = compile_automodel_config(config, tmp_path, MagicMock())
+
+    assert compiled["checkpoint"]["restore_from"] == "LATEST"
+    assert compiled["step_scheduler"]["preemption_signal"] == "SIGUSR1"
+    assert compiled["_pause_sentinel"] == str(tmp_path / "PAUSED")
+
+
 def test_compile_uses_fallback_packing_factor_for_schedule(tmp_path: Path) -> None:
     fixture = (
         Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"

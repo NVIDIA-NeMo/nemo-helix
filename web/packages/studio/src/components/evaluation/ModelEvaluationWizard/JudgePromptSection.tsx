@@ -6,6 +6,7 @@ import {
   VariableTextArea,
   type VariableTextAreaHandle,
 } from '@nemo/common/src/components/form/VariableTextArea';
+import { Pencil } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   composeJudgeUserPrompt,
@@ -13,7 +14,6 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
 import { useJudgePromptVariables } from '@studio/components/evaluation/ModelEvaluationWizard/useJudgePromptVariables';
-import { Pencil } from 'lucide-react';
 import { FC, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 

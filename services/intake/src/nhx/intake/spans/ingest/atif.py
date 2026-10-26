@@ -48,16 +48,41 @@ def _atif_max_subagent_depth(request: Request) -> int:
     return cfg.atif_max_subagent_depth
 
 
+def _evaluation_context_from_extra(extra: dict[str, Any] | None) -> EvaluationContext | None:
+    """Read the spec-valid evaluation identity from ``extra.evaluation_context``.
+
+    JSON null and an object with no evaluation or test-case name are absent. They
+    do not override a top-level alias and they are not promoted.
+    """
+    if extra is None or "evaluation_context" not in extra:
+        return None
+    raw = extra["evaluation_context"]
+    if raw is None:
+        return None
+    context = EvaluationContext.model_validate(raw)
+    if not context.has_values():
+        return None
+    return context
+
+
 class AtifIngestRequest(BaseModel):
     """Span-based ATIF ingest request.
 
     ATIF project scoping is intentionally not accepted here; use the workspace
-    route and ``evaluation_context`` for evaluation identity.
+    route. Evaluation identity is an Intake extension: spec-valid ATIF puts it
+    at ``extra.evaluation_context``. The top-level field is a compatibility alias
+    for existing callers.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    evaluation_context: EvaluationContext | None = None
+    evaluation_context: EvaluationContext | None = Field(
+        default=None,
+        description=(
+            "Intake extension outside ATIF. Spec-valid producers put the same object at "
+            "extra.evaluation_context. Existing callers may keep sending this top-level alias."
+        ),
+    )
     schema_version: AtifSchemaVersion
     session_id: str | None = None
     trajectory_id: str | None = None
@@ -77,6 +102,33 @@ class AtifIngestRequest(BaseModel):
         if self.schema_version == "ATIF-v1.7":
             validate_atif_v17_subagent_ref_resolution_keys(self.steps)
         validate_atif_subagent_trajectory_ids(self.subagent_trajectories)
+        return self
+
+    @model_validator(mode="after")
+    def promote_extra_evaluation_context(self) -> AtifIngestRequest:
+        """Honor ``extra.evaluation_context`` and keep it in ``extra``.
+
+        The top-level field stays as a compatibility alias. When both carry an
+        evaluation or test-case name, the normalized objects must be identical,
+        including a name present on only one side. A null or empty copy on either
+        side is ignored.
+        """
+        from_extra = _evaluation_context_from_extra(self.extra)
+        top_level = (
+            self.evaluation_context
+            if self.evaluation_context is not None and self.evaluation_context.has_values()
+            else None
+        )
+        if top_level is not None and from_extra is not None:
+            if top_level.model_dump() != from_extra.model_dump():
+                raise ValueError(
+                    "evaluation_context "
+                    f"({top_level.evaluation_name!r}, {top_level.test_case_name!r}) "
+                    "and extra.evaluation_context "
+                    f"({from_extra.evaluation_name!r}, {from_extra.test_case_name!r}) must match"
+                )
+        elif from_extra is not None:
+            self.evaluation_context = from_extra
         return self
 
     def to_trajectory(self) -> AtifTrajectory:

@@ -552,7 +552,7 @@ def _fetch_agent(agents: AgentsResource, workspace: str, name: str) -> dict[str,
         agent = agents.get(name, workspace=workspace)
     except Exception as exc:  # any client/transport failure → one clean, actionable error
         raise AgentResolutionError(
-            f"agent {workspace}/{name!r} not found. Deploy it first (nemo agents create + nemo agents deploy)."
+            f"agent {workspace}/{name!r} not found. Deploy it first (nemo agents register + nemo agents deploy)."
         ) from exc
     if not agent.get("config"):
         raise AgentResolutionError(f"agent {workspace}/{name!r} has an empty config; nothing to build a victim from.")

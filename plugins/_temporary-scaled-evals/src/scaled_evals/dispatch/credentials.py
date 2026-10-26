@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Dispatch-time BYOK credential materialization.
+"""Dispatch-time credential materialization.
 
-Evaluation rows store role -> credential id references. The dispatcher resolves
-those references once, decrypts the payloads, and passes only an ephemeral env
-map to runtime backends. API read paths continue to return metadata only.
+Evaluations store provider -> platform secret references. The evaluation Job
+spec injects each referenced secret into the Job process environment, and the
+dispatcher maps those values to the env vars runtime backends expect.
 """
 
 from __future__ import annotations
@@ -14,8 +14,6 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from scaled_evals.api import crypto
-from scaled_evals.api.repositories.credential_repository import CredentialRepository
 from scaled_evals.api.settings import settings
 
 _PROVIDER_ENV_KEYS = {
@@ -24,6 +22,14 @@ _PROVIDER_ENV_KEYS = {
     # Recipe 12 maps the same inference key to OPENAI_API_KEY for OpenAI-wire agents.
     "nvidia": ("NGC_INFERENCE_API_KEY", "POLICY_API_KEY", "OPENAI_API_KEY"),
 }
+# Values taken out of os.environ, so backend subprocesses that inherit the
+# environment do not also receive every injected secret.
+_injected: dict[str, str] = {}
+
+
+def credential_env_var(provider: str) -> str:
+    """Name the Job environment variable that carries ``provider``'s secret value."""
+    return f"SCALED_EVALS_CREDENTIAL_{provider.upper()}"
 
 
 def _env_file_value(value: str) -> str:
@@ -44,83 +50,40 @@ def write_env_file(path: Path, env: Mapping[str, str]) -> None:
         handle.write("".join(f"{key}={_env_file_value(value)}\n" for key, value in env.items()))
 
 
-def credential_env_from_rows(rows: list[Mapping[str, object]]) -> dict[str, str]:
-    """Convert credential rows into runtime env vars."""
-    plaintext = {
-        str(row["id"]): crypto.decrypt(row["encrypted_payload"])  # type: ignore[arg-type]
-        for row in rows
-    }
-    return _credential_env_from_plaintext_rows(rows, plaintext)
-
-
-def _credential_env_from_plaintext_rows(
-    rows: list[Mapping[str, object]],
-    plaintext_by_id: Mapping[str, str],
-) -> dict[str, str]:
+def credential_env(providers: list[str], values: Mapping[str, str]) -> dict[str, str]:
+    """Map provider -> secret value into the env vars runtime backends read."""
     env: dict[str, str] = {}
-    for row in rows:
-        provider = str(row["provider"])
-        payload_kind = str(row["payload_kind"])
-        plaintext = plaintext_by_id[str(row["id"])]
+    for provider in providers:
+        value = values.get(provider)
+        if not value:
+            raise ValueError(f"credential secret for {provider} was not injected into the evaluation Job")
         if provider in _PROVIDER_ENV_KEYS:
-            if payload_kind != "key":
-                raise ValueError(f"credential {row['id']} for {provider} must use key payload")
             for key in _PROVIDER_ENV_KEYS[provider]:
-                env[key] = plaintext
+                env[key] = value
             if provider == "anthropic":
                 env.setdefault("ANTHROPIC_BASE_URL", settings.nvidia_anthropic_base_url)
             elif provider == "nvidia":
                 env.setdefault("POLICY_BASE_URL", settings.nvidia_inference_base_url)
         elif provider == "nhx":
-            env["NHX_INTAKE_CREDENTIAL_YAML"] = plaintext
+            env["NHX_INTAKE_CREDENTIAL_YAML"] = value
         elif provider == "openshift":
             # A user's OpenShift bearer token. NOT a runtime env var for the
             # agent — sandbox_k8s extracts it to write a per-eval kubeconfig and
             # strips it before the agent env-file, so it never reaches the pod.
-            if payload_kind != "key":
-                raise ValueError(f"credential {row['id']} for openshift must use key payload")
-            env["SANDBOX_OC_TOKEN"] = plaintext
+            env["SANDBOX_OC_TOKEN"] = value
         else:
             raise ValueError(f"unsupported credential provider: {provider}")
     return env
 
 
-def materialize_credential_env(  # noqa: ANN001
-    conn,
-    credentials: Mapping[str, str],
-    *,
-    owner_id: str | None = None,
-    include_unowned: bool = False,
-    expected: Mapping[str, Mapping[str, str]] | None = None,
-) -> dict[str, str]:
-    """Resolve role -> credential-id refs into decrypted runtime env vars."""
-    cred_ids = sorted(set(credentials.values()))
-    if not cred_ids:
-        return {}
-    rows = CredentialRepository(conn).load_for_dispatch(
-        cred_ids,
-        owner_id=owner_id,
-        include_unowned=include_unowned,
-    )
-    rows_by_id = {row["id"]: row for row in rows}
-    missing = [cred_id for cred_id in cred_ids if cred_id not in rows_by_id]
-    if missing:
-        raise ValueError(f"credential not found: {missing[0]}")
-    for credential_id, expectation in (expected or {}).items():
-        row = rows_by_id.get(credential_id)
-        if row is None:
-            raise ValueError(f"snapshotted credential not found: {credential_id}")
-        for field in ("fingerprint", "provider", "payload_kind"):
-            actual = str(row.get(field) or "")
-            wanted = str(expectation.get(field) or "")
-            if not wanted or actual != wanted:
-                raise ValueError(f"credential {credential_id} {field} changed after evaluation submission")
-    providers = [str(rows_by_id[cred_id]["provider"]) for cred_id in cred_ids]
-    duplicate = next((provider for provider in providers if providers.count(provider) > 1), None)
-    if duplicate:
-        # Each provider fills fixed env keys, so a second credential would silently replace the first.
-        raise ValueError(f"multiple {duplicate} credentials are not supported")
-    return credential_env_from_rows([rows_by_id[cred_id] for cred_id in cred_ids])
+def injected_credential_env(credentials: Mapping[str, str]) -> dict[str, str]:
+    """Build runtime env vars from the secrets the Job spec injected for ``credentials``."""
+    for provider in credentials:
+        name = credential_env_var(provider)
+        if name in os.environ:
+            _injected[name] = os.environ.pop(name)
+    values = {provider: _injected.get(credential_env_var(provider), "") for provider in credentials}
+    return credential_env(sorted(credentials), values)
 
 
 def merged_env_file(

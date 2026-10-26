@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  CheckCircle,
+  CloseCircle,
+  Refresh,
+  Cancel,
+  HelpCircle,
+  Warning,
+  Pause,
+} from '@nemo/icons/icons';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { BadgeProps as KuiBadgeProps } from '@nvidia/foundations-react-core';
-import {
-  CircleCheck,
-  CircleX,
-  RefreshCw,
-  Ban,
-  CircleHelp,
-  TriangleAlert,
-  Pause,
-} from 'lucide-react';
 import { type ComponentType, type SVGProps } from 'react';
 
 export interface BadgeProps {
@@ -46,63 +46,63 @@ export const badgeStatus: Record<BadgeStatus | 'default', BadgeProps> = {
   created: {
     label: 'Created',
     color: 'teal',
-    icon: CircleCheck,
+    icon: CheckCircle,
   },
   completed: {
     label: 'Completed',
     color: 'green',
-    icon: CircleCheck,
+    icon: CheckCircle,
   },
   error: {
     label: 'Error',
     color: 'red',
-    icon: CircleX,
+    icon: CloseCircle,
   },
   pending: {
     label: 'Pending',
     color: 'gray',
-    icon: RefreshCw,
+    icon: Refresh,
   },
   active: {
     label: 'Active',
     color: 'blue',
-    icon: RefreshCw,
+    icon: Refresh,
   },
   in_progress: {
     label: 'In Progress',
     color: 'blue',
-    icon: RefreshCw,
+    icon: Refresh,
   },
   cancelling: {
     label: 'Cancelling',
     color: 'yellow',
-    icon: Ban,
+    icon: Cancel,
   },
   cancelled: {
     label: 'Cancelled',
     color: 'yellow',
-    icon: Ban,
+    icon: Cancel,
   },
   unavailable: {
     label: 'Unavailable',
     color: 'gray',
-    icon: TriangleAlert,
+    icon: Warning,
   },
   default: {
     label: 'Unknown',
     color: 'purple',
-    icon: CircleHelp,
+    icon: HelpCircle,
   },
   // What does it even mean for the job to be "ready" to be used..
   ready: {
     label: 'Ready',
     color: 'green',
-    icon: CircleCheck,
+    icon: CheckCircle,
   },
   unknown: {
     label: 'Unknown',
     color: 'purple',
-    icon: CircleHelp,
+    icon: HelpCircle,
   },
   paused: {
     label: 'Paused',
@@ -117,36 +117,36 @@ export const badgeStatus: Record<BadgeStatus | 'default', BadgeProps> = {
   resuming: {
     label: 'Resuming',
     color: 'yellow',
-    icon: RefreshCw,
+    icon: Refresh,
   },
   starting: {
     label: 'Starting',
     color: 'yellow',
-    icon: RefreshCw,
+    icon: Refresh,
   },
   running: {
     label: 'Running',
     color: 'green',
-    icon: CircleCheck,
+    icon: CheckCircle,
   },
   failed: {
     label: 'Failed',
     color: 'red',
-    icon: CircleX,
+    icon: CloseCircle,
   },
   deleting: {
     label: 'Deleting',
     color: 'yellow',
-    icon: Ban,
+    icon: Cancel,
   },
   deleted: {
     label: 'Deleted',
     color: 'gray',
-    icon: CircleX,
+    icon: CloseCircle,
   },
   lost: {
     label: 'Lost',
     color: 'red',
-    icon: TriangleAlert,
+    icon: Warning,
   },
 };

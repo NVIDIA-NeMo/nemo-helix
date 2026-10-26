@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -202,3 +203,43 @@ class TestApplyIntegrationsToSftConfig:
 
         assert kwargs == {"run_name": "w-run"}
         assert "differ" in caplog.text
+
+
+class TestTrackerRunContinuity:
+    """HF's callbacks read the run identity from the environment, so the bridge sets it there."""
+
+    def test_wandb_continues_the_jobs_run(
+        self, job_ctx: NHXJobContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WANDB_API_KEY", "test-key")
+        integrations = IntegrationsSpec.model_validate({"wandb": {"project": "p"}})
+
+        _, _, env = apply_integrations_to_sft_config(
+            integrations=integrations,
+            job_ctx=dataclasses.replace(job_ctx, job_uid="platform-job-abc123"),
+            output_name="out",
+            workspace_path=tmp_path,
+            model_name="meta/llama",
+        )
+
+        assert env["WANDB_RUN_ID"] == "platform-job-abc123"
+        assert env["WANDB_RESUME"] == "allow"
+
+    def test_mlflow_continues_the_jobs_run(
+        self, job_ctx: NHXJobContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        integrations = IntegrationsSpec.model_validate({"mlflow": {"tracking_uri": "http://mlflow"}})
+        monkeypatch.setattr(
+            "nhx.unsloth.integrations.hf_bridge.find_mlflow_run_id",
+            lambda config: "run-1" if config["tags"].get("job_uid") == "platform-job-abc123" else None,
+        )
+
+        _, _, env = apply_integrations_to_sft_config(
+            integrations=integrations,
+            job_ctx=dataclasses.replace(job_ctx, job_uid="platform-job-abc123"),
+            output_name="out",
+            workspace_path=tmp_path,
+            model_name="meta/llama",
+        )
+
+        assert env["MLFLOW_RUN_ID"] == "run-1"

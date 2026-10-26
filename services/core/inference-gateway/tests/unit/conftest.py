@@ -3,6 +3,7 @@
 
 """Test configuration for Inference Gateway service."""
 
+import os
 from datetime import datetime
 from typing import Iterator
 from unittest.mock import AsyncMock, Mock
@@ -16,6 +17,7 @@ from multidict import CIMultiDict, CIMultiDictProxy
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
+from nhx.common.config import Configuration, HelixConfig
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
@@ -168,13 +170,22 @@ def app_and_client(
 
     service = InferenceGatewayService()
     mocker.patch.object(service.dependency_provider, "get_service_nemo_client", return_value=mock_client)
+    # Unit tests must not touch host resources: the default startup() polls each dependency's
+    # /status over real HTTP, and loading HelixConfig with the Docker runtime pings the daemon.
+    mocker.patch.object(service, "startup", new=AsyncMock())
     app = service.app
     app.dependency_overrides[global_http_client] = lambda: mock_proxy_client
     app.dependency_overrides[global_model_cache] = lambda: model_cache
     app.dependency_overrides[global_virtual_model_cache] = lambda: virtual_model_cache
     app.dependency_overrides[global_middleware_registry] = lambda: middleware_registry
-    with TestClient(app) as test_client:
-        yield app, test_client
+    # Environment settings take precedence over constructor arguments, so pin the runtime there.
+    mocker.patch.dict(os.environ, {"NHX_RUNTIME": "none"})
+    Configuration.set_override(HelixConfig())
+    try:
+        with TestClient(app) as test_client:
+            yield app, test_client
+    finally:
+        Configuration.clear_override(HelixConfig)
 
 
 @pytest.fixture

@@ -18,12 +18,12 @@ NeMo Helix uses modular plugins for the infrastructure agents need to run at sca
 
 ## Get started
 
-**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](docs/get-started/local-docker-and-executors.mdx) for the subprocess vs Docker matrix.
+**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (OpenRouter, OpenAI, Anthropic, Google Gemini, NVIDIA Build, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](docs/get-started/local-docker-and-executors.mdx) for the subprocess vs Docker matrix.
 
 Quick install from PyPI:
 
 ```bash
-curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
+curl -LsSf https://astral.sh/uv/0.13.4/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install "nemo-helix[all]"
 uv tool update-shell
@@ -102,13 +102,51 @@ If `make bootstrap` reports that Studio asset bootstrap did not complete, the AP
 <summary>Non-interactive setup (for agents, CI, or scripts)</summary>
 
 ```bash
-export NVIDIA_API_KEY=nvapi...
-export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b
+export OPENROUTER_API_KEY=sk-or-...
+export NEMO_DEFAULT_MODEL=default/nvidia-nemotron-3-super-120b-a12b
 export NEMO_FAST_MODEL="$NEMO_DEFAULT_MODEL"
-nemo setup --auto --start-services --install-skills
+nemo setup --auto --workspace default --start-services --install-skills
 ```
 
 </details>
+
+## What is in the box
+
+### Capabilities
+
+| Domain | What it covers | Components |
+|---|---|---|
+| **Connectivity & Observability** | Connect agents to Helix and see what they actually do in production | NeMo Fabric (specialized agents, formerly NAT), NeMo Relay (black-box and general-purpose harnesses), trace ingestion, session and cost inspection |
+| **Data** | Generate the training and evaluation data you do not have, and keep sensitive data out of it | Data Designer, Safe Synthesizer, Anonymizer|
+| **Optimization** | Make the agent more accurate, faster or cheaper | Prompt-optimization, Hyper-Parameter Search with Optuna, model-routing with Switchyard|
+| **Fine-tuning** | Make OSS models more accurate, faster, or cheaper|  LoRA, Full SFT, DPO, GRPO for LLMs, Embedding and Re-ranking models with Customizer plugin ( AutoModel, NeMoRL, Unsloth ) |
+| **Evaluation** | Score candidates against your benchmarks before you ship them | NeMo Gym environments, Harbor eval suites, LLM-as-judge, deterministic, agentic, and RAG metrics, experiments |
+| **Safety** | Catch unsafe behavior before and during production | Guardrails (content safety, jailbreak detection, PII redaction), garak red-teaming, OpenShell sandboxing |
+
+### Built-in agents
+
+Two agents work the loop with you rather than waiting for you to drive it.
+
+- **Analyst.** Reads production traces and surfaces where and why the agent is failing.
+- **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
+
+### Surfaces
+
+Every capability is reachable from every surface. Pick the one that fits the moment.
+
+| Surface | Use it for |
+|---|---|
+| **NeMo CLI** | The primary interface. Every service under one command, one config, one context. |
+| **NeMo Skills** | Agent skills installed into Claude Code, Cursor, Codex, or OpenCode, so your coding agent drives Helix in natural language. |
+| **Python SDK and REST APIs** | Programmatic access for pipelines, services, and products built on Helix. |
+| **NeMo Studio** | Web UI for chat, job monitoring, optimization & evaluation results, traces, experiments, and governance review. |
+
+### Foundations
+
+Shared services every capability builds on: object and data storage, trace ingestion, model registry, experiments, jobs and session management, inference gateway, authentication and authorization, and secrets management. Workspaces and projects scope every artifact, so what your team produces can be shared, referenced, and governed instead of copied between laptops.
+
+**These are defaults, not lock-in.** Each foundation is an interface with a working implementation attached, so `nemo setup` gets you running in minutes. When you move to your own environment, swap them: point storage at your object store, the database at your managed Postgres and ClickHouse, identity at your IdP over OIDC, and inference at any OpenAI-compatible gateway.
+
 
 ## Use NeMo Helix from your coding agent
 
@@ -117,20 +155,12 @@ After installation, launch your coding agent (Claude Code, Codex, Cursor, OpenCo
 Things you can ask it to do, once the platform is running:
 
 - "Scaffold an agent from this spec and deploy it."
+- "Fine-tune Nemotron 3.5 Lightining with my dataset, evaluate it and deploy it"
 - "Run an evaluation against my agent."
 - "Add content-safety guardrails to my agent."
 - "Help me optimize my agent."
 - "Show me what's running on the platform."
 - "Shut down NeMo cleanly."
-
-## What's here today
-
-- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), garak (red-teaming via garak), Anonymizer (PII handling for training data).
-- **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. Harbor-backed eval suites for regression testing.
-- **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
-- **Build agents.** NVIDIA NeMo Agent Toolkit (NAT) for LangGraph-based agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.
-- **Generate synthetic data.** Generate synthetic data for training or evaluation purposes using Data Designer.
-- **NeMo Studio (alpha).** Installed automatically with the platform. Browser UI for chat, monitoring, and reviewing optimization suggestions. Studio's agent-focused features are still a work in progress; the CLI is the primary surface today.
 
 ## Release notes
 

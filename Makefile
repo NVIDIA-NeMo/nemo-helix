@@ -23,10 +23,10 @@ PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
 PYTHON_VERSION ?= 3.13
-UV_VERSION := 0.10.10
-NODE_VERSION := 22.23.2
+UV_VERSION := 0.13.4
+NODE_VERSION := 22.23.4
 PNPM_VERSION := 10.34.5
-GO_VERSION := 1.26.7
+GO_VERSION := 1.26.10
 BOOTSTRAP_CREATE_VENV ?= 1
 BOOTSTRAP_EXPECTED_VIRTUAL_ENV := $(CURDIR)/.venv
 BOOTSTRAP_ACTIVATION_REMINDER = if [ "$(TOOLCHAIN)" = "flox" ] && [ "$${FLOX_ENV_PROJECT:-}" != "$(CURDIR)" ]; then echo ""; echo "Next steps:"; echo "  flox -q activate"; echo "  nemo --help"; elif [ "$(TOOLCHAIN)" = "system" ] && [ "$${VIRTUAL_ENV:-}" != "$(BOOTSTRAP_EXPECTED_VIRTUAL_ENV)" ]; then echo ""; echo "Next steps:"; echo "  source .venv/bin/activate"; echo "  nemo --help"; fi
@@ -588,15 +588,12 @@ test-agents-hermes: ## Run Hermes adapter integration tests with its isolated ha
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_hermes.py
 
 .PHONY: test-deployments-openshell
-test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
-	# The openshell extra is not part of the default sync (platform-restricted
-	# wheel), so the shared unit-test job skips these. Install it just here and
-	# run the backend's tests for real (mirrors the nemo-guardrails --extra bench job).
-	$(UV) run --frozen --package nemo-deployments-plugin --extra openshell \
+test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the [openshell] extra installed
+	$(UV) run --frozen --all-packages --extra openshell \
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
 
 .PHONY: test-jobs-openshell
-test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
+test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the [openshell] extra installed
 	$(UV) run --frozen --all-packages --extra openshell \
 		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
 		services/core/jobs/tests/integration/test_openshell_job_integration.py

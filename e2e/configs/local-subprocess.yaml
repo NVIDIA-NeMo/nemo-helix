@@ -25,6 +25,10 @@ auth:
 entities: {}
 
 jobs:
+  # Tests wait on each step being scheduled and its status being reconciled.
+  # Same values as e2e/configs/fast-controller-intervals.yaml.
+  schedule_interval_seconds: 1
+  reconcile_interval_seconds: 1
   # Local E2E-only debugging aid. This may leak secrets or PII from job output,
   # so it must remain disabled in non-test configs.
   include_job_logs_in_diagnostics: true
@@ -56,7 +60,9 @@ models:
     interval_seconds: 5
     model_deployment_garbage_collection_ttl_seconds: 30
 
-inference_gateway: {}
+inference_gateway:
+  # Tests wait for new providers and virtual models to reach the gateway cache.
+  refresh_model_cache_interval_sec: 1
 
 secrets:
   allow_key_creation: true

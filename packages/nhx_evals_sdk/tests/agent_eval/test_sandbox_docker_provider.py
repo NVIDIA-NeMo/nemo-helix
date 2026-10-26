@@ -51,16 +51,18 @@ class _Recorder:
         return self.default
 
 
-def _provider(monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, **kwargs: object) -> DockerSandboxProvider:
-    provider = DockerSandboxProvider(**kwargs)  # type: ignore[arg-type]
+def _provider(
+    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, *, network: str | None = None
+) -> DockerSandboxProvider:
+    provider = DockerSandboxProvider(network=network)
     monkeypatch.setattr(provider, "_run", recorder)
     return provider
 
 
 async def _created(
-    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, spec: SandboxSpec, **kwargs: object
+    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, spec: SandboxSpec, *, network: str | None = None
 ) -> tuple[DockerSandboxProvider, SandboxHandle]:
-    provider = _provider(monkeypatch, recorder, **kwargs)
+    provider = _provider(monkeypatch, recorder, network=network)
     handle = await provider.create(spec)
     return provider, handle
 

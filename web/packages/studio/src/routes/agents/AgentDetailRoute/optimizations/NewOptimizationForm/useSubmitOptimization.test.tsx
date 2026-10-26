@@ -8,7 +8,9 @@ import { ROUTES } from '@studio/constants/routes';
 import { entityStoreBaseModel1 } from '@studio/mocks/entity-store/models';
 import { server } from '@studio/mocks/node';
 import { NewOptimizationForm } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm';
+import { DEFAULT_PROMPT_OPTIONS } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import { useSubmitOptimization } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useSubmitOptimization';
+import { intentById } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { getAgentOptimizeRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -35,6 +37,35 @@ const EVALUATION: AgentEvaluationRow = {
       description: null,
       isFavorite: false,
       showsEvaluationsOverTime: false,
+    },
+  ],
+};
+
+/** One row scored by a registered judge — enough for the study to stage. */
+const EVAL_CONFIG = {
+  tasks: [
+    {
+      id: 'row-1',
+      intent: 'Classify this email',
+      reference: { answer: 'phishing' },
+      metrics: [
+        {
+          metric_type: 'llm-judge',
+          outputs: [{ name: 'accuracy', value_json_schema: { type: 'number' } }],
+          payload: {
+            kind: 'inline',
+            metric: {
+              type: 'llm-judge',
+              model: 'default/original-judge',
+              scores: [{ name: 'accuracy', minimum: 0, maximum: 1 }],
+              inference: { max_tokens: 1024 },
+              prompt_template:
+                'Compare {{ item.reference.answer }} against {{ sample.output_text }}.',
+            },
+          },
+        },
+      ],
+      inputs: { instruction: 'Classify this email' },
     },
   ],
 };
@@ -67,35 +98,7 @@ describe('optimization form submission', () => {
         HttpResponse.json({ data: [{ path: 'eval-config.json' }] })
       ),
       http.get(`${FILESETS_URL}/eval-data/-/eval-config.json`, () =>
-        HttpResponse.text(
-          JSON.stringify({
-            tasks: [
-              {
-                id: 'row-1',
-                intent: 'Classify this email',
-                reference: { answer: 'phishing' },
-                metrics: [
-                  {
-                    metric_type: 'llm-judge',
-                    outputs: [{ name: 'accuracy', value_json_schema: { type: 'number' } }],
-                    payload: {
-                      kind: 'inline',
-                      metric: {
-                        type: 'llm-judge',
-                        model: 'default/original-judge',
-                        scores: [{ name: 'accuracy', minimum: 0, maximum: 1 }],
-                        inference: { max_tokens: 1024 },
-                        prompt_template:
-                          'Compare {{ item.reference.answer }} against {{ sample.output_text }}.',
-                      },
-                    },
-                  },
-                ],
-                inputs: { instruction: 'Classify this email' },
-              },
-            ],
-          })
-        )
+        HttpResponse.text(JSON.stringify(EVAL_CONFIG))
       ),
       http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/${AGENT}`, () =>
         HttpResponse.json({
@@ -188,6 +191,56 @@ describe('optimization form submission', () => {
         'Compare phishing against __OPTIMIZATION_CANDIDATE_OUTPUT__.'
       ),
     });
+  });
+
+  it('refuses to rewrite a prompt the agent does not have', async () => {
+    const submitted: unknown[] = [];
+    server.use(
+      http.get(`${FILESETS_URL}/eval-data/files`, () =>
+        HttpResponse.json({ data: [{ path: 'eval-config.json' }] })
+      ),
+      http.get(`${FILESETS_URL}/eval-data/-/eval-config.json`, () =>
+        HttpResponse.text(JSON.stringify(EVAL_CONFIG))
+      ),
+      http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/${AGENT}`, () =>
+        HttpResponse.json({ name: AGENT, config: { models: {} } })
+      ),
+      http.post(JOBS_URL, async ({ request }) => {
+        submitted.push(await request.json());
+        return HttpResponse.json({ name: 'study-1' });
+      })
+    );
+    let submit: ReturnType<typeof useSubmitOptimization> | undefined;
+    const Capture = () => {
+      submit = useSubmitOptimization({
+        workspace: DEFAULT_WORKSPACE,
+        agentName: AGENT,
+        evals: [EVALUATION],
+      });
+      return null;
+    };
+    renderRoute(undefined, {
+      history: getAgentOptimizeRoute(DEFAULT_WORKSPACE, AGENT),
+      routes: [{ path: ROUTES.workspace.agentDetail, element: <Capture /> }],
+    });
+    await waitFor(() => expect(submit).toBeDefined());
+
+    await expect(
+      submit!({
+        name: 'study',
+        intent: 'accuracy',
+        budget: 'quick',
+        experimentId: 'exp-quality',
+        searchSpace: intentById('accuracy').parameters,
+        prompt: {
+          ...DEFAULT_PROMPT_OPTIONS,
+          enabled: true,
+          purpose: 'Answer accurately.',
+          model: 'default/rewriter',
+        },
+      })
+    ).rejects.toThrow(/has no system prompt at instructions\.system\.content/);
+    expect(submitted).toEqual([]);
   });
 
   it('says why the evaluation cannot be staged before the user runs the study', async () => {

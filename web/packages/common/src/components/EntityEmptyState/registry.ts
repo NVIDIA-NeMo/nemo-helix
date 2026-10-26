@@ -140,6 +140,11 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       'Jobs from customization, evaluation, anonymization, and data generation appear here once submitted.',
   },
+  recentJobs: {
+    heading: 'No recent active or finished jobs',
+    subheading: 'Jobs show here while they run and for 48 hours after they finish.',
+    createAction: { label: 'Fine-tune a Model' },
+  },
   anonymizerJobs: {
     heading: 'No anonymizer jobs yet',
     subheading:
@@ -197,8 +202,8 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   optimizerInsights: {
     heading: 'No insights yet',
     subheading: 'Run an optimizer analysis on an agent to surface insights here.',
-    cliCommand: 'nemo insights analysis-runs create --agent <agent-name> --workspace <workspace>',
-    skillPrompt: 'Help me run my first analysis of my agent with the nemo-analyst skill',
+    cliCommand: 'nemo compass analysis-runs create --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first analysis of my agent with the nemo-compass skill',
   },
   insightExperiments: {
     heading: 'No experiments yet',
@@ -237,7 +242,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   agents: {
     heading: 'No agents yet',
     subheading: 'Build and deploy an agent to see it listed here.',
-    cliCommand: 'nemo agents create --name <agent-name> --agent-config <agent.yaml>',
+    cliCommand: 'nemo agents register --name <agent-name> --agent-config <agent.yaml>',
     skillPrompt: 'Help me create my first agent with the nemo-build-agent skill',
   },
 };

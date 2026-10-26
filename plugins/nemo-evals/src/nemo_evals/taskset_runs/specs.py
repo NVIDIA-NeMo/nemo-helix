@@ -7,9 +7,30 @@ from datetime import datetime, timezone
 from typing import Self
 
 from nemo_evals.harbor.remote.images import PreparedHarborEnvironment
-from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, ResolvedHarborSandboxPolicy
+from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.jobs.agent_spec import AgentEvalSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class RunIntakePublication(BaseModel):
+    """Where the run publishes its trials: one Intake Evaluation, named after the run, in this Experiment.
+
+    Frozen at submit with the Experiment resolved to its id and the agent identity resolved from the
+    target, so task Jobs and the controller never resolve them again. The Evaluation's name is the
+    run record's name, so it isn't stored again here.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    experiment: str = Field(min_length=1, description="The Experiment's name, as the request gave it.")
+    experiment_id: str = Field(min_length=1, description="The Experiment's id, resolved from its name at submit.")
+    agent_name: str = Field(min_length=1, description="Agent name recorded on each published trajectory.")
+    dataset_name: str = Field(
+        min_length=1, description="The Evaluation's dataset: the request's, or the taskset without its digest."
+    )
+    dataset_version: str = Field(
+        min_length=1, description="The dataset's version: the request's, or the pinned taskset's content digest."
+    )
 
 
 class TasksetRunPlan(BaseModel):
@@ -63,16 +84,19 @@ class TasksetRunPlan(BaseModel):
         description="Maximum task Jobs of this run running at once; None relies only on Jobs Service admission limits.",
     )
     sandbox_policy: ResolvedHarborSandboxPolicy = Field(
-        description="The operator sandbox profile execution.sandbox_policy named, frozen at submit."
+        description="The operator sandbox profile execution.sandbox.profile named (or the default), frozen at submit."
     )
     dispatcher_image: str = Field(
-        pattern=PINNED_IMAGE_REF_PATTERN, description="Task Job image, pinned by digest, from evals.runs.harbor."
+        min_length=1, description="Task Job image from evals.runs.harbor, or the platform's nhx-tasks image."
     )
     dispatcher_profile: str = Field(
         min_length=1, description="Jobs execution profile every task Job of this run uses (CPU class)."
     )
     task_environments: list[PreparedHarborEnvironment] = Field(
         description="Each task's images, pinned by digest at submit; task_environments[i] belongs to spec.tasks[i]."
+    )
+    intake: RunIntakePublication | None = Field(
+        default=None, description="Publish the run's trials to this Intake Experiment; None publishes nowhere."
     )
 
     @model_validator(mode="after")

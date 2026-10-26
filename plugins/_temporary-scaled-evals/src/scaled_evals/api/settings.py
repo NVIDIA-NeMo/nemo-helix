@@ -3,43 +3,14 @@
 
 import re
 from typing import Any, Literal
-from urllib.parse import quote
 
-from cryptography.fernet import Fernet
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# Development default when SCALED_EVALS_DATABASE_URL is unset. Matches upstream.
-# Deployments always set the DSN explicitly; leaving this reachable keeps a local
-# `docker run postgres` the only setup step, as in the standalone repo.
-_STANDALONE_DATABASE_URL = "postgresql://scaled_evals:scaled_evals@localhost:5432/scaled_evals"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # scaled-evals owns its own Postgres, so this names it. Deliberately not
-    # `DATABASE_URL`: the platform injects that into the same process, and reusing
-    # it would run these migrations and claim queues inside the platform database.
-    database_url: str = Field(default="", validation_alias="SCALED_EVALS_DATABASE_URL")
-    # Every scaled-evals table lives here. Redundant in a dedicated database, but
-    # it costs one connect-time option and keeps the vendored SQL safe to point at
-    # a shared database without touching 19 table names. Unqualified SQL resolves
-    # through search_path.
-    database_schema: str = Field(default="scaled_evals", validation_alias="SCALED_EVALS_DATABASE_SCHEMA")
-    # Applied by the plugin at startup and by `scaled-evals-migrate`. Turn off
-    # where an external Job owns schema rollout.
-    run_migrations: bool = Field(default=True, validation_alias="SCALED_EVALS_RUN_MIGRATIONS")
-    # How long migrations wait for a database that is still starting. Covers
-    # `initdb` on a fresh volume, which is what makes an unordered Kubernetes
-    # start lose the race. Also the ceiling on how long a wrong DSN delays
-    # startup, since the two are indistinguishable at connect time.
-    migration_wait_seconds: float = Field(default=30.0, validation_alias="SCALED_EVALS_MIGRATION_WAIT_SECONDS")
-    database_ssl_mode: str = "verify-full"
-    database_ssl_root_cert: str | None = None
-    database_pool_min_size: int = 2
-    database_pool_max_size: int = 20
-    database_pool_timeout_seconds: float = 10.0
     # Server-sent event guardrails are process-local. The deployment-wide
     # ceiling is this value multiplied by the number of API replicas.
     api_sse_max_connections: int = 20
@@ -130,12 +101,6 @@ class Settings(BaseSettings):
     cloud_build_service_account: str = ""
     cloud_build_timeout_seconds: float = 2100.0
     cloud_build_poll_interval_seconds: float = 5.0
-    # Staleness bound for the Platform Jobs controller heartbeat in readyz.
-    # Hosted charts still set the old BUILD_WORKER_STALE_SECONDS name.
-    platform_jobs_controller_stale_seconds: float = Field(
-        default=60.0,
-        validation_alias=AliasChoices("PLATFORM_JOBS_CONTROLLER_STALE_SECONDS", "BUILD_WORKER_STALE_SECONDS"),
-    )
     # Target platform for finalize image builds. Pinned to the runtime cluster's
     # arch (hosted nodes are amd64) so an arm64 build host (Apple Silicon under
     # Colima) does not produce images that `exec format error` on amd64 nodes.
@@ -177,14 +142,6 @@ class Settings(BaseSettings):
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_IMAGE",
     )
-    platform_jobs_postgres_password_secret: str = Field(
-        default="",
-        validation_alias="SCALED_EVALS_PLATFORM_JOBS_POSTGRES_PASSWORD_SECRET",
-    )
-    platform_jobs_credentials_encryption_key_secret: str = Field(
-        default="",
-        validation_alias="SCALED_EVALS_PLATFORM_JOBS_CREDENTIALS_ENCRYPTION_KEY_SECRET",
-    )
     platform_jobs_registry_auth_secret: str = Field(
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
@@ -216,32 +173,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_OPENSANDBOX_API_KEY_SECRET",
     )
-    # Entity Store migration flags. Projection writes a derived read model while
-    # Postgres stays authoritative; reads only flip once parity is established,
-    # so the two are deliberately separate switches.
-    entity_store_projection_enabled: bool = Field(
-        default=False,
-        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED",
-    )
-    entity_store_reads_enabled: bool = Field(
-        default=False,
-        validation_alias="SCALED_EVALS_ENTITY_STORE_READS_ENABLED",
-    )
-    entity_store_workspace: str = Field(
-        default="default",
-        validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
-    )
-    # Holds execution inputs (prompts, private snapshots). The service creates it,
+    # Holds execution inputs (prompts, private snapshots), config profiles, and agent
+    # bundles. The service creates it,
     # so with auth on no user can read it without an explicit role binding.
     entity_store_private_workspace: str = Field(
         default="scaled-evals-internal",
         validation_alias="SCALED_EVALS_ENTITY_STORE_PRIVATE_WORKSPACE",
-    )
-    entity_store_projection_batch_size: int = Field(
-        default=100,
-        ge=1,
-        le=1000,
-        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_BATCH_SIZE",
     )
     # Registry the finalized sandbox images are pushed to and pulled from.
     # Local compose: the in-stack `registry:2` service. Remote: NGC. Everything
@@ -269,22 +206,6 @@ class Settings(BaseSettings):
     task_image_registry_auth_json: str = ""
     task_image_registry_timeout_seconds: float = 10.0
     task_image_hosted_mode: bool = False
-    # Primary Fernet key for BYOK credential payloads. There is deliberately no
-    # source-code default: every process that reads credentials must receive it
-    # from deployment secret configuration. During rotation, comma-separated
-    # previous keys remain decrypt-only fallbacks until ciphertext migration is
-    # complete. See docs/API.md § Security, BYOK.
-    credentials_encryption_key: str
-    credentials_encryption_key_previous: str = ""
-
-    @field_validator("credentials_encryption_key")
-    @classmethod
-    def validate_credentials_encryption_key(cls, value: str) -> str:
-        try:
-            Fernet(value.encode())
-        except (TypeError, ValueError) as exc:
-            raise ValueError("must be a valid Fernet key") from exc
-        return value
 
     @model_validator(mode="after")
     def validate_hosted_task_image_policy(self) -> "Settings":
@@ -306,42 +227,12 @@ class Settings(BaseSettings):
             raise ValueError("must be a full 40-character hex commit")
         return normalized
 
-    @field_validator("credentials_encryption_key_previous")
-    @classmethod
-    def validate_previous_credentials_encryption_keys(cls, value: str) -> str:
-        for key in value.split(","):
-            if not key.strip():
-                continue
-            try:
-                Fernet(key.strip().encode())
-            except (TypeError, ValueError) as exc:
-                raise ValueError("must contain only comma-separated Fernet keys") from exc
-        return value
-
-    # Optional live BYOK verification probes. These are low-cost metadata
-    # endpoints; set a URL to an empty value to make that provider inconclusive.
-    credential_verify_timeout_seconds: float = 10.0
-    credential_verify_openai_models_url: str | None = "https://api.openai.com/v1/models"
     # The ``anthropic`` runtime credential is sent to NVIDIA's
     # Anthropic-compatible endpoint by dispatch.credentials.
-    credential_verify_anthropic_models_url: str | None = "https://inference-api.nvidia.com/v1/models"
-    credential_verify_nvidia_models_url: str | None = "https://inference-api.nvidia.com/v1/models"
     nvidia_inference_base_url: str = "https://inference-api.nvidia.com/v1"
     nvidia_anthropic_base_url: str = "https://inference-api.nvidia.com"
 
-    # --- Control-plane ownership --------------------------------------------
-    # The plugin does not authenticate callers; the platform does that before a
-    # plugin route runs. Leaving this false resolves every caller to the shared
-    # development owner. Setting it true makes scaled_evals.api.auth fail closed
-    # with 401 until platform identity is bridged into the ownership model.
-    control_plane_auth_enabled: bool = False
-    # Comma-separated stable subjects are preferred. Verified email fallback
-    # supports initial onboarding while an administrator discovers a colleague's
-    # subject via /users/me; neither list grants team membership.
-    control_plane_admin_subjects: str = ""
-    control_plane_admin_emails: str = ""
-    control_plane_admin_groups: str = ""
-    control_plane_admin_roles: str = ""
+    # --- Control-plane admission --------------------------------------------
     # Weighted sandbox-slot admission. Submissions may queue beyond these
     # limits; dispatch only claims work when its requested parallelism fits.
     control_plane_cluster_run_limit: int = 500
@@ -573,29 +464,13 @@ class Settings(BaseSettings):
     def resolved_object_store_bucket(self) -> str:
         return self.gcs_bucket
 
-    def resolved_database_url(self) -> str:
-        base = self.database_url or _STANDALONE_DATABASE_URL
-        params = [f"sslmode={self.database_ssl_mode}"]
-        if self.database_ssl_root_cert:
-            params.append(f"sslrootcert={self.database_ssl_root_cert}")
-        if self.database_schema:
-            # libpq hands this to the backend at connect time, so every pooled
-            # connection, worker, and migration run resolves the vendored SQL's
-            # unqualified table names into our schema before `public`.
-            options = quote(f"-c search_path={self.database_schema},public", safe="")
-            params.append(f"options={options}")
-        if not params:
-            return base
-        sep = "&" if "?" in base else "?"
-        return f"{base}{sep}{'&'.join(params)}"
-
 
 class _LazySettings:
     """Defer Settings() until first attribute access.
 
     The platform loads this plugin through a `nemo.services` entry point and
     swallows any exception raised during import, so an import-time
-    ValidationError (a missing CREDENTIALS_ENCRYPTION_KEY, say) makes the whole
+    ValidationError (an invalid TASK_IMAGE_VALIDATION_MODE, say) makes the whole
     plugin vanish with one log line. Deferring means the plugin always loads and
     misconfiguration surfaces as a real error on the request that needs it.
     """
@@ -606,9 +481,7 @@ class _LazySettings:
         # ponytail: unsynchronized; a startup race builds Settings twice and
         # discards one. Add a lock if construction ever gains side effects.
         if self._instance is None:
-            # Required fields without a source-code default come from the
-            # environment, which a type checker reading the signature cannot see.
-            self._instance = Settings()  # ty: ignore[missing-argument]
+            self._instance = Settings()
         return self._instance
 
     # Any, not object: callers use the real Settings surface through this proxy,

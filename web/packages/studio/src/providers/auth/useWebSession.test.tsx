@@ -138,6 +138,7 @@ describe('server-side browser sessions', () => {
       isError: false,
     });
     expect(profile.current).toEqual({
+      id: 'user-1',
       name: 'user@example.com',
       email: 'user@example.com',
       workspace: 'user',

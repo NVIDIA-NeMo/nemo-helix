@@ -72,7 +72,7 @@ def _make_agent(
     agent = Agent(
         name=name,
         workspace=workspace,
-        config=config or _fabric_agent_config(),
+        config=config if config is not None else _fabric_agent_config(),
         config_format=config_format,
     )
     agent._id = f"agent-{name}-id"
@@ -620,9 +620,14 @@ class TestCreateDeployment:
         assert "AgentEnvironment 'missing' not found" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
-    def test_create_rejects_invalid_platform_agent_config(self) -> None:
-        config = _fabric_agent_config()
-        config["default_harness"] = "missing"
+    @pytest.mark.parametrize(
+        ("config", "error"),
+        [
+            ({}, "Agent 'default/fabric-agent' has no configuration"),
+            ({**_fabric_agent_config(), "default_harness": "missing"}, "Invalid agent config"),
+        ],
+    )
+    def test_create_rejects_invalid_platform_agent_config(self, config: dict[str, Any], error: str) -> None:
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
         client = _test_client(mock_entity_client)
@@ -633,7 +638,7 @@ class TestCreateDeployment:
         )
 
         assert resp.status_code == 400
-        assert "Invalid agent config" in resp.json()["detail"]
+        assert error in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
     def test_create_returns_422_when_the_store_rejects_the_name(self) -> None:

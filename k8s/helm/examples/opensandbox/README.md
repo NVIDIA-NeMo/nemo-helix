@@ -46,7 +46,7 @@ Replace `REPLACE_WITH_RELEASE_NAMESPACE` in the server values before install.
 | `opensandbox-server-kata-qemu.yaml` | Kata QEMU server (`[secure_runtime] type=kata`) |
 | `batchsandbox-template.yaml` | ConfigMap — exclude control-plane; pull Secret name `nvcrimagepullsecret`; [Harbor directories](#harbor-directories) |
 | `batchsandbox-template-kata-qemu.yaml` | ConfigMap — example Kata node selectors; same pull Secret name; [Harbor directories](#harbor-directories) |
-| `opensandbox-ext-rbac.yaml` | Role — `pods/exec` and `pods/log` in the release namespace for the [Compose services](#compose-services) extension |
+| `opensandbox-ext-rbac.yaml` | Role — `pods/exec` and `pods/log` in the release namespace for the [Compose services](#compose-services) extension; apply it once per [tenant namespace](#multi-tenant-servers) |
 
 `[secure_runtime]` is server-global. Install **one** server for production
 (shared-kernel **or** Kata). Dual releases are only for proving both paths.
@@ -239,6 +239,31 @@ kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
 `configmap.yaml` is generated from the extension's source files by
 `script/generate_opensandbox_ext_configmap.py`, and CI fails if the committed
 copy is out of date. Don't edit it by hand.
+
+### Multi-tenant servers
+
+When the server runs with `[tenants]`, each tenant's API key maps to its own
+namespace, and the sandboxes of that tenant are created there. The extension's
+routes look in the caller's tenant namespace, and hide a sandbox labeled for another
+tenant, so the server's service account needs `pods`, `pods/log` and `pods/exec` in
+**every tenant namespace**, not only the release namespace. Without that,
+Kubernetes answers 403 on the extension's exec and services routes.
+
+`opensandbox-ext-rbac.yaml` is a Role and a RoleBinding for one namespace. Apply it to
+each tenant namespace, with that namespace in place of the one in the file: the
+`REPLACE_WITH_RELEASE_NAMESPACE` placeholder, or `${NHX_NAMESPACE}` if you already
+substituted it:
+
+```bash
+for ns in sandbox-alpha sandbox-beta; do   # the namespace of each tenant in tenants.toml
+  sed -E "s/^  namespace: (REPLACE_WITH_RELEASE_NAMESPACE|${NHX_NAMESPACE})$/  namespace: ${ns}/" \
+    "${EXAMPLES}/opensandbox-ext-rbac.yaml" | kubectl apply -f -
+done
+```
+
+Apply it again for a new tenant's namespace when you add the tenant. The chart's
+`composeServices` values cover one sandbox namespace, so apply the others this way.
+The extension also works on a server without `[tenants]`, using `[kubernetes] namespace`.
 
 ### Move a manual install to the chart
 

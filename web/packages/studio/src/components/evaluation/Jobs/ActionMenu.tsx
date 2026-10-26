@@ -3,6 +3,7 @@
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
+import { ArrowRight, MoreVert, Trash } from '@nemo/icons/icons';
 import { useEvalsDeleteEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
@@ -18,7 +19,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationJobName } from '@studio/selectors/evaluationJob';
-import { ArrowRight, EllipsisVertical, Trash } from 'lucide-react';
 import { FC, useState } from 'react';
 
 interface ActionMenuProps {
@@ -66,7 +66,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({ job, onNavigateToDetails, onJo
             aria-label="Open evaluation job actions menu"
             data-testid={`action-menu-${jobName}`}
           >
-            <EllipsisVertical />
+            <MoreVert />
           </Button>
         </DropdownTrigger>
         <DropdownContent align="end" className="w-[180px]">

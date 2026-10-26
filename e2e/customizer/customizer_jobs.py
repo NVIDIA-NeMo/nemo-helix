@@ -312,14 +312,14 @@ def deploy_vllm_model(
         body=CreateModelDeploymentRequest(name=deployment_name, config=deployment_config_name),
     )
     try:
-        _wait_for_deployment_ready(
+        wait_until_routable(
             client,
             workspace,
             deployment_name,
-            deployment_config_name=deployment_config_name,
-            timeout=ready_timeout,
+            deployment_config_name,
+            ready_timeout=ready_timeout,
+            gateway_timeout=gateway_timeout,
         )
-        _wait_for_gateway_ready(client, workspace, deployment_name, timeout=gateway_timeout)
     except BaseException:
         # Readiness helpers raise (pytest.fail) before we can return the names to the
         # caller, so the caller's try/finally never runs — clean up here to avoid
@@ -330,6 +330,26 @@ def deploy_vllm_model(
         raise
     logger.info("Deployment %s ready and routable", deployment_name)
     return deployment_name, deployment_config_name
+
+
+def wait_until_routable(
+    client: NemoClient,
+    workspace: str,
+    deployment_name: str,
+    deployment_config_name: str | None = None,
+    *,
+    ready_timeout: int = 3600,
+    gateway_timeout: int = 120,
+) -> None:
+    """Wait until a deployment is READY and the inference gateway routes to it."""
+    _wait_for_deployment_ready(
+        client,
+        workspace,
+        deployment_name,
+        deployment_config_name=deployment_config_name,
+        timeout=ready_timeout,
+    )
+    _wait_for_gateway_ready(client, workspace, deployment_name, timeout=gateway_timeout)
 
 
 def delete_deployment(

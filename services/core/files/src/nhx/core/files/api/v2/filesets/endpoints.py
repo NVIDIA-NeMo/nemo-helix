@@ -651,8 +651,7 @@ async def update_fileset_metadata(
             request.custom_fields["service_source"] = new_service_source
 
     diff = request.model_dump(include=request.model_fields_set)
-    fileset = fileset.model_copy(update=diff)
-    await entity_store.update(fileset)
+    fileset = await entity_store.update(fileset.model_copy(update=diff))
 
     return fileset_output_from_entity(fileset)
 
@@ -753,8 +752,7 @@ async def refresh_fileset(
         logger.warning(f"Storage refresh failed: {exc}")
         raise HTTPException(HTTP_400_BAD_REQUEST, f"Error refreshing fileset: {exc}") from exc
 
-    fileset = fileset.model_copy(update={"storage": storage})
-    await entity_store.update(fileset)
+    fileset = await entity_store.update(fileset.model_copy(update={"storage": storage}))
 
     return fileset_output_from_entity(fileset)
 

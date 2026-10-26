@@ -6,7 +6,7 @@ Generate markdown documentation for the NeMo Helix CLI.
 
 This module provides a custom docs generator that:
 - Groups commands and options by rich_help_panel
-- Outputs clean markdown (no HTML entities or spans)
+- Outputs markdown with MDX-safe escaping outside code spans
 - Properly handles Rich markup in help text
 """
 
@@ -672,17 +672,26 @@ def _escape_mdx_line(line: str) -> str:
     while i < n:
         ch = line[i]
         if ch == "`":
-            end = line.find("`", i + 1)
-            if end == -1:
-                out.append(line[i:])
-                break
-            out.append(line[i : end + 1])
-            i = end + 1
+            delimiter_end = i + 1
+            while delimiter_end < n and line[delimiter_end] == "`":
+                delimiter_end += 1
+            delimiter = line[i:delimiter_end]
+            closing = re.search(rf"(?<!`){re.escape(delimiter)}(?!`)", line[delimiter_end:])
+            if closing is not None:
+                end = delimiter_end + closing.end()
+                out.append(line[i:end])
+                i = end
+            else:
+                # An unmatched delimiter is prose, not an inline code span.
+                out.append(delimiter)
+                i = delimiter_end
             continue
         if ch == "{":
             out.append("\\{")
         elif ch == "<":
-            out.append("\\<")
+            # Fern's link checker can reparse bare URLs after Markdown backslash
+            # escapes are removed. An entity keeps URL placeholders out of JSX.
+            out.append("&lt;")
         else:
             out.append(ch)
         i += 1
@@ -698,7 +707,7 @@ _DOCUMENTED_PLUGIN_CLIS = (
     "evals",
     "experiments",
     "guardrail",
-    "insights",
+    "compass",
     "intake",
     "safe-synthesizer",
 )

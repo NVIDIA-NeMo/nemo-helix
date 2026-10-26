@@ -22,8 +22,8 @@ from test_evaluations import (
     _fake_download,
     _FakeBackend,
     _make_task_pack,
+    _seed_worker_row,
     _spec_with_tarball,
-    _worker_conn,
 )
 
 
@@ -89,7 +89,7 @@ def test_dispatch_uses_frozen_task_slug(monkeypatch: pytest.MonkeyPatch) -> None
         "credentials": {},
         "submission_identity": {},
     }
-    conn, executed = _worker_conn(
+    _seed_worker_row(
         _eval_row(
             status="queued",
             runtime="gym_daytona",
@@ -98,9 +98,9 @@ def test_dispatch_uses_frozen_task_slug(monkeypatch: pytest.MonkeyPatch) -> None
             image_ref="",
         )
     )
-    worker = _dispatcher(backend, conn)
+    worker = _dispatcher(backend)
     for method in ("_sync_artifacts_warn", "_build_archive_warn", "_write_provenance_warn"):
         monkeypatch.setattr(worker, method, lambda *args, **kwargs: None)
     worker.run("ev_test123")
-    assert backend.launched, executed
+    assert backend.launched
     assert backend.launched[0].task_slug == "frozen-task"

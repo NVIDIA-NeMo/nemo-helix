@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { z } from 'zod';
@@ -24,7 +24,7 @@ export const getPrimaryModelName = (config: AgentConfig | undefined): string | u
 export const applyModelToConfig = (
   config: AgentConfig | undefined,
   modelName: string
-): CreateAgentRequestConfig => {
+): RegisterAgentRequestConfig => {
   const cloned: AgentConfig = config ? JSON.parse(JSON.stringify(config)) : {};
   const llms = cloned.llms;
   if (llms) {
@@ -37,7 +37,7 @@ export const applyModelToConfig = (
       }
     }
   }
-  return cloned as CreateAgentRequestConfig;
+  return cloned as RegisterAgentRequestConfig;
 };
 
 export const cloneAgentFormSchema = z.object({

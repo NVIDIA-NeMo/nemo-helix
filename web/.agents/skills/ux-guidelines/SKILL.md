@@ -4,6 +4,8 @@
 
 name: ux-guidelines
 description: UX design guidelines and standards for NeMo Studio. Use when implementing new UI features, reviewing designs, or making UX decisions.
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # UX Guidelines

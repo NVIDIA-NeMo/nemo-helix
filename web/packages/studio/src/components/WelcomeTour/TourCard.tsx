@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Close } from '@nemo/icons/icons';
 import { Button, Card, Flex, Text } from '@nvidia/foundations-react-core';
-import { X } from 'lucide-react';
 import type { FC, ReactNode } from 'react';
 
 interface TourCardProps {
@@ -41,7 +41,7 @@ export const TourCard: FC<TourCardProps> = ({
       className="absolute top-3 right-3"
       onClick={onClose}
     >
-      <X />
+      <Close />
     </Button>
     {body && (
       <Text kind="label/regular/md" className="whitespace-normal break-words" lineHeight="125">

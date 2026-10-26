@@ -13,7 +13,7 @@ platform can deploy it, route requests to it, collect its traces, evaluate it,
 and optimize it. Agents run through
 [NeMo Fabric](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/),
 which gives every supported harness (DeepAgents, Claude Code, Codex, Hermes,
-NOOA, or a remote agent endpoint) the same configuration, lifecycle, and
+Mini-SWE-Agent, NOOA, or a remote agent endpoint) the same configuration, lifecycle, and
 telemetry.
 
 ## How It Works
@@ -27,8 +27,9 @@ flowchart LR
  D -. traces .-> Intake
 ```
 
-1. **Register.** `nemo agents create` stores the agent's `agent.yaml` and uploads the
-   files beside it to the agent's `<name>-ethos` fileset.
+1. **Register.** `nemo agents register` creates an agent identity. With `--agent-config`,
+   it also stores the agent's config and uploads the files beside a Fabric config to
+   the agent's `<name>-ethos` fileset.
 1. **Deploy.** `nemo agents deploy` runs the agent as a local subprocess, a Docker
    container, or a Kubernetes Deployment.
 1. **Invoke.** The Agents gateway routes each request to the agent's active deployment
@@ -41,16 +42,29 @@ flowchart LR
    feeds [Insights](/documentation/agents/traces-and-insights/insights-from-traces),
    evaluation, and [optimization](/documentation/agents/optimize-agents).
 
+## Upgrade and adapter setup
+
+For NeMo Helix 0.9, start with
+[Fabric 0.5 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade): it
+covers the registration-command rename, host/task package compatibility,
+persisted Relay observability, gateway telemetry routing, and the difference
+between a shipped descriptor and an installed harness. Pi is an opt-in packaged
+integration, not an end-to-end release-gated harness in the 0.9 CI matrix.
+
+For Mini-SWE-Agent 2.x, follow
+[Run Mini-SWE-Agent](/documentation/agents/mini-swe-agent) for a complete
+install → register → deploy → invoke → session → cleanup journey.
+
 ## Agent Lifecycle
 
 | Stage | Command |
 |---|---|
-| Register | `nemo agents create --name <name> --agent-config <path>` |
+| Register | `nemo agents register --name <name> [--agent-config <path>]` |
 | Deploy | `nemo agents deploy --agent <name>` |
 | Invoke | `nemo agents invoke --agent <name> --input "..."` |
 | Chat | `nemo agents chat --agent-deployment <deployment>` |
 | Run once as a job | `nemo agents execute --agent <name> --input "..."` |
-| Analyze traces | `nemo insights analysis-runs create --agent <name>` |
+| Analyze traces | `nemo compass analysis-runs create --agent <name>` |
 | Optimize | `nemo agents optimize run-strategy --strategy <strategy> --agent <name>` |
 | Update in place | `nemo agents redeploy --agent <name> --agent-config <path>` |
 | Tear down | `nemo agents undeploy --agent <name>`, then `nemo agents delete <name>` |

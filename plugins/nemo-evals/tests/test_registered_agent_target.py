@@ -36,6 +36,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.fabric_harness_packages import FABRIC_ADAPTER_EXTRAS
+from nemo_evals.jobs.gateway_models import agent_gateway_origin, rebase_registered_agent_config
 from nemo_evals.jobs.gym_sandbox import SandboxUnavailableError
 from nemo_evals.jobs.registered_agent_resolution import resolve_registered_agent
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -82,7 +83,7 @@ def _async_platform() -> AsyncNemoClient:
 
 
 def _calculator_config() -> dict[str, Any]:
-    """The shipped calculator example, as ``nemo agents create`` stores it."""
+    """The shipped calculator example, as ``nemo agents register`` stores it."""
     return {
         "config_format": "nemo-agents-spec-v1",
         "name": "calculator-agent",
@@ -144,10 +145,14 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
 
 
 def _agent(config: dict[str, Any] | None = None, *, config_format: str = "nemo-agents-spec-v1") -> Any:
-    return SimpleNamespace(name="calculator-agent", config_format=config_format, config=config or _calculator_config())
+    return SimpleNamespace(
+        name="calculator-agent",
+        config_format=config_format,
+        config=config if config is not None else _calculator_config(),
+    )
 
 
-async def _resolve(target: FabricRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
+async def _resolve(target: FabricRunnerTarget | GymRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
     return await resolve_registered_agent(target, workspace=workspace, async_sdk=_async_platform())
 
 
@@ -260,6 +265,15 @@ async def test_a_legacy_nat_agent_is_rejected_rather_than_guessed_at(mocker: Moc
 
     with pytest.raises(ValueError, match="nat-workflow-v1"):
         await _resolve(_by_agent())
+
+
+async def test_an_agent_without_config_is_rejected_before_staging_files(mocker: MockerFixture) -> None:
+    agents = _platform(mocker, _agent({}))
+
+    with pytest.raises(ValueError, match="Agent 'dev/calculator-agent' has no configuration"):
+        await _resolve(_by_agent())
+
+    agents.files.get_fileset.assert_not_called()
 
 
 async def test_the_published_agent_name_survives_resolution(mocker: MockerFixture) -> None:
@@ -503,7 +517,7 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert await _resolve(resolved) is resolved
 
 
-async def test_harbor_rebases_gateway_models_without_changing_external_models_or_host_targets(
+async def test_job_rebases_harbor_gateway_models_without_changing_external_models_or_host_targets(
     mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
@@ -519,7 +533,9 @@ async def test_harbor_rebases_gateway_models_without_changing_external_models_or
     harbor = await _resolve(_harbor_by_agent())
     fabric = await _resolve(_by_agent())
 
-    models = harbor.agent_kwargs["fabric_config"]["models"]
+    agent_kwargs = dict(harbor.agent_kwargs)
+    rebase_registered_agent_config(harbor, agent_kwargs, agent_gateway_origin(sandboxed=False))
+    models = agent_kwargs["fabric_config"]["models"]
     assert models["default"]["base_url"] == (
         "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
     )

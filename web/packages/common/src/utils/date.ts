@@ -14,6 +14,9 @@ export const getDifferenceInMilliseconds = (date1?: string, date2?: string) => {
   return dateValue2.getTime() - dateValue1.getTime();
 };
 
+export const getElapsedSeconds = (startMs: number, endMs: number = Date.now()): number =>
+  Math.floor((endMs - startMs) / 1000);
+
 /**
  * Converts a UTC ISO string to a local Date object.
  * Handles ISO strings with or without timezone indicators.

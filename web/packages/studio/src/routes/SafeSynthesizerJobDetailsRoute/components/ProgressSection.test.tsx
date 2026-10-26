@@ -5,12 +5,8 @@ import { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { ProgressSection } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/ProgressSection';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
 
 // Mock the highlighted code region to avoid act() warnings from async Shiki
 // highlighting. LogViewer composes the snippet from primitives, so only
@@ -120,8 +116,7 @@ const renderProgressSection = (
 
 // Helper to find the download button using Testing Library queries
 const getDownloadButton = () => {
-  const buttons = screen.getAllByRole('button');
-  const downloadButton = buttons.find((button) => within(button).queryByTestId('download-icon'));
+  const downloadButton = screen.queryByRole('button', { name: 'Download logs' });
   if (!downloadButton) {
     throw new Error('Download button not found');
   }
@@ -140,7 +135,7 @@ describe('ProgressSection', () => {
       const logs = [createMockLog('Test log', '2024-01-01T10:00:00.000Z')];
       renderProgressSection('test-job-123', false, logs);
 
-      expect(screen.getByTestId('download-icon')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Download logs' })).toBeInTheDocument();
     });
   });
 
@@ -266,7 +261,6 @@ describe('ProgressSection', () => {
       renderProgressSection('test-job-123', false, manyLogs);
 
       expect(await screen.findByText('Load previous logs')).toBeInTheDocument();
-      expect(await screen.findByTestId('arrow-up-icon')).toBeInTheDocument();
     });
 
     it('should not show "Load previous logs" button when there are 30 or fewer logs', async () => {

@@ -28,20 +28,29 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 import yaml
+from nemo_agents_plugin.container.template import SANDBOX_IMAGE_REGISTRY_ENV, SANDBOX_IMAGE_TAG_ENV
 from nemo_agents_plugin.entities import (
     AGENT_CONFIG_FILENAME,
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     ethos_fileset_name,
 )
+from nemo_helix_plugin.agents.validation import require_agent_config
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoResponseValidationError
+from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.job_results import ResultRef
-from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.api_factory import (
+    HelixJobEnvironmentVariable,
+    HelixJobSpec,
+    HelixJobStep,
+    SubprocessExecutionProviderSpec,
+)
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
@@ -215,7 +224,7 @@ class PackageAgentJob(NemoJob):
     ) -> BaseModel:
         """Resolve the agent name into its inline config.
 
-        Reads the entity at submit time so a missing or non-Fabric agent fails
+        Reads the entity at submit time so a missing, unconfigured, or non-Fabric agent fails
         the POST rather than the build.
         """
         del is_local
@@ -228,6 +237,7 @@ class PackageAgentJob(NemoJob):
         except NemoEntityNotFoundError as exc:
             raise HelixJobCompilationError(f"Agent '{input_spec.agent}' not found in workspace '{workspace}'.") from exc
 
+        require_agent_config(agent.config, name=input_spec.agent, workspace=workspace)
         if agent.config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
             raise HelixJobCompilationError(
                 f"Agent '{input_spec.agent}' has config_format '{agent.config_format}'; platform-side "
@@ -266,7 +276,6 @@ class PackageAgentJob(NemoJob):
     ) -> HelixJobSpec:
         """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.package`` on the host."""
         del entity_client, job_name, options
-        from nemo_helix_plugin.jobs.api_factory import HelixJobStep, SubprocessExecutionProviderSpec
 
         assert isinstance(spec, PackageAgentSpec), (
             f"PackageAgentJob.compile received unexpected spec type: {type(spec).__name__}"
@@ -279,6 +288,13 @@ class PackageAgentJob(NemoJob):
         # URL workspace is the auth boundary; overwrite whatever to_spec set.
         spec_dict["workspace"] = workspace
 
+        # Sandbox images (the OpenShell jobs-launcher) come from this platform's registry and tag.
+        platform_config = get_platform_config()
+        environment = [
+            HelixJobEnvironmentVariable(name=SANDBOX_IMAGE_REGISTRY_ENV, value=platform_config.image_registry),
+            HelixJobEnvironmentVariable(name=SANDBOX_IMAGE_TAG_ENV, value=platform_config.image_tag),
+        ]
+
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
@@ -288,6 +304,7 @@ class PackageAgentJob(NemoJob):
                         profile=resolved_profile,
                         command=["python", "-m", "nemo_agents_plugin.tasks.package"],
                     ),
+                    environment=environment,
                     config=spec_dict,
                 ),
             ],
@@ -317,6 +334,9 @@ class PackageAgentJob(NemoJob):
             profiles = (
                 await AsyncJobsClient.from_client(cast(AsyncNemoClient, async_sdk)).get_execution_profiles()
             ).data()
+        except NemoResponseValidationError:
+            # A response that does not match the client contract is not transient; retrying cannot fix it.
+            raise
         except Exception as exc:
             raise HelixJobDependencyUnavailableError(
                 f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "

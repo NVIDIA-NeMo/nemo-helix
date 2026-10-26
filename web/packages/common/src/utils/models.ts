@@ -41,13 +41,14 @@ export const hasModelProvider = (model: ModelEntity): boolean =>
 
 /**
  * Returns true if the model is a base model, false otherwise. This is determined by
- * checking if the model has a base_model property.
+ * checking if the model has a base_model property. The API sends `null` for base models
+ * even though the generated type only allows `undefined`, so check for any empty value.
  *
  * @param model - The model to check.
  * @returns True if the model is a base model, false otherwise.
  */
 export const isBaseModel = (model: ModelEntity) => {
-  return model.base_model === undefined;
+  return !model.base_model;
 };
 
 /**

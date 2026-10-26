@@ -5,13 +5,15 @@
 
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 import pytest
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.taskset_runs.controller import TERMINAL_JOB_STATUSES, JobsServiceRunJobs, PassOutcome, complete_run
 from nemo_evals.taskset_runs.entities import ResultState, TasksetRunEntity, TasksetRunPhase
-from nemo_evals.taskset_runs.specs import TasksetBundleSpec
+from nemo_evals.taskset_runs.run_evaluation import RESULT_STATE_KEY, ensure_run_evaluation
+from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetBundleSpec, TasksetRunPlan
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_evals.taskset_runs.task_jobs import task_job_request
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -45,6 +47,7 @@ class FakeRunJobs:
         self.records: list[AgentEvalResultEntity] = []
         self.cancelled: list[str] = []
         self.stepless: set[str] = set()
+        self.evaluations: Any = None  # a FakeRunEvaluations, for runs that publish to Intake
 
     def put(self, request: CreateHelixJobRequest, status: str) -> None:
         assert request.name is not None
@@ -331,6 +334,99 @@ async def test_a_bundle_name_jobs_holds_but_cannot_show_is_skipped(stored_run, h
     # The next pass finds the second attempt again instead of starting a third.
     outcome = await run_pass(stored_run, harbor_plan, jobs, store)
     assert outcome == PassOutcome("bundling", second) and len(jobs.created) == 1
+
+
+@pytest.fixture
+async def publishing(harbor_plan, stored_run, fake_evaluations) -> tuple[TasksetRunPlan, FakeRunJobs]:
+    """A run that publishes to Intake: its plan, and its task Jobs (running) with the Evaluation submit created."""
+    intake = RunIntakePublication(
+        experiment="swe-agent-tuning",
+        experiment_id="exp-1",
+        agent_name="o",
+        dataset_name="default/debug",
+        dataset_version="e" * 64,
+    )
+    plan = harbor_plan.model_copy(update={"intake": intake})
+    fake = FakeRunJobs()
+    for index in range(len(plan.spec.tasks)):
+        fake.put(await task_job_request(plan, stored_run, index, plan.task_environments[index]), "active")
+    fake.evaluations = fake_evaluations
+    await ensure_run_evaluation(fake_evaluations, stored_run, plan)
+    return plan, fake
+
+
+async def test_a_publishing_run_stamps_its_evaluation_once_at_the_end(
+    stored_run, publishing, store, entity_store, fake_evaluations
+):
+    plan, jobs = publishing
+    assert (await run_pass(stored_run, plan, jobs, store)).action == "running"
+    run = await reread(entity_store, stored_run)
+    for name in list(jobs.jobs):
+        jobs.finish(name, "completed")
+    await run_pass(run, plan, jobs, store)
+    assert not fake_evaluations.patches  # task Jobs publish trials; only the run's end touches the Evaluation
+    jobs.finish(f"{stored_run.name}-bundle-1", "completed")
+    done = BEFORE_DEADLINE + timedelta(minutes=5)
+    assert (await run_pass(run, plan, jobs, store, now=done)).action == "completed"
+
+    ((name, patch),) = fake_evaluations.patches
+    assert name == stored_run.name and patch.status == "completed"
+    assert patch.metadata is not None
+    assert patch.metadata[RESULT_STATE_KEY] == "ready"
+    assert float(patch.metadata["eval_duration_sec"]) == (done - stored_run.accepted_at).total_seconds()
+    assert patch.metadata["taskset_run_id"] == stored_run.name  # merged, not replaced
+    assert (await reread(entity_store, stored_run)).result_state is ResultState.READY
+
+
+async def test_an_expired_publishing_run_stamps_expired(stored_run, publishing, store, fake_evaluations):
+    plan, jobs = publishing
+    assert (await run_pass(stored_run, plan, jobs, store, now=AFTER_EXECUTION)).action == "expired"
+    ((_, patch),) = fake_evaluations.patches
+    assert patch.status == "expired" and patch.metadata is not None and patch.metadata[RESULT_STATE_KEY] == "none"
+
+
+async def test_a_cancel_between_the_stamp_and_the_state_write_leaves_the_evaluation_matching_the_run(
+    stored_run, publishing, store, entity_store, fake_evaluations, monkeypatch
+):
+    """The cancel route's write lands after a pass stamps ``expired``: that pass's ``set_state`` loses, and the next
+    pass stamps again before its own write, so the last stamp matches the run's final state."""
+    plan, jobs = publishing
+    stamp = fake_evaluations.patch
+
+    async def cancel_after_the_stamp(workspace, name, body):
+        await stamp(workspace, name, body)
+        if len(fake_evaluations.patches) == 1:
+            await store.request_cancel(workspace, name, now=AFTER_EXECUTION)
+
+    monkeypatch.setattr(fake_evaluations, "patch", cancel_after_the_stamp)
+    with pytest.raises(NemoEntityConflictError):
+        await run_pass(stored_run, plan, jobs, store, now=AFTER_EXECUTION)
+    run = await reread(entity_store, stored_run)
+    assert run.phase is TasksetRunPhase.ACCEPTED and run.cancel_requested_at == AFTER_EXECUTION
+    await run_pass(run, plan, jobs, store, now=AFTER_EXECUTION)
+
+    run = await reread(entity_store, stored_run)
+    evaluation = fake_evaluations.evaluations[run.name]
+    assert evaluation.status == run.phase.value and evaluation.metadata[RESULT_STATE_KEY] == run.result_state.value
+
+
+async def test_a_failed_stamp_never_blocks_the_runs_final_state(
+    stored_run, publishing, store, entity_store, fake_evaluations
+):
+    plan, jobs = publishing
+    fake_evaluations.fail = {"patch"}
+    assert (await run_pass(stored_run, plan, jobs, store, now=AFTER_EXECUTION)).action == "expired"
+    assert (await reread(entity_store, stored_run)).phase is TasksetRunPhase.EXPIRED
+
+
+async def test_a_foreign_evaluation_under_the_runs_name_is_never_stamped(
+    stored_run, publishing, store, fake_evaluations
+):
+    plan, jobs = publishing
+    evaluation = fake_evaluations.evaluations[stored_run.name]
+    fake_evaluations.evaluations[stored_run.name] = evaluation.model_copy(update={"metadata": {}})
+    await run_pass(stored_run, plan, jobs, store, now=AFTER_EXECUTION)
+    assert not fake_evaluations.patches
 
 
 async def test_missing_task_job_waits(stored_run, harbor_plan, jobs, store):

@@ -203,7 +203,9 @@ def test_maybe_stop_if_target_met_ignored_for_multi_objective() -> None:
 
 def test_run_numeric_study_all_trials_failed(tmp_path: Path) -> None:
     class AlwaysFailEvaluator:
-        def evaluate(self, *, trial_number: int, suggestions: dict, trial_overlay: dict, rep: int) -> dict[str, float]:
+        def evaluate(
+            self, *, trial_number: int, suggestions: dict[str, Any], trial_overlay: dict[str, Any], rep: int
+        ) -> CandidateEvaluationResult:
             raise StudyDriverError("simulated trial failure")
 
     from nemo_optimization.backends.optuna.study_driver import StudyDriverError

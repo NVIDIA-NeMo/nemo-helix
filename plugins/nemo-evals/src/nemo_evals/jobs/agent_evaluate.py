@@ -44,11 +44,19 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
     Target,
     registered_agent_files,
     validate_task_collection,
 )
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
+from nemo_evals.jobs.gateway_models import (
+    agent_gateway_origin,
+    check_gateway_model,
+    point_agent_at_gateway_model,
+    rebase_registered_agent_config,
+    sandbox_agent_channel,
+)
 from nemo_evals.jobs.gym_sandbox import (
     SandboxUnavailableError,
     has_staged_environment,
@@ -65,7 +73,13 @@ from nemo_evals.jobs.registered_agent_resolution import (
     upgrade_registered_agent_config,
 )
 from nemo_evals.jobs.result_persistence import persist_agent_eval_result
-from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
+from nemo_evals.jobs.run_outcome import (
+    PUBLICATION_STATUS_KEY,
+    STATUS_DETAILS_KEY,
+    agent_eval_outcome,
+    report_run_outcome,
+    report_status_details,
+)
 from nemo_evals.jobs.secret_env import JobEnvSecretSource
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
@@ -207,6 +221,9 @@ class _AgentEvalJobBase(NemoJob):
     #: Delete a registered agent's files snapshot after a successful run. A taskset run's task Jobs
     #: share one snapshot, so they keep it. TODO(M4 story 8): the run controller deletes it.
     discard_agent_files: ClassVar[bool] = True
+    #: Stamp the run's and the publish's durations onto the Evaluation after publishing. A taskset run's
+    #: task Jobs share one Evaluation, so they leave it to the run controller.
+    record_publication_durations: ClassVar[bool] = True
 
     @classmethod
     async def to_spec(
@@ -241,6 +258,7 @@ class _AgentEvalJobBase(NemoJob):
         validate_task_collection(resolved_tasks)
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
+            await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -518,6 +536,16 @@ class _AgentEvalJobBase(NemoJob):
                 harbor_config.n_concurrent_trials = target.n_concurrent_trials
             if configure_harbor is not None:
                 harbor_config = configure_harbor(harbor_config)
+            if target.gateway_model is not None or isinstance(target.source, RegisteredAgentSource):
+                origin = agent_gateway_origin(
+                    sandboxed=harbor_config.environment is not None,
+                    agent_channel=sandbox_agent_channel(harbor_config.environment),
+                )
+                agent_kwargs = dict(harbor_config.agent_kwargs)
+                rebase_registered_agent_config(target, agent_kwargs, origin)
+                harbor_config = point_agent_at_gateway_model(
+                    harbor_config.model_copy(update={"agent_kwargs": agent_kwargs}), target, origin
+                )
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
@@ -584,6 +612,7 @@ class _AgentEvalJobBase(NemoJob):
             labels=spec.labels,
             fail_fast=spec.fail_fast,
             work_dir=bundle_dir,
+            run_id=self._run_id(),
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
@@ -639,8 +668,15 @@ class _AgentEvalJobBase(NemoJob):
                 target=spec.target,
                 workspace=ctx.workspace,
                 intake=intake,
+                record_durations=self.record_publication_durations,
             )
             output["publication"] = publication_outcome.model_dump(exclude_none=True)
+            # The job output isn't persisted; status details are, so `runs status` can say what was published.
+            report_status_details(
+                {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
+                ctx=ctx,
+                async_client=async_client,
+            )
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
@@ -653,6 +689,10 @@ class _AgentEvalJobBase(NemoJob):
             discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
+
+    def _run_id(self) -> str | None:
+        """Hook: the SDK run id, which keys published sessions (``run_id:trial_id``). None generates one."""
+        return None
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
         """Hook: inspect or adjust materialized tasks before they run. Does nothing by default."""

@@ -109,6 +109,14 @@ def test_list_files_with_query_params() -> None:
     assert prepared.query_params == {"path": "data/", "include_cache_status": True}
 
 
+def test_file_routes_use_path_placeholder() -> None:
+    """Pins ``{path:path}`` so nested file paths travel with literal ``/`` (not ``%2F``)."""
+    for prepare in (endpoints.upload_file, endpoints.download_file, endpoints.delete_file):
+        kwargs = {"content": b""} if prepare is endpoints.upload_file else {}
+        prepared = prepare(workspace="default", name="my-fileset", path="a/b", **kwargs)
+        assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path:path}"
+
+
 def test_upload_file() -> None:
     prepared = endpoints.upload_file(workspace="default", name="my-fileset", path="data/file.txt", content=b"hello")
 
@@ -144,6 +152,7 @@ def test_create_fileset_with_project() -> None:
 
     import json
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content["project"] == "my-project"
 
@@ -155,6 +164,7 @@ def test_update_fileset_excludes_unset_fields() -> None:
 
     import json
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content == {"description": "updated"}
     assert "purpose" not in content
@@ -187,5 +197,6 @@ def test_query_otlp_logs() -> None:
     assert prepared.method == "POST"
     assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query"
     assert prepared.path_params == {"workspace": "default", "name": "my-fileset"}
+    assert isinstance(prepared.content, bytes)
     assert json.loads(prepared.content) == {"limit": 10, "artifact_base_path": "logs/run-1"}
     assert prepared.content_type == "application/json"
