@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.api.v2 import sample_agent as sample
 from nemo_helix_plugin.agents.types import Agent, AgentDeployment, CreateSampleAgentRequest, SampleAgentStreamEvent
 from nemo_helix_plugin.files.types import FilesetPurpose
+from nemo_helix_plugin.models.client import UnroutableModelError
 from nemo_helix_plugin.models.refs import ResolvedModelReference
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_DESCRIPTION
 from nemo_helix_plugin.workspaces.types import Workspace
@@ -296,3 +297,26 @@ def test_sample_agent_openapi_responses() -> None:
         assert responses[status]["content"]["application/x-ndjson"]["schema"]["$ref"].endswith(
             "/SampleAgentStreamEvent"
         )
+
+
+@pytest.mark.asyncio
+async def test_a_model_nothing_routes_is_reported_as_unroutable_not_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    unroutable = UnroutableModelError("default/my-model", "http://nemo/model/my-model")
+    monkeypatch.setattr(sample, "_existing_sample", AsyncMock(return_value=_workspace("sample-owned")))
+    monkeypatch.setattr(
+        sample.AsyncModelsClient,
+        "from_client",
+        lambda client: SimpleNamespace(resolve_model_reference=AsyncMock(side_effect=unroutable)),
+    )
+    monkeypatch.setattr(sample, "platform_auth_enabled", lambda: True)
+
+    with pytest.raises(HTTPException) as raised:
+        await sample.create_sample_agent(
+            body=CreateSampleAgentRequest(model="default/my-model"),
+            client=MagicMock(),
+            principal_id="alice",
+            authorize=AsyncMock(),
+        )
+
+    assert raised.value.status_code == 422
+    assert "no VirtualModel and no provider" in str(raised.value.detail)

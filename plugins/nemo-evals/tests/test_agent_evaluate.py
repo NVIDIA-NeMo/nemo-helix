@@ -20,6 +20,7 @@ from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefin
 from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.jobs import agent_evaluate
 from nemo_evals.jobs.agent_compiler import _environment
 from nemo_evals.jobs.agent_evaluate import (
     AGENT_BUNDLE_DIR,
@@ -57,7 +58,7 @@ from nemo_evals.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY
-from nemo_evals.jobs.secret_env import JobEnvSecretSource
+from nemo_evals.jobs.secret_env import JobEnvSecretSource, SecretEnvError
 from nemo_evals.metric_refs import MetricRef
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
@@ -1174,6 +1175,31 @@ async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> Non
     assert isinstance(spec.tasks[0].spec.metrics[0], MetricInline)
     # Canonical metrics reconstruct to runtime instances.
     assert isinstance(_to_runtime_task(spec.tasks[0]).metrics[0], ExactMatchMetric)
+
+
+async def test_to_spec_refuses_a_gateway_key_another_secret_already_fills(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A taskset run compiles its task Jobs only after it is accepted, so the conflict must stop submission."""
+    monkeypatch.setattr(
+        agent_evaluate,
+        "add_gateway_key_placeholder",
+        MagicMock(side_effect=SecretEnvError("OPENAI_API_KEY is already sourced from a secret in this job")),
+    )
+    input_spec = AgentEvalInputSpec(
+        tasks=[
+            AgentEvalTaskInput(
+                id="task-1",
+                intent="Answer.",
+                inputs=_task_inputs(instruction="Reply DONE."),
+                metrics=[_inline_metric()],
+            )
+        ],
+        target=_runner_target("openai/gpt-5.4"),
+    )
+
+    with pytest.raises(SecretEnvError, match="already sourced from a secret"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+        )
 
 
 @pytest.mark.parametrize("task_id", ["", "   ", "\t\n"])
