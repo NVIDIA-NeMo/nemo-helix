@@ -720,3 +720,39 @@ async def test_stop_before_start_records_nothing(tmp_path: Path, server: Server)
     await environment.stop(delete=True)
 
     assert list((tmp_path / TRIAL).glob(APPLIED_EGRESS_GLOB)) == []
+
+
+async def test_the_pod_ip_lookup_stops_retrying_at_its_budget(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The IP is optional, so an unresponsive server can't hold the create for every retry's full timeout."""
+    monkeypatch.setattr(environment_module, "SANDBOX_IP_LOOKUP_BUDGET_SEC", 0)
+    server.endpoint_answer = httpx.ReadTimeout("no answer")
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+
+    sandbox = await environment._create_sandbox()
+
+    assert len(server.endpoint_requests) == 1
+    assert _record(tmp_path, sandbox.id)["ip"] is None
+
+
+async def test_a_failed_rewrite_leaves_the_previous_record_whole(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that dies after emptying its file (a full disk, say) must not cost the sandbox its IP and start."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    await environment.start(force_build=False)
+    sandbox_id = _sandbox(environment).id
+    before = _record(tmp_path, sandbox_id)
+
+    def dies_mid_write(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
+        with open(self, "w") as file:
+            file.write(data[:10])
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", dies_mid_write)
+    await environment.stop(delete=True)
+    monkeypatch.undo()
+
+    assert _record(tmp_path, sandbox_id) == before
+    assert [path.name for path in (tmp_path / TRIAL).iterdir()] == [applied_egress_filename(sandbox_id)]

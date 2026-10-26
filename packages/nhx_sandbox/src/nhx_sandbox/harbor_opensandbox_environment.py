@@ -146,6 +146,8 @@ SERVER_RETRY_MAX_SEC = 8.0
 PROVISIONING_STATUS_BUDGET_SEC = 30
 # execd's port, which every sandbox pod listens on; its direct endpoint is ``<pod IP>:<port>``.
 EXECD_PORT = 44772
+# The pod IP is optional, so its lookup gives up after this long in all, retries included.
+SANDBOX_IP_LOOKUP_BUDGET_SEC = 15
 # How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 
@@ -468,7 +470,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
     async def _sandbox_ip(self, recorded_id: str) -> str | None:
         """The pod IP from execd's direct endpoint, or ``None`` if the server doesn't report one."""
         try:
-            response = await self._server().get(f"/sandboxes/{recorded_id}/endpoints/{EXECD_PORT}", timeout=30)
+            response = await self._server().get(
+                f"/sandboxes/{recorded_id}/endpoints/{EXECD_PORT}",
+                timeout=SANDBOX_IP_LOOKUP_BUDGET_SEC,
+                deadline=time.monotonic() + SANDBOX_IP_LOOKUP_BUDGET_SEC,
+            )
             response.raise_for_status()
             endpoint = str(response.json()["endpoint"])
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
@@ -518,7 +524,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._record_path = self.trial_paths.trial_dir / applied_egress_filename(recorded_id or self.session_id)
         try:
             self.trial_paths.trial_dir.mkdir(parents=True, exist_ok=True)
-            self._record_path.write_text(json.dumps(record, indent=2))
+            self._write_record(self._record_path, record)
         except OSError:
             self.logger.warning("Could not record the applied egress policy", exc_info=True)
 
@@ -528,11 +534,22 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             return
         self._record["stopped_at"] = datetime.now(UTC).isoformat()
         try:
-            self._record_path.write_text(json.dumps(self._record, indent=2))
+            self._write_record(self._record_path, self._record)
         except OSError:
             self.logger.warning("Could not record when the sandbox stopped", exc_info=True)
         self._record = None
         self._record_path = None
+
+    @staticmethod
+    def _write_record(path: Path, record: dict[str, Any]) -> None:
+        """Replace *path* with *record* in one rename, so a failed write leaves the previous record whole."""
+        temporary = path.with_name(f"{path.name}.tmp")
+        try:
+            temporary.write_text(json.dumps(record, indent=2))
+            temporary.replace(path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+            raise
 
     @override
     async def start(self, force_build: bool) -> None:
