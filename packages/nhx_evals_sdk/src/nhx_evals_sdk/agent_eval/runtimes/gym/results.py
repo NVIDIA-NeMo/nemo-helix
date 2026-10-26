@@ -288,6 +288,7 @@ def _rollout_evidence(
     task_id: str,
     trial_id: str,
     capture_dir: Path | None = None,
+    inline_failure: bool = False,
 ) -> CandidateEvidence:
     """The rollouts file every trial shares, plus this rollout's own trace.
 
@@ -299,6 +300,11 @@ def _rollout_evidence(
     descriptors: dict[str, EvidenceDescriptor] = {
         "rollouts": EvidenceDescriptor(kind="filesystem", format="file", ref=str(rollouts_path))
     }
+    if inline_failure:
+        # Gym 0.5 can keep a producer failure in the main rollout file rather
+        # than its failures sidecar. Give consumers the same stable evidence
+        # name while retaining the exact file that carried the diagnostic.
+        descriptors["rollout_failures"] = EvidenceDescriptor(kind="filesystem", format="file", ref=str(rollouts_path))
     capture_path = _capture_path(record, capture_dir)
     if capture_dir is not None and capture_path is None:
         # Capture is switched on by the runner, so an absent one is Gym not doing what it was
@@ -638,9 +644,9 @@ def trials_from_rollouts(
 ) -> list[AgentEvalTrial]:
     """Fan Gym's rollout records out into one :class:`AgentEvalTrial` per attempt.
 
-    Reads *both* Gym output files: successes from ``rollouts.jsonl`` (COMPLETED, carrying the reward)
-    and failures from the ``*_failures.jsonl`` sidecar (FAILED — so a failed attempt is counted and
-    diagnosed rather than silently dropped). Every record is attributed to its task by
+    Reads *both* Gym output files: regular records and inline producer failures from
+    ``rollouts.jsonl``, plus failures from the ``*_failures.jsonl`` sidecar. A failed attempt is
+    counted and diagnosed rather than silently scored from a synthetic zero reward. Every record is attributed to its task by
     ``_ng_task_index`` → ``index_to_task_id``, the map we stamped in :func:`materialize_dataset`.
     """
     if not rollouts_path.exists():
@@ -689,10 +695,13 @@ def trials_from_rollouts(
             continue
         raw_rollout_index = record.get(NG_ROLLOUT_INDEX)
         reward = _coerce_reward(record.get(reward_key))
+        inline_failure = any(key.startswith(_NG_FAILURE_PREFIX) for key in record)
         # An agent that never ran did not earn its reward — reporting 0.0 as a completed trial would
         # let a broken environment read as a poorly-performing one.
         never_ran = _agent_never_ran(record)
-        if never_ran:
+        if inline_failure:
+            status = AgentEvalTrialStatus.FAILED
+        elif never_ran:
             empty_output_count += 1
             empty_output_task_ids.add(task_id)
             status = AgentEvalTrialStatus.FAILED
@@ -701,12 +710,23 @@ def trials_from_rollouts(
         else:
             status = AgentEvalTrialStatus.PARTIAL
         metadata: dict[str, Any] = {
-            "reward": None if never_ran else reward,
+            "reward": None if inline_failure or never_ran else reward,
             NG_TASK_INDEX: record.get(NG_TASK_INDEX),
             NG_ROLLOUT_INDEX: raw_rollout_index,
         }
         error: TrialError | None = None
-        if never_ran:
+        if inline_failure:
+            error = TrialError(
+                type=_first_text(record, _FAILURE_TYPE_KEYS) or UNKNOWN_ERROR_TYPE,
+                message=_failure_message(record),
+            )
+            metadata["gym_failure"] = next((value for value in map(record.get, _FAILURE_MESSAGE_KEYS) if value), None)
+            metadata[GYM_FAILURE_RECORD] = {
+                key: value
+                for key, value in record.items()
+                if key in _FAILURE_MESSAGE_KEYS or key.startswith(_NG_FAILURE_PREFIX)
+            }
+        elif never_ran:
             # Kept alongside the reward Gym reported, so the discarded value is still auditable.
             metadata["gym_failure"] = (
                 "the agent produced no output and consumed no tokens, so the model was never called; "
@@ -728,6 +748,7 @@ def trials_from_rollouts(
                     task_id=task_id,
                     trial_id=trial_id,
                     capture_dir=capture_dir,
+                    inline_failure=inline_failure,
                 ),
                 error=error,
                 measurements=_usage_measurements(record),

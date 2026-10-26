@@ -533,6 +533,34 @@ def test_a_failed_attempt_keeps_its_diagnostic_and_model_calls(
     assert trial.evidence.require("rollout_failures").ref == str(failures)
 
 
+def test_an_inline_gym_producer_failure_is_not_scored_as_a_completed_zero(tmp_path: Path) -> None:
+    """Gym 0.5 writes some producer failures into the main rollout file."""
+    tasks = discover_gym_tasks(EXAMPLE)
+    _, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    failure = {
+        NG_TASK_INDEX: 0,
+        NG_ROLLOUT_INDEX: 0,
+        "reward": 0.0,
+        "response": {"output": [{"type": "message", "content": []}]},
+        "_ng_failure_class": "remote_agent_error",
+        "error": "RuntimeError: customer workload failed",
+    }
+    bundle.write_text(json.dumps(failure) + "\n", encoding="utf-8")
+
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map)
+
+    assert trial.status == AgentEvalTrialStatus.FAILED
+    assert trial.error == TrialError(type="remote_agent_error", message="RuntimeError: customer workload failed")
+    assert trial.metadata["reward"] is None
+    assert trial.metadata[GYM_FAILURE_RECORD] == {
+        "_ng_failure_class": "remote_agent_error",
+        "error": "RuntimeError: customer workload failed",
+    }
+    assert trial.evidence is not None
+    assert trial.evidence.require("rollout_failures").ref == str(bundle)
+
+
 def test_ensure_fresh_output_rejects_reused_dir(tmp_path: Path) -> None:
     # Gym appends to the failures sidecar, so a directory already holding one must be refused
     # (rather than cleared) to avoid mixing runs / clobbering prior results.
