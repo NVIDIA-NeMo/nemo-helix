@@ -21,7 +21,6 @@ import {
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { ModelChatTab } from '@studio/components/ModelChatTab';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useModelLineage } from '@studio/hooks/useModelLineage';
@@ -29,6 +28,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
+import { ChatTab } from '@studio/routes/ModelDetailRoute/ChatTab';
 import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
 import { DeploymentTab } from '@studio/routes/ModelDetailRoute/DeploymentTab';
 import { DeploymentActions } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions';
@@ -186,9 +186,12 @@ export const ModelDetailRoute: FC = () => {
           </TabsContent>
 
           <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0 pt-6">
-            <Stack className="mx-auto h-full w-full max-w-[768px]">
-              <ModelChatTab model={model} adapter={adapter} />
-            </Stack>
+            <ChatTab
+              // The baseline panel is seeded once, so start over on another model or adapter.
+              key={`${model.workspace}/${model.name}:${adapter?.name ?? ''}`}
+              model={model}
+              adapter={adapter}
+            />
           </TabsContent>
 
           <TabsContent
