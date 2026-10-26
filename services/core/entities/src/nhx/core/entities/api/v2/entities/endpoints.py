@@ -20,7 +20,7 @@ Cross-Workspace Queries:
 
 import logging
 import textwrap
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
@@ -99,14 +99,20 @@ def redact_stored_auth_context(entity: Entity, auth_client: AuthClient) -> Entit
     return entity.model_copy(update={"data": data})
 
 
-def server_owned_data_keys(auth_client: AuthClient) -> tuple[str, ...]:
-    """``data`` keys the caller may not write: the stored creator auth context, unless a service calls.
+def server_owned_data_keys(auth_client: AuthClient, data: dict[str, Any]) -> tuple[str, ...]:
+    """``data`` keys whose stored values win over what the caller sent.
 
-    Services write it, including while delegating for a user, so the direct caller is checked. For anyone
-    else the stored value wins over what was sent, which covers forged values and the ``None`` that SDK
-    read-modify-write sends after a redacted read.
+    Services write the creator auth context, including while delegating for a user, so the direct caller
+    is checked. For anyone else the stored value wins, which covers forged values and the ``None`` that SDK
+    read-modify-write sends after a redacted read. A delegating service reads it redacted too, so its
+    ``None`` keeps the stored value; only a value it actually sets replaces it.
     """
-    return () if is_service_principal(auth_client.principal.id) else (STORED_AUTH_CONTEXT_KEY,)
+    principal = auth_client.principal
+    if not is_service_principal(principal.id):
+        return (STORED_AUTH_CONTEXT_KEY,)
+    if principal.is_delegated and data.get(STORED_AUTH_CONTEXT_KEY) is None:
+        return (STORED_AUTH_CONTEXT_KEY,)
+    return ()
 
 
 async def validate_project_exists(repository: EntityRepository, workspace: str, project: str | None) -> None:
@@ -282,7 +288,11 @@ async def create_entity(
             workspace=workspace,
             entity_type=entity_type,
             name=name,
-            data={key: value for key, value in entity.data.items() if key not in server_owned_data_keys(auth_client)},
+            data={
+                key: value
+                for key, value in entity.data.items()
+                if key not in server_owned_data_keys(auth_client, entity.data)
+            },
             parent=entity.parent,
             project=entity.project,
             created_by=auth_client.principal.effective_id,
@@ -557,7 +567,7 @@ async def update_entity_by_name(
             project=entity_data.project,
             updated_by=auth_client.principal.effective_id,
             expected_db_version=entity_data.expected_db_version,
-            preserve_data_keys=server_owned_data_keys(auth_client),
+            preserve_data_keys=server_owned_data_keys(auth_client, entity_data.data),
         )
         return redact_stored_auth_context(entity, auth_client)
     except EntityVersionConflictError as e:

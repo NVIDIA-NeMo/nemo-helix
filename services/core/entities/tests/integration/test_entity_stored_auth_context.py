@@ -189,3 +189,35 @@ async def test_service_principal_update_replaces_auth_context(
     assert updated.status_code == 200, updated.text
     assert updated.json()["data"][STORED_AUTH_CONTEXT_KEY] == replacement
     assert (await _stored_data(repos, _NAME))[STORED_AUTH_CONTEXT_KEY] == replacement
+
+
+@pytest.mark.parametrize("sent", [{}, {STORED_AUTH_CONTEXT_KEY: None}], ids=["absent", "sdk-redacted-none"])
+async def test_delegated_service_update_without_auth_context_keeps_it(
+    client_with_auth_service_on_behalf_of: AsyncClient, repos, sent
+) -> None:
+    """A service acting for a user reads the context redacted, so writing that back must not wipe it."""
+    await _seed_run(repos)
+
+    updated = await client_with_auth_service_on_behalf_of.put(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}/{_NAME}",
+        json={"data": {"status": "cancelling", **sent}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert await _stored_data(repos, _NAME) == {"status": "cancelling", STORED_AUTH_CONTEXT_KEY: _AUTH_CONTEXT}
+
+
+async def test_delegated_service_update_replaces_auth_context(
+    client_with_auth_service_on_behalf_of: AsyncClient, repos
+) -> None:
+    """Rerun-style flows re-apply the caller's context while delegating for them."""
+    await _seed_run(repos)
+    caller = {**_AUTH_CONTEXT, "principal_id": TEST_PRINCIPAL, "principal_email": TEST_PRINCIPAL}
+
+    updated = await client_with_auth_service_on_behalf_of.put(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}/{_NAME}",
+        json={"data": {"status": "running", STORED_AUTH_CONTEXT_KEY: caller}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert (await _stored_data(repos, _NAME))[STORED_AUTH_CONTEXT_KEY] == caller
