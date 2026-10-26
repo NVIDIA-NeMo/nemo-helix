@@ -217,9 +217,10 @@ For a top-level `llm_classifier`, this middleware entry uses the native default:
 }
 ```
 
-For a `stage_router`, put the limit inside the optional `classifier` object. This example overrides
-it with `64`; omitting only `max_output_tokens` or replacing `64` with `null` uses the native default
-while keeping the classifier enabled:
+For a `stage_router`, put the limit inside the optional `classifier` object. Enabling the classifier
+also requires a `models.judge` list. This example overrides the limit with `64`; omitting only
+`max_output_tokens` or replacing `64` with `null` uses the native default while keeping the classifier
+enabled:
 
 ```json
 {
@@ -229,6 +230,7 @@ while keeping the classifier enabled:
     "confidence_threshold": 0.5,
     "classifier": {"base_threshold": 0.5, "max_output_tokens": 64},
     "models": {
+      "judge": ["default/<judge-model>"],
       "capable": ["default/<strong-model>"],
       "efficient": ["default/<weak-model>"]
     }

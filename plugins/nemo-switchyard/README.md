@@ -111,7 +111,9 @@ The limit applies to classifier judge output, not the routed backend response.
 
 For example, `"max_output_tokens": null` may be added alongside `base_threshold`
 in the capability-classifier config above. For a stage router, add
-`"classifier": {"base_threshold": 0.5, "max_output_tokens": 64}` inside `config`.
+`"classifier": {"base_threshold": 0.5, "max_output_tokens": 64}` inside `config`
+and add `"judge": ["workspace/judge"]` alongside `capable` and `efficient` in
+`config.models`. Enabling the stage-router classifier requires `models.judge`.
 Omitting only the nested `max_output_tokens`, or setting it to `null`, keeps the
 classifier enabled with its native token default. Omitting the entire
 `classifier` object leaves the stage router without a classifier.
