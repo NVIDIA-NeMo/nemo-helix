@@ -45,6 +45,11 @@ def account_migration_client() -> Generator[TestClient]:
         client_type=TestClient,
         auth_enabled=True,
         auth_bundle_cache_seconds=0,
+        # bundle_cache_seconds=0 already reloads policy data on every PDP call, so the
+        # background refresh loop only adds a second writer to the shared PDP store. A
+        # refresh that fetched bindings before the Viewer grant could land after a request's
+        # reload and evaluate it without the grant (403). Keep the loop idle after startup.
+        auth_policy_data_refresh_interval=3600,
         workspaces=[],
         projects=[],
         service_configs={
