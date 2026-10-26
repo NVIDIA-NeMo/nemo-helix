@@ -11,7 +11,12 @@ from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, overload
 
 import httpx
-from nemo_helix_plugin.client.errors import NemoResponseValidationError, NemoTransportError, raise_for_status
+from nemo_helix_plugin.client.errors import (
+    NemoHTTPError,
+    NemoResponseValidationError,
+    NemoTransportError,
+    raise_for_status,
+)
 from nemo_helix_plugin.client.types import (
     RESPONSE_VALIDATION_CONTEXT,
     OffsetPagination,
@@ -216,8 +221,14 @@ class NemoStreamResponse(Generic[ModelT]):
         try:
             with self._stream_ctx as raw:
                 if not raw.is_success:
-                    # Buffer error bodies so NemoHTTPError retains server diagnostics.
-                    raw.read()
+                    # A rejected response stays an HTTP error even if its body cannot be read.
+                    try:
+                        raw.read()
+                    except httpx.TransportError as exc:
+                        try:
+                            raise_for_status(raw)
+                        except NemoHTTPError as error:
+                            raise error from exc
                 raise_for_status(raw)
 
                 def _iter() -> Iterator[ModelT]:
@@ -334,7 +345,13 @@ class AsyncNemoStreamResponse(Generic[ModelT]):
             async with self._stream_ctx as raw:
                 if not raw.is_success:
                     # Keep error details without buffering successful event streams.
-                    await raw.aread()
+                    try:
+                        await raw.aread()
+                    except httpx.TransportError as exc:
+                        try:
+                            raise_for_status(raw)
+                        except NemoHTTPError as error:
+                            raise error from exc
                 raise_for_status(raw)
 
                 async def _iter() -> AsyncIterator[ModelT]:

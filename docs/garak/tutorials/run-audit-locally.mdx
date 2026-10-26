@@ -106,7 +106,7 @@ for provider in providers.items():
     print(provider.name, provider.host_url)
 ```
 
-Use a `provider` name from this output in the target below. This example defaults to `nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Set `NVIDIA_MODEL` to use another service's exact catalog ID. Do not infer IDs by adding or removing prefixes: the endpoint, model ID, and credentials must match.
+This example uses `system/nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Set `NVIDIA_MODEL` only to an exact catalog ID served by that provider's configured endpoint; it changes the model ID, not the provider route. To use a different provider from the list, change both the preflight and target routes below. Do not infer IDs by adding or removing prefixes: the endpoint, model ID, and credentials must match.
 
 Before creating the target, send one chat completion through the same provider route that garak will use. A READY provider or a model listed in its catalog does not guarantee that your API key has completion access:
 

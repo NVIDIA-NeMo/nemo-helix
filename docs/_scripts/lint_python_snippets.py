@@ -16,6 +16,7 @@ audits.
 
 import argparse
 import ast
+import inspect
 import os
 import re
 import subprocess
@@ -103,6 +104,7 @@ class PreparedTypeCheckFile:
     doc_path: Path
     temp_path: Path
     line_mapping: tuple[int, ...]
+    column_offset: int = 0
 
 
 def find_doc_files(paths: Iterable[Path]) -> list[Path]:
@@ -295,6 +297,21 @@ def prepare_type_check_file(
     if not any(line.strip() for line in source_lines):
         return None
 
+    # IPython executes cells with this flag. Detect notebook-level async code
+    # without running it, then give ty the async scope it requires. Keep the
+    # entire page in one scope so values remain available across cells.
+    column_offset = 0
+    try:
+        code = compile("\n".join(source_lines), str(doc_path), "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+    except SyntaxError:
+        # Let ty report invalid Python with the original source mapping.
+        pass
+    else:
+        if code.co_flags & inspect.CO_COROUTINE:
+            source_lines = ["async def _notebook_cells():", *("    " + line for line in source_lines)]
+            line_mapping.insert(0, line_mapping[0])
+            column_offset = 4
+
     with tempfile.NamedTemporaryFile(
         "w",
         encoding="utf-8",
@@ -306,7 +323,9 @@ def prepare_type_check_file(
         temp_file.write("\n".join(source_lines))
         temp_path = Path(temp_file.name)
 
-    return PreparedTypeCheckFile(doc_path=doc_path, temp_path=temp_path, line_mapping=tuple(line_mapping))
+    return PreparedTypeCheckFile(
+        doc_path=doc_path, temp_path=temp_path, line_mapping=tuple(line_mapping), column_offset=column_offset
+    )
 
 
 def translate_line_number(line_in_combined: int, line_mapping: tuple[int, ...]) -> int:
@@ -383,7 +402,7 @@ def run_type_check(
                 continue
 
             combined_line = int(match.group("line"))
-            column = match.group("column")
+            column = max(1, int(match.group("column")) - matched_prepared.column_offset)
             message = match.group("message")
             doc_line = translate_line_number(combined_line, matched_prepared.line_mapping)
             results[matched_prepared.doc_path].append(f"{matched_prepared.doc_path}:{doc_line}:{column}: {message}")

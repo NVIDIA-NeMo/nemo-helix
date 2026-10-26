@@ -69,12 +69,12 @@ print({"corpus": CORPUS, "provider": PROVIDER, "chat": CHAT_MODEL, "embed": EMBE
 
 `retrieval-preview` runs a single record through the pipeline so you can read the generated pairs before paying for a full pass; it writes no fileset. The full job writes Q&A JSONL plus `generation_result.json`, which Stage 1 reads as `sdg_input`.
 
-Equivalent CLI:
+Equivalent CLI, using the same pinned sample corpus without an upload:
 
 ```bash
 nemo data-designer retrieval-preview --workspace default --spec '{
   "generate": {
-    "corpus": "default/my-docs",
+    "corpus": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random",
     "provider": "system/nvidia-build",
     "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -85,7 +85,7 @@ nemo data-designer retrieval-preview --workspace default --spec '{
 }'
 
 nemo data-designer retrieval-generate --workspace default --spec '{
-  "corpus": "default/my-docs",
+  "corpus": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random",
   "provider": "system/nvidia-build",
   "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",

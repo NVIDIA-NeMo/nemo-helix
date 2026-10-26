@@ -175,6 +175,26 @@ value = 1
     assert syntax_check(extract_python_snippets(doc)) == []
 
 
+@pytest.mark.parametrize("annotation", ["int", "str"])
+def test_run_type_check_handles_notebook_await_without_hiding_type_errors(tmp_path: Path, annotation: str) -> None:
+    doc = tmp_path / "notebook.mdx"
+    doc.write_text(
+        "# Notebook\n\n```python\nasync def read() -> int:\n    return 1\n```\n\n"
+        f"```python\nvalue: {annotation} = await read()\n```\n",
+        encoding="utf-8",
+    )
+    snippets = extract_python_snippets(doc)
+    assert syntax_check(snippets) == []
+
+    results = run_type_check({doc: snippets}, project_root=Path(__file__).resolve().parents[2], timeout_seconds=120)
+
+    if annotation == "int":
+        assert results[doc] == ()
+    else:
+        assert len(results[doc]) == 1
+        assert f"{doc}:9:14: error[invalid-assignment]" in results[doc][0]
+
+
 def test_prepare_type_check_file_preserves_line_mapping(tmp_path: Path) -> None:
     doc = tmp_path / "page.mdx"
     doc.write_text(
