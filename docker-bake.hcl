@@ -867,9 +867,6 @@ target "nhx-gym-tasks-docker" {
     nhx-tasks   = "target:nhx-tasks-docker"
     nhx-workspace   = "target:nhx-workspace"
   }
-  args = {
-    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
-  }
   cache-to   = maybe_registry_cache_to("nhx-gym-tasks")
   cache-from = maybe_registry_cache_from("nhx-gym-tasks")
   tags       = sha_and_maybe_latest_tags("nhx-gym-tasks")
