@@ -24,7 +24,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
-from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nhx.common.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
 from nhx.common.auth import ALL_WORKSPACES, is_service_principal
 from nhx.common.auth.client import AuthClient
 from nhx.core.entities.api.dependencies import (
@@ -129,10 +129,11 @@ def _names_stored_auth_context(field: str | None) -> bool:
 
 
 def _filters_on_stored_auth_context(operation: FilterOperation | None) -> bool:
-    """Whether any field path in the filter tree reaches the stored auth context.
+    """Whether the filter tree reaches the stored auth context through a field path or a root ``data`` value.
 
-    ``$hasKey`` on ``data`` is the one operator whose value names a top-level key; ``$contains`` and
-    ``$elemMatch`` only match array elements.
+    A comparison on ``data`` itself names top-level keys in its value: ``$hasKey`` as a string, ``$eq``
+    as an object, ``$in``/``$nin`` as a list of objects. ``$contains``/``$elemMatch`` only match array
+    elements, so ``data`` (an object) gives them nothing to match.
     """
     if isinstance(operation, LogicalOperation):
         return any(_filters_on_stored_auth_context(op) for op in operation.operations)
@@ -140,11 +141,17 @@ def _filters_on_stored_auth_context(operation: FilterOperation | None) -> bool:
         return _filters_on_stored_auth_context(operation.condition)
     if isinstance(operation, ComparisonOperation):
         return _names_stored_auth_context(operation.field) or (
-            operation.operator == FilterOperator.HAS_KEY
-            and operation.field == "data"
-            and operation.value == STORED_AUTH_CONTEXT_KEY
+            operation.field == "data" and _names_top_level_key(operation.value)
         )
     return False
+
+
+def _names_top_level_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        return STORED_AUTH_CONTEXT_KEY in value
+    if isinstance(value, (list, tuple)):
+        return any(_names_top_level_key(item) for item in value)
+    return value == STORED_AUTH_CONTEXT_KEY
 
 
 def server_owned_data_keys(auth_client: AuthClient, data: dict[str, Any]) -> tuple[str, ...]:

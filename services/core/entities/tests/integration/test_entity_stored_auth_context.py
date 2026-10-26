@@ -227,6 +227,10 @@ async def test_delegated_service_update_replaces_auth_context(
 _PROBES = {
     "filter-field": {"filter": json.dumps({"data._auth_context.principal_id": "creator@example.com"})},
     "filter-has-key": {"filter": json.dumps({"data": {"$hasKey": STORED_AUTH_CONTEXT_KEY}})},
+    "filter-root-eq": {
+        "filter": json.dumps({"data": {"$eq": {"status": "running", STORED_AUTH_CONTEXT_KEY: _AUTH_CONTEXT}}})
+    },
+    "filter-root-in": {"filter": json.dumps({"data": {"$in": [{STORED_AUTH_CONTEXT_KEY: _AUTH_CONTEXT}]}})},
     "filter-nested": {"filter": json.dumps({"$or": [{"data.status": "running"}, {"data._auth_context.x": 1}]})},
     "sort": {"sort": "-data._auth_context.principal_id"},
     "count_by": {"count_by": "data._auth_context"},
