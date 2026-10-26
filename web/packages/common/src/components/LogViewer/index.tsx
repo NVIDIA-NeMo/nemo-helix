@@ -140,14 +140,6 @@ export const LogViewer: FC<LogViewerProps> = ({
 
   return (
     <Block className="relative w-full min-w-0 max-w-full overflow-hidden h-full">
-      {!showAllLogs && hasMoreLogs && (
-        <Block className="absolute top-6 mt-[2px] left-px right-px z-10 py-5 text-center bg-[linear-gradient(to_bottom,var(--background-color-surface-sunken),transparent)]">
-          <Tag color="gray" kind="solid" onClick={() => setShowAllLogs(true)}>
-            <ArrowUp />
-            Load previous logs
-          </Tag>
-        </Block>
-      )}
       <CodeSnippetRoot
         kind="block"
         collapsible={false}
@@ -193,6 +185,17 @@ export const LogViewer: FC<LogViewerProps> = ({
             <CopyGeneric />
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
+        {!showAllLogs && hasMoreLogs && (
+          // Zero-height anchor so the fade starts at the editor's top edge.
+          <Block className="relative z-10 h-0">
+            <Block className="absolute inset-x-px top-px max-h-none rounded-t-md py-5 text-center bg-[linear-gradient(to_bottom,var(--nv-code-snippet-custom-background),transparent)]">
+              <Tag color="gray" kind="solid" onClick={() => setShowAllLogs(true)}>
+                <ArrowUp />
+                Load previous logs
+              </Tag>
+            </Block>
+          </Block>
+        )}
         <LogEditor
           logs={displayedLogs}
           resetKey={showAllLogs}
