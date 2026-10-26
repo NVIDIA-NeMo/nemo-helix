@@ -2,11 +2,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Best-effort PyPI source distribution collector for an installed environment."""
+"""Best-effort PyPI source distribution collector for an installed environment or a uv cache."""
 
 from __future__ import annotations
 
 import argparse
+import email.parser
 import hashlib
 import json
 import os
@@ -91,6 +92,19 @@ def parse_freeze(output: str) -> dict[str, tuple[str, str]]:
             continue
         name, version = match.groups()
         packages[normalize_name(name)] = (name, version)
+    return packages
+
+
+def uv_cache_packages(cache: Path) -> dict[str, tuple[str, str]]:
+    """Distributions unpacked in a uv cache, such as the build backends uv fetched to build sdists."""
+    packages: dict[str, tuple[str, str]] = {}
+    for metadata in sorted(cache.glob("archive-v*/*/*.dist-info/METADATA")):
+        headers = email.parser.Parser().parsestr(
+            metadata.read_text(encoding="utf-8", errors="replace"), headersonly=True
+        )
+        name, version = headers.get("Name"), headers.get("Version")
+        if name and version:
+            packages.setdefault(normalize_name(name), (name, version))
     return packages
 
 
@@ -193,7 +207,8 @@ def unique_filename(output_dir: Path, url: str, name: str, version: str) -> Path
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--python", required=True, help="Python interpreter for the environment to inspect")
+    parser.add_argument("--python", help="Python interpreter for the environment to inspect")
+    parser.add_argument("--uv-cache", help="uv cache directory whose unpacked distributions to collect instead")
     parser.add_argument("--output", required=True, help="Source distribution output directory")
     parser.add_argument("--lock-file", action="append", default=[], help="uv.lock file to use for exact sdist URLs")
     parser.add_argument(
@@ -204,6 +219,8 @@ def main() -> int:
         "--skip-package", action="append", default=[], help="Package name to exclude from PyPI sdist collection"
     )
     args = parser.parse_args()
+    if bool(args.python) == bool(args.uv_cache):
+        parser.error("give exactly one of --python or --uv-cache")
 
     output_dir = Path(args.output)
     manifests = output_dir / "manifests"
@@ -214,19 +231,20 @@ def main() -> int:
 
     (output_dir / "pypi").mkdir(parents=True, exist_ok=True)
 
-    try:
-        purelib = purelib_for(args.python)
-        packages = freeze_packages(args.python, purelib)
-    except subprocess.CalledProcessError as error:
-        (manifests / "missing-pypi-sdists.txt").write_text(
-            f"failed to inspect Python environment {args.python}: {error.output}\n",
-            encoding="utf-8",
-        )
-        return 0
-
-    local_packages = local_direct_url_packages(purelib)
-    for package_name in local_packages:
-        packages.pop(package_name, None)
+    if args.uv_cache:
+        packages = uv_cache_packages(Path(args.uv_cache))
+    else:
+        try:
+            purelib = purelib_for(args.python)
+            packages = freeze_packages(args.python, purelib)
+        except subprocess.CalledProcessError as error:
+            (manifests / "missing-pypi-sdists.txt").write_text(
+                f"failed to inspect Python environment {args.python}: {error.output}\n",
+                encoding="utf-8",
+            )
+            return 0
+        for package_name in local_direct_url_packages(purelib):
+            packages.pop(package_name, None)
     for package_name in args.skip_package:
         packages.pop(normalize_name(package_name), None)
     baseline = baseline_packages(args.baseline_freeze)

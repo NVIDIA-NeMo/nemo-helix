@@ -84,9 +84,10 @@ RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonl
 
 # Sources of the host venv, each prefetched component venv, CPython, and uv and its crates, collected
 # after the update above so they match what ships; the update collects the rebuilt wandb-cores' Go
-# modules into rebuilt-wandb. The uv cache holds the same package versions as the venvs, plus the
-# setuptools uv built sdists with. docker/sources/nhx-gym-host.json pins ray, which has no sdist,
-# the packages ray bundles, that setuptools, and the source of distlib's Windows launchers.
+# modules into rebuilt-wandb. The uv cache's distributions are collected too: it also holds the build
+# backends uv fetched to build sdists, such as setuptools, at whatever version was current.
+# docker/sources/nhx-gym-host.json pins ray, which has no sdist, the packages ray bundles, and the
+# source of distlib's Windows launchers.
 COPY docker/sources/ /tmp/nhx-sources/
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python /opt/gym-host-venv/bin/python \
@@ -103,6 +104,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --output /source-distributions/nhx-gym-host \
             --label "${label}" || exit 1; \
     done && \
+    python3 /usr/local/bin/collect-python-sdists.py \
+        --uv-cache "${UV_CACHE_DIR}" \
+        --output /source-distributions/nhx-gym-host \
+        --label uv-cache && \
     UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python /opt/gym-host-venv/bin/python \
         /usr/local/bin/collect-cpython-source.py \
         --python /opt/gym-host-venv/bin/python \
