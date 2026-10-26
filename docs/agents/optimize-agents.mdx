@@ -159,6 +159,44 @@ The result holds a complete `agent.yaml` with the new prompt, and `prompt-master
 the original and optimized prompts. To change the optimizer's model or instructions, upload a partial
 `agent.yaml` to a fileset and pass it with `--optimize-config-fileset` and `--optimize-config`.
 
+## Run from Studio
+
+The **Optimizations** tab on an agent's detail page in NeMo Studio runs the same strategies without the CLI. The tab lists the agent's optimization runs with their **Name**, **Config**, **Status**, and **Created** columns. Select **Optimize** in the page header, or the call to action in the empty list, to start a new run. See [Studio Agents](/documentation/studio/agents) for the rest of the agent page.
+
+The launch flow starts with a strategy picker. It shows one tile per strategy the platform has installed, titled and described by the plugin that provides it, plus an **Upload a config** tile when `config-tuning` is installed. What happens next depends on the strategy:
+
+| Choice | What opens |
+|---|---|
+| **Upload a config** | A dialog to choose a `config-tuning` optimize bundle from your computer or a fileset. |
+| **Hyperparameter optimization** (`config-tuning`) | A guided form on the tab. |
+| **Model routing using Switchyard** | The routing form described below. |
+| Any other installed strategy | A dialog titled with the strategy's name. Its bundle section is labeled **Config bundle**, or **Config bundle (optional)** when the strategy runs without one. |
+
+### Set Up a Switchyard Run
+
+The Switchyard form takes the same inputs as the `switchyard` strategy's `--spec`:
+
+1. Enter a **Name** for the run. The form shows the entity name it creates.
+2. Under **Which models can it use?**, add the models to route between, most capable first. Use the arrows to reorder and the remove button to drop one. You need at least two models, and each can be added once. Every model is paired with each model below it, so the first model of a pair is its capable model and the second is its efficient model.
+3. Under **How should each pair route?**, pick one or more routing strategies and set each one's threshold, a number from 0 to 1:
+
+   | Strategy | Threshold |
+   |---|---|
+   | Random routing | **Capable model share**: the share of requests sent to the capable model. |
+   | Stage router | **Confidence threshold**: the confidence below which a request escalates to the capable model. |
+   | LLM classifier | **Capability threshold**: the capability score above which a request escalates to the capable model. Optionally select a **Judge model**; by default each pair's capable model judges. |
+
+The summary beside the form shows the model pairs and how many routed models the run will build, which is the number of pairs times the number of strategies. **Run optimization** stays disabled, with the reason shown above it, until the form is valid. Selecting it submits a `switchyard` run-strategy job. The stored agent is never modified.
+
+### Review Switchyard Results
+
+Select a run in the list to open its page at `/agents/optimizations/<run>`. The breadcrumb shows the agent's name and links back to its **Optimizations** tab. While the run is in progress the page shows its status, and it always shows the run's **Logs** and **Artifacts**.
+
+When the run completes, the page lists one row per virtual model with its **Routing strategy**, **Capable model**, **Efficient model**, and **Setting** (the strategy's threshold). From a row you can:
+
+- **Test routing**: select the row to open the **Test routing** panel, which sends chat requests through that virtual model. It tallies which model answered each request, so you can compare the observed split against the strategy's setting.
+- **Deploy**: select **Deploy** to open **Deploy route as a new agent**, enter a **New agent name**, and create a new agent whose models all call that virtual model. The original agent isn't changed.
+
 ## The Optimization Loop
 
 A strategy only produces candidates. Optimization is the loop around it: find a problem, generate

@@ -49,7 +49,7 @@ The agent details page has the following tabs:
 - **Logs** shows deployment logs.
 - **Chat** opens an interactive chat with a running deployment.
 - **Evaluations** lists this agent's evaluations, including runs still in progress, and can group them by experiment. Start a new evaluation from this tab.
-- **Optimizations**, when enabled, lists optimization runs for the agent and lets you start a new one. See [Optimize Agents](/documentation/agents/optimize-agents).
+- **Optimizations**, when enabled, lists optimization runs for the agent and lets you start a new one. See [Run from Studio](/documentation/agents/optimize-agents#run-from-studio).
 - **Insights**, when enabled, configures **Insights analysis** for this agent: whether to **Run periodic analysis**, and the **Default model** and **Fast model** the analysis uses. See [NeMo Studio Insights](/documentation/studio/insights).
 - **Details** shows a **Summary** of the agent (name, workspace, models, config format, and timestamps) and its stored configuration. Legacy NAT agents show their `workflow`, `llms`, and `functions` sections in **Workflow**, **Models**, and **Tools** panels. All other top-level fields, including every `nemo-agents-spec-v1` field such as the harness, models, instructions, skills, and MCP servers, are listed in a collapsed **Additional configuration** panel.
 
@@ -65,7 +65,7 @@ Select **Run Evaluation** in the page header to open the **Run Agent Evaluation*
 
 1. **Begin**: Choose **Re-run an existing evaluation** or **Create a new experiment**. Re-running reuses the eval config from a previous run, adds the new run to that run's experiment, and skips directly to **Run Evaluation**.
 2. **Create experiment**: Enter a **Name** for the new experiment and, optionally, its description and default sort order.
-3. **Run Evaluation**: Name the run and set **Parallel requests**. When re-running, select the evaluation to base the run on and enter a **New Evaluation Name**. When creating an experiment, enter an **Evaluation Name** and choose the evaluation dataset and evaluator config. Upload the dataset or choose it from a fileset; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern. Upload the evaluator config as a JSON or YAML file.
+3. **Run Evaluation**: Name the run and set **Parallel requests**. When re-running, select the evaluation to base the run on and enter a **New Evaluation Name**. When creating an experiment, enter an **Evaluation Name** and choose the evaluation dataset and evaluator config. Upload the dataset or choose it from a fileset; datasets can be `.jsonl`, `.json`, `.csv`, or `.parquet` files, and you can upload several Parquet files to combine them. When a fileset folder holds more than one Parquet file, the file list also offers all of them as one dataset, which the evaluator reads through a `<folder>/*.parquet` pattern. Upload the evaluator config as a JSON or YAML file, or choose one from a fileset.
 
 The tab's **Evaluations** view lists completed evaluations and in-progress runs in a single table. Switch to **Experiments** to group the runs by experiment. This agent-scoped view differs from **Models > Evaluations**, which shows model evaluation results.
 

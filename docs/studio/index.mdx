@@ -48,7 +48,22 @@ The current sidebar groups related pages under expandable parents. Selecting a p
 | **System** | **Jobs** | Monitor jobs across enabled platform capabilities. |
 | **System** | **Settings** | View workspace settings and open **Secrets** and inference provider management. Enabled by default. |
 
-**Dashboard** appears above the sidebar groups and is shown by default. **Playground** and **Virtual Models** are disabled by default and appear only when an administrator enables their feature flags. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+**Dashboard** appears above the sidebar groups and is shown by default; see [Dashboard](#dashboard). **Playground** and **Virtual Models** are disabled by default and appear only when an administrator enables their feature flags. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+
+### Dashboard
+
+The workspace **Dashboard** includes a **Recent Jobs** list of jobs in progress and jobs that reached a terminal state in the last 48 hours. It is shown when jobs are enabled; an administrator can hide it by setting `studio.feature_flags.jobs_enabled: false` in the platform configuration and restarting Studio.
+
+The list shows newest jobs first, ten rows per page with pagination, in these columns:
+
+| Column | Shows |
+| --- | --- |
+| **Name** | The job's name. |
+| **Source** | A badge for the service that created the job. |
+| **Status** | A status badge; see the statuses under [Jobs](#jobs). |
+| **Elapsed time** | How long the job has run. The value counts up live while the job is running. |
+
+The list refreshes automatically, so there's no refresh button. Selecting a row opens the job's service-specific detail page, or the generic job detail view when that service isn't enabled. When no jobs match, the empty state offers a **Fine-tune** call to action if fine-tuning is enabled (`studio.feature_flags.customizer_enabled`).
 
 ### Agents
 
@@ -91,6 +106,8 @@ Select **Models > Model Catalog** to browse base-model entities available in the
 The Model Catalog page supports searching by model name, filtering by creation or update date, sorting alphabetically or by creation time, and showing only customizable models. Select a model card to open the model details side panel.
 
 The model details side panel has **Model Details** and **Chat Playground** tabs. **Model Details** shows model metadata, parameters, and available actions, such as **Customize this Model** when fine-tuning is enabled. **Chat Playground** lets you chat with chat-capable models.
+
+In the chat, a model's streamed reasoning appears live in a collapsible **Thinking** block, which is relabeled **Thought process** when the response completes. After the response completes, its tool calls and reasoning collapse together into a single **View work** group, and the final answer stays visible. Expand **View work** to inspect them.
 
 ### Fine-tuning
 
