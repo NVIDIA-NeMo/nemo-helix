@@ -391,9 +391,31 @@ def test_environment_forms_scalars_and_env_files(tmp_path: Path) -> None:
     )
 
     assert _service(spec, "a")["env"] == {"PORT": "8080", "DEBUG": "true", "RATIO": "0.5", "NAME": "x y"}
-    # `environment` wins over `env_file`, and a name with no value is left out, as on a host that doesn't define it.
+    # `environment` wins over `env_file`, and a name with no value is left out when Compose has no value for it.
     assert _service(spec, "b")["env"] == {"X": "from-compose", "Y": "1", "K": "v=w", "EMPTY": ""}
     assert spec["main"]["env"] == {"M": "1"}
+
+
+def test_a_value_less_entry_takes_compose_s_value_or_unsets_the_env_file_one(tmp_path: Path) -> None:
+    # `docker compose up` gives the container TOKEN from `.env`, and no A even though `a.env` sets it.
+    task = _parsed(
+        tmp_path,
+        """
+        services:
+          db:
+            image: redis
+            env_file: a.env
+            environment:
+              TOKEN:
+              A: null
+            build: {context: ., args: [TOKEN, UNSET]}
+        """,
+        files={".env": "TOKEN=from-dotenv\n", "a.env": "A=from-file\n"},
+    )
+
+    assert task.services["db"].env == {"TOKEN": "from-dotenv"}
+    assert isinstance(task.services["db"].source, ComposeBuild)
+    assert task.services["db"].source.args == {"TOKEN": "from-dotenv"}
 
 
 def test_ports_come_from_expose_and_the_container_side_of_ports(tmp_path: Path) -> None:

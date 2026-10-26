@@ -267,6 +267,20 @@ class Interpolator:
             self._problems.unsupported(f"{path}: task.toml sets {name} from the host's {self._host_only[name]}")
         return value
 
+    def fill_in_value_less_entries(self, entries: Mapping[str, str | None], path: str) -> dict[str, str]:
+        """Return ``entries`` with each value-less one (None) given the value Compose has for that variable.
+
+        One Compose has no value for is left out, so the container doesn't get it, even if an ``env_file`` set it:
+        ``{TOKEN: None}`` gives ``{TOKEN: "from-dotenv"}`` when ``.env`` sets it, and ``{}`` when nothing does.
+        """
+        filled: dict[str, str] = {}
+        for name, value in entries.items():
+            if value is None:
+                value = self.variable_value(name, f"{path}.{name}")
+            if value is not None:
+                filled[name] = value
+        return filled
+
     def interpolate_tree(self, node: Any, path: str = "") -> Any:
         """Return a copy of a YAML document, or any part of one, with every string filled in.
 

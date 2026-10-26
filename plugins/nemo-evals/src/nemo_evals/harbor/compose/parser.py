@@ -33,6 +33,7 @@ from nemo_evals.harbor.compose.models import (
 from nemo_evals.harbor.compose.resolve import (
     COMPOSE_FILENAME,
     ENVIRONMENT_DIR,
+    Interpolator,
     find_compose_file,
     read_env_files,
     resolve_compose,
@@ -100,7 +101,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
     resolved = resolve_compose(task_dir, compose_file, compose_path, problems)
 
     # Parse every service before raising, so a task with several problems reports all of them.
-    service_parser = ServiceParser(task_dir, problems)
+    service_parser = ServiceParser(task_dir, resolved.interpolator, problems)
     parsed_services = {
         name: service_parser.service(name, raw_service) for name, raw_service in resolved.services.items()
     }
@@ -132,9 +133,10 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
 class ServiceParser:
     """Reads the raw services of one compose file into models, recording what a pod can't run in ``problems``."""
 
-    def __init__(self, task_dir: Path, problems: ComposeProblems) -> None:
-        """Parse services of the task at ``task_dir``."""
+    def __init__(self, task_dir: Path, interpolator: Interpolator, problems: ComposeProblems) -> None:
+        """Parse services of the task at ``task_dir``, reading ``env_file`` and value-less entries with ``interpolator``."""
         self._task_dir = task_dir
+        self._interpolator = interpolator
         self._problems = problems
 
     def service(self, name: str, raw_service: dict[str, Any]) -> ComposeService | None:
@@ -144,7 +146,7 @@ class ServiceParser:
         """
         path = f"services.{name}"
         self._check_keys(name, raw_service, _SERVICE_KEYS)
-        source = parse_image_source(name, raw_service, self._problems)
+        source = parse_image_source(name, raw_service, self._interpolator, self._problems)
         if source is None:
             return None
 
@@ -184,7 +186,7 @@ class ServiceParser:
         build: ComposeBuild | None = None
         # A prebuilt task has no build to read: `main` runs the image `task.toml` names.
         if not prebuilt:
-            build = parse_build_source(MAIN_SERVICE, raw_main.get("build"), self._problems)
+            build = parse_build_source(MAIN_SERVICE, raw_main.get("build"), self._interpolator, self._problems)
             # The sandbox replaces `main`'s command, so carry over the image's own ENTRYPOINT from its Dockerfile.
             if build is not None and entrypoint is None and read_entrypoint:
                 entrypoint = read_dockerfile_entrypoint(
@@ -200,11 +202,17 @@ class ServiceParser:
         return settings, build
 
     def _environment(self, raw_service: Mapping[str, Any], path: str) -> dict[str, str]:
-        """Read a service's variables: its ``env_file`` entries, overridden by its ``environment``, as compose does."""
-        return {
-            **read_env_files(raw_service.get("env_file"), f"{path}.env_file", self._task_dir, self._problems),
+        """Read a service's variables: its ``env_file`` entries, overridden by its ``environment``, as compose does.
+
+        A value-less ``environment`` entry overrides an ``env_file`` too, so it's filled in only after the two merge.
+        """
+        environment: dict[str, str | None] = {
+            **read_env_files(
+                raw_service.get("env_file"), f"{path}.env_file", self._task_dir, self._interpolator, self._problems
+            ),
             **parse_environment(raw_service.get("environment"), f"{path}.environment", self._problems),
         }
+        return self._interpolator.fill_in_value_less_entries(environment, f"{path}.environment")
 
     def _check_keys(self, name: str, raw_service: Mapping[str, Any], allowed_keys: frozenset[str]) -> None:
         """Record every key of service ``name`` that a pod can't honor: unknown keys and other network modes."""

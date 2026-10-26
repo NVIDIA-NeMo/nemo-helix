@@ -14,7 +14,7 @@ from typing import Any
 
 from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference
 from nemo_evals.harbor.compose.models import ComposeBuild, ComposeError, ComposeImage, ComposeProblems
-from nemo_evals.harbor.compose.resolve import ENVIRONMENT_DIR, path_in_environment
+from nemo_evals.harbor.compose.resolve import ENVIRONMENT_DIR, Interpolator, path_in_environment
 from nemo_evals.harbor.compose.service_options import parse_environment
 
 _BUILD_KEYS = frozenset({"context", "dockerfile", "args", "target"})
@@ -45,7 +45,7 @@ def normalize_image(reference: str) -> str:
 
 
 def parse_image_source(
-    name: str, raw_service: Mapping[str, Any], problems: ComposeProblems
+    name: str, raw_service: Mapping[str, Any], interpolator: Interpolator, problems: ComposeProblems
 ) -> ComposeImage | ComposeBuild | None:
     """Read where service ``name``'s image comes from; ``build`` wins when both ``build`` and ``image`` are set, as in Compose.
 
@@ -54,7 +54,7 @@ def parse_image_source(
     path = f"services.{name}"
     build = raw_service.get("build")
     if build is not None:
-        return parse_build_source(name, build, problems)
+        return parse_build_source(name, build, interpolator, problems)
 
     image = raw_service.get("image")
     if not isinstance(image, str) or not image:
@@ -68,7 +68,9 @@ def parse_image_source(
         return None
 
 
-def parse_build_source(name: str, build: Any, problems: ComposeProblems) -> ComposeBuild | None:
+def parse_build_source(
+    name: str, build: Any, interpolator: Interpolator, problems: ComposeProblems
+) -> ComposeBuild | None:
     """Read service ``name``'s ``build`` section as a context under ``environment/`` and a Dockerfile inside it.
 
     ``{context: ./api, dockerfile: Dockerfile.prod}`` gives the context ``environment/api``. A remote context, a
@@ -105,7 +107,10 @@ def parse_build_source(name: str, build: Any, problems: ComposeProblems) -> Comp
     return ComposeBuild(
         context_path=context_path,
         dockerfile=dockerfile,
-        args=parse_environment(build.get("args"), f"{path}.args", problems),
+        # A value-less arg takes the value Compose has for that variable; without one, the Dockerfile's default applies.
+        args=interpolator.fill_in_value_less_entries(
+            parse_environment(build.get("args"), f"{path}.args", problems), f"{path}.args"
+        ),
         target=target if isinstance(target, str) else None,
     )
 
