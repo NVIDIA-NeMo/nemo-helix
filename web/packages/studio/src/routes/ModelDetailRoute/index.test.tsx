@@ -169,12 +169,23 @@ describe('ModelDetailRoute', () => {
     );
   });
 
-  it('drops the Evaluations tab for an adapter, which cannot be evaluated on its own', async () => {
+  it("lists an adapter's own evaluations, not its base model's", async () => {
     mockLineage({ adapter });
     renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
 
-    expect(await screen.findByText('details content')).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Evaluations' })).not.toBeInTheDocument();
+    expect(await screen.findByText('evaluations for my-adapter')).toBeInTheDocument();
+  });
+
+  it('leaves the model unset when running an evaluation from an adapter', async () => {
+    mockLineage({ adapter });
+    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
+
+    // The wizard's picker cannot resolve an adapter ref yet, and a seeded one
+    // would look selected while naming no real model.
+    expect(await screen.findByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
+      'href',
+      '/workspaces/ws/evaluation/new'
+    );
   });
 
   it('shows an adapter under its own name', async () => {

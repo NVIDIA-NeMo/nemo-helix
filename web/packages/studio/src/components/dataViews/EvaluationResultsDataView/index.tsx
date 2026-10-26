@@ -55,9 +55,10 @@ const buildFilter = (
   targetModelName?: string
 ): EvaluateJobsListFilter => {
   const conditions: FilterTree<EvaluateJobsListFilter>[] = [NOT_AGENT_TRIGGERED];
-  // The wizard writes the bare entity name to `spec.target.name`, so that is
-  // what a model-scoped list matches on -- the gateway URL alongside it also
-  // carries the name, but only as one segment of a path.
+  // Both submit paths write the bare entity name to `spec.target.name` -- the
+  // wizard for a model, `buildModelPayload` for an adapter -- so that is what a
+  // scoped list matches on. The gateway URL alongside it also carries the name,
+  // but only as one segment of a path.
   if (targetModelName) {
     conditions.push({ 'spec.target.name': { $eq: targetModelName } });
   }
@@ -74,8 +75,9 @@ const buildFilter = (
 
 export interface EvaluationResultsDataViewProps {
   /**
-   * Narrows the list to runs that evaluated this model, named as the bare model
-   * entity. Omitted lists every model evaluation in the workspace.
+   * Narrows the list to runs that evaluated this model or adapter, named as the
+   * bare entity -- the form `spec.target.name` carries in both cases. Omitted
+   * lists every model evaluation in the workspace.
    */
   targetModelName?: string;
   /**

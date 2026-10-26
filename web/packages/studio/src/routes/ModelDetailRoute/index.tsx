@@ -74,15 +74,10 @@ export const ModelDetailRoute: FC = () => {
 
   // The job tabs stay visible but disabled while the lookup runs, and go away if there is no job.
   const hasJobTabs = job.isLoading || Boolean(job.jobName);
-  // Models only. An evaluation targets a model endpoint by name, and the wizard's
-  // picker keeps only the model half of a selection -- so an adapter cannot be
-  // evaluated on its own today, and a tab on one would list its base model's runs
-  // under the adapter's name.
-  const hasEvaluationsTab = !adapterName;
   const tabs: { value: ModelDetailTab; label: string; disabled?: boolean }[] = [
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
-    ...(hasEvaluationsTab ? [{ value: ModelDetailTab.Evaluations, label: 'Evaluations' }] : []),
+    { value: ModelDetailTab.Evaluations, label: 'Evaluations' },
     { value: ModelDetailTab.Files, label: 'Files' },
     { value: ModelDetailTab.Deployment, label: 'Deployment' },
     ...(hasJobTabs
@@ -97,11 +92,18 @@ export const ModelDetailRoute: FC = () => {
   const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
   const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
-  // The wizard takes a model ref, and the page's own path names the workspace and
-  // model that the lineage was looked up by.
-  const runEvaluationRoute = getEvaluationNewRoute(workspace, {
-    model: `${workspace}/${modelName}`,
-  });
+  // An adapter is evaluated in its own right: `buildModelPayload` targets one by
+  // its bare name, so that is what its runs are listed under here.
+  const evaluatedName = adapterName ?? modelName;
+
+  // Only a model is pre-selected. The wizard's picker cannot resolve an adapter
+  // yet, and an unrecognised ref renders as the raw string in the trigger -- so
+  // seeding one would look selected and submit a target that names no model.
+  // Pre-select the adapter here once that picker handles it.
+  const runEvaluationRoute = getEvaluationNewRoute(
+    workspace,
+    adapterName ? undefined : { model: `${workspace}/${modelName}` }
+  );
 
   let headerAction: { label: string; to: string } | undefined;
   if (isJobTab && job.jobName) {
@@ -211,17 +213,15 @@ export const ModelDetailRoute: FC = () => {
             />
           </TabsContent>
 
-          {hasEvaluationsTab && (
-            <TabsContent
-              value={ModelDetailTab.Evaluations}
-              className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
-            >
-              <EvaluationResultsDataView
-                targetModelName={modelName}
-                onCreate={() => navigate(runEvaluationRoute)}
-              />
-            </TabsContent>
-          )}
+          <TabsContent
+            value={ModelDetailTab.Evaluations}
+            className="min-h-0 flex-1 overflow-y-auto p-0 pt-6"
+          >
+            <EvaluationResultsDataView
+              targetModelName={evaluatedName}
+              onCreate={() => navigate(runEvaluationRoute)}
+            />
+          </TabsContent>
 
           <TabsContent
             value={ModelDetailTab.Files}
