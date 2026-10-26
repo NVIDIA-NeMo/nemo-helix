@@ -710,7 +710,38 @@ curl -s http://localhost:8080/health/ready
 
 ### Re-running after an interrupted tutorial
 
-The initialization cell creates a fresh workspace on each run. If a previous run stopped before cleanup, use the workspace name printed by that run to inspect and clean up its resources. Do not delete your current CLI workspace or any workspace you did not create for this tutorial.
+The initialization cell creates a fresh workspace on each run. If a previous run stopped before cleanup, use the workspace name printed by that run to clean up its orphaned jobs, filesets, and secrets. Do not delete your current CLI workspace or any workspace you did not create for this tutorial.
+
+The following cell does nothing by default. After inspecting the previous run's workspace, set `interrupted_workspace` to its printed name and set `confirm_tutorial_ownership` to `True` only if you created that workspace exclusively for this tutorial. This deletes all jobs, filesets, and secrets in that workspace, then requests workspace deletion. It does not use the new run's `WORKSPACE` variable or change your CLI context.
+
+```python
+import re
+
+from nemo_helix_plugin.client.client import NemoClient
+
+interrupted_workspace: str | None = None
+confirm_tutorial_ownership = False
+
+if interrupted_workspace is not None and confirm_tutorial_ownership:
+    cleanup_client = NemoClient.from_config()
+    if interrupted_workspace == cleanup_client.resolve_workspace():
+        raise ValueError("Refusing to delete the current CLI workspace")
+    if re.fullmatch(r"llm-as-judge-tutorial-[0-9a-f]{12}", interrupted_workspace) is None:
+        raise ValueError("Expected the generated workspace name printed by a previous tutorial run")
+    cleanup_client = cleanup_client.with_workspace(interrupted_workspace)
+
+    # Snapshot each workspace-scoped listing before deleting to avoid shifting pagination.
+    for orphaned_job in list(cleanup_client.jobs.list_jobs().items()):
+        cleanup_client.jobs.delete_job(name=orphaned_job.name).data()
+    for orphaned_fileset in list(cleanup_client.files.list_filesets().items()):
+        cleanup_client.files.delete_fileset(name=orphaned_fileset.name).data()
+    for orphaned_secret in list(cleanup_client.secrets.list_secrets().items()):
+        cleanup_client.secrets.delete_secret(name=orphaned_secret.name).data()
+    cleanup_client.workspaces.delete_workspace(name=interrupted_workspace).data()
+    print(f"Requested cleanup of interrupted tutorial workspace '{interrupted_workspace}'")
+else:
+    print("Interrupted-run cleanup disabled; no resources changed")
+```
 
 ### Local NVIDIA Build authentication fails
 

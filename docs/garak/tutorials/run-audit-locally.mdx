@@ -252,7 +252,7 @@ Report artifacts are left in place under the scheduler's temporary directory; th
 : The plugin couldn't find a garak install. Either install garak at `~/.garak/.venv/bin/python`, or set `NEMO_GARAK_PYTHON` to the absolute path of a Python interpreter that has garak installed.
 
 **`RuntimeError: Failed to resolve inference gateway provider '<workspace>/<provider>'`**
-: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List your providers with `client.models.list_providers(workspace="default")` and update the target to reference an existing one.
+: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List providers in the workspace named by that reference: this tutorial uses `client.models.list_providers(workspace="system")` for `system/nvidia-build`. Update the reference to an existing provider in that workspace. The audit target remains in `default`; its workspace is separate from the provider's workspace.
 
 **HTTP 403, 404, or 424 during the completion preflight**
 : Check the provider, its API base URL, the exact model ID in its served-model catalog, and the provider's configured API key. An upstream 403 (`Authorization failed` or `key_model_access_denied`) indicates an authorization/access failure; confirm both the model ID and the key's access with that provider. An upstream 404 can indicate an incorrect model ID, such as a duplicated `nvidia/` prefix on NVIDIA Build. The platform may wrap an upstream failure as HTTP 424; inspect the response body for the upstream status and error. Do not retry the audit until the completion preflight succeeds.

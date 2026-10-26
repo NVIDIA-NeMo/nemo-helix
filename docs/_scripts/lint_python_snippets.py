@@ -104,7 +104,7 @@ class PreparedTypeCheckFile:
     doc_path: Path
     temp_path: Path
     line_mapping: tuple[int, ...]
-    column_offset: int = 0
+    column_offsets: tuple[int, ...] = ()
 
 
 def find_doc_files(paths: Iterable[Path]) -> list[Path]:
@@ -300,7 +300,7 @@ def prepare_type_check_file(
     # IPython executes cells with this flag. Detect notebook-level async code
     # without running it, then give ty the async scope it requires. Keep the
     # entire page in one scope so values remain available across cells.
-    column_offset = 0
+    column_offsets: list[int] = []
     try:
         code = compile("\n".join(source_lines), str(doc_path), "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     except SyntaxError:
@@ -308,9 +308,28 @@ def prepare_type_check_file(
         pass
     else:
         if code.co_flags & inspect.CO_COROUTINE:
-            source_lines = ["async def _notebook_cells():", *("    " + line for line in source_lines)]
-            line_mapping.insert(0, line_mapping[0])
-            column_offset = 4
+            # Future and wildcard imports are only valid at module scope.
+            # Hoist their complete statements (including multiline imports),
+            # retaining their original locations independently of the body.
+            module_lines: set[int] = set()
+            for statement in ast.parse("\n".join(source_lines)).body:
+                if isinstance(statement, ast.ImportFrom) and (
+                    statement.module == "__future__" or any(alias.name == "*" for alias in statement.names)
+                ):
+                    module_lines.update(range(statement.lineno - 1, statement.end_lineno or statement.lineno))
+            imports = [index for index in range(len(source_lines)) if index in module_lines]
+            body = [index for index in range(len(source_lines)) if index not in module_lines]
+            source_lines = [
+                *(source_lines[index] for index in imports),
+                "async def _notebook_cells():",
+                *("    " + source_lines[index] for index in body),
+            ]
+            line_mapping = [
+                *(line_mapping[index] for index in imports),
+                line_mapping[0],
+                *(line_mapping[index] for index in body),
+            ]
+            column_offsets = [*([0] * (len(imports) + 1)), *([4] * len(body))]
 
     with tempfile.NamedTemporaryFile(
         "w",
@@ -324,7 +343,7 @@ def prepare_type_check_file(
         temp_path = Path(temp_file.name)
 
     return PreparedTypeCheckFile(
-        doc_path=doc_path, temp_path=temp_path, line_mapping=tuple(line_mapping), column_offset=column_offset
+        doc_path=doc_path, temp_path=temp_path, line_mapping=tuple(line_mapping), column_offsets=tuple(column_offsets)
     )
 
 
@@ -402,7 +421,9 @@ def run_type_check(
                 continue
 
             combined_line = int(match.group("line"))
-            column = max(1, int(match.group("column")) - matched_prepared.column_offset)
+            offsets = matched_prepared.column_offsets
+            column_offset = offsets[combined_line - 1] if 0 < combined_line <= len(offsets) else 0
+            column = max(1, int(match.group("column")) - column_offset)
             message = match.group("message")
             doc_line = translate_line_number(combined_line, matched_prepared.line_mapping)
             results[matched_prepared.doc_path].append(f"{matched_prepared.doc_path}:{doc_line}:{column}: {message}")
