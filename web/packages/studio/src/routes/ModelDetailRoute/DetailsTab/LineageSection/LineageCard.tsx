@@ -11,17 +11,30 @@ export interface LineageCardProps {
   /** A status badge shown before the note. */
   badge?: ReactNode;
   note?: string;
+  /** Shown beside the label, such as a copy button. */
+  action?: ReactNode;
   /** Makes the whole card a link. Omitted when there is nowhere to go. */
   to?: string;
   loading?: boolean;
 }
 
-export const LineageCard: FC<LineageCardProps> = ({ label, value, badge, note, to, loading }) => {
+export const LineageCard: FC<LineageCardProps> = ({
+  label,
+  value,
+  badge,
+  note,
+  action,
+  to,
+  loading,
+}) => {
   const body = (
     <Stack gap="density-sm" className="min-w-0">
-      <Text kind="label/regular/sm" className="text-secondary">
-        {label}
-      </Text>
+      <Flex align="center" justify="between" gap="density-sm" className="min-h-6">
+        <Text kind="label/regular/sm" className="text-secondary">
+          {label}
+        </Text>
+        {action}
+      </Flex>
       {loading ? (
         <Skeleton className="h-5 w-3/4" />
       ) : (

@@ -18,27 +18,15 @@ import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { useModelsGetDeploymentConfigVersion } from '@nemo/sdk/generated/platform/model-deployment-configs';
 import { useModelsGetLatestDeployment } from '@nemo/sdk/generated/platform/model-deployments';
-import {
-  Engine,
-  type ModelDeployment,
-  ModelDeploymentStatus,
-} from '@nemo/sdk/generated/platform/schema';
+import { type ModelDeployment, ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema';
 import { Banner, Button, Flex, SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
 import { ErrorMessageWithRetry } from '@studio/components/ErrorMessageWithRetry';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { useRehydrateDeploymentsListFromDetail } from '@studio/hooks/useRehydrateDeploymentsListFromDetail';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { formatDeploymentEngine } from '@studio/routes/DeploymentsListRoute/DeploymentDetailsSidePanel/utils';
 import { formatElapsedTime } from '@studio/util/date';
 import { type FC, useMemo } from 'react';
-
-function formatDeploymentEngine(engine: string | undefined): string {
-  if (!engine) return '-';
-  const normalized = engine.toLowerCase();
-  if (normalized === Engine.nim) return 'NIM';
-  if (normalized === Engine.vllm) return 'vLLM';
-  if (normalized === Engine.generic) return 'Generic';
-  return engine;
-}
 
 function isStatusMessageError(status: ModelDeploymentStatus | undefined): boolean {
   return (
