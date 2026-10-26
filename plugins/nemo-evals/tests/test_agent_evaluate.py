@@ -1095,9 +1095,7 @@ async def test_platform_metric_model_reanchors_job_route_before_authentication()
     )
 
     assert isinstance(metric.model, Model)
-    assert metric.model.url == (
-        "https://runtime.platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1"
-    )
+    assert metric.model.url == ("https://runtime.platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1")
     assert metric.model.api_key_provider is not None
     assert await metric.model.api_key_provider() == "job-access-token"
 
