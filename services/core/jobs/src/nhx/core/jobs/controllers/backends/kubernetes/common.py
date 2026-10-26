@@ -1271,7 +1271,7 @@ fi
                             ],
                             volume_mounts=[
                                 client.V1VolumeMount(
-                                    name="job-storage",
+                                    name=JOB_STORAGE_VOLUME_NAME,
                                     mount_path="/vol",
                                 )
                             ],
@@ -1279,7 +1279,7 @@ fi
                     ],
                     volumes=[
                         client.V1Volume(
-                            name="job-storage",
+                            name=JOB_STORAGE_VOLUME_NAME,
                             persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                                 claim_name=pvc_name,
                                 read_only=False,
@@ -1327,7 +1327,7 @@ def reclaim_job_persistent_storage(
         cleanup_job
         for cleanup_job in cleanup_jobs
         if any(
-            volume.name == "job-storage"
+            volume.name == JOB_STORAGE_VOLUME_NAME
             and volume.persistent_volume_claim is not None
             and volume.persistent_volume_claim.claim_name == pvc_name
             for volume in cleanup_job.spec.template.spec.volumes or []
