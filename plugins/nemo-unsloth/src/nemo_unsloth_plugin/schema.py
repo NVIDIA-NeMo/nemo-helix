@@ -108,6 +108,9 @@ class UnslothJobInput(UnslothSchema):
                     "training.finetuning_type='all_weights' is incompatible with 4-bit/8-bit loading; "
                     "set model.load_in_4bit=false and model.load_in_8bit=false"
                 )
+            # Unsloth recommends 2e-4 for LoRA, the field default, and a lower rate for full fine-tuning.
+            if "learning_rate" not in self.optimizer.model_fields_set:
+                self.optimizer = self.optimizer.model_copy(update={"learning_rate": 2e-5})
         # warmup_steps and warmup_ratio mutex (transformers also enforces this
         # at runtime; we surface it earlier with a clearer message)
         if self.schedule.warmup_steps and self.schedule.warmup_ratio is not None:

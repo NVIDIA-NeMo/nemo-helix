@@ -48,7 +48,7 @@ def test_unsloth_sft_uplift(
             },
             "training": {"finetuning_type": finetuning_type},
             "schedule": {"epochs": 1},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
+            # No learning_rate: the schema default for each finetuning_type is what this covers.
             "output": output,
         }
     )

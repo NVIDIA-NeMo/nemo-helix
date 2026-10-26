@@ -250,7 +250,14 @@ class BatchSpec(UnslothSchema):
 
 
 class OptimizerSpec(UnslothSchema):
-    learning_rate: float = Field(default=2e-4, gt=0.0)
+    learning_rate: float = Field(
+        default=2e-4,
+        gt=0.0,
+        description=(
+            "Peak learning rate. Left unset, it follows Unsloth's guidance: 2e-4 for LoRA and "
+            "a lower 2e-5 for finetuning_type 'all_weights'."
+        ),
+    )
     weight_decay: float = Field(default=0.0, ge=0.0)
     # Unsloth's notebooks default to adamw_8bit (bitsandbytes-backed) — much
     # smaller optimizer state than adamw_torch, which lets users fit larger

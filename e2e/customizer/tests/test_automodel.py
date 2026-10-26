@@ -44,7 +44,7 @@ def test_automodel_sft_uplift(
             },
             "schedule": {"epochs": 1},
             "batch": {"global_batch_size": 8, "micro_batch_size": 1},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
+            # No learning_rate: the schema default for each finetuning_type is what this covers.
             "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},
             "output": {"name": output_name},
         }

@@ -18,7 +18,6 @@ Discriminated by `training.type`: `"dpo"` or `"grpo"`. **`training.type` is requ
   "training": {
     "type": "dpo",
     "epochs": 1,
-    "learning_rate": 5e-6,
     "max_seq_length": 1024,
     "batch_size": 32,
     "micro_batch_size": 1,
@@ -64,7 +63,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `1e-4` | Peak LR. DPO typically uses a **low** LR (e.g. `5e-6`–`1e-5`). |
+| `learning_rate` | `5e-6`; GRPO with `finetuning_type: "lora"` `1e-5` | Peak LR. |
 | `min_learning_rate` | `null` | Floor for cosine decay. |
 | `weight_decay` | `0.01` | |
 | `adam_beta1` / `adam_beta2` | `0.9` / `0.999` | Adam betas. |
