@@ -3,6 +3,7 @@
 
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { toInferenceModelEntityId } from '@nemo/common/src/utils/models';
 import { useProviderReady } from '@nemo/sdk/generated/platform/inference-gateway';
@@ -54,7 +55,14 @@ export const ServedView: FC<ServedViewProps> = ({ model, adapter, providerRef, d
   const { isSuccess: isRoutable, isLoading: isReadyLoading } = useProviderReady(
     providerParts?.workspace ?? '',
     providerParts?.name ?? '',
-    { query: { enabled: Boolean(providerParts), retry: false } }
+    {
+      query: {
+        enabled: Boolean(providerParts),
+        retry: false,
+        refetchInterval: (query) =>
+          query.state.status === 'success' ? false : JOB_POLLING_INTERVAL_MS,
+      },
+    }
   );
 
   const servedIds = new Set(provider?.served_models?.map((served) => served.model_entity_id));
