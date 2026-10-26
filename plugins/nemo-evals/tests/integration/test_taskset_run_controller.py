@@ -307,8 +307,8 @@ async def test_group_only_creator_creates_records_through_full_principal_only(au
 async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_subprocess_platform: str) -> None:
     """The controller's GET and cancel need no binding: the group is gone and ``service:evals`` never had one.
 
-    The Job is created by the undelegated client, so this holds whether or not Jobs accepts delegated creates
-    (see ``test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service``).
+    The Job is created by the undelegated client; a delegated create is in
+    ``test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service``.
     """
     async with _controller_client(auth_subprocess_platform) as service:
         space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
@@ -318,23 +318,10 @@ async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_sub
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Jobs fix pending: with auth on, Jobs checks its system records as the caller, so every create made for "
-        "a user answers 409, and a forbidden delegated create answers 422, not 403. Passes once Jobs acts as "
-        "service:jobs there; then drop this marker"
-    ),
-)
 async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service(
     auth_subprocess_platform: str,
 ) -> None:
-    """A task Job created for a group-only creator, then read and cancelled after the creator loses access.
-
-    Without the Jobs fix, Jobs answers ``409 Could not confirm that storage of an earlier job ... was reclaimed``
-    to any create made for a user: its pending-reclaim check lists the ``system`` workspace as the caller. The
-    controller reads that 409 as a name conflict: GET 404, then ``job_name_conflict`` once past grace.
-    """
+    """A task Job created for a group-only creator, then read and cancelled after the creator loses access."""
     async with _controller_client(auth_subprocess_platform) as service:
         space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
         task_job = f"{run.name}-task-0"
@@ -350,20 +337,8 @@ async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Jobs fix pending: with auth on, Jobs checks its system records as the caller, so every create made for "
-        "a user answers 409, and a forbidden delegated create answers 422, not 403. Passes once Jobs acts as "
-        "service:jobs there; then drop this marker"
-    ),
-)
 async def test_a_forbidden_delegated_job_create_is_a_403(auth_subprocess_platform: str) -> None:
-    """A Job create for a principal without access to the workspace is a 403, the controller's ``job_forbidden``.
-
-    Without the Jobs fix, Jobs answers ``422 Not allowed to list entities in workspace '<ws>'`` (the delegated
-    user's workspace check inside Jobs), which the controller files as ``job_spec_invalid``.
-    """
+    """A Job create for a principal without access to the workspace is a 403, the controller's ``job_forbidden``."""
     async with _controller_client(auth_subprocess_platform) as service:
         space, run = await _group_run(auth_subprocess_platform, service)
         async with _controller_client(auth_subprocess_platform, space.user.principal_id) as id_only:
