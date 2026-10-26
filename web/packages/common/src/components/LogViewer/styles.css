@@ -9,6 +9,8 @@
   border-radius: var(--radius-md);
   background-color: var(--nv-code-snippet-custom-background);
   font-size: inherit;
+  /* Shrinks inside the capped wrapper (LogEditor) rather than overflowing it. */
+  min-height: 0;
 
   &.cm-focused {
     outline: none;
@@ -46,6 +48,12 @@
     color: var(--text-color-base);
     border-color: var(--border-color-base);
   }
+}
+
+/* The rows cap sits on the editor's wrapper, the flex item that shrinks to fit a short
+   slot, and the editor shrinks with it; capped any deeper, the newest lines get clipped. */
+.log-viewer .log-viewer--capped {
+  max-height: calc(var(--nv-code-snippet-rows) * 1lh);
 }
 
 .log-viewer .log-viewer--scroll-locked .cm-editor .cm-scroller {

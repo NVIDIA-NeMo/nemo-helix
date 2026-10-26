@@ -6,8 +6,16 @@ import type { BasicSetupOptions } from '@uiw/react-codemirror';
 
 export const LOG_LANGUAGE: CodeSnippetLanguage = 'shell';
 
-/** Read-only: keep selection, navigation and search; drop every editing aid and the gutter. */
+/** Read-only: keep selection and search; drop every editing aid and the gutter. */
 export const LOG_VIEWER_BASIC_SETUP: BasicSetupOptions = {
+  // Its navigation keys move an invisible cursor; without it the browser scrolls.
+  defaultKeymap: false,
+  // Control characters would render as red placeholders (ANSI codes are stripped anyway).
+  highlightSpecialChars: false,
+  // Each sync would be an undo step holding the replaced text, and Mod-u (which ignores
+  // readOnly) could revert the document behind LogEditor's back.
+  history: false,
+  historyKeymap: false,
   lineNumbers: false,
   foldGutter: false,
   drawSelection: false,

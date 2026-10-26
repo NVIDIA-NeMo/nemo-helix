@@ -13,9 +13,9 @@ export const pinToBottom = StateEffect.define<null>();
  * Keeps the editor pinned to the bottom as lines arrive while the user is there. Reacts to
  * document and layout changes, since virtualized rendering defeats DOM-mutation watching.
  */
-export const stickToBottom: Extension = ViewPlugin.fromClass(
+const stickToBottomPlugin = ViewPlugin.fromClass(
   class {
-    private pinned = true;
+    pinned = true;
 
     constructor(private readonly view: EditorView) {
       view.scrollDOM.addEventListener('scroll', this.handleScroll);
@@ -23,11 +23,15 @@ export const stickToBottom: Extension = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      if (update.transactions.some((tr) => tr.effects.some((effect) => effect.is(pinToBottom)))) {
+      const moved = update.docChanged || update.geometryChanged;
+      if (
+        update.transactions.some((tr) => tr.effects.some((effect) => effect.is(pinToBottom))) ||
+        (moved && this.isScrollLocked())
+      ) {
         this.pinned = true;
       }
       // Wrapping, resizes and measured line heights all move the bottom too.
-      if (this.pinned && (update.docChanged || update.geometryChanged)) {
+      if (this.pinned && moved) {
         this.scrollToBottom();
       }
     }
@@ -37,9 +41,17 @@ export const stickToBottom: Extension = ViewPlugin.fromClass(
     }
 
     private handleScroll = () => {
+      // Only CodeMirror (e.g. search) can scroll a locked tail; stay pinned so the next
+      // update brings the newest lines back.
+      if (this.isScrollLocked()) return;
       const { scrollHeight, clientHeight, scrollTop } = this.view.scrollDOM;
       this.pinned = Math.abs(scrollHeight - clientHeight - scrollTop) < AT_BOTTOM_THRESHOLD_PX;
     };
+
+    // LogViewer locks the unwrapped tail with overflow-y: hidden (styles.css).
+    private isScrollLocked() {
+      return getComputedStyle(this.view.scrollDOM).overflowY === 'hidden';
+    }
 
     private scrollToBottom() {
       // Scroll in CodeMirror's write phase, after it has laid out the new content.
@@ -53,3 +65,8 @@ export const stickToBottom: Extension = ViewPlugin.fromClass(
     }
   }
 );
+
+export const stickToBottom: Extension = stickToBottomPlugin;
+
+export const isPinnedToBottom = (view: EditorView): boolean =>
+  view.plugin(stickToBottomPlugin)?.pinned ?? false;

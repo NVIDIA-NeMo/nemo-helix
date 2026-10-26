@@ -194,7 +194,7 @@ export const LogViewer: FC<LogViewerProps> = ({
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
         <LogEditor
-          text={logText}
+          logs={displayedLogs}
           resetKey={showAllLogs}
           wrapLines={wrapLines}
           fillHeight={fillHeight}
