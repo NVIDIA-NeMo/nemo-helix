@@ -56,6 +56,7 @@ export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEna
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
 export const OPTIMIZER_ENABLED = featureFlags.optimizerEnabled !== false;
 export const GUARDRAILS_ENABLED = featureFlags.guardrailsEnabled !== false;
+export const VIRTUAL_MODELS_ROUTE_ENABLED = GUARDRAILS_ENABLED || AGENT_OPTIMIZATIONS_ENABLED;
 export const FLAG_OVERRIDES_ENABLED = featureFlags.flagOverridesEnabled === true;
 
 // Vars used by OpenTelemetry

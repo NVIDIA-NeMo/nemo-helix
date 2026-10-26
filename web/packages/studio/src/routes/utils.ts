@@ -24,6 +24,7 @@ import {
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
+  VIRTUAL_MODELS_ROUTE_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
@@ -70,6 +71,9 @@ export const gateExperimentRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateGuardrailsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(GUARDRAILS_ENABLED, routes);
+
+export const gateVirtualModelsRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(VIRTUAL_MODELS_ROUTE_ENABLED, routes);
 
 export const gateInferenceProviderRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(INFERENCE_PROVIDER_ENABLED, routes);
