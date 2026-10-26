@@ -59,7 +59,7 @@ version_output="$(nemo --version)"
 echo "${version_output}"
 # A bare `0.0.0` is the CLI's fallback when its importlib.metadata lookup
 # misses the distribution it was installed from, which is invisible unless the
-# output is asserted. Match it exactly: nightly wheels are stamped with a
+# output is asserted. Match it exactly: rc wheels are stamped with a
 # sentinel `0.0.0.dev<timestamp>` that is a legitimate version string. The
 # pattern is the subset of PEP 440 this project stamps — release, optional
 # pre-release, any number of .post/.dev segments, optional local version.

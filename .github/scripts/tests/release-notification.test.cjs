@@ -7,24 +7,24 @@ const { sendReleaseNotification } = require("../release-notification.cjs");
 
 function releaseEnv(overrides = {}) {
   return {
-    RELEASE_TYPE: "nightly",
-    RELEASE_LABEL: "nightly-20260923",
+    RELEASE_TYPE: "rc",
+    RELEASE_LABEL: "rc-20260923",
     SOURCE_SHA: "abcdef1234567890",
     COMMIT_URL: "https://example.test/commit/abcdef1234567890",
     WHEEL_IDS: '["nemo-helix"]',
     WHEEL_CATALOG: '[{"id":"nemo-helix","package":"nemo-helix"}]',
     CONTAINER_IDS: '["nhx-api"]',
     INCLUDE_HELM: "true",
-    CHART_VERSION: "0.6.0-nightly-20260923",
-    NIGHTLY_WHEEL_INDEX: "https://example.test/nightly",
+    CHART_VERSION: "0.6.0-rc-20260923",
+    RC_WHEEL_INDEX: "https://example.test/rc",
     STABLE_WHEEL_INDEX: "https://example.test/simple",
-    PUBLISH_NIGHTLY_WHEELS: "true",
+    PUBLISH_RC_WHEELS: "true",
     WHEEL_VERSION: "0.6.0.dev20260923",
     NGC_CATALOG_BASE: "https://example.test/catalog",
     POLL_RESULT: "success",
     GITHUB_RELEASE_RESULT: "success",
     DEPLOYMENT_RESULT: "success",
-    NIGHTLY_INSTANCE_URL: "https://nightly.example.test",
+    RC_INSTANCE_URL: "https://rc.example.test",
     SLACK_RELEASE_WEBHOOK: "https://example.test/release-webhook",
     SLACK_ALERTS_WEBHOOK: "https://example.test/alerts-webhook",
     RUN_URL: "https://example.test/actions/runs/123",
@@ -45,29 +45,29 @@ async function notificationText(env) {
   return text;
 }
 
-test("successful nightly notification links the instance and uses visible bullets", async () => {
+test("successful rc notification links the instance and uses visible bullets", async () => {
   const text = await notificationText(releaseEnv());
   assert.match(
     text,
-    /Commit: <[^\n]+>\nNightly instance: <https:\/\/nightly\.example\.test>/,
+    /Commit: <[^\n]+>\nRC instance: <https:\/\/rc\.example\.test>/,
   );
   assert.match(text, /^• <[^\n]+\|nemo-helix: 0\.6\.0\.dev20260923>$/m);
-  assert.match(text, /^• nhx-api: nightly-20260923$/m);
-  assert.match(text, /^• nemo-helix: 0\.6\.0-nightly-20260923$/m);
+  assert.match(text, /^• nhx-api: rc-20260923$/m);
+  assert.match(text, /^• nemo-helix: 0\.6\.0-rc-20260923$/m);
   assert.doesNotMatch(text, /^- /m);
 });
 
-test("stable and failed notifications omit the nightly instance", async () => {
+test("stable and failed notifications omit the rc instance", async () => {
   const stable = await notificationText(releaseEnv({ RELEASE_TYPE: "stable" }));
   const failed = await notificationText(releaseEnv({ POLL_RESULT: "failure" }));
-  assert.doesNotMatch(stable, /Nightly instance:/);
+  assert.doesNotMatch(stable, /RC instance:/);
   assert.match(stable, /^• /m);
-  assert.doesNotMatch(failed, /Nightly instance:/);
+  assert.doesNotMatch(failed, /RC instance:/);
 });
 
-test("staged nightly wheels use visible bullets", async () => {
+test("staged rc wheels use visible bullets", async () => {
   const text = await notificationText(
-    releaseEnv({ PUBLISH_NIGHTLY_WHEELS: "false" }),
+    releaseEnv({ PUBLISH_RC_WHEELS: "false" }),
   );
   assert.match(
     text,
@@ -75,13 +75,13 @@ test("staged nightly wheels use visible bullets", async () => {
   );
 });
 
-test("successful nightly notification requires the instance URL secret", async () => {
+test("successful rc notification requires the instance URL secret", async () => {
   await assert.rejects(
     sendReleaseNotification({
-      env: releaseEnv({ NIGHTLY_INSTANCE_URL: "  " }),
+      env: releaseEnv({ RC_INSTANCE_URL: "  " }),
       fetchImpl: () => assert.fail("notification must not be sent"),
     }),
-    /NIGHTLY_INSTANCE_URL secret is required/,
+    /RC_INSTANCE_URL secret is required/,
   );
 });
 

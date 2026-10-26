@@ -8,7 +8,7 @@ const test = require("node:test");
 
 const {
   resolveReleasePlan,
-  resolveNightlyBaseVersion,
+  resolveRcBaseVersion,
   readReleaseCatalog,
 } = require("../release-plan.cjs");
 
@@ -53,6 +53,19 @@ function manualContext(inputs) {
     payload: { inputs, repository: { default_branch: "main" } },
   };
 }
+
+test("rejects unsupported release types before reading source or dispatching", async () => {
+  for (const releaseType of ["nightly", "unknown", "", undefined]) {
+    await assert.rejects(
+      resolveReleasePlan({
+        context: manualContext({ "release-type": releaseType }),
+        listBranches: () => assert.fail("must not discover branches"),
+        loadSourceWorkflow: () => assert.fail("must not read a source catalog"),
+      }),
+      /Unsupported release type/,
+    );
+  }
+});
 
 test("reads the checked-in release catalog's multiline JSON blocks", () => {
   const workflow = fs.readFileSync(
@@ -103,8 +116,8 @@ test("rejects missing or invalid source catalogs", () => {
 
 for (const [label, context] of [
   ["scheduled", { eventName: "schedule", payload: {} }],
-  ["manual", manualContext({ "release-type": "nightly" })],
-  ["dry-run", manualContext({ "release-type": "nightly", "dry-run": "true" })],
+  ["manual", manualContext({ "release-type": "rc" })],
+  ["dry-run", manualContext({ "release-type": "rc", "dry-run": "true" })],
   [
     "stable",
     manualContext({
@@ -140,11 +153,11 @@ for (const [label, context] of [
   });
 }
 
-test("pinned nightlies read the pinned commit's catalog rather than the branch head", async () => {
+test("pinned RCs read the pinned commit's catalog rather than the branch head", async () => {
   const pinnedSha = "d".repeat(40);
   const plan = await resolveReleasePlan({
     context: manualContext({
-      "release-type": "nightly",
+      "release-type": "rc",
       "source-sha": pinnedSha.toUpperCase(),
     }),
     listBranches: async () => BRANCHES,
@@ -161,7 +174,7 @@ test("custom selections reject IDs not shipped by the source", async () => {
   await assert.rejects(
     resolveReleasePlan({
       context: manualContext({
-        "release-type": "nightly",
+        "release-type": "rc",
         "release-scope": "custom",
         "container-ids": "nhx-builder-tasks",
       }),
@@ -200,9 +213,9 @@ for (const [branch, tags, expected] of [
   ["release/0.6", ["0.6.0", "0.6.1-rc0"], "0.6.1"],
   ["release/2.10", ["2.9.99", "2.10.3"], "2.10.4"],
 ]) {
-  test(`${branch} with tags ${JSON.stringify(tags)} plans ${expected} nightlies`, () => {
+  test(`${branch} with tags ${JSON.stringify(tags)} plans ${expected} RCs`, () => {
     assert.equal(
-      resolveNightlyBaseVersion(
+      resolveRcBaseVersion(
         branch,
         tags.map((name) => ({ name })),
       ),
@@ -235,11 +248,11 @@ test("resolves a stable Helm-only release", async () => {
   assert.deepEqual(plan.containerIds, []);
 });
 
-test("resolves a custom nightly release and uses the supplied clock", async () => {
+test("resolves a custom rc release and uses the supplied clock", async () => {
   const plan = await resolveReleasePlan({
     loadSourceWorkflow: async () => sourceWorkflow(),
     context: manualContext({
-      "release-type": "nightly",
+      "release-type": "rc",
       "release-scope": "custom",
       "wheel-ids": "nemo-helix",
       "container-ids": "nhx-api",
@@ -252,7 +265,7 @@ test("resolves a custom nightly release and uses the supplied clock", async () =
 
   assert.equal(plan.sourceSha, SHA);
   assert.equal(plan.sourceBranch, "release/0.10");
-  assert.equal(plan.releaseLabel, "nightly-20260827123456");
+  assert.equal(plan.releaseLabel, "rc-20260827123456");
   assert.deepEqual(plan.wheelIds, ["nemo-helix"]);
   assert.deepEqual(plan.containerIds, ["nhx-api"]);
 });
@@ -262,7 +275,7 @@ test("rejects duplicate custom artifact IDs", async () => {
     resolveReleasePlan({
       loadSourceWorkflow: async () => sourceWorkflow(),
       context: manualContext({
-        "release-type": "nightly",
+        "release-type": "rc",
         "release-scope": "custom",
         "wheel-ids": "nemo-helix,nemo-helix",
       }),
@@ -274,16 +287,16 @@ test("rejects duplicate custom artifact IDs", async () => {
 
 for (const [label, context] of [
   ["scheduled", { eventName: "schedule", sha: "b".repeat(40), payload: {} }],
-  ["manual", manualContext({ "release-type": "nightly" })],
-  ["dry-run", manualContext({ "release-type": "nightly", "dry-run": "true" })],
+  ["manual", manualContext({ "release-type": "rc" })],
+  ["dry-run", manualContext({ "release-type": "rc", "dry-run": "true" })],
 ]) {
-  test(`${label} nightlies select the highest release branch and pin its SHA`, async () => {
+  test(`${label} RCs select the highest release branch and pin its SHA`, async () => {
     const plan = await resolveReleasePlan({
       loadSourceWorkflow: async () => sourceWorkflow(),
       context,
       listBranches: async () => BRANCHES,
       compareCommits: async () =>
-        assert.fail("unpinned nightlies use the discovered branch head"),
+        assert.fail("unpinned RCs use the discovered branch head"),
     });
 
     assert.equal(plan.sourceBranch, "release/0.10");
@@ -295,7 +308,7 @@ for (const [label, context] of [
 test("compares major versions before minor versions and ignores unrelated branches", async () => {
   const plan = await resolveReleasePlan({
     loadSourceWorkflow: async () => sourceWorkflow(),
-    context: manualContext({ "release-type": "nightly" }),
+    context: manualContext({ "release-type": "rc" }),
     listBranches: async () => [
       { name: "release/2.99", commit: { sha: "c".repeat(40) } },
       { name: "release/10.0", commit: { sha: SHA } },
@@ -315,11 +328,11 @@ test("compares major versions before minor versions and ignores unrelated branch
 });
 
 for (const dryRun of ["false", "true"]) {
-  test(`pinned nightlies retain the release series (dry-run=${dryRun})`, async () => {
+  test(`pinned RCs retain the release series (dry-run=${dryRun})`, async () => {
     const plan = await resolveReleasePlan({
       loadSourceWorkflow: async () => sourceWorkflow(),
       context: manualContext({
-        "release-type": "nightly",
+        "release-type": "rc",
         "source-sha": ` ${SHA.toUpperCase()} `,
         "dry-run": dryRun,
         "send-notifications": "false",
@@ -339,7 +352,7 @@ for (const dryRun of ["false", "true"]) {
     assert.equal(plan.sourceBranch, "release/0.7");
     assert.equal(plan.sendNotifications, false);
     assert.equal(
-      resolveNightlyBaseVersion(plan.sourceBranch, [{ name: "0.6.0" }]),
+      resolveRcBaseVersion(plan.sourceBranch, [{ name: "0.6.0" }]),
       "0.7.0",
     );
   });
@@ -350,7 +363,7 @@ test("retains an older pinned SHA within the latest release branch", async () =>
   const plan = await resolveReleasePlan({
     loadSourceWorkflow: async () => sourceWorkflow(),
     context: manualContext({
-      "release-type": "nightly",
+      "release-type": "rc",
       "source-sha": olderSha,
     }),
     listBranches: async () => BRANCHES,
@@ -365,12 +378,12 @@ test("retains an older pinned SHA within the latest release branch", async () =>
 });
 
 for (const status of ["behind", "diverged", undefined]) {
-  test(`rejects pinned nightlies outside the release branch (${status})`, async () => {
+  test(`rejects pinned RCs outside the release branch (${status})`, async () => {
     await assert.rejects(
       resolveReleasePlan({
         loadSourceWorkflow: async () => sourceWorkflow(),
         context: manualContext({
-          "release-type": "nightly",
+          "release-type": "rc",
           "source-sha": SHA,
         }),
         listBranches: async () => BRANCHES,
@@ -381,14 +394,14 @@ for (const status of ["behind", "diverged", undefined]) {
   });
 }
 
-test("pinned nightlies propagate comparison and branch lookup errors", async () => {
+test("pinned RCs propagate comparison and branch lookup errors", async () => {
   const error = new Error("GitHub lookup failed");
   for (const failedLookup of ["listBranches", "compareCommits"]) {
     await assert.rejects(
       resolveReleasePlan({
         loadSourceWorkflow: async () => sourceWorkflow(),
         context: manualContext({
-          "release-type": "nightly",
+          "release-type": "rc",
           "source-sha": SHA,
         }),
         listBranches: async () => BRANCHES,
@@ -402,11 +415,11 @@ test("pinned nightlies propagate comparison and branch lookup errors", async () 
   }
 });
 
-test("pinned nightlies fail when no release branch exists", async () => {
+test("pinned RCs fail when no release branch exists", async () => {
   await assert.rejects(
     resolveReleasePlan({
       loadSourceWorkflow: async () => sourceWorkflow(),
-      context: manualContext({ "release-type": "nightly", "source-sha": SHA }),
+      context: manualContext({ "release-type": "rc", "source-sha": SHA }),
       listBranches: async () => [],
       compareCommits: async () => assert.fail("no branch to compare"),
     }),
@@ -419,7 +432,7 @@ for (const branches of [[], [BRANCHES[2]]]) {
     await assert.rejects(
       resolveReleasePlan({
         loadSourceWorkflow: async () => sourceWorkflow(),
-        context: manualContext({ "release-type": "nightly" }),
+        context: manualContext({ "release-type": "rc" }),
         listBranches: async () => branches,
       }),
       /No release\/X\.X branch found/,
@@ -432,7 +445,7 @@ test("propagates branch lookup failures instead of falling back to the workflow 
   await assert.rejects(
     resolveReleasePlan({
       loadSourceWorkflow: async () => sourceWorkflow(),
-      context: manualContext({ "release-type": "nightly" }),
+      context: manualContext({ "release-type": "rc" }),
       listBranches: async () => {
         throw error;
       },
@@ -441,7 +454,7 @@ test("propagates branch lookup failures instead of falling back to the workflow 
   );
 });
 
-for (const releaseType of ["nightly", "stable"]) {
+for (const releaseType of ["rc", "stable"]) {
   test(`rejects invalid explicit ${releaseType} SHAs before branch discovery`, async () => {
     await assert.rejects(
       resolveReleasePlan({
@@ -636,12 +649,12 @@ test("a platform release still tags unprefixed", async () => {
   assert.equal(plan.tagPrefix, "");
 });
 
-test("an independent wheel cannot be released as a nightly", async () => {
+test("an independent wheel cannot be released as an RC", async () => {
   await assert.rejects(
     resolveReleasePlan({
       loadSourceWorkflow: async () => sourceWorkflow(),
       context: manualContext({
-        "release-type": "nightly",
+        "release-type": "rc",
         "release-scope": "custom",
         "wheel-ids": "nemo-sandboxed-gym",
         "dry-run": "true",

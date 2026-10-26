@@ -6,12 +6,12 @@ async function sendReleaseNotification({ env, fetchImpl }) {
   const wheelIds = JSON.parse(env.WHEEL_IDS);
   const wheelCatalog = JSON.parse(env.WHEEL_CATALOG);
   const containerIds = JSON.parse(env.CONTAINER_IDS);
-  const stagesNightlyWheels =
-    releaseType === "nightly" &&
-    env.PUBLISH_NIGHTLY_WHEELS !== "true" &&
+  const stagesRcWheels =
+    releaseType === "rc" &&
+    env.PUBLISH_RC_WHEELS !== "true" &&
     wheelIds.length > 0;
   const hasPublishedArtifacts =
-    (wheelIds.length > 0 && !stagesNightlyWheels) ||
+    (wheelIds.length > 0 && !stagesRcWheels) ||
     containerIds.length > 0 ||
     env.INCLUDE_HELM === "true";
   const results = [
@@ -29,42 +29,40 @@ async function sendReleaseNotification({ env, fetchImpl }) {
   const title = published
     ? releaseType === "stable"
       ? "*:ship: Release publish complete*"
-      : "*:crescent_moon: Nightly release complete*"
+      : "*:test_tube: RC release complete*"
     : releaseType === "stable"
       ? "*:alert: Release publish failed*"
-      : "*:alert: Nightly release publish failed*";
+      : "*:alert: RC release publish failed*";
   const lines = [
     title,
     `Release: ${env.RELEASE_LABEL}`,
     `Commit: <${env.COMMIT_URL}|${env.SOURCE_SHA.slice(0, 7)}>`,
   ];
 
-  if (published && releaseType === "nightly") {
-    const nightlyInstanceUrl = env.NIGHTLY_INSTANCE_URL?.trim();
-    if (!nightlyInstanceUrl) {
+  if (published && releaseType === "rc") {
+    const rcInstanceUrl = env.RC_INSTANCE_URL?.trim();
+    if (!rcInstanceUrl) {
       throw new Error(
-        "NIGHTLY_INSTANCE_URL secret is required for nightly notifications",
+        "RC_INSTANCE_URL secret is required for rc notifications",
       );
     }
-    lines.push(`Nightly instance: <${nightlyInstanceUrl}>`);
+    lines.push(`RC instance: <${rcInstanceUrl}>`);
   }
 
   if (published) {
     if (hasPublishedArtifacts) {
       lines.push("", "*Artifacts published:*");
     }
-    if (wheelIds.length > 0 && !stagesNightlyWheels) {
+    if (wheelIds.length > 0 && !stagesRcWheels) {
       lines.push("*:python: Wheels published:*");
       for (const wheelId of wheelIds) {
         const wheel = wheelCatalog.find(
           (candidate) => candidate.id === wheelId,
         );
         const wheelIndex =
-          releaseType === "nightly"
-            ? env.NIGHTLY_WHEEL_INDEX
-            : env.STABLE_WHEEL_INDEX;
+          releaseType === "rc" ? env.RC_WHEEL_INDEX : env.STABLE_WHEEL_INDEX;
         const wheelUrl =
-          releaseType === "nightly"
+          releaseType === "rc"
             ? `${wheelIndex}/${wheel.package}/`
             : `${wheelIndex.replace(/\/simple$/, "/project")}/${wheel.package}/${env.WHEEL_VERSION}/`;
         lines.push(`• <${wheelUrl}|${wheel.package}: ${env.WHEEL_VERSION}>`);
@@ -88,7 +86,7 @@ async function sendReleaseNotification({ env, fetchImpl }) {
       lines.push("*:helm: Helm chart published:*");
       lines.push(`• ${chart}: ${env.CHART_VERSION}`);
     }
-    if (stagesNightlyWheels) {
+    if (stagesRcWheels) {
       lines.push("", "*:python: Wheel staging dispatched:*");
       for (const wheelId of wheelIds) {
         const wheel = wheelCatalog.find(
