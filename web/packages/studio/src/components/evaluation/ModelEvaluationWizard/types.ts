@@ -142,8 +142,11 @@ export interface DatasetBindings {
 }
 
 /** Prompt sent to the model under test, built from the resolved input binding. */
-export const composeGenerationPrompt = (bindings: DatasetBindings) => ({
-  messages: [{ role: 'user', content: bindings.input }],
+export const composeGenerationPrompt = (
+  bindings: DatasetBindings,
+  edited: string | null = null
+) => ({
+  messages: [{ role: 'user', content: edited ?? bindings.input }],
 });
 
 /** The judge's user message, composed from what the dataset actually provides.
@@ -275,8 +278,11 @@ export const EMPTY_FIELD_MAPPING: Record<CanonicalField, string> = {
   messages: '',
 };
 
+/** The part of the form that becomes a config file, minus the per-run choices. */
+export type DatasetConfigValues = Pick<EvaluationFormValues, 'dataset' | 'fieldMapping' | 'body'>;
+
 /** The metric types the user ticked. */
-export const selectedMetrics = (values: EvaluationFormValues): SelectableMetric[] =>
+export const selectedMetrics = (values: DatasetConfigValues): SelectableMetric[] =>
   SELECTABLE_METRICS.map((metric) => metric.type).filter((type) => values.body?.metrics?.[type]);
 
 /** Which region of the form a check belongs to. Only the FIRST failure in each
@@ -323,11 +329,130 @@ export const EVALUATION_FORM_DEFAULTS: EvaluationFormValues = {
   },
 };
 
-/** Row-0 preview is read from an HTTP Range head, which cannot satisfy Parquet
- *  (hyparquet needs the footer, and a truncated buffer fails silently to null).
- *  ponytail: text formats only; add Parquet when row-0 preview can fetch a full
- *  object, or when the backend exposes a row-preview endpoint. */
+/** File types the model wizard maps. ``useDatasetPreview`` also reads Parquet
+ *  (whole file), which the agent wizard accepts.
+ *  ponytail: model wizard stays text-only; add '.parquet' here once its live
+ *  test has been checked against a Parquet dataset. */
 export const MAPPABLE_FILE_TYPES = ['.json', '.jsonl', '.csv'] as const;
+
+/** The dataset, mapping and metric fields, shared with the agent wizard's form. */
+export const datasetConfigShape = {
+  dataset: z.string().min(1, 'Select an input file.').nullable(),
+  // Explicit rather than `z.record(z.enum(...))`, which zod infers as
+  // `Partial<Record<...>>` and so cannot satisfy the form type's required keys.
+  fieldMapping: z.object({
+    input: z.string(),
+    reference: z.string(),
+    context: z.string(),
+    messages: z.string(),
+  }),
+  body: z.object({
+    metrics: z.object({
+      'llm-judge': z.boolean(),
+      'exact-match': z.boolean(),
+      f1: z.boolean(),
+      bleu: z.boolean(),
+      rouge: z.boolean(),
+      'string-check': z.boolean(),
+      'number-check': z.boolean(),
+    }),
+    judgeModel: z.string(),
+    judgePrompt: z.string().nullable(),
+    scores: z.array(z.custom<PanelScoreFormData>()),
+    numberCheck: z.object({
+      operation: z.enum(NUMBER_CHECK_OPERATIONS),
+      epsilon: z.number().nullable(),
+    }),
+    stringCheck: z.object({ operation: z.enum(STRING_CHECK_OPERATIONS) }),
+  }),
+};
+
+/** Cross-field rules for ``datasetConfigShape``. Each issue names the field the
+ *  user must act on, so the message lands where the fix is. */
+export const refineDatasetConfig = (
+  values: z.infer<z.ZodObject<typeof datasetConfigShape>>,
+  ctx: z.RefinementCtx
+): void => {
+  const mapping = values.fieldMapping ?? {};
+  const selected = SELECTABLE_METRICS.map((metric) => metric.type).filter(
+    (type) => values.body?.metrics?.[type]
+  );
+
+  if (!values.dataset) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['dataset'],
+      message: 'Select an input file.',
+    });
+  }
+
+  // Reported on the file field, because a messages dataset renders no Input
+  // select for the error to land on.
+  if (!mapping.input) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: mapping.messages ? ['dataset'] : ['fieldMapping', 'input'],
+      message: mapping.messages
+        ? 'No user turn in this file to send as Input.'
+        : 'Map a dataset field to Input.',
+    });
+  }
+
+  if (selected.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['body', 'metrics'],
+      message: 'Select at least one metric.',
+    });
+  }
+
+  const needsReference = selected.some(
+    (metric) => REFERENCE_METRICS.includes(metric) || COMPARISON_METRICS.includes(metric)
+  );
+  // A bound messages column is NOT proof of a ground truth: the reference is
+  // the assistant turn, and a prompts-only dataset has none. The error goes to
+  // the metrics slot in that case because no Reference select is rendered
+  // for a messages dataset, so a field error there would never be seen.
+  if (needsReference && !mapping.reference) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: mapping.messages ? ['body', 'metrics'] : ['fieldMapping', 'reference'],
+      message: mapping.messages
+        ? 'This dataset has no assistant reply to its last user turn to compare against. Clear the metrics that score against the Reference.'
+        : 'This metric compares against the Reference, so Reference must be mapped.',
+    });
+  }
+
+  if (selected.includes('llm-judge')) {
+    if (!values.body?.judgeModel) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['body', 'judgeModel'],
+        message: 'Select a judge model.',
+      });
+    }
+    if (!values.body?.scores?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['body', 'scores'],
+        message: 'Add at least one score for the judge to extract.',
+      });
+    }
+  }
+
+  // The API requires epsilon for absolute difference and rejects it elsewhere.
+  if (
+    selected.includes('number-check') &&
+    values.body?.numberCheck?.operation === 'absolute difference' &&
+    values.body?.numberCheck?.epsilon === null
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['body', 'numberCheck', 'epsilon'],
+      message: 'Absolute difference requires a tolerance.',
+    });
+  }
+};
 
 /**
  * Submit-time validation, as a zod schema fed to RHF via ``zodResolver``.
@@ -347,41 +472,9 @@ export const evaluationSchema = z
     configSource: z.string(),
     name: entityNameField(),
     model: z.string().min(1, 'Select a model to evaluate.'),
-    dataset: z.string().min(1, 'Select an input file.').nullable(),
-    // Explicit rather than `z.record(z.enum(...))`, which zod infers as
-    // `Partial<Record<...>>` and so cannot satisfy the form type's required keys.
-    fieldMapping: z.object({
-      input: z.string(),
-      reference: z.string(),
-      context: z.string(),
-      messages: z.string(),
-    }),
-    body: z.object({
-      metrics: z.object({
-        'llm-judge': z.boolean(),
-        'exact-match': z.boolean(),
-        f1: z.boolean(),
-        bleu: z.boolean(),
-        rouge: z.boolean(),
-        'string-check': z.boolean(),
-        'number-check': z.boolean(),
-      }),
-      judgeModel: z.string(),
-      judgePrompt: z.string().nullable(),
-      scores: z.array(z.custom<PanelScoreFormData>()),
-      numberCheck: z.object({
-        operation: z.enum(NUMBER_CHECK_OPERATIONS),
-        epsilon: z.number().nullable(),
-      }),
-      stringCheck: z.object({ operation: z.enum(STRING_CHECK_OPERATIONS) }),
-    }),
+    ...datasetConfigShape,
   })
   .superRefine((values, ctx) => {
-    const mapping = values.fieldMapping ?? {};
-    const selected = SELECTABLE_METRICS.map((metric) => metric.type).filter(
-      (type) => values.body?.metrics?.[type]
-    );
-
     if (!values.configSource) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -399,78 +492,5 @@ export const evaluationSchema = z
       }
     }
 
-    if (!values.dataset) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['dataset'],
-        message: 'Select an input file.',
-      });
-    }
-
-    // Reported on the file field, because a messages dataset renders no Input
-    // select for the error to land on.
-    if (!mapping.input) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: mapping.messages ? ['dataset'] : ['fieldMapping', 'input'],
-        message: mapping.messages
-          ? 'No user turn in this file to send as Input.'
-          : 'Map a dataset field to Input.',
-      });
-    }
-
-    if (selected.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['body', 'metrics'],
-        message: 'Select at least one metric.',
-      });
-    }
-
-    const needsReference = selected.some(
-      (metric) => REFERENCE_METRICS.includes(metric) || COMPARISON_METRICS.includes(metric)
-    );
-    // A bound messages column is NOT proof of a ground truth: the reference is
-    // the assistant turn, and a prompts-only dataset has none. The error goes to
-    // the metrics slot in that case because no Reference select is rendered
-    // for a messages dataset, so a field error there would never be seen.
-    if (needsReference && !mapping.reference) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: mapping.messages ? ['body', 'metrics'] : ['fieldMapping', 'reference'],
-        message: mapping.messages
-          ? 'This dataset has no assistant reply to its last user turn to compare against. Clear the metrics that score against the Reference.'
-          : 'This metric compares against the Reference, so Reference must be mapped.',
-      });
-    }
-
-    if (selected.includes('llm-judge')) {
-      if (!values.body?.judgeModel) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['body', 'judgeModel'],
-          message: 'Select a judge model.',
-        });
-      }
-      if (!values.body?.scores?.length) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['body', 'scores'],
-          message: 'Add at least one score for the judge to extract.',
-        });
-      }
-    }
-
-    // The API requires epsilon for absolute difference and rejects it elsewhere.
-    if (
-      selected.includes('number-check') &&
-      values.body?.numberCheck?.operation === 'absolute difference' &&
-      values.body?.numberCheck?.epsilon === null
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['body', 'numberCheck', 'epsilon'],
-        message: 'Absolute difference requires a tolerance.',
-      });
-    }
+    refineDatasetConfig(values, ctx);
   });

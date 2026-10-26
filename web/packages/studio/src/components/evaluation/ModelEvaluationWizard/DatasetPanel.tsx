@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledDatasetFileSelect } from '@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect';
+import type { AcceptedFileType } from '@nemo/common/src/components/DatasetFileSelect/DatasetFileSelect';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { DatasetRowPager } from '@nemo/common/src/components/DatasetRowPager';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
@@ -25,7 +26,7 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
 import { useMessagesBinding } from '@studio/components/evaluation/ModelEvaluationWizard/useMessagesBinding';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { FC, useEffect, useMemo, useState } from 'react';
+import { FC, ReactNode, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const asText = (value: unknown): string =>
@@ -42,7 +43,25 @@ const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
   </Flex>
 );
 
-export const DatasetPanel: FC = () => {
+interface DatasetPanelProps {
+  acceptedFileTypes?: AcceptedFileType[];
+  /** ``null`` lists filesets of every purpose. */
+  filesetPurpose?: FilesetPurpose | null;
+  /** Let one upload carry several files, e.g. the shards of a Parquet dataset. */
+  allowMultipleUpload?: boolean;
+  /** Off when an existing config supplies its own mapping. */
+  showMapping?: boolean;
+  /** Rendered between the file checks and the field mapping. */
+  children?: ReactNode;
+}
+
+export const DatasetPanel: FC<DatasetPanelProps> = ({
+  acceptedFileTypes = [...MAPPABLE_FILE_TYPES],
+  filesetPurpose = FilesetPurpose.dataset,
+  allowMultipleUpload,
+  showMapping = true,
+  children,
+}) => {
   const workspace = useWorkspaceFromPath();
   const { control, setError, clearErrors, setValue } = useFormContext<EvaluationFormValues>();
   const dataset = useWatch({ control, name: 'dataset' });
@@ -119,9 +138,10 @@ export const DatasetPanel: FC = () => {
           useControllerProps={{ name: 'dataset', control }}
           setError={(fieldError) => setError('dataset', fieldError)}
           clearError={() => clearErrors('dataset')}
-          acceptedFileTypes={[...MAPPABLE_FILE_TYPES]}
+          acceptedFileTypes={acceptedFileTypes}
           invalidFileMode="disable"
-          filesetPurpose={FilesetPurpose.dataset}
+          filesetPurpose={filesetPurpose}
+          allowMultipleUpload={allowMultipleUpload}
           autoSelectFirstAcceptable
           onFileSelected={() => setValue('fieldMapping', EMPTY_FIELD_MAPPING)}
         />
@@ -136,7 +156,7 @@ export const DatasetPanel: FC = () => {
           <Stack gap="density-sm" className="rounded-md border border-base p-density-lg">
             <Text kind="label/bold/sm">File Validation</Text>
             <Check ok label={`${formatLabel} is valid`} />
-            {messagesColumn ? (
+            {!showMapping ? null : messagesColumn ? (
               <>
                 <Check ok label={`Standard messages array found in "${messagesColumn}"`} />
                 <Check
@@ -166,13 +186,14 @@ export const DatasetPanel: FC = () => {
             last user turn is the input and the last assistant turn is the ground
             truth, bound by role in useMessagesBinding. Asking the user to map
             that would be busywork. */}
-        {hasIngestedKeys && !messagesColumn ? (
+        {children}
+
+        {showMapping && hasIngestedKeys && !messagesColumn ? (
           <Stack gap="density-sm" className="min-w-0">
             <Text kind="body/bold/lg">Field Mapping</Text>
             <Text kind="body/regular/md" className="text-secondary">
-              Choose which field holds the prompt to send to the model, and which holds the answer
-              to score its response against. Reference is only needed by metrics that compare
-              against it.
+              Choose which field holds the prompt to send, and which holds the answer to score the
+              response against. Reference is only needed by metrics that compare against it.
             </Text>
             <Flex align="start" gap="density-lg" className="min-w-0">
               {PRIMARY_CANONICAL_FIELDS.map(renderMappingSelect)}

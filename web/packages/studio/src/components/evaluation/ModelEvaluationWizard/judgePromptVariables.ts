@@ -7,7 +7,7 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 
 /** Names the render context carries regardless of the dataset. */
-const ALWAYS_AVAILABLE = ['item', 'sample', 'scores', 'output_text', 'response'];
+export const ALWAYS_AVAILABLE = ['item', 'sample', 'scores', 'output_text', 'response'];
 
 export interface JudgePromptVariableReport {
   invalid: string[];
@@ -29,7 +29,7 @@ const templateExpressions = (template: string): string[] =>
   [...template.matchAll(TOKEN_RE)].map((match) => match[1]);
 
 /** Braces that nest or do not pair up, which Jinja cannot parse. */
-const hasMalformedBraces = (template: string): boolean =>
+export const hasMalformedBraces = (template: string): boolean =>
   /\{\{|\}\}/.test(template.replace(TOKEN_RE, '')) ||
   templateExpressions(template).some((body) => /[{}]/.test(body));
 

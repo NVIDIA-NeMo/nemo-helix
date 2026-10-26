@@ -107,6 +107,15 @@ describe('DatasetSelect', () => {
     });
   });
 
+  it('lists filesets of every purpose when the purpose is null', async () => {
+    render(<DatasetSelect project="test-project" />, {
+      wrapper: createWrapper({ filesetPurpose: null }),
+    });
+
+    await waitFor(() => expect(filesListFilesets).toHaveBeenCalled());
+    expect(JSON.stringify(vi.mocked(filesListFilesets).mock.calls[0][1])).not.toContain('purpose');
+  });
+
   it('searches filesets server-side', async () => {
     render(<DatasetSelect project="test-project" />, { wrapper: createWrapper() });
 

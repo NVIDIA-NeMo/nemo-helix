@@ -176,7 +176,7 @@ export const InlineUploadPicker: FC<InlineUploadPickerProps> = ({
       acceptableFileSize: acceptableFileSize ?? uploadModalInitialState.acceptableFileSize,
       invalidFileMode: invalidFileMode ?? uploadModalInitialState.invalidFileMode,
       allowNewDataset: effectiveAllowNewDataset,
-      filesetPurpose: filesetPurpose ?? uploadModalInitialState.filesetPurpose,
+      filesetPurpose,
       datasetLabel: datasetLabel ?? uploadModalInitialState.datasetLabel,
       autoSelectFirstAcceptable:
         autoSelectFirstAcceptable ?? uploadModalInitialState.autoSelectFirstAcceptable,
