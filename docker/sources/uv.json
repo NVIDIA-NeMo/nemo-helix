@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "name": "uv",
+      "version": "0.13.4",
+      "license": "Apache-2.0 OR MIT",
+      "url": "https://files.pythonhosted.org/packages/79/55/609455d21e87430c11fe734abfced50a3bdf177b2f49d41fbb19c199cbc3/uv-0.13.4.tar.gz",
+      "sha256": "b0bff5b9a5061f7a35b1d0c1a94c19af134222c48eb7aadc42f85a038be1b248"
+    }
+  ]
+}

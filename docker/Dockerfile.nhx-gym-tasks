@@ -44,9 +44,27 @@ RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonl
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
     GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
 
+# The Gym venv's sources, collected after the update above so they match what ships; the rest of the
+# image's are nhx-tasks' own, under its directory. The update collects the rebuilt wandb-core's Go
+# modules into rebuilt-wandb. docker/sources/nhx-gym-tasks.json pins ray, which has no sdist, the
+# packages ray bundles, and the source of distlib's Windows launchers.
+COPY docker/sources/nhx-gym-tasks.json /tmp/nhx-gym-tasks.json
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv run --no-project --python /opt/gym-venv/bin/python \
+        /usr/local/bin/collect-python-sdists.py \
+        --python /opt/gym-venv/bin/python \
+        --output /source-distributions/nhx-gym-tasks \
+        --lock-file /opt/nhx-gym-tasks-lock/uv.lock \
+        --label gym-venv && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-gym-tasks.json \
+        --installed-in /opt/gym-venv/bin/python \
+        --output /source-distributions/nhx-gym-tasks
+
 FROM cpu-tasks AS runtime
 COPY --from=gym-builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --chown=1000:1000 --from=gym-builder /opt/gym-venv /opt/gym-venv
+COPY --from=gym-builder /source-distributions/nhx-gym-tasks/ /usr/share/nemo-helix/source-distributions/nhx-gym-tasks/
 COPY --from=gym-builder /usr/local/bin/python* /usr/local/bin/
 COPY --from=gym-builder /usr/local/include/python3.13 /usr/local/include/python3.13
 COPY --from=gym-builder /usr/local/lib/libpython3.13* /usr/local/lib/

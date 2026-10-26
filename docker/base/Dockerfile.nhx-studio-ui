@@ -105,3 +105,21 @@ RUN set -eu; \
 FROM scratch AS artifacts
 WORKDIR /artifacts
 COPY --from=build /app/web/packages/studio/dist .
+
+# --------------- NPM SOURCES --------------- #
+# The npm packages bundled into dist/, for the API image's source distributions. @nvidia/* packages
+# are NVIDIA's own; their third-party dependencies are still collected.
+FROM base AS npm-sources
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/scripts/collect-npm-sources.py /usr/local/bin/collect-npm-sources.py
+RUN pnpm --filter nemo-studio-ui list --prod --depth Infinity --json > /tmp/studio-production-packages.json && \
+    python3 /usr/local/bin/collect-npm-sources.py \
+        --pnpm-list /tmp/studio-production-packages.json \
+        --pnpm-lock pnpm-lock.yaml \
+        --exclude '@nvidia/*' \
+        --label studio \
+        --output /source-distributions
+
+FROM scratch AS npm-source-artifacts
+COPY --from=npm-sources /source-distributions .

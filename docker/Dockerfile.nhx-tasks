@@ -23,6 +23,9 @@ RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonl
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
     GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
 
+# Pinned sources cover what ships without a package manager's record: BusyBox from root-busybox, uv
+# (its crates are collected from the binary), and Python packages published without an sdist.
+COPY docker/sources/ /tmp/nhx-sources/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-workspace-sdists.py \
@@ -38,6 +41,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-cpython-source.py \
         --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-tasks && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-sources/busybox-1.37.0-musl.json \
+        --manifest /tmp/nhx-sources/alpine-3.23-musl.json \
+        --manifest /tmp/nhx-sources/uv.json \
+        --manifest /tmp/nhx-sources/nhx-tasks.json \
+        --installed-in /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-tasks && \
+    python3 /usr/local/bin/collect-cargo-crate-sources.py \
+        --binary /bin/uv \
+        --cargo-lock /app/.source-distributions/nhx-tasks/pinned/uv-0.13.4.tar.gz \
+        --output /app/.source-distributions/nhx-tasks && \
+    python3 /usr/local/bin/collect-npm-sources.py \
+        --package-lock /app/.venv/lib/python3.13/site-packages/nooa/viewer/frontend-react/package-lock.json \
+        --label nooa-viewer \
         --output /app/.source-distributions/nhx-tasks
 RUN mkdir -p /app/.runtime-home/nvs
 

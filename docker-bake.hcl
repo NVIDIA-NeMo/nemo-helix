@@ -623,6 +623,17 @@ target "nhx-jobs-launcher" {
   platforms  = get_platforms()
 }
 
+target "nhx-studio-ui-sources" {
+  target     = "npm-source-artifacts"
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.nhx-studio-ui"
+  platforms  = get_platforms()
+  args = {
+    DOCKERHUB_MIRROR    = DOCKERHUB_MIRROR
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+}
+
 target "nhx-studio-ui" {
   target     = "artifacts"
   context    = "."
@@ -701,6 +712,7 @@ target "nhx-api-docker" {
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     nhx-studio-ui             = "target:nhx-studio-ui"
+    nhx-studio-ui-sources     = "target:nhx-studio-ui-sources"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
@@ -728,6 +740,7 @@ target "nhx-agents-deepagents-e2e-docker" {
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     nhx-studio-ui             = "target:nhx-studio-ui"
+    nhx-studio-ui-sources     = "target:nhx-studio-ui-sources"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
@@ -853,6 +866,9 @@ target "nhx-gym-tasks-docker" {
     nhx-python-base = "target:nhx-python-base"
     nhx-tasks   = "target:nhx-tasks-docker"
     nhx-workspace   = "target:nhx-workspace"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
   }
   cache-to   = maybe_registry_cache_to("nhx-gym-tasks")
   cache-from = maybe_registry_cache_from("nhx-gym-tasks")

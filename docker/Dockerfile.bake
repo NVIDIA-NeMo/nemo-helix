@@ -53,7 +53,7 @@ ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
     COPY --from=root-uv-binary-base /uv /bin/uv
 
 #root-busybox:
-    FROM busybox:1.37.0-musl AS root-busybox
+    FROM busybox:1.37.0-musl@sha256:5cec3fc171c87218698e85a52af7087de727372aae264a787b8112901a5b0092 AS root-busybox
 
 #root-distroless-base-3-11
     FROM ${DISTROLESS_BASE} AS root-distroless-base-3-11
