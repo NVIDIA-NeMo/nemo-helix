@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -756,3 +757,25 @@ async def test_a_failed_rewrite_leaves_the_previous_record_whole(
 
     assert _record(tmp_path, sandbox_id) == before
     assert [path.name for path in (tmp_path / TRIAL).iterdir()] == [applied_egress_filename(sandbox_id)]
+
+
+async def test_a_slowly_answered_pod_ip_lookup_still_stops_at_its_budget(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server dripping its answer resets the client's read timeout per chunk, so only a total bound stops it."""
+    monkeypatch.setattr(environment_module, "SANDBOX_IP_LOOKUP_BUDGET_SEC", 0.1)
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+
+    class _Dripping:
+        async def get(self, path: str, **kwargs: Any) -> httpx.Response:
+            await asyncio.sleep(30)
+            raise AssertionError("the budget should have stopped the lookup")
+
+    monkeypatch.setattr(environment, "_server", lambda: _Dripping())
+
+    started = time.monotonic()
+    sandbox = await environment._create_sandbox()
+
+    assert time.monotonic() - started < 5
+    assert _record(tmp_path, sandbox.id)["ip"] is None
+    assert server.live() == {sandbox.id}

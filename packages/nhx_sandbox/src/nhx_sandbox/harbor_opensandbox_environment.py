@@ -470,14 +470,15 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
     async def _sandbox_ip(self, recorded_id: str) -> str | None:
         """The pod IP from execd's direct endpoint, or ``None`` if the server doesn't report one."""
         try:
-            response = await self._server().get(
-                f"/sandboxes/{recorded_id}/endpoints/{EXECD_PORT}",
-                timeout=SANDBOX_IP_LOOKUP_BUDGET_SEC,
-                deadline=time.monotonic() + SANDBOX_IP_LOOKUP_BUDGET_SEC,
-            )
+            async with asyncio.timeout(SANDBOX_IP_LOOKUP_BUDGET_SEC):
+                response = await self._server().get(
+                    f"/sandboxes/{recorded_id}/endpoints/{EXECD_PORT}",
+                    timeout=SANDBOX_IP_LOOKUP_BUDGET_SEC,
+                    deadline=time.monotonic() + SANDBOX_IP_LOOKUP_BUDGET_SEC,
+                )
             response.raise_for_status()
             endpoint = str(response.json()["endpoint"])
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError):
             self.logger.warning(
                 "Could not read sandbox %s's pod IP; it is recorded without one", recorded_id, exc_info=True
             )
