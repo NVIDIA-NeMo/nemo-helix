@@ -148,7 +148,7 @@ def compose_fabric_config(
         skill_config["paths"] = list(dict.fromkeys([*(skill_config.get("paths") or []), *skills]))
 
     if adapter_descriptors:
-        discovery = config.setdefault("discovery", {})
+        discovery = config["discovery"] = config.get("discovery") or {}
         discovery["local_paths"] = list(dict.fromkeys([*(discovery.get("local_paths") or []), *adapter_descriptors]))
     return config
 

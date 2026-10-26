@@ -3,8 +3,9 @@
 
 """The Gym component that runs a registered agent: what it changes in the config and what it leaves alone.
 
-``nemo_gym`` and ``nemo_fabric`` are not installed here (Gym cannot be a repo dependency), so the
-module is loaded with stand-ins for the names it imports; only its pure functions are exercised.
+``nemo_gym`` is not installed here (Gym cannot be a repo dependency), so the module is loaded with
+stand-ins for the Gym names it imports; its pure functions are exercised, and its composed config is
+planned by the real ``nemo_fabric``, a dependency of the evals SDK.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import types
 from pathlib import Path
 from typing import Any, ClassVar
 
+import nemo_fabric
 import pytest
 from pydantic import BaseModel
 
@@ -36,7 +38,7 @@ class _Item(BaseModel, extra="allow"):
 
 @pytest.fixture(scope="module")
 def app():
-    for name in ("nemo_gym", "nemo_fabric", "fastapi"):
+    for name in ("nemo_gym", "fastapi"):
         if name not in sys.modules:
             try:
                 __import__(name)
@@ -44,7 +46,6 @@ def app():
                 pass
     stand_ins = {
         "fastapi": {"Body": lambda *a, **k: None, "Request": object},
-        "nemo_fabric": {"Fabric": object, "FabricConfig": object, "RunRequest": object},
         "nemo_gym": {},
         "nemo_gym.base_resources_server": {
             "NEMO_GYM_MCP_METADATA_KEY": "mcp",
@@ -207,9 +208,18 @@ def test_staged_descriptors_extend_the_agents_discovery_paths_without_mutating_i
     assert registered["discovery"]["local_paths"] == ["authored.fabric-adapter.json"]
 
 
+def test_staged_descriptors_fill_a_null_discovery_section(app) -> None:
+    staged = "/job/work/wheels-v1-site-packages/share/nemo-fabric/adapters/x/x.fabric-adapter.json"
+
+    composed = app.compose_fabric_config(
+        {**_REGISTERED, "discovery": None}, **_compose_kwargs(adapter_descriptors=[staged])
+    )
+
+    assert composed["discovery"] == {"local_paths": [staged]}
+
+
 def test_fabric_plans_an_agent_whose_adapter_was_staged_with_a_target_install(app, tmp_path: Path) -> None:
     """The Gym host's ``--target`` install leaves the descriptor outside the prefix Fabric lists (NVBug 6991629)."""
-    nemo_fabric = pytest.importorskip("nemo_fabric")
     target = tmp_path / "wheels-v1-site-packages"
     _stage_adapter(target, "test.staged.adapter")
     registered = {"metadata": {"name": "a"}, "harness": {"adapter_id": "test.staged.adapter"}}
