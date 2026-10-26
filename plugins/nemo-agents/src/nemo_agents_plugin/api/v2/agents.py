@@ -271,7 +271,7 @@ async def _probe_deployment(
         return None, "Could not reach the runtime."
     if response.status_code == 404:
         return None, "Runtime does not report MCP status."
-    if response.status_code >= 400:
+    if not response.is_success:
         return None, f"Runtime returned HTTP {response.status_code}."
     try:
         return McpStatusResponse.model_validate(response.json()), ""
@@ -315,13 +315,13 @@ async def list_agent_tools(
     agent = await _get_agent_or_404(workspace, name, entity_client)
 
     try:
-        result = await entity_client.list(AgentDeployment, workspace=workspace)
+        deployments = await _list_all_deployments(workspace, entity_client)
     except Exception as exc:
         logger.exception("Failed to list deployments for an agent tools listing")
         raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc
 
     # Same choice as the gateway: the deployment that chat and invoke requests reach.
-    deployment = next((d for d in result.data if d.agent == name and is_deployment_routable(d)), None)
+    deployment = next((d for d in deployments if d.agent == name and is_deployment_routable(d)), None)
     config = config_from_dict(deployment.config if deployment is not None else agent.config)
     declared = declared_mcp_servers(config) if config else []
     if deployment is None or not declared:
@@ -338,6 +338,18 @@ async def list_agent_tools(
             servers=[_unknown(server, probe_error) for server in declared],
         )
     return AgentToolsResponse(deployment=deployment.name, checked_at=probed.checked_at, servers=probed.servers)
+
+
+async def _list_all_deployments(workspace: str, entity_client: NemoEntitiesClient) -> list[AgentDeployment]:
+    """List every deployment in *workspace*, following pagination."""
+    deployments: list[AgentDeployment] = []
+    page = 1
+    while True:
+        result = await entity_client.list(AgentDeployment, workspace=workspace, page=page)
+        deployments.extend(result.data)
+        if result.pagination is None or page >= result.pagination.total_pages:
+            return deployments
+        page += 1
 
 
 def _unknown(server: McpServerStatus, probe_error: str) -> McpServerStatus:

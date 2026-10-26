@@ -204,9 +204,12 @@ class McpStatusCache:
         ``max_age=None`` accepts a running server's result of any age; ``0`` probes everything.
         The returned time is when the oldest result was checked.
         """
+        arrived = self._clock()
         async with self._lock:
             now = self._clock()
-            stale = [(name, server) for name, server in self._servers if not self._is_fresh(name, now, max_age)]
+            stale = [
+                (name, server) for name, server in self._servers if not self._is_fresh(name, arrived, now, max_age)
+            ]
             results = await asyncio.gather(
                 *(probe_mcp_server(name, server, self._blocked, self._timeout) for name, server in stale)
             )
@@ -217,11 +220,14 @@ class McpStatusCache:
         checked = [status.checked_at for status in statuses if status.checked_at is not None]
         return statuses, min(checked, default=datetime.now(UTC))
 
-    def _is_fresh(self, name: str, now: float, max_age: float | None) -> bool:
+    def _is_fresh(self, name: str, arrived: float, now: float, max_age: float | None) -> bool:
         entry = self._entries.get(name)
         if entry is None:
             return False
         status, finished = entry
+        # A probe that finished after this caller arrived ran while it waited on the lock, so share it.
+        if finished > arrived:
+            return True
         if status.state == "running":
             return max_age is None or now - finished < max_age
         limit = self._failure_ttl if max_age is None else min(self._failure_ttl, max_age)

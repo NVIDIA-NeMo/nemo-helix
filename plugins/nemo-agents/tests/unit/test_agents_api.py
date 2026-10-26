@@ -797,6 +797,23 @@ class TestListAgentTools:
         assert route.call_count == 1
         assert route.calls.last.request.url.query == b""
 
+    def test_finds_the_running_deployment_on_a_later_page(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        first = _list_response([_make_deployment(name="other-dep", agent="other-agent", status="running")])
+        first.pagination.total_pages = 2
+        second = _list_response([_running_triage_deployment()])
+        second.pagination.total_pages = 2
+        mock_entity_client.get = AsyncMock(return_value=_triage_agent())
+        mock_entity_client.list = AsyncMock(side_effect=[first, second])
+
+        with respx.mock:
+            respx.get("http://localhost:9001/mcp/tools").respond(200, json=_RUNTIME_TOOLS)
+            resp = client.get(_TOOLS_URL)
+
+        assert resp.json()["deployment"] == "triage-dep"
+        assert [call.kwargs["page"] for call in mock_entity_client.list.call_args_list] == [1, 2]
+
     def test_refresh_is_forwarded_to_the_runtime(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.get = AsyncMock(return_value=_triage_agent())
         mock_entity_client.list = AsyncMock(return_value=_list_response([_running_triage_deployment()]))
@@ -839,6 +856,7 @@ class TestListAgentTools:
         ("runtime", "probe_error"),
         [
             ({"status_code": 404}, "Runtime does not report MCP status."),
+            ({"status_code": 302}, "Runtime returned HTTP 302."),
             ({"side_effect": httpx.ConnectError("refused")}, "Could not reach the runtime."),
         ],
     )

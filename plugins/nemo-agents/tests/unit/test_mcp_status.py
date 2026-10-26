@@ -11,6 +11,7 @@ probe exists to catch is exactly a subprocess that does not come up.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import socket
 import sys
@@ -384,6 +385,14 @@ class TestMcpStatusCache:
         cache = McpStatusCache(_config({"iocs": {"transport": "stdio", "url": "iocs"}}))
 
         await asyncio.gather(*(cache.get(max_age=30) for _ in range(5)))
+
+        assert probe_calls == ["iocs"]
+
+    async def test_concurrent_refreshes_share_the_probe_in_flight(self, probe_calls: list[str]) -> None:
+        ticks = itertools.count()
+        cache = McpStatusCache(_config({"iocs": {"transport": "stdio", "url": "iocs"}}), clock=lambda: next(ticks))
+
+        await asyncio.gather(*(cache.get(max_age=0) for _ in range(5)))
 
         assert probe_calls == ["iocs"]
 
