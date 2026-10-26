@@ -19,6 +19,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.types import RESPONSE_VALIDATION_CONTEXT_KEY
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
 from nemo_helix_plugin.entities.types import (
+    WORKSPACE_NOT_FOUND_CODE,
     DeleteResponse,
     Entity,
     EntityByNameQueryParams,
@@ -394,9 +395,16 @@ class AnyEntityDeleteClientProtocol(AnyEntityGetterProtocol, Protocol):
 
 # Error types
 class EntityStoreError(Exception):
-    """Base exception for EntityClient errors."""
+    """Base exception for EntityClient errors.
 
-    pass
+    Attributes:
+        code: Machine-readable reason sent by the entity store alongside the
+            message, such as ``workspace_not_found``, or ``None``.
+    """
+
+    def __init__(self, *args: object, code: str | None = None) -> None:
+        super().__init__(*args)
+        self.code = code
 
 
 class EntityNotFoundError(EntityStoreError):
@@ -420,7 +428,25 @@ class EntityConflictError(EntityStoreError):
 class EntityValidationError(EntityStoreError):
     """Entity validation failed (e.g., referenced project does not exist)."""
 
-    pass
+    @classmethod
+    def from_response(cls, error: UnprocessableEntityError) -> Self:
+        """Build from an entity store 422, keeping its detail and code."""
+        body = error.body if isinstance(error.body, dict) else {}
+        code = body.get("code")
+        return cls(body.get("detail", str(error)), code=code if isinstance(code, str) else None)
+
+
+def is_workspace_not_found(error: BaseException) -> bool:
+    """Whether an entity write failed because its workspace does not exist.
+
+    Recognizes both the entity client's ``EntityValidationError`` and a 422
+    relayed by another service, such as the Models API.
+    """
+    if isinstance(error, EntityStoreError):
+        return error.code == WORKSPACE_NOT_FOUND_CODE
+    if isinstance(error, UnprocessableEntityError) and isinstance(error.body, dict):
+        return error.body.get("code") == WORKSPACE_NOT_FOUND_CODE
+    return False
 
 
 def _get_entity_type(entity_class: EntityTypeLike) -> str:
@@ -787,8 +813,7 @@ class EntityClient:
                 f"Entity with name '{entity.name}' already exists in workspace '{entity.workspace}'"
             ) from e
         except UnprocessableEntityError as e:
-            detail = e.body.get("detail", str(e)) if isinstance(e.body, dict) else str(e)
-            raise EntityValidationError(detail) from e
+            raise EntityValidationError.from_response(e) from e
 
     async def get(
         self,
@@ -887,8 +912,7 @@ class EntityClient:
         except ConflictError as e:
             raise EntityConflictError(str(e)) from e
         except UnprocessableEntityError as e:
-            detail = e.body.get("detail", str(e)) if isinstance(e.body, dict) else str(e)
-            raise EntityValidationError(detail) from e
+            raise EntityValidationError.from_response(e) from e
 
     async def delete(
         self,
@@ -1268,8 +1292,7 @@ class SyncEntityClient:
                 f"Entity with name '{entity.name}' already exists in workspace '{entity.workspace}'"
             ) from e
         except UnprocessableEntityError as e:
-            detail = e.body.get("detail", str(e)) if isinstance(e.body, dict) else str(e)
-            raise EntityValidationError(detail) from e
+            raise EntityValidationError.from_response(e) from e
 
     def get(
         self,
@@ -1325,8 +1348,7 @@ class SyncEntityClient:
         except ConflictError as e:
             raise EntityConflictError(str(e)) from e
         except UnprocessableEntityError as e:
-            detail = e.body.get("detail", str(e)) if isinstance(e.body, dict) else str(e)
-            raise EntityValidationError(detail) from e
+            raise EntityValidationError.from_response(e) from e
 
     def delete(
         self,

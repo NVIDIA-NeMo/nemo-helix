@@ -11,9 +11,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, Principal, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 from nhx.core.models.api.service.model_entity_service import ModelEntityService
 from nhx.core.models.api.v2.models import router, start_update_model_spec_job
@@ -71,6 +73,9 @@ def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_c
     )
 
     app = FastAPI()
+    # The deployed service registers these through the service base; entity
+    # store validation errors rely on them to become 422 responses.
+    register_sdk_exception_handlers(app)
 
     def override_model_entity_service():
         return mock_model_entity_service
@@ -450,6 +455,18 @@ def test_create_model_entity_validation_error_returns_422(client, mock_model_ent
 
     assert response.status_code == 422
     assert "name must match pattern" in response.json()["detail"]
+
+
+def test_create_model_relays_entity_store_error_code(client, mock_model_entity_service):
+    """The entity store's code survives the Models API so callers can act on it."""
+    mock_model_entity_service.create_model_entity.side_effect = EntityValidationError(
+        "Workspace 'nvidia' does not exist. Please create the workspace first.", code=WORKSPACE_NOT_FOUND_CODE
+    )
+
+    response = client.post("/apis/models/v2/workspaces/nvidia/models", json={"name": "my-model"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
 
 
 @pytest.mark.asyncio

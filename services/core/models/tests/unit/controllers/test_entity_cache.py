@@ -6,6 +6,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE
 from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
 from nhx.core.models.controllers.entity_cache import ModelEntityCache, UnflushedMutationsError
 
@@ -269,51 +270,53 @@ async def test_failed_write_is_kept_for_retry_and_succeeds_later(mock_client, ca
 
 
 @pytest.mark.asyncio
-async def test_failed_write_in_deleted_workspace_is_dropped(mock_client, cache):
+async def test_failed_create_in_deleted_workspace_is_dropped(mock_client, cache):
     """A workspace deleted before a staged create lands would fail every retry forever."""
     await _load(mock_client, cache)
     client = _configure_models_client(
         mock_client,
-        create_model=AsyncMock(side_effect=_status_error(422, "Workspace 'gone' does not exist.")),
+        create_model=AsyncMock(
+            side_effect=_status_error(422, "Workspace 'gone' does not exist.", code=WORKSPACE_NOT_FOUND_CODE)
+        ),
     )
-    mock_client.workspaces_client.get_workspace = AsyncMock(side_effect=_status_error(404, "not found"))
 
     cache.stage_create("gone", "m1")
-    cache.stage_create("gone", "m2")
+    await cache.flush()
+    assert cache._pending == {}
+
+    await cache.flush()
+    client.create_model.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_update_of_missing_entity_is_dropped(mock_client, cache):
+    """An entity that no longer exists has nothing left to keep consistent."""
+    await _load(mock_client, cache, [_entity("ws", "m1", ["ws/p1"])])
+    _configure_models_client(mock_client, update_model=AsyncMock(side_effect=_status_error(404, "not found")))
+
+    cache.stage_provider_unlink("ws", "m1", "ws/p1")
     await cache.flush()
 
     assert cache._pending == {}
-    # One lookup answers for every failure in the workspace.
-    mock_client.workspaces_client.get_workspace.assert_awaited_once_with(name="gone")
-
-    await cache.flush()
-    assert client.create_model.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_failed_unlink_is_kept_while_workspace_exists(mock_client, cache):
-    """An unlink for a provider being deleted survives as long as its workspace does."""
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(Exception("boom"), id="unexpected-error"),
+        pytest.param(_status_error(422, "Referenced resource does not exist."), id="422-without-code"),
+    ],
+)
+async def test_failed_unlink_is_kept_unless_the_write_can_never_succeed(mock_client, cache, error):
+    """An unlink for a provider being deleted survives anything short of its workspace or entity going away."""
     await _load(mock_client, cache, [_entity("ws", "m1", ["ws/p1"])])
-    _configure_models_client(mock_client, update_model=AsyncMock(side_effect=Exception("boom")))
+    _configure_models_client(mock_client, update_model=AsyncMock(side_effect=error))
 
     cache.stage_provider_unlink("ws", "m1", "ws/p1")
     await cache.flush()
 
-    mock_client.workspaces_client.get_workspace.assert_awaited_once_with(name="ws")
     assert cache._pending[("ws", "m1")].unlink_providers == ["ws/p1"]
-
-
-@pytest.mark.asyncio
-async def test_failed_write_is_kept_when_workspace_lookup_fails(mock_client, cache):
-    """Only a definite "not found" drops a change; an unanswered lookup keeps it."""
-    await _load(mock_client, cache, [_entity("ws", "m1", ["ws/p1"])])
-    _configure_models_client(mock_client, update_model=AsyncMock(side_effect=Exception("boom")))
-    mock_client.workspaces_client.get_workspace = AsyncMock(side_effect=_status_error(503, "unavailable"))
-
-    cache.stage_provider_unlink("ws", "m1", "ws/p1")
-    await cache.flush()
-
-    assert ("ws", "m1") in cache._pending
 
 
 @pytest.mark.asyncio
