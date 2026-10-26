@@ -169,6 +169,34 @@ def test_stdio_secret_templates_are_filled_from_the_process_env_and_gym_servers_
     assert _REGISTERED["mcp"]["servers"]["calc"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"  # the input is not mutated
 
 
+def test_staged_fabric_adapter_descriptors_are_discovered_from_python_target_directories(app, tmp_path: Path) -> None:
+    target = tmp_path / "wheels-v1-site-packages"
+    adapter_root = target / "share" / "nemo-fabric" / "adapters"
+    deepagents = adapter_root / "deepagents" / "deepagents.fabric-adapter.json"
+    custom = adapter_root / "custom.fabric-adapter.json"
+    deepagents.parent.mkdir(parents=True)
+    deepagents.write_text("{}")
+    custom.write_text("{}")
+    (adapter_root / "README.md").write_text("not a descriptor")
+
+    descriptors = app._staged_fabric_adapter_descriptors(["", str(target), str(target), str(tmp_path / "missing")])
+
+    assert descriptors == sorted([str(custom.resolve()), str(deepagents.resolve())])
+
+
+def test_staged_adapter_descriptors_extend_registered_discovery_without_mutating_it(app) -> None:
+    registered = {**_REGISTERED, "discovery": {"local_paths": ["/agent/authored.fabric-adapter.json"]}}
+    staged = "/job/work/wheels-v1-site-packages/share/nemo-fabric/adapters/deepagents/deepagents.fabric-adapter.json"
+
+    composed = app.compose_fabric_config(
+        registered,
+        **_compose_kwargs(adapter_descriptor_paths=[staged, staged]),
+    )
+
+    assert composed["discovery"]["local_paths"] == ["/agent/authored.fabric-adapter.json", staged]
+    assert registered["discovery"]["local_paths"] == ["/agent/authored.fabric-adapter.json"]
+
+
 def test_fabric_messages_become_responses_items_ending_with_the_answer(app) -> None:
     output = {
         "messages": [
