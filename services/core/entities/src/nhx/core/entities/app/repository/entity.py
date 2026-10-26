@@ -88,6 +88,7 @@ class EntityRepositoryInterface(ABC):
         page: int = 1,
         page_size: int = 100,
         sort: Optional[str] = None,
+        page_token: str | None = None,
         filter_op: Optional[FilterOperation] = None,
         relationship_child_workspaces: Optional[set[str]] = None,
         session: AsyncSession | None = None,
@@ -100,6 +101,10 @@ class EntityRepositoryInterface(ABC):
             page: Page number (1-indexed)
             page_size: Number of items per page
             sort: Sort field (prefix with - for descending)
+            page_token: None retains offset paging. Empty string starts keyset paging;
+                otherwise resume after the token boundary. Requires page=1 and created_at
+                or -created_at sort. The returned total counts the full matching query,
+                not just rows after the boundary.
             filter_op: Filter operation for filtering (can include workspace filter)
             relationship_child_workspaces: If set, relationship/EXISTS filters only consider
                 child entities in these workspaces. If None, child workspace is not restricted

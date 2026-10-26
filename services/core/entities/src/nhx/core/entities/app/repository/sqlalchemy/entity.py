@@ -11,11 +11,12 @@ from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
 from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.pagination import CURSOR_SORTS, EntityPageToken, entity_page_scope
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
 from nhx.core.entities.entities import Entity
 from nhx.core.entities.utils.identifiers import generate_entity_id
-from sqlalchemy import cast, func, select
+from sqlalchemy import and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
@@ -179,11 +180,31 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         page: int = 1,
         page_size: int = 100,
         sort: Optional[str] = None,
+        page_token: str | None = None,
         filter_op: Optional[FilterOperation] = None,
         relationship_child_workspaces: Optional[set[str]] = None,
         session: AsyncSession | None = None,
     ) -> tuple[List[Entity], int]:
-        """List entities with filtering."""
+        """List entities with filtering and optional timestamp/ID keyset paging."""
+        position = None
+        if page_token is not None:
+            sort = "-created_at" if sort is None else sort
+            if page != 1:
+                raise ValueError("page_token cannot be combined with page other than 1")
+            if sort not in CURSOR_SORTS:
+                raise ValueError("page_token supports only created_at and -created_at sorts")
+            if page_token:
+                position = EntityPageToken.decode(
+                    page_token,
+                    scope_hash=entity_page_scope(
+                        workspace=workspace,
+                        entity_type=entity_type,
+                        sort=sort,
+                        filter_op=filter_op,
+                        relationship_child_workspaces=relationship_child_workspaces,
+                    ),
+                )
+
         async with self._get_session(session) as sess:
             # Start with base query
             query = select(DBEntity)
@@ -209,12 +230,29 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             total_result = await sess.execute(count_query)
             total = total_result.scalar() or 0
 
+            if position is not None:
+                # The timestamp direction follows sort; IDs always break ties ASC.
+                timestamp_bound = (
+                    DBEntity.created_at < position.created_at
+                    if sort == "-created_at"
+                    else DBEntity.created_at > position.created_at
+                )
+                query = query.where(
+                    or_(
+                        timestamp_bound,
+                        and_(DBEntity.created_at == position.created_at, DBEntity.id > position.entity_id),
+                    )
+                )
+
             if sort is not None:
                 query = query.order_by(self._get_sort_key(sort, dialect_name=sess.get_bind().dialect.name))
             else:
                 query = query.order_by(DBEntity.created_at.desc())
 
-            query = query.offset((page - 1) * page_size).limit(page_size)
+            if page_token is not None:
+                query = query.order_by(DBEntity.id.asc()).limit(page_size)
+            else:
+                query = query.offset((page - 1) * page_size).limit(page_size)
 
             result = await sess.execute(query)
             db_entities = result.scalars().all()

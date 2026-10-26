@@ -1362,6 +1362,35 @@ paths:
           default: -created_at
           title: Sort
         description: Sort field
+      - name: page_token
+        in: query
+        required: false
+        schema:
+          description: 'Experimental forward-only keyset pagination. Pass an empty
+            string to start, then the returned next_page_token to continue. Supported
+            sorts: created_at and -created_at, with id ascending as tie-breaker. Omit
+            this parameter to retain numbered pages. Requires page=1; changing the
+            sort or effective filters invalidates a token. Tokens are opaque continuation
+            positions, not snapshot handles. Concurrent inserts before the boundary
+            are not revisited; deletes before it do not shift the next page. Changes
+            to sort values or filter membership can still affect traversal. Counts
+            reflect the current matching query, not a snapshot; pagination.page remains
+            1 in token mode. Stop when next_page_token is null. Invalid or mismatched
+            tokens return HTTP 400 (tokens over the length limit return HTTP 422).'
+          title: Page Token
+          type: string
+          maxLength: 4096
+        description: 'Experimental forward-only keyset pagination. Pass an empty string
+          to start, then the returned next_page_token to continue. Supported sorts:
+          created_at and -created_at, with id ascending as tie-breaker. Omit this
+          parameter to retain numbered pages. Requires page=1; changing the sort or
+          effective filters invalidates a token. Tokens are opaque continuation positions,
+          not snapshot handles. Concurrent inserts before the boundary are not revisited;
+          deletes before it do not shift the next page. Changes to sort values or
+          filter membership can still affect traversal. Counts reflect the current
+          matching query, not a snapshot; pagination.page remains 1 in token mode.
+          Stop when next_page_token is null. Invalid or mismatched tokens return HTTP
+          400 (tokens over the length limit return HTTP 422).'
       - name: count_by
         in: query
         required: false
@@ -12602,6 +12631,13 @@ components:
           additionalProperties:
             type: integer
           type: object
+        next_page_token:
+          type:
+          - string
+          - 'null'
+          title: Next Page Token
+          description: Forward continuation for experimental token mode; null for
+            numbered pages or the final page.
       type: object
       required:
       - data

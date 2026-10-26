@@ -347,7 +347,8 @@ def add_workspace_filtering(
     workspace_filter = ComparisonOperation(
         operator=FilterOperator.IN,
         field=field,
-        value=list(accessible_workspaces),
+        # Keep the effective filter stable across workers for cursor scope hashes.
+        value=sorted(accessible_workspaces),
     )
 
     # Combine with user's filter if present

@@ -41,14 +41,23 @@ from nhx.core.entities.api.v2.utils import (
 )
 from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
 from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.pagination import MAX_PAGE_TOKEN_LENGTH, EntityPageToken, entity_page_scope
 from nhx.core.entities.entities import Entity
 from nhx.core.entities.utils.filter import FilterDep
 from nhx.core.entities.utils.identifiers import generate_entity_name
+from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 
 
 class EntitiesPage(Page[Entity]):
     group_counts: dict[str, int] | None = None
+    next_page_token: str | None = Field(
+        default=None,
+        description="Forward continuation for experimental token mode; null for numbered pages or the final page.",
+        # The platform normalizer flattens Optional unions. Preserve the terminal
+        # null explicitly so generated clients can validate the wire response.
+        json_schema_extra={"type": ["string", "null"]},
+    )
 
 
 router = APIRouter()
@@ -362,6 +371,22 @@ async def list_entities(
         description="Sort field",
         examples=["-created_at", "created_at", "-updated_at", "updated_at", "-name", "name"],
     ),
+    page_token: str | None = Query(
+        default=None,
+        max_length=MAX_PAGE_TOKEN_LENGTH,
+        description=(
+            "Experimental forward-only keyset pagination. Pass an empty string to start, then "
+            "the returned next_page_token to continue. Supported sorts: created_at and -created_at, "
+            "with id ascending as tie-breaker. Omit this parameter to retain numbered pages. "
+            "Requires page=1; changing the sort or effective filters invalidates a token. "
+            "Tokens are opaque continuation positions, not snapshot handles. Concurrent inserts "
+            "before the boundary are not revisited; deletes before it do not shift the next page. "
+            "Changes to sort values or filter membership can still affect traversal. Counts reflect "
+            "the current matching query, not a snapshot; pagination.page remains 1 in token mode. "
+            "Stop when next_page_token is null. Invalid or mismatched tokens return HTTP 400 "
+            "(tokens over the length limit return HTTP 422)."
+        ),
+    ),
     count_by: str | None = Query(
         default=None,
         description="Optional direct string data field whose matching values should be counted.",
@@ -391,13 +416,31 @@ async def list_entities(
             workspace=query_workspace,
             entity_type=entity_type,
             page=page,
-            page_size=page_size,
+            page_size=page_size + 1 if page_token is not None else page_size,
             sort=sort,
+            page_token=page_token,
             filter_op=effective_filter,
             relationship_child_workspaces=accessible_workspaces,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    next_page_token = None
+    if page_token is not None and len(entities) > page_size:
+        entities = entities[:page_size]
+        last_entity = entities[-1]
+        next_page_token = EntityPageToken(
+            v=1,
+            t=last_entity.created_at,
+            i=last_entity.id,
+            q=entity_page_scope(
+                workspace=query_workspace,
+                entity_type=entity_type,
+                sort=sort,
+                filter_op=effective_filter,
+                relationship_child_workspaces=accessible_workspaces,
+            ),
+        ).encode()
+
     group_counts = None
     if count_by is not None:
         try:
@@ -423,6 +466,7 @@ async def list_entities(
         sort=sort,
         filter=filter.to_dict() if filter else None,
         group_counts=group_counts,
+        next_page_token=next_page_token,
     )
 
 
