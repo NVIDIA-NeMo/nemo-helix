@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -1069,9 +1070,17 @@ async def virtual_model_proxy(
     # Build per-request context.  original_request captures the state after model
     # seeding but before any plugin runs; plugins receive a separate InferenceRequest
     # instance so mutations don't affect the snapshot.
+    #
+    # Deep-copy the body: a shallow ``dict(json_body)`` shares nested objects (e.g. the
+    # inner tool lists of a namespace tool, Responses ``input[].tools``, or
+    # ``allowed_tools.tools``) with the live working request, so a plugin that mutates
+    # one of those lists in place would silently corrupt this "frozen" snapshot. The
+    # snapshot is contractually the request as the client sent it (nemo-guardrails reads
+    # ``ctx.original_request.body`` precisely so later middleware can't hide content by
+    # mutating the body), so it must not alias any mutable state the chain can touch.
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     original_request = build_inference_request(
-        body=dict(json_body),
+        body=copy.deepcopy(json_body),
         headers=dict(request.headers),
         path=trailing_uri,
     )
