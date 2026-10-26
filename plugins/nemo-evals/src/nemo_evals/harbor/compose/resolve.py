@@ -30,7 +30,7 @@ from nhx_sandbox.harbor_opensandbox_services import COMPOSE_FILENAMES, MAIN_SERV
 from yaml.constructor import ConstructorError
 
 # The only compose file name Harbor reads, in the task's ``environment/`` directory.
-# TODO(AALGO-976): accept the other COMPOSE_FILENAMES and run-level overlays, via Harbor's extra_docker_compose.
+# TODO: accept the other COMPOSE_FILENAMES and run-level overlays, via Harbor's extra_docker_compose.
 COMPOSE_FILENAME = "docker-compose.yaml"
 ENVIRONMENT_DIR = "environment"
 
