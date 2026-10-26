@@ -105,7 +105,7 @@ To reuse a job's settings later, open the actions menu (**⋯**) on its detail p
 
 The list shows fine-tuned models created in the current workspace. Select a row to open the model details side panel, which includes **Model Details** and **Chat Playground** tabs, a **Customize this Model** action, an **Evaluate this Model** action that opens the **Evaluations** page (see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations)), and a **View Intake Traces** link when intake is enabled.
 
-The list also shows fine-tuning runs that are still in progress. A LoRA adapter links to the fine-tuning run that produced it. When a training step has finished but its output model is still uploading or registering, the list explains that state instead of showing the model as ready.
+A run's output model or LoRA adapter appears in the list only after the run finishes; follow a run that's still in progress from its job detail page. A row's actions menu includes **Job details**, which opens the fine-tuning run that produced the model or adapter.
 
 ## Customization Job Details
 

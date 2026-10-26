@@ -61,7 +61,7 @@ The list shows newest jobs first, ten rows per page with pagination, in these co
 | **Name** | The job's name. |
 | **Source** | A badge for the service that created the job. |
 | **Status** | A status badge; see the statuses under [Jobs](#jobs). |
-| **Elapsed time** | How long the job has run. The value counts up live while the job is running. |
+| **Elapsed time** | Time since the job was created, including while it's pending. The value counts up live while the job is active, and stops at the job's last update once it finishes. |
 
 The list refreshes automatically, so there's no refresh button. Selecting a row opens the job's service-specific detail page, or the generic job detail view when that service isn't enabled. When no jobs match, the empty state offers a **Fine-tune** call to action if fine-tuning is enabled (`studio.feature_flags.customizer_enabled`).
 
