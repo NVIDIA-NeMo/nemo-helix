@@ -752,17 +752,36 @@ def _build_delegated_claims(
     delegation: WorkloadDelegationEntity,
     verified_subject: VerifiedSubjectToken,
 ) -> dict[str, Any]:
-    delegated_principal = delegation.auth_context.to_principal().effective_principal
+    original_principal = delegation.auth_context.to_principal()
+    delegated_principal = original_principal.effective_principal
     claims: dict[str, Any] = {"sub": delegated_principal.id}
     if delegated_principal.email:
         claims["email"] = delegated_principal.email
     if delegated_principal.groups:
         claims["groups"] = ",".join(delegated_principal.groups)
 
-    actor_claims: dict[str, Any] = {"sub": verified_subject.subject}
-    if verified_subject.groups:
-        actor_claims["groups"] = ",".join(verified_subject.groups)
+    if original_principal.caller_kind == "service_principal":
+        actor_id = original_principal.id
+        actor_groups = original_principal.groups
+        actor_aliases = original_principal.authz_aliases
+    elif delegation.workload_kind == "job" or delegation.job_id is not None:
+        # Match the trusted-header path used by jobs-launcher: a workload is the
+        # jobs service acting on behalf of the principal that submitted the job.
+        actor_id = "service:jobs"
+        actor_groups = []
+        actor_aliases = [actor_id]
+    else:
+        actor_id = verified_subject.subject
+        actor_groups = verified_subject.groups
+        actor_aliases = [actor_id]
+
+    actor_claims: dict[str, Any] = {"sub": actor_id}
+    if actor_groups:
+        actor_claims["groups"] = ",".join(actor_groups)
+    if actor_aliases != [actor_id]:
+        actor_claims["nhx_actor_aliases"] = list(dict.fromkeys([actor_id, *actor_aliases]))
     claims["act"] = actor_claims
+    claims["nhx_workload_subject"] = verified_subject.subject
     return claims
 
 

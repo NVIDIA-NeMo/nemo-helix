@@ -870,7 +870,8 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
     assert response.status_code == 200
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert claims["sub"] == "creator@example.com"
-    assert claims["act"] == {"sub": delegation.name}
+    assert claims["act"] == {"sub": "service:jobs"}
+    assert claims["nhx_workload_subject"] == delegation.name
 
 
 def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_row(
@@ -1051,10 +1052,52 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert entity_client.get_calls == [delegation.name]
     assert claims["sub"] == "creator@example.com"
+    assert claims["act"] == {"sub": "service:jobs"}
+    assert claims["nhx_workload_subject"] == "system:serviceaccount:nemo-runs:job-runner"
+
+
+def test_kubernetes_reference_row_preserves_delegating_service_alias(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service_principal = Principal(
+        id="service:evals",
+        authz_aliases=["service:evals"],
+        on_behalf_of="creator@example.com",
+        on_behalf_of_email="creator@example.com",
+        on_behalf_of_groups=["workspace-editors"],
+        on_behalf_of_authz_aliases=["creator@example.com"],
+    )
+    delegation = _reference_delegation_entity(
+        auth_context=PluginAuthContext.from_principal(service_principal),
+    )
+    entity_client.entities[delegation.name] = delegation
+
+    async def decode_subject_token(
+        config: AuthConfig, subject_token: str, audience: str
+    ) -> exchange.DecodedSubjectToken:
+        return _decoded_subject_token(
+            {
+                "sub": "system:serviceaccount:nemo-runs:job-runner",
+                "groups": ["system:serviceaccounts"],
+            },
+            bound_reference=_pod_uid_bound_reference(),
+        )
+
+    monkeypatch.setattr(exchange_service, "decode_subject_token", decode_subject_token)
+
+    response = client.post("/token", data=_exchange_form("kubernetes-token"))
+
+    assert response.status_code == 200
+    claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
+    assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {
-        "sub": "system:serviceaccount:nemo-runs:job-runner",
-        "groups": "system:serviceaccounts",
+        "sub": "service:evals",
     }
+    assert claims["nhx_workload_subject"] == "system:serviceaccount:nemo-runs:job-runner"
 
 
 def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_row(
