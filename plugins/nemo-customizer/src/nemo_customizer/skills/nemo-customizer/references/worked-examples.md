@@ -5,7 +5,7 @@
 
 End-to-end examples for automodel, unsloth and rl (DPO).
 
-**Automodel (Nemotron LoRA):** `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` + `tau/commonsense_qa` → CHAT JSONL, fileset `commonsense_qa`, entity `nemotron-3-5-lightning-30b-a3b`, output `nemotron-3-5-lightning-commonsense-qa-lora`, `epochs: 1` (no `max_steps`). Values come from the Nemotron 3 Nano LoRA recipes in `references/recipes.md` (same architecture):
+**Automodel (Nemotron LoRA):** `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` + `tau/commonsense_qa` → CHAT JSONL, fileset `commonsense_qa`, entity `nemotron-3-5-lightning-30b-a3b`, output `nemotron-3-5-lightning-commonsense-qa-lora`, `epochs: 1`. Values come from the Nemotron 3 Nano LoRA recipes in `references/recipes.md` (same architecture):
 
 ```json
 {
@@ -27,9 +27,9 @@ End-to-end examples for automodel, unsloth and rl (DPO).
 
 **Automodel (small dense, 1 GPU):** `Qwen/Qwen3-1.7B` + the same dataset, entity `qwen3-1.7b`. On a ≥48 GB GPU, use the LoRA ≤4B **default** row: `micro` 32, GBS 128, `learning_rate` `1e-4` (high-util: 64 / 256).
 
-**Unsloth:** same small-dense model + dataset + entity + fileset, but `nemo customization unsloth --job-json /tmp/job.json -w default`. Job JSON ≤4B row: `batch.per_device_train_batch_size` 8, `batch.gradient_accumulation_steps` 16 (effective 128), `learning_rate` `1e-4`, `hardware.gpus` `"0"`, `output.save_method` `"lora"`. Poll the submit `"name"` (already `unsloth-…`) verbatim to completion. For payload shape only (not the field set or values): `plugins/nemo-unsloth/tests/fixtures/minimal_unsloth_sft.json` — a smoke-test input, so confirm fields against `unsloth explain`.
+**Unsloth:** same small-dense model + dataset + entity + fileset, but `nemo customization unsloth --job-json /tmp/job.json -w default`. Job JSON ≤4B row: `batch.per_device_train_batch_size` 8, `batch.gradient_accumulation_steps` 16 (effective 128), `learning_rate` `1e-4`, `hardware.gpus` `"0"`, `output.save_method` `"lora"`. Poll to completion.
 
-**rl (DPO):** the no-details default — `Qwen/Qwen3-0.6B` + `nvidia/HelpSteer3` (preference subset, uploaded raw), output `qwen3-0.6b-dpo`. First confirm `kubernetes_job` backend (see **Plugin pick** → rl runtime gate). Upload `training.jsonl` + `validation.jsonl` to one fileset, register the model entity, then submit a **small 20-step demo** job:
+**rl (DPO):** the no-details default — `Qwen/Qwen3-0.6B` + `nvidia/HelpSteer3` (preference subset, uploaded raw), output `qwen3-0.6b-dpo`. Upload `training.jsonl` + `validation.jsonl` to one fileset, register the model entity, then submit a **small 20-step demo** job:
 
 ```json
 {
@@ -42,5 +42,5 @@ End-to-end examples for automodel, unsloth and rl (DPO).
 }
 ```
 
-`nemo customization rl --job-json /tmp/job.json -w default`, derive the `rl-<hex>` id (submit has no `--name`), poll to completion. For payload shape only: `plugins/nemo-rl/tests/fixtures/minimal_dpo.json` — a smoke-test input, so confirm fields against `rl explain`. For a real run, replace `max_steps: 20` with `epochs`.
+`nemo customization rl --job-json /tmp/job.json -w default`, then poll to completion. This is the 20-step demo from `references/defaults.md`; a real run sets `epochs` instead of `max_steps`.
 

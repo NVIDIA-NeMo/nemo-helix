@@ -5,26 +5,11 @@
 
 Read this file when submit fails, jobs fail on images, the platform is unreachable, W&B/MLflow integrations fail, gated HuggingFace model download fails, or the user asks for Unsloth.
 
-Resolve the CLI first per **Pre-flight — CLI resolution** in `SKILL.md` (`nemo` on `PATH`, else `uv run nemo`, else route to **nemo-setup**). Example commands below use `nemo …`.
-
-## Prerequisites
-
-Before working through any section below, confirm:
-
-- **NeMo CLI available** — `nemo` on `PATH`, otherwise `uv run nemo` from the nemo-helix repo root (see **Pre-flight — CLI resolution** in `SKILL.md`).
-- **Platform base URL configured** — via the CLI context, `--base-url`, or `$NHX_BASE_URL`; defaults to `http://localhost:8080`.
-- **Workspace access** — authenticated (`nemo auth login`) with access to the target workspace.
+Resolve the CLI and the platform URL first: `SKILL.md` § **Pre-flight**.
 
 ## Platform unreachable (connection error)
 
-Any `nemo …` call may fail with `Connection error`, timeout, or connection refused — typically on the first `nemo jobs list-execution-profiles`. Auth is not required when the cluster has authentication disabled (`nemo auth status`); on 401/403 see **Authentication** in `SKILL.md`.
-
-**Did the user override the base URL?**
-
-| Situation | Action |
-|-----------|--------|
-| User gave a platform host/URL (e.g. `<remote-host>:8080`) or you set `NHX_BASE_URL` to something other than `http://127.0.0.1:8080` or `http://localhost:8080` | Report that the platform is not reachable at that address. Ask them to confirm the host is up and the URL is correct. **Do not** start local services. |
-| Default URL only — no user override | **Ask** whether to start the platform locally. If they agree, from the **nemo-helix** git root run in the **background**, then poll until healthy and retry the failed command: |
+`SKILL.md` § **Pre-flight** decides whether to start the platform. When the user agrees, run this from the **nemo-helix** git root in the **background**, then poll until healthy and retry the failed command:
 
 ```bash
 nemo services run \
@@ -42,32 +27,13 @@ curl -sf http://127.0.0.1:8080/health/ready
 nemo jobs list-execution-profiles -f json
 ```
 
-Do **not** auto-start services without asking. Customization needs **jobs**, **entities** (filesets), and **models** controllers — the command above is the minimal local set for this skill.
+Customization needs **jobs**, **entities** (filesets), and **models** controllers — the command above is the minimal local set for this skill.
 
 If the user already has a listener on `:8080` but health fails, see **nemo-status** (stale lock / wedged platform) before starting a second instance.
 
-## Backend choice (automodel vs unsloth)
+## Execution profiles
 
-**Do not** run `docker info` on the agent machine. The platform often runs elsewhere (`NHX_BASE_URL`). Ask the **connected platform** what executors it exposes.
-
-List profiles (login first only if auth is enabled — see **Authentication** in `SKILL.md`):
-
-```bash
-nemo jobs list-execution-profiles -f json
-```
-
-REST equivalent (same payload): `GET /apis/jobs/v2/execution-profiles` on the platform base URL with the saved auth token.
-
-Each entry has `provider`, `profile` (name), and `backend` (e.g. `docker`, `kubernetes_job`, `volcano_job`, `subprocess`).
-
-| Condition | Plugin |
-|-----------|--------|
-| User explicitly asks for Unsloth | `unsloth` |
-| User explicitly asks for Automodel | `automodel` |
-| Response includes **`provider`: `gpu` or `gpu_distributed`** | **`automodel`** (default) |
-| No GPU profiles (only `subprocess` and/or CPU `provider`) | Report that GPU customization is unavailable |
-
-Automodel and unsloth run through the platform Jobs service. After submission, the platform's **Docker executor** runs GPU container steps on the daemon attached to the connected platform host (`platform.runtime: docker`). (rl also runs through Kubernetes/Ray — see `rl-kubernetes-runtime.md`.) Training does not run in the CLI shell — query execution profiles on the platform (`NHX_BASE_URL`), not GPU availability in the agent's terminal.
+`nemo jobs list-execution-profiles -f json` (REST: `GET /apis/jobs/v2/execution-profiles`) returns one entry per profile, with `provider`, `profile` (name) and `backend` (`docker`, `kubernetes_job`, `volcano_job`, `subprocess`). `SKILL.md` § **Plugin pick** maps them to a backend.
 
 ### Pick execution profile
 
@@ -75,7 +41,7 @@ Automodel and unsloth run through the platform Jobs service. After submission, t
 
 **Unsloth** — pass `--profile <name>` on `nemo customization unsloth --job-json …` when the default `gpu` profile is wrong. There is no `execution_profile` field in `UnslothJobInput` today.
 
-Quick filter (stdout only — do not use `2>&1` or `json.load` breaks on stderr warnings):
+Quick filter:
 
 ```bash
 nemo jobs list-execution-profiles -f json 2>/dev/null | python3 -c "
@@ -88,28 +54,9 @@ for p in json.load(sys.stdin):
 
 Do not run `nemo customization --help` unless submit returns unknown plugin.
 
-## Parsing CLI JSON
-
-`submit`, `explain`, and `-f json` commands write **JSON on stdout**. Harmless config warnings (e.g. `Configuration file not found, using defaults`) go to **stderr**, not stdout.
-
-**Do not** merge stderr into stdout with **`2>&1`** before `json.load` or jq — the warnings prefix the stream and cause `JSONDecodeError` even when submit **succeeded** and the job is already queued. That parse failure often leads to **duplicate jobs** when the agent re-runs submit.
-
-| Do | Don't |
-|----|-------|
-| Pipe **stdout only**: `nemo customization <plugin> --job-json /tmp/job.json \| python3 -c "import sys,json; print(json.load(sys.stdin)['name'])"` | `nemo customization <plugin> --job-json /tmp/job.json 2>&1 \| python3 -c "import sys,json; json.load(sys.stdin)"` |
-| Suppress stderr if noisy: append `2>/dev/null` to the `nemo` command (not `2>&1`) | Merge stderr into the JSON pipe with `2>&1` |
-| On `json.load` failure, check `nemo jobs list` before re-submitting | Assume submit failed and submit again |
-
-Same rule for `nemo jobs list-execution-profiles -f json`: parse stdout only; use `2>/dev/null` if needed, never `2>&1` into `json.load`.
-
-## Verb is backend-specific (Jobs service only)
-
-- **Automodel**, **Unsloth**, and **RL** run through the Jobs service. Use `nemo customization <plugin> --job-json …`; these backends expose no local `run` verb.
-- Dataset refs in job JSON: `default/<fileset>` (automodel: `dataset.training` / `dataset.validation`; unsloth: `dataset.path` / optional `dataset.validation_path`).
-
 ## Gated HuggingFace models
 
-Gated or private HuggingFace repos require a **platform secret** and **`token_secret`** on the model fileset. The Files service does **not** use your local `~/.cache/huggingface` or shell `HF_TOKEN`. Unlike W&B, the HF token is **not** set in job JSON — it is wired on the **model fileset** storage config.
+Commands for the gated-model rule in `SKILL.md` § **Pre-flight**.
 
 | Symptom / log excerpt | Likely cause | Fix |
 |-----------------------|--------------|-----|
@@ -125,7 +72,7 @@ Gated or private HuggingFace repos require a **platform secret** and **`token_se
 nemo secrets list --workspace default
 ```
 
-If `hf-token` is missing, **ask the user** for a HuggingFace token with **Read** access (https://huggingface.co/settings/tokens). They must also accept the model license on the model's HF page.
+The token needs **Read** access (https://huggingface.co/settings/tokens), and the user must accept the model license on the model's HF page with the same account.
 
 ### 2. Create or update the secret
 
@@ -287,11 +234,14 @@ Set `jobs.executors.docker.launcher_tool_path` in `~/.nemo/config.yaml` to the *
 |-----------------|-------|-----|
 | `Unsloth training requires platform.runtime: docker` | Platform not configured for Docker GPU jobs | Start platform with Docker runtime and a GPU execution profile |
 | Unknown execution profile | Default `gpu` profile missing or wrong | Re-list profiles; pass `--profile <exact-name>` on submit |
-| Missing `nhx-unsloth-training` image / `Failed to pull image` / `manifest unknown` | Image not on the **platform host's** Docker daemon | **Remote platform** (`NHX_BASE_URL` not localhost): tell user to build on the target — **do not** `docker build` locally. **Local platform**: build on same host; see **Missing training images** above and `docker/unsloth/README.md` |
+| Missing `nhx-unsloth-training` image / `Failed to pull image` / `manifest unknown` | Image not on the **platform host's** Docker daemon | **Missing training images** above |
 | `torch.cuda.is_available()` False in training step logs | GPU not exposed to the container step | Confirm the execution profile is GPU-backed; check platform Docker GPU setup |
-| Job stuck in `active` after training step completes | Upload / model-entity steps still running | Keep polling top-level status (same as automodel) |
+| Job stuck in `active` after training step completes | Upload / model-entity steps still running | Keep polling (`SKILL.md` § **Workflow** step 6) |
 
-See `plugins/nemo-unsloth/README.md` for the 4-step job flow (download → train → upload → model-entity).
+
+## Older jobs missing from a backend's job list
+
+`GET /apis/customization/v2/workspaces/{workspace}/automodel/jobs` (and `/unsloth/jobs`, `/rl/jobs`) returns jobs whose spec stores `backend`. Jobs submitted before that field existed appear only in `nemo jobs list` (`GET /apis/jobs/v2/workspaces/{workspace}/jobs`).
 
 ## Empty `neg_doc` on retrieval jobs
 
@@ -317,7 +267,7 @@ Shared:
 | Action | Command |
 |--------|---------|
 | Execution profiles | `nemo jobs list-execution-profiles -f json` |
-| Create dataset fileset | `nemo files filesets create <name> --workspace default --purpose dataset` (no `--exist-ok`; use a new name when the data changes — see `references/gotchas.md`) |
+| Create dataset fileset | `nemo files filesets create <name> --workspace default --purpose dataset` (a new name when the data changes: `SKILL.md` § **Workflow** step 2) |
 | Create HF weights fileset (public) | `nemo files filesets create <name> --workspace default --purpose model --exist-ok --storage '{"type":"huggingface","repo_id":"<repo>","repo_type":"model","revision":"main"}'` |
 | Create HF weights fileset (gated) | Same as above plus `"token_secret":"hf-token"` — see § **Gated HuggingFace models** |
 | Upload | `nemo files upload <local> <fileset> --workspace default --remote-path train.jsonl` |
@@ -341,4 +291,3 @@ Unsloth:
 | Status | `nemo jobs get-status <name>` (submit `"name"`, verbatim: already `unsloth-…`) |
 | Live schema | `nemo customization unsloth explain` |
 
-All backends return a job id from `submit` — poll until top-level status is terminal (`completed`, `error`, or `cancelled`).

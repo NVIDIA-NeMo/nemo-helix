@@ -215,7 +215,7 @@ Val loss from training is **not** accuracy — always run a generation eval for 
 
 ## Helper script
 
-From **nemo-helix** git root:
+From this skill's directory; the script needs only the Python standard library:
 
 ```bash
 # eval_helpers.py reads $NHX_BASE_URL when --base-url is omitted and self-defaults to
@@ -225,7 +225,7 @@ From **nemo-helix** git root:
 # with no config, leave it unset and the script defaults to localhost.
 
 # Base vs one adapter (--base-url optional when NHX_BASE_URL is set)
-uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \
+python3 references/eval_helpers.py \
   --model-entity <model-entity> \
   --adapter <adapter-name> \
   --provider <provider> \
@@ -234,7 +234,7 @@ uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer
   --output /tmp/fine-tune-eval.json
 
 # Base vs multiple adapters (epoch ablation)
-uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \
+python3 references/eval_helpers.py \
   --model-entity <model-entity> \
   --adapter <adapter-a> \
   --adapter <adapter-b> \

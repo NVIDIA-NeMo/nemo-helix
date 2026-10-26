@@ -88,27 +88,7 @@
     },
     {
       "type": "implicit",
-      "prompt": "Convert the primeintellect/ascii-tree environment to a format the platform can train against.",
-      "expected_skill": "nemo-customizer"
-    },
-    {
-      "type": "implicit",
-      "prompt": "How do I package my own reward environment as adapter-wheels-v1 and upload it as a fileset?",
-      "expected_skill": "nemo-customizer"
-    },
-    {
-      "type": "implicit",
-      "prompt": "My GRPO dataset rows are rejected at submit. What shape should the Gym JSONL rows be?",
-      "expected_skill": "nemo-customizer"
-    },
-    {
-      "type": "implicit",
-      "prompt": "Turn my existing NeMo Gym resources server into a native-v1 environment package for a customization job.",
-      "expected_skill": "nemo-customizer"
-    },
-    {
-      "type": "contextual",
-      "prompt": "The environment fileset validation says prompt JSONL must not live in the environment package. How do I fix the layout?",
+      "prompt": "I want to train Llama on my own support-ticket data so it answers like our agents.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -139,6 +119,11 @@
     {
       "type": "negative-control",
       "prompt": "Attach guardrails middleware to my virtual model in the inference gateway.",
+      "expected_skill_not": "nemo-customizer"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Package my reward environment as a wheels-v1 environment fileset and validate it.",
       "expected_skill_not": "nemo-customizer"
     }
   ]

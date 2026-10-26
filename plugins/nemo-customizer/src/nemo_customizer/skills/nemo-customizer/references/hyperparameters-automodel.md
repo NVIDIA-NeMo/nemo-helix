@@ -1,19 +1,17 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-<!-- Automodel job JSON reference. Index + integrations + source-of-truth: `hyperparameters.md`. Batch sizing / multi-GPU / 48 GB VRAM tables: `batch-sizing.md`. -->
+<!-- Automodel job JSON reference. Index + integrations: `hyperparameters.md`. Batch sizing / multi-GPU / 48 GB VRAM tables: `batch-sizing.md`. -->
 
 # Automodel job JSON
 
-Job JSON for `nemo customization automodel --job-json` uses **`AutomodelJobInput`** (`plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). For per-model values (LR, LoRA rank, batch, MoE layout), start from the model's recipe in **`recipes.md`**.
+Job JSON for `nemo customization automodel --job-json` uses **`AutomodelJobInput`**. Only fields in that schema are accepted (`extra="forbid"`). For per-model values (LR, LoRA rank, batch, MoE layout), start from the model's recipe in **`recipes.md`**.
 
 **Schema dump:**
 
 ```bash
 nemo customization automodel explain
 ```
-
-**Contract examples:** `services/automodel/tests/contract/input_configs/` (legacy shape; map `batch_size` → `global_batch_size` in submit JSON).
 
 ## Job JSON layout
 
@@ -140,11 +138,9 @@ LoRA block is auto-created when `finetuning_type` is `lora` or `lora_merged`.
 | Field | Default | Notes |
 |-------|---------|-------|
 | `epochs` | `1` | Must be **≥ 1**. Full passes over training set |
-| `max_steps` | `null` | **Global step cap.** Omit for epoch-based runs |
+| `max_steps` | `null` | **Global step cap.** Overrides `epochs` when it is reached first |
 | `val_check_interval` | `null` | `≤ 1.0` = fraction of epoch; `> 1` = every N steps |
 | `seed` | `null` | Reproducibility |
-
-**Gotcha:** Do **not** set `max_steps` with `epochs` for normal training. `max_steps` stops early (e.g. `epochs: 1` + `max_steps: 100` ends at step 100). Use `max_steps` **alone** only for smoke tests.
 
 ### Automodel `batch`
 
