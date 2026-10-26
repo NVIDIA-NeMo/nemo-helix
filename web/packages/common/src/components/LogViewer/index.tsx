@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useStickToBottom } from '@nemo/common/src/hooks/useStickToBottom';
+import { LogEditor } from '@nemo/common/src/components/LogViewer/LogEditor';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
@@ -12,7 +12,6 @@ import {
   Block,
   Button,
   CodeSnippetActions,
-  CodeSnippetCode,
   CodeSnippetCopyButton,
   CodeSnippetRoot,
   Flex,
@@ -20,8 +19,9 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
-import classNames from 'classnames';
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
+
+import '@nemo/common/src/components/LogViewer/styles.css';
 
 const DEFAULT_ROW_COUNT = 30;
 
@@ -85,8 +85,6 @@ export const LogViewer: FC<LogViewerProps> = ({
   const logText = formatLogs(displayedLogs);
   const hasMoreLogs = logs && logs.length > rows;
 
-  const isShowingLogs = useMemo(() => logs.length > 0 && !isLoading, [logs.length, isLoading]);
-
   // Announce the wait straight away; the counts join it once the first page tells us
   // the denominator.
   const progressLabel =
@@ -97,20 +95,10 @@ export const LogViewer: FC<LogViewerProps> = ({
 
   const notify = useNotify(onNotify);
 
-  const { ref: codeScrollRef, scrollToBottom } = useStickToBottom<HTMLDivElement>({
-    enabled: isShowingLogs,
-    resetKey: showAllLogs,
-  });
-
   const handleDownload = () => {
     if (downloadFilename) {
       triggerDownload(formatLogs(logs), downloadFilename);
     }
-  };
-
-  const handleLoadMore = () => {
-    scrollToBottom();
-    setShowAllLogs(true);
   };
 
   if (isLoading) {
@@ -154,7 +142,7 @@ export const LogViewer: FC<LogViewerProps> = ({
     <Block className="relative w-full min-w-0 max-w-full overflow-hidden h-full">
       {!showAllLogs && hasMoreLogs && (
         <Block className="absolute top-6 mt-[2px] left-px right-px z-10 py-5 text-center bg-[linear-gradient(to_bottom,var(--background-color-surface-sunken),transparent)]">
-          <Tag color="gray" kind="solid" onClick={handleLoadMore}>
+          <Tag color="gray" kind="solid" onClick={() => setShowAllLogs(true)}>
             <ArrowUp />
             Load previous logs
           </Tag>
@@ -164,7 +152,7 @@ export const LogViewer: FC<LogViewerProps> = ({
         kind="block"
         collapsible={false}
         rows={fillHeight ? undefined : rows}
-        className="min-h-auto h-full"
+        className="log-viewer min-h-auto h-full"
       >
         <CodeSnippetActions>
           <Flex className="w-full" justify="between" wrap="wrap">
@@ -205,20 +193,13 @@ export const LogViewer: FC<LogViewerProps> = ({
             <CopyGeneric />
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
-        <CodeSnippetCode
-          value={logText}
-          language="shell"
-          ref={codeScrollRef}
-          className={classNames(
-            'min-w-0 max-w-full',
-            { 'h-full !overflow-y-auto': fillHeight },
-            // Keep scroll on when wrapping: wrapped rows exceed the fixed height.
-            { '!overflow-y-hidden': !showAllLogs && !wrapLines },
-            {
-              'whitespace-pre-wrap [overflow-wrap:anywhere] [&_code]:whitespace-pre-wrap [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]':
-                wrapLines,
-            }
-          )}
+        <LogEditor
+          text={logText}
+          resetKey={showAllLogs}
+          wrapLines={wrapLines}
+          fillHeight={fillHeight}
+          // The unwrapped tail is sized to its rows, so it doesn't scroll.
+          scrollLocked={!showAllLogs && !wrapLines}
         />
       </CodeSnippetRoot>
     </Block>

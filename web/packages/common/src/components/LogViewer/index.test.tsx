@@ -4,18 +4,12 @@
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
-// Stand in for the highlighted code region to avoid act() warnings from async Shiki
-// highlighting. Only CodeSnippetCode needs replacing — the actions row stays real.
-vi.mock('@nvidia/foundations-react-core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nvidia/foundations-react-core')>();
-  return {
-    ...actual,
-    CodeSnippetCode: ({ value }: { value?: string }) => (
-      <pre data-testid="nv-code-snippet-code">{value}</pre>
-    ),
-  };
-});
+// Shiki loads asynchronously; highlighting isn't under test.
+vi.mock('@nemo/common/src/components/LogViewer/extensions/useShikiHighlighting', () => ({
+  useShikiHighlighting: () => [],
+}));
 
 function makeLog(index: number): HelixJobLog {
   return {
@@ -108,5 +102,45 @@ describe('LogViewer', () => {
     render(<LogViewer logs={[]} emptyMessage="No logs for this job." />);
 
     expect(screen.getByText('No logs for this job.')).toBeInTheDocument();
+  });
+
+  it('shows the tail of the log in the editor', () => {
+    const logs = Array.from({ length: 5 }, (_, i) => makeLog(i));
+
+    render(<LogViewer logs={logs} rows={2} />);
+
+    const code = screen.getByTestId('log-viewer-code');
+    expect(code).toHaveTextContent('Log message 4');
+    expect(code).not.toHaveTextContent('Log message 0');
+  });
+
+  it('shows every line after loading previous logs', async () => {
+    const logs = Array.from({ length: 5 }, (_, i) => makeLog(i));
+
+    render(<LogViewer logs={logs} rows={2} />);
+    await userEvent.click(screen.getByText('Load previous logs'));
+
+    expect(screen.getByTestId('log-viewer-code')).toHaveTextContent('Log message 0');
+    expect(screen.getByText('5 lines')).toBeInTheDocument();
+    expect(screen.queryByText('Load previous logs')).not.toBeInTheDocument();
+  });
+
+  it('appends new lines to the editor', () => {
+    const { rerender } = render(<LogViewer logs={[makeLog(0)]} fillHeight />);
+
+    rerender(<LogViewer logs={[makeLog(0), makeLog(1)]} fillHeight />);
+
+    const code = screen.getByTestId('log-viewer-code');
+    expect(code).toHaveTextContent('Log message 0');
+    expect(code).toHaveTextContent('Log message 1');
+  });
+
+  it('toggles line wrapping', async () => {
+    render(<LogViewer logs={[makeLog(0)]} />);
+    const wrap = screen.getByRole('button', { name: 'Wrap lines' });
+
+    await userEvent.click(wrap);
+
+    expect(wrap).toHaveAttribute('aria-pressed', 'true');
   });
 });
