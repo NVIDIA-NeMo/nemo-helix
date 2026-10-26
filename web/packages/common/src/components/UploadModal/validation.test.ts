@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadFile } from '@nemo/common/src/components/UploadModal/types';
 import { validateUploadForm } from '@nemo/common/src/components/UploadModal/validation';
 
 const readme = {
