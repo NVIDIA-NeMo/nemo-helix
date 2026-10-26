@@ -1251,6 +1251,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      actions: read
     uses: ./.github/workflows/release-smoke.yaml
     with:
       release-version: ${{ needs.stage-helm.outputs.chart_version }}
