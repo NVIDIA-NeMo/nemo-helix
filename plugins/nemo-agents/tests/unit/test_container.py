@@ -694,7 +694,9 @@ class TestRenderFabricDockerfile:
             PI_ADAPTER_NPM_SPEC,
             PI_RELAY_EXTENSION_PATH,
             PI_RELAY_EXTENSION_REF,
+            PI_SDK_NPM_SPECS,
             PINNED_NODE_MAJOR,
+            _pi_sdk_package_names,
             get_contract_version,
             render_fabric_dockerfile,
         )
@@ -720,6 +722,36 @@ class TestRenderFabricDockerfile:
         assert "@earendil-works/pi-coding-agent@^1.0.0" in result
         assert "@earendil-works/pi-ai@^1.0.0" in result
         assert "@earendil-works/pi-mcp@^1.0.0" in result
+        # The Pi SDK peers must be installed into the ADAPTER'S OWN node_modules (not
+        # as flat siblings under the npm prefix), so the adapter's ESM `import()` —
+        # which walks up from the importing file and ignores NODE_PATH — resolves the
+        # SDK by climbing into its own node_modules. Regression guard for
+        # `pi_harness_unavailable` when the SDK was installed flat under the prefix.
+        # --omit=dev keeps the adapter's TS/build devDeps out of the image and
+        # --save-prod records the SDK as prod deps so a future --omit=dev can't drop
+        # them (the adapter declares the SDK as optional peers AND devDeps).
+        assert (
+            f'npm install --prefix "${{PI_ADAPTER_DIR}}" --save-prod --omit=dev '
+            f"--no-audit --no-fund {PI_SDK_NPM_SPECS}" in result
+        )
+        # PI_ADAPTER_DIR must be assigned BEFORE the SDK install uses it — otherwise the
+        # install would run with --prefix "" and land in the build cwd, not the adapter.
+        assert result.index('PI_ADAPTER_DIR="') < result.index('npm install --prefix "${PI_ADAPTER_DIR}"')
+        # Build-time fail-fast: resolve each SDK package from the adapter dir the same
+        # way the adapter's bare-specifier ESM import() does, so a bad install layout
+        # fails the image build instead of surfacing as a runtime pi_harness_unavailable.
+        # The probe is DERIVED from PI_SDK_NPM_SPECS, so assert every installed package
+        # name is actually probed — this catches drift if the spec list ever changes.
+        probe_names = _pi_sdk_package_names()
+        assert probe_names, "expected at least one SDK package to probe"
+        assert "node --input-type=module -e " in result
+        for name in probe_names:
+            assert f'await import("{name}")' in result
+        # The adapter itself is still installed globally (so its bin/PATH + descriptor
+        # staging work); the SDK specs must NOT ride along on that global install line.
+        global_install_line = next(line for line in result.splitlines() if "npm install -g" in line)
+        assert PI_ADAPTER_NPM_SPEC in global_install_line
+        assert "@earendil-works/pi-coding-agent" not in global_install_line
         # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
         assert "nemo-relay-cli-bin" in result
         assert "ca-certificates curl git" in result
