@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: stored creator auth context (``data._auth_context``) is readable only by service principals."""
+"""Integration tests: stored creator auth context (``data._auth_context``) is readable only by service principals
+and writable only by services."""
 
 from datetime import datetime, timezone
 
@@ -109,22 +110,82 @@ async def test_service_principal_reads_keep_stored_auth_context(
     assert all(data[STORED_AUTH_CONTEXT_KEY] == _AUTH_CONTEXT for data in datas)
 
 
-async def test_user_write_responses_omit_stored_auth_context(client_with_auth: AsyncClient, repos) -> None:
-    """Create and update echo stored data; the auth context is still persisted for controllers."""
+_FORGED = {"principal_id": "attacker@example.com", "principal_groups": ["platform-admins"]}
+
+
+async def _stored_data(repos, name: str) -> dict:
+    stored = await repos["entity"].get_entity_by_name(workspace=_WS, entity_type=_ENTITY_TYPE, name=name)
+    assert stored is not None
+    return stored.data
+
+
+async def test_user_create_drops_forged_auth_context(client_with_auth: AsyncClient, repos) -> None:
     await _seed_run(repos)
-    data = {"status": "pending", STORED_AUTH_CONTEXT_KEY: _AUTH_CONTEXT}
 
     created = await client_with_auth.post(
-        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}", json={"name": "run-2", "data": data}
-    )
-    updated = await client_with_auth.put(
-        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}/run-2", json={"data": data}
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}",
+        json={"name": "run-2", "data": {"status": "pending", STORED_AUTH_CONTEXT_KEY: _FORGED}},
     )
 
     assert created.status_code == 201, created.text
-    assert updated.status_code == 200, updated.text
     assert created.json()["data"] == {"status": "pending"}
-    assert updated.json()["data"] == {"status": "pending"}
-    stored = await repos["entity"].get_entity_by_name(workspace=_WS, entity_type=_ENTITY_TYPE, name="run-2")
-    assert stored is not None
-    assert stored.data[STORED_AUTH_CONTEXT_KEY] == _AUTH_CONTEXT
+    assert await _stored_data(repos, "run-2") == {"status": "pending"}
+
+
+@pytest.mark.parametrize("sent", [_FORGED, None], ids=["forged", "sdk-redacted-none"])
+async def test_user_update_keeps_stored_auth_context(client_with_auth: AsyncClient, repos, sent) -> None:
+    """Users can neither replace the creator auth context nor wipe it with a redacted read-modify-write."""
+    await _seed_run(repos)
+
+    updated = await client_with_auth.put(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}/{_NAME}",
+        json={"data": {"status": "cancelling", STORED_AUTH_CONTEXT_KEY: sent}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["data"] == {"status": "cancelling"}
+    assert await _stored_data(repos, _NAME) == {"status": "cancelling", STORED_AUTH_CONTEXT_KEY: _AUTH_CONTEXT}
+
+
+async def test_auth_disabled_user_update_keeps_stored_auth_context(client: AsyncClient, repos) -> None:
+    await _seed_run(repos)
+
+    updated = await client.put(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}/{_NAME}",
+        json={"data": {"status": "cancelling", STORED_AUTH_CONTEXT_KEY: _FORGED}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert (await _stored_data(repos, _NAME))[STORED_AUTH_CONTEXT_KEY] == _AUTH_CONTEXT
+
+
+async def test_delegated_service_create_stores_auth_context(
+    client_with_auth_service_on_behalf_of: AsyncClient, repos
+) -> None:
+    """Plugin APIs create entities while delegating for the user; the creator auth context they set is kept."""
+    await _seed_run(repos)
+
+    created = await client_with_auth_service_on_behalf_of.post(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}",
+        json={"name": "run-2", "data": {"status": "pending", STORED_AUTH_CONTEXT_KEY: _AUTH_CONTEXT}},
+    )
+
+    assert created.status_code == 201, created.text
+    assert STORED_AUTH_CONTEXT_KEY not in created.json()["data"]
+    assert (await _stored_data(repos, "run-2"))[STORED_AUTH_CONTEXT_KEY] == _AUTH_CONTEXT
+
+
+async def test_service_principal_update_replaces_auth_context(
+    client_with_auth_service_principal: AsyncClient, repos
+) -> None:
+    await _seed_run(repos)
+    replacement = {**_AUTH_CONTEXT, "principal_groups": ["eval-admins", "new-group"]}
+
+    updated = await client_with_auth_service_principal.put(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}/{_NAME}",
+        json={"data": {"status": "running", STORED_AUTH_CONTEXT_KEY: replacement}},
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["data"][STORED_AUTH_CONTEXT_KEY] == replacement
+    assert (await _stored_data(repos, _NAME))[STORED_AUTH_CONTEXT_KEY] == replacement

@@ -3454,6 +3454,10 @@ async def test_rerun_without_a_caller_keeps_the_jobs_auth_context(
     """The job is read with auth_context stripped. Without a caller's, rerun saves back the job's own."""
     owner = AuthContext(principal_id="owner@example.com", principal_email="owner@example.com")
     job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE, auth_context=owner)
+    # The Entity Store keeps only a service's write of the auth context. In production the dispatcher
+    # writes as service:jobs on behalf of the caller; mock_store sends no principal, so store it as the service.
+    jobs_store = mock_store.as_service("jobs", internal=True)
+    await jobs_store.update((await jobs_store.get_by_id(HelixJob, job.id)).with_auth_context(owner))
     step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
     assert step is not None
     await mock_dispatcher.update_job_status_from_step(step, HelixJobStatus.ERROR, error_details={"message": "boom"})
