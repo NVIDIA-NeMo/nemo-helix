@@ -17,8 +17,10 @@ import os
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlsplit
 
+from fastapi import HTTPException, status
 from nemo_agents_plugin.jobs.gateway_proxy import platform_auth_proxy
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
@@ -34,7 +36,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -108,10 +110,33 @@ def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> Metr
     return resolved_bundle.model_copy(update={"metadata": source_bundle.metadata})
 
 
+async def _readable_kind(
+    authorize: SourceReadAuthorizer | None, workspace: str, name: str
+) -> Literal["model", "virtual_model"]:
+    """Which of the model or the VirtualModel named ``name`` the caller may read; either lets them use it.
+
+    Every model is served through a VirtualModel of the same name, so reading either one is enough.
+
+    Raises:
+        HTTPException: The caller may read neither (the model's denial).
+    """
+    try:
+        await authorize_source_read(authorize, "model", workspace, name)
+    except HTTPException as model_denied:
+        if model_denied.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        try:
+            await authorize_source_read(authorize, "virtual_model", workspace, name)
+        except HTTPException:
+            raise model_denied from None
+        return "virtual_model"
+    return "model"
+
+
 def _model_not_found_error(model_ref: ModelRef, workspace: str, name: str) -> ValueError:
     return ValueError(
         f"Model reference '{model_ref.root}' not found. "
-        f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
+        f"Ensure a model or VirtualModel named '{name}' exists in workspace '{workspace}', "
         "or use an inline model definition instead."
     )
 
@@ -144,16 +169,21 @@ class HelixMetricModelResolver(ModelResolver):
         workspace, name = parse_workspace_name_ref(
             model_ref.root, label="ModelRef", expected_format="workspace/model_name"
         )
-        await authorize_source_read(self.authorize, "model", workspace, name)
+        readable = await _readable_kind(self.authorize, workspace, name)
         try:
             resolved = await self.models_client.resolve_model_reference(model_ref.root)
+        except UnroutableModelError as exc:
+            raise ValueError(str(exc.detail)) from exc
         except NotFoundError as exc:
             raise _model_not_found_error(model_ref, workspace, name) from exc
+        if resolved.virtual_model and readable == "model":
+            await authorize_source_read(self.authorize, "virtual_model", workspace, name)
+        entity_readable = readable == "model"
         return Model(
             url=_job_reachable_url(resolved.url, self.models_client.base_url),
             name=resolved.name,
-            host_url=resolved.host_url,
-            served_model_name=resolved.served_model_name,
+            host_url=resolved.host_url if entity_readable else None,
+            served_model_name=resolved.served_model_name if entity_readable else None,
         )
 
 

@@ -27,15 +27,12 @@ test("parseTrigger accepts a leading /helix-* token only", () => {
   assert.equal(parseTrigger(""), null);
 });
 
-test("no trigger token -> no reaction, no dispatch", async () => {
+test("no trigger token -> no dispatch", async () => {
   const calls = [];
   const out = await dispatchAgent({
     core: { info: () => {}, warning: () => {} },
     github: {
       rest: {
-        reactions: {
-          createForIssueComment: async (r) => calls.push(["react", r]),
-        },
         repos: {
           createDispatchEvent: async (r) => calls.push(["dispatch", r]),
         },
@@ -48,16 +45,13 @@ test("no trigger token -> no reaction, no dispatch", async () => {
   assert.deepEqual(calls, []);
 });
 
-test("ACT reports the envelope and does not dispatch or react", async () => {
+test("ACT reports the envelope and does not dispatch", async () => {
   const logs = [];
   const calls = [];
   const out = await dispatchAgent({
     core: { info: (m) => logs.push(m), warning: () => {} },
     github: {
       rest: {
-        reactions: {
-          createForIssueComment: async (r) => calls.push(["react", r]),
-        },
         repos: {
           createDispatchEvent: async (r) => calls.push(["dispatch", r]),
         },
@@ -73,15 +67,12 @@ test("ACT reports the envelope and does not dispatch or react", async () => {
   assert.equal(out.client_payload.comment_author, "benmccown");
 });
 
-test("a /helix-* comment reacts 👀 and dispatches with PR context", async () => {
+test("a /helix-* comment dispatches with PR context", async () => {
   const calls = [];
   await dispatchAgent({
     core: { info: () => {}, warning: () => {} },
     github: {
       rest: {
-        reactions: {
-          createForIssueComment: async (r) => calls.push(["react", r]),
-        },
         repos: {
           createDispatchEvent: async (r) => calls.push(["dispatch", r]),
         },
@@ -89,14 +80,6 @@ test("a /helix-* comment reacts 👀 and dispatches with PR context", async () =
     },
     context: fakeContext("/helix-review"),
     env: { DISPATCH_REPO: "NVIDIA-NeMo/Platform-Deploy" },
-  });
-
-  const react = calls.find((c) => c[0] === "react")[1];
-  assert.deepEqual(react, {
-    owner: "NVIDIA-NeMo",
-    repo: "nemo-helix",
-    comment_id: 42,
-    content: "eyes",
   });
 
   const dispatch = calls.find((c) => c[0] === "dispatch")[1];

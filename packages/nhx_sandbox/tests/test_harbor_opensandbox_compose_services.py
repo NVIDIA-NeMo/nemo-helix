@@ -117,14 +117,17 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Server:
 
 
 @pytest.fixture
-def extension(monkeypatch: pytest.MonkeyPatch) -> _Extension:
-    """Route the environment's direct server requests to a fake extension."""
+def extension(monkeypatch: pytest.MonkeyPatch, server: Server) -> _Extension:
+    """Route the environment's direct server requests to a fake extension, and the endpoints route to ``server``."""
     extension = _Extension()
     real_client = httpx.AsyncClient
 
+    def handle(request: httpx.Request) -> httpx.Response:
+        return server.endpoint_route(request) or extension.handle(request)
+
     def client(**kwargs: Any) -> httpx.AsyncClient:
         extension.timeouts.append(kwargs["timeout"])
-        return real_client(transport=httpx.MockTransport(extension.handle), **kwargs)
+        return real_client(transport=httpx.MockTransport(handle), **kwargs)
 
     monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
     return extension

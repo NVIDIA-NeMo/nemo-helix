@@ -58,6 +58,7 @@ from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import ResolvedModelReference
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -683,6 +684,12 @@ async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     entity = SimpleNamespace(workspace="default", name="judge", model_providers=[])
     mocker.patch.object(
         AsyncModelsClient, "get_model", AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=entity)))
+    )
+    passthrough = SimpleNamespace(autoprovisioned=True, default_model_entity=f"{entity.workspace}/{entity.name}")
+    mocker.patch.object(
+        AsyncVirtualModelsClient,
+        "get_virtual_model",
+        AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=passthrough))),
     )
     inline_judge = LLMJudgeMetric(
         model=Model(url=f"http://localhost:9000{route}", name="sidecar"),

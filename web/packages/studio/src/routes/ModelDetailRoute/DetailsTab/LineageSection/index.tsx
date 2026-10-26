@@ -15,7 +15,8 @@ import type { FC } from 'react';
 
 /** What the deployment lineage card shows for each deployment state. */
 const getDeploymentCard = (
-  state: DeploymentIndicatorState
+  state: DeploymentIndicatorState,
+  isAdapter: boolean
 ): { value: string; note?: string; to?: string } => {
   switch (state.kind) {
     case 'served': {
@@ -28,10 +29,20 @@ const getDeploymentCard = (
         note: 'Served by an external provider',
       };
     }
+    case 'not-serving': {
+      const { workspace, name, status_message: statusMessage } = state.deployment;
+      return {
+        value: name,
+        to: getWorkspaceDeploymentDetailsRoute(workspace, name),
+        note: statusMessage || 'Not serving yet',
+      };
+    }
     case 'adapter-not-loaded':
       return { value: 'Not loaded', note: "The model's deployment hasn't loaded this adapter" };
     case 'not-deployed':
-      return { value: 'Not deployed', note: 'Deploy it to chat and serve inference' };
+      return isAdapter
+        ? { value: 'Base not deployed', note: 'Deploy the base model to serve this adapter' }
+        : { value: 'Not deployed', note: 'Deploy it to chat and serve inference' };
     default:
       return { value: 'Unknown', note: "Couldn't check where this is served" };
   }
@@ -52,6 +63,8 @@ export interface LineageSectionProps {
   };
   fileset: FilesetRef | null;
   deployment: DeploymentIndicatorState;
+  /** Where the deployment card leads; defaults to the serving deployment's own page. */
+  deploymentTo?: string;
   isAdapter: boolean;
 }
 
@@ -61,9 +74,10 @@ export const LineageSection: FC<LineageSectionProps> = ({
   job,
   fileset,
   deployment,
+  deploymentTo,
   isAdapter,
 }) => {
-  const deploymentCard = getDeploymentCard(deployment);
+  const deploymentCard = getDeploymentCard(deployment, isAdapter);
 
   return (
     <Grid colMinWidth="220px" gap="density-lg">
@@ -99,7 +113,7 @@ export const LineageSection: FC<LineageSectionProps> = ({
         label="Deployment"
         loading={deployment.kind === 'loading'}
         value={deploymentCard.value}
-        to={deploymentCard.to}
+        to={deploymentTo ?? deploymentCard.to}
         badge={<DeploymentStatusBadge state={deployment} isAdapter={isAdapter} />}
         note={deploymentCard.note}
       />

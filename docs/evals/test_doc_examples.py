@@ -29,8 +29,8 @@ import inspect
 import pytest
 from nemo_evals.sdk import Evaluator
 from nemo_evals.shared.metric_bundles.bundles import MetricBundlePackagerPolicyError
-from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_helix_plugin.client.client import NemoClient
+from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 
 
 class _CustomMetric:
@@ -75,16 +75,16 @@ def test_modelref_imports_from_context_agnostic_sdk() -> None:
 
 def test_harbor_codex_platform_target_example_validates() -> None:
     """The Harbor guide's built-in Codex target uses the current plugin-job contract."""
-    from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
+    from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborModelName, HarborRunnerTarget
     from nhx_evals_sdk import SecretRef
 
     target = HarborRunnerTarget(
-        source=HarborBuiltinAgentSource(name="codex", model_name="gpt-5.6-luna"),
+        source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5.6-luna")),
         agent_kwargs={"version": "0.153.0"},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
     )
 
-    assert target.source == HarborBuiltinAgentSource(name="codex", model_name="gpt-5.6-luna")
+    assert target.source == HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5.6-luna"))
     assert target.env_secrets["OPENAI_API_KEY"].root == "my-workspace/openai-key"
 
 

@@ -42,6 +42,15 @@ class ModelEntityRefLike(Protocol):
     def name(self) -> str: ...
 
 
+class VirtualModelLike(Protocol):
+    """A VirtualModel's routing identity."""
+
+    @property
+    def autoprovisioned(self) -> bool | None: ...
+    @property
+    def default_model_entity(self) -> str | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedModelReference:
     """Inference route details for a workspace-qualified model reference."""
@@ -50,6 +59,8 @@ class ResolvedModelReference:
     name: str
     host_url: str | None
     served_model_name: str | None = None
+    virtual_model: bool = False
+    """The name is held by a user-managed VirtualModel, so calls may go to any model it routes to."""
 
 
 def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "workspace/name") -> tuple[str, str]:
@@ -94,6 +105,21 @@ def resolved_model_reference(
         name=name,
         host_url=host_url,
         served_model_name=served_model_name,
+    )
+
+
+def is_passthrough_virtual_model(virtual_model: VirtualModelLike, workspace: str, name: str) -> bool:
+    """Whether ``virtual_model`` is the passthrough the platform created for model entity ``workspace/name``."""
+    return bool(virtual_model.autoprovisioned) and virtual_model.default_model_entity == f"{workspace}/{name}"
+
+
+def resolved_virtual_model_reference(*, base_url: str, workspace: str, name: str) -> ResolvedModelReference:
+    """Build route details for a VirtualModel; the gateway serves it on the same per-model route as an entity."""
+    return ResolvedModelReference(
+        url=model_entity_route_openai_url(base_url=base_url, workspace=workspace, name=name),
+        name=name,
+        host_url=None,
+        virtual_model=True,
     )
 
 
