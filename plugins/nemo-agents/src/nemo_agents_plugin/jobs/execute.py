@@ -46,6 +46,7 @@ from nemo_agents_plugin.jobs.execute_extensions import (
 )
 from nemo_agents_plugin.jobs.gateway_proxy import (
     exports_otlp_to_intake,
+    job_has_platform_identity,
     optional_platform_auth_proxy,
     platform_auth_proxy,
     rewrite_gateway_models,
@@ -463,12 +464,18 @@ class ExecuteAgentJob(NemoJob):
             and supports_intake_atif_export(step_config.agent.config, base_dir=fabric_dirs.base)
         )
         # Starting a proxy nothing would use is not free: it resolves the job's
-        # credentials up front, failing a run that never needed them. And a job
-        # that wants one only for telemetry would rather run untraced than not
-        # at all, which inference cannot say.
+        # credentials up front. A job routing inference through the gateway must
+        # fail if its proxy cannot start -- inference has no degraded mode. Any
+        # other job with a platform identity may still reach the platform API at
+        # any point (to read its own record, list jobs, or submit sub-jobs), so
+        # its proxy starts and its origin is published for the agent to call --
+        # but, like a telemetry-only job, it degrades to API-less rather than
+        # failing when credentials or a port cannot be had, which the optional
+        # variant allows. An auth-disabled job has no identity to forward, so the
+        # proxy yields ``None`` and callers reach the platform directly as before.
         if routes_inference_through_gateway(agent_config):
             proxy = platform_auth_proxy()
-        elif exports_telemetry or exports_otlp_to_intake(agent_config):
+        elif job_has_platform_identity() or exports_telemetry or exports_otlp_to_intake(agent_config):
             proxy = optional_platform_auth_proxy()
         else:
             proxy = nullcontext(None)
@@ -500,6 +507,11 @@ class ExecuteAgentJob(NemoJob):
                             agent_config=rewrite_intake_otlp_endpoints(
                                 rewrite_gateway_models(agent_config, proxy_origin), proxy_origin
                             ),
+                            # Route the agent's platform base URL through the proxy so its
+                            # SDK reaches the platform authenticated as the job's identity.
+                            # Injected via the translator's runtime-override layer, not the
+                            # agent config, so the task process's direct URL cannot clobber it.
+                            proxy_origin=proxy_origin,
                             input=step_config.request.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,

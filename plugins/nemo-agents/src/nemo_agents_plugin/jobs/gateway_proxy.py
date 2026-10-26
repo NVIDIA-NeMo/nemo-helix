@@ -52,6 +52,22 @@ def _gateway_models(config: AgentConfig) -> Iterator[tuple[ModelConfig, str]]:
             yield model, base_url
 
 
+def job_has_platform_identity() -> bool:
+    """Whether this job carries an identity the proxy could forward.
+
+    True when the substrate serialized a non-anonymous identity into the job --
+    a workload-identity token file, or a principal. It is the broadest reason to
+    run a proxy: an authenticated job may reach the platform API at any time (to
+    read its own record, list jobs, submit sub-jobs), not only for the inference
+    and telemetry paths the config happens to name. An auth-disabled platform
+    serializes an anonymous principal, for which :func:`platform_auth_proxy`
+    still yields ``None`` -- so this only decides whether to *attempt* a proxy;
+    the proxy itself remains the authority on whether there is anything to
+    forward.
+    """
+    return bool(os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR) or os.environ.get("NHX_PRINCIPAL"))
+
+
 def routes_inference_through_gateway(config: AgentConfig) -> bool:
     """Whether any of *config*'s models point at Inference Gateway.
 
