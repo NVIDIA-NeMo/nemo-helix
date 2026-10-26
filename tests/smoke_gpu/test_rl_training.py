@@ -45,7 +45,7 @@ SOUNDFILE_FILE_REMOVALS = {
     "/opt/uv_cache/archive-v0/*/soundfile.py",
 }
 BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
-    "wandb": "0.28.2",
+    "wandb": "0.30.0",
 }
 
 # Actor FQN -> packages that must import inside that actor's venv.
@@ -268,12 +268,16 @@ def test_worker_venv_wandb_opentelemetry_compat(actor_fqn):
         [
             str(python),
             "-c",
-            "from opentelemetry.util.types import _ExtendedAttributes; import wandb",
+            "from opentelemetry.util.types import _ExtendedAttributes; import wandb; "
+            "from importlib.metadata import version; from packaging.version import Version; "
+            "assert Version(version('wandb')) >= Version('0.30.0'), version('wandb')",
         ],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"wandb/OpenTelemetry import failed in {venv} (api/sdk skew?):\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"wandb/OpenTelemetry import or wandb security version check failed in {venv}:\n{result.stderr}"
+    )
 
 
 @pytest.mark.smoke_nhx_rl_training
@@ -316,6 +320,18 @@ def test_worker_venvs_symlink_into_shared_cache():
     assert str(torch_init.resolve()).startswith("/opt/uv_cache/"), (
         f"{torch_init} resolves outside the shared cache: {torch_init.resolve()}"
     )
+
+
+@pytest.mark.smoke_nhx_rl_training
+def test_mooncake_removed_from_environments_and_cache():
+    """Neither Mooncake wheel's bundled Go/etcd library is needed for RL training."""
+    roots = (
+        "/opt/nemo_rl_venv/lib/python*/site-packages",
+        "/opt/ray_venvs/*/lib/python*/site-packages",
+        "/opt/gym_venvs/*/lib/python*/site-packages",
+        "/opt/uv_cache/archive-v0/*",
+    )
+    assert_file_patterns_absent([f"{root}/mooncake" for root in roots])
 
 
 @pytest.mark.smoke_nhx_rl_training

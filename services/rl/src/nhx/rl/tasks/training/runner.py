@@ -19,6 +19,7 @@ from typing import Self
 import yaml
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.errors.classifier import classify_exception, failure_status_details
 from nhx.rl.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nhx.rl.app.jobs.training.schemas import (
     GPUInfo,
@@ -30,7 +31,6 @@ from nhx.rl.app.jobs.training.schemas import TrainingBackend as TrainingBackendE
 from nhx.rl.tasks.training.progress import JobsServiceProgressReporter
 
 from .distributed import DistributedContext
-from .errors.converter import create_error_details
 from .protocol import LibraryConfig, SupportsPreprocessing, TrainingBackend, TrainingPaused
 from .utils import get_gpu_info
 
@@ -152,16 +152,15 @@ class TrainingRunner:
 
         except Exception as e:
             logger.exception(f"Training failed: {e}")
-            # Convert exception to user-friendly error details using error mapping rules
-            error_details = create_error_details(e)
+            error = classify_exception(e)
             result = TrainingResult(
                 success=False,
-                error_message=error_details.get("message", str(e)),
+                error_message=error.message,
                 gpu_info=gpu_info,
                 training_duration_seconds=self._progress.training_duration_seconds,
             )
             if self._dist_ctx.is_coordinator:
-                self._progress.report_error(error_details)
+                self._progress.report_error(dict(error.to_error_details()), failure_status_details(error))
                 # Publish a failure marker so workers blocked on a coordinator
                 # barrier exit promptly instead of waiting out the full timeout.
                 self._dist_ctx.signal_failure()

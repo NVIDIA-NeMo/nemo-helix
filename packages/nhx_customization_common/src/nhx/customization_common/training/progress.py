@@ -238,9 +238,9 @@ class JobsServiceProgressReporter:
     def report_completed(self, message: str = "Completed") -> None:
         self.update_task(status="completed", status_details={"message": message, "phase": TrainingPhase.COMPLETED})
 
-    def report_error(self, error: str | dict[str, Any]) -> None:
+    def report_error(self, error: str | dict[str, Any], status_details: dict[str, Any] | None = None) -> None:
         error_details = {"message": error} if isinstance(error, str) else error
-        self.update_task(status="error", error_details=error_details)
+        self.update_task(status="error", status_details=status_details, error_details=error_details)
 
     def close(self) -> None:
         self._client.close()

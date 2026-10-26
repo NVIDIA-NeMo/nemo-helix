@@ -31,6 +31,7 @@ from nemo_helix_plugin.files.metadata import FilesetMetadata, ModelMetadataConte
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.types import (
     ContainerExecutorConfig,
     CreateModelAdapterRequest,
@@ -108,11 +109,11 @@ client.models.wait_for_provider_status(provider_name="my-nvidia-build")
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-nvidia-build",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -169,11 +170,11 @@ client.models.wait_for_provider_status(provider_name="openai")
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="openai",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "gpt-4",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -299,11 +300,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="llama-3-2-1b-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -369,7 +370,7 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="nemoguard-jailbreak-deployment",
     trailing_uri="v1/classify",
-    body={"input": "Tell me about vacation spots in Hawaii."},
+    body=JsonBody({"input": "Tell me about vacation spots in Hawaii."}),
 )
 ```
 
@@ -492,11 +493,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen-fs-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/qwen-2-5-1-5b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -602,11 +603,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen3-vllm-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/qwen3-1-7b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -751,13 +752,13 @@ client.models.create_model_adapter(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen3-lora-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default--linear-algebra",
         "messages": [
             {"role": "user", "content": "Find the determinant of [[2, 1], [1, 3]]."}
         ],
         "max_tokens": 256,
-    },
+    }),
 )
 ```
 
@@ -914,11 +915,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).model_post(
     name="qwen-2-5-14b",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/qwen-2-5-14b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -1398,12 +1399,12 @@ nemo inference gateway provider post v1/chat/completions "my-deployment" \
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/my-model",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
         "chat_template_kwargs": {"enable_thinking": False},
-    },
+    }),
 )
 ```
 

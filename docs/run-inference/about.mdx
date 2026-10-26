@@ -65,6 +65,7 @@ import os
 from pydantic import SecretStr
 
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.types import CreateModelProviderRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 ```
@@ -121,11 +122,11 @@ client.models.wait_for_provider_status(provider_name="my-nvidia-build")
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-nvidia-build",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -179,11 +180,11 @@ client.models.wait_for_provider_status(provider_name="openai")
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="openai",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "gpt-4",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 

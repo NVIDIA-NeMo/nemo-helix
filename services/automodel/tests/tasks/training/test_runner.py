@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
@@ -171,6 +172,27 @@ def test_result_json_keeps_the_recorded_duration_when_training_fails(
     assert written_duration(tmp_path) == 9.25
 
 
+def test_a_failure_reports_whether_a_rerun_would_repeat_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nhx.automodel.tasks.training.runner.get_gpu_info", lambda: None)
+    runner = _ScriptedRunner(
+        tmp_path,
+        duration=1.0,
+        compile_config=MagicMock,
+        train=MagicMock(side_effect=RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")),
+        backend=MagicMock(),
+    )
+    report_error = MagicMock()
+    monkeypatch.setattr(runner._progress, "report_error", report_error)
+
+    result = runner.run()
+
+    error_details, status_details = report_error.call_args.args
+    assert error_details["cause"] == "gpu_out_of_memory"
+    assert error_details["type"] == "GpuOutOfMemoryError"
+    assert status_details["resumable"] is False
+    assert status_details["non_resumable_reason"] == error_details["message"] == result.error_message
+
+
 def test_result_json_omits_duration_when_training_never_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -297,6 +319,29 @@ def test_the_coordinator_clears_an_earlier_pause_marker_before_training(
 
     assert not (tmp_path / "PAUSED").exists()
     assert signals == ["config_ready"]
+
+
+def test_a_resume_tells_training_which_step_it_paused_at(tmp_path: Path) -> None:
+    """The marker is gone once training starts, so the step goes in the config training reads."""
+    (tmp_path / "PAUSED").write_text("9\n")
+    backend = MagicMock()
+    backend.compile_config.return_value = {}
+    runner = _ScriptedRunner(tmp_path, duration=None, compile_config=MagicMock, backend=backend)
+
+    library = TrainingRunner._compile_config_phase(runner)
+
+    assert library.config_dict["_paused_at_step"] == 9
+    assert yaml.safe_load(library.config_path.read_text())["_paused_at_step"] == 9
+
+
+def test_a_first_run_is_not_told_it_resumes(tmp_path: Path) -> None:
+    backend = MagicMock()
+    backend.compile_config.return_value = {}
+    runner = _ScriptedRunner(tmp_path, duration=None, compile_config=MagicMock, backend=backend)
+
+    library = TrainingRunner._compile_config_phase(runner)
+
+    assert "_paused_at_step" not in library.config_dict
 
 
 def test_a_paused_run_exits_with_the_pause_code(monkeypatch: pytest.MonkeyPatch) -> None:

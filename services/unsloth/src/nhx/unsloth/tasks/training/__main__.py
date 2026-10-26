@@ -48,22 +48,26 @@ def _read_step_config() -> dict | None:
     return json.loads(path.read_text())
 
 
-def main() -> int:
-    """Run the unsloth training step inside a submit container."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+def _report_failure(exception: Exception) -> None:
+    """Report the classified failure, so a rerun can tell whether it would fail the same way."""
+    from nhx.customization_common.service.context import NHXJobContext
+    from nhx.customization_common.training.errors.classifier import classify_exception, failure_status_details
+    from nhx.unsloth.tasks.training.progress import JobsServiceProgressReporter
 
-    raw = _read_step_config()
-    if raw is None:
-        sys.stderr.write(
-            "nhx.unsloth.tasks.training requires NEMO_JOB_STEP_CONFIG_FILE_PATH. "
-            "Submit via `nemo customization unsloth --job-json <job.json>` so the "
-            "platform Jobs runner populates this for you.\n",
-        )
-        return 2
+    error = classify_exception(exception)
+    try:
+        reporter = JobsServiceProgressReporter(NHXJobContext.from_env())
+        try:
+            reporter.report_error(dict(error.to_error_details()), failure_status_details(error))
+        finally:
+            reporter.close()
+    except Exception:
+        # The exit code still fails the step.
+        logger.exception("Could not report the training failure")
 
+
+def _run_training(raw: dict) -> dict:
+    """Validate the step config, prepare the container's directories, and train."""
     # Local imports so the parent process (e.g. CLI discovery, pytest
     # collection) does not pay the ML import cost.
     from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -118,18 +122,38 @@ def main() -> int:
             return None
         return str(remap_job_storage_path(persistent_root, value))
 
-    try:
-        result = train_sft(
-            spec,
-            ctx,
-            model_path=_storage_path(config.model_path),
-            dataset_path=_storage_path(config.dataset_path),
-            validation_path=_storage_path(config.validation_path),
-            output_path=_storage_path(config.output_path),
-            checkpoint_path=_storage_path(config.checkpoint_path),
+    return train_sft(
+        spec,
+        ctx,
+        model_path=_storage_path(config.model_path),
+        dataset_path=_storage_path(config.dataset_path),
+        validation_path=_storage_path(config.validation_path),
+        output_path=_storage_path(config.output_path),
+        checkpoint_path=_storage_path(config.checkpoint_path),
+    )
+
+
+def main() -> int:
+    """Run the unsloth training step inside a submit container."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+    raw = _read_step_config()
+    if raw is None:
+        sys.stderr.write(
+            "nhx.unsloth.tasks.training requires NEMO_JOB_STEP_CONFIG_FILE_PATH. "
+            "Submit via `nemo customization unsloth --job-json <job.json>` so the "
+            "platform Jobs runner populates this for you.\n",
         )
-    except Exception:
+        return 2
+
+    try:
+        result = _run_training(raw)
+    except Exception as e:
         logger.exception("Unsloth training step failed")
+        _report_failure(e)
         return 1
 
     if result.get("paused"):

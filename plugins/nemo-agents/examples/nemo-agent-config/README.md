@@ -176,9 +176,12 @@ commands above. The example calls the NVIDIA model endpoint directly.
 streaming and sessions. Mini-SWE-Agent supports replacement system instructions,
 but not appended instructions, skills, MCP, or tool policy.
 
-Fabric 0.4 reports degraded Relay telemetry for Mini-SWE-Agent tool results.
-Invocation and session history still work; complete tool telemetry needs an
-upstream adapter fix.
+For Helix 0.9 / Fabric 0.5, follow the public
+[Mini-SWE lifecycle guide](https://docs.nvidia.com/nemo-helix/documentation/agents/mini-swe-agent)
+for credential binding, session commands, normalized responses and timeout
+boundaries. The integration gate checks invocation, session history and Relay
+request correlation, but does not guarantee complete per-tool-result telemetry;
+do not assume an older telemetry limitation was resolved merely by upgrading.
 
 ### NOOA
 

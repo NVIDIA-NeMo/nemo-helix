@@ -264,7 +264,7 @@ def test_grpo_driver_fails_a_run_that_saved_no_checkpoint() -> None:
 )
 def test_missing_checkpoint_messages_are_classified(message: str, expected_type: str, expected_detail: str) -> None:
     """The driver raises these as ValueError; the rules must map them for the user."""
-    from nhx.rl.tasks.training.errors.converter import create_error_details
+    from nhx.customization_common.training.errors.classifier import create_error_details
 
     details = create_error_details(ValueError(message))
     assert details["type"] == expected_type
@@ -325,3 +325,33 @@ def test_grpo_driver_exits_for_a_pause_before_the_checkpoint_check() -> None:
     }
 
     assert calls["exit_paused"] < calls["get_best_checkpoint_path"]
+
+
+def _first_call_lines(source: str) -> dict[str, int]:
+    """The line of the first call to each function or method name in *source*."""
+    lines: dict[str, int] = {}
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+        if name is not None:
+            lines[name] = min(node.lineno, lines.get(name, node.lineno))
+    return lines
+
+
+@pytest.mark.parametrize("driver,train_fn", [("grpo_driver.py", "grpo_train"), ("dpo_driver.py", "dpo_train")])
+def test_driver_fails_a_resume_that_restored_no_checkpoint(driver: str, train_fn: str) -> None:
+    """NeMo-RL's setup() starts from step 0 when it finds no checkpoint, which after a pause discards the
+    paused progress. The check sits after setup() and before the rewind, which would drop the metrics."""
+    lines = _first_call_lines((DRIVERS / driver).read_text())
+
+    assert "take_pause_marker" in lines
+    assert lines["setup"] < lines["check_resumed_from_pause"] < lines["rewind_to"] < lines[train_fn]
+
+
+@pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
+def test_driver_marks_a_pause_for_the_resume(driver: str) -> None:
+    """The exit code alone tells only this run's runner; the resume reads the marker."""
+    lines = _first_call_lines((DRIVERS / driver).read_text())
+
+    assert lines["write_pause_marker"] < lines["exit_paused"]

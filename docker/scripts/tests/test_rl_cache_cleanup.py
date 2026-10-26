@@ -55,3 +55,25 @@ def test_rl_cache_cleanup_preserves_referenced_archives(tmp_path: Path, stage: i
             link = cache / name / "pypi" / key
             assert link.is_symlink() is retained
             assert link.exists() is retained
+
+
+@pytest.mark.parametrize("stage", [0, 1], ids=["cache-warming", "worker-venvs"])
+def test_rl_syncs_skip_unused_mooncake_wheels(stage: int) -> None:
+    dockerfile = Path(__file__).parents[2] / "rl/Dockerfile.nhx-rl-base"
+    content = dockerfile.read_text()
+    blocks = content.split("SKIP=(\n")[1:]
+    assert len(blocks) == 2, "Keep coverage aligned with both RL sync stages"
+    array = "SKIP=(\n" + blocks[stage].split("\n)", 1)[0] + "\n)\n"
+    result = subprocess.run(
+        ["bash", "-eu", "-c", array + 'printf "%s\\n" "${SKIP[@]}"'],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    arguments = result.stdout.splitlines()
+    skipped = {arguments[index + 1] for index, arg in enumerate(arguments) if arg == "--no-install-package"}
+    assert {"mooncake-transfer-engine", "mooncake-transfer-engine-cuda13"} <= skipped
+    # An array that is never passed to uv would not prevent wheel installation.
+    syncs = [line for line in content.splitlines() if line.strip().startswith("uv sync ")]
+    assert syncs
+    assert all('"${SKIP[@]}"' in line for line in syncs)

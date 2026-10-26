@@ -27,7 +27,13 @@ from typing import Any, Literal
 from nemo_helix_plugin.job_context import JobContext
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.customization_common.training.pause import PausePoller
+from nhx.customization_common.training.pause import (
+    PausePoller,
+    check_resumed_from_pause,
+    pause_marker_path,
+    take_pause_marker,
+    write_pause_marker,
+)
 from nhx.customization_common.training.reporting import DIAGNOSTIC_TIME_SERIES, ProgressReportingConfig
 from nhx.unsloth.app.constants import SERVICE_NAME
 from nhx.unsloth.integrations.hf_bridge import apply_integrations_to_sft_config
@@ -360,11 +366,14 @@ def train_sft(
             )
 
             # Resume, or a rerun after a crash, continues from the newest complete checkpoint.
+            paused_step = take_pause_marker(pause_marker_path(checkpoint_dir))
             resume = newest_complete_checkpoint(checkpoint_dir)
             resume_step = 0
             if resume is not None:
                 resume_step = resume[1]
                 logger.info(f"Resuming training from {resume[0]} at step {resume_step}")
+            # Without a checkpoint the trainer starts from scratch, which a resume must not do.
+            check_resumed_from_pause(paused_step, resume_step, checkpoint_dir)
             # A rerun can restore an earlier step than the last one reported.
             progress.rewind_to(resume_step)
 
@@ -381,6 +390,8 @@ def train_sft(
                 train_result = trainer.train(resume_from_checkpoint=str(resume[0]) if resume is not None else None)
 
         if pause.stopped:
+            # Tells the resumed run that it must restore a checkpoint.
+            write_pause_marker(pause_marker_path(checkpoint_dir), trainer.state.global_step)
             logger.info(f"Training paused at step {trainer.state.global_step}; checkpoint saved, nothing published")
             return {
                 "paused": True,

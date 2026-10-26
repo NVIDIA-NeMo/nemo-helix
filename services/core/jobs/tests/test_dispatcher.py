@@ -1146,6 +1146,97 @@ async def test_create_or_update_task_keeps_the_task_phase_when_the_controller_re
     }
 
 
+CLASSIFIED_ERROR = {
+    "message": "A GPU ran out of memory.",
+    "type": "GpuOutOfMemoryError",
+    "detail": "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB",
+    "cause": "gpu_out_of_memory",
+}
+
+# A failure no rule matched. The task still reported it, with the traceback the controller never sees.
+UNMATCHED_ERROR = {
+    "message": "An internal error occurred during training. (ValueError: something new)",
+    "type": "InternalError",
+    "detail": "ValueError: something new",
+    "cause": None,
+}
+
+TASK_ERRORS = pytest.mark.parametrize("reported", [CLASSIFIED_ERROR, UNMATCHED_ERROR], ids=["matched", "unmatched"])
+
+
+async def _set_running(store: EntityClient, attempt_id: str, step_id: str, task_id: str) -> None:
+    for entity_type, entity_id in ((HelixJobAttempt, attempt_id), (HelixJobStep, step_id), (HelixJobTask, task_id)):
+        entity = await store.get_by_id(entity_type, entity_id)
+        entity.status = HelixJobStatus.ACTIVE
+        await store.update(entity)
+
+
+@TASK_ERRORS
+@pytest.mark.asyncio
+async def test_a_task_keeps_the_error_it_reported_when_the_controller_reports_the_failure(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, reported: dict
+):
+    """The controller only sees the process exit, so its error adds to the task's own instead of replacing it."""
+    _, job_name, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "classified-task-job")
+    await _set_running(mock_store, attempt_id, step_id, task_id)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+
+    for error_details in (reported, {"message": "Pod pod-1 is in error state", "failed": "Back-off"}):
+        await mock_dispatcher.create_or_update_task(
+            job_name,
+            task.name,
+            DEFAULT_WORKSPACE,
+            HelixJobTaskUpdate(status=HelixJobStatus.ERROR, error_details=error_details),
+            step,
+        )
+
+    stored_task = await mock_store.get_by_id(HelixJobTask, task_id)
+    assert stored_task.error_details == {**reported, "failed": "Back-off"}
+
+
+@TASK_ERRORS
+@pytest.mark.asyncio
+async def test_a_failed_step_reports_the_error_its_task_classified(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient, reported: dict
+):
+    _, _, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "classified-step-job")
+    await _set_running(mock_store, attempt_id, step_id, task_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+    task.status = HelixJobStatus.ERROR
+    task.error_details = dict(reported)
+    await mock_store.update(task)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+
+    saved_step, attempt = await mock_dispatcher.update_job_status_from_step(
+        step, HelixJobStatus.ERROR, error_details={"message": "Job failed; One or more tasks are in error state"}
+    )
+
+    assert saved_step.error_details == reported
+    assert attempt.error_details == reported
+
+
+@pytest.mark.asyncio
+async def test_a_failed_step_keeps_the_controller_error_when_no_task_classified_its_failure(
+    mock_dispatcher: JobDispatcher, mock_store: EntityClient
+):
+    _, _, attempt_id, step_id, task_id, _ = await create_test_job_data(mock_store, "unclassified-step-job")
+    await _set_running(mock_store, attempt_id, step_id, task_id)
+    task = await mock_store.get_by_id(HelixJobTask, task_id)
+    task.status = HelixJobStatus.ERROR
+    task.error_details = {"message": "Pod pod-1 is in error state"}
+    await mock_store.update(task)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+    controller_error = {"message": "Job timed out after reaching max TTL of 3600 seconds"}
+
+    saved_step, attempt = await mock_dispatcher.update_job_status_from_step(
+        step, HelixJobStatus.ERROR, error_details=controller_error
+    )
+
+    assert saved_step.error_details == controller_error
+    assert attempt.error_details == controller_error
+
+
 @pytest.mark.asyncio
 async def test_create_or_update_task_ignores_statusless_poll_after_error(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient

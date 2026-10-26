@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -9,7 +10,17 @@ import pytest
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.customization_common.training.pause import PausePoller, exit_paused
+from nhx.customization_common.training.errors.classifier import classify_exception
+from nhx.customization_common.training.errors.exceptions import CheckpointError
+from nhx.customization_common.training.pause import (
+    PausePoller,
+    ResumeCheckpointMissingError,
+    check_resumed_from_pause,
+    exit_paused,
+    pause_marker_path,
+    take_pause_marker,
+    write_pause_marker,
+)
 
 
 class _JobCtx:
@@ -113,3 +124,62 @@ def test_exit_paused_uses_the_pause_exit_code() -> None:
         exit_paused()
 
     assert exc_info.value.code == 75
+
+
+# --------------------------------------------------------------------------- #
+# The pause marker, and the check that a resume restored a checkpoint
+# --------------------------------------------------------------------------- #
+
+
+def test_the_marker_sits_beside_the_checkpoints_so_it_outlives_them(tmp_path: Path) -> None:
+    assert pause_marker_path(tmp_path / "training" / "checkpoints") == tmp_path / "training" / "PAUSED"
+
+
+def test_a_resume_takes_the_step_the_pause_wrote(tmp_path: Path) -> None:
+    """Taken, not read: a later run must not mistake this pause for its own."""
+    marker = tmp_path / "training" / "PAUSED"
+    write_pause_marker(marker, 9)
+
+    assert take_pause_marker(marker) == 9
+    assert not marker.exists()
+
+
+def test_without_a_marker_the_run_is_not_a_resume(tmp_path: Path) -> None:
+    assert take_pause_marker(tmp_path / "PAUSED") is None
+
+
+def test_a_marker_without_a_step_still_counts_as_a_pause(tmp_path: Path) -> None:
+    """Reading it as no pause would let the resume start from scratch."""
+    marker = tmp_path / "PAUSED"
+    marker.write_text("", encoding="utf-8")
+
+    assert take_pause_marker(marker) == 0
+    assert not marker.exists()
+
+
+def test_a_resume_that_restored_nothing_fails(tmp_path: Path) -> None:
+    with pytest.raises(ResumeCheckpointMissingError, match=r"paused at step 9, but no complete checkpoint .* in /ckpt"):
+        check_resumed_from_pause(9, 0, "/ckpt")
+
+
+@pytest.mark.parametrize(
+    "paused_step,restored_step",
+    [
+        (None, 0),  # a first run starts from scratch
+        (None, 8),  # a rerun after a crash continues from its newest checkpoint
+        (9, 9),  # a resume restores the pause checkpoint
+        (9, 8),  # or an older one, when the newest was incomplete; training repeats the step
+    ],
+)
+def test_a_first_run_a_rerun_and_a_restored_resume_continue(paused_step: int | None, restored_step: int) -> None:
+    check_resumed_from_pause(paused_step, restored_step, "/ckpt")
+
+
+def test_a_resume_that_restored_nothing_tells_the_user_to_create_a_new_job() -> None:
+    """In process (Unsloth) the classifier sees the exception itself, not a printed line."""
+    error = classify_exception(ResumeCheckpointMissingError("Cannot resume: training paused at step 9"))
+
+    assert isinstance(error, CheckpointError)
+    assert error.cause == "resume_checkpoint_missing"
+    assert not error.rerunnable
+    assert "Create a new job" in error.message
