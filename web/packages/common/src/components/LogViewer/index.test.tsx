@@ -268,6 +268,18 @@ describe('LogViewer', () => {
       expect(docLines()).toEqual([`[${colored.timestamp}]   dim [info] done`]);
     });
 
+    it('copies the text it shows, without ANSI codes or carriage returns', async () => {
+      // `userEvent.setup()` stubs `navigator.clipboard`.
+      const user = userEvent.setup();
+      const colored = { ...makeLog(0), message: '\x1b[32mok\x1b[0m\r\nnext' };
+      render(<LogViewer logs={[colored]} fillHeight onNotify={vi.fn()} />);
+
+      await user.click(screen.getByRole('button', { name: 'Copy logs' }));
+
+      expect(await navigator.clipboard.readText()).toBe(docLines().join('\n'));
+      expect(docLines()).toEqual([`[${colored.timestamp}]   ok`, 'next']);
+    });
+
     it('leaves keyboard navigation to the browser instead of moving a hidden cursor', () => {
       render(<LogViewer logs={range(0, 3)} fillHeight />);
       const view = getView();

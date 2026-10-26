@@ -5,7 +5,11 @@ import { LogEditor } from '@nemo/common/src/components/LogViewer/LogEditor';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
-import { formatLogs, type LogLoadProgress } from '@nemo/common/src/utils/logs';
+import {
+  formatLogs,
+  formatLogsForDisplay,
+  type LogLoadProgress,
+} from '@nemo/common/src/utils/logs';
 import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -82,7 +86,8 @@ export const LogViewer: FC<LogViewerProps> = ({
   const [wrapLines, setWrapLines] = useState(false);
   const tailLogs = logs?.slice(-rows) || [];
   const displayedLogs = showAllLogs ? logs : tailLogs;
-  const logText = formatLogs(displayedLogs);
+  // Copy what's on screen; download keeps the raw messages.
+  const logText = formatLogsForDisplay(displayedLogs);
   const hasMoreLogs = logs && logs.length > rows;
 
   // Announce the wait straight away; the counts join it once the first page tells us

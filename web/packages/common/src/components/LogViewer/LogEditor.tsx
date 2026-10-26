@@ -15,6 +15,7 @@ import {
   stickToBottom,
 } from '@nemo/common/src/components/LogViewer/extensions/stickToBottom';
 import { useShikiHighlighting } from '@nemo/common/src/components/LogViewer/extensions/useShikiHighlighting';
+import { formatLogEntryForDisplay, formatLogsForDisplay } from '@nemo/common/src/utils/logs';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { useTheme } from '@nvidia/foundations-react-core';
 import CodeMirror from '@uiw/react-codemirror';
@@ -25,18 +26,9 @@ import { FC, useEffect, useMemo, useRef, useState } from 'react';
 // The label names the textbox role CodeMirror gives the content.
 const FOCUSABLE_CONTENT = EditorView.contentAttributes.of({ tabindex: '0', 'aria-label': 'Logs' });
 
-// ANSI colour codes (CSI sequences) from terminal-style loggers.
-// eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-
-// CodeMirror also breaks lines on a lone \r; normalizing keeps entry line counts in step.
-const formatEntry = (log: HelixJobLog): string =>
-  `[${log.timestamp}]   ${log.message}`.replace(ANSI_ESCAPE, '').replace(/\r\n?/g, '\n');
-
-const formatEntries = (logs: readonly HelixJobLog[]): string => logs.map(formatEntry).join('\n');
-
+// The display formatter normalizes \r, so entry line counts stay in step with CodeMirror's.
 const countLines = (logs: readonly HelixJobLog[]): number =>
-  logs.reduce((lines, log) => lines + formatEntry(log).split('\n').length, 0);
+  logs.reduce((lines, log) => lines + formatLogEntryForDisplay(log).split('\n').length, 0);
 
 interface LogEditorProps {
   logs: readonly HelixJobLog[];
@@ -60,7 +52,7 @@ export const LogEditor: FC<LogEditorProps> = ({
   const [view, setView] = useState<EditorView | null>(null);
   // CodeMirror's starting document, and never changed after: @uiw/react-codemirror replaces
   // the whole document whenever `value` changes, so the effect below syncs it instead.
-  const [initialText] = useState(() => formatEntries(logs));
+  const [initialText] = useState(() => formatLogsForDisplay(logs));
   // What the document was last synced from, so the next update can be diffed against it.
   const syncedRef = useRef({ logs, resetKey });
 
@@ -92,7 +84,7 @@ export const LogEditor: FC<LogEditorProps> = ({
     // can leave it short of the bottom; a replacement can't.
     if (!diff || (diff.dropped > 0 && isPinnedToBottom(view))) {
       view.dispatch({
-        changes: { from: 0, to: doc.length, insert: formatEntries(logs) },
+        changes: { from: 0, to: doc.length, insert: formatLogsForDisplay(logs) },
         effects: isReset ? pinToBottom.of(null) : [],
       });
       return;
@@ -108,7 +100,7 @@ export const LogEditor: FC<LogEditorProps> = ({
     }
     if (diff.added.length > 0) {
       const separator = doc.length > 0 ? '\n' : '';
-      changes.push({ from: doc.length, insert: separator + formatEntries(diff.added) });
+      changes.push({ from: doc.length, insert: separator + formatLogsForDisplay(diff.added) });
     }
     view.dispatch({ changes });
   }, [view, logs, resetKey]);

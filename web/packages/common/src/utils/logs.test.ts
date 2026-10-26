@@ -3,7 +3,7 @@
 
 import { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 
-import { formatLogs } from './logs';
+import { formatLogs, formatLogsForDisplay } from './logs';
 
 const createLog = (message: string, timestamp: string): HelixJobLog => ({
   timestamp,
@@ -43,5 +43,29 @@ describe('formatLogs', () => {
   it('returns an empty string for empty array', () => {
     const result = formatLogs([]);
     expect(result).toBe('');
+  });
+});
+
+describe('formatLogsForDisplay', () => {
+  it('strips ANSI colour codes', () => {
+    const logs = [
+      createLog('\x1b[2mdim\x1b[0m [\x1b[32minfo\x1b[0m] done', '2026-02-20T19:08:56Z'),
+    ];
+    expect(formatLogsForDisplay(logs)).toBe('[2026-02-20T19:08:56Z]   dim [info] done');
+  });
+
+  it('normalizes carriage returns to newlines', () => {
+    const logs = [
+      createLog('Traceback\r\n  boom', '2026-02-20T19:08:56Z'),
+      createLog('progress 50%\r', '2026-02-20T19:09:00Z'),
+    ];
+    expect(formatLogsForDisplay(logs)).toBe(
+      '[2026-02-20T19:08:56Z]   Traceback\n  boom\n[2026-02-20T19:09:00Z]   progress 50%\n'
+    );
+  });
+
+  it('leaves the raw formatter untouched', () => {
+    const logs = [createLog('\x1b[32mok\x1b[0m\r', '2026-02-20T19:08:56Z')];
+    expect(formatLogs(logs)).toBe('[2026-02-20T19:08:56Z]   \x1b[32mok\x1b[0m\r');
   });
 });
