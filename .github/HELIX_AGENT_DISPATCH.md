@@ -13,8 +13,10 @@ pattern (the agent returns data; the worker does the writes).
 
 **Plane 1 — trigger (in the TARGET repo, e.g. nemo-helix):**
 `.github/workflows/helix-agent-dispatch.yaml` + `.github/scripts/helix-agent-dispatch.cjs`.
-On a PR comment starting with `/helix-`, it reacts 👀 and sends a `repository_dispatch`
+On a PR comment starting with `/helix-`, it sends a `repository_dispatch`
 (`event_type: helix-agent`) to the worker repo with a PR-context `client_payload`.
+The trigger is dispatch-only — it does not react to or comment on the PR itself;
+acknowledgement comes from the worker once it picks up the dispatch.
 
 **Plane 2 — worker (in the runner-privileged repo, e.g. Platform-Deploy):**
 `.github/workflows/helix-agent-run.yaml` + `.github/scripts/dispatch_agent.py` +
@@ -28,7 +30,7 @@ NEVER reaches the agent.
 ```
 PR comment "/helix-review"
       │  (issue_comment workflow, target repo)
-      ▼  react 👀 + repository_dispatch{helix-agent, PR context}
+      ▼  repository_dispatch{helix-agent, PR context}
 Worker repo (runner)
       │  mint READ token (→ agent) + WRITE token (stays here)
       │  resolve registry · submit agents.execute · poll to done
@@ -136,16 +138,16 @@ nemo agents register --agent agent.yaml --workspace <workspace>
 **4. Install the trigger workflow** on the target repo(s): the generic
 `.github/workflows/helix-agent-dispatch.yaml` + `.github/scripts/helix-agent-dispatch.cjs`
 (from the nemo-helix PR), plus the `CI_DISPATCH_TOKEN` / `CI_DISPATCH_REPO` secrets.
-`CI_DISPATCH_TOKEN` needs, for a fine-grained token: `Issues: write` on the TARGET repo
-for the 👀 reaction, and `Contents: write` on the WORKER repo to send the
-`repository_dispatch` (without the latter, dispatch is denied and the worker never
-starts). If it lacks the reaction permission the 👀 is silently skipped (caught) while
-dispatch still succeeds.
+`CI_DISPATCH_TOKEN` needs, for a fine-grained token, only `Contents: write` on the
+WORKER repo to send the `repository_dispatch` (without it, dispatch is denied and the
+worker never starts) — least-privilege: the trigger holds no permission on the TARGET
+repo, since it neither reacts nor comments there.
 
 **Test it:** comment `/helix-<name>` on a PR in an allowed repo (as an org
-OWNER/MEMBER — the trigger is author-gated). You should see a 👀 reaction, then the
-agent's review on the PR. If nothing happens, check the worker repo's Actions run:
-a missing agent entity logs a `::notice::` and skips (not an error).
+OWNER/MEMBER — the trigger is author-gated). The trigger dispatches silently; once the
+worker picks up the dispatch it acknowledges on the PR, then posts the agent's review.
+If nothing happens, check the worker repo's Actions run: a missing agent entity logs a
+`::notice::` and skips (not an error).
 
 ## Secrets & vars
 
