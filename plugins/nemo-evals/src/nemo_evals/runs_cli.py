@@ -1200,8 +1200,10 @@ def _status_table(
     lines.append("")
     lines += _task_lines(views)
     done = [v for v in views if v.phase in SETTLED_MEMBER_PHASES]
-    succeeded = sum(v.phase == MemberPhase.SUCCEEDED for v in done)
-    lines.append(f"{len(done)}/{len(views)} done ({succeeded} succeeded, {len(done) - succeeded} failed)")
+    counts = {phase: sum(v.phase == phase for v in done) for phase in SETTLED_MEMBER_PHASES}
+    stopped = "".join(f", {counts[p]} {p}" for p in (MemberPhase.CANCELLED, MemberPhase.EXPIRED) if counts[p])
+    succeeded, failed = counts[MemberPhase.SUCCEEDED], counts[MemberPhase.FAILED]
+    lines.append(f"{len(done)}/{len(views)} done ({succeeded} succeeded, {failed} failed{stopped})")
     return lines
 
 
