@@ -1172,7 +1172,7 @@ class TestEvaluateJobCompile:
         ],
     )
     async def test_rejects_wrong_online_param_type(self, target: Model | Agent, expected_message: str) -> None:
-        with pytest.raises(TypeError, match=expected_message):
+        with pytest.raises(ValidationError, match=expected_message):
             EvaluateSpec.model_validate(
                 {
                     **_exact_match_spec(),
@@ -1183,7 +1183,7 @@ class TestEvaluateJobCompile:
             )
 
     async def test_rejects_missing_online_params(self) -> None:
-        with pytest.raises(TypeError, match="model target requires RunConfigOnlineModel"):
+        with pytest.raises(ValidationError, match="model target requires RunConfigOnlineModel"):
             EvaluateSpec.model_validate(
                 {
                     **_exact_match_spec(),
