@@ -234,7 +234,8 @@ def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace
     for attempt in range(1, _RETRY_ATTEMPTS + 1):
         timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
         try:
-            api.create_namespaced_pod(namespace=namespace, body=manifest, _request_timeout=timeout)
+            # A (connect, read) tuple: kubernetes 29.x ignores a float timeout.
+            api.create_namespaced_pod(namespace=namespace, body=manifest, _request_timeout=(timeout, timeout))
             return
         except ApiException as exc:
             remaining = deadline - time.monotonic()

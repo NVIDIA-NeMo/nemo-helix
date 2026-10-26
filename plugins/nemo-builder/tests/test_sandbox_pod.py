@@ -282,10 +282,10 @@ class _Api:
     ) -> None:
         self.created: list[str] = []
         self.deleted: list[str] = []
-        self.timeouts: list[float] = []
+        self.timeouts: list[tuple[float, float]] = []
         self._create, self._create_failures, self._delete = create, create_failures, delete
 
-    def create_namespaced_pod(self, *, namespace: str, body: k8s.V1Pod, _request_timeout: float) -> None:
+    def create_namespaced_pod(self, *, namespace: str, body: k8s.V1Pod, _request_timeout: tuple[float, float]) -> None:
         self.timeouts.append(_request_timeout)
         if self._create and self._create_failures != 0:
             self._create_failures -= 1
@@ -340,7 +340,7 @@ class TestEachSandboxFailsAlone:
         assert self._build(monkeypatch, api) == 0
         assert api.created == [self.NAME]
         assert sleeps == [5.0, 10.0, 20.0]
-        assert api.timeouts == [60.0] * 4
+        assert api.timeouts == [(60.0, 60.0)] * 4
 
         sleeps.clear()
         monkeypatch.setattr(supervise, "_RETRY_ATTEMPTS", 2)
@@ -354,7 +354,7 @@ class TestEachSandboxFailsAlone:
         api = _Api(create=quota)
         assert self._build(monkeypatch, api) == 2
         assert sleeps == [5.0, 7.0]
-        assert api.timeouts == [12.0, 7.0, 1.0]
+        assert api.timeouts == [(12.0, 12.0), (7.0, 7.0), (1.0, 1.0)]
 
     def test_a_log_that_cannot_be_read_fails_the_group_and_the_sandbox_is_still_deleted(
         self, monkeypatch: pytest.MonkeyPatch
