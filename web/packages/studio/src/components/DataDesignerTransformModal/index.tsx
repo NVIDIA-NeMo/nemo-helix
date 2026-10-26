@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ScmBranch } from '@nemo/icons/icons';
 import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import {
   Banner,
@@ -30,7 +31,6 @@ import { TransformPreview } from '@studio/components/transform/TransformPreview'
 import { useTransformMapping } from '@studio/components/transform/useTransformMapping';
 import { getDataDesignerJobDetailsRoute } from '@studio/routes/utils';
 import { getContentColumns, getFileNameFromPath } from '@studio/util/files';
-import { GitBranch } from 'lucide-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -168,7 +168,7 @@ export const DataDesignerTransformModal: FC<DataDesignerTransformModalProps> = (
         open={open}
         title={
           <Flex gap="density-md" align="center">
-            <GitBranch />
+            <ScmBranch />
             Transform
           </Flex>
         }

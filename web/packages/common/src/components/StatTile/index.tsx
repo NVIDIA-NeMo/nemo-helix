@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronRight } from '@nemo/icons/icons';
 import { Card, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { ChevronRight } from 'lucide-react';
 import type { ComponentProps, FC, ReactNode } from 'react';
 import { Link } from 'react-router';
 
@@ -20,7 +20,7 @@ export type StatTileVariant = 'default' | 'metric' | 'actionable';
 
 interface StatTileBaseProps {
   label: string;
-  value: string;
+  value: ReactNode;
   className?: string;
   /**
    * The tile's own health, independent of `trailingLabelStatus`/`hintStatus`: only this tints the

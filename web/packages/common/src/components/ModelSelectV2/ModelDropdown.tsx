@@ -11,6 +11,7 @@ import type {
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference, getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { filterModel, isBaseModel } from '@nemo/common/src/utils/models';
+import { ChevronDown, HourglassMid } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -21,7 +22,6 @@ import {
   SegmentedControl,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { useDebounce } from 'use-debounce';
 
@@ -163,14 +163,14 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
                 creatorToIcon(selectedWorkspace, { className: 'text-base flex-shrink-0' })}
               {loading && !selectedName ? (
                 <>
-                  <LoaderCircle size={16} className="animate-spin shrink-0" />
+                  <HourglassMid size="16" className="animate-spin shrink-0" />
                   <Text className="truncate">{placeholder}</Text>
                 </>
               ) : (
                 <Text className="truncate">{triggerLabel}</Text>
               )}
             </Flex>
-            <ChevronDown size={16} className="shrink-0" />
+            <ChevronDown size="16" className="shrink-0" />
           </Flex>
         </Button>
       </DropdownTrigger>
@@ -178,7 +178,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
         align="start"
         side={dropdownSide}
         data-testid="model-select-v2-content"
-        className="min-w-[360px]"
+        className="min-w-[360px] min-h-[200px]"
         style={{ width: 360 }} // eslint-disable-line no-restricted-syntax -- KUI DropdownContent needs explicit width
       >
         {open && (

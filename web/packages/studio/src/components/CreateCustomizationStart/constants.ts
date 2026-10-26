@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { LayoutDetail, Add, Sparkle } from '@nemo/icons/icons';
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
 import { ADVANCED, BEGINNER, INTERMEDIATE } from '@studio/components/StartOptions/levels';
-import { LayoutTemplate, Plus, Sparkles } from 'lucide-react';
 
 /**
  * The non-template ways in. "Start from a template" is not among them — templates are
@@ -15,7 +15,7 @@ export const START_OPTIONS: StartOption[] = [
     title: 'Describe with AI',
     description:
       'Pick a model and dataset and describe your goal. AI drafts the training settings — then you review everything in the form.',
-    icon: Sparkles,
+    icon: Sparkle,
     tag: BEGINNER,
     enabled: true,
   },
@@ -23,7 +23,7 @@ export const START_OPTIONS: StartOption[] = [
     id: 'template',
     title: 'Start from a template',
     description: 'Begin from a ready-made recipe that brings its own model and dataset.',
-    icon: LayoutTemplate,
+    icon: LayoutDetail,
     tag: INTERMEDIATE,
     enabled: true,
   },
@@ -31,7 +31,7 @@ export const START_OPTIONS: StartOption[] = [
     id: 'scratch',
     title: 'Build from scratch',
     description: 'Open the full form with sensible defaults and choose your own model and data.',
-    icon: Plus,
+    icon: Add,
     tag: ADVANCED,
     enabled: true,
   },

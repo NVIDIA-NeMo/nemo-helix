@@ -92,6 +92,12 @@ The following models support both chat and completion model training.
 | [mistralai/Ministral-3-3B-Instruct-2512](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512) | No | Full SFT, LoRA | No | No | No |
 | [mistralai/Ministral-3-3B-Reasoning-2512](https://huggingface.co/mistralai/Ministral-3-3B-Reasoning-2512) | No | Full SFT, LoRA | Yes | No | Yes |
 
+<Warning>
+
+Deployment configurations on the model family pages that use the multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.15.5`) cannot serve merged LoRA checkpoints (`finetuning_type: lora_merged`). Deploy merged LoRA models with vLLM or the model-free NIM; see [Choose an Inference Engine](/documentation/models-and-inference/deploy-models#choose-an-inference-engine).
+
+</Warning>
+
 [^1]: Read more on [sequence packing with NeMo Framework](https://docs.nvidia.com/nemo-framework/user-guide/latest/sft_peft/packed_sequence.html#)
 
 ### Embedding Models

@@ -9,6 +9,12 @@ description: ""
 
 This page provides detailed technical specifications for the OpenAI GPT-OSS model family supported by NeMo Customizer. For supported features and capabilities, refer to [Tested Models](/documentation/customizer-reference/models/model-catalog).
 
+<Warning>
+
+Deployment configurations on this page that use the multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.15.5`) cannot serve merged LoRA checkpoints (`finetuning_type: lora_merged`). Deploy merged LoRA models with vLLM or the model-free NIM; see [Choose an Inference Engine](/documentation/models-and-inference/deploy-models#choose-an-inference-engine).
+
+</Warning>
+
 ## Before You Start
 
 These models require a Hugging Face token to download. Create a secret with your Hugging Face API key, then create a FileSet and Model Entity referencing the model. See [index](/documentation/customizer-reference/manage-model-entities/overview) for setup instructions.

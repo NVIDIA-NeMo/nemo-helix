@@ -21,10 +21,6 @@ vi.mock('@nvidia/foundations-react-core', () => ({
   ),
 }));
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 describe('FilterPanelToggle', () => {
   it('returns null when no columns have getCanFilter', () => {
     mockTable.getAllLeafColumns.mockReturnValue([{ getCanFilter: () => false }]);

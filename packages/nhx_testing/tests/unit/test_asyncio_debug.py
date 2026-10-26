@@ -5,6 +5,7 @@
 
 import asyncio
 import asyncio.runners
+import gc
 import io
 import threading
 from collections.abc import AsyncGenerator
@@ -22,7 +23,13 @@ from nhx.testing.asyncio_debug import (
 
 
 async def _swallow_cancellation(started: asyncio.Event) -> None:
-    """Mimic a background loop that catches CancelledError and keeps waiting."""
+    """Mimic a background loop that catches CancelledError and keeps waiting.
+
+    The event loop holds tasks only weakly, and a task waiting here is otherwise
+    reachable only through its own reference cycle. Tests must keep a reference
+    to the task, or a garbage collection before teardown removes it from
+    ``asyncio.all_tasks()`` and there is nothing left to report.
+    """
     started.set()
     while True:
         try:
@@ -82,10 +89,13 @@ def test_dump_event_loop_tasks_reports_tasks_on_another_threads_loop():
 
 
 def test_bounded_teardown_names_task_that_ignores_cancellation():
+    tasks: list[asyncio.Task[None]] = []
+
     async def _main() -> None:
         started = asyncio.Event()
-        asyncio.get_running_loop().create_task(_swallow_cancellation(started), name="stubborn")
+        tasks.append(asyncio.get_running_loop().create_task(_swallow_cancellation(started), name="stubborn"))
         await started.wait()
+        gc.collect()
 
     with pytest.raises(AsyncioTeardownError, match="1 asyncio task") as exc_info:
         with bounded_event_loop_teardown(timeout=0.2):
@@ -96,10 +106,13 @@ def test_bounded_teardown_names_task_that_ignores_cancellation():
 
 
 def test_bounded_teardown_attaches_stuck_tasks_to_an_error_already_raised():
+    tasks: list[asyncio.Task[None]] = []
+
     async def _main() -> None:
         started = asyncio.Event()
-        asyncio.get_running_loop().create_task(_swallow_cancellation(started), name="stubborn")
+        tasks.append(asyncio.get_running_loop().create_task(_swallow_cancellation(started), name="stubborn"))
         await started.wait()
+        gc.collect()
 
     with pytest.raises(ValueError, match="test failed") as exc_info:
         with bounded_event_loop_teardown(timeout=0.2):
@@ -130,13 +143,15 @@ def test_bounded_teardown_restores_the_stock_hook():
 def test_bounded_teardown_unblocks_starlette_test_client():
     """The CI hang: a lifespan-spawned task survives shutdown and blocks the TestClient portal."""
 
+    tasks: list[asyncio.Task[None]] = []
+
     @asynccontextmanager
     async def _lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
-        asyncio.get_running_loop().create_task(_swallow_cancellation(asyncio.Event()), name="stubborn")
+        tasks.append(asyncio.get_running_loop().create_task(_swallow_cancellation(asyncio.Event()), name="stubborn"))
         yield
 
     app = FastAPI(lifespan=_lifespan)
 
     with pytest.raises(AsyncioTeardownError, match="'stubborn'"):
         with bounded_event_loop_teardown(timeout=0.2), TestClient(app):
-            pass
+            gc.collect()

@@ -118,10 +118,6 @@ vi.mock('@studio/routes/SafeSynthesizerJobReportRoute/components/ReportMenu', ()
 }));
 
 // Mock icons - use importOriginal to preserve other exports
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 const mockuseWorkspaceFromPath = vi.mocked(useWorkspaceFromPath);
 const mockUseBreadcrumbs = vi.mocked(useBreadcrumbs);
 
@@ -192,33 +188,6 @@ const mockApiHooks = (job: GenerateJob, summary: SafeSynthesizerSummary) => {
     vi.fn().mockReturnValue({ data: summary })
   );
 };
-
-describe('GenerateJobReportRoute - Feature Flag', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  it('should be defined when feature flag is enabled', async () => {
-    // Mock the environment constant to enable the component
-    vi.doMock('@studio/constants/environment', () => ({
-      SAFE_SYNTHESIZER_ENABLED: true,
-    }));
-
-    const module = await import('./index');
-    expect(module.GenerateJobReportRoute).toBeDefined();
-    expect(module.GenerateJobReportRoute).not.toBeNull();
-  });
-
-  it('should be null when feature flag is disabled', async () => {
-    // Mock the environment constant to disable the component
-    vi.doMock('@studio/constants/environment', () => ({
-      SAFE_SYNTHESIZER_ENABLED: false,
-    }));
-
-    const module = await import('./index');
-    expect(module.GenerateJobReportRoute).toBeNull();
-  });
-});
 
 describe('GenerateJobReportRoute - Rendering', () => {
   beforeEach(() => {
@@ -300,11 +269,6 @@ describe('GenerateJobReportRoute - Rendering', () => {
     expect(panelTitles[0]).toHaveTextContent('Overview');
     expect(panelTitles[1]).toHaveTextContent('Synthetic Quality');
     expect(panelTitles[2]).toHaveTextContent('Data Privacy');
-
-    // Verify icons are rendered
-    expect(screen.getByTestId('file-icon')).toBeInTheDocument();
-    expect(screen.getByTestId('badge-check-icon')).toBeInTheDocument();
-    expect(screen.getByTestId('lock-icon')).toBeInTheDocument();
   });
 
   it('should pass correct props to OverviewPanel', () => {

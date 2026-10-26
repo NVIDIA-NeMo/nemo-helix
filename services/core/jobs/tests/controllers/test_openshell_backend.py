@@ -27,7 +27,6 @@ from nhx.core.jobs.controllers.backends.openshell import (
 from nhx.core.jobs.controllers.backends.openshell import backend as backend_module
 from nhx.core.jobs.controllers.backends.openshell.backend import (
     _DEFAULT_ENTRYPOINT,
-    _LAUNCHER_PATH,
     _ensure_openshell,
     _sandbox_name,
 )
@@ -180,7 +179,9 @@ class TestSchedule:
 
         assert update.status == HelixJobStatus.PENDING
         request = _create_request(backend)
-        assert request.spec.command == [_LAUNCHER_PATH, "run", "--fetch-step-config", "--"] + list(_DEFAULT_ENTRYPOINT)
+        assert request.spec.command == ["/tools/jobs-launcher", "run", "--fetch-step-config", "--"] + list(
+            _DEFAULT_ENTRYPOINT
+        )
         # Step container image wins over the profile default.
         assert request.spec.template.image == "test-image"
         env = dict(request.spec.environment)
@@ -191,10 +192,9 @@ class TestSchedule:
         # Task storage paths: the task dispatcher refuses to run without the ephemeral one.
         # The fixture step overrides it; the config path keeps the default.
         assert env["NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH"] == "/var/tmp"
-        assert env["NEMO_JOB_STEP_CONFIG_STORAGE_PATH"] == "/var/run/scratch/config"
-        assert env["PATH"].startswith("/app/.venv/bin")
-        assert env["VIRTUAL_ENV"] == "/app/.venv"
-        assert env["HOME"] == "/home/sandbox"
+        assert env["NEMO_JOB_STEP_CONFIG_STORAGE_PATH"] == "/tmp/nhx-job-config"
+        # The supervisor applies the image ENV; the backend must not override it.
+        assert not {"PATH", "VIRTUAL_ENV", "HOME"} & env.keys()
         assert "HTTP_PROXY" not in env
         assert env["ENV_VAR"] == "test_value"
         assert request.name == _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
@@ -232,7 +232,39 @@ class TestSchedule:
         backend.schedule(executor, test_step_pending)
 
         request = _create_request(backend)
-        assert request.spec.command == [_LAUNCHER_PATH, "run", "--fetch-step-config", "--", "/custom/bin", "--flag"]
+        assert request.spec.command == [
+            "/tools/jobs-launcher",
+            "run",
+            "--fetch-step-config",
+            "--",
+            "/custom/bin",
+            "--flag",
+        ]
+
+    def test_profile_launcher_path_is_the_main_process_and_egress_binary(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, launcher_tool_path="/opt/nhx/jobs-launcher")
+
+        backend.schedule(_no_container_executor(), test_step_pending)
+
+        request = _create_request(backend)
+        assert request.spec.command[0] == "/opt/nhx/jobs-launcher"
+        binaries = [b.path for b in request.spec.policy.network_policies["nemo_helix"].binaries]
+        assert binaries[0] == "/opt/nhx/jobs-launcher"
+
+    def test_custom_egress_binaries_keep_the_launcher(self, mock_nemo_client, mock_platform_config) -> None:
+        backend = _backend(
+            mock_nemo_client,
+            mock_platform_config,
+            launcher_tool_path="/opt/nhx/jobs-launcher",
+            platform_egress=OpenShellJobEgressConfig(host="h", port=1, binaries=["/usr/bin/python3"]),
+        )
+
+        policy = backend._build_executor_policy()
+
+        binaries = [b.path for b in policy.network_policies["nemo_helix"].binaries]
+        assert binaries == ["/opt/nhx/jobs-launcher", "/usr/bin/python3"]
 
     def test_egress_proxy_injected_when_configured(
         self, mock_nemo_client, mock_platform_config, test_step_pending
@@ -287,8 +319,11 @@ class TestSchedule:
         backend.schedule(step.step_spec.executor, step)
 
         env = dict(_create_request(backend).spec.environment)
-        assert env["NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH"] == "/var/run/scratch/task"
-        assert env["NEMO_JOB_STEP_CONFIG_STORAGE_PATH"] == "/var/run/scratch/config"
+        # /tmp exists in every image, so a launcher that does not create the task
+        # directory still works; the launcher creates the config directory itself.
+        assert env["NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH"] == "/tmp"
+        assert env["NEMO_JOB_STEP_CONFIG_STORAGE_PATH"] == "/tmp/nhx-job-config"
+        assert env["NEMO_JOB_STEP_CONFIG_FILE_PATH"] == "/tmp/nhx-job-config/job_step_config.json"
 
     def test_existing_sandbox_for_attempt_is_adopted(
         self, mock_nemo_client, mock_platform_config, test_step_pending
@@ -664,13 +699,14 @@ class TestPolicy:
         assert policy.process.run_as_user == "sandbox"
         assert policy.process.run_as_group == "sandbox"
         assert "/app" in policy.filesystem.read_only
+        assert "/tmp" in policy.filesystem.read_write
         assert "/var/run/scratch" in policy.filesystem.read_write
         # The only network rule is the platform egress, and only the launcher and
         # the task interpreter may open it. Nothing else gets egress.
         network = policy.network_policies
         assert list(network) == ["nemo_helix"]
         binaries = [b.path for b in network["nemo_helix"].binaries]
-        assert binaries == ["/tools/jobs-launcher", "/usr/local/bin/python3*"]
+        assert binaries == ["/tools/jobs-launcher", "/usr/local/bin/python3*", "/opt/uv/python/*/bin/python3*"]
 
     def test_platform_egress_null_yields_no_network_rules(self, mock_nemo_client, mock_platform_config) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config, platform_egress=None)

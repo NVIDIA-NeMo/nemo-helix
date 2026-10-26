@@ -9,6 +9,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { ChartTree, Trash } from '@nemo/icons/icons';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import {
   deleteExperiment,
@@ -19,7 +20,6 @@ import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import type { AgentExperimentRow } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { FolderTree, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 interface ExperimentsTableProps {
@@ -133,7 +133,7 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
             renderEmptyState: () => (
               <TableEmptyState
                 className="py-density-3xl"
-                icon={<FolderTree className="size-16" />}
+                icon={<ChartTree className="size-16" />}
                 header="No experiments yet"
                 emptyMessage="An experiment appears here once one of its evaluations publishes results for this agent."
               />

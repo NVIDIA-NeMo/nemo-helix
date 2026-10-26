@@ -123,10 +123,6 @@ vi.mock('@studio/providers/toast/useToast', () => ({
 }));
 
 // Mock brand assets icons
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Test wrapper
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -212,7 +208,6 @@ describe('JobDetailsPanel', () => {
       render(<JobDetailsPanel job={job} />, { wrapper: createWrapper() });
 
       expect(screen.getByText('Job Details')).toBeInTheDocument();
-      expect(screen.getByTestId('play-icon')).toBeInTheDocument();
     });
 
     it('should display job status with badge', () => {
@@ -451,7 +446,6 @@ describe('JobDetailsPanel', () => {
       render(<JobDetailsPanel job={job} />, { wrapper: createWrapper() });
 
       expect(screen.getByText('View Job Config')).toBeInTheDocument();
-      expect(screen.getByTestId('cog-icon')).toBeInTheDocument();
     });
 
     it('should open job config drawer when button is clicked', async () => {

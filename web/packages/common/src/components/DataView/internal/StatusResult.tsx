@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
+import { IconError, Filter, Refresh } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
   StatusMessage,
   type StatusMessageProps,
 } from '@nvidia/foundations-react-core';
-import { CircleAlert as ErrorIcon, Filter, RefreshCw } from 'lucide-react';
 import type { JSX } from 'react';
 
 export type TableStatusState = Pick<
@@ -42,12 +42,12 @@ export function StatusResult({
       <Flex justify="center" className="p-density-md">
         <StatusMessage
           attributes={{ StatusMessageMedia: { className: '!text-feedback-danger' } }}
-          slotMedia={<ErrorIcon variant="fill" />}
+          slotMedia={<IconError variant="fill" />}
           slotHeading="Something went wrong"
           slotSubheading="There was an error loading the data. If the problem persists, please contact support."
           slotFooter={
             <Button onClick={() => window.location.reload()} kind="secondary" size="small">
-              <RefreshCw />
+              <Refresh />
             </Button>
           }
           {...props}

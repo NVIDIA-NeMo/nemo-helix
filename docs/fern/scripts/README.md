@@ -53,8 +53,8 @@ Keeps notebook actions consistent across Fern docs:
 `npm run prepare` runs this hook automatically. For `Latest`, generated URLs point at
 `main` by default, or at the current `release/*` ref when preparing docs from a
 release branch. `materialize-release-versions.mjs` also runs the hook over each
-release snapshot with the correct source ref: stable versions point at their tag,
-and pre-release/branch-overridden versions point at the release branch.
+release snapshot with its source release branch, regardless of preview status.
+Tags determine preview status only; they do not supply snapshot content.
 
 To run it directly:
 

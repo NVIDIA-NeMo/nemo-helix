@@ -95,7 +95,7 @@ describe('CustomizationOverview', () => {
 
     expect(screen.getByText('Duration')).toBeInTheDocument();
     expect(screen.getByText('00:01:12')).toBeInTheDocument();
-    expect(screen.queryByText('Phase')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stage')).not.toBeInTheDocument();
   });
 
   it('renders the run configuration', async () => {
@@ -183,7 +183,7 @@ describe('CustomizationOverview — GRPO', () => {
     expect(screen.queryByText('Steps Completed')).not.toBeInTheDocument();
     expect(screen.getByText('Epochs Completed')).toBeInTheDocument();
     expect(screen.getByText('Duration')).toBeInTheDocument();
-    expect(screen.queryByText('Phase')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stage')).not.toBeInTheDocument();
   });
 
   it('keeps the training health diagnostics collapsed until asked for', async () => {

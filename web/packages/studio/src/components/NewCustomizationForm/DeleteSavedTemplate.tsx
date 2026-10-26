@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
+import { Trash } from '@nemo/icons/icons';
 import {
   getCustomizationListJobTemplatesQueryKey,
   useCustomizationDeleteJobTemplate,
@@ -9,7 +10,6 @@ import {
 import type { CustomizationJobTemplate } from '@nemo/sdk/generated/customizer/schema';
 import { Banner, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
 import { useState, type FC } from 'react';
 
 interface Props {
@@ -56,7 +56,7 @@ export const DeleteSavedTemplate: FC<Props> = ({ workspace, name, onDeleted, dis
           setConfirming(true);
         }}
       >
-        <Trash2 size={16} aria-hidden />
+        <Trash size="16" aria-hidden />
         Delete template
       </Button>
 

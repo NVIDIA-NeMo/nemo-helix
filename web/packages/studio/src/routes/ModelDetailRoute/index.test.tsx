@@ -17,6 +17,15 @@ vi.mock('@studio/hooks/useCustomizationJob');
 vi.mock('@studio/routes/ModelDetailRoute/DetailsTab', () => ({
   DetailsTab: () => <div>details content</div>,
 }));
+vi.mock('@studio/routes/ModelDetailRoute/FilesTab', () => ({
+  FilesTab: () => <div>files content</div>,
+}));
+vi.mock('@studio/routes/ModelDetailRoute/DeploymentTab', () => ({
+  DeploymentTab: () => <div>deployment content</div>,
+}));
+vi.mock('@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions', () => ({
+  DeploymentActions: () => <button type="button">deployment actions</button>,
+}));
 vi.mock('@studio/components/ModelChatTab', () => ({ ModelChatTab: () => <div /> }));
 vi.mock('@studio/components/CustomizationOverview', () => ({
   CustomizationOverview: () => <div>training content</div>,
@@ -42,6 +51,7 @@ const mockLineage = (overrides: Partial<ModelLineage> = {}) =>
     job: { jobName: 'job-1', workspace: 'ws', isLoading: false },
     fileset: null,
     deployment: { kind: 'not-deployed' },
+    baseDeployment: { kind: 'not-deployed' },
     ...overrides,
   });
 
@@ -66,10 +76,10 @@ describe('ModelDetailRoute', () => {
     renderPage('/workspaces/ws/fine-tune/models/my-model');
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent('my-model');
-    for (const name of ['Details', 'Chat', 'Training', 'Logs']) {
+    for (const name of ['Details', 'Chat', 'Files', 'Deployment', 'Training', 'Logs']) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument();
     }
-    expect(screen.getAllByRole('tab')).toHaveLength(4);
+    expect(screen.getAllByRole('tab')).toHaveLength(6);
     expect(screen.getByText('details content')).toBeInTheDocument();
   });
 
@@ -82,6 +92,41 @@ describe('ModelDetailRoute', () => {
       'href',
       expect.stringContaining('/fine-tune/job-1')
     );
+  });
+
+  it('links out to the fileset from the Files tab', async () => {
+    mockLineage({ fileset: { workspace: 'files-ws', name: 'weights' } });
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=files');
+
+    expect(await screen.findByText('files content')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Fileset' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('weights')
+    );
+  });
+
+  it('keeps the Files tab without a fileset, with nothing to open', async () => {
+    mockLineage({ fileset: null });
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=files');
+
+    expect(await screen.findByText('files content')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open Fileset' })).not.toBeInTheDocument();
+  });
+
+  it('puts the deployment actions in the page header on the Deployment tab only', async () => {
+    mockLineage();
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=deployment');
+
+    expect(await screen.findByText('deployment content')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'deployment actions' })).toBeInTheDocument();
+  });
+
+  it('leaves the deployment actions off other tabs', async () => {
+    mockLineage();
+    renderPage('/workspaces/ws/fine-tune/models/my-model');
+
+    expect(await screen.findByText('details content')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'deployment actions' })).not.toBeInTheDocument();
   });
 
   it('disables the job tabs while the job lookup runs', async () => {

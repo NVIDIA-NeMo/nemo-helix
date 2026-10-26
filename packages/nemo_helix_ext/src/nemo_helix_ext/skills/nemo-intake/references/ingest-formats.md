@@ -21,6 +21,12 @@ Full request schemas for the three intake ingest endpoints. All are under
 - `test_case_name` is optional and identifies which task or test case the run covers.
 - The referenced Evaluation **must already exist** (create it first) or the request is rejected with
   `400 "…must be created before it can be logged."`
+- On ATIF, the top-level object is an Intake compatibility alias. Spec-valid ATIF puts the same
+  object at `extra.evaluation_context`. When both name an evaluation or test case, the normalized
+  objects must be identical, including a name present on only one side. JSON `null` and an object
+  with no names are treated as absent. Unknown content-part keys such as
+  `cache_control` are ignored and not stored; unknown keys on the trajectory, a step, or a tool
+  call are still rejected with `422`.
 
 ---
 

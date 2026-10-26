@@ -4,7 +4,6 @@
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import type { ResourceRef } from '@nemo/common/src/types';
 import { Button } from '@nvidia/foundations-react-core';
-import { DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { getWorkspaceNewDeploymentRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
@@ -31,8 +30,6 @@ export const DeployModelCta: FC<DeployModelCtaProps> = ({
   label = 'Deploy this model',
 }) => {
   const navigate = useNavigate();
-
-  if (!DEPLOYMENTS_ENABLED) return null;
 
   const { workspace } = getPartsFromReference(modelRef);
 

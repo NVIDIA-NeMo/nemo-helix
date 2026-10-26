@@ -127,6 +127,10 @@ builder:
   # -- Namespace builds run in, which the chart creates. Empty is `<release namespace>-builds`. Each release needs its own,
   # and it can't be the release namespace.
   namespace: ""
+  # -- How long a build step may stay pending before Jobs fails it, in seconds: the build profiles'
+  # `ttl_seconds_before_active`. Longer than the 30-minute profile default: a burst of builds (113 for one DeepSWE run)
+  # queues steps behind the Jobs controller, and that queue time counts.
+  ttlSecondsBeforeActive: 3600
   # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
   namespaceLabels: {}
   # -- The work volume every build step and sandbox mounts.

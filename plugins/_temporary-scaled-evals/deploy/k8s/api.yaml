@@ -48,16 +48,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # libpq reads the password from PGPASSWORD, so the DSN below carries no
-            # credential and the secret stays out of the ConfigMap and out of any log
-            # or provenance record that echoes the DSN.
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: scaled-evals-postgres
-                  key: password
-            # Platform Jobs, Files, Secrets, and Entity Store keep their own
-            # tables in public while scaled-evals uses its dedicated schema.
+            # Platform Jobs, Files, Secrets, and Entity Store keep their tables
+            # here; scaled-evals stores its state as entities.
             - name: DATABASE_HOST
               value: postgres
             - name: DATABASE_NAME
@@ -69,8 +61,6 @@ spec:
                 secretKeyRef:
                   name: scaled-evals-postgres
                   key: password
-            - name: SCALED_EVALS_DATABASE_URL
-              value: postgresql://scaled_evals@postgres:5432/scaled_evals
             # Platform Secrets are stored in Postgres, so their key must outlive
             # the pod. The default generates one on the pod's disk, and a restart
             # leaves every stored secret undecryptable.
@@ -84,7 +74,7 @@ spec:
           ports:
             - containerPort: 8080
               name: http
-          # Liveness must not follow dependencies: a Postgres blip should pull
+          # Liveness must not follow dependencies: a dependency blip should pull
           # the pod from rotation, not restart it. healthz is unconditional,
           # readyz 503s when a dependency is down.
           livenessProbe:
@@ -99,9 +89,6 @@ spec:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
-            # Readiness additionally waits on the build worker's heartbeat, and
-            # the build worker cannot start until this pod has migrated the
-            # schema. Allow for that ordering rather than flapping through it.
             failureThreshold: 30
           resources:
             requests:

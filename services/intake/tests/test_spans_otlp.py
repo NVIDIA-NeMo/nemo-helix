@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException, Request
+from nhx.intake.spans.domain import SpanKind
 from nhx.intake.spans.ingest.otlp import _read_limited_body, _span_to_domain
 
 DEFAULT_TRACE_ID = bytes.fromhex("0" * 31 + "1")
@@ -215,6 +216,50 @@ def test_span_to_domain_normalizes_legacy_evaluation_id_key() -> None:
     )
     assert domain_span.attributes_string.get("nemo.evaluation.name") == "legacy-eval"
     assert "nemo.experiment.id" not in domain_span.attributes_string
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected"),
+    [
+        ("chat", SpanKind.LLM),
+        ("generate_content", SpanKind.LLM),
+        ("text_completion", SpanKind.LLM),
+        ("embeddings", SpanKind.EMBEDDING),
+        ("invoke_agent", SpanKind.AGENT),
+        ("execute_tool", SpanKind.UNKNOWN),
+    ],
+)
+def test_span_to_domain_kinds_from_gen_ai_operation_when_openinference_kind_is_absent(
+    operation: str, expected: SpanKind
+) -> None:
+    span = _make_span()
+    _add_string_attr(span, "gen_ai.operation.name", operation)
+
+    domain_span = _span_to_domain(
+        workspace="default",
+        span=span,
+        resource_attributes={},
+        scope_data={},
+        ingested_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert domain_span.kind is expected
+
+
+def test_span_to_domain_keeps_a_recognized_openinference_kind() -> None:
+    span = _make_span()
+    _add_string_attr(span, "openinference.span.kind", "TOOL")
+    _add_string_attr(span, "gen_ai.operation.name", "chat")
+
+    domain_span = _span_to_domain(
+        workspace="default",
+        span=span,
+        resource_attributes={},
+        scope_data={},
+        ingested_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert domain_span.kind is SpanKind.TOOL
 
 
 def test_span_to_domain_without_evaluation_attribute_has_no_id() -> None:

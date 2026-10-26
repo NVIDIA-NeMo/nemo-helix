@@ -1,20 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  Code,
+  Beaker,
+  ScaleBalance,
+  Shield,
+  Graduate,
+  Envelope,
+  MagnifyingGlass,
+  IconFunction,
+} from '@nemo/icons/icons';
 import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import type { FilesetTemplate } from '@studio/components/CreateFilesetStart/types';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_EMBEDDER_MODEL_NAME } from '@studio/constants/constants';
-import {
-  Braces,
-  Code2,
-  FlaskConical,
-  GraduationCap,
-  MailWarning,
-  Scale,
-  SearchCode,
-  ShieldCheck,
-  SquareFunction,
-} from 'lucide-react';
 
 /**
  * Shared with both phishing templates. The corpus is fully synthetic, so every prompt
@@ -38,7 +37,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Phishing email triage (evaluation set)',
     description:
       'Labeled synthetic emails for benchmarking a phishing analyzer. Labels are sampled, not model-authored.',
-    icon: MailWarning,
+    icon: Envelope,
     tag: { label: 'Evaluation', color: 'red', kind: 'outline' },
     columns: [
       {
@@ -129,7 +128,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Phishing analyzer fine-tuning (SFT)',
     description:
       'Prompt–completion pairs teaching a small model the phishing-analyzer task. Keep it disjoint from the eval set.',
-    icon: ShieldCheck,
+    icon: Shield,
     tag: { label: 'Fine-tuning', color: 'red', kind: 'outline' },
     columns: [
       {
@@ -196,7 +195,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Instruction fine-tuning (SFT)',
     description:
       'Instruction–response pairs: a sampled topic, an LLM-written instruction, and a model answer.',
-    icon: GraduationCap,
+    icon: Graduate,
     tag: { label: 'Fine-tuning', color: 'blue', kind: 'outline' },
     columns: [
       {
@@ -233,7 +232,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     id: 'sampler-showcase',
     title: 'All samplers (showcase)',
     description: 'One column per previewable sampler type, seeded with valid parameters — for QA.',
-    icon: FlaskConical,
+    icon: Beaker,
     tag: { label: 'Showcase', color: 'green', kind: 'outline' },
     columns: [
       {
@@ -323,7 +322,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Code generation + validation (Python)',
     description:
       'Python exercises with LLM-written solutions and a pass/fail column from code validation.',
-    icon: Code2,
+    icon: Code,
     tag: { label: 'Fine-tuning', color: 'green', kind: 'outline' },
     columns: [
       {
@@ -371,7 +370,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Structured data extraction',
     description:
       'Free-form text paired with the typed JSON extracted from it — for extraction models.',
-    icon: Braces,
+    icon: Code,
     tag: { label: 'Fine-tuning', color: 'purple', kind: 'outline' },
     columns: [
       {
@@ -410,7 +409,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Preference pairs (reward modeling)',
     description:
       'A chosen answer, a rejected answer and a judge score — for DPO and reward-model training.',
-    icon: Scale,
+    icon: ScaleBalance,
     tag: { label: 'Alignment', color: 'yellow', kind: 'outline' },
     columns: [
       {
@@ -466,7 +465,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Semantic search dataset',
     description:
       'Query–passage pairs with embeddings for retrieval and RAG evaluation. Needs an "embedder" model.',
-    icon: SearchCode,
+    icon: MagnifyingGlass,
     tag: { label: 'Retrieval', color: 'blue', kind: 'outline' },
     columns: [
       {
@@ -522,7 +521,7 @@ export const FILESET_TEMPLATES: FilesetTemplate[] = [
     title: 'Expression transforms (no LLM)',
     description:
       'Derived columns from Jinja2 expressions — no LLM calls, so it previews instantly.',
-    icon: SquareFunction,
+    icon: IconFunction,
     tag: { label: 'Transform', color: 'teal', kind: 'outline' },
     columns: [
       {

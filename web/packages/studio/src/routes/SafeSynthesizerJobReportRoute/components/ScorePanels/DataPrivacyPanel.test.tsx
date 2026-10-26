@@ -18,10 +18,6 @@ vi.mock('@nemo/common/src/components/ScoreGauge', () => ({
   ),
 }));
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Mock the ScrollTable component
 /* eslint-disable testing-library/no-node-access */
 vi.mock('@nemo/common/src/components/ScrollTable', () => ({
@@ -330,8 +326,8 @@ describe('DataPrivacyPanel', () => {
         { wrapper: createWrapper() }
       );
 
-      const checkIcons = screen.getAllByTestId('circle-check-icon');
-      const cancelIcons = screen.getAllByTestId('ban-icon');
+      const checkIcons = screen.getAllByTestId('score-check-icon');
+      const cancelIcons = screen.getAllByTestId('score-cancel-icon');
 
       expect(checkIcons).toHaveLength(2);
       expect(cancelIcons).toHaveLength(2);

@@ -1,15 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isConflictError } from '@nemo/common/src/api/common/utils';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getErrorMessage } from '@nemo/common/src/utils/error';
 import { logger } from '@nemo/common/src/utils/logger';
 import { useEvalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJobRequest, MetricInline } from '@nemo/sdk/generated/evals/schema';
-import {
-  createEvalConfigFileset,
-  isConflictError,
-} from '@studio/api/evaluation/eval-config-fileset';
+import { createEvalConfigFileset } from '@studio/api/evaluation/eval-config-fileset';
 import { evalConfigFilename } from '@studio/components/evaluation/experimentEvalConfig';
 import { buildEvaluationSpec } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
 import {

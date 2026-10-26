@@ -26,7 +26,7 @@ export type BaseModelDeploymentState =
   | 'unavailable'
   | 'indeterminate';
 
-const LIVE_STATUSES: ReadonlySet<ModelDeploymentStatus> = new Set<ModelDeploymentStatus>([
+export const LIVE_STATUSES: ReadonlySet<ModelDeploymentStatus> = new Set<ModelDeploymentStatus>([
   ModelDeploymentStatus.CREATED,
   ModelDeploymentStatus.PENDING,
   ModelDeploymentStatus.READY,

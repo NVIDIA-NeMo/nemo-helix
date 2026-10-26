@@ -65,6 +65,19 @@ After a customization job reaches **`completed`**, the platform registers the ad
 |-------------------------|----------------------------------|
 | A **READY** inference deployment for the **base** model entity with `lora_enabled: true` | Confirm adapter appears under `nemo models get <model-entity>` → `adapters` |
 | Gateway reachable at the provider URL below | Target the adapter by name in the eval request (see table) |
+| The deployment's maximum LoRA rank ≥ the adapter's `rank` (see below) | — |
+
+#### LoRA rank limit
+
+A deployment loads adapters up to a maximum rank and **refuses higher-rank adapters**. Defaults:
+
+| Engine / image | Default max rank | Raise it on the deployment config |
+|---|---|---|
+| vLLM (`engine: vllm`, the default) | **16** | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
+| Model-free NIM (`vllm-model-free-nim`, `sglang-model-free-nim`; the default NIM image) | **16** | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
+
+vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
 
 ### Full SFT / merged checkpoints: deploy the output model
 
@@ -77,6 +90,14 @@ The fine-tuned weights live on a **new model entity** at `output.name` (`default
 | Confirm registration | `nemo models get <output.name> --workspace default` — entity exists with fine-tuned weights |
 | Deploy for inference | Create or update an inference deployment / provider that serves `default/<output.name>` |
 | Inference / eval route | **Model-entity** URL on `<output.name>` with `model: default/<output.name>` (not the base entity) |
+
+**Pick the engine.** Deploy with **`engine: vllm`** by default; it is also the default for an inline `deployment_config` on the job. Use `engine: nim` only when the user asks for NIM or has a model-specific NIM image for the model. When using NIM for a Hugging Face checkpoint:
+
+- Prefer the **model-free NIM** (`nvcr.io/nim/nvidia/vllm-model-free-nim`, the platform default NIM image, tag `latest`). It is the NIM 2.x successor to the multi-LLM NIM, not a rename, and the platform sets the configuration it reads. Supported models: [model-free NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim).
+- Use the NIM 1.x **multi-LLM NIM** (`nvcr.io/nim/nvidia/llm-nim`) only when the user asks for it. Supported architectures: [multi-LLM NIM list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html).
+- **The multi-LLM NIM cannot serve automodel `lora_merged` outputs.** The merge step saves `config.json` and the tokenizer with transformers 5; the multi-LLM NIM 1.15 ships transformers 4.56. Deploy merged LoRA outputs with vLLM or the model-free NIM, and warn the user if they ask for the multi-LLM NIM.
+
+The per-model deployment configurations in the docs still list `llm-nim:1.15.5`; the merged-LoRA limitation applies to them.
 
 Post-training eval for full models: compare against the base entity on its deployment, or eval the fine-tuned entity directly via `eval_helpers.py` is LoRA-oriented (`--adapter`); for full SFT, run generation eval against the **output** model entity's gateway URL.
 

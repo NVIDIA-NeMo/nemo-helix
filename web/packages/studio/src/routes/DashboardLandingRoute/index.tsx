@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
+import { Paperplane, WindowTerminal } from '@nemo/icons/icons';
 import { Button, Flex, Text, TextArea, Tooltip } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -10,7 +11,6 @@ import { writeStoredActiveSessionId } from '@studio/routes/agents/AssistantChatR
 import { AssistantLayout } from '@studio/routes/agents/AssistantChatRoute/AssistantLayout';
 import type { AssistantChatRouteState } from '@studio/routes/agents/AssistantChatRoute/types';
 import { getAssistantChatRoute } from '@studio/routes/utils';
-import { Send, Terminal } from 'lucide-react';
 import {
   type ChangeEvent,
   type FC,
@@ -74,7 +74,7 @@ const LandingComposer = ({
       />
       <Flex className="flex items-center justify-between gap-3 px-1 pt-2">
         <Flex className="flex items-center gap-2 text-secondary">
-          <Terminal size={16} />
+          <WindowTerminal size="16" />
           <Text kind="body/regular/sm">NeMo Assistant</Text>
         </Flex>
         <Tooltip slotContent="Send">
@@ -85,7 +85,7 @@ const LandingComposer = ({
             type="submit"
             disabled={!input.trim()}
           >
-            <Send size={16} />
+            <Paperplane size="16" />
           </Button>
         </Tooltip>
       </Flex>

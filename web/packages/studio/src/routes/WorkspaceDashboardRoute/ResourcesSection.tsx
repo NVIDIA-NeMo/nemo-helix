@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Book, Bug, OpenExternal, Route } from '@nemo/icons/icons';
 import {
   Card,
   Divider,
@@ -14,7 +15,6 @@ import {
 import { ReportTraceModal } from '@studio/components/ReportTraceModal';
 import { TELEMETRY_ENABLED } from '@studio/constants/environment';
 import { LINK_DOCS_SDK, LINK_DOCS_STUDIO, LINK_GITHUB_ISSUES } from '@studio/constants/links';
-import { Book, Bug, ExternalLink, Route } from 'lucide-react';
 import { FC, useState } from 'react';
 
 export const ResourcesSection: FC = () => {
@@ -48,7 +48,7 @@ export const ResourcesSection: FC = () => {
                   >
                     {item.children}
                     <Flex align="center" className="ml-auto">
-                      <ExternalLink width={14} height={14} />
+                      <OpenExternal width={14} height={14} />
                     </Flex>
                   </VerticalNavItem>
                   {item.id === 'studio-docs' && <Divider />}
@@ -76,7 +76,7 @@ export const ResourcesSection: FC = () => {
                         >
                           {item.children}
                           <Flex align="center" className="ml-auto">
-                            <ExternalLink width={14} height={14} />
+                            <OpenExternal width={14} height={14} />
                           </Flex>
                         </VerticalNavItem>
                         {TELEMETRY_ENABLED && <Divider />}

@@ -8,6 +8,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { getModelVersion, TagLabel, tagToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { kebabCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import { isDefined } from '@nemo/common/src/utils/list';
+import { ChatMulti, Eye, EyeOff, Layers, HAlignLeft, IconWindow } from '@nemo/icons/icons';
 import {
   ModelDeploymentStatus,
   type Adapter,
@@ -32,7 +33,6 @@ import {
 import { CopyButton } from '@studio/components/CopyButton';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import { formatFinetuningType } from '@studio/util/customizations';
-import { MessagesSquare, Eye, EyeOff, Layers, AlignLeft, AppWindow } from 'lucide-react';
 import { FC, useState } from 'react';
 
 export type ModelParameters = ModelDetailOverviewProps & ModelParametersAccordionProps;
@@ -96,7 +96,7 @@ export const ModelDetailOverview: FC<ModelDetailOverviewProps> = ({
         {parameters != null && (
           <Tooltip slotContent="Parameters">
             <Flex align="center" gap="1">
-              <AlignLeft />
+              <HAlignLeft />
               <Text kind="body/regular/sm">
                 {parametersToString(parameters, { format: 'short' })}
               </Text>
@@ -106,7 +106,7 @@ export const ModelDetailOverview: FC<ModelDetailOverviewProps> = ({
         {contextSize != null && (
           <Tooltip slotContent="Context Size">
             <Flex align="center" gap="1">
-              <AppWindow />
+              <IconWindow />
               <Text kind="body/regular/sm">
                 {parametersToString(contextSize, { format: 'short' })}
               </Text>
@@ -116,7 +116,7 @@ export const ModelDetailOverview: FC<ModelDetailOverviewProps> = ({
         {isChatModel && (
           <Tooltip slotContent="Chat Supported">
             <Flex align="center" gap="1">
-              <MessagesSquare />
+              <ChatMulti />
               <Text kind="body/regular/sm">Chat</Text>
             </Flex>
           </Tooltip>

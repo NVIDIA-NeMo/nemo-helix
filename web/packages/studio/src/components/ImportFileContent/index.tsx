@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Db } from '@nemo/icons/icons';
 import { Button, Stack, TabItem, Tabs } from '@nvidia/foundations-react-core';
 import { DatasetFileSelect } from '@studio/components/DatasetFileSelect';
 import { DatasetSelect } from '@studio/components/DatasetSelect';
@@ -8,7 +9,6 @@ import { ControlledFileUpload } from '@studio/components/form/ControlledFileUplo
 import { ImportFileContentFormFields } from '@studio/components/ImportFileContent/validation';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getWorkspaceFilesetsRoute } from '@studio/routes/utils';
-import { Database } from 'lucide-react';
 import { FC, ReactNode } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router';
@@ -124,7 +124,7 @@ export const ImportFileContent: FC<Props> = ({
               type="button"
               disabled={disabled}
             >
-              <Database />
+              <Db />
               Manage Datasets
             </Button>
           </Link>

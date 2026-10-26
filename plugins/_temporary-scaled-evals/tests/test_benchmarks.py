@@ -3,12 +3,8 @@
 
 """Unit tests for the benchmarks router.
 
-Uses an in-process FastAPI TestClient over the fake Entity Store; the psycopg
-connection dependency is stubbed because benchmarks no longer use it.
+Uses an in-process FastAPI TestClient over the fake Entity Store.
 """
-
-from collections.abc import Iterator
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,19 +12,12 @@ pytest.importorskip("scaled_evals")
 
 from api_test_fixture import client, v1
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import get_conn
 from task_fixtures import seed_benchmark, seed_task_revision
-
-
-def _empty_db() -> Iterator[MagicMock]:
-    yield MagicMock()
 
 
 @pytest.fixture(autouse=True)
 def _override_db():
-    v1.dependency_overrides[get_conn] = _empty_db
     yield
-    v1.dependency_overrides.pop(get_conn, None)
     v1.dependency_overrides.pop(current_principal, None)
 
 

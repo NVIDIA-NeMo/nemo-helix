@@ -3,9 +3,9 @@
 
 import { CodeEditor } from '@nemo/common/src/components/CodeEditor';
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
+import { Code } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import { Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { Braces } from 'lucide-react';
 import type { FC } from 'react';
 
 /**
@@ -15,7 +15,7 @@ import type { FC } from 'react';
  * cannot configure yet, and the only way to see what switching a rail on actually wrote.
  */
 export const RawConfigSection: FC<{ data: RailsConfig }> = ({ data }) => (
-  <Panel slotHeading="Configuration JSON" slotIcon={<Braces />} elevation="high" density="compact">
+  <Panel slotHeading="Configuration JSON" slotIcon={<Code />} elevation="high" density="compact">
     <Stack gap="density-sm">
       <Text kind="body/regular/sm" className="text-text-secondary">
         The full configuration, including any settings this page does not surface. Read-only.

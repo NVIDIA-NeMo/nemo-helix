@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Trigger-side helper for the Helix agent dispatch workflow: parse the `/helix-*`
-// token from a PR comment, react 👀, and fire a `repository_dispatch` to the worker
+// token from a PR comment and fire a `repository_dispatch` to the worker
 // (fire-and-forget). Envelope contract + architecture: see HELIX_AGENT_DISPATCH.md.
 
 const EVENT_TYPE = "helix-agent";
@@ -26,9 +26,6 @@ async function dispatchAgent({ core, github, context, env }) {
     return null;
   }
 
-  const [owner, repo] = (context.payload.repository?.full_name ?? "").split(
-    "/",
-  );
   const clientPayload = {
     trigger,
     repo: context.payload.repository?.full_name,
@@ -42,20 +39,6 @@ async function dispatchAgent({ core, github, context, env }) {
     base_ref: null,
     head_ref: null,
   };
-
-  // Acknowledge immediately so the human sees the request was received.
-  if (env.ACT !== "true") {
-    try {
-      await github.rest.reactions.createForIssueComment({
-        owner,
-        repo,
-        comment_id: comment.id,
-        content: "eyes",
-      });
-    } catch (error) {
-      core.warning(`Could not add 👀 reaction: ${error.message}`);
-    }
-  }
 
   const envelope = { action: EVENT_TYPE, client_payload: clientPayload };
   if (env.ACT === "true") {

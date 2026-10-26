@@ -3,8 +3,8 @@
 
 """The dispatcher: evaluation row -> launched run.
 
-The durable dispatch queue is the ``evaluations`` table itself: ``POST
-/evaluations`` inserts a row at ``status='queued'`` and submits a Platform Job,
+The durable dispatch queue is the evaluation entities themselves: ``POST
+/evaluations`` stores one at ``status='queued'`` and submits a Platform Job,
 which calls :meth:`Dispatcher.run` and then :meth:`Dispatcher.finalize`. The
 Jobs controller resubmits any active row that has no live Job, so
 ``provisioning`` / ``running`` rows are resumed through the backend status reader
@@ -12,17 +12,15 @@ instead of launching a new run.
 
 :class:`Dispatcher` is the unit of work. ``run`` performs one evaluation
 end-to-end: load the evaluation, build a :class:`~scaled_evals.dispatch.runtime_backend.LaunchSpec`, hand it to the
-backend, advance ``evaluations.status`` to ``running``, poll the backend to a
+backend, advance the evaluation's ``status`` to ``running``, poll the backend to a
 terminal state, sync per-run artifacts to the object store, write the result
-envelope back to Postgres (``result`` JSONB plus derived summary columns),
+envelope back to the evaluation (``result`` plus derived summary fields),
 optionally upload post-run ATIF trajectories to NHX Intake when
 ``intake_profile_id`` is set, and set a terminal ``status`` of ``succeeded`` or
 ``failed``.
 
-Both the backend resolver and the DB connection factory are injected so the
-whole path runs in unit tests with a fake backend and a fake connection — no
-cluster, no live Postgres. The background task opens its *own* connection
-(the request-scoped one from ``get_conn`` is gone by the time it runs).
+The backend resolver is injected so the whole path runs in unit tests with a
+fake backend and no cluster.
 """
 
 from __future__ import annotations
@@ -37,15 +35,12 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import yaml
-from psycopg.rows import dict_row
 
 from scaled_evals.api import artifacts
 from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
@@ -101,10 +96,7 @@ _DB_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 # Rows the worker may pick up (including resume after a restart).
 _RESUMABLE_STATUSES = frozenset({"queued", "provisioning", "running"})
 _PROFILE_TYPES_BY_ROLE = {"intake": ("intake",), "harbor": ("harbor",), "framework": ("harbor", "gym")}
-ConnFactory = Callable[[], AbstractContextManager[psycopg.Connection]]
 BackendResolver = Callable[[str], RuntimeBackend]
-_DATABASE_CONNECT_RETRY_SECONDS = 300.0
-_DATABASE_CONNECT_RETRY_INTERVAL = 1.0
 _LIFECYCLE_TIMEOUT_GRACE_SECONDS = 300.0
 _HARBOR_PROFILE_TEMPLATE_KEYS = ("config", "harbor_config", "template", "harbor_template")
 # sandbox_k8s stops a sandbox after this long when the profile omits lifecycle_timeout.
@@ -205,40 +197,6 @@ def assert_lifecycle_covers_agent_floor(row: Mapping[str, Any], floor_sec: int) 
             f"profile stops the sandbox after {lifecycle:g}s; raise "
             f"environment.kwargs.lifecycle_timeout to at least {needed:g}"
         )
-
-
-def _connect_database() -> psycopg.Connection[Any]:
-    deadline = time.monotonic() + _DATABASE_CONNECT_RETRY_SECONDS
-    attempt = 0
-    while True:
-        try:
-            return psycopg.Connection[dict[str, Any]].connect(settings.resolved_database_url(), row_factory=dict_row)
-        except psycopg.OperationalError:
-            attempt += 1
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise
-            if attempt == 1 or attempt % 10 == 0:
-                LOG.warning(
-                    "database connection unavailable; retrying for up to %.0f more seconds",
-                    remaining,
-                )
-            time.sleep(min(_DATABASE_CONNECT_RETRY_INTERVAL, remaining))
-
-
-@contextmanager
-def _default_connect() -> Iterator[psycopg.Connection[Any]]:
-    # Standalone connection for the background task. Mirrors api.db.get_conn
-    # rather than importing it — get_conn is a request-scoped generator
-    # dependency, not a context manager. Autocommit so status writes from the
-    # long poll loop are visible without holding one transaction open for the
-    # whole run.
-    conn = _connect_database()
-    conn.autocommit = True
-    try:
-        yield conn
-    finally:
-        conn.close()
 
 
 def _resolve_backend(runtime: str) -> RuntimeBackend:
@@ -402,7 +360,6 @@ class Dispatcher:
     """
 
     resolve: BackendResolver = _resolve_backend
-    connect: ConnFactory = _default_connect
     sleep: Callable[[float], None] = time.sleep
     poll_interval: float = field(default_factory=lambda: settings.dispatch_run_poll_interval_seconds)
     max_polls: int = field(default_factory=lambda: settings.dispatch_run_max_polls)
@@ -490,46 +447,45 @@ class Dispatcher:
         execution_number: int | None = None
         row: dict[str, Any] | None = None
         try:
-            with self.connect() as conn:
-                row = EvaluationStore().load_for_dispatch(evaluation_id)
-                if row is None:
-                    raise RuntimeError(f"evaluation not found: {evaluation_id}")
-                if row.get("status") not in _DB_TERMINAL_STATUSES:
-                    raise RuntimeError(f"evaluation is not terminal: {evaluation_id}")
-                snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-                framework_config = self._profile_config(conn, row, snapshot=snapshot, role="framework")
-                harbor_config = (
-                    framework_config
-                    if row.get("framework") == "harbor" and framework_config
-                    else self._profile_config(conn, row, snapshot=snapshot, role="harbor")
-                )
-                if row.get("framework") == "harbor" and not framework_config:
-                    framework_config = harbor_config
-                row = {
-                    **row,
-                    "framework_config": framework_config,
-                    "harbor_config": harbor_config,
-                    "intake_config": self._profile_config(conn, row, snapshot=snapshot, role="intake"),
-                }
-                execution_number = int(row.get("current_execution") or 1)
+            row = EvaluationStore().load_for_dispatch(evaluation_id)
+            if row is None:
+                raise RuntimeError(f"evaluation not found: {evaluation_id}")
+            if row.get("status") not in _DB_TERMINAL_STATUSES:
+                raise RuntimeError(f"evaluation is not terminal: {evaluation_id}")
+            snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
+            framework_config = self._profile_config(row, snapshot=snapshot, role="framework")
+            harbor_config = (
+                framework_config
+                if row.get("framework") == "harbor" and framework_config
+                else self._profile_config(row, snapshot=snapshot, role="harbor")
+            )
+            if row.get("framework") == "harbor" and not framework_config:
+                framework_config = harbor_config
+            row = {
+                **row,
+                "framework_config": framework_config,
+                "harbor_config": harbor_config,
+                "intake_config": self._profile_config(row, snapshot=snapshot, role="intake"),
+            }
+            execution_number = int(row.get("current_execution") or 1)
+            try:
+                skill_materials = artifacts.read_json_object(
+                    artifacts.evaluation_artifact_key(
+                        evaluation_id,
+                        "scaled-evals-extra-skill-materials.json",
+                    )
+                ).get("materials", [])
+            except Exception:  # noqa: BLE001 — most runs have no extra-skill artifact
+                skill_materials = []
+            row["extra_skill_materials"] = skill_materials
+            if row.get("runtime") == HARBOR_OPENSANDBOX_RUNTIME:
                 try:
-                    skill_materials = artifacts.read_json_object(
-                        artifacts.evaluation_artifact_key(
-                            evaluation_id,
-                            "scaled-evals-extra-skill-materials.json",
-                        )
-                    ).get("materials", [])
-                except Exception:  # noqa: BLE001 — most runs have no extra-skill artifact
-                    skill_materials = []
-                row["extra_skill_materials"] = skill_materials
-                if row.get("runtime") == HARBOR_OPENSANDBOX_RUNTIME:
-                    try:
-                        applied_egress = artifacts.read_json_object(
-                            artifacts.evaluation_artifact_key(evaluation_id, APPLIED_EGRESS_SUMMARY_FILENAME)
-                        ).get("sandboxes", [])
-                    except Exception:  # noqa: BLE001 — runs that never started a sandbox have no summary
-                        applied_egress = []
-                    row["opensandbox_applied_egress"] = applied_egress
+                    applied_egress = artifacts.read_json_object(
+                        artifacts.evaluation_artifact_key(evaluation_id, APPLIED_EGRESS_SUMMARY_FILENAME)
+                    ).get("sandboxes", [])
+                except Exception:  # noqa: BLE001 — runs that never started a sandbox have no summary
+                    applied_egress = []
+                row["opensandbox_applied_egress"] = applied_egress
 
             prefix = f"scaled-evals-evidence-{evaluation_id}-"
             with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
@@ -546,19 +502,17 @@ class Dispatcher:
                     evidence_root,
                     artifacts.evaluation_artifact_prefix(evaluation_id),
                 )
-            with self.connect() as conn:
-                EvaluationStore().mark_evidence_ready(
-                    evaluation_id,
-                    expected_execution_number=execution_number,
-                )
+            EvaluationStore().mark_evidence_ready(
+                evaluation_id,
+                expected_execution_number=execution_number,
+            )
         except Exception as exc:  # noqa: BLE001 — durable queue retries up to its limit
             LOG.warning("evidence generation failed for %s: %s", evaluation_id, exc)
-            with self.connect() as conn:
-                EvaluationStore().mark_evidence_failed(
-                    evaluation_id,
-                    str(exc),
-                    expected_execution_number=execution_number,
-                )
+            EvaluationStore().mark_evidence_failed(
+                evaluation_id,
+                str(exc),
+                expected_execution_number=execution_number,
+            )
         finally:
             # Evidence can fail permanently; the outcome still belongs in analytics.
             # Each attempt re-emits the same span id and reads keep one per evaluation.
@@ -659,319 +613,302 @@ class Dispatcher:
         status/reward are derived from its members on read (see
         ``benchmark_run_store.derive_run_view``), so there is no fan-in here.
         """
-        with self.connect() as conn:
-            row: dict[str, Any] | None = (
-                self._load(conn, evaluation_id) if inputs is None else self._load_state(conn, evaluation_id, inputs)
+        row: dict[str, Any] | None = (
+            self._load(evaluation_id) if inputs is None else self._load_state(evaluation_id, inputs)
+        )
+        if row is None:
+            return
+        if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
+            EvaluationStore().record_cancel_teardown_succeeded(evaluation_id)
+            return
+        if row["status"] not in _RESUMABLE_STATUSES:
+            return
+
+        execution_number = int(row.get("current_execution") or 1)
+        if row.get("switchyard_profile_id"):
+            # Closed- and open-book runs relied on Switchyard to fence model
+            # traffic; running them without it would silently lift that fence.
+            self._set_status(
+                evaluation_id,
+                "failed",
+                execution_number=execution_number,
+                detail="switchyard_unsupported: Switchyard profiles are no longer supported",
+                failure_code="switchyard_unsupported",
             )
-            if row is None:
-                return
-            if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
-                EvaluationStore().record_cancel_teardown_succeeded(evaluation_id)
-                return
-            if row["status"] not in _RESUMABLE_STATUSES:
-                return
-
-            execution_number = int(row.get("current_execution") or 1)
-            if row.get("switchyard_profile_id"):
-                # Closed- and open-book runs relied on Switchyard to fence model
-                # traffic; running them without it would silently lift that fence.
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail="switchyard_unsupported: Switchyard profiles are no longer supported",
-                    failure_code="switchyard_unsupported",
-                )
-                return
-            if expected_execution_number is not None and execution_number != expected_execution_number:
-                LOG.info(
-                    "execution %s for %s is stale; current execution is %s",
-                    expected_execution_number,
-                    evaluation_id,
-                    execution_number,
-                )
-                return
-            resume = row["status"] in {"provisioning", "running"} and row.get("backend_handle")
-            execution_id = (
-                _external_handle(row.get("backend_handle"))
-                if resume
-                else _execution_id(evaluation_id, execution_number)
-            ) or _execution_id(evaluation_id, execution_number)
-            try:
-                artifact_root = _artifact_root(execution_id, row["runtime"])
-            except Exception as exc:  # noqa: BLE001 — unknown/misregistered runtime
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail=str(exc),
-                    failure_code=type(exc).__name__,
-                )
-                return
-            row = {
-                **row,
-                "execution_number": execution_number,
-                "execution_id": execution_id,
-            }
-            if not resume:
-                object_key = row.get("tarball_object_key")
-                if object_key:
-                    try:
-                        pack_exists = artifacts.object_exists(str(object_key))
-                    except Exception as exc:  # noqa: BLE001 — dispatch must terminalize cleanly
-                        self._set_status(
-                            conn,
-                            evaluation_id,
-                            "failed",
-                            execution_number=execution_number,
-                            detail=(f"object_store_unavailable: could not read task pack object: {exc}"),
-                            failure_code="object_store_unavailable",
-                        )
-                        return
-                    if not pack_exists:
-                        detail = _task_pack_missing_detail(str(object_key))
-                        self._set_status(
-                            conn,
-                            evaluation_id,
-                            "failed",
-                            execution_number=execution_number,
-                            detail=detail,
-                            failure_code="task_object_missing",
-                        )
-                        return
-            if not resume and row["status"] != "provisioning":
-                # --- provisioning: assemble LaunchSpec and hand off to the backend ---
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "provisioning",
-                    execution_number=execution_number,
-                )
-                row = {**row, "status": "provisioning"}
-
-            try:
-                snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-            except Exception as exc:  # noqa: BLE001 — record invalid execution snapshot
-                self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
-                self._sync_artifacts_warn(
-                    evaluation_id,
-                    row["runtime"],
-                    execution_id=execution_id,
-                    execution_number=execution_number,
-                )
-                self._build_archive_warn(
-                    evaluation_id,
-                    runtime=row["runtime"],
-                    artifact_root=artifact_root,
-                    execution_number=execution_number,
-                )
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail=str(exc),
-                    failure_code=type(exc).__name__,
-                )
-                return
-
-            try:
-                framework_config = self._load_framework_config(conn, row)
-                harbor_config = (
-                    framework_config
-                    if row.get("framework") == "harbor" and framework_config
-                    else self._load_harbor_config(conn, row)
-                )
-                if row.get("framework") == "harbor" and not framework_config:
-                    framework_config = harbor_config
-                intake_config = self._load_intake_config(conn, row)
-                credential_env = injected_credential_env(row["credentials"] or {})
-            except Exception as exc:  # noqa: BLE001 — record profile load/validation failure
-                self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
-                self._sync_artifacts_warn(
-                    evaluation_id,
-                    row["runtime"],
-                    execution_id=execution_id,
-                    execution_number=execution_number,
-                )
-                self._build_archive_warn(
-                    evaluation_id,
-                    runtime=row["runtime"],
-                    artifact_root=artifact_root,
-                    execution_number=execution_number,
-                )
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail=str(exc),
-                    failure_code=type(exc).__name__,
-                )
-                return
-
-            row = {
-                **row,
-                "framework_config": framework_config,
-                "harbor_config": harbor_config,
-                "intake_config": intake_config,
-            }
-
-            # validate_execution_snapshot already guarantees an evaluation object.
-            snapshot_evaluation: Mapping[str, Any] = snapshot["evaluation"] if snapshot is not None else row
-            runner_metadata = snapshot_evaluation.get("runner_metadata") or {}
-            runner_artifact: Mapping[str, Any] | None = (
-                runner_metadata.get("artifact") if isinstance(runner_metadata, Mapping) else {}
+            return
+        if expected_execution_number is not None and execution_number != expected_execution_number:
+            LOG.info(
+                "execution %s for %s is stale; current execution is %s",
+                expected_execution_number,
+                evaluation_id,
+                execution_number,
             )
-            if not isinstance(runner_artifact, Mapping):
-                runner_artifact = {}
-            agent_floor = snapshot_agent_timeout_floor(row)
-            task_slug = snapshot["task"].get("slug") if snapshot else row.get("task_slug")
-            if task_slug is not None and not isinstance(task_slug, str):
-                raise ValueError("task slug must be a string")
-            spec = LaunchSpec(
-                evaluation_id=execution_id,
-                benchmark_run_id=row.get("benchmark_run_id"),
-                name=row["name"],
-                task_slug=task_slug,
-                framework=row["framework"],
-                framework_version=snapshot_evaluation.get("framework_version"),
-                runner_image_ref=snapshot_evaluation.get("runner_image_ref"),
-                runner_image_digest=snapshot_evaluation.get("runner_image_digest"),
-                runner_source_revision=runner_artifact.get("source_revision"),
-                runner_package_version=runner_artifact.get("package_version"),
-                allow_live_runner_fallback=snapshot is None,
-                framework_adapter_version=snapshot_evaluation.get("framework_adapter_version"),
-                sandbox_k8s_version=snapshot_evaluation.get("sandbox_k8s_version"),
-                agent_bundle=runner_metadata.get("agent_bundle") if isinstance(runner_metadata, Mapping) else None,
-                harbor_dir=(
-                    resolve_harbor_runner(row.get("framework_version")).harbor_dir
-                    if row["framework"] == "harbor"
-                    else None
-                ),
-                image_ref=row["image_ref"] or "",
-                image_digest=row.get("image_digest"),
-                verifier_image_ref=row.get("verifier_image_ref"),
-                verifier_image_digest=row.get("verifier_image_digest"),
-                n_attempts=row.get("n_attempts") or 1,
-                parallelism=row["parallelism"],
-                network_policy=str(row.get("network_policy") or "unrestricted"),
-                network_policy_config=row.get("network_policy_config") or {},
-                tarball_object_key=row.get("tarball_object_key"),
-                extra_skill_object_keys=row.get("extra_skill_object_keys") or [],
-                instruction_prefix=row.get("instruction_prefix"),
-                instruction_postfix=row.get("instruction_postfix"),
-                agent_timeout_floor_sec=agent_floor,
-                initial_user_turns=row.get("initial_user_turns") or [],
-                harbor_profile_id=row["harbor_profile_id"],
-                framework_config=framework_config,
-                harbor_config=harbor_config,
-                intake_profile_id=row["intake_profile_id"],
-                credentials=row["credentials"] or {},
-                credential_env=credential_env,
+            return
+        resume = row["status"] in {"provisioning", "running"} and row.get("backend_handle")
+        execution_id = (
+            _external_handle(row.get("backend_handle")) if resume else _execution_id(evaluation_id, execution_number)
+        ) or _execution_id(evaluation_id, execution_number)
+        try:
+            artifact_root = _artifact_root(execution_id, row["runtime"])
+        except Exception as exc:  # noqa: BLE001 — unknown/misregistered runtime
+            self._set_status(
+                evaluation_id,
+                "failed",
+                execution_number=execution_number,
+                detail=str(exc),
+                failure_code=type(exc).__name__,
             )
-            try:
-                backend = self.resolve(row["runtime"])
-            except Exception as exc:  # noqa: BLE001 — record any launch failure
-                self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
-                self._sync_artifacts_warn(
-                    evaluation_id,
-                    row["runtime"],
-                    execution_id=execution_id,
-                    execution_number=execution_number,
-                )
-                self._build_archive_warn(
-                    evaluation_id,
-                    runtime=row["runtime"],
-                    artifact_root=artifact_root,
-                    execution_number=execution_number,
-                )
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail=str(exc),
-                    failure_code=type(exc).__name__,
-                )
-                return
-
-            if resume:
-                handle = self._resume_handle(row)
-            else:
+            return
+        row = {
+            **row,
+            "execution_number": execution_number,
+            "execution_id": execution_id,
+        }
+        if not resume:
+            object_key = row.get("tarball_object_key")
+            if object_key:
                 try:
-                    if agent_floor is not None:
-                        assert_lifecycle_covers_agent_floor(row, agent_floor)
-                    if (
-                        spec.framework == "harbor"
-                        and spec.harbor_config.get("dataset_only") is True
-                        and effective_image_mode(spec.harbor_config) == "managed"
-                    ):
-                        imports = prepare_dataset_images(
-                            datasets=dataset_configs(spec.harbor_config),
-                            harbor_dir=str(spec.harbor_dir or settings.harbor_dir),
-                        )
-                        spec = spec.model_copy(
-                            update={"harbor_dataset_image_imports": [asdict(item) for item in imports]}
-                        )
-                    verify_launch_images(spec)
-                    handle = backend.launch(spec)
-                except Exception as exc:  # noqa: BLE001 — record any launch failure
-                    detail = str(exc)
-                    self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
-                    self._sync_artifacts_warn(
-                        evaluation_id,
-                        row["runtime"],
-                        execution_id=execution_id,
-                        execution_number=execution_number,
-                    )
-                    self._build_archive_warn(
-                        evaluation_id,
-                        runtime=row["runtime"],
-                        artifact_root=artifact_root,
-                        execution_number=execution_number,
-                    )
+                    pack_exists = artifacts.object_exists(str(object_key))
+                except Exception as exc:  # noqa: BLE001 — dispatch must terminalize cleanly
                     self._set_status(
-                        conn,
+                        evaluation_id,
+                        "failed",
+                        execution_number=execution_number,
+                        detail=(f"object_store_unavailable: could not read task pack object: {exc}"),
+                        failure_code="object_store_unavailable",
+                    )
+                    return
+                if not pack_exists:
+                    detail = _task_pack_missing_detail(str(object_key))
+                    self._set_status(
                         evaluation_id,
                         "failed",
                         execution_number=execution_number,
                         detail=detail,
-                        failure_code=type(exc).__name__,
+                        failure_code="task_object_missing",
                     )
                     return
-
-            db_status = EvaluationStore().load_runtime_status(
+        if not resume and row["status"] != "provisioning":
+            # --- provisioning: assemble LaunchSpec and hand off to the backend ---
+            self._set_status(
                 evaluation_id,
-                expected_execution_number=execution_number,
+                "provisioning",
+                execution_number=execution_number,
             )
-            if db_status is None:
-                raise DispatchClaimLost(evaluation_id)
-            if db_status == "cancelled":
-                self._teardown_cancelled_runtime(
+            row = {**row, "status": "provisioning"}
+
+        try:
+            snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
+        except Exception as exc:  # noqa: BLE001 — record invalid execution snapshot
+            self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
+            self._sync_artifacts_warn(
+                evaluation_id,
+                row["runtime"],
+                execution_id=execution_id,
+                execution_number=execution_number,
+            )
+            self._build_archive_warn(
+                evaluation_id,
+                runtime=row["runtime"],
+                artifact_root=artifact_root,
+                execution_number=execution_number,
+            )
+            self._set_status(
+                evaluation_id,
+                "failed",
+                execution_number=execution_number,
+                detail=str(exc),
+                failure_code=type(exc).__name__,
+            )
+            return
+
+        try:
+            framework_config = self._load_framework_config(row)
+            harbor_config = (
+                framework_config
+                if row.get("framework") == "harbor" and framework_config
+                else self._load_harbor_config(row)
+            )
+            if row.get("framework") == "harbor" and not framework_config:
+                framework_config = harbor_config
+            intake_config = self._load_intake_config(row)
+            credential_env = injected_credential_env(row["credentials"] or {})
+        except Exception as exc:  # noqa: BLE001 — record profile load/validation failure
+            self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
+            self._sync_artifacts_warn(
+                evaluation_id,
+                row["runtime"],
+                execution_id=execution_id,
+                execution_number=execution_number,
+            )
+            self._build_archive_warn(
+                evaluation_id,
+                runtime=row["runtime"],
+                artifact_root=artifact_root,
+                execution_number=execution_number,
+            )
+            self._set_status(
+                evaluation_id,
+                "failed",
+                execution_number=execution_number,
+                detail=str(exc),
+                failure_code=type(exc).__name__,
+            )
+            return
+
+        row = {
+            **row,
+            "framework_config": framework_config,
+            "harbor_config": harbor_config,
+            "intake_config": intake_config,
+        }
+
+        # validate_execution_snapshot already guarantees an evaluation object.
+        snapshot_evaluation: Mapping[str, Any] = snapshot["evaluation"] if snapshot is not None else row
+        runner_metadata = snapshot_evaluation.get("runner_metadata") or {}
+        runner_artifact: Mapping[str, Any] | None = (
+            runner_metadata.get("artifact") if isinstance(runner_metadata, Mapping) else {}
+        )
+        if not isinstance(runner_artifact, Mapping):
+            runner_artifact = {}
+        agent_floor = snapshot_agent_timeout_floor(row)
+        task_slug = snapshot["task"].get("slug") if snapshot else row.get("task_slug")
+        if task_slug is not None and not isinstance(task_slug, str):
+            raise ValueError("task slug must be a string")
+        spec = LaunchSpec(
+            evaluation_id=execution_id,
+            benchmark_run_id=row.get("benchmark_run_id"),
+            name=row["name"],
+            task_slug=task_slug,
+            framework=row["framework"],
+            framework_version=snapshot_evaluation.get("framework_version"),
+            runner_image_ref=snapshot_evaluation.get("runner_image_ref"),
+            runner_image_digest=snapshot_evaluation.get("runner_image_digest"),
+            runner_source_revision=runner_artifact.get("source_revision"),
+            runner_package_version=runner_artifact.get("package_version"),
+            allow_live_runner_fallback=snapshot is None,
+            framework_adapter_version=snapshot_evaluation.get("framework_adapter_version"),
+            sandbox_k8s_version=snapshot_evaluation.get("sandbox_k8s_version"),
+            agent_bundle=runner_metadata.get("agent_bundle") if isinstance(runner_metadata, Mapping) else None,
+            harbor_dir=(
+                resolve_harbor_runner(row.get("framework_version")).harbor_dir if row["framework"] == "harbor" else None
+            ),
+            image_ref=row["image_ref"] or "",
+            image_digest=row.get("image_digest"),
+            verifier_image_ref=row.get("verifier_image_ref"),
+            verifier_image_digest=row.get("verifier_image_digest"),
+            n_attempts=row.get("n_attempts") or 1,
+            parallelism=row["parallelism"],
+            network_policy=str(row.get("network_policy") or "unrestricted"),
+            network_policy_config=row.get("network_policy_config") or {},
+            tarball_object_key=row.get("tarball_object_key"),
+            extra_skill_object_keys=row.get("extra_skill_object_keys") or [],
+            instruction_prefix=row.get("instruction_prefix"),
+            instruction_postfix=row.get("instruction_postfix"),
+            agent_timeout_floor_sec=agent_floor,
+            initial_user_turns=row.get("initial_user_turns") or [],
+            harbor_profile_id=row["harbor_profile_id"],
+            framework_config=framework_config,
+            harbor_config=harbor_config,
+            intake_profile_id=row["intake_profile_id"],
+            credentials=row["credentials"] or {},
+            credential_env=credential_env,
+        )
+        try:
+            backend = self.resolve(row["runtime"])
+        except Exception as exc:  # noqa: BLE001 — record any launch failure
+            self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
+            self._sync_artifacts_warn(
+                evaluation_id,
+                row["runtime"],
+                execution_id=execution_id,
+                execution_number=execution_number,
+            )
+            self._build_archive_warn(
+                evaluation_id,
+                runtime=row["runtime"],
+                artifact_root=artifact_root,
+                execution_number=execution_number,
+            )
+            self._set_status(
+                evaluation_id,
+                "failed",
+                execution_number=execution_number,
+                detail=str(exc),
+                failure_code=type(exc).__name__,
+            )
+            return
+
+        if resume:
+            handle = self._resume_handle(row)
+        else:
+            try:
+                if agent_floor is not None:
+                    assert_lifecycle_covers_agent_floor(row, agent_floor)
+                if (
+                    spec.framework == "harbor"
+                    and spec.harbor_config.get("dataset_only") is True
+                    and effective_image_mode(spec.harbor_config) == "managed"
+                ):
+                    imports = prepare_dataset_images(
+                        datasets=dataset_configs(spec.harbor_config),
+                        harbor_dir=str(spec.harbor_dir or settings.harbor_dir),
+                    )
+                    spec = spec.model_copy(update={"harbor_dataset_image_imports": [asdict(item) for item in imports]})
+                verify_launch_images(spec)
+                handle = backend.launch(spec)
+            except Exception as exc:  # noqa: BLE001 — record any launch failure
+                detail = str(exc)
+                self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
+                self._sync_artifacts_warn(
                     evaluation_id,
-                    backend,
-                    handle,
-                    row=row,
-                    artifact_root=artifact_root,
+                    row["runtime"],
+                    execution_id=execution_id,
+                    execution_number=execution_number,
                 )
-                return
-            if db_status in _DB_TERMINAL_STATUSES:
+                self._build_archive_warn(
+                    evaluation_id,
+                    runtime=row["runtime"],
+                    artifact_root=artifact_root,
+                    execution_number=execution_number,
+                )
+                self._set_status(
+                    evaluation_id,
+                    "failed",
+                    execution_number=execution_number,
+                    detail=detail,
+                    failure_code=type(exc).__name__,
+                )
                 return
 
-            if row["status"] != "running":
-                # --- running: poll backend until the Harbor job finishes ---
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "running",
-                    execution_number=execution_number,
-                    detail=f"launched on {handle.backend}",
-                    handle=json.dumps(handle.model_dump()),
-                )
-                row = {**row, "status": "running", "backend_handle": handle.model_dump()}
+        db_status = EvaluationStore().load_runtime_status(
+            evaluation_id,
+            expected_execution_number=execution_number,
+        )
+        if db_status is None:
+            raise DispatchClaimLost(evaluation_id)
+        if db_status == "cancelled":
+            self._teardown_cancelled_runtime(
+                evaluation_id,
+                backend,
+                handle,
+                row=row,
+                artifact_root=artifact_root,
+            )
+            return
+        if db_status in _DB_TERMINAL_STATUSES:
+            return
+
+        if row["status"] != "running":
+            # --- running: poll backend until the Harbor job finishes ---
+            self._set_status(
+                evaluation_id,
+                "running",
+                execution_number=execution_number,
+                detail=f"launched on {handle.backend}",
+                handle=json.dumps(handle.model_dump()),
+            )
+            row = {**row, "status": "running", "backend_handle": handle.model_dump()}
 
         try:
             status = self._await_terminal(
@@ -985,134 +922,81 @@ class Dispatcher:
             self._teardown_failed_runtime_warn(backend, handle)
             raise
         except Exception as exc:  # noqa: BLE001 — record any status-read failure
-            with self.connect() as conn:
-                # Tear down before syncing: the terminator stops the runner and may write
-                # artifacts (such as the OpenSandbox applied-egress summary) that must be uploaded.
-                teardown_note = self._teardown_failed_runtime_warn(backend, handle)
-                self._write_provenance_warn(row, status="failed", artifact_root=artifact_root, handle=handle)
-                self._sync_artifacts_warn(
-                    evaluation_id,
-                    row["runtime"],
-                    execution_id=execution_id,
-                    execution_number=execution_number,
-                )
-                self._build_archive_warn(
-                    evaluation_id,
-                    runtime=row["runtime"],
-                    artifact_root=artifact_root,
-                    execution_number=execution_number,
-                )
-                detail = f"status read failed: {exc}"
-                if teardown_note:
-                    detail = f"{detail}; {teardown_note}"
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail=detail,
-                    failure_code=type(exc).__name__,
-                )
+            # Tear down before syncing: the terminator stops the runner and may write
+            # artifacts (such as the OpenSandbox applied-egress summary) that must be uploaded.
+            teardown_note = self._teardown_failed_runtime_warn(backend, handle)
+            self._write_provenance_warn(row, status="failed", artifact_root=artifact_root, handle=handle)
+            self._sync_artifacts_warn(
+                evaluation_id,
+                row["runtime"],
+                execution_id=execution_id,
+                execution_number=execution_number,
+            )
+            self._build_archive_warn(
+                evaluation_id,
+                runtime=row["runtime"],
+                artifact_root=artifact_root,
+                execution_number=execution_number,
+            )
+            detail = f"status read failed: {exc}"
+            if teardown_note:
+                detail = f"{detail}; {teardown_note}"
+            self._set_status(
+                evaluation_id,
+                "failed",
+                execution_number=execution_number,
+                detail=detail,
+                failure_code=type(exc).__name__,
+            )
             return
 
-        with self.connect() as conn:
-            if status.phase == "cancelled":
-                self._teardown_cancelled_runtime(
-                    evaluation_id,
-                    backend,
-                    handle,
-                    row=row,
-                    artifact_root=artifact_root,
-                )
-                return
-
-            if status.phase != "succeeded":
-                raw_result = dict(status.raw)
-                summary: ResultSummary | None = None
-                try:
-                    summary = backend.summarize(status.raw)
-                except Exception as exc:  # noqa: BLE001 - preserve the original failure
-                    LOG.warning(
-                        "failed to summarize terminal error result for %s: %s",
-                        evaluation_id,
-                        exc,
-                    )
-                failure_code = status.failure_code
-                if not failure_code and summary is not None and summary.exception_counts:
-                    failure_code = next(
-                        (code for code in summary.exception_counts if is_retryable_failure(code)),
-                        next(iter(summary.exception_counts)),
-                    )
-                failure_code = failure_code or "unknown"
-                detail = status.detail or "run reported failure"
-                teardown_note = self._teardown_failed_runtime_warn(backend, handle)
-                if teardown_note is not None:
-                    detail = f"{detail}; {teardown_note}"
-                if is_retryable_failure(failure_code, detail):
-                    scheduled = EvaluationStore().schedule_retry(
-                        evaluation_id,
-                        execution_number=execution_number,
-                        failure_code=failure_code,
-                        failure_category=failure_category_for_code(failure_code, detail),
-                        delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
-                    )
-                    if scheduled is not None:
-                        return
-
-                provenance_note = self._write_provenance_warn(
-                    row, status="failed", artifact_root=artifact_root, handle=handle
-                )
-                intake_note = self._maybe_upload_atif(conn, row)
-                artifact_note = self._sync_artifacts_warn(
-                    evaluation_id,
-                    row["runtime"],
-                    execution_id=execution_id,
-                    execution_number=execution_number,
-                )
-                self._build_archive_warn(
-                    evaluation_id,
-                    runtime=row["runtime"],
-                    artifact_root=artifact_root,
-                    execution_number=execution_number,
-                )
-                for note in (provenance_note, artifact_note, intake_note):
-                    if note:
-                        detail = f"{detail}; {note}"
-                if raw_result:
-                    raw_result, viewer_note = self._maybe_upload_harbor_viewer(
-                        row,
-                        result=raw_result,
-                        artifact_root=artifact_root,
-                    )
-                    if viewer_note:
-                        detail = f"{detail}; {viewer_note}"
-                if summary is not None and raw_result:
-                    self._persist_result(
-                        conn,
-                        evaluation_id,
-                        raw_result,
-                        summary,
-                        terminal_status="failed",
-                        status_detail=detail,
-                        failure_code=failure_code,
-                        execution_number=execution_number,
-                    )
-                    return
-                self._set_status(
-                    conn,
-                    evaluation_id,
-                    "failed",
-                    execution_number=execution_number,
-                    detail=detail,
-                    failure_code=failure_code,
-                )
-                return
-
-            # --- terminal success: artifact sync, optional Intake ATIF, then write-back ---
-            provenance_note = self._write_provenance_warn(
-                row, status="succeeded", artifact_root=artifact_root, handle=handle
+        if status.phase == "cancelled":
+            self._teardown_cancelled_runtime(
+                evaluation_id,
+                backend,
+                handle,
+                row=row,
+                artifact_root=artifact_root,
             )
-            intake_note = self._maybe_upload_atif(conn, row)
+            return
+
+        if status.phase != "succeeded":
+            raw_result = dict(status.raw)
+            summary: ResultSummary | None = None
+            try:
+                summary = backend.summarize(status.raw)
+            except Exception as exc:  # noqa: BLE001 - preserve the original failure
+                LOG.warning(
+                    "failed to summarize terminal error result for %s: %s",
+                    evaluation_id,
+                    exc,
+                )
+            failure_code = status.failure_code
+            if not failure_code and summary is not None and summary.exception_counts:
+                failure_code = next(
+                    (code for code in summary.exception_counts if is_retryable_failure(code)),
+                    next(iter(summary.exception_counts)),
+                )
+            failure_code = failure_code or "unknown"
+            detail = status.detail or "run reported failure"
+            teardown_note = self._teardown_failed_runtime_warn(backend, handle)
+            if teardown_note is not None:
+                detail = f"{detail}; {teardown_note}"
+            if is_retryable_failure(failure_code, detail):
+                scheduled = EvaluationStore().schedule_retry(
+                    evaluation_id,
+                    execution_number=execution_number,
+                    failure_code=failure_code,
+                    failure_category=failure_category_for_code(failure_code, detail),
+                    delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
+                )
+                if scheduled is not None:
+                    return
+
+            provenance_note = self._write_provenance_warn(
+                row, status="failed", artifact_root=artifact_root, handle=handle
+            )
+            intake_note = self._maybe_upload_atif(row)
             artifact_note = self._sync_artifacts_warn(
                 evaluation_id,
                 row["runtime"],
@@ -1125,40 +1009,87 @@ class Dispatcher:
                 artifact_root=artifact_root,
                 execution_number=execution_number,
             )
-            raw_result, harbor_viewer_note = self._maybe_upload_harbor_viewer(
-                row,
-                result=status.raw,
-                artifact_root=artifact_root,
-            )
-            # The backend reduces its own framework-typed result to the generic
-            # summary — the worker stays framework-agnostic.
-            summary = backend.summarize(status.raw)
-            cleanup_note = self._teardown_succeeded_sandbox_warn(
+            for note in (provenance_note, artifact_note, intake_note):
+                if note:
+                    detail = f"{detail}; {note}"
+            if raw_result:
+                raw_result, viewer_note = self._maybe_upload_harbor_viewer(
+                    row,
+                    result=raw_result,
+                    artifact_root=artifact_root,
+                )
+                if viewer_note:
+                    detail = f"{detail}; {viewer_note}"
+            if summary is not None and raw_result:
+                self._persist_result(
+                    evaluation_id,
+                    raw_result,
+                    summary,
+                    terminal_status="failed",
+                    status_detail=detail,
+                    failure_code=failure_code,
+                    execution_number=execution_number,
+                )
+                return
+            self._set_status(
                 evaluation_id,
-                str(row["runtime"]),
-                backend,
-                handle,
-            )
-            # Result envelope + summary; artifact/intake notes ride in status_detail.
-            extra_detail = "; ".join(
-                note
-                for note in [
-                    provenance_note,
-                    artifact_note,
-                    intake_note,
-                    harbor_viewer_note,
-                    cleanup_note,
-                ]
-                if note
-            )
-            self._persist_result(
-                conn,
-                evaluation_id,
-                raw_result,
-                summary,
+                "failed",
                 execution_number=execution_number,
-                extra_detail=extra_detail or None,
+                detail=detail,
+                failure_code=failure_code,
             )
+            return
+
+        # --- terminal success: artifact sync, optional Intake ATIF, then write-back ---
+        provenance_note = self._write_provenance_warn(
+            row, status="succeeded", artifact_root=artifact_root, handle=handle
+        )
+        intake_note = self._maybe_upload_atif(row)
+        artifact_note = self._sync_artifacts_warn(
+            evaluation_id,
+            row["runtime"],
+            execution_id=execution_id,
+            execution_number=execution_number,
+        )
+        self._build_archive_warn(
+            evaluation_id,
+            runtime=row["runtime"],
+            artifact_root=artifact_root,
+            execution_number=execution_number,
+        )
+        raw_result, harbor_viewer_note = self._maybe_upload_harbor_viewer(
+            row,
+            result=status.raw,
+            artifact_root=artifact_root,
+        )
+        # The backend reduces its own framework-typed result to the generic
+        # summary — the worker stays framework-agnostic.
+        summary = backend.summarize(status.raw)
+        cleanup_note = self._teardown_succeeded_sandbox_warn(
+            evaluation_id,
+            str(row["runtime"]),
+            backend,
+            handle,
+        )
+        # Result envelope + summary; artifact/intake notes ride in status_detail.
+        extra_detail = "; ".join(
+            note
+            for note in [
+                provenance_note,
+                artifact_note,
+                intake_note,
+                harbor_viewer_note,
+                cleanup_note,
+            ]
+            if note
+        )
+        self._persist_result(
+            evaluation_id,
+            raw_result,
+            summary,
+            execution_number=execution_number,
+            extra_detail=extra_detail or None,
+        )
 
     def _await_terminal(
         self,
@@ -1361,28 +1292,27 @@ class Dispatcher:
         return LaunchHandle(backend=row["runtime"], external_id=row["id"])
 
     @staticmethod
-    def _load_intake_config(conn: psycopg.Connection, row: dict) -> dict:
+    def _load_intake_config(row: dict) -> dict:
         """Load the selected Intake profile's non-secret config."""
         snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-        return Dispatcher._profile_config(conn, row, snapshot=snapshot, role="intake")
+        return Dispatcher._profile_config(row, snapshot=snapshot, role="intake")
 
     @staticmethod
-    def _load_harbor_config(conn: psycopg.Connection, row: dict) -> dict:
+    def _load_harbor_config(row: dict) -> dict:
         """Load the selected Harbor profile's non-secret config for runtime render."""
         if row.get("framework") != "harbor":
             return {}
         snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-        return Dispatcher._profile_config(conn, row, snapshot=snapshot, role="harbor")
+        return Dispatcher._profile_config(row, snapshot=snapshot, role="harbor")
 
     @staticmethod
-    def _load_framework_config(conn: psycopg.Connection, row: dict) -> dict:
+    def _load_framework_config(row: dict) -> dict:
         """Load generic framework configuration from its immutable snapshot."""
         snapshot = validate_execution_snapshot(row.get("execution_snapshot"))
-        return Dispatcher._profile_config(conn, row, snapshot=snapshot, role="framework")
+        return Dispatcher._profile_config(row, snapshot=snapshot, role="framework")
 
     @staticmethod
     def _profile_config(
-        conn: psycopg.Connection,
         row: Mapping[str, Any],
         *,
         snapshot: Mapping[str, Any] | None,
@@ -1446,7 +1376,7 @@ class Dispatcher:
             note = "harbor viewer archive ready for manual upload"
         return published_result, note
 
-    def _maybe_upload_atif(self, conn: psycopg.Connection, row: dict) -> str | None:
+    def _maybe_upload_atif(self, row: dict) -> str | None:
         """Upload Harbor ATIF trajectories when ``intake_profile_id`` is set.
 
         Reads ``trajectory.json`` files from the finished Harbor job dir and POSTs
@@ -1476,14 +1406,14 @@ class Dispatcher:
             _artifact_root(row.get("execution_id") or row["id"], row["runtime"]),
             target,
             evaluation_run_id=row["id"],
-            experiment=self._experiment_request(conn, row),
+            experiment=self._experiment_request(row),
             test_case_id=row.get("task_slug"),
             timeout=settings.intake_timeout_seconds,
             fail_on_error=settings.intake_fail_on_error,
         )
 
     @staticmethod
-    def _experiment_request(conn: psycopg.Connection, row: Mapping[str, Any]) -> ExperimentRequest:
+    def _experiment_request(row: Mapping[str, Any]) -> ExperimentRequest:
         """Build the run's intake Experiment identity.
 
         Experiment = benchmark run (group + dataset = the benchmark); a standalone
@@ -1559,43 +1489,41 @@ class Dispatcher:
             if execution_number is None:
                 count = artifacts.sync_directory_to_prefix(artifact_root, artifact_prefix)
             else:
-                with self.connect() as conn, conn.transaction():
-                    # ponytail: check-then-publish. Postgres held the row lock
-                    # across the upload; Entity Store can't, so a retry that
-                    # advances `current_execution` mid-upload lets this stale
-                    # execution overwrite the shared prefix. The archive build
-                    # below has the same gap. Upgrade path: a prefix per
-                    # execution, with the evaluation pointing at the current one.
-                    if not EvaluationStore().current_execution_is(
-                        evaluation_id,
-                        expected_execution_number=execution_number,
-                    ):
-                        raise DispatchClaimLost(evaluation_id)
-                    sync = (
-                        artifacts.replace_directory_at_prefix
-                        if replace and execution_number > 1
-                        else artifacts.sync_directory_to_prefix
-                    )
-                    count = sync(artifact_root, artifact_prefix)
-                    EvaluationStore().record_artifact_sync(
-                        evaluation_id,
-                        execution_number=execution_number,
-                        status="succeeded",
-                        file_count=count,
-                    )
+                # ponytail: check-then-publish. Postgres held the row lock
+                # across the upload; Entity Store can't, so a retry that
+                # advances `current_execution` mid-upload lets this stale
+                # execution overwrite the shared prefix. The archive build
+                # below has the same gap. Upgrade path: a prefix per
+                # execution, with the evaluation pointing at the current one.
+                if not EvaluationStore().current_execution_is(
+                    evaluation_id,
+                    expected_execution_number=execution_number,
+                ):
+                    raise DispatchClaimLost(evaluation_id)
+                sync = (
+                    artifacts.replace_directory_at_prefix
+                    if replace and execution_number > 1
+                    else artifacts.sync_directory_to_prefix
+                )
+                count = sync(artifact_root, artifact_prefix)
+                EvaluationStore().record_artifact_sync(
+                    evaluation_id,
+                    execution_number=execution_number,
+                    status="succeeded",
+                    file_count=count,
+                )
         except DispatchClaimLost:
             raise
         except Exception as exc:  # noqa: BLE001 — terminal status must still be recorded
             LOG.warning("artifact sync failed for %s: %s", evaluation_id, exc)
             if execution_number is not None:
                 try:
-                    with self.connect() as conn, conn.transaction():
-                        EvaluationStore().record_artifact_sync(
-                            evaluation_id,
-                            execution_number=execution_number,
-                            status="failed",
-                            error=str(exc),
-                        )
+                    EvaluationStore().record_artifact_sync(
+                        evaluation_id,
+                        execution_number=execution_number,
+                        status="failed",
+                        error=str(exc),
+                    )
                 except Exception:  # noqa: BLE001 - preserve the primary sync warning
                     LOG.exception("failed to persist artifact sync telemetry for %s", evaluation_id)
             return f"artifact sync failed: {exc}"
@@ -1619,49 +1547,48 @@ class Dispatcher:
             if diagnostic_path.exists():
                 loaded = json.loads(diagnostic_path.read_text(encoding="utf-8"))
                 diagnostic = loaded if isinstance(loaded, dict) else {}
-            with self.connect() as conn, conn.transaction():
-                row = EvaluationStore().load_for_dispatch(evaluation_id)
-                if row is None:
-                    return
-                repository = EvaluationStore()
-                repository.record_summary(
+            row = EvaluationStore().load_for_dispatch(evaluation_id)
+            if row is None:
+                return
+            repository = EvaluationStore()
+            repository.record_summary(
+                evaluation_id,
+                execution_number=execution_number,
+                summary=summary,
+            )
+            profile_id = row.get("intake_profile_id")
+            if profile_id:
+                experiment = self._experiment_request(row)
+                experiment_ref = build_experiment_name(
+                    experiment.benchmark,
+                    experiment.run_key,
+                )
+                diagnostic_status = str(diagnostic.get("status") or "pending")
+                if diagnostic_status not in {"succeeded", "failed", "no_records"}:
+                    diagnostic_status = "pending"
+                repository.record_intake(
                     evaluation_id,
                     execution_number=execution_number,
-                    summary=summary,
+                    experiment_ref=experiment_ref,
+                    run_refs=list(summary["intake_run_refs"]),
+                    status=diagnostic_status,
+                    expected_records=int(summary["intake_expected_records"]),
+                    uploaded_records=(
+                        int(diagnostic["uploaded"]) if isinstance(diagnostic.get("uploaded"), int) else None
+                    ),
+                    error=(str(diagnostic["error"]) if diagnostic.get("error") else None),
                 )
-                profile_id = row.get("intake_profile_id")
-                if profile_id:
-                    experiment = self._experiment_request(conn, row)
-                    experiment_ref = build_experiment_name(
-                        experiment.benchmark,
-                        experiment.run_key,
-                    )
-                    diagnostic_status = str(diagnostic.get("status") or "pending")
-                    if diagnostic_status not in {"succeeded", "failed", "no_records"}:
-                        diagnostic_status = "pending"
-                    repository.record_intake(
-                        evaluation_id,
-                        execution_number=execution_number,
-                        experiment_ref=experiment_ref,
-                        run_refs=list(summary["intake_run_refs"]),
-                        status=diagnostic_status,
-                        expected_records=int(summary["intake_expected_records"]),
-                        uploaded_records=(
-                            int(diagnostic["uploaded"]) if isinstance(diagnostic.get("uploaded"), int) else None
-                        ),
-                        error=(str(diagnostic["error"]) if diagnostic.get("error") else None),
-                    )
-                else:
-                    repository.record_intake(
-                        evaluation_id,
-                        execution_number=execution_number,
-                        experiment_ref=None,
-                        run_refs=[],
-                        status="disabled",
-                        expected_records=None,
-                        uploaded_records=None,
-                        error=None,
-                    )
+            else:
+                repository.record_intake(
+                    evaluation_id,
+                    execution_number=execution_number,
+                    experiment_ref=None,
+                    run_refs=[],
+                    status="disabled",
+                    expected_records=None,
+                    uploaded_records=None,
+                    error=None,
+                )
         except Exception as exc:  # noqa: BLE001 - telemetry must not fail the evaluation
             LOG.warning("portable telemetry unavailable for %s: %s", evaluation_id, exc)
 
@@ -1677,20 +1604,18 @@ class Dispatcher:
         """Build the downloadable results archive, warning on errors."""
         try:
             if runtime is not None and not get_backend_capabilities(runtime).supports_archive:
-                with self.connect() as conn:
-                    EvaluationStore().mark_archive_missing(
-                        evaluation_id,
-                        detail=f"runtime {runtime} does not support result archives",
-                        expected_execution_number=execution_number,
-                    )
+                EvaluationStore().mark_archive_missing(
+                    evaluation_id,
+                    detail=f"runtime {runtime} does not support result archives",
+                    expected_execution_number=execution_number,
+                )
                 return None
             if not already_claimed:
-                with self.connect() as conn:
-                    EvaluationStore().mark_archive_building(
-                        evaluation_id,
-                        worker_id=self.worker_id,
-                        expected_execution_number=execution_number,
-                    )
+                EvaluationStore().mark_archive_building(
+                    evaluation_id,
+                    worker_id=self.worker_id,
+                    expected_execution_number=execution_number,
+                )
             if execution_number is None:
                 if artifact_root is not None:
                     archive = artifacts.build_evaluation_archive_from_directory(
@@ -1699,62 +1624,58 @@ class Dispatcher:
                     )
                 else:
                     archive = artifacts.build_evaluation_archive(evaluation_id)
-                with self.connect() as conn:
-                    EvaluationStore().mark_archive_ready(
-                        evaluation_id,
-                        object_key=archive["object_key"],
-                        size_bytes=archive["size_bytes"],
-                    )
+                EvaluationStore().mark_archive_ready(
+                    evaluation_id,
+                    object_key=archive["object_key"],
+                    size_bytes=archive["size_bytes"],
+                )
             else:
-                with self.connect() as conn, conn.transaction():
-                    if not EvaluationStore().current_execution_is(
+                if not EvaluationStore().current_execution_is(
+                    evaluation_id,
+                    expected_execution_number=execution_number,
+                ):
+                    raise DispatchClaimLost(evaluation_id)
+                if artifact_root is not None:
+                    archive = artifacts.build_evaluation_archive_from_directory(
                         evaluation_id,
-                        expected_execution_number=execution_number,
-                    ):
-                        raise DispatchClaimLost(evaluation_id)
-                    if artifact_root is not None:
-                        archive = artifacts.build_evaluation_archive_from_directory(
-                            evaluation_id,
-                            artifact_root,
-                        )
-                    else:
-                        archive = artifacts.build_evaluation_archive(evaluation_id)
-                    EvaluationStore().mark_archive_ready(
-                        evaluation_id,
-                        object_key=archive["object_key"],
-                        size_bytes=archive["size_bytes"],
-                        expected_execution_number=execution_number,
+                        artifact_root,
                     )
+                else:
+                    archive = artifacts.build_evaluation_archive(evaluation_id)
+                EvaluationStore().mark_archive_ready(
+                    evaluation_id,
+                    object_key=archive["object_key"],
+                    size_bytes=archive["size_bytes"],
+                    expected_execution_number=execution_number,
+                )
         except DispatchClaimLost:
             raise
         except Exception as exc:  # noqa: BLE001 — terminal status must still be recorded
             detail = str(exc)
             LOG.warning("archive build failed for %s: %s", evaluation_id, detail)
             try:
-                with self.connect() as conn:
-                    EvaluationStore().mark_archive_missing(
-                        evaluation_id,
-                        detail=detail,
-                        expected_execution_number=execution_number,
-                    )
+                EvaluationStore().mark_archive_missing(
+                    evaluation_id,
+                    detail=detail,
+                    expected_execution_number=execution_number,
+                )
             except Exception:  # noqa: BLE001 — keep original archive failure as the warning
                 LOG.exception("failed to record archive build failure for %s", evaluation_id)
             return f"archive build failed: {detail}"
         return f"archive: uploaded {artifacts.ARCHIVE_FILE_NAME}"
 
     @staticmethod
-    def _load(conn: psycopg.Connection, evaluation_id: str) -> dict | None:
+    def _load(evaluation_id: str) -> dict | None:
         return EvaluationStore().load_for_dispatch(evaluation_id)
 
     @staticmethod
-    def _load_state(conn: psycopg.Connection, evaluation_id: str, inputs: Mapping[str, Any]) -> dict | None:
+    def _load_state(evaluation_id: str, inputs: Mapping[str, Any]) -> dict | None:
         """Overlay the row's live state, which the API still writes, on the immutable inputs."""
         state = EvaluationStore().load_dispatch_state(evaluation_id)
         return None if state is None else {**inputs, **state}
 
     def _set_status(
         self,
-        conn: psycopg.Connection,
         evaluation_id: str,
         status: str,
         *,
@@ -1790,7 +1711,6 @@ class Dispatcher:
 
     def _persist_result(
         self,
-        conn: psycopg.Connection,
         evaluation_id: str,
         result: dict,
         summary: ResultSummary,

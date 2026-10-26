@@ -38,6 +38,7 @@ from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
+from nemo_evals.jobs.gateway_models import require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
@@ -62,6 +63,7 @@ from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.schema import Page
 
 DEVELOPMENT_CALLER = "user:development"
@@ -193,7 +195,7 @@ class TasksetRunService:
             authorize: Caller-scoped source read authorizer, independent of service privileges.
             config: Operator configuration including run budgets and ``runs.harbor``.
             clock: Aware acceptance clock, invoked after resolution.
-            platform: Platform configuration naming the OpenSandbox server.
+            platform: Platform configuration naming the OpenSandbox server and the default dispatcher image.
             preparer: Checks every task, then prepares each one's images, before acceptance.
             task_jobs: Jobs operations for fan-out; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
@@ -349,6 +351,13 @@ class TasksetRunService:
                     f"this deployment starts every task Job at once: {len(spec.tasks)} tasks exceed "
                     f"execution.max_concurrent_task_jobs={req.execution.max_concurrent_task_jobs}; select fewer tasks"
                 )
+            configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+            try:
+                await require_closed_book_route(
+                    spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
+                )
+            except ValueError as exc:
+                raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared = await self._prepare_images(spec.tasks, policy, caller=caller)
             accepted_at = self._clock()
@@ -360,7 +369,7 @@ class TasksetRunService:
                 spec=spec,
                 max_concurrent_task_jobs=req.execution.max_concurrent_task_jobs,
                 sandbox_policy=policy,
-                dispatcher_image=harbor.dispatcher_image,
+                dispatcher_image=harbor.dispatcher_image or self._default_dispatcher_image(),
                 dispatcher_profile=dispatcher_profile,
                 task_environments=prepared,
                 intake=intake,
@@ -389,6 +398,10 @@ class TasksetRunService:
         warnings += await self._start_task_jobs(result.run)
         status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=warnings)
         return SubmitOutcome(status, created=result.created)
+
+    def _default_dispatcher_image(self) -> str:
+        """The platform's nhx-tasks image: the dispatcher a run gets when ``runs.harbor`` doesn't pin one."""
+        return get_qualified_image("nhx-tasks", tag=self._platform.image_tag, registry=self._platform.image_registry)
 
     async def _check_execution(
         self, req: TasksetRunInput

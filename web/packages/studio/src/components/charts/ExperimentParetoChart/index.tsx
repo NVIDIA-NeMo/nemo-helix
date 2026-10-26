@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { HourglassMid, Floppy } from '@nemo/icons/icons';
 import {
   getGetExperimentQueryKey,
   useUpdateExperiment,
@@ -18,7 +19,6 @@ import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import { useGroupEvaluations } from '@studio/components/charts/useGroupEvaluations';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
 import { useQueryClient } from '@tanstack/react-query';
-import { Loader2, Save } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 import {
   CartesianGrid,
@@ -141,7 +141,7 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
     if (isLoading) {
       return (
         <div aria-busy className="flex h-[360px] items-center justify-center gap-2">
-          <Loader2 width={20} height={20} className="animate-spin text-brand" />
+          <HourglassMid width={20} height={20} className="animate-spin text-brand" />
           <Text kind="body/regular/sm" color="subtle">
             Loading evaluations…
           </Text>
@@ -223,9 +223,9 @@ export const ExperimentParetoChart: FC<ExperimentParetoChartProps> = ({
             onClick={() => xMetric && yMetric && persistAxes(xMetric.id, yMetric.id)}
           >
             {isSaving ? (
-              <Loader2 width={16} height={16} className="animate-spin" />
+              <HourglassMid width={16} height={16} className="animate-spin" />
             ) : (
-              <Save width={16} height={16} />
+              <Floppy width={16} height={16} />
             )}
           </Button>
         </div>

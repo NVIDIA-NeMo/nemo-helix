@@ -385,6 +385,31 @@ async def test_an_expired_publishing_run_stamps_expired(stored_run, publishing, 
     assert patch.status == "expired" and patch.metadata is not None and patch.metadata[RESULT_STATE_KEY] == "none"
 
 
+async def test_a_cancel_between_the_stamp_and_the_state_write_leaves_the_evaluation_matching_the_run(
+    stored_run, publishing, store, entity_store, fake_evaluations, monkeypatch
+):
+    """The cancel route's write lands after a pass stamps ``expired``: that pass's ``set_state`` loses, and the next
+    pass stamps again before its own write, so the last stamp matches the run's final state."""
+    plan, jobs = publishing
+    stamp = fake_evaluations.patch
+
+    async def cancel_after_the_stamp(workspace, name, body):
+        await stamp(workspace, name, body)
+        if len(fake_evaluations.patches) == 1:
+            await store.request_cancel(workspace, name, now=AFTER_EXECUTION)
+
+    monkeypatch.setattr(fake_evaluations, "patch", cancel_after_the_stamp)
+    with pytest.raises(NemoEntityConflictError):
+        await run_pass(stored_run, plan, jobs, store, now=AFTER_EXECUTION)
+    run = await reread(entity_store, stored_run)
+    assert run.phase is TasksetRunPhase.ACCEPTED and run.cancel_requested_at == AFTER_EXECUTION
+    await run_pass(run, plan, jobs, store, now=AFTER_EXECUTION)
+
+    run = await reread(entity_store, stored_run)
+    evaluation = fake_evaluations.evaluations[run.name]
+    assert evaluation.status == run.phase.value and evaluation.metadata[RESULT_STATE_KEY] == run.result_state.value
+
+
 async def test_a_failed_stamp_never_blocks_the_runs_final_state(
     stored_run, publishing, store, entity_store, fake_evaluations
 ):

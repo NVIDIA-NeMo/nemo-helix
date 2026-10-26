@@ -307,7 +307,7 @@ nemo auth access-keys create [OPTIONS]
 * `--service-account`: Bind the key to a non-human service account (HelixAdmin only).
 * `--scope`: Comma-separated service names to scope this key to, e.g. 'intake,entities'. Omit for an unscoped key.
 * `--rotate`: JTI of a previous Scoped Access Key owned by the caller to revoke once this key is created. Primarily for rotating personal keys, which have no service-account identity to correlate rotations against automatically.
-* `--workspace`: Grant the key's principal workspace membership, formatted '\<workspace>' or '\<workspace>:\<role1>,\<role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call.
+* `--workspace`: Grant the key's principal workspace membership, formatted '&lt;workspace>' or '&lt;workspace>:&lt;role1>,&lt;role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call.
 
 **Help:**
 
@@ -5906,7 +5906,7 @@ nemo workspaces list [OPTIONS]
 **Options:**
 
 * `--filter`: Query filter expression. Supports text and JSON syntaxes:
-- Text: name:"value" AND status>500 with operators : ~ > >= \< \<= IN NOT IN AND OR and negation prefix -
+- Text: name:"value" AND status>500 with operators : ~ > >= &lt; &lt;= IN NOT IN AND OR and negation prefix -
 - Object (JSON): `{"name":{"$like":"value"}}` with operators `$eq`, `$like`, `$lt`, `$lte`, `$gt`, `$gte`, `$in`, `$nin`, `$and`, `$or`, `$not`
 * `--page <INTEGER>`: Page number
 * `--page-size <INTEGER>`: Items per page
@@ -6576,7 +6576,7 @@ Reads the log file written by the local in-memory runner backend.
 NAT subprocess deployments write process output there; Fabric-backed
 deployments write validation/preparation entries there. The log file
 location is the same convention the backend uses internally:
-``nhx_user_data_dir() / 'agents' / 'system' / \<deployment-name>.log``
+``nhx_user_data_dir() / 'agents' / 'system' / <deployment-name>.log``
 by default. This command is therefore only meaningful when the CLI runs
 on the same host as the platform — once a remote backend lands, log
 retrieval should move to a server-side endpoint.
@@ -7271,7 +7271,7 @@ nemo agents evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--agent AGENT_REF | URL`: Agent to evaluate against — either a platform-managed agent reference (e.g. 'calculator', 'workspace/calculator') or an HTTP(S) endpoint URL (e.g. 'http://localhost:8080').  Bare names resolve to the platform gateway URL '\{base_url}/apis/agents/v2/workspaces/\{workspace}/agents/\{name}/-'; URLs are passed through to 'nat eval --endpoint' verbatim.  When omitted, the eval config must include an inline agent workflow.
 * `--eval-config`: Path to the NAT evaluation YAML config file.
 * `--eval-config-fileset FILESET_REF`: Optional fileset reference (``name`` or ``workspace/name``).  When set, the runner downloads the fileset's contents into a tempdir and resolves ``eval_config`` relative to that dir.  Local CLI runs leave this ``None``.
-* `--output PATH | FILESET_REF`: Where to write eval outputs — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  Defaults to \<ctx.storage.persistent>/results (the platform-injected persistent volume) when not provided.
+* `--output PATH | FILESET_REF`: Where to write eval outputs — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  Defaults to &lt;ctx.storage.persistent>/results (the platform-injected persistent volume) when not provided.
 
 **Spec Source:**
 
@@ -7404,7 +7404,7 @@ nemo agents package-agent [OPTIONS] [COMMAND] [ARGS]...
 * `--agent-author`: OCI image authors label override.
 * `--skip-validation`: Bypass Fabric package validation before building.
 * `--registry`: Push the built image to this registry (e.g. 'nvcr.io/my-org'). The host executing the push must already be authenticated to it: the local machine for direct CLI invocation, or the platform's job-execution host for remote execution or the REST API. Credentials are never accepted over this API.
-* `--push-tag`: Fully-qualified remote tag. Defaults to '\<registry>/\<image>', where \<image> is the namespaced local reference 'nemo-agents/\{workspace}/\{tag}'. Requires 'registry'. Must start with '\<registry>/nemo-agents/\{workspace}/' — Docker tags are daemon-global while the auth boundary here is the workspace, so an unscoped push_tag would let this workspace overwrite another workspace's image, or redirect the push to a registry other than the one declared.
+* `--push-tag`: Fully-qualified remote tag. Defaults to '&lt;registry>/&lt;image>', where &lt;image> is the namespaced local reference 'nemo-agents/\{workspace}/\{tag}'. Requires 'registry'. Must start with '&lt;registry>/nemo-agents/\{workspace}/' — Docker tags are daemon-global while the auth boundary here is the workspace, so an unscoped push_tag would let this workspace overwrite another workspace's image, or redirect the push to a registry other than the one declared.
 
 **Spec Source:**
 
@@ -7520,10 +7520,10 @@ nemo agents package [OPTIONS]
 * `--publish`: After building, tag and push to --registry.
 * `--format`: Packaging format: 'docker' (Jinja2 Dockerfile). 'whl' is reserved for future wheel-based builds and is currently rejected. [default: docker]
 * `--dockerfile <FILE>`: Use an existing Dockerfile instead of rendering (skips render stage).
-* `--tag, -t`: Image tag.  Defaults to '\<agent-name>-\<agent-id>:\<agent-version>'.
+* `--tag, -t`: Image tag.  Defaults to '&lt;agent-name>-&lt;agent-id>:&lt;agent-version>'.
 * `--platform`: Target platform (e.g. 'linux/amd64' or 'linux/arm64'). When omitted, defaults to the local daemon's native platform. Multi-arch builds via buildx are not yet implemented; pass at most one value.
 * `--registry, -r`: Remote registry URL (required when --publish is set).
-* `--push-tag`: Fully-qualified remote tag.  Defaults to '\<registry>/\<tag>'.
+* `--push-tag`: Fully-qualified remote tag.  Defaults to '&lt;registry>/&lt;tag>'.
 * `--output, -o <PATH>`: Output path for rendered Dockerfile (only used with --no-build). Defaults to 'Dockerfile' next to --pyproject when given (project root, so COPY statements resolve), otherwise next to the agent config.
 * `--base-image-url`: [env: NEMO_AGENTS_BASE_IMAGE_URL=]
 * `--base-image-tag`: [env: NEMO_AGENTS_BASE_IMAGE_TAG=]
@@ -7698,7 +7698,7 @@ nemo data-designer personas make-fileset [OPTIONS]
 
 **Options:**
 
-* `--locale <CHOICE>`: Locale fileset to create. [possible values: en_IN, en_SG, en_US, fr_FR, hi_Deva_IN, hi_Latn_IN, ja_JP, ko_KR, pt_BR]
+* `--locale <CHOICE>`: Locale fileset to create. [possible values: de_DE, en_GB, en_IN, en_SG, en_US, fr_FR, hi_Deva_IN, hi_Latn_IN, ja_JP, ko_KR, pt_BR]
 * `--api-key-secret`: Fully qualified NGC API key secret reference (WORKSPACE/NAME).
 * `--api-key-env-var`: Environment variable containing an NGC API key to create at --api-key-secret.
 
@@ -9185,6 +9185,7 @@ nemo evals runs [OPTIONS] COMMAND [ARGS]...
 
 * `list`: List a workspace's runs, newest first.
 * `status`: Show each task Job of a run and its status.
+* `cancel`: Request a run's cancel; the run controller acts on it,...
 * `download`: Download a run's merged result bundle (report.html,...
 * `results`: Show each completed task's scores (every Harbor reward)...
 * `submit`: Publish the selected tasks as a taskset, build their...
@@ -9237,6 +9238,29 @@ nemo evals runs status [OPTIONS] RUN_ID
 
 * `--help, -h`: Show this message and exit.
 
+##### nemo evals runs cancel
+
+Request a run's cancel; the run controller acts on it, and the run keeps its phase until then.
+
+**Usage:**
+
+```shell
+nemo evals runs cancel [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--workspace`: Workspace of the run; default: configured.
+* `--json`: Print the run's status as JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
 ##### nemo evals runs download
 
 Download a run's merged result bundle (report.html, summary.json, every trial and score).
@@ -9253,7 +9277,7 @@ nemo evals runs download [OPTIONS] RUN_ID
 
 **Options:**
 
-* `--output-dir, -o <PATH>`: Directory to unpack agent-eval-results/ into; default ./\<run_id>.
+* `--output-dir, -o <PATH>`: Directory to unpack agent-eval-results/ into; default ./&lt;run_id>.
 * `--workspace`: Workspace of the run; default: configured.
 
 **Help:**
@@ -9297,7 +9321,7 @@ nemo evals runs submit [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: \<url>@\<ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/\<org>/\<repo>/tree/\<ref>/\<dir>.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: &lt;url>@&lt;ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>.
 * `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
@@ -9548,8 +9572,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 The command prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
+id. Track the job with 'nemo jobs watch &lt;job id>', or check its status with
+'nemo jobs get-status &lt;job id>'.
 
 Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
@@ -9656,8 +9680,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 The command prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
+id. Track the job with 'nemo jobs watch &lt;job id>', or check its status with
+'nemo jobs get-status &lt;job id>'.
 
 Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
@@ -9763,8 +9787,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 The command prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch \<job id>', or check its status with
-'nemo jobs get-status \<job id>'.
+id. Track the job with 'nemo jobs watch &lt;job id>', or check its status with
+'nemo jobs get-status &lt;job id>'.
 
 Pass --wait to stay with the job until it finishes, or --watch to do the same
 and print its logs as they arrive. Both report the final status, and exit
@@ -10520,7 +10544,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--config.enable-synthesis`: Whether to run LLM training and generation phases. When false the task only performs PII replacement and returns the processed data.
 * `--config.enable-replace-pii`: Whether to run the default PII replacement pipeline before synthesis.
 * `--hf-token-secret`: Name of platform secret containing the HuggingFace token. Must exist in the same workspace as the job.
-* `--pretrained-model-job`: Optional previous NSS job whose stored adapter artifact is reused for generation-only synthesis. Accepts either '\<job>' in the current workspace or '\<workspace>/\<job>'. The plugin resolves the prior job's 'adapter' result from Files.
+* `--pretrained-model-job`: Optional previous NSS job whose stored adapter artifact is reused for generation-only synthesis. Accepts either '&lt;job>' in the current workspace or '&lt;workspace>/&lt;job>'. The plugin resolves the prior job's 'adapter' result from Files.
 * `--enable-synthesis`: Whether to run LLM training and generation phases. When False the task only performs PII replacement and returns the processed data.
 
 **Spec Source:**
@@ -10682,7 +10706,7 @@ nemo experiments list [OPTIONS]
 JSON-only fields:
   metadata: dict[str, str]
 
-Filter experiments by name, insight_id, is_favorite, show_evaluations_over_time, baseline_evaluation_name, is_deleted, or a metadata key/value (filter[metadata.\<key>]=\<value>). Pass is_deleted=true to return only soft-deleted experiments; omit to see only live ones.
+Filter experiments by name, insight_id, is_favorite, show_evaluations_over_time, baseline_evaluation_name, is_deleted, or a metadata key/value (filter[metadata.&lt;key>]=&lt;value>). Pass is_deleted=true to return only soft-deleted experiments; omit to see only live ones.
 * `--filter.baseline-evaluation-name`
 * `--filter.insight-id`
 * `--filter.is-deleted`

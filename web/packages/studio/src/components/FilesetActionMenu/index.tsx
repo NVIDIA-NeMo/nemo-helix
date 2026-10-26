@@ -4,6 +4,7 @@
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
+import { MoreVert } from '@nemo/icons/icons';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -16,7 +17,6 @@ import {
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
-import { EllipsisVertical } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 export interface FilesetActionMenuProps {
@@ -69,7 +69,7 @@ export const FilesetActionMenu: FC<FilesetActionMenuProps> = ({
       <DropdownRoot>
         <DropdownTrigger asChild showChevron={false} data-testid="quick-actions-menu-trigger">
           <Button kind="tertiary" aria-label="Open fileset actions menu">
-            <EllipsisVertical />
+            <MoreVert />
           </Button>
         </DropdownTrigger>
         <DropdownContent align="end" className="w-[180px]">

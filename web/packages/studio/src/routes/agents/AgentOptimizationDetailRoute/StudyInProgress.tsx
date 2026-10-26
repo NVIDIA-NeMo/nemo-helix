@@ -5,12 +5,12 @@ import { KeyValueGrid } from '@nemo/common/src/components/KeyValueGrid';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { ListCheckmark, Sliders } from '@nemo/icons/icons';
 import { useAgentOptimizationGetRunStrategyJobStatus } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
 import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { routingStrategyTitle } from '@studio/components/dataViews/SwitchyardRoutesDataView/useRouteColumns';
 import { SWITCHYARD_STRATEGY } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationStrategySelect/constants';
-import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import type { FC } from 'react';
 
 /** A spec list field — strategy-specific, so untyped on `RunStrategySpec` — as one line. */
@@ -63,12 +63,7 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
 
   return (
     <Stack gap="density-2xl" className="min-h-0 w-full" data-testid="study-in-progress">
-      <Panel
-        slotHeading="Study details"
-        slotIcon={<SlidersHorizontal />}
-        elevation="high"
-        density="compact"
-      >
+      <Panel slotHeading="Study details" slotIcon={<Sliders />} elevation="high" density="compact">
         <Stack gap="density-xl">
           <Text kind="body/regular/md" className="text-secondary" role="status">
             {isQueued
@@ -96,7 +91,12 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
       </Panel>
 
       {steps.length > 0 && (
-        <Panel slotHeading="Progress" slotIcon={<ListChecks />} elevation="high" density="compact">
+        <Panel
+          slotHeading="Progress"
+          slotIcon={<ListCheckmark />}
+          elevation="high"
+          density="compact"
+        >
           <Stack gap="density-md" role="list" aria-label="Study steps">
             {steps.map((step) => (
               <Flex key={step.id} align="center" justify="between" gap="density-md" role="listitem">

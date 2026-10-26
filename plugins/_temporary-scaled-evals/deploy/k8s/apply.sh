@@ -116,7 +116,7 @@ echo "==> waiting for the API"
 kubectl rollout status -n "$NS" deploy/scaled-evals-api --timeout=300s
 
 # Platform Job pods cannot consume deployment-local Kubernetes Secrets
-# directly. Mirror the two required values into Platform Secrets without ever
+# directly. Mirror the required value into Platform Secrets without ever
 # placing plaintext in manifests, command arguments, or shell output.
 echo "==> configuring Platform Job secrets"
 kubectl exec -n "$NS" deploy/scaled-evals-api -- python -c '
@@ -128,7 +128,6 @@ import urllib.request
 
 base = "http://127.0.0.1:8080/apis/secrets/v2/workspaces/default/secrets"
 for name, value in {
-    "scaled-evals-postgres-password": os.environ["PGPASSWORD"],
     "scaled-evals-registry-auth": Path(os.environ["TASK_IMAGE_REGISTRY_AUTH_FILE"]).read_text(),
 }.items():
     body = json.dumps({"name": name, "value": value}).encode()

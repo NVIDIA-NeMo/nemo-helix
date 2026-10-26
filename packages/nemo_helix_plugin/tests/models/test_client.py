@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from nemo_helix_plugin.client.auth import StaticToken
-from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
-from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.types import (
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
@@ -233,27 +233,34 @@ def test_model_entity_route_always_v1() -> None:
     assert client.get_model_entity_route_openai_url(me).endswith("/model/m/-/v1")
 
 
+def _response(status: int, body: object) -> httpx.Response:
+    return httpx.Response(status, request=httpx.Request("GET", BASE), json=body)
+
+
+def _passthrough_json(name: str) -> dict:
+    return {"name": name, "workspace": "default", "autoprovisioned": True, "default_model_entity": f"default/{name}"}
+
+
+def _user_virtual_model_json(name: str) -> dict:
+    return {"name": name, "workspace": "default", "default_model_entity": "default/other-model"}
+
+
+VM_PATH = f"{BASE}/apis/inference-gateway/v2/workspaces/default/virtual-models"
+
+
 def test_resolve_model_reference_fetches_model_and_provider() -> None:
+    """A model entity reached through its own passthrough VirtualModel resolves with its provider's details."""
     http = MagicMock(spec=httpx.Client)
     http.request.side_effect = [
-        httpx.Response(
+        _response(200, _passthrough_json("judge")),
+        _response(200, _model_json("judge", model_providers=["default/provider"])),
+        _response(
             200,
-            request=httpx.Request("GET", BASE),
-            json=_model_json("judge", model_providers=["default/provider"]),
-        ),
-        httpx.Response(
-            200,
-            request=httpx.Request("GET", BASE),
-            json=_provider_json(
+            _provider_json(
                 "READY",
                 name="provider",
                 host_url="http://nim.example.test:8000",
-                served_models=[
-                    {
-                        "model_entity_id": "default/judge",
-                        "served_model_name": "publisher/upstream-judge",
-                    }
-                ],
+                served_models=[{"model_entity_id": "default/judge", "served_model_name": "publisher/upstream-judge"}],
             ),
         ),
     ]
@@ -262,6 +269,7 @@ def test_resolve_model_reference_fetches_model_and_provider() -> None:
     result = client.resolve_model_reference("default/judge")
 
     assert [call.args[1] for call in http.request.call_args_list] == [
+        f"{VM_PATH}/judge",
         f"{BASE}/apis/models/v2/workspaces/default/models/judge",
         f"{BASE}/apis/models/v2/workspaces/default/providers/provider",
     ]
@@ -269,17 +277,15 @@ def test_resolve_model_reference_fetches_model_and_provider() -> None:
     assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
     assert result.served_model_name == "publisher/upstream-judge"
+    assert not result.virtual_model
 
 
 def test_resolve_model_reference_ignores_missing_provider() -> None:
     http = MagicMock(spec=httpx.Client)
     http.request.side_effect = [
-        httpx.Response(
-            200,
-            request=httpx.Request("GET", BASE),
-            json=_model_json("judge", model_providers=["default/missing-provider"]),
-        ),
-        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "missing"}),
+        _response(200, _passthrough_json("judge")),
+        _response(200, _model_json("judge", model_providers=["default/missing-provider"])),
+        _response(404, {"detail": "missing"}),
     ]
     client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
 
@@ -287,6 +293,129 @@ def test_resolve_model_reference_ignores_missing_provider() -> None:
 
     assert result.name == "judge"
     assert result.host_url is None
+
+
+PROVIDER_ROUTE = f"{BASE}/apis/inference-gateway/v2/workspaces/default/provider/provider/-/v1"
+
+
+@pytest.mark.parametrize(
+    ("served_models", "name"),
+    [
+        (
+            [{"model_entity_id": "default/judge", "served_model_name": "publisher/upstream-judge"}],
+            "publisher/upstream-judge",
+        ),
+        ([], "judge"),
+    ],
+    ids=["provider-maps-the-entity", "provider-without-model-discovery"],
+)
+def test_resolve_model_reference_reaches_an_entity_without_a_virtual_model_through_its_provider(
+    served_models: list[dict], name: str
+) -> None:
+    """The gateway's model route 404s without a VirtualModel; an entity created by hand gets none, but its
+    provider's route serves it, under the provider's name for the model."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        _response(404, {"detail": "no virtual model"}),
+        _response(200, _model_json("judge", model_providers=["default/provider"])),
+        _response(200, _provider_json("READY", name="provider", served_models=served_models)),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = client.resolve_model_reference("default/judge")
+
+    assert result.url == PROVIDER_ROUTE
+    assert result.name == name
+    assert result.host_url == "https://api.example.com"
+    assert not result.virtual_model
+
+
+@pytest.mark.parametrize(
+    "responses",
+    [
+        [_response(404, {"detail": "no virtual model"}), _response(200, _model_json("judge"))],
+        [
+            _response(404, {"detail": "no virtual model"}),
+            _response(200, _model_json("judge", model_providers=["default/provider"])),
+            _response(404, {"detail": "no provider"}),
+        ],
+    ],
+    ids=["no-provider", "provider-missing"],
+)
+def test_resolve_model_reference_refuses_an_entity_nothing_routes(responses: list[httpx.Response]) -> None:
+    """Returning the entity's route would 404 at call time, so it fails at resolution instead."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = responses
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(UnroutableModelError, match="has no VirtualModel and no provider") as raised:
+        client.resolve_model_reference("default/judge")
+
+    assert isinstance(raised.value, NotFoundError)
+
+
+def test_resolve_model_reference_gives_only_the_route_for_an_unreadable_virtual_model() -> None:
+    """It may be a user-managed VirtualModel the calls reach instead of the entity, so the entity's provider is
+    never described as the model; the entity must still exist."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        _response(403, {"detail": "Forbidden"}),
+        _response(200, _model_json("judge", model_providers=["default/provider"])),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = client.resolve_model_reference("default/judge")
+
+    assert [call.args[1] for call in http.request.call_args_list] == [
+        f"{VM_PATH}/judge",
+        f"{BASE}/apis/models/v2/workspaces/default/models/judge",
+    ]
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    assert result.virtual_model
+    assert result.host_url is None
+    assert result.served_model_name is None
+
+
+def test_resolve_model_reference_fails_when_the_virtual_model_lookup_fails() -> None:
+    """Falling back to the entity could name it while a VirtualModel owns the name."""
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [_response(500, {"detail": "gateway down"})]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(NemoHTTPError, match="gateway down"):
+        client.resolve_model_reference("default/judge")
+
+
+def test_resolve_model_reference_names_a_user_managed_virtual_model() -> None:
+    """The gateway routes by VirtualModel name, so a user's VirtualModel is what the reference reaches.
+
+    That holds even when a model entity has the same name: its calls never reach the entity, so its provider's
+    details would describe a model the reference doesn't use.
+    """
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [_response(200, _user_virtual_model_json("cb-judge"))]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = client.resolve_model_reference("default/cb-judge")
+
+    assert [call.args[1] for call in http.request.call_args_list] == [f"{VM_PATH}/cb-judge"]
+    assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/cb-judge/-/v1"
+    assert result.name == "cb-judge"
+    assert result.virtual_model
+    assert result.host_url is None
+    assert result.served_model_name is None
+
+
+def test_resolve_model_reference_raises_when_neither_a_virtual_model_nor_a_model_exists() -> None:
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        _response(404, {"detail": "no virtual model"}),
+        _response(404, {"detail": "no model"}),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(NotFoundError, match="no model"):
+        client.resolve_model_reference("default/missing")
 
 
 def test_provider_route_for_deployment_fetches_provider() -> None:
@@ -533,28 +662,84 @@ async def test_async_create_model() -> None:
 async def test_async_resolve_model_reference_fetches_model_and_provider() -> None:
     http = AsyncMock(spec=httpx.AsyncClient)
     http.request.side_effect = [
-        httpx.Response(
-            200,
-            request=httpx.Request("GET", BASE),
-            json=_model_json("judge", model_providers=["default/provider"]),
-        ),
-        httpx.Response(
-            200,
-            request=httpx.Request("GET", BASE),
-            json=_provider_json("READY", name="provider", host_url="http://nim.example.test:8000"),
-        ),
+        _response(200, _passthrough_json("judge")),
+        _response(200, _model_json("judge", model_providers=["default/provider"])),
+        _response(200, _provider_json("READY", name="provider", host_url="http://nim.example.test:8000")),
     ]
     client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
 
     result = await client.resolve_model_reference("default/judge")
 
     assert [call.args[1] for call in http.request.call_args_list] == [
+        f"{VM_PATH}/judge",
         f"{BASE}/apis/models/v2/workspaces/default/models/judge",
         f"{BASE}/apis/models/v2/workspaces/default/providers/provider",
     ]
-    assert result.name == "judge"
     assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_names_a_user_managed_virtual_model() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [_response(200, _user_virtual_model_json("cb-judge"))]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = await client.resolve_model_reference("default/cb-judge")
+
+    assert [call.args[1] for call in http.request.call_args_list] == [f"{VM_PATH}/cb-judge"]
+    assert result.virtual_model
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_gives_only_the_route_for_an_unreadable_virtual_model() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [_response(403, {"detail": "Forbidden"}), _response(200, _model_json("judge"))]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = await client.resolve_model_reference("default/judge")
+
+    assert len(http.request.call_args_list) == 2
+    assert result.virtual_model
+    assert result.host_url is None
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_reaches_an_entity_without_a_virtual_model_through_its_provider() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [
+        _response(404, {"detail": "no virtual model"}),
+        _response(200, _model_json("judge", model_providers=["default/provider"])),
+        _response(200, _provider_json("READY", name="provider")),
+    ]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    result = await client.resolve_model_reference("default/judge")
+
+    assert (result.url, result.name) == (PROVIDER_ROUTE, "judge")
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_refuses_an_entity_nothing_routes() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [_response(404, {"detail": "no virtual model"}), _response(200, _model_json("judge"))]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(UnroutableModelError):
+        await client.resolve_model_reference("default/judge")
+
+
+@pytest.mark.asyncio
+async def test_async_resolve_model_reference_raises_when_neither_exists() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [
+        _response(404, {"detail": "no virtual model"}),
+        _response(404, {"detail": "no model"}),
+    ]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    with pytest.raises(NotFoundError, match="no model"):
+        await client.resolve_model_reference("default/missing")
 
 
 @pytest.mark.asyncio

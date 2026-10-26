@@ -14,6 +14,7 @@ import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
+from nemo_helix_plugin.jobs.execution_profiles import OpenShellJobExecutionProfile
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -239,6 +240,35 @@ def test_get_execution_profiles_parses_list_response() -> None:
     assert isinstance(profiles, list)
     assert len(profiles) == 2
     assert {p.backend for p in profiles} == {"subprocess", "e2e"}
+
+
+def test_get_execution_profiles_parses_openshell_profile() -> None:
+    payload = [
+        *_PROFILES_JSON,
+        {
+            "backend": "openshell",
+            "provider": "cpu",
+            "profile": "openshell",
+            "config": {
+                "gateway_endpoint": "http://127.0.0.1:17670",
+                "platform_egress": {"host": "host.docker.internal", "port": 8080},
+            },
+        },
+    ]
+    mock_http = _mock_http(
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/execution-profiles"),
+            json=payload,
+        )
+    )
+    client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    profiles = client.get_execution_profiles().data()
+
+    openshell = [p for p in profiles if isinstance(p, OpenShellJobExecutionProfile)]
+    assert len(profiles) == 3
+    assert [p.profile for p in openshell] == ["openshell"]
 
 
 @pytest.mark.asyncio

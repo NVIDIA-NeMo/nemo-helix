@@ -7,29 +7,17 @@
 # Run it from this directory (`docker compose up -d`); the build context is the
 # repo root, resolved relative to this file.
 #
-# Trimmed against the standalone scaled-evals compose stack. Four of its
-# services are gone because the plugin now does the work itself:
+# Trimmed against the standalone scaled-evals compose stack. These services are
+# gone because the plugin or the platform now does the work:
 #
-#   schema-migrate  -> the plugin migrates on startup (see migrations.py)
+#   postgres, schema-migrate -> scaled-evals state lives in platform entities
 #   rustfs-init     -> the plugin creates its bucket on startup (s3.ensure_bucket)
-#   postgres certs  -> no TLS locally; the DSN only sets sslmode when a root
-#                      cert is configured, so plain postgres needs no cert step
 #   harbor/gym-runner -> evaluation runtimes are out of Phase 1 scope
-#
-# The Postgres here belongs to scaled-evals. The plugin runs inside the platform
-# process but keeps its own database: no platform config is read, and the DSN is
-# passed explicitly below.
 
 name: nemo-scaled-evals
 
 # Every scaled-evals process, including Platform Job subprocesses, reads this block.
 x-scaled-evals-env: &scaled-evals-env
-  # scaled-evals' own database, named explicitly. The API reads this rather than
-  # the platform's DATABASE_* variables, so the two never share a database even
-  # though they share a process.
-  SCALED_EVALS_DATABASE_URL: postgresql://${POSTGRES_USER:-scaled_evals}:${POSTGRES_PASSWORD:-scaled_evals}@postgres:5432/${POSTGRES_DB:-scaled_evals}
-  DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-disable}
-
   S3_ENDPOINT: http://rustfs:9000
   # `rustfs:9000` does not resolve on the host, and SigV4 signs the Host header,
   # so presigned URLs handed to a client must name the published port instead.
@@ -65,22 +53,6 @@ x-app-build: &app-build
     HARBOR_EXTRA_INDEX_URL: ${HARBOR_EXTRA_INDEX_URL-}
 
 services:
-  postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16}
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-scaled_evals}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scaled_evals}
-      POSTGRES_DB: ${POSTGRES_DB:-scaled_evals}
-    ports:
-      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5434}:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   rustfs-data-init:
     image: ${RUSTFS_IMAGE:-rustfs/rustfs:latest}
     user: "0:0"
@@ -191,12 +163,10 @@ services:
       # scaled-evals runtime configuration through the local execution profile
       # so it is not persisted in each Platform Job spec.
       NHX_JOBS_EXECUTORS: >-
-        [{"provider":"subprocess","profile":"default","backend":"subprocess","config":{"working_directory":"/tmp/nhx-subprocess-jobs","cleanup_completed_jobs_immediately":false,"env":{"SCALED_EVALS_DATABASE_URL":"postgresql://${POSTGRES_USER:-scaled_evals}:${POSTGRES_PASSWORD:-scaled_evals}@postgres:5432/${POSTGRES_DB:-scaled_evals}","DATABASE_SSL_MODE":"${DATABASE_SSL_MODE:-disable}","S3_ENDPOINT":"http://rustfs:9000","S3_PUBLIC_ENDPOINT":"${S3_PUBLIC_ENDPOINT:-http://localhost:9000}","S3_ACCESS_KEY":"${S3_ACCESS_KEY:-scaledevals}","S3_SECRET_KEY":"${S3_SECRET_KEY:-scaledevals-dev-secret}","S3_BUCKET":"${S3_BUCKET:-scaled-evals}","BUILDKIT_ADDR":"unix:///run/buildkit/buildkitd.sock","IMAGE_REGISTRY":"${IMAGE_REGISTRY:-registry:5000}","REGISTRY_INSECURE":"${REGISTRY_INSECURE:-true}","TASK_IMAGE_VALIDATION_MODE":"${TASK_IMAGE_VALIDATION_MODE:-resolve}","TASK_IMAGE_ALLOWED_REGISTRIES":"${TASK_IMAGE_ALLOWED_REGISTRIES:-registry:5000}","TASK_IMAGE_REGISTRY_INSECURE":"${TASK_IMAGE_REGISTRY_INSECURE:-true}","HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES":"${HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES:-docker.io,ghcr.io}","IMAGE_BUILD_PLATFORM":"${IMAGE_BUILD_PLATFORM-}"}}}]
+        [{"provider":"subprocess","profile":"default","backend":"subprocess","config":{"working_directory":"/tmp/nhx-subprocess-jobs","cleanup_completed_jobs_immediately":false,"env":{"S3_ENDPOINT":"http://rustfs:9000","S3_PUBLIC_ENDPOINT":"${S3_PUBLIC_ENDPOINT:-http://localhost:9000}","S3_ACCESS_KEY":"${S3_ACCESS_KEY:-scaledevals}","S3_SECRET_KEY":"${S3_SECRET_KEY:-scaledevals-dev-secret}","S3_BUCKET":"${S3_BUCKET:-scaled-evals}","BUILDKIT_ADDR":"unix:///run/buildkit/buildkitd.sock","IMAGE_REGISTRY":"${IMAGE_REGISTRY:-registry:5000}","REGISTRY_INSECURE":"${REGISTRY_INSECURE:-true}","TASK_IMAGE_VALIDATION_MODE":"${TASK_IMAGE_VALIDATION_MODE:-resolve}","TASK_IMAGE_ALLOWED_REGISTRIES":"${TASK_IMAGE_ALLOWED_REGISTRIES:-registry:5000}","TASK_IMAGE_REGISTRY_INSECURE":"${TASK_IMAGE_REGISTRY_INSECURE:-true}","HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES":"${HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES:-docker.io,ghcr.io}","IMAGE_BUILD_PLATFORM":"${IMAGE_BUILD_PLATFORM-}"}}}]
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8080}:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
       rustfs:
         condition: service_healthy
       buildkit:
@@ -218,7 +188,6 @@ services:
       start_period: 20s
 
 volumes:
-  postgres-data:
   rustfs-data:
   registry-data:
   buildkit-socket:

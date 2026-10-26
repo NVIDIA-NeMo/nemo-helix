@@ -3,13 +3,13 @@
 
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2/WorkspaceModelSelect';
+import { Cpu } from '@nemo/icons/icons';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { CardIconBadge, SelectableCard } from '@studio/components/common/SelectableCard';
 import {
   type BuilderModel,
   providerForSelection,
 } from '@studio/routes/DataDesignerJobBuildRoute/models';
-import { Cpu } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface AddModelPaletteProps {
@@ -64,7 +64,7 @@ export const AddModelPalette: FC<AddModelPaletteProps> = ({
             className="w-full"
             leading={
               <CardIconBadge>
-                <Cpu size={15} className="text-accent-teal" aria-hidden />
+                <Cpu size="15" className="text-accent-teal" aria-hidden />
               </CardIconBadge>
             }
           />

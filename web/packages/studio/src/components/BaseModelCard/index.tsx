@@ -14,9 +14,9 @@ import { EntityCard } from '@nemo/common/src/components/EntityCard';
 import { getModelMetadata } from '@nemo/common/src/components/ModelDetailsTooltip/utils';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { ChatMulti, IconDocument, World } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
-import { MessagesSquare, File, Globe } from 'lucide-react';
 import { useMemo } from 'react';
 
 export interface BaseModelCardProps {
@@ -89,13 +89,13 @@ export const BaseModelCard = ({
       }))}
       stats={[
         ...(parameters
-          ? [{ key: 'parameters', icon: <File className={STAT_ICON} />, label: parameters }]
+          ? [{ key: 'parameters', icon: <IconDocument className={STAT_ICON} />, label: parameters }]
           : []),
         ...(contextSize
-          ? [{ key: 'context', icon: <Globe className={STAT_ICON} />, label: contextSize }]
+          ? [{ key: 'context', icon: <World className={STAT_ICON} />, label: contextSize }]
           : []),
         ...(isChatAvailable
-          ? [{ key: 'chat', icon: <MessagesSquare className={STAT_ICON} />, label: 'Chat' }]
+          ? [{ key: 'chat', icon: <ChatMulti className={STAT_ICON} />, label: 'Chat' }]
           : []),
       ]}
       onClick={onClick}

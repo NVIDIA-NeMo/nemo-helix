@@ -16,7 +16,9 @@ import {
   toAssistantToolArgs,
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
-import { Terminal, type LucideIcon } from 'lucide-react';
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { WindowTerminal } from '@nemo/icons/icons';
+import type { FC } from 'react';
 
 const getStringArg = (args: AssistantToolArgs, keys: string[]): string | undefined => {
   for (const key of keys) {
@@ -81,8 +83,8 @@ export const formatSubtleToolMessage = (
   return compactedDetail ? `${action} ${compactedDetail}` : fallback;
 };
 
-export const getSubtleToolIcon = (toolName: string): LucideIcon =>
-  SUBTLE_TOOL_ICONS[toolName] ?? TOOL_ICONS[toolName] ?? Terminal;
+export const getSubtleToolIcon = (toolName: string): FC<Omit<NvidiaGuiIconProps, 'iconName'>> =>
+  SUBTLE_TOOL_ICONS[toolName] ?? TOOL_ICONS[toolName] ?? WindowTerminal;
 
 const getRepeatedSubtleToolMessage = (toolName: string, count: number): string => {
   switch (toolName) {

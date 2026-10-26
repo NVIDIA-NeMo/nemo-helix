@@ -3,9 +3,9 @@
 
 import { EntityCard } from '@nemo/common/src/components/EntityCard';
 import type { ToolParameter } from '@nemo/common/src/components/ToolCard/types';
+import { Code, Star, Wrench } from '@nemo/icons/icons';
 import type { ChatCompletionTool } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
-import { Asterisk, Braces, Wrench } from 'lucide-react';
 import type { FC } from 'react';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -78,14 +78,14 @@ export const ToolCard: FC<ToolCardProps> = ({ tool, onClick, className }) => {
       stats={[
         {
           key: 'parameters',
-          icon: <Braces className={STAT_ICON} />,
+          icon: <Code className={STAT_ICON} />,
           label: `${params.length} ${params.length === 1 ? 'param' : 'params'}`,
         },
         ...(requiredCount > 0
           ? [
               {
                 key: 'required',
-                icon: <Asterisk className={STAT_ICON} />,
+                icon: <Star className={STAT_ICON} />,
                 label: `${requiredCount} required`,
               },
             ]

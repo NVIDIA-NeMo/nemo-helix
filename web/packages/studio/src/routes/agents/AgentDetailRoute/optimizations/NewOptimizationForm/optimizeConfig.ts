@@ -10,7 +10,9 @@ import {
 import type { StudyEvaluation } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/studyDataset';
 import {
   budgetById,
+  PROMPT_SEARCH,
   type SearchParameter,
+  SYSTEM_PROMPT_PATH,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import { asRecord } from '@studio/util/guards';
 import { Document, Scalar } from 'yaml';
@@ -67,6 +69,14 @@ export const gatewayAgentModel = (
   };
 };
 
+/** The agent's system prompt at {@link SYSTEM_PROMPT_PATH}, if it has one there. */
+export const agentSystemPrompt = (
+  agentConfig: Record<string, unknown> | undefined
+): string | undefined => {
+  const content = asRecord(asRecord(agentConfig?.instructions)?.system)?.content;
+  return typeof content === 'string' ? content : undefined;
+};
+
 export interface BuildOptimizeConfigParams {
   workspace: string;
   values: OptimizationFormOutput;
@@ -74,11 +84,14 @@ export interface BuildOptimizeConfigParams {
   evaluationData: StudyEvaluation;
 }
 
+/** A registered model, called through the gateway of the workspace its URN names. */
+const registeredModel = (workspace: string, model: string): Record<string, unknown> => {
+  const modelWorkspace = model.includes('/') ? model.slice(0, model.indexOf('/')) : workspace;
+  return { provider: 'nvidia', model, base_url: gatewayBaseUrl(modelWorkspace) };
+};
+
 const originalJudgeModel = (workspace: string, model: unknown): Record<string, unknown> => {
-  if (typeof model === 'string') {
-    const modelWorkspace = model.includes('/') ? model.slice(0, model.indexOf('/')) : workspace;
-    return { provider: 'nvidia', model, base_url: gatewayBaseUrl(modelWorkspace) };
-  }
+  if (typeof model === 'string') return registeredModel(workspace, model);
   const inline = asRecord(model);
   if (
     typeof inline?.url !== 'string' ||
@@ -97,6 +110,24 @@ const originalJudgeModel = (workspace: string, model: unknown): Record<string, u
   };
 };
 
+/** The `models.*` role the prompt phase's rewriter is declared under. */
+export const PROMPT_OPTIMIZER_MODEL = 'prompt_optimizer';
+
+/** The search-space key for the system prompt, in either mode; the GA names its artifacts after
+ *  it, and the sweep its trial parameter. */
+export const SYSTEM_PROMPT_DIMENSION = 'system_prompt';
+
+/** The prompt phase runs after the numeric sweep, starting from its best config. Its prompt seed
+ *  is read from the agent at {@link SYSTEM_PROMPT_PATH}, so no copy of it travels in the bundle. */
+const PROMPT_PHASE = {
+  enabled: true,
+  backend: 'ga',
+  model: PROMPT_OPTIMIZER_MODEL,
+  population_size: PROMPT_SEARCH.populationSize,
+  generations: PROMPT_SEARCH.generations,
+  oracle_feedback_mode: PROMPT_SEARCH.feedback,
+};
+
 /** The job merges only optimizer, eval and models onto the agent; metadata would be dropped.
  *  One repetition per row keeps the run count equal to trials × rows. */
 export const buildOptimizeConfig = ({
@@ -106,10 +137,20 @@ export const buildOptimizeConfig = ({
   evaluationData,
 }: BuildOptimizeConfigParams): string => {
   const mimicked = mimicEvaluation(evaluationData);
+  const { enabled, mode, purpose, model, versions } = values.prompt;
+  const rewrite = enabled && mode === 'rewrite';
+  // The GA rewrites a prompt dimension; the user's versions are a plain choice the numeric phase
+  // sweeps like any other, so they share its trials.
+  const promptDimension = {
+    type: 'fabric',
+    path: SYSTEM_PROMPT_PATH,
+    ...(rewrite ? { is_prompt: true, purpose } : { values: versions }),
+  };
   const config = {
     models: {
       ...(agentModel ? { default: agentModel } : {}),
       judge: originalJudgeModel(workspace, mimicked.model),
+      ...(rewrite ? { [PROMPT_OPTIMIZER_MODEL]: registeredModel(workspace, model) } : {}),
     },
     optimizer: {
       experiment_id: values.experimentId,
@@ -117,6 +158,7 @@ export const buildOptimizeConfig = ({
         enabled: true,
         n_trials: budgetById(values.budget).trials,
       },
+      ...(rewrite ? { prompt: PROMPT_PHASE } : {}),
       reps_per_param_set: 1,
       eval_metrics: {
         average_score: { evaluator_name: 'average_score', direction: 'maximize', weight: float(1) },
@@ -135,6 +177,7 @@ export const buildOptimizeConfig = ({
           path: `environment.env.${IGW_API_KEY_ENV}`,
           values: ['not-used'],
         },
+        ...(enabled ? { [SYSTEM_PROMPT_DIMENSION]: promptDimension } : {}),
       },
     },
     eval: {

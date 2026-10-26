@@ -37,7 +37,7 @@ class HarborTaskJobSpec(BaseModel):
     spec: AgentEvalSpec = Field(description="The run's spec with only this task.")
     environment: PreparedHarborEnvironment
     sandbox_policy: ResolvedHarborSandboxPolicy
-    dispatcher_image: str = Field(pattern=PINNED_IMAGE_REF_PATTERN)
+    dispatcher_image: str = Field(min_length=1)
     execution_deadline_at: datetime
 
 

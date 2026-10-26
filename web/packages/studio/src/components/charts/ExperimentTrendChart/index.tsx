@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { HourglassMid } from '@nemo/icons/icons';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Text } from '@nvidia/foundations-react-core';
 import { TrendTooltip } from '@studio/components/charts/ExperimentTrendChart/TrendTooltip';
@@ -13,7 +14,6 @@ import {
 import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import { useGroupEvaluations } from '@studio/components/charts/useGroupEvaluations';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
-import { Loader2 } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 import {
   CartesianGrid,
@@ -91,7 +91,7 @@ export const ExperimentTrendChart: FC<ExperimentTrendChartProps> = ({
     if (isLoading) {
       return (
         <div aria-busy className="flex h-[360px] items-center justify-center gap-2">
-          <Loader2 width={20} height={20} className="animate-spin text-brand" />
+          <HourglassMid width={20} height={20} className="animate-spin text-brand" />
           <Text kind="body/regular/sm" color="subtle">
             Loading evaluations…
           </Text>

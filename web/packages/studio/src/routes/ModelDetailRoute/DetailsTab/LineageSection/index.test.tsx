@@ -48,6 +48,21 @@ describe('LineageSection', () => {
     );
   });
 
+  it('links the deployment card to the given route, even when nothing serves the model', () => {
+    renderLineage({ deploymentTo: '/deployment-tab' });
+
+    expect(screen.getByRole('link', { name: /Deployment/ })).toHaveAttribute(
+      'href',
+      '/deployment-tab'
+    );
+  });
+
+  it('points an adapter at its base model when nothing serves it', () => {
+    renderLineage({ deployment: { kind: 'not-deployed' }, isAdapter: true });
+
+    expect(screen.getByText('Deploy the base model to serve this adapter')).toBeInTheDocument();
+  });
+
   it('explains when an adapter is not loaded', () => {
     renderLineage({ deployment: { kind: 'adapter-not-loaded' }, isAdapter: true });
 

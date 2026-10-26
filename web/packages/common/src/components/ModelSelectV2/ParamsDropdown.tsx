@@ -5,6 +5,7 @@ import {
   InferenceParameters,
   type InferenceParametersProps,
 } from '@nemo/common/src/components/ModelSelectV2/InferenceParameters';
+import { ChevronDown, Sliders } from '@nemo/icons/icons';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -15,7 +16,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { FC } from 'react';
 
 export interface ParamsDropdownProps {
@@ -45,9 +45,9 @@ export const ParamsDropdown: FC<ParamsDropdownProps> = ({
         className="shrink-0"
       >
         <Flex align="center" gap="density-sm">
-          <SlidersHorizontal size={16} />
+          <Sliders size="16" />
           <Text>Params</Text>
-          <ChevronDown size={16} />
+          <ChevronDown size="16" />
         </Flex>
       </Button>
     </DropdownTrigger>

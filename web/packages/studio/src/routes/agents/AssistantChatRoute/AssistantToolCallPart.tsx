@@ -28,10 +28,10 @@ import {
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
+import { ChevronRight, IconClipboard } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
 import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
-import { ChevronRight, ClipboardList } from 'lucide-react';
 
 interface AssistantToolCallPartContentProps {
   readonly args: AssistantToolArgs;
@@ -146,7 +146,7 @@ const CollapsedStudioDetailsToolCall = ({ args }: { readonly args: AssistantTool
             aria-hidden
             className="size-3 shrink-0 transition-transform group-open/studio-details:rotate-90"
           />
-          <ClipboardList aria-hidden className="size-3.5 shrink-0" />
+          <IconClipboard aria-hidden className="size-3.5 shrink-0" />
           <span>
             <span className="font-medium text-primary">View work</span>
             {contextLabel ? ` · ${contextLabel}` : null}

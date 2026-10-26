@@ -97,7 +97,7 @@ constraints = [
     { name = "langchain-openai", specifier = ">=1.3.5" },
     { name = "langgraph", specifier = ">=1.2.6" },
     { name = "langsmith", specifier = ">=0.9.7" },
-    { name = "litellm", specifier = ">=1.83.10" },
+    { name = "litellm", specifier = "==1.95.1" },
     { name = "lxml", specifier = ">=6.1.0" },
     { name = "mako", specifier = ">=1.3.12" },
     { name = "mcp", specifier = ">=1.28.1" },
@@ -148,11 +148,12 @@ overrides = [
     { name = "fschat", marker = "sys_platform == 'never'" },
     { name = "gitpython", specifier = ">=3.1.62" },
     { name = "grpcio", specifier = ">=1.71.0" },
+    { name = "harbor", specifier = ">=0.24,<0.25" },
     { name = "huggingface-hub", specifier = ">=1.31.0,<2.0.0" },
     { name = "jaraco-context", specifier = ">=6.1.0" },
     { name = "joserfc", specifier = ">=1.7.2" },
     { name = "jsonpath-ng", specifier = ">=1.6.1" },
-    { name = "litellm", specifier = ">=1.83.10" },
+    { name = "litellm", specifier = "==1.95.1" },
     { name = "nltk", specifier = ">=3.10.3" },
     { name = "openai", specifier = ">=2.26.0" },
     { name = "pyasn1", specifier = ">=0.6.4" },
@@ -1212,7 +1213,7 @@ wheels = [
 
 [[package]]
 name = "data-designer"
-version = "0.9.5"
+version = "0.9.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "data-designer-config" },
@@ -1231,16 +1232,17 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/28/6e/3643c727402315f4a7b6384e56cc24e9a6c6254b61dcf422f03b1f25ed6a/data_designer-0.9.5.tar.gz", hash = "sha256:d67dea7de6b21659f65eb6fe2b28d4b2ffae52ed408d5d83b59e2ee8f78aa8ff", size = 241965, upload-time = "2026-10-13T20:26:49.623Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/5b/775137cf838d1c06635ae8fb03a6732a47db808cbd06f6aee8f17e01ab7a/data_designer-0.9.7.tar.gz", hash = "sha256:c1358fb5e1ccad7140148788cd36302672b1b8b7d529b86e5e01e3c29d69ad77", size = 248195, upload-time = "2026-10-22T02:00:20.094Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/62/e290a6ab3e271f7d44c3c13c7a9631590bdeaf92dcc7112690f6265400d1/data_designer-0.9.5-py3-none-any.whl", hash = "sha256:c1ffe0267d873e3de84433fdf1b044d198a65f2c1bff2464da6be83327268518", size = 160239, upload-time = "2026-10-13T20:26:48.248Z" },
+    { url = "https://files.pythonhosted.org/packages/12/f3/75c578f1286f052d18967b9d27a5c68ad8d566c9309aba95ca0981a7dc9a/data_designer-0.9.7-py3-none-any.whl", hash = "sha256:7a8fe33d88b8927e103d585dc9129a3c335191440e73a0e451f13702b4b08410", size = 160876, upload-time = "2026-10-22T02:00:18.759Z" },
 ]
 
 [[package]]
 name = "data-designer-config"
-version = "0.9.5"
+version = "0.9.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "certifi" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "numpy" },
@@ -1254,14 +1256,14 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/63/bb140989c16184b8a21623679a2c1e61d49dc78b98984473ff579c68c607/data_designer_config-0.9.5.tar.gz", hash = "sha256:980d3ac13428be69d97f56eea552fcd4a5f47812499c25946d98534225cf526a", size = 152846, upload-time = "2026-10-13T20:26:41.22Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/f9/a2a1c3e1abe4e5d2cf1c8d55ed5609a95082da4c166cb5fc041298445192/data_designer_config-0.9.7.tar.gz", hash = "sha256:fc6a72f6ea9223e11222f513796be8df3cdf0e67d528524c14840c98cadf3e7a", size = 153073, upload-time = "2026-10-22T02:00:11.926Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/2f/345ff529de8f4ed3fa2656c0ce34d8d68a1469b2ed773c5837ce3f33fdac/data_designer_config-0.9.5-py3-none-any.whl", hash = "sha256:4e6b861d461bf7bf2a247f4c95c21eb502aca094e365aaf4671f9a7903730f43", size = 129907, upload-time = "2026-10-13T20:26:39.883Z" },
+    { url = "https://files.pythonhosted.org/packages/96/87/90ebf0662a80e5be2d0ae18e3817e2a0f5fcb59d9c8fa4ded7b88c9b7a56/data_designer_config-0.9.7-py3-none-any.whl", hash = "sha256:b17913a76cad92672d2350aa10399899aabf3b04783d61d5f8ebd7210cb145d1", size = 129938, upload-time = "2026-10-22T02:00:10.207Z" },
 ]
 
 [[package]]
 name = "data-designer-engine"
-version = "0.9.5"
+version = "0.9.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyascii" },
@@ -1292,9 +1294,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "wcwidth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/40/38604a2dc96888f72de688ccd0be8994ee005227477479a5e492033c79c4/data_designer_engine-0.9.5.tar.gz", hash = "sha256:a2475816d98b35fed1df65b170483fc002537be2282ad0e725d51d1a203f5596", size = 930354, upload-time = "2026-10-13T20:26:46.011Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/e1/9225b78bb2c049fee24dda80eeb1d52821ea91e559aefcc571d2692ae189/data_designer_engine-0.9.7.tar.gz", hash = "sha256:ba9578c13abb278ce2b0e1ecb63dc2b9da0b2ca7c8198e3db66b37aa756d53c9", size = 939761, upload-time = "2026-10-22T02:00:16.221Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/f9/5adfcf3588569338ab3767ba7786db83bce83c2c5ee85d9fb72ed1a0afc0/data_designer_engine-0.9.5-py3-none-any.whl", hash = "sha256:ae14b424e91eacbe9ae23125d142032f8163844715d329caa8fd04cdcd79bd06", size = 710035, upload-time = "2026-10-13T20:26:44.093Z" },
+    { url = "https://files.pythonhosted.org/packages/58/a7/d5d9023a39ad970f5bc8d862ba5ba5af64606680542f11ff11a48fc65378/data_designer_engine-0.9.7-py3-none-any.whl", hash = "sha256:2a1f4f7f1717adee4bb4447b6636d397d0ee1a7edba8bf6081c8bbefc8cd6936", size = 711961, upload-time = "2026-10-22T02:00:13.994Z" },
 ]
 
 [[package]]
@@ -1318,7 +1320,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
-    { name = "data-designer", specifier = "==0.9.5" },
+    { name = "data-designer", specifier = "==0.9.7" },
     { name = "duckdb" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "pydantic", specifier = ">=2" },
@@ -2326,7 +2328,7 @@ wheels = [
 
 [[package]]
 name = "harbor"
-version = "0.23.0"
+version = "0.24.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dirhash" },
@@ -2345,6 +2347,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
     { name = "rich" },
+    { name = "semver" },
     { name = "shortuuid" },
     { name = "supabase" },
     { name = "tenacity" },
@@ -2352,9 +2355,9 @@ dependencies = [
     { name = "typer" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/3a/b05d0e8752d5d531e56fbb2955f0e656c0a9b5fbcd202dbad7313b29d4df/harbor-0.23.0.tar.gz", hash = "sha256:a8b87e98db59877228bb36d2c24757cc422a3144ffaf31a1f88955c65c911e4d", size = 1907464, upload-time = "2026-09-12T04:55:11.919Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/7d/16e21cfd52938260dce71ff77ec1ed156bd8c327642760fe66163b0cd3ce/harbor-0.24.0.tar.gz", hash = "sha256:6c5185e6a76abc677ed3f95e688dc0dbf8597e4fa50847cb9a37a4448c91b1e5", size = 2090577, upload-time = "2026-10-05T05:04:46.252Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/c7/607ff037dff1f40d1f941b9854742d66fd43630274fd4e7b8de8480dad34/harbor-0.23.0-py3-none-any.whl", hash = "sha256:8747400dbb2a5e2298e1338e17e88eba38433c0433fd700f34d1a9021bba5c37", size = 2142100, upload-time = "2026-09-12T04:55:10.014Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/63/0e3d788e8d1ed116125507c6a01e3fb95cf82be71f2ea7040a1458709d21/harbor-0.24.0-py3-none-any.whl", hash = "sha256:23b7ba616a3aae4eff561ced5e2c51c7186f2981e53a770dea9c689d3969877c", size = 2331740, upload-time = "2026-10-05T05:04:42.088Z" },
 ]
 
 [[package]]
@@ -3450,7 +3453,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.95.0"
+version = "1.95.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -3466,14 +3469,23 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/96/8cdfb9aaf584b57af35a0423c111a1c1264a78b548cebbb5ed96defacdab/litellm-1.95.0.tar.gz", hash = "sha256:0ef126d52c7a559f8353e50d60fd0d5e7e6c8767ad54df25ddaf79b9edca1afc", size = 17513577, upload-time = "2026-08-02T02:52:49.465Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/64/3604383a6cae547d86f0f6efc7b3cd24a12f71d1ee5f0a416c9b830fcbe6/litellm-1.95.1.tar.gz", hash = "sha256:fc53333a5378e639b13558d0efbc0119510f32c422b9304788e88bc09f5daaf0", size = 17515255, upload-time = "2026-08-09T02:32:35.827Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/d0/ad0272853cc450f8bb4a40a93d206e767e18ac2ff3f91870374e1d9fc090/litellm-1.95.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:cb667f84f08520f32b076e03c7a3fa51bf3f7e8b641dade34ab046bf00314d6b", size = 26421359, upload-time = "2026-08-02T02:52:16.048Z" },
-    { url = "https://files.pythonhosted.org/packages/02/c1/4301aa8ef6d2fb0e4a2b8dec973d7c4499f680b26d2e1b77643864235a4b/litellm-1.95.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:1bdf7153557cc0851fa9477b137fde476c56d5de92a5778ecfc6c3a75439a4e1", size = 26300401, upload-time = "2026-08-02T02:52:19.501Z" },
-    { url = "https://files.pythonhosted.org/packages/fd/47/719785f65b01779cf7568c329430c93b2e7832498deb3deec53bdd106f8d/litellm-1.95.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:9d80a9adc506bfce48145621d6649e3fd428407811eb00211bcce33344054701", size = 26422310, upload-time = "2026-08-02T02:52:26.626Z" },
-    { url = "https://files.pythonhosted.org/packages/55/48/06447e1125d7ae31bd24d34d2af2833b15aed79dc5f7e8b45862c1d06af8/litellm-1.95.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:cf014ff515825ad49937b4cdf95616270789311db7841d16702e0a5b1ac5b067", size = 26300935, upload-time = "2026-08-02T02:52:30.032Z" },
-    { url = "https://files.pythonhosted.org/packages/bb/f6/5b2e944d5c8cea5164e10a28220d9af598792a9c3f25605bcf14946323ef/litellm-1.95.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:c8e712f95764a9a730f3aec9dff8be916973423411ca12a79a35c8bea3f7d5a4", size = 26423318, upload-time = "2026-08-02T02:52:37.629Z" },
-    { url = "https://files.pythonhosted.org/packages/ca/f7/d7450f5d3d7b566900067a21bdfafb5cee62bc0bc73b190e8598df1f2e67/litellm-1.95.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:071a63c0e1d949bf7ed5e5c73843cb042a6e00324d3f214b13f8c6b90da6822d", size = 26299965, upload-time = "2026-08-02T02:52:41.577Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/38/edf065a49a26105746a3d8273e0acddb6a06d4346b0c42ee6db191bf88e4/litellm-1.95.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:884476f661c389b4fe2a70ee8c962d7e899c7495b246c8f903171ceb37ca531e", size = 25488078, upload-time = "2026-08-09T02:31:39.736Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/f8/7c08aeb423d49b29662b0a21b5f8d6a69876b2cbdb4d4b82e320e7fea3e6/litellm-1.95.1-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:122c406b0dbe3c4c0a10933fe6d2f39a847982479f2ec59da23769c607858d39", size = 26421410, upload-time = "2026-08-09T02:31:42.406Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/1c/4178c4428bf777df37e9a7df306cc1292cab426489a76323191004f6b307/litellm-1.95.1-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:9d387672c00573d516795134f664e8cbd89849e9acd7a65c90e49f4e8dfa96ad", size = 26300094, upload-time = "2026-08-09T02:31:45.053Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/05/4d7860b7a64261fda522c5c1d5fd5c1cfaa5ea192616e5e3a0b98b6daa32/litellm-1.95.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:def055e7cb3c5aaee6755c8f6dba90a5a4151847fe8deb026132ff05ac1dee6a", size = 26495826, upload-time = "2026-08-09T02:31:47.628Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/13/ebdecfe1cbc20c03df5e905e78aa7bc4e6f7d18534848a79876428a3c7c7/litellm-1.95.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:ce63278ad967a7dcbd68a8fb43f2462b0e7766dc720ddf21f03ad5dcb91397a2", size = 26708217, upload-time = "2026-08-09T02:31:50.549Z" },
+    { url = "https://files.pythonhosted.org/packages/77/0e/337689f90ac54d495904f4e9b041d0aac2db38375730cd0c6da152c91319/litellm-1.95.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:7697a426405064a18832b645c4d3dc37677ad984fd6d57ebd4558cfa513db7f7", size = 25488617, upload-time = "2026-08-09T02:31:59.148Z" },
+    { url = "https://files.pythonhosted.org/packages/09/88/9b81636f87ce1f1b73b473ca2033c52efd6a7e3b797d687625ee0858ba8b/litellm-1.95.1-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:57d567000b72bf6ed0d6b3f3510a2e36e9ce89de5a6676189a156c59597aa4e8", size = 26422361, upload-time = "2026-08-09T02:32:01.666Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/5e/7ca75d611ec581ebb537c613d3dbd21a6999fe04c508fb9558f1b92955c8/litellm-1.95.1-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:ee4946db0a13da8095b7ee2142f63017a34aabaa25c90d879e3b107216d8c709", size = 26300628, upload-time = "2026-08-09T02:32:04.128Z" },
+    { url = "https://files.pythonhosted.org/packages/71/e6/97ab93136a4262dbf1231827ca3907b0a67cf1bee2a9a814b0c1a5fdbae6/litellm-1.95.1-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:bbacb7bbb36770b67694f09c185e1d56d3002213beb21e7669f1e81b0e4b4a39", size = 26496011, upload-time = "2026-08-09T02:32:06.798Z" },
+    { url = "https://files.pythonhosted.org/packages/55/6c/b575e84bb699896eecd4c4c6ca51fe913c5d8ed02dcfb4291a601f83fb0e/litellm-1.95.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:14c3d019fabf2293c43aa95a590c35b55aae3ebb018c63fb598b45bd1ec623fc", size = 26708083, upload-time = "2026-08-09T02:32:09.836Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/fa/87761dc114c1e9fe7335bd9f3346e19838745ca1391e5ce3b7acb859ad95/litellm-1.95.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:01aa7139f437df6c20676fbc0f5156a3c86b445d57ca6b81627e0feb60cafdde", size = 25497334, upload-time = "2026-08-09T02:32:18.347Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/b7/97884154e937c96b1ccd6f831a67d950521a6b1b54f99d986b57aca929bc/litellm-1.95.1-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:2d0290d912a17d57066c896d0ab9155fca219108b3dcc284ca9bd70bff9f3d17", size = 26423369, upload-time = "2026-08-09T02:32:20.934Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/76/f4019a026d4772e3594eee62525930e5a880e6d0ea0d7a702eb79fe9c1fa/litellm-1.95.1-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:5825a7edf65e1bd37874b9731d382ad77946ad0e290d5bdf9829d50c88dfa41f", size = 26299658, upload-time = "2026-08-09T02:32:24.193Z" },
+    { url = "https://files.pythonhosted.org/packages/99/ed/1b330df46b7a914639841e48449e6e1972f5fd14f5d50a18e4d5c801c189/litellm-1.95.1-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:9f9ca909d36409de064956c9411c044fcb771b75ec8a8f99f44f627bcc3ec87c", size = 26496554, upload-time = "2026-08-09T02:32:27.163Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/14/93ae7cd8a974741c80f819cef21b641fc13bc2bef83df7ccb907afee1a85/litellm-1.95.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:6e4e75df75200c5f8d733d0531981d0b9d604fdf077abff87edabc7a5a919990", size = 26709858, upload-time = "2026-08-09T02:32:29.919Z" },
 ]
 
 [[package]]
@@ -3698,7 +3710,7 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.29.0"
+version = "1.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -3715,9 +3727,9 @@ dependencies = [
     { name = "typing-inspection" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/30/d3/f9acc21dfc886e4f78e2add1a47db46ce16884346afde53f8a064c02c891/mcp-1.29.0.tar.gz", hash = "sha256:52d01f334de1868cc3bb2d6604931126a67631f99a6c5d3b82ba47290315ec36", size = 643148, upload-time = "2026-07-28T13:41:41.939Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/93/0142dc84a666daf8ad51a34268f34c12fd6fda4f3810c4be2504eecc8212/mcp-1.30.0.tar.gz", hash = "sha256:445414625fce5c295faa505bb11bacece661ab6f4028d57c935db57820b7a3e4", size = 680511, upload-time = "2026-09-07T14:34:15.845Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/c8/248b201f6d753d69fd5d6506011abbb35a946d9142b2ae311a948fd0be3d/mcp-1.29.0-py3-none-any.whl", hash = "sha256:f5a075bb611f23d6f4d080c6a1699fa62772eebc562ba9e66b306ddde1c755f7", size = 223436, upload-time = "2026-07-28T13:41:40.337Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/f4/e58bc33317c92a0203664daaf00bf6f41166cc0149e5d6870a03f7cd004a/mcp-1.30.0-py3-none-any.whl", hash = "sha256:666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0", size = 234581, upload-time = "2026-09-07T14:34:14.266Z" },
 ]
 
 [[package]]
@@ -4271,7 +4283,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "data-designer", specifier = "==0.9.5" },
+    { name = "data-designer", specifier = "==0.9.7" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
     { name = "fastapi" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
@@ -4482,6 +4494,7 @@ nemo-helix-plugin = [
     { name = "anthropic" },
     { name = "certifi" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "openai" },
@@ -4507,8 +4520,8 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.88.0" },
     { name = "anyio", marker = "extra == 'data-designer-nemo'", specifier = ">=4.0" },
     { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
-    { name = "data-designer", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.5" },
+    { name = "data-designer", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.7" },
     { name = "data-designer-nemo", editable = "packages/data_designer_nemo" },
     { name = "data-designer-retrieval-sdg", marker = "extra == 'retrieval-sdg'", specifier = "==0.2.1", index = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/" },
     { name = "duckdb", marker = "extra == 'data-designer-nemo'" },
@@ -4517,6 +4530,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "huggingface-hub", marker = "extra == 'retrieval-sdg'" },
     { name = "jsonschema", marker = "extra == 'nemo-helix-plugin'", specifier = ">=4.0.0" },
@@ -5215,6 +5229,7 @@ harbor = [
     { name = "jinja2" },
     { name = "jsonpath-ng" },
     { name = "jsonschema" },
+    { name = "langchain-community" },
     { name = "langchain-nvidia-ai-endpoints" },
     { name = "langchain-openai" },
     { name = "nemo-fabric", extra = ["harbor"] },
@@ -5561,6 +5576,7 @@ nemo-helix-plugin = [
     { name = "certifi" },
     { name = "fastapi" },
     { name = "filesets" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "openai" },
@@ -5663,6 +5679,7 @@ nhx-evals-sdk = [
     { name = "jinja2" },
     { name = "jsonpath-ng" },
     { name = "jsonschema" },
+    { name = "langchain-community" },
     { name = "langchain-nvidia-ai-endpoints" },
     { name = "langchain-openai" },
     { name = "nemo-fabric" },
@@ -5981,12 +5998,12 @@ requires-dist = [
     { name = "cryptography", marker = "extra == 'nemo-builder-plugin'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'plugins'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'services'", specifier = ">=42.0.0" },
-    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.5" },
-    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.5" },
+    { name = "data-designer", marker = "extra == 'all'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'data-designer-nemo'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'nemo-anonymizer-plugin'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'nemo-data-designer-plugin'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'plugins'", specifier = "==0.9.7" },
+    { name = "data-designer", marker = "extra == 'services'", specifier = "==0.9.7" },
     { name = "data-designer-nemo", marker = "extra == 'all'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-anonymizer-plugin'", editable = "packages/data_designer_nemo" },
     { name = "data-designer-nemo", marker = "extra == 'nemo-data-designer-plugin'", editable = "packages/data_designer_nemo" },
@@ -6083,7 +6100,7 @@ requires-dist = [
     { name = "gunicorn", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=23.0.0" },
     { name = "gunicorn", marker = "extra == 'plugins'", specifier = ">=23.0.0" },
     { name = "gunicorn", marker = "extra == 'services'", specifier = ">=23.0.0" },
-    { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.23,<0.24" },
+    { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.23,<0.25" },
     { name = "httpx", marker = "extra == 'all'" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0" },
@@ -6110,6 +6127,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-garak-plugin'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.23.0,<1" },
+    { name = "httpx", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'nemo-switchyard'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nhx-customization-common'", specifier = ">=0.27.0" },
@@ -6173,7 +6191,9 @@ requires-dist = [
     { name = "langchain-aws", marker = "extra == 'plugins'", specifier = "==1.1.0" },
     { name = "langchain-aws", marker = "extra == 'services'", specifier = "==1.1.0" },
     { name = "langchain-community", marker = "extra == 'all'", specifier = ">=0.3.31,<0.4" },
+    { name = "langchain-community", marker = "extra == 'harbor'", specifier = ">=0.3.31,<0.4" },
     { name = "langchain-community", marker = "extra == 'nemo-guardrails-plugin'", specifier = ">=0.3.31,<0.4" },
+    { name = "langchain-community", marker = "extra == 'nhx-evals-sdk'", specifier = ">=0.3.31,<0.4" },
     { name = "langchain-community", marker = "extra == 'plugins'", specifier = ">=0.3.31,<0.4" },
     { name = "langchain-community", marker = "extra == 'services'", specifier = ">=0.3.31,<0.4" },
     { name = "langchain-core", marker = "extra == 'all'", specifier = ">=1.4.9" },
@@ -6919,6 +6939,7 @@ dependencies = [
     { name = "certifi" },
     { name = "fastapi" },
     { name = "filesets" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "openai" },
@@ -6951,6 +6972,7 @@ nhx-evals-sdk = [
     { name = "jinja2" },
     { name = "jsonpath-ng" },
     { name = "jsonschema" },
+    { name = "langchain-community" },
     { name = "langchain-nvidia-ai-endpoints" },
     { name = "langchain-openai" },
     { name = "nemo-fabric" },
@@ -6975,12 +6997,14 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.4" },
     { name = "filesets", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'filesets'", specifier = ">=2023.1.0" },
+    { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nhx-evals-sdk'", specifier = ">=0.27.0,<1" },
     { name = "jinja2", marker = "extra == 'nhx-evals-sdk'", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", marker = "extra == 'nhx-evals-sdk'", specifier = ">=1.7.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "jsonschema", marker = "extra == 'nhx-evals-sdk'", specifier = ">=4.23.0" },
+    { name = "langchain-community", marker = "extra == 'nhx-evals-sdk'", specifier = ">=0.3.31,<0.4" },
     { name = "langchain-nvidia-ai-endpoints", marker = "extra == 'nhx-evals-sdk'", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", marker = "extra == 'nhx-evals-sdk'", specifier = ">=1.3.5" },
     { name = "lark", specifier = ">=1.1.0" },
@@ -7243,6 +7267,7 @@ nemo-helix-plugin = [
     { name = "anthropic" },
     { name = "certifi" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "openai" },
@@ -7269,6 +7294,7 @@ requires-dist = [
     { name = "fsspec", specifier = ">=2024.10.0" },
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "httpx", specifier = ">=0.27.2" },
+    { name = "httpx", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "jsonschema", marker = "extra == 'nemo-helix-plugin'", specifier = ">=4.0.0" },
     { name = "lark", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.1.0" },
@@ -7352,8 +7378,6 @@ dependencies = [
     { name = "nemo-helix" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-sandbox" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "psycopg-pool" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
     { name = "pyyaml" },
@@ -7371,8 +7395,6 @@ requires-dist = [
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-sandbox", editable = "packages/nhx_sandbox" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
-    { name = "psycopg-pool", specifier = ">=3.2.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
@@ -7593,7 +7615,7 @@ core-services = [
     { name = "nemo-compass-plugin" },
     { name = "nemo-customizer-plugin" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"] },
-    { name = "nemo-deployments-plugin", extra = ["docker", "k8s"] },
+    { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"] },
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
@@ -7609,7 +7631,7 @@ core-services = [
     { name = "nhx-entities" },
     { name = "nhx-files" },
     { name = "nhx-inference-gateway" },
-    { name = "nhx-jobs" },
+    { name = "nhx-jobs", extra = ["openshell"] },
     { name = "nhx-models" },
     { name = "nhx-platform" },
     { name = "nhx-secrets" },
@@ -7703,7 +7725,7 @@ enabled-plugins = [
     { name = "nemo-compass-plugin" },
     { name = "nemo-customizer-plugin" },
     { name = "nemo-data-designer-plugin", extra = ["retrieval-sdg"] },
-    { name = "nemo-deployments-plugin", extra = ["docker", "k8s"] },
+    { name = "nemo-deployments-plugin", extra = ["docker", "k8s", "openshell"] },
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
@@ -7712,6 +7734,7 @@ enabled-plugins = [
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
     { name = "nemo-unsloth-plugin" },
+    { name = "nhx-jobs", extra = ["openshell"] },
 ]
 functional-services = [
     { name = "nemo-agents-plugin" },
@@ -7822,8 +7845,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-compass-plugin", editable = "plugins/nemo-compass" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
-    { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
-    { name = "nemo-deployments-plugin", extras = ["openshell"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -7869,7 +7891,7 @@ core-services = [
     { name = "nemo-compass-plugin", editable = "plugins/nemo-compass" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
-    { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -7887,6 +7909,7 @@ core-services = [
     { name = "nhx-files", editable = "services/core/files" },
     { name = "nhx-inference-gateway", editable = "services/core/inference-gateway" },
     { name = "nhx-jobs", editable = "services/core/jobs" },
+    { name = "nhx-jobs", extras = ["openshell"], editable = "services/core/jobs" },
     { name = "nhx-models", editable = "services/core/models" },
     { name = "nhx-platform", editable = "packages/nhx_platform" },
     { name = "nhx-secrets", editable = "services/core/secrets" },
@@ -7982,7 +8005,7 @@ enabled-plugins = [
     { name = "nemo-compass-plugin", editable = "plugins/nemo-compass" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
-    { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -7991,6 +8014,7 @@ enabled-plugins = [
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
+    { name = "nhx-jobs", extras = ["openshell"], editable = "services/core/jobs" },
 ]
 functional-services = [
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
@@ -8000,8 +8024,7 @@ functional-services = [
     { name = "nemo-compass-plugin", editable = "plugins/nemo-compass" },
     { name = "nemo-customizer-plugin", editable = "plugins/nemo-customizer" },
     { name = "nemo-data-designer-plugin", extras = ["retrieval-sdg"], editable = "plugins/nemo-data-designer" },
-    { name = "nemo-deployments-plugin", extras = ["docker", "k8s"], editable = "plugins/nemo-deployments" },
-    { name = "nemo-deployments-plugin", extras = ["openshell"], editable = "plugins/nemo-deployments" },
+    { name = "nemo-deployments-plugin", extras = ["docker", "k8s", "openshell"], editable = "plugins/nemo-deployments" },
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
@@ -8442,6 +8465,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "jsonpath-ng" },
     { name = "jsonschema" },
+    { name = "langchain-community" },
     { name = "langchain-nvidia-ai-endpoints" },
     { name = "langchain-openai" },
     { name = "nemo-fabric" },
@@ -8478,11 +8502,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.23,<0.24" },
+    { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.23,<0.25" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
+    { name = "langchain-community", specifier = ">=0.3.31,<0.4" },
     { name = "langchain-nvidia-ai-endpoints", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.3.5" },
     { name = "nemo-fabric", specifier = ">=0.5.0,<0.6.0" },
@@ -10666,57 +10691,6 @@ wheels = [
 ]
 
 [[package]]
-name = "psycopg"
-version = "3.3.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/db/2f/cb91e5502ec9de1de6f1b76cfbf69531932725361168bb06963620c77e2e/psycopg-3.3.4.tar.gz", hash = "sha256:e21207764952cff81b6b8bdacad9a3939f2793367fdac2987b3aac36a651b5bc", size = 165799, upload-time = "2026-05-01T23:31:55.179Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/e0/7b3dee031daae7743609ce3c746565d4a3ed7c2c186479eb48e34e838c64/psycopg-3.3.4-py3-none-any.whl", hash = "sha256:b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a", size = 213001, upload-time = "2026-05-01T23:20:50.816Z" },
-]
-
-[package.optional-dependencies]
-binary = [
-    { name = "psycopg-binary", marker = "implementation_name != 'pypy'" },
-]
-
-[[package]]
-name = "psycopg-binary"
-version = "3.3.4"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/b9/11b341edf8d54e2694726b273fe9652b254d989f4f63e3ac6816ad6b55f4/psycopg_binary-3.3.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:6402a9d8146cf4b3974ded3fd28a971e83dc6a0333eb7822524a3aa20b546578", size = 4669943, upload-time = "2026-05-01T23:28:04.522Z" },
-    { url = "https://files.pythonhosted.org/packages/7c/b1/b83136c6e510593d9b0c759ba5384337bc4ad82d19fda675adc4b2703c84/psycopg_binary-3.3.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:e7510c37550f91a187e3660a8cc50d4b760f8c3b8b2f89ebc5698cd2c7f2c85d", size = 5152995, upload-time = "2026-05-01T23:28:20.529Z" },
-    { url = "https://files.pythonhosted.org/packages/67/8d/a9821e2a648afe6091989929982a3b0f00b2631a859cb81379728f08fb75/psycopg_binary-3.3.4-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:77df19583501ea288eaf15ac0fe7ad01e6d8091a91d5c41df5c718f307d8e31b", size = 6738180, upload-time = "2026-05-01T23:28:30.654Z" },
-    { url = "https://files.pythonhosted.org/packages/45/48/57b00d03b4721878326122a1f1e6b0a90b85bcaec56b5b2f8ea6cfa45235/psycopg_binary-3.3.4-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:17a21953a9e5ff3a16dab692625a3676e2f101db5e40072f39dbee2250194d68", size = 4509757, upload-time = "2026-05-01T23:28:43.078Z" },
-    { url = "https://files.pythonhosted.org/packages/cd/68/d190ef0c0c5b16ded07831dabc8ddd412f4cdab07ec6e30ed38d9bda0e1f/psycopg_binary-3.3.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:71e55ccbdfae79a2ed9c6369c3008a3025817ff9d7e27b32a2d84e2a4267e66e", size = 4236627, upload-time = "2026-05-01T23:29:05.336Z" },
-    { url = "https://files.pythonhosted.org/packages/22/be/2923cd7c3683e7afdecf4f10796a18de02f5c5ddc0969aa2ad0a8cdd3bbd/psycopg_binary-3.3.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:75a9067e236f9b9ae3535b66fe99bddb33d39c0de10112e49b9ab11eee53dc31", size = 4669023, upload-time = "2026-05-01T23:29:25.884Z" },
-    { url = "https://files.pythonhosted.org/packages/e7/38/205d10bc1ad0df4a21c5c51659126bd3ea0ef98fcad1e852f78c249bb9c3/psycopg_binary-3.3.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:c677c4ad433cb7150c8cd304a0769ae3bcfbe5ea0676eb53faa7b1443b16d0d3", size = 5151137, upload-time = "2026-05-01T23:29:42.013Z" },
-    { url = "https://files.pythonhosted.org/packages/36/fc/f0381ddcd45eff3bb70dbca6823a996048d7f507b2ec3fc92c6fabc0fe87/psycopg_binary-3.3.4-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:26df2717e59c0473e4465a97dfb1b7afebaa479277870fd5784d1436470db47c", size = 6736671, upload-time = "2026-05-01T23:29:51.626Z" },
-    { url = "https://files.pythonhosted.org/packages/86/e4/2f8a47ee97f90cd2b933d0463081d35631ff419de2b8c984a5f369857de0/psycopg_binary-3.3.4-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:136f199a407b5348b9b857c504aff60c77622a28482e7195839ce1b51238c4cc", size = 4510513, upload-time = "2026-05-01T23:30:07.243Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/65/768364d4a97a15b1a7f47ba52688c1686f22941d8332a8398cefc468e25f/psycopg_binary-3.3.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5c4ab71be17bdca30cb34c34c4e1496e2f5d6f20c199c12bad226070b22ef9bf", size = 4236393, upload-time = "2026-05-01T23:30:26.211Z" },
-    { url = "https://files.pythonhosted.org/packages/92/58/5b40dbc9d839045c9dae956960e4fb6d20bcabe6c59a2aa34fc3a371913f/psycopg_binary-3.3.4-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:1fbaa292a3c8bb61b45df1ad3da1908ccee7cb889db9425e3557d9e34e2a4829", size = 4687023, upload-time = "2026-05-01T23:30:47.227Z" },
-    { url = "https://files.pythonhosted.org/packages/8f/26/42e8533497e2592334f68ec529cf5f840f7fa4e99575a4bb61aa184dbfbf/psycopg_binary-3.3.4-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:8c0056529e68dbe9184cd4019a1f3d8f3a4ead2f6fc7a5afcf27d3314edd1277", size = 5168745, upload-time = "2026-05-01T23:31:01.904Z" },
-    { url = "https://files.pythonhosted.org/packages/15/af/b7151776cc08d5935d45c833ec818a9beb417cf7c08239af1aafbdae78ee/psycopg_binary-3.3.4-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2c09aad7051326e7603c14e50636db9c01f78272dc54b3accff03d46370461e6", size = 6761486, upload-time = "2026-05-01T23:31:14.511Z" },
-    { url = "https://files.pythonhosted.org/packages/a2/23/ccadfd0de416aa188356daa199453af24087b042e296088706d190ae0295/psycopg_binary-3.3.4-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:46893c26858be12cc49ca4226ed6a60b4bfccadd946b3bebb783a60b38788228", size = 4533549, upload-time = "2026-05-01T23:31:26.204Z" },
-    { url = "https://files.pythonhosted.org/packages/c4/b1/f6670f00fa7ea601584623f6c11602ab92117d83eaff885e0210f6de7418/psycopg_binary-3.3.4-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:47c656a8a7ba6eb0cff1801a4caaa9c8bdc12d03080e273aff1c8ac39971a77e", size = 4255811, upload-time = "2026-05-01T23:31:44.986Z" },
-]
-
-[[package]]
-name = "psycopg-pool"
-version = "3.3.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/90/82/7a23d26039827ecd4ebe93905651029ddd307c5182ad59296dfb6f67b528/psycopg_pool-3.3.1.tar.gz", hash = "sha256:b10b10b7a175d5cc1592147dc5b7eec8a9e0834eb3ed2c4a92c858e2f51eb63c", size = 31661, upload-time = "2026-05-01T23:31:59.809Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/ed/89c2c620af0e1660354cd8aabf9f5b21f911597ce22acb37c805d6c86bc8/psycopg_pool-3.3.1-py3-none-any.whl", hash = "sha256:2af5b432941c4c9ad5c87b3fa410aec910ec8f7c122855897983a06c45f2e4b5", size = 40023, upload-time = "2026-05-01T23:31:53.136Z" },
-]
-
-[[package]]
 name = "psycopg2-binary"
 version = "2.9.12"
 source = { registry = "https://pypi.org/simple" }
@@ -11896,6 +11870,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/46/f5af3402b579fd5e11573ce652019a67074317e18c1935cc0b4ba9b35552/secretstorage-3.5.0-py3-none-any.whl", hash = "sha256:0ce65888c0725fcb2c5bc0fdb8e5438eece02c523557ea40ce0703c266248137", size = 15554, upload-time = "2025-11-23T19:02:51.545Z" },
+]
+
+[[package]]
+name = "semver"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/f5/e1dfe8e1d91c54ce212fd93916eb01fd1c590f413be0a0978c39a97aa1bb/semver-3.1.0.tar.gz", hash = "sha256:14bc073439513d7773662a338f4db9829cf16c12b74b9568e2d2689975fbd7fc", size = 304162, upload-time = "2026-09-12T18:38:14.045Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/02/bce7a1d70e9d0f6ea8623c16386138c251b5855af6cd3a11433d3fba4e66/semver-3.1.0-py3-none-any.whl", hash = "sha256:6e4998f8b4762acdfea85f9bfd5b4032e0bb50038dc04bf82011b42d5d1145c5", size = 18783, upload-time = "2026-09-12T18:38:12.457Z" },
 ]
 
 [[package]]

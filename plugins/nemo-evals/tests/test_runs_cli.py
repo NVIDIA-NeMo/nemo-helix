@@ -867,6 +867,51 @@ def test_list_failure_exits_with_the_api_detail():
     assert 'listing runs failed (500): "Internal server error"' in result.output
 
 
+def invoke_cancel(args, response):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return response
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    return CliRunner().invoke(app, ["runs", "cancel", "run-aaaa", "--workspace", "ac9", *args]), requests
+
+
+def test_cancel_posts_the_intent_and_says_how_to_follow_the_run():
+    run = listed_run("run-aaaa") | {"cancel_requested_at": "2026-10-17T12:30:00Z"}
+    result, requests = invoke_cancel([], httpx.Response(200, json=run))
+    assert result.exit_code == 0
+    (request,) = requests
+    assert request.method == "POST"
+    assert request.url.path == "/apis/evals/v2/workspaces/ac9/agent-evaluate/runs/run-aaaa/cancel"
+    assert result.output.splitlines() == [
+        "Cancel requested for run-aaaa at 2026-10-17T12:30:00Z (phase running).",
+        "Follow it with: nemo evals runs status run-aaaa --workspace ac9",
+    ]
+    result, _ = invoke_cancel(["--json"], httpx.Response(200, json=run))
+    assert json.loads(result.output) == run
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (httpx.Response(404, json={"detail": "Taskset run not found"}), "run ac9/run-aaaa not found"),
+        (
+            httpx.Response(409, json={"detail": "run run-aaaa already finished: completed"}),
+            'cancelling run run-aaaa failed (409): "run run-aaaa already finished: completed"',
+        ),
+    ],
+)
+def test_cancel_failure_exits_with_the_reason(response, message):
+    result, _ = invoke_cancel([], response)
+    assert result.exit_code == 1 and message in result.output
+
+
 def bundle_archive(*members: tuple[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:

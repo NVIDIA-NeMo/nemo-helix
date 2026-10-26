@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronLeft, ChevronRight, LockClosed, LayoutRows, Trash } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -20,7 +21,6 @@ import {
   type DataFileColumnType,
   type DataFileRow,
 } from '@studio/components/FileRowEditor/types';
-import { ChevronLeft, ChevronRight, Lock, Rows3, Trash } from 'lucide-react';
 import { type FC, type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 const BOOLEAN_OPTIONS = ['true', 'false'];
@@ -118,7 +118,7 @@ const FieldControl: FC<FieldControlProps> = ({ column, value, onChange }) => {
       <TextInput
         value={formatCellValue(value, column.type)}
         readOnly
-        slotEnd={<Lock size={14} className="text-secondary" />}
+        slotEnd={<LockClosed size="14" className="text-secondary" />}
         attributes={{ Input: { 'aria-label': column.key } }}
       />
     );
@@ -291,10 +291,10 @@ export const RowEditorPanel: FC<RowEditorPanelProps> = ({
                 onClick={onPrev}
                 disabled={rowNumber <= 1}
               >
-                <ChevronLeft size={16} />
+                <ChevronLeft size="16" />
               </Button>
               <Flex align="center" gap="density-xs" className="text-secondary">
-                <Rows3 size={14} />
+                <LayoutRows size="14" />
                 <Text kind="body/regular/sm" className="text-secondary">
                   Row {rowNumber.toLocaleString()} of {totalRows.toLocaleString()}
                 </Text>
@@ -306,7 +306,7 @@ export const RowEditorPanel: FC<RowEditorPanelProps> = ({
                 onClick={onNext}
                 disabled={rowNumber >= totalRows}
               >
-                <ChevronRight size={16} />
+                <ChevronRight size="16" />
               </Button>
             </Flex>
             {isDirty ? (
@@ -321,7 +321,7 @@ export const RowEditorPanel: FC<RowEditorPanelProps> = ({
         draft ? (
           <Flex align="center" justify="between" className="w-full">
             <Button type="button" kind="secondary" color="danger" onClick={onDelete}>
-              <Trash size={15} />
+              <Trash size="15" />
               Delete
             </Button>
             <Flex align="center" gap="density-sm">

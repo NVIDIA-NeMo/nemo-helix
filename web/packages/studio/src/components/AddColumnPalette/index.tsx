@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import { Stack, Text, TextInput } from '@nvidia/foundations-react-core';
 import { ColumnTypeGroupSection } from '@studio/components/AddColumnPalette/ColumnTypeGroupSection';
 import { COLUMN_TYPE_GROUPS } from '@studio/components/AddColumnPalette/constants';
@@ -8,7 +9,6 @@ import type {
   AddColumnSelection,
   ColumnTypeOption,
 } from '@studio/components/AddColumnPalette/types';
-import { Search } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 
 /** Matches an option against a lowercased search query (name + description). */
@@ -68,7 +68,7 @@ export const AddColumnPalette: FC<AddColumnPaletteProps> = ({
         value={search}
         onValueChange={setSearch}
         placeholder="Search column types…"
-        slotStart={<Search size={14} className="text-secondary" />}
+        slotStart={<MagnifyingGlass size="14" className="text-secondary" />}
         className="shrink-0"
         attributes={{ Input: { 'aria-label': 'Search column types' } }}
       />

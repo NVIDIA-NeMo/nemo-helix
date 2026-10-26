@@ -6,6 +6,7 @@ import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMe
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { toError } from '@nemo/common/src/utils/logger';
+import { Cancel, Bookmark, CopyGeneric } from '@nemo/icons/icons';
 import { useCustomizationCancelAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
 import { useCustomizationCancelRlJob } from '@nemo/sdk/generated/customizer/rl-jobs';
 import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer/unsloth-jobs';
@@ -18,7 +19,6 @@ import { SaveTemplateModal } from '@studio/routes/CustomizationJobDetailsRoute/S
 import { getNewCustomizationFormRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
-import { Ban, Bookmark, Copy } from 'lucide-react';
 import { FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -94,7 +94,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
         actions={[
           {
             label: 'Clone',
-            icon: <Copy />,
+            icon: <CopyGeneric />,
             onSelect: () =>
               navigate(getNewCustomizationFormRoute(workspace), { state: { cloneFromJob: job } }),
           },
@@ -112,7 +112,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
             ? [
                 {
                   label: isCancelling ? 'Cancelling…' : 'Cancel Job',
-                  icon: <Ban />,
+                  icon: <Cancel />,
                   danger: !isCancelling,
                   disabled: isCancelling || !backend,
                   onSelect: cancelJob,

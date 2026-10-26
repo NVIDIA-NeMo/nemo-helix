@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CheckmarkBadge, CheckCircle, Play } from '@nemo/icons/icons';
 import { Flex } from '@nvidia/foundations-react-core';
-import { BadgeCheck, CircleCheckBig, Play } from 'lucide-react';
 import { ReactNode } from 'react';
 
 /**
@@ -92,7 +92,7 @@ export const CUSTOMIZATION_FILESET_FILE_LABELS: Record<CustomizationFileType, st
 
 export const CUSTOMIZATION_FILESET_FILE_ICONS: Record<CustomizationFileType, ReactNode> = {
   [CustomizationFileType.Training]: <Play />,
-  [CustomizationFileType.Validation]: <BadgeCheck />,
+  [CustomizationFileType.Validation]: <CheckmarkBadge />,
 };
 
 export const CUSTOMIZATION_FILESET_FILE_HELPERS: Record<CustomizationFileType, ReactNode> = {
@@ -118,7 +118,7 @@ export const CUSTOMIZATION_TYPE_BADGES: Record<CustomizationFileType, ReactNode>
   ),
   [CustomizationFileType.Validation]: (
     <Flex align="center" gap="density-xs">
-      <CircleCheckBig /> Validation
+      <CheckCircle /> Validation
     </Flex>
   ),
 };

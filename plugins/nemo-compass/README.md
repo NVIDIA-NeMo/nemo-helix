@@ -7,28 +7,6 @@ NeMo Helix plugin for analyzing agent telemetry and persisting actionable insigh
 
 Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/nemo-compass).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
-Compass names the service; an Insight is a finding it produces.
-
-## Updating existing integrations
-
-The plugin now uses Compass names throughout its public interfaces:
-
-| Before | Now |
-|---|---|
-| `nemo-insights-plugin` package / extra | `nemo-compass-plugin` |
-| `nemo insights` | `nemo compass` |
-| `nemo_insights_plugin` | `nemo_compass_plugin` |
-| `client.insights` | `client.compass` |
-| `/apis/insights/v2` | `/apis/compass/v2` |
-| `insights.analyst` configuration | `compass.analysis` configuration |
-| `NEMO_INSIGHTS_ANALYST_*` | `NEMO_COMPASS_ANALYSIS_*` |
-
-Update callers and deployment configuration together. Stored insights, analysis runs,
-and schedules keep their identities. Existing `insights.*` permission grants and
-`insights:read` / `insights:write` OAuth scopes also remain valid.
-The internal job identifiers `insights.analysis` and `nvidia.fabric.insights-analyst`
-stay unchanged so already-submitted jobs can still resolve them.
-The observability opt-out is now `NEMO_COMPASS_OBSERVABILITY=false`.
 
 ## Prerequisites
 
