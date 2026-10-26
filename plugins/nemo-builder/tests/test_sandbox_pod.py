@@ -277,13 +277,16 @@ class TestTheBuildScriptRuns:
 class _Api:
     """The pod calls a sandbox makes, failing where told to."""
 
-    def __init__(self, *, create: Exception | None = None, delete: Exception | None = None) -> None:
+    def __init__(
+        self, *, create: Exception | None = None, create_failures: int = -1, delete: Exception | None = None
+    ) -> None:
         self.created: list[str] = []
         self.deleted: list[str] = []
-        self._create, self._delete = create, delete
+        self._create, self._create_failures, self._delete = create, create_failures, delete
 
     def create_namespaced_pod(self, *, namespace: str, body: k8s.V1Pod) -> None:
-        if self._create:
+        if self._create and self._create_failures != 0:
+            self._create_failures -= 1
             raise self._create
         self.created.append(body.metadata.name)
 
@@ -312,9 +315,22 @@ class TestEachSandboxFailsAlone:
         )
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        api = _Api(create=ApiException(status=403, reason="exceeded quota"))
+        api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
+
+    def test_a_sandbox_the_quota_rejects_waits_for_room(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr(supervise.time, "sleep", sleeps.append)
+        quota = ApiException(status=403, reason="Forbidden")
+        quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
+        api = _Api(create=quota, create_failures=3)
+        assert self._build(monkeypatch, api) == 0
+        assert api.created == [self.NAME]
+        assert sleeps == [5.0, 10.0, 20.0]
+
+        monkeypatch.setattr(supervise, "_QUOTA_WAIT_SECONDS", 0)
+        assert self._build(monkeypatch, _Api(create=quota)) == 2
 
     def test_a_log_that_cannot_be_read_fails_the_group_and_the_sandbox_is_still_deleted(
         self, monkeypatch: pytest.MonkeyPatch

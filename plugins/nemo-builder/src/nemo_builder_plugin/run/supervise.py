@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
 from kubernetes import watch as k8s_watch
+from kubernetes.client.exceptions import ApiException
 from nemo_builder_plugin.run.utils import job_identity, read_step_config
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
 from nemo_helix_plugin.jobs.constants import job_storage_subpath
@@ -47,6 +48,10 @@ _POD_TIMEOUT_SECONDS = 60 * 60
 
 #: Enforced by the kubelet, so a sandbox ends even if this step is killed before it can delete it.
 _POD_DEADLINE_SECONDS = _POD_TIMEOUT_SECONDS + 5 * 60
+
+#: How long a sandbox waits for room in the namespace's ResourceQuota, which other builds free as they end.
+_QUOTA_WAIT_SECONDS = 60 * 60
+_QUOTA_RETRY_MAX_DELAY_SECONDS = 60.0
 
 #: This step's namespace, which Kubernetes mounts beside the ServiceAccount token.
 _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
@@ -216,9 +221,29 @@ def _delete_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> None:
         logger.warning("sandbox %s could not be deleted", sanitize_for_log(name), exc_info=True)
 
 
+def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> None:
+    """Create a sandbox, retrying while the namespace's ResourceQuota rejects it. Any other error raises at once.
+
+    ponytail: this step's own pod keeps its share of the quota while it waits, so enough waiting builds can use
+    all of it and wait out the deadline together; capping how many builds run at once removes that.
+    """
+    deadline = time.monotonic() + _QUOTA_WAIT_SECONDS
+    delay = 5.0
+    while True:
+        try:
+            api.create_namespaced_pod(namespace=namespace, body=manifest)
+            return
+        except ApiException as exc:
+            if exc.status != 403 or "exceeded quota" not in str(exc.body) or time.monotonic() + delay > deadline:
+                raise
+        logger.warning("sandbox %s: namespace quota is full; retrying in %.0fs", sanitize_for_log(name), delay)
+        time.sleep(delay)
+        delay = min(delay * 2, _QUOTA_RETRY_MAX_DELAY_SECONDS)
+
+
 def _run_sandbox(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> tuple[str, str]:
     """Run one sandbox to its end, deleting it whatever happens. Returns its phase and its log."""
-    api.create_namespaced_pod(namespace=namespace, body=manifest)
+    _create_pod(api, name=name, manifest=manifest, namespace=namespace)
     try:
         phase = _await_pod(api, name=name, namespace=namespace)
         return phase, _read_pod_log(api, name=name, namespace=namespace)
