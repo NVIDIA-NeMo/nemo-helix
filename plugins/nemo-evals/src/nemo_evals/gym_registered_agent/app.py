@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 from asyncio import Semaphore
 from copy import deepcopy
@@ -62,6 +63,23 @@ LOG = logging.getLogger(__name__)
 #: The variable the composed config reads the policy model server's key from.
 POLICY_MODEL_API_KEY_ENV = "NEMO_GYM_FABRIC_MODEL_API_KEY"  # pragma: allowlist secret
 _ENV_TEMPLATE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+#: Where a Fabric adapter wheel puts its descriptor, relative to the install's data root.
+_ADAPTER_DESCRIPTOR_DIR = Path("share", "nemo-fabric", "adapters")
+
+
+def staged_adapter_descriptors(import_paths: list[str]) -> list[str]:
+    """Fabric adapter descriptors installed under the given import paths, such as a `--target` install.
+
+    The Gym host installs the staged wheelhouse with ``uv pip install --target`` and puts that directory on
+    ``sys.path``. The adapter's Python modules import from there, but its descriptor lands in the target's own
+    ``share/nemo-fabric/adapters``, and Fabric only lists the one under ``sys.prefix``.
+    """
+    descriptors: dict[str, None] = {}
+    for import_path in filter(None, import_paths):  # "" is the working directory, not a staged install
+        root = Path(import_path) / _ADAPTER_DESCRIPTOR_DIR
+        if root.is_dir():
+            descriptors.update((str(path.resolve()), None) for path in sorted(root.rglob("*.fabric-adapter.json")))
+    return list(descriptors)
 
 
 def compose_fabric_config(
@@ -76,6 +94,7 @@ def compose_fabric_config(
     skills: list[str],
     environ: dict[str, str],
     timeout_seconds: Optional[float] = None,
+    adapter_descriptors: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """The registered agent's config, made runnable for one Gym rollout.
 
@@ -84,6 +103,7 @@ def compose_fabric_config(
     policy model server, the workspace is the rollout's, Gym's rollout MCP server and skills are
     added, and a stdio MCP server's ``${NAME}`` env templates are filled from this process. An agent
     that declares no ``runtime.timeout_seconds`` gets ``timeout_seconds`` as its task deadline.
+    ``adapter_descriptors`` (see `staged_adapter_descriptors`) are added to the agent's own discovery paths.
     """
     config = deepcopy(registered)
     environment = config.setdefault("environment", {})
@@ -126,6 +146,10 @@ def compose_fabric_config(
     if skills:
         skill_config = config.setdefault("skills", {})
         skill_config["paths"] = list(dict.fromkeys([*(skill_config.get("paths") or []), *skills]))
+
+    if adapter_descriptors:
+        discovery = config.setdefault("discovery", {})
+        discovery["local_paths"] = list(dict.fromkeys([*(discovery.get("local_paths") or []), *adapter_descriptors]))
     return config
 
 
@@ -364,6 +388,7 @@ class NeMoRegisteredAgent(SimpleResponsesAPIAgent):
                 skills=_skill_paths(skills_path),
                 environ=dict(os.environ),
                 timeout_seconds=self.config.timeout,
+                adapter_descriptors=staged_adapter_descriptors(sys.path),
             )
             result = await Fabric().run(
                 FabricConfig.from_mapping(composed),
