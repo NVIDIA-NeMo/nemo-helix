@@ -413,6 +413,106 @@ def test_evaluation_views_count_the_three_level_shape_once(client: TestClient, m
     assert body["cost_usd"]["sum"] == pytest.approx(0.012)
 
 
+def _trial_with_gateway_calls(session_id: str, *, evaluation_name: str | None = None) -> list[dict[str, Any]]:
+    """An agent reports its two chats, and the gateway reports what the provider billed for each.
+
+    The agent's own counts are off by a few tokens, as agents' often are; the gateway's are authoritative.
+    """
+    return [
+        _span(name="trial", span_id=1, session_id=session_id, evaluation_name=evaluation_name, test_case_name="case"),
+        _span(name="claude_code.interaction", span_id=2, parent_span_id=1, session_id=session_id, kind="AGENT"),
+        _span(
+            name="llm_request-1",
+            span_id=3,
+            parent_span_id=2,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=98,
+            output_tokens=9,
+        ),
+        _span(
+            name="llm_request-2",
+            span_id=4,
+            parent_span_id=2,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=197,
+            output_tokens=21,
+        ),
+        _span(
+            name="chat.completions",
+            span_id=5,
+            parent_span_id=1,
+            session_id=session_id,
+            operation="chat",
+            input_tokens=100,
+            output_tokens=10,
+            cached_tokens=60,
+            gateway_call=True,
+        ),
+        _span(
+            name="chat.completions",
+            span_id=6,
+            parent_span_id=1,
+            session_id=session_id,
+            operation="chat",
+            input_tokens=200,
+            output_tokens=20,
+            gateway_call=True,
+        ),
+    ]
+
+
+def test_gateway_call_spans_count_a_calls_usage_once(client: TestClient, make_otlp_request) -> None:
+    session_id = "gateway-trial"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(20),
+        spans=_trial_with_gateway_calls(session_id),
+    )
+
+    trace = _trace(client, session_id)
+    session = _session(client, session_id)
+    for totals in (trace, session):
+        assert totals["input_tokens"] == 300
+        assert totals["output_tokens"] == 30
+        assert totals["cached_tokens"] == 60
+
+
+def test_the_agents_counts_still_count_when_the_gateway_reports_no_usage(client: TestClient, make_otlp_request) -> None:
+    """A gateway span without a usage field (an aborted call) doesn't hide the agent's own count of it."""
+    session_id = "gateway-no-usage"
+    spans = [span for span in _trial_with_gateway_calls(session_id) if span["name"] != "chat.completions"]
+    spans.append(_span(name="chat.completions", span_id=5, parent_span_id=1, session_id=session_id, gateway_call=True))
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(21), spans=spans)
+
+    trace = _trace(client, session_id)
+    assert trace["input_tokens"] == 295
+
+
+def test_evaluation_views_count_gateway_calls_once(client: TestClient, make_otlp_request) -> None:
+    evaluation_name = "gateway-usage-eval"
+    _create_evaluation(client, evaluation_name)
+    session_id = "gateway-eval-trial"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(22),
+        spans=_trial_with_gateway_calls(session_id, evaluation_name=evaluation_name),
+    )
+
+    listed = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
+    assert listed.status_code == 200, listed.text
+    row = listed.json()["data"][0]
+    assert (row["input_tokens"], row["output_tokens"]) == (300, 30)
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_name}")
+    assert evaluation.status_code == 200, evaluation.text
+    assert evaluation.json()["tokens"]["sum"] == pytest.approx(330)
+
+
 def test_evaluation_session_token_sort_uses_deduped_totals(client: TestClient, make_otlp_request) -> None:
     """A parent total must not push a small call ahead of a larger one."""
     evaluation_name = "usage-rollup-sort"
@@ -541,8 +641,11 @@ def _span(
     evaluation_name: str | None = None,
     test_case_name: str | None = None,
     start_time_unix_nano: int | None = None,
+    gateway_call: bool = False,
 ) -> dict[str, Any]:
     attributes: dict[str, Any] = {"gen_ai.conversation.id": session_id}
+    if gateway_call:
+        attributes["nemo.inference_gateway.call"] = True
     if kind is not None:
         attributes["openinference.span.kind"] = kind
     if operation is not None:
