@@ -3,7 +3,7 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { GUARDRAILS_ENABLED } from '@studio/constants/environment';
+import { VIRTUAL_MODELS_ROUTE_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { gateVirtualModelsRoutes, getWorkspaceVirtualModelsRoute } from '@studio/routes/utils';
@@ -64,7 +64,7 @@ export const virtualModelsRoutes: RouteObject[] = gateVirtualModelsRoutes([
 const NavIcon = ENTITY_ICONS.virtualModels;
 
 export const getVirtualModelsSideNavItems = (workspace: string) =>
-  GUARDRAILS_ENABLED
+  VIRTUAL_MODELS_ROUTE_ENABLED
     ? [
         {
           id: 'virtual-models',
