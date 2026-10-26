@@ -4,7 +4,7 @@
 """Auth claim projection from decoded JWT payloads."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 from nhx.common.config import AuthConfig
@@ -20,6 +20,7 @@ class ActorClaims:
 
     subject: str
     groups: list[str]
+    authz_aliases: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -110,4 +111,5 @@ class TokenClaimsExtractor:
         return ActorClaims(
             subject=actor_subject,
             groups=self.groups_from_claims(actor_claims),
+            authz_aliases=groups_from_claim(actor_claims.get("nhx_actor_aliases", [])),
         )

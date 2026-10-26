@@ -60,6 +60,21 @@ def test_resolved_token_maps_actor_claims_to_delegated_principal_headers() -> No
     }
 
 
+def test_workload_access_token_preserves_signed_actor_aliases() -> None:
+    claims = _claims_with_actor()
+    claims.actor = ActorClaims(
+        subject="system:serviceaccount:nemo-runs:job-runner",
+        groups=["system:serviceaccounts"],
+        authz_aliases=["system:serviceaccount:nemo-runs:job-runner", "service:evals"],
+    )
+
+    principal = ResolvedBearerToken(claims=claims, token_kind="workload_access_token").principal
+
+    assert principal.id == "system:serviceaccount:nemo-runs:job-runner"
+    assert principal.authz_aliases == ["system:serviceaccount:nemo-runs:job-runner", "service:evals"]
+    assert principal.on_behalf_of == "user:alice"
+
+
 def test_workload_access_token_preserves_signed_account_context() -> None:
     claims = TokenClaims(
         subject="user:alice",

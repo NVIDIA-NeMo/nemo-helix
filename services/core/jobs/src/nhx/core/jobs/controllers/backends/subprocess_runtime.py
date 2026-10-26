@@ -21,6 +21,8 @@ import requests
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR, Principal
+from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
+from nhx.common.config import get_auth_config
 from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
 from opentelemetry._logs import Logger
 from opentelemetry._logs.severity import SeverityNumber
@@ -165,6 +167,17 @@ def parse_secret_references(secrets_env: str) -> list[SecretReference]:
     return references
 
 
+def inject_subprocess_task_auth(env: dict[str, str]) -> dict[str, str]:
+    auth_config = get_auth_config()
+    if not (auth_config.enabled and auth_config.oidc.workload is not None):
+        return env
+
+    principal = _principal_from_env(env)
+    on_behalf_of = principal.effective_principal if principal is not None and principal.id else None
+    env["NHX_ACCESS_TOKEN"] = ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of).get_access_token()
+    return env
+
+
 def inject_secret_env_vars(env: dict[str, str], *, secrets_url: str | None = None) -> dict[str, str]:
     secrets_env = env.get(NEMO_JOB_SECRETS_ENVVAR, "")
     references = parse_secret_references(secrets_env)
@@ -181,6 +194,7 @@ def inject_secret_env_vars(env: dict[str, str], *, secrets_url: str | None = Non
         env[reference.env_var_name] = _fetch_secret(
             api_base_url=api_base_url,
             principal=principal,
+            access_token=env.get("NHX_ACCESS_TOKEN"),
             workspace=reference.workspace,
             secret_name=reference.secret_name,
         )
@@ -301,12 +315,19 @@ def _principal_from_env(env: dict[str, str]) -> Principal | None:
         return None
 
 
-def _fetch_secret(*, api_base_url: str, principal: Principal | None, workspace: str, secret_name: str) -> str:
+def _fetch_secret(
+    *,
+    api_base_url: str,
+    principal: Principal | None,
+    access_token: str | None,
+    workspace: str,
+    secret_name: str,
+) -> str:
     request = Request(
         url=f"{api_base_url}/apis/secrets/v2/workspaces/{quote(workspace, safe='')}/secrets/{quote(secret_name, safe='')}/access",
         method="GET",
     )
-    for name, value in _secret_request_headers(principal).items():
+    for name, value in _secret_request_headers(principal, access_token=access_token).items():
         request.add_header(name, value)
 
     try:
@@ -329,7 +350,16 @@ def _validate_http_url(url: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be an absolute http or https URL")
 
 
-def _secret_request_headers(principal: Principal | None) -> dict[str, str]:
+def _secret_request_headers(principal: Principal | None, *, access_token: str | None = None) -> dict[str, str]:
+    if access_token:
+        return {"Authorization": f"Bearer {access_token}"}
+
+    auth_config = get_auth_config()
+    if auth_config.enabled and auth_config.oidc.workload is not None:
+        on_behalf_of = principal.effective_principal if principal is not None and principal.id else None
+        token = ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of).get_access_token()
+        return {"Authorization": f"Bearer {token}"}
+
     if principal is None or not principal.id:
         return Principal(id="service:jobs", authz_aliases=["service:jobs"]).get_headers()
     effective_principal = principal.effective_principal

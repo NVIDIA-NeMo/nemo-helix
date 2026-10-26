@@ -50,6 +50,7 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
     create_otel_logger,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
     start_log_capture,
 )
 from pydantic import Field
@@ -527,6 +528,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             principal = auth_context.to_principal()
             env.update(principal.get_env_var())
 
+        inject_subprocess_task_auth(env)
         inject_secret_env_vars(env)
         return env, task_id, work_dir, log_path, persistent_dir
 

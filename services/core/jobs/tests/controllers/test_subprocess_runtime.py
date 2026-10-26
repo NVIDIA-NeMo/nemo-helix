@@ -4,6 +4,7 @@
 import json
 import threading
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,6 +20,7 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     _build_otlp_log_exporter,
     _UnixSocketOTLPSession,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
     parse_secret_references,
     start_log_capture,
 )
@@ -60,7 +62,11 @@ def test_inject_secret_env_vars():
     response.__enter__.return_value = response
     response.__exit__.return_value = None
 
-    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen:
+    auth_config = SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None))
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
+    ):
         updated_env = inject_secret_env_vars(env.copy())
 
     assert updated_env["HF_TOKEN"] == "secret-value"
@@ -71,6 +77,43 @@ def test_inject_secret_env_vars():
     assert request.get_header("X-nhx-principal-on-behalf-of") == "creator@example.com"
     assert request.get_header("X-nhx-subject-account-id") == "account-creator"
     assert request.get_header("X-nhx-subject-aliases") == "legacy-creator,creator@example.com"
+
+
+def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled():
+    principal = Principal(
+        id="creator@example.com",
+        account_id="account-creator",
+        authz_aliases=["creator@example.com"],
+    )
+    env = {
+        NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
+        NHX_PRINCIPAL_ENVVAR: principal.model_dump_json(exclude_none=True),
+        "NHX_SECRETS_URL": "http://secrets.example",
+    }
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object()))
+    response = MagicMock()
+    response.read.return_value = json.dumps({"value": "secret-value"}).encode("utf-8")
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
+    ):
+        provider_cls.return_value.get_access_token.return_value = "jobs-workload-token"
+        inject_subprocess_task_auth(env)
+        updated_env = inject_secret_env_vars(env.copy())
+
+    assert updated_env["HF_TOKEN"] == "secret-value"
+    assert updated_env["NHX_ACCESS_TOKEN"] == "jobs-workload-token"
+    provider_cls.assert_called_once_with(auth_config, "jobs", principal)
+    request = mock_urlopen.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer jobs-workload-token"
+    assert request.get_header("X-nhx-principal-id") is None
+    assert request.get_header("X-nhx-principal-on-behalf-of") is None
 
 
 def test_inject_secret_env_vars_rejects_missing_value_field():

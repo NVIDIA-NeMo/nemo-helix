@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
@@ -142,6 +143,98 @@ func TestGetOTLPLogWorkloadAuthHeadersNoopsWithoutTokenFile(t *testing.T) {
 
 	if headers := os.Getenv(otelExporterOTLPLogsHeadersEnv); headers != "X-NHX-Principal-Id=nemo-user" {
 		t.Fatalf("expected headers to be unchanged, got %s", headers)
+	}
+}
+
+func TestJobAPIClientsUseWorkloadBearerWithoutTrustedPrincipalHeaders(t *testing.T) {
+	subjectTokenPath := filepath.Join(t.TempDir(), "subject.jwt")
+	if err := os.WriteFile(subjectTokenPath, []byte("subject-token\n"), 0o600); err != nil {
+		t.Fatalf("failed to write subject token: %v", err)
+	}
+
+	var serverURL string
+	tokenExchangeCount := 0
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apis/auth/discovery":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(
+				w,
+				`{"auth_enabled":true,"oidc":{"workload_token_exchange_enabled":true,"workload_client_id":"nemo-helix-workload","workload_token_endpoint":%q}}`,
+				serverURL+"/apis/auth/token",
+			)
+		case "/apis/auth/token":
+			tokenExchangeCount++
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"job.access.token","expires_in":120}`)
+		case "/apis/secrets/v2/workspaces/ws/secrets/key/access":
+			requestCount++
+			assertJobAPIWorkloadHeaders(t, r)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"name":"key","workspace_id":"ws","value":"secret-value"}`)
+		case "/apis/jobs/v2/workspaces/ws/jobs/job-1/steps/step-a":
+			requestCount++
+			assertJobAPIWorkloadHeaders(t, r)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"config":{"_step_spec_name":"run","value":3}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	t.Setenv(nhxBaseURLEnv, server.URL)
+	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
+	t.Setenv("NHX_PRINCIPAL", `{"id":"creator@example.com"}`)
+	endpoint, err := nhxclient.ParseEndpoint(server.URL)
+	if err != nil {
+		t.Fatalf("ParseEndpoint returned error: %v", err)
+	}
+	httpClient, principal, err := endpointClientForJobRequest(
+		context.Background(), endpoint, secretFetchTimeout, "job API test", nhxclient.PrincipalFromEnv(),
+	)
+	if err != nil {
+		t.Fatalf("endpointClientForJobRequest returned error: %v", err)
+	}
+	if principal != nil {
+		t.Fatalf("expected workload bearer mode to suppress trusted principal headers, got %#v", principal)
+	}
+
+	secret, err := nhxclient.NewSecretClientWithHTTPClient(server.URL, principal, httpClient).GetSecret("ws", "key")
+	if err != nil {
+		t.Fatalf("GetSecret returned error: %v", err)
+	}
+	if secret.Value != "secret-value" {
+		t.Fatalf("expected secret value, got %q", secret.Value)
+	}
+	config, err := nhxclient.NewJobStepClientWithHTTPClient(server.URL, principal, httpClient).GetJobStepConfig(
+		context.Background(), "ws", "job-1", "step-a",
+	)
+	if err != nil {
+		t.Fatalf("GetJobStepConfig returned error: %v", err)
+	}
+	if string(config) != `{"value":3}` {
+		t.Fatalf("expected filtered step config, got %s", config)
+	}
+	if tokenExchangeCount != 1 {
+		t.Fatalf("expected one cached token exchange, got %d", tokenExchangeCount)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected both job API requests, got %d", requestCount)
+	}
+}
+
+func assertJobAPIWorkloadHeaders(t *testing.T, r *http.Request) {
+	t.Helper()
+	if got := r.Header.Get("Authorization"); got != "Bearer job.access.token" {
+		t.Errorf("expected workload bearer header, got %q", got)
+	}
+	for _, header := range []string{"X-NHX-Principal-Id", "X-NHX-Principal-On-Behalf-Of"} {
+		if got := r.Header.Get(header); got != "" {
+			t.Errorf("expected %s to be absent in workload bearer mode, got %q", header, got)
+		}
 	}
 }
 

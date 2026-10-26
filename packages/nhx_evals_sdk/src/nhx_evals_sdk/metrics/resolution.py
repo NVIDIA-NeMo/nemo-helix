@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, get_args
 
 from nhx_evals_sdk.resolver_protocols import ModelResolver
-from nhx_evals_sdk.values.models import ModelRef
+from nhx_evals_sdk.values.models import Model, ModelRef
 from pydantic import BaseModel
 
 
@@ -36,6 +36,15 @@ def collect_model_refs(metric: BaseModel, fields: tuple[str, ...] | None = None)
         if isinstance(value, ModelRef):
             refs[field_name] = value
     return refs
+
+
+def collect_models(metric: BaseModel) -> dict[str, Model]:
+    """Return direct model-bearing fields after their references have been resolved."""
+    return {
+        field_name: value
+        for field_name in type(metric).model_fields
+        if isinstance(value := getattr(metric, field_name, None), Model)
+    }
 
 
 async def resolve_model_refs(

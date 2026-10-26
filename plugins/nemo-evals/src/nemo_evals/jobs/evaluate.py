@@ -171,7 +171,14 @@ class _EvaluateSpecCommon(BaseModel):
 
     @model_validator(mode="after")
     def validate_params_for_target(self) -> Self:
-        self.params = resolve_params(self.params, self.target)
+        try:
+            self.params = resolve_params(self.params, self.target)
+        except TypeError as exc:
+            # Pydantic does not wrap TypeError raised by a validator, so it
+            # otherwise escapes FastAPI request validation as an HTTP 500.
+            # Keep resolve_params' public Python API unchanged while making a
+            # mismatched submitted spec a normal HTTP 422 validation error.
+            raise ValueError(str(exc)) from exc
         return self
 
     @model_validator(mode="after")

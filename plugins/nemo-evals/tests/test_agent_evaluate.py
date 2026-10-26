@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -27,6 +28,7 @@ from nemo_evals.jobs.agent_evaluate import (
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
+    _attach_platform_metric_auth,
 )
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
@@ -62,6 +64,7 @@ from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.commands import add_job_commands
@@ -108,9 +111,11 @@ from nhx_evals_sdk.agent_eval.trials import (
 from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.protocol import MetricOutput
+from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 from pydantic import JsonValue, ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -624,6 +629,37 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     assert params is None
 
 
+def test_resolve_target_routes_platform_fabric_model_through_job_auth_proxy(tmp_path: Path) -> None:
+    platform_url = "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    config = {
+        "metadata": {"name": "a"},
+        "harness": {"adapter_id": "nvidia.fabric.codex"},
+        "models": {
+            "default": {
+                "provider": "openai",
+                "model": "test",
+                "base_url": platform_url,
+                "api_key_env": "NEMO_AGENTS_IGW_API_KEY",
+            }
+        },
+        "environment": {"env": {"NEMO_AGENTS_IGW_API_KEY": "not-used"}},
+    }
+    fabric_target = FabricRunnerTarget(source=FabricConfigSource(config=config))
+
+    target, _, _ = AgentEvalJob._resolve_target(
+        fabric_target,
+        _job_context(tmp_path),
+        fabric_gateway_origin="http://127.0.0.1:9019",
+    )
+
+    assert isinstance(target, FabricAgentRuntime)
+    assert target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert target._config["environment"]["env"]["NEMO_AGENTS_IGW_API_KEY"] == "not-used"
+    assert config["models"]["default"]["base_url"] == platform_url
+
+
 def test_resolve_target_builds_harbor_runtime_from_runner_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1042,6 +1078,117 @@ def test_build_evaluator_without_identity_headers_forwards_no_headers() -> None:
     )
     target = _model_target("http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions")
     assert AgentEvalJob._build_evaluator(sdk, target).default_headers is None
+
+
+@pytest.mark.asyncio
+async def test_platform_metric_model_uses_refreshable_job_identity() -> None:
+    client = AsyncNemoClient(
+        base_url="https://platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    metric = LLMJudgeMetric(
+        model=Model(
+            url="https://platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1",
+            name="judge",
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+        prompt_template={"messages": [{"role": "user", "content": "{{item}} {{sample}}"}]},
+    )
+    task = AgentEvalTask(id="task", intent="score", inputs={}, metrics=[metric])
+
+    _attach_platform_metric_auth([task], client)
+
+    assert isinstance(metric.model, Model)
+    assert metric.model.api_key_provider is not None
+    assert await metric.model.api_key_provider() == "job-access-token"
+
+
+@pytest.mark.asyncio
+async def test_platform_metric_model_reanchors_job_route_before_authentication() -> None:
+    client = AsyncNemoClient(
+        base_url="https://runtime.platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    metric = LLMJudgeMetric(
+        model=Model(
+            url="https://compiler.platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1",
+            name="judge",
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+
+    _attach_platform_metric_auth(
+        [AgentEvalTask(id="task", intent="score", inputs={}, metrics=[metric])],
+        client,
+    )
+
+    assert isinstance(metric.model, Model)
+    assert metric.model.url == ("https://runtime.platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1")
+    assert metric.model.api_key_provider is not None
+    assert await metric.model.api_key_provider() == "job-access-token"
+
+
+def test_platform_metric_auth_does_not_override_explicit_or_external_credentials() -> None:
+    client = AsyncNemoClient(
+        base_url="https://platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    explicit = LLMJudgeMetric(
+        model=Model(
+            url="https://platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1",
+            name="judge",
+            api_key_secret=SecretRef("judge-key"),
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+    external = LLMJudgeMetric(
+        model=Model(url="https://api.example.test/v1", name="judge"),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+
+    _attach_platform_metric_auth(
+        [
+            AgentEvalTask(id="explicit", intent="score", inputs={}, metrics=[explicit]),
+            AgentEvalTask(id="external", intent="score", inputs={}, metrics=[external]),
+        ],
+        client,
+    )
+
+    assert isinstance(explicit.model, Model)
+    assert isinstance(external.model, Model)
+    assert explicit.model.api_key_provider is None
+    assert external.model.api_key_provider is None
+
+
+def test_platform_metric_auth_does_not_trust_lookalike_external_route() -> None:
+    client = AsyncNemoClient(
+        base_url="https://platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    metric = LLMJudgeMetric(
+        model=Model(
+            url="https://external.example/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1/chat",
+            name="judge",
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+
+    _attach_platform_metric_auth(
+        [AgentEvalTask(id="task", intent="score", inputs={}, metrics=[metric])],
+        client,
+    )
+
+    assert isinstance(metric.model, Model)
+    assert metric.model.url.startswith("https://external.example/")
+    assert metric.model.api_key_provider is None
 
 
 def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:
@@ -2187,6 +2334,44 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
         assert getattr(fake.received_target, "name", None) == target.model.name
     else:
         assert getattr(fake.received_target, "name", None) == target.agent.name
+
+
+def test_sync_fabric_job_uses_auth_proxy_for_platform_model(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.platform_auth_proxy",
+        return_value=nullcontext("http://127.0.0.1:9019"),
+    )
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "a"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+                "models": {
+                    "default": {
+                        "provider": "openai",
+                        "model": "test",
+                        "base_url": "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1",
+                    }
+                },
+            }
+        )
+    )
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_called_once_with()
+    assert isinstance(fake.received_target, FabricAgentRuntime)
+    assert fake.received_target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
 
 
 def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: MockerFixture) -> None:

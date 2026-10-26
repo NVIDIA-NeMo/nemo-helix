@@ -81,9 +81,13 @@ func writeStepConfigFromAPI(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("jobs endpoint is not configured (NHX_JOBS_URL or NHX_BASE_URL): %w", err)
 	}
-	httpClient := *endpoint.HTTPClient()
-	httpClient.Timeout = stepConfigFetchTimeout
-	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, nhxclient.PrincipalFromEnv(), &httpClient)
+	httpClient, principal, err := endpointClientForJobRequest(
+		ctx, endpoint, stepConfigFetchTimeout, "job step config fetch", nhxclient.PrincipalFromEnv(),
+	)
+	if err != nil {
+		return fmt.Errorf("configure jobs API authentication: %w", err)
+	}
+	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, principal, httpClient)
 
 	workspace, job, step := required["NEMO_JOB_WORKSPACE"], required["NEMO_JOB_ID"], required["NEMO_JOB_STEP"]
 	logger.Printf("Fetching step config for %s/%s/%s...\n", workspace, job, step)
@@ -191,11 +195,51 @@ func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs 
 	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
 }
 
-func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithEndpoint(
+	ctx context.Context,
+	endpoint nhxclient.Endpoint,
+	principal *nhxclient.Principal,
+	secretRefs []secretReference,
+) ([]string, error) {
+	httpClient, requestPrincipal, err := endpointClientForJobRequest(
+		ctx, endpoint, secretFetchTimeout, "secret fetch", principal,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("configure secrets API authentication: %w", err)
+	}
 	return fetchSecretsWithClient(
-		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
+		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, requestPrincipal, httpClient),
 		secretRefs,
 	)
+}
+
+func endpointClientForJobRequest(
+	ctx context.Context,
+	endpoint nhxclient.Endpoint,
+	timeout time.Duration,
+	operation string,
+	principal *nhxclient.Principal,
+) (*http.Client, *nhxclient.Principal, error) {
+	httpClient := *endpoint.HTTPClient()
+	httpClient.Timeout = timeout
+	if os.Getenv(workloadIdentityTokenFileEnv) == "" {
+		return &httpClient, principal, nil
+	}
+
+	tokenSource, err := newOTLPLogWorkloadAuthTokenSource(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := tokenSource.Headers(ctx); err != nil {
+		return nil, nil, fmt.Errorf("configure workload identity auth for %s: %w", operation, err)
+	}
+	httpClient.Transport = &authHeadersTransport{
+		source:          tokenSource,
+		authDescription: "workload identity auth",
+		operation:       operation,
+		base:            httpClient.Transport,
+	}
+	return &httpClient, nil, nil
 }
 
 func secretEndpointHTTPClient(endpoint nhxclient.Endpoint) *http.Client {
@@ -298,7 +342,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
 			principal := nhxclient.PrincipalFromEnv()
 
-			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
+			secretEnvVars, err := fetchSecretsWithEndpoint(ctx, secretEndpoint, principal, secretRefs)
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err

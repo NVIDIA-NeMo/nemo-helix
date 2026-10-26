@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from functools import cached_property
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, RootModel, field_validator
 from pydantic.config import JsonDict
 
 from nhx_evals_sdk.enums import ModelFormat
@@ -156,6 +157,8 @@ class Model(BaseModel):
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, json_schema_extra=_strip_internal_fields)
 
+    _api_key_provider: Callable[[], Awaitable[str]] | None = PrivateAttr(default=None)
+
     url: str = Field(description="URL of the model.")
     name: str = Field(description="Name of the model.")
     default_headers: dict[str, str] | None = Field(
@@ -226,6 +229,15 @@ class Model(BaseModel):
             api_key_env = self.api_key_env
             assert api_key_env is not None
             return os.getenv(api_key_env) or os.getenv(api_key_env.upper())
+
+    @property
+    def api_key_provider(self) -> Callable[[], Awaitable[str]] | None:
+        """Return the runtime-only async credential provider, when one was attached."""
+        return self._api_key_provider
+
+    def set_api_key_provider(self, provider: Callable[[], Awaitable[str]] | None) -> None:
+        """Attach a runtime-only credential provider without serializing credential state."""
+        self._api_key_provider = provider
 
     def with_default_headers(self, headers: dict[str, str] | None) -> "Model":
         """Return a copy of the model with merged runtime default headers."""

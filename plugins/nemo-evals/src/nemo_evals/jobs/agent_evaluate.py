@@ -21,11 +21,18 @@ import logging
 import os
 import shutil
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
+from nemo_agents_plugin.jobs.gateway_proxy import (
+    platform_auth_proxy,
+    rewrite_gateway_models,
+    routes_inference_through_gateway,
+)
 from nemo_evals.config import get_config
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
 from nemo_evals.jobs.agent_compiler import (
@@ -114,6 +121,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
+from nhx_evals_sdk.metrics.resolution import collect_models
 from nhx_evals_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
 
@@ -130,6 +138,69 @@ _HARBOR_BACKEND_REQUIREMENT = (
     "Harbor targets currently require the subprocess backend with access to the host Docker daemon."
 )
 _SUBPROCESS_PROVIDER: Literal["subprocess"] = "subprocess"
+
+
+_INFERENCE_GATEWAY_MODEL_ROUTE_PREFIX = "/apis/inference-gateway/v2/workspaces/"
+
+
+def _platform_metric_url(url: str, client: AsyncNemoClient) -> str | None:
+    """Return a trusted platform URL for a metric model, or ``None`` for an external URL.
+
+    Model references are resolved by the API process and may be rewritten to a job-reachable
+    platform origin. A task client can use another advertised origin for the same platform. In
+    that case, recognize only the registered-model inference route and re-anchor it on the task
+    client's trusted origin before attaching workload credentials. This avoids sending a platform
+    token to the untrusted origin of an inline model that merely resembles an inference route.
+    """
+    if client.is_platform_url(url):
+        return url
+
+    parsed = urlsplit(url)
+    path = parsed.path.rstrip("/")
+    if not path.startswith(_INFERENCE_GATEWAY_MODEL_ROUTE_PREFIX):
+        return None
+    route = path.removeprefix(_INFERENCE_GATEWAY_MODEL_ROUTE_PREFIX)
+    workspace, separator, model_route = route.partition("/model/")
+    model_name, model_separator, endpoint = model_route.partition("/-/")
+    if not separator or not workspace or not model_separator or not model_name or endpoint != "v1":
+        return None
+
+    trusted = urlsplit(client.base_url)
+    return urlunsplit((trusted.scheme, trusted.netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _attach_platform_metric_auth(tasks: list[AgentEvalTask], client: AsyncNemoClient) -> None:
+    """Give platform-routed metric models the job's refreshable workload identity.
+
+    A resolved ``ModelRef`` points at the protected inference-gateway route but deliberately carries
+    no persisted credential. Job pods already receive workload identity, and their typed client owns
+    the exchange and refresh lifecycle. Attach that provider only to models on the same platform;
+    explicit model secrets and third-party endpoints keep their existing authentication.
+    """
+    for task in tasks:
+        for metric in task.metrics:
+            if not isinstance(metric, BaseModel):
+                continue
+            for model in collect_models(metric).values():
+                if model.api_key_secret is not None:
+                    continue
+                platform_url = _platform_metric_url(model.url, client)
+                if platform_url is None:
+                    continue
+                model.url = platform_url
+
+                async def api_key(*, url: str = model.url) -> str:
+                    headers = await client.request_headers(url=url)
+                    authorization = next(
+                        (value for name, value in (headers or {}).items() if name.lower() == "authorization"),
+                        "",
+                    )
+                    scheme, separator, token = authorization.partition(" ")
+                    if separator != " " or scheme.lower() != "bearer" or not token:
+                        raise RuntimeError("Platform inference route requires a bearer token from workload identity")
+                    return token
+
+                model.set_api_key_provider(api_key)
 
 
 def _harbor_backend_error(reason: str) -> HelixJobCompilationError:
@@ -473,6 +544,7 @@ class _AgentEvalJobBase(NemoJob):
         ctx: JobContext,
         *,
         configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
+        fabric_gateway_origin: str | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -489,8 +561,10 @@ class _AgentEvalJobBase(NemoJob):
             _require_fabric_env_secrets_resolved(target)
             target = upgrade_registered_agent_config(target)
             assert target.config is not None  # canonical spec guarantees resolution ran
+            config = expand_mcp_secret_env(target.config, os.environ)
+            config = rewrite_gateway_models(config, fabric_gateway_origin)
             fabric_runtime = FabricAgentRuntime(
-                config=expand_mcp_secret_env(target.config, os.environ),
+                config=config,
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
@@ -580,32 +654,44 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         self._prepared_tasks(tasks)
-        target, prompt_template, params = self._resolve_target(
-            spec.target, ctx, configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx)
+        if async_client is not None:
+            _attach_platform_metric_auth(tasks, async_client)
+        fabric_config = spec.target.config if isinstance(spec.target, FabricRunnerTarget) else None
+        proxy = (
+            platform_auth_proxy()
+            if fabric_config is not None and routes_inference_through_gateway(fabric_config)
+            else nullcontext(None)
         )
-        bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
-        if bundle_dir.exists():
-            shutil.rmtree(bundle_dir)
-        run_config = AgentEvalRunConfig(
-            params=params,
-            prompt_template=prompt_template,
-            parallelism=spec.max_concurrent_tasks,
-            labels=spec.labels,
-            fail_fast=spec.fail_fast,
-            work_dir=bundle_dir,
-            run_id=self._run_id(),
-        )
-        evaluator = self._build_evaluator(platform_client, spec.target)
-        include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
-        with capture_evaluator_request_logs() as request_logs:
-            with capture_agent_evaluation_usage(
-                ctx.usage,
-                request_logs,
-                include_trial_measurements=include_trial_measurements,
-            ) as usage_capture:
-                result = usage_capture.record(
-                    evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
-                )
+        with proxy as fabric_gateway_origin:
+            target, prompt_template, params = self._resolve_target(
+                spec.target,
+                ctx,
+                configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx),
+                fabric_gateway_origin=fabric_gateway_origin,
+            )
+            bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
+            if bundle_dir.exists():
+                shutil.rmtree(bundle_dir)
+            run_config = AgentEvalRunConfig(
+                params=params,
+                prompt_template=prompt_template,
+                parallelism=spec.max_concurrent_tasks,
+                labels=spec.labels,
+                fail_fast=spec.fail_fast,
+                work_dir=bundle_dir,
+                run_id=self._run_id(),
+            )
+            evaluator = self._build_evaluator(platform_client, spec.target)
+            include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
+            with capture_evaluator_request_logs() as request_logs:
+                with capture_agent_evaluation_usage(
+                    ctx.usage,
+                    request_logs,
+                    include_trial_measurements=include_trial_measurements,
+                ) as usage_capture:
+                    result = usage_capture.record(
+                        evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+                    )
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)

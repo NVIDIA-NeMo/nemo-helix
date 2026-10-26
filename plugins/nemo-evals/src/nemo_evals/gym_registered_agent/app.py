@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 from asyncio import Semaphore
 from copy import deepcopy
@@ -64,6 +65,26 @@ POLICY_MODEL_API_KEY_ENV = "NEMO_GYM_FABRIC_MODEL_API_KEY"  # pragma: allowlist 
 _ENV_TEMPLATE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
+def _staged_fabric_adapter_descriptors(import_paths: list[str]) -> list[str]:
+    """Find Fabric adapter descriptors installed below a Python target directory.
+
+    ``uv pip install --target`` puts wheel data files below the target directory as well as putting
+    that directory on ``sys.path``. Fabric's normal environment discovery does not inspect those
+    target-local data files because they are outside the active interpreter's prefix.
+    """
+    descriptors: set[str] = set()
+    for import_path in import_paths:
+        if not import_path:
+            continue
+        descriptor_root = Path(import_path) / "share" / "nemo-fabric" / "adapters"
+        if not descriptor_root.is_dir():
+            continue
+        descriptors.update(
+            str(path.resolve()) for path in descriptor_root.rglob("*.fabric-adapter.json") if path.is_file()
+        )
+    return sorted(descriptors)
+
+
 def compose_fabric_config(
     registered: dict[str, Any],
     *,
@@ -76,6 +97,7 @@ def compose_fabric_config(
     skills: list[str],
     environ: dict[str, str],
     timeout_seconds: Optional[float] = None,
+    adapter_descriptor_paths: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """The registered agent's config, made runnable for one Gym rollout.
 
@@ -126,6 +148,11 @@ def compose_fabric_config(
     if skills:
         skill_config = config.setdefault("skills", {})
         skill_config["paths"] = list(dict.fromkeys([*(skill_config.get("paths") or []), *skills]))
+    if adapter_descriptor_paths:
+        discovery = config.setdefault("discovery", {})
+        discovery["local_paths"] = list(
+            dict.fromkeys([*(discovery.get("local_paths") or []), *adapter_descriptor_paths])
+        )
     return config
 
 
@@ -364,6 +391,7 @@ class NeMoRegisteredAgent(SimpleResponsesAPIAgent):
                 skills=_skill_paths(skills_path),
                 environ=dict(os.environ),
                 timeout_seconds=self.config.timeout,
+                adapter_descriptor_paths=_staged_fabric_adapter_descriptors(sys.path),
             )
             result = await Fabric().run(
                 FabricConfig.from_mapping(composed),

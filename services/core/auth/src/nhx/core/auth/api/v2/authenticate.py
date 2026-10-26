@@ -298,6 +298,7 @@ def _actor_from_claims(claims: dict[str, object]) -> ActorClaims | None:
     return ActorClaims(
         subject=actor_subject,
         groups=groups_from_claim(actor_claims.get("groups", [])),
+        authz_aliases=groups_from_claim(actor_claims.get("nhx_actor_aliases", [])),
     )
 
 

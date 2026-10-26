@@ -3,6 +3,7 @@
 
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import openai
 import pytest
 from nhx_evals_sdk.inference import (
@@ -16,6 +17,7 @@ from nhx_evals_sdk.inference import (
     make_inference_request,
     merge_default_headers,
     new_hooks,
+    new_inference_client,
     process_output,
     redact_request_for_logging,
     requests_log_var,
@@ -29,6 +31,47 @@ from pytest_mock import MockerFixture
 
 
 class TestInferenceHelpers:
+    @pytest.mark.asyncio
+    async def test_new_client_sends_runtime_api_key_provider_value(self):
+        seen_authorization: list[str | None] = []
+
+        async def api_key_provider() -> str:
+            return "dynamic-job-token"
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            seen_authorization.append(request.headers.get("Authorization"))
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "judge-model",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+        model = Model(url="https://platform.test/v1", name="judge-model")
+        model.set_api_key_provider(api_key_provider)
+        client = new_inference_client(model)
+        client._client._transport = httpx.MockTransport(respond)
+        try:
+            await client.chat.completions.create(
+                model="judge-model",
+                messages=[{"role": "user", "content": "hello"}],
+            )
+        finally:
+            await client.close()
+
+        assert seen_authorization == ["Bearer dynamic-job-token"]
+
     def test_merge_default_headers_combines_model_and_request_headers(self):
         model = Model(
             url="https://judge.example.test/v1/chat/completions",
