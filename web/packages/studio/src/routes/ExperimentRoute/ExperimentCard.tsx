@@ -104,7 +104,7 @@ export const ExperimentCard: FC<ExperimentCardProps> = ({ group, workspace }) =>
           <Metric title="Evaluations" value={String(group.evaluation_count ?? 0)} />
         </div>
       )}
-      <ExperimentDeleteButton workspace={workspace} name={group.name} />
+      <ExperimentDeleteButton workspace={workspace} name={group.name} asMenu />
     </Card>
   );
 };

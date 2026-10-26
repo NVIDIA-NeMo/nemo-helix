@@ -13,34 +13,50 @@ import { http, HttpResponse } from 'msw';
 
 const NAME = 'sample-experiment';
 
-it('requires confirmation, explains the cascade, and does not trigger card navigation', async () => {
-  const deleted = vi.fn();
-  const navigate = vi.fn();
-  const request = vi.fn(() => new HttpResponse(null, { status: 204 }));
-  server.use(http.delete(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), request));
-  render(
-    <div onClick={navigate}>
-      <ExperimentDeleteButton workspace={DEFAULT_WORKSPACE} name={NAME} onDeleted={deleted} />
-    </div>
-  );
-  await userEvent.click(screen.getByRole('button', { name: `Delete experiment ${NAME}` }));
-  const dialog = await screen.findByRole('dialog');
-  expect(
-    within(dialog).getByText(
-      /Evaluations belonging only to the selected experiments will also be deleted/
-    )
-  ).toBeVisible();
-  expect(request).not.toHaveBeenCalled();
-  await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-  expect(request).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole('button', { name: `Delete experiment ${NAME}` }));
-  await userEvent.click(
-    within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete' })
-  );
-  await waitFor(() => expect(deleted).toHaveBeenCalledOnce());
-  expect(request).toHaveBeenCalledOnce();
-  expect(navigate).not.toHaveBeenCalled();
-});
+it.each([false, true])(
+  'requires confirmation without card navigation (menu: %s)',
+  async (asMenu) => {
+    const deleted = vi.fn();
+    const navigate = vi.fn();
+    const request = vi.fn(() => new HttpResponse(null, { status: 204 }));
+    server.use(http.delete(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), request));
+    render(
+      <div onClick={navigate}>
+        <ExperimentDeleteButton
+          workspace={DEFAULT_WORKSPACE}
+          name={NAME}
+          onDeleted={deleted}
+          asMenu={asMenu}
+        />
+      </div>
+    );
+    const openDelete = async () => {
+      await userEvent.click(
+        screen.getByRole('button', {
+          name: asMenu ? `More actions for experiment ${NAME}` : `Delete experiment ${NAME}`,
+        })
+      );
+      if (asMenu) await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    };
+    await openDelete();
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText(
+        /Evaluations belonging only to the selected experiments will also be deleted/
+      )
+    ).toBeVisible();
+    expect(request).not.toHaveBeenCalled();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(request).not.toHaveBeenCalled();
+    await openDelete();
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete' })
+    );
+    await waitFor(() => expect(deleted).toHaveBeenCalledOnce());
+    expect(request).toHaveBeenCalledOnce();
+    expect(navigate).not.toHaveBeenCalled();
+  }
+);
 
 it('surfaces deletion errors without navigating away', async () => {
   const deleted = vi.fn();

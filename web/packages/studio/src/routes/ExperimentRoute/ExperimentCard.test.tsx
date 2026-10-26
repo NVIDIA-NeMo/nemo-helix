@@ -17,7 +17,12 @@ it.each([false, true])('offers deletion on experiment cards (favorite: %s)', asy
   };
   render(<ExperimentCard group={group} workspace={DEFAULT_WORKSPACE} />);
   expect(screen.getByRole('link', { name: 'sample' })).toBeVisible();
-  await userEvent.click(screen.getByRole('button', { name: 'Delete experiment sample' }));
+  expect(
+    screen.queryByRole('button', { name: 'Delete experiment sample' })
+  ).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'More actions for experiment sample' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
   expect(await screen.findByRole('dialog')).toBeVisible();
   expect(
     screen.getByText(/Evaluations belonging only to the selected experiments will also be deleted/)

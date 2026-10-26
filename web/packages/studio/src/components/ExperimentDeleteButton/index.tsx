@@ -3,10 +3,16 @@
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { deleteExperiment } from '@nemo/sdk/generated/platform/experiments';
-import { Button } from '@nvidia/foundations-react-core';
+import {
+  Button,
+  DropdownContent,
+  DropdownItem,
+  DropdownRoot,
+  DropdownTrigger,
+} from '@nvidia/foundations-react-core';
 import { invalidateExperimentDeletion } from '@studio/api/evaluation/invalidateExperimentDeletion';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
+import { EllipsisVertical, Trash } from 'lucide-react';
 import { useState } from 'react';
 
 export const EXPERIMENT_DELETE_DESCRIPTION =
@@ -16,29 +22,43 @@ interface ExperimentDeleteButtonProps {
   workspace: string;
   name: string;
   onDeleted?: () => void;
+  asMenu?: boolean;
 }
 
 export const ExperimentDeleteButton = ({
   workspace,
   name,
   onDeleted,
+  asMenu = false,
 }: ExperimentDeleteButtonProps) => {
   const [open, setOpen] = useState(false);
   const client = useQueryClient();
 
   return (
     <div onClick={(event) => event.stopPropagation()}>
-      <Button
-        kind="secondary"
-        color="danger"
-        aria-label={`Delete experiment ${name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpen(true);
-        }}
-      >
-        <Trash /> Delete
-      </Button>
+      {asMenu ? (
+        <DropdownRoot>
+          <DropdownTrigger asChild showChevron={false}>
+            <Button kind="tertiary" aria-label={`More actions for experiment ${name}`}>
+              <EllipsisVertical />
+            </Button>
+          </DropdownTrigger>
+          <DropdownContent align="end">
+            <DropdownItem onClick={() => setOpen(true)} danger>
+              Delete
+            </DropdownItem>
+          </DropdownContent>
+        </DropdownRoot>
+      ) : (
+        <Button
+          kind="secondary"
+          color="danger"
+          aria-label={`Delete experiment ${name}`}
+          onClick={() => setOpen(true)}
+        >
+          <Trash /> Delete
+        </Button>
+      )}
       <DeleteConfirmationModal
         open={open}
         onClose={() => setOpen(false)}
