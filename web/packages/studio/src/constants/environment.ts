@@ -66,6 +66,7 @@ export const SAFE_SYNTHESIZER_ENABLED = featureFlags.safeSynthesizerEnabled !== 
 export const SECRETS_ENABLED = featureFlags.secretsEnabled !== false;
 export const SETTINGS_ENABLED = featureFlags.settingsEnabled !== false;
 export const GUARDRAILS_ENABLED = featureFlags.guardrailsEnabled !== false;
+export const VIRTUAL_MODELS_ROUTE_ENABLED = GUARDRAILS_ENABLED || AGENT_OPTIMIZATIONS_ENABLED;
 export const FLAG_OVERRIDES_ENABLED = featureFlags.flagOverridesEnabled === true;
 export const TOUR_ENABLED = featureFlags.tourEnabled !== false;
 

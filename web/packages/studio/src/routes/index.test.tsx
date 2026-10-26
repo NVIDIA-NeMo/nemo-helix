@@ -217,6 +217,20 @@ describe('Routes', () => {
       ).toBe(true);
     });
 
+    it('should include virtual model routes if only agent optimizations are enabled', async () => {
+      vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'false');
+      vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
+      const { routes } = await import('./index');
+      expect(findIfRouteExists(routes, ROUTES.workspace.virtualModelDetail)).toBe(true);
+    });
+
+    it('should exclude virtual model routes if guardrails and agent optimizations are disabled', async () => {
+      vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'false');
+      vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'false');
+      const { routes } = await import('./index');
+      expect(findIfRouteExists(routes, ROUTES.workspace.virtualModelDetail)).toBe(false);
+    });
+
     it('includes Optimizer routes when Optimizer is enabled for preview', async () => {
       vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'preview');
       const { routes } = await import('./index');
