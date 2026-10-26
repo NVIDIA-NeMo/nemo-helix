@@ -21,6 +21,8 @@ import requests
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR, Principal
+from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
+from nhx.common.config import get_auth_config
 from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
 from opentelemetry._logs import Logger
 from opentelemetry._logs.severity import SeverityNumber
@@ -330,6 +332,12 @@ def _validate_http_url(url: str, field_name: str) -> None:
 
 
 def _secret_request_headers(principal: Principal | None) -> dict[str, str]:
+    auth_config = get_auth_config()
+    if auth_config.enabled and auth_config.oidc.workload is not None:
+        on_behalf_of = principal.effective_principal if principal is not None and principal.id else None
+        token = ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of).get_access_token()
+        return {"Authorization": f"Bearer {token}"}
+
     if principal is None or not principal.id:
         return Principal(id="service:jobs", authz_aliases=["service:jobs"]).get_headers()
     effective_principal = principal.effective_principal
