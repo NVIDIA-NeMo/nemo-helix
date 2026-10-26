@@ -60,6 +60,7 @@ class CallLeaseRegistrar:
         self._client = client
         self._workspace = workspace
         self._evaluation_name = evaluation_name
+        self.test_case_name: str | None = None
 
     @contextlib.asynccontextmanager
     async def _leases(self) -> AsyncIterator[AsyncCallLeasesClient]:
@@ -87,6 +88,7 @@ class CallLeaseRegistrar:
             role=role,
             started_at=started_at,
             evaluation_name=self._evaluation_name,
+            test_case_name=self.test_case_name,
         )
         try:
             async with asyncio.timeout(LEASE_REQUEST_TIMEOUT_SEC), self._leases() as leases:

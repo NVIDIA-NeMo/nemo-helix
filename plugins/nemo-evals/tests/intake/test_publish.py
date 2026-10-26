@@ -739,3 +739,23 @@ async def test_a_partly_rejected_otlp_batch_fails_the_trial_instead_of_scoring_i
         )
 
     assert intake.evaluator_result_requests == [], "scores must not attach to a trace Intake only partly stored"
+
+
+async def test_a_trial_whose_spans_streamed_live_publishes_only_its_scores_on_the_trial_root() -> None:
+    """Its spans are already in Intake under the trial root; uploading the trajectory again would double them."""
+    result = _result(
+        trials=[_trial("t-1")],
+        scores=[_score("t-1", "accuracy", [MetricOutput(name="score", value=1.0)])],
+    )
+    intake = InMemoryIntakeService()
+
+    report = await publish_to_intake(
+        result, client=intake.client(), experiment_id="exp-1", trial_root_span=lambda trial_id: f"root-of-{trial_id}"
+    )
+
+    assert intake.atif_requests == []
+    assert intake.otlp_requests == []
+    assert [(row["session_id"], row["span_id"]) for row in intake.evaluator_result_requests] == [
+        ("run-1:t-1", "root-of-t-1")
+    ]
+    assert report.published_trials[0].span_id == "root-of-t-1"

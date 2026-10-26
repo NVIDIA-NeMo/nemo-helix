@@ -22,7 +22,7 @@ from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConf
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
-from nemo_evals.harbor.call_leases import CallLeaseRegistrar, current_registrar
+from nemo_evals.harbor.call_leases import CallLeaseRegistrar, TrialIdentity, current_registrar
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs import harbor_task_dispatch as dispatch
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -58,6 +58,8 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.values import ModelRef
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
@@ -476,3 +478,56 @@ async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_s
     variables = {variable.name: variable for variable in step.environment or []}
     assert variables["ANTHROPIC_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
     assert variables["ANTHROPIC_API_KEY"].from_secret is None
+
+
+def _job(task_spec: HarborTaskJobSpec) -> HarborTaskAgentEvalJob:
+    job = HarborTaskAgentEvalJob()
+    job._task_spec = task_spec
+    return job
+
+
+def test_a_built_in_agent_that_exports_traces_sends_them_live_and_publishes_scores_on_the_trial_root(
+    task_spec, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(dispatch, "agent_gateway_origin", lambda **kwargs: "http://nemo-helix-api.ns.svc:8080")
+    ctx = MagicMock(spec=JobContext)
+    ctx.workspace = "evals"
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    job = _job(task_spec)
+
+    configured = job._configure_harbor_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="claude-code"), ctx)
+
+    assert configured.env_vars["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] == (
+        "http://nemo-helix-api.ns.svc:8080/apis/inference-gateway/v2/workspaces/evals/otlp/v1/traces"
+    )
+    trial_root = job._trial_root_span()
+    assert trial_root is not None
+    assert trial_root("hello__abc") == TrialIdentity.of(job._run_id(), "hello__abc").root_span_id
+
+
+def test_an_agent_without_live_traces_publishes_its_trajectory(task_spec, tmp_path, monkeypatch):
+    monkeypatch.setattr(dispatch, "agent_gateway_origin", lambda **kwargs: "http://nemo-helix-api.ns.svc:8080")
+    ctx = MagicMock(spec=JobContext)
+    ctx.workspace = "evals"
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    job = _job(task_spec)
+
+    configured = job._configure_harbor_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="oracle"), ctx)
+
+    assert "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" not in configured.env_vars
+    assert job._trial_root_span() is None
+
+
+def test_leases_name_the_test_case_publishing_uses(task_spec, tmp_path):
+    task_dir = write_task(tmp_path / "hello-world", "[environment]\ncpus = 1\n")
+    (task_dir / "instruction.md").write_text("Say hello.\n")
+    (task_dir / "tests").mkdir()
+    (task_dir / "tests" / "test.sh").write_text("#!/bin/sh\n")
+    job = _job(task_spec)
+    job._registrar = CallLeaseRegistrar(MagicMock(), workspace="evals")
+    task = MagicMock(spec=AgentEvalTask)
+    task.metadata = {HARBOR_TASK_DIR_KEY: str(task_dir)}
+
+    job._prepared_tasks([task])
+
+    assert job._registrar.test_case_name == "hello-world"

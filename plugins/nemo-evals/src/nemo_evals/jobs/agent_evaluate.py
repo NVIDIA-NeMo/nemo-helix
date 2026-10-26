@@ -669,6 +669,7 @@ class _AgentEvalJobBase(NemoJob):
                 workspace=ctx.workspace,
                 intake=intake,
                 record_durations=self.record_publication_durations,
+                trial_root_span=self._trial_root_span(),
             )
             output["publication"] = publication_outcome.model_dump(exclude_none=True)
             # The job output isn't persisted; status details are, so `runs status` can say what was published.
@@ -692,6 +693,10 @@ class _AgentEvalJobBase(NemoJob):
 
     def _run_id(self) -> str | None:
         """Hook: the SDK run id, which keys published sessions (``run_id:trial_id``). None generates one."""
+        return None
+
+    def _trial_root_span(self) -> Callable[[str], str] | None:
+        """Hook: each trial's root span id when trials' spans reach Intake live. None publishes trajectories."""
         return None
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:

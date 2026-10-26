@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import timedelta
 from typing import cast
 
@@ -146,6 +147,7 @@ async def publish_to_intake(
     agent_version: str = mapping.DEFAULT_AGENT_VERSION,
     model_name: str | None = None,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+    trial_root_span: Callable[[str], str] | None = None,
 ) -> PublishReport:
     """Publish a completed ``AgentEvalResult`` to Intake under an existing Experiment.
 
@@ -176,6 +178,9 @@ async def publish_to_intake(
     Agent identity (``agent_name``/``agent_version``/``model_name``) is taken as
     arguments because it lives on the run *target*, which ``AgentEvalResult`` does
     not carry (design §3.9 #6).
+
+    ``trial_root_span`` maps a trial id to the root span id of a trial whose spans reached Intake live:
+    such a trial's trajectory isn't published again, and its scores attach to that root.
     """
     validated_trials = [AgentEvalTrial.model_validate(trial) for trial in result.trials]
     intake = client
@@ -291,6 +296,8 @@ async def publish_to_intake(
         async with semaphore:
             measurements = trial.measurements
             session_id = mapping.session_id_for(result.run_id, trial.id)
+            if trial_root_span is not None:
+                return await _publish_scores(trial, session_id=session_id, span_id=trial_root_span(trial.id))
             span_id = await _publish_otlp(trial, measurements=measurements, session_id=session_id)
             if span_id is None:
                 span_id = await _publish_atif(trial, measurements=measurements, session_id=session_id)

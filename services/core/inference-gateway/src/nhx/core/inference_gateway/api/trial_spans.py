@@ -24,6 +24,7 @@ from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Sp
 SERVICE_NAME = "nemo-inference-gateway"
 SESSION_ATTRIBUTE = "gen_ai.conversation.id"
 EVALUATION_ATTRIBUTE = "nemo.evaluation.name"
+TEST_CASE_ATTRIBUTE = "nemo.test_case.name"
 # Marks the gateway's own call spans, whose usage is what the provider reported for the call.
 GATEWAY_CALL_ATTRIBUTE = "nemo.inference_gateway.call"
 
@@ -62,6 +63,8 @@ def _lease_attributes(lease: CallLease) -> dict[str, object]:
     attributes: dict[str, object] = {SESSION_ATTRIBUTE: lease.session_id}
     if lease.evaluation_name:
         attributes[EVALUATION_ATTRIBUTE] = lease.evaluation_name
+    if lease.test_case_name:
+        attributes[TEST_CASE_ATTRIBUTE] = lease.test_case_name
     return attributes
 
 

@@ -73,7 +73,7 @@ def _export(*spans: Span, session: str = "agent-chosen-session") -> ExportTraceS
 
 
 def test_agent_spans_move_into_the_trial_and_its_roots_hang_under_the_trials() -> None:
-    lease = _lease(evaluation_name="run-1")
+    lease = _lease(evaluation_name="run-1", test_case_name="hello-world")
     root = Span(trace_id=b"\xaa" * 16, span_id=b"\x01" * 8, name="claude_code.interaction")
     child = Span(trace_id=b"\xaa" * 16, span_id=b"\x02" * 8, parent_span_id=b"\x01" * 8, name="claude_code.llm_request")
 
@@ -86,6 +86,7 @@ def test_agent_spans_move_into_the_trial_and_its_roots_hang_under_the_trials() -
     for span in adopted:
         assert _attributes(span)["gen_ai.conversation.id"] == lease.session_id
         assert _attributes(span)["nemo.evaluation.name"] == "run-1"
+        assert _attributes(span)["nemo.test_case.name"] == "hello-world"
 
 
 def test_an_agent_span_claiming_the_trials_root_is_dropped() -> None:

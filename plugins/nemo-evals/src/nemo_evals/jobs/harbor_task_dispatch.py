@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from harbor.models.task.task import Task
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.agent_setup_egress import (
     INNER_AGENT_KWARG,
@@ -27,13 +28,15 @@ from nemo_evals.harbor.agent_setup_egress import (
     SETUP_HOSTS_KWARG,
     setup_timeout_multiplier,
 )
-from nemo_evals.harbor.call_leases import CallLeaseRegistrar, leasing
+from nemo_evals.harbor.agent_traces import export_agent_traces, trace_endpoint
+from nemo_evals.harbor.call_leases import CallLeaseRegistrar, TrialIdentity, leasing
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.gateway_models import (
     AGENT_CHANNEL_HOSTS_KWARG,
     add_gateway_key_placeholder,
+    agent_gateway_origin,
     check_tasks_reach_the_gateway,
 )
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
@@ -122,12 +125,16 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
       have stable sessions (``<run_id>-task-<i>:<trial>``) and a re-publish replaces them.
     - Leases each sandbox's address to its trial's session, so the gateway joins the trial's calls to it.
+    - Has a built-in agent that can export traces send them to the gateway live; their trials then publish only
+      their scores, on the trial's root span, since their spans are already in Intake.
     - Never writes the shared Evaluation's metadata: the run controller stamps the run's duration once.
     """
 
     discard_agent_files: ClassVar[bool] = False
     record_publication_durations: ClassVar[bool] = False
     _task_spec: HarborTaskJobSpec
+    _registrar: CallLeaseRegistrar | None = None
+    _live_traces: bool = False
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
         """Run the task Job's one task and persist its result bundle."""
@@ -141,18 +148,24 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         )
         self._task_spec = spec
         publication = spec.spec.publication.intake if spec.spec.publication is not None else None
-        registrar = CallLeaseRegistrar(
+        self._registrar = CallLeaseRegistrar(
             async_client,
             workspace=ctx.workspace,
             evaluation_name=publication.evaluation_id if publication is not None else None,
         )
-        with leasing(registrar):
+        with leasing(self._registrar):
             return self._run_with_client(
                 spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client
             )
 
-    def _run_id(self) -> str | None:
+    def _run_id(self) -> str:
         return task_job_name(self._task_spec.run_id, self._task_spec.task_index)
+
+    def _trial_root_span(self) -> Callable[[str], str] | None:
+        if not self._live_traces:
+            return None
+        run_id = self._run_id()
+        return lambda trial_id: TrialIdentity.of(run_id, trial_id).root_span_id
 
     def _prepared_tasks(self, tasks: list[AgentEvalTask]) -> None:
         environment = self._task_spec.environment
@@ -160,9 +173,16 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
         for task in tasks:
             task_dir = Path(str(task.metadata[HARBOR_TASK_DIR_KEY]))
             bind_task_image(task_dir, environment.agent.image_ref, verifier_image_ref=verifier)
+            if self._registrar is not None:
+                self._registrar.test_case_name = Task(task_dir).name
 
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
-        return configure_runtime(config, ctx, self._task_spec)
+        exported = None
+        if config.agent_import_path is None and config.agent_name is not None:
+            origin = agent_gateway_origin(sandboxed=True, agent_channel=self._task_spec.sandbox_policy.agent_channel)
+            exported = export_agent_traces(config, config.agent_name, trace_endpoint(origin, ctx.workspace))
+        self._live_traces = exported is not None
+        return configure_runtime(exported or config, ctx, self._task_spec)
 
 
 def check_execution_deadline(spec: HarborTaskJobSpec, now: datetime | None = None) -> None:
