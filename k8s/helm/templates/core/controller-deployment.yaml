@@ -5,7 +5,6 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.core.enabled }}
 {{- $imagePullSecrets := include "nemo-common.imagepullsecrets" . }}
-{{- $platformConfig := include "nemo-helix.calculatedConfig" . | fromYaml }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -64,14 +63,12 @@ spec:
             - name: NHX_CONFIG_FILE_PATH
               value: /etc/nhx/config.yaml
             - name: NHX_BASE_URL
-              value: {{ dig "platform" "base_url" (include "nemo-helix.internalBaseUrl" .) $platformConfig | quote }}
-            # In-cluster API Service DNS. Deployed agents use this as their inference
-            # endpoint, since NHX_BASE_URL may not be reachable from an agent pod.
+              value: {{ include "nemo-helix.platformBaseUrl" . | quote }}
             - name: NHX_INTERNAL_BASE_URL
-              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+              value: {{ include "nemo-helix.platformBaseUrl" . | quote }}
             {{- if include "nemo-helix.embeddedPdpEnabled" . }}
             - name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL
-              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+              value: {{ include "nemo-helix.platformBaseUrl" . | quote }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: {{ include "nhx-core.controller-servicename" . }}

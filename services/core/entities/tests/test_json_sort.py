@@ -4,13 +4,14 @@
 """Scalar JSON sorting through the real SQLite repository and PostgreSQL compiler."""
 
 from collections.abc import AsyncIterator
+from datetime import datetime
 
 import pytest
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from nhx.core.entities.app.repository.sqlalchemy.entity import SQLAlchemyEntityRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity, DBWorkspace
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -169,3 +170,105 @@ def test_postgresql_base_sort_uses_direct_column(json_sort_repository, sort):
     expression = json_sort_repository._get_sort_key(sort, dialect_name="postgresql")
     sql = str(expression.compile(dialect=postgresql.dialect()))
     assert sql == f"entities.{sort.lstrip('-')} {'DESC' if sort.startswith('-') else 'ASC'}"
+
+
+@pytest.mark.parametrize("dialect_name", ["sqlite", "postgresql"])
+@pytest.mark.parametrize(
+    "field", ["bogus", "metadata", "registry", "__class__", "to_pydantic", "data", "workspace_rel"]
+)
+@pytest.mark.parametrize("prefix", ["", "-"])
+def test_non_sortable_attributes_are_rejected(json_sort_repository, dialect_name, field, prefix):
+    """Invalid client input must fail validation before building a database query."""
+    with pytest.raises(ValueError, match=f"Invalid sort field {field}"):
+        json_sort_repository._get_sort_key(prefix + field, dialect_name=dialect_name)
+
+
+@pytest.mark.parametrize("sort", ["", "-", "--name", "---created_at", "data.", "data..k", "data.k."])
+@pytest.mark.parametrize("dialect_name", ["sqlite", "postgresql"])
+def test_malformed_sort_syntax_is_rejected(json_sort_repository, sort, dialect_name):
+    with pytest.raises(ValueError, match="Invalid sort field"):
+        json_sort_repository._get_sort_key(sort, dialect_name=dialect_name)
+
+
+@pytest.mark.parametrize("path", ["data.display-name", "data.display name", "data.nested.123"])
+def test_json_sort_preserves_non_identifier_keys(json_sort_repository, path):
+    """JSON object keys are not restricted to Python identifiers."""
+    expression = json_sort_repository._get_sort_key(path, dialect_name="postgresql")
+    assert "AS JSONB" in str(expression.compile(dialect=postgresql.dialect()))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "id",
+        "workspace",
+        "entity_type",
+        "name",
+        "parent",
+        "project",
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "db_version",
+    ],
+)
+@pytest.mark.parametrize("prefix", ["", "-"])
+def test_existing_scalar_column_sorts_are_preserved(json_sort_repository, field, prefix):
+    expression = json_sort_repository._get_sort_key(prefix + field, dialect_name="postgresql")
+    assert str(expression.compile(dialect=postgresql.dialect())) == (f"entities.{field} {'DESC' if prefix else 'ASC'}")
+
+
+@pytest.mark.parametrize("sort", [None, "created_at", "-created_at", "data.k", "-data.k", "data.missing"])
+@pytest.mark.parametrize("page_size", [1, 2, 4])
+async def test_tied_sort_pages_use_unique_id_order(json_sort_repository, sort, page_size):
+    """Ties have a defined order, including missing JSON paths and default timestamps."""
+    timestamp = datetime(2026, 1, 1)
+    async with json_sort_repository.session_maker() as session:
+        # Insertion order intentionally differs from the required tie-break order.
+        for index in [5, 2, 4, 1, 3, 0]:
+            session.add(
+                DBEntity(
+                    id=f"member-{index}",
+                    workspace="default",
+                    entity_type="member",
+                    name=f"task-{index}",
+                    data={"k": "equal"},
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            )
+        await session.commit()
+
+    statements = []
+    async with json_sort_repository.session_maker() as session:
+        engine = session.get_bind()
+
+        def capture_statement(conn, clauseelement, multiparams, params, execution_options):
+            statements.append(clauseelement)
+
+        event.listen(engine, "before_execute", capture_statement)
+        try:
+            ids = []
+            for page in range(1, (6 + page_size - 1) // page_size + 1):
+                rows, total = await json_sort_repository.list_entities(
+                    workspace="default",
+                    entity_type="member",
+                    sort=sort,
+                    page=page,
+                    page_size=page_size,
+                    session=session,
+                )
+                assert total == 6
+                ids.extend(row.id for row in rows)
+        finally:
+            event.remove(engine, "before_execute", capture_statement)
+
+    assert ids == [f"member-{index}" for index in range(6)]
+    # SQLite can appear stable even without a total order. Check the actual
+    # paginated query against the PostgreSQL compiler as well.
+    for statement in statements:
+        if statement._limit_clause is not None:
+            sql = str(statement.compile(dialect=postgresql.dialect()))
+            order_by = sql.split("ORDER BY", 1)[1].split("LIMIT", 1)[0].strip()
+            assert order_by.endswith(", entities.id ASC")

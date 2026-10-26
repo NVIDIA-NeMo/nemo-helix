@@ -48,14 +48,18 @@ nemo files filesets create my-docs --workspace default --purpose dataset --exist
 nemo files upload /path/to/docs/ my-docs --workspace default
 ```
 
-NVIDIA's sample corpus exercises the plumbing without standing in for your domain:
+By default, the Python example uses NVIDIA's pinned sample corpus so it does not require a pre-existing `my-docs` fileset. Set `RETRIEVAL_CORPUS=default/my-docs` after uploading your own corpus. The sample exercises the plumbing without standing in for your domain:
 
 `hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random`
 
 ```python
-CORPUS = os.environ.get("RETRIEVAL_CORPUS", "default/my-docs")
+CORPUS = os.environ.get(
+    "RETRIEVAL_CORPUS",
+    "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random",
+)
 PROVIDER = os.environ.get("RETRIEVAL_PROVIDER", "system/nvidia-build")
-CHAT_MODEL = os.environ.get("RETRIEVAL_CHAT_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
+# RETRIEVAL_CHAT_MODEL takes precedence over the shared NVIDIA_MODEL override.
+CHAT_MODEL = os.environ.get("RETRIEVAL_CHAT_MODEL", os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"))
 EMBED_MODEL = os.environ.get("RETRIEVAL_EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
 print({"corpus": CORPUS, "provider": PROVIDER, "chat": CHAT_MODEL, "embed": EMBED_MODEL})
 

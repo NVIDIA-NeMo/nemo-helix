@@ -3,8 +3,13 @@
 
 """Helper functions for API v2."""
 
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.config import Runtime
+from nhx.common.entities.client import EntityNotFoundError
 from nhx.core.models.config import get_platform_config
+
+# Let the registered SDK handlers preserve not-found status and detail.
+NOT_FOUND_ERRORS = (NotFoundError, EntityNotFoundError)
 
 
 def deployments_enabled() -> bool:

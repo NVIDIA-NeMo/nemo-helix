@@ -305,6 +305,9 @@ import os
 from nemo_evals.sdk import Evaluator as HelixEvaluator
 from nemo_helix_plugin.client.client import NemoClient
 
+# Remote custom metric submission is disabled by default. Opt in only after an
+# operator has enabled both deployment settings described in Step 7.
+RUN_REMOTE_CUSTOM_METRIC = os.environ.get("NHX_RUN_REMOTE_CUSTOM_METRIC") == "true"
 MODEL_REF = os.environ.get("NHX_EVAL_MODEL_REF", "default/my-model")
 
 client = NemoClient.from_config()
@@ -438,6 +441,8 @@ Users cannot grant this to their own jobs: secret environment names that start w
 
 ### Submit the Job
 
+The notebook skips remote custom Python execution by default, preserving the deployment's security policy. After an operator explicitly enables both settings above on a trusted deployment, set `NHX_RUN_REMOTE_CUSTOM_METRIC=true` and `NHX_EVAL_MODEL_REF=workspace/model-name` before running the notebook. This notebook opt-in does not enable the deployment capability. A skipped remote section exercises only the local metric, not remote job coverage.
+
 <Note>
 
 Submit from a Python 3.13 environment. A bundle created on another minor version fails when the job hydrates it, with `cloudpickle metric payload was created with Python 3.12.x, but this runtime is Python 3.13.x; recreate the metric bundle with the runtime Python version.`
@@ -448,33 +453,37 @@ Submit from a Python 3.13 environment. A bundle created on another minor version
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nhx_evals_sdk import InferenceParams, ModelRef, RunConfigOnlineModel
 
-job = helix_evaluator.submit(
-    metric=metric,
-    dataset=dataset_ref,
-    config=RunConfigOnlineModel(
-        parallelism=2,
-        limit_samples=3,
-        inference=InferenceParams(
-            temperature=0.0,
-            max_tokens=32,
+remote_result = None
+if RUN_REMOTE_CUSTOM_METRIC:
+    job = helix_evaluator.submit(
+        metric=metric,
+        dataset=dataset_ref,
+        config=RunConfigOnlineModel(
+            parallelism=2,
+            limit_samples=3,
+            inference=InferenceParams(
+                temperature=0.0,
+                max_tokens=32,
+            ),
         ),
-    ),
-    target=ModelRef(root=MODEL_REF),
-    prompt_template=(
-        "Return exactly one valid Python arithmetic expression that evaluates to the answer.\n"
-        "Start immediately with the expression. Do not start with a newline.\n"
-        "Do not include markdown, code fences, prose, units, the final answer, or any explanation.\n"
-        "Use only numbers, whitespace, parentheses, and these operators: +, -, *, /, //, %.\n\n"
-        "Question: {{item.question}}\n"
-        "Expression:"
-    ),
-    metric_bundle_packager=CloudpickleMetricBundlePackager(),
-)
+        target=ModelRef(root=MODEL_REF),
+        prompt_template=(
+            "Return exactly one valid Python arithmetic expression that evaluates to the answer.\n"
+            "Start immediately with the expression. Do not start with a newline.\n"
+            "Do not include markdown, code fences, prose, units, the final answer, or any explanation.\n"
+            "Use only numbers, whitespace, parentheses, and these operators: +, -, *, /, //, %.\n\n"
+            "Question: {{item.question}}\n"
+            "Expression:"
+        ),
+        metric_bundle_packager=CloudpickleMetricBundlePackager(),
+    )
 
-print(f"Submitted job: {job.name}")
-job.wait_until_done()
-remote_result = job.get_result()
-remote_result.print_summary()
+    print(f"Submitted job: {job.name}")
+    job.wait_until_done()
+    remote_result = job.get_result()
+    remote_result.print_summary()
+else:
+    print("SKIPPED remote custom metric job: set NHX_RUN_REMOTE_CUSTOM_METRIC=true on a trusted, opted-in deployment. Local metric coverage only.")
 ```
 
 <Warning>
@@ -488,8 +497,9 @@ Cloudpickle metric bundles execute serialized Python code with the Evals service
 The aggregate scores show how often the outputs followed the expression contract and how often the expression evaluated to the expected value.
 
 ```python
-for score in remote_result.aggregate_scores.scores:
-    print(f"{score.name}: mean={score.mean}, count={score.count}, nan_count={score.nan_count}")
+if remote_result is not None:
+    for score in remote_result.aggregate_scores.scores:
+        print(f"{score.name}: mean={score.mean}, count={score.count}, nan_count={score.nan_count}")
 ```
 
 If `valid_expression` is low, inspect row scores before changing the metric. Some models return the right expression followed by explanation text, which is not a valid Python expression and should fail this metric.
@@ -497,11 +507,12 @@ If `valid_expression` is low, inspect row scores before changing the metric. Som
 Use row scores to debug the expressions:
 
 ```python
-for row in remote_result.row_scores:
-    print("Question:", row.item["question"])
-    print("Model output:", row.sample.get("output_text"))
-    print("Metric outputs:", row.metrics)
-    print()
+if remote_result is not None:
+    for row in remote_result.row_scores:
+        print("Question:", row.item["question"])
+        print("Model output:", row.sample.get("output_text"))
+        print("Metric outputs:", row.metrics)
+        print()
 ```
 
 Use the local `result` object from Step 5 the same way if you want to inspect the local run instead.

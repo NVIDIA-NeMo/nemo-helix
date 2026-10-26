@@ -13,7 +13,7 @@ from nhx.common.entities.client import EntityConflictError, EntityValidationErro
 from nhx.core.models.api.dependencies import get_model_deployment_service
 from nhx.core.models.api.permissions import check_deployment_config_access
 from nhx.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
-from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, deployments_enabled
+from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, NOT_FOUND_ERRORS, deployments_enabled
 from nhx.core.models.schemas import (
     CreateModelDeploymentRequest,
     ModelDeployment,
@@ -77,6 +77,8 @@ async def list_deployments(
             all_versions=all_versions,
         )
         return result
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Unexpected error listing deployments by workspace")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployments")

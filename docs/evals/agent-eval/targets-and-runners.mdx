@@ -41,10 +41,15 @@ bare model do before you wrap it in an agent?). The evaluator prompts it with ea
 | `default_headers` | no | non-auth headers applied to every request; authentication goes through `api_key_secret` |
 | `host_url` | no | direct NIM endpoint (`http://host:port`), populated when the target resolves from a `ModelRef` |
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from nhx_evals_sdk.values import Model, SecretRef
 
-target = Model(url="https://integrate.api.nvidia.com/v1/chat/completions", name="nvidia/nemotron-3.5-lightning-30b-a3b",
+target = Model(url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions", name="nvidia/nemotron-3.5-lightning-30b-a3b",
                api_key_secret=SecretRef(root="NVIDIA_API_KEY"))
 ```
 

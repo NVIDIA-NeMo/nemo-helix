@@ -48,7 +48,12 @@ Fabric agent config** inside the task container. Hand it the agent through `agen
 — a Fabric `agent.yaml` as a JSON-shaped mapping, the same document the
 [Fabric runner](/documentation/evaluate-models/agent-eval/fabric-runner) runs on the host:
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from pathlib import Path
 
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
@@ -61,7 +66,7 @@ fabric_config = {
             "provider": "nvidia",
             "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
             "api_key_env": "NVIDIA_API_KEY",           # the harness reads the key from this variable
-            "base_url": "https://integrate.api.nvidia.com/v1",
+            "base_url": os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
         }
     },
 }
