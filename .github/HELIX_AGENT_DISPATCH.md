@@ -18,7 +18,7 @@ On a PR comment starting with `/helix-`, it sends a `repository_dispatch`
 The trigger is dispatch-only — it does not react to or comment on the PR itself;
 acknowledgement comes from the worker once it picks up the dispatch.
 
-**Plane 2 — worker (in the runner-privileged repo, e.g. Platform-Deploy):**
+**Plane 2 — worker (in the runner-privileged agents repo, nemo-helix-agents):**
 `.github/workflows/helix-agent-run.yaml` + `.github/scripts/dispatch_agent.py` +
 `.github/dispatch-registry.yaml`. On the dispatch it mints TWO repo-scoped `aire-ops`
 tokens — a READ-only one forwarded to the agent, and a WRITE one kept in the worker —
@@ -137,7 +137,7 @@ nemo agents register --agent agent.yaml --workspace <workspace>
 
 **4. Install the trigger workflow** on the target repo(s): the generic
 `.github/workflows/helix-agent-dispatch.yaml` + `.github/scripts/helix-agent-dispatch.cjs`
-(from the nemo-helix PR), plus the `CI_DISPATCH_TOKEN` / `CI_DISPATCH_REPO` secrets.
+(from the nemo-helix PR), plus the `CI_DISPATCH_TOKEN` / `AUTOMATION_DISPATCH_REPO` secrets.
 `CI_DISPATCH_TOKEN` needs, for a fine-grained token, only `Contents: write` on the
 WORKER repo to send the `repository_dispatch` (without it, dispatch is denied and the
 worker never starts) — least-privilege: the trigger holds no permission on the TARGET
@@ -155,7 +155,7 @@ If nothing happens, check the worker repo's Actions run: a missing agent entity 
 | Secret | Purpose |
 | --- | --- |
 | `CI_DISPATCH_TOKEN` | token allowed to `repository_dispatch` to the worker repo |
-| `CI_DISPATCH_REPO` | `owner/worker-repo` destination |
+| `AUTOMATION_DISPATCH_REPO` | `owner/worker-repo` destination (the agents repo) |
 
 **Worker repo (dispatch side):**
 | Secret / var | Purpose |
