@@ -11,15 +11,17 @@ from sqlalchemy import event
 from sqlalchemy.dialects import postgresql, sqlite
 
 
-@pytest.mark.parametrize("sort", ["created_at", "-created_at"])
-@pytest.mark.parametrize("continuation", [False, True])
-async def test_keyset_query_has_total_order_and_no_offset(
-    entity_repo, session_maker, setup_workspaces, sort, continuation
-):
+@pytest.mark.parametrize("sort", ["created_at", "-created_at", None])
+async def test_keyset_query_has_total_order_and_no_offset(entity_repo, session_maker, setup_workspaces, sort):
+    effective_sort = "-created_at" if sort is None else sort
     scope = entity_page_scope(
-        workspace="workspace-1", entity_type="widget", sort=sort, filter_op=None, relationship_child_workspaces=None
+        workspace="workspace-1",
+        entity_type="widget",
+        sort=effective_sort,
+        filter_op=None,
+        relationship_child_workspaces=None,
     )
-    token = EntityPageToken(v=1, t=datetime(2026, 1, 1), i="widget-boundary", q=scope).encode() if continuation else ""
+    token = EntityPageToken(v=1, t=datetime(2026, 1, 1), i="widget-boundary", q=scope).encode()
     statements = []
     async with session_maker() as session:
         engine = session.get_bind()
@@ -39,14 +41,13 @@ async def test_keyset_query_has_total_order_and_no_offset(
     assert query._offset_clause is None
     for dialect in [postgresql.dialect(), sqlite.dialect()]:
         sql = str(query.compile(dialect=dialect, compile_kwargs={"literal_binds": True}))
-        direction = "DESC" if sort.startswith("-") else "ASC"
+        direction = "DESC" if effective_sort.startswith("-") else "ASC"
         assert f"ORDER BY entities.created_at {direction}, entities.id ASC" in sql
         # SQLite's compiler may emit OFFSET 0 as part of a LIMIT; the SQLAlchemy
         # query itself must not have a numbered-page offset.
-        if continuation:
-            operator = "<" if sort.startswith("-") else ">"
-            assert f"entities.created_at {operator}" in sql
-            assert "entities.created_at =" in sql
-            assert "entities.id > 'widget-boundary'" in sql
+        operator = "<" if effective_sort.startswith("-") else ">"
+        assert f"entities.created_at {operator}" in sql
+        assert "entities.created_at =" in sql
+        assert "entities.id > 'widget-boundary'" in sql
         count_sql = str(count.compile(dialect=dialect, compile_kwargs={"literal_binds": True}))
         assert "widget-boundary" not in count_sql

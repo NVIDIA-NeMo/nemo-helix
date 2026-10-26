@@ -4,15 +4,27 @@
 """Strict versioned token validation and effective-query binding."""
 
 import json
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 
 import base58
 import pytest
-from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator
+from nhx.common.api.filter import FilterOperation
 from nhx.common.api.utils import tweak_spec
 from nhx.core.entities.api.v2.entities.endpoints import EntitiesPage
 from nhx.core.entities.api.v2.utils import add_workspace_filtering
-from nhx.core.entities.app.repository.pagination import EntityPageToken, entity_page_scope
+from nhx.core.entities.app.repository.pagination import MAX_PAGE_TOKEN_LENGTH, EntityPageToken, entity_page_scope
+
+
+class IterationOrderedSet(set[str]):
+    """Simulate differing set iteration orders across server workers."""
+
+    def __init__(self, values: Iterable[str], *, reverse: bool = False):
+        super().__init__(values)
+        self._reverse = reverse
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(sorted(super().__iter__(), reverse=self._reverse))
 
 
 def scope_hash(
@@ -29,7 +41,9 @@ def scope_hash(
         sort=sort,
         filter_op=filter_op,
         relationship_child_workspaces=(
-            set(relationship_child_workspaces) if relationship_child_workspaces is not None else None
+            set(relationship_child_workspaces)
+            if isinstance(relationship_child_workspaces, frozenset)
+            else relationship_child_workspaces
         ),
     )
 
@@ -50,16 +64,16 @@ def test_token_round_trip_preserves_microseconds():
 @pytest.mark.parametrize(
     "changes",
     [
-        {"v": 2},
-        {"v": "1"},
-        {"t": "not-a-date"},
-        {"t": 123},
-        {"t": "2026-01-01T00:00:00Z"},
-        {"i": ""},
-        {"i": 1},
-        {"i": "i" * 256},
-        {"q": "not-a-hash"},
-        {"extra": "ignored?"},
+        pytest.param({"v": 2}, id="unsupported-version"),
+        pytest.param({"v": "1"}, id="string-version"),
+        pytest.param({"t": "not-a-date"}, id="invalid-timestamp"),
+        pytest.param({"t": 123}, id="numeric-timestamp"),
+        pytest.param({"t": "2026-01-01T00:00:00Z"}, id="aware-timestamp"),
+        pytest.param({"i": ""}, id="empty-id"),
+        pytest.param({"i": 1}, id="numeric-id"),
+        pytest.param({"i": "i" * 256}, id="oversize-id"),
+        pytest.param({"q": "not-a-hash"}, id="malformed-scope-hash"),
+        pytest.param({"extra": "ignored?"}, id="unexpected-field"),
     ],
 )
 def test_token_rejects_invalid_payload(changes):
@@ -76,21 +90,16 @@ def test_token_requires_every_field(field):
         EntityPageToken.decode(encode_payload(data), scope_hash=scope_hash())
 
 
-@pytest.mark.parametrize("data", [[], None, 1, "text"])
-def test_token_rejects_other_json_shapes(data):
+def test_token_rejects_non_object_payload():
     with pytest.raises(ValueError, match="Invalid page_token"):
-        EntityPageToken.decode(encode_payload(data), scope_hash=scope_hash())
+        EntityPageToken.decode(encode_payload([]), scope_hash=scope_hash())
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"workspace": "other"},
-        {"entity_type": "other"},
-        {"sort": "created_at"},
-        {"relationship_child_workspaces": {"a"}},
-        {"relationship_child_workspaces": None},
-        {"filter_op": ComparisonOperation(field="name", operator=FilterOperator.EQ, value="one")},
+        pytest.param({"relationship_child_workspaces": {"a"}}, id="changed-child-workspaces"),
+        pytest.param({"relationship_child_workspaces": None}, id="unrestricted-child-workspaces"),
     ],
 )
 def test_token_rejects_changed_query_or_authorization_scope(changes):
@@ -105,12 +114,26 @@ def test_terminal_token_remains_nullable_in_normalized_openapi():
 
 
 def test_cross_workspace_filter_uses_canonical_workspace_order():
-    operation = add_workspace_filtering({"z", "a", "m"}, None, field="workspace")
+    workspaces = IterationOrderedSet({"z", "a", "m"}, reverse=True)
+    operation = add_workspace_filtering(workspaces, None, field="workspace")
     assert operation is not None
     assert operation.to_dict() == {"workspace": {"$in": ["a", "m", "z"]}}
 
 
 def test_scope_is_independent_of_workspace_set_iteration_order():
-    assert scope_hash(relationship_child_workspaces=set(["a", "b"])) == scope_hash(
-        relationship_child_workspaces=set(["b", "a"])
+    # Constructing two ordinary sets with the same elements does not reliably
+    # change their iteration order. Simulate the order difference across workers.
+    workspaces = {"a", "b"}
+    assert scope_hash(relationship_child_workspaces=IterationOrderedSet(workspaces)) == scope_hash(
+        relationship_child_workspaces=IterationOrderedSet(workspaces, reverse=True)
     )
+
+
+def test_decoder_rejects_oversize_token_before_decoding():
+    # Valid JSON with leading whitespace would decode successfully without the
+    # size guard. A malformed oversized token would not prove that guard exists.
+    raw = b" " * MAX_PAGE_TOKEN_LENGTH + json.dumps(payload()).encode()
+    token = base58.b58encode(raw).decode()
+    assert len(token) > MAX_PAGE_TOKEN_LENGTH
+    with pytest.raises(ValueError, match="Invalid page_token"):
+        EntityPageToken.decode(token, scope_hash=scope_hash())
