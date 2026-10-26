@@ -75,7 +75,7 @@ from nhx_evals_sdk.values import (
 from nhx_evals_sdk.values.models import ModelRef
 from nhx_evals_sdk.values.results import RowScore
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
@@ -96,6 +96,37 @@ def _exact_match_spec() -> dict:
         ],
         "params": {"parallelism": 2},
     }
+
+
+@pytest.mark.parametrize(
+    ("target", "params", "expected"),
+    [
+        (
+            GenericAgent(
+                url="http://agent.test",
+                name="test-agent",
+                format=AgentFormat.GENERIC,
+                body={"query": "{{ prompt }}"},
+                response_path="$.answer",
+            ),
+            RunConfig(parallelism=1),
+            "agent target requires RunConfigOnline",
+        ),
+        (None, RunConfigOnline(parallelism=1), "offline evaluation requires RunConfig"),
+    ],
+    ids=["agent-with-offline-params", "offline-with-online-params"],
+)
+def test_evaluate_input_spec_reports_target_param_mismatch_as_validation_error(
+    target: GenericAgent | None,
+    params: RunConfig | RunConfigOnline,
+    expected: str,
+) -> None:
+    payload = _exact_match_spec()
+    payload["target"] = target
+    payload["params"] = params
+
+    with pytest.raises(ValidationError, match=expected):
+        EvaluateInputSpec.model_validate(payload)
 
 
 def _bundle_payload(metric) -> dict[str, Any]:
