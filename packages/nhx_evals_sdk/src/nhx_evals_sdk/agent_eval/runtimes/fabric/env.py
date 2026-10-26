@@ -23,6 +23,45 @@ _HOST_TLS_ENV_NAMES = (
 )
 
 
+def _forward_tls_to_stdio_servers(config: dict[str, Any], names: set[str]) -> None:
+    """Let stdio MCP children resolve the runtime's TLS trust variables.
+
+    The MCP SDK intentionally inherits only a small environment allowlist. A
+    Fabric adapter can therefore trust a private CA while an MCP subprocess it
+    starts cannot. Keep the values runtime-local: placeholders are expanded by
+    the adapter where the subprocess actually runs, including inside a sandbox.
+    """
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return
+    for server in servers.values():
+        if not isinstance(server, dict):
+            continue
+        transport = server.get("transport", "stdio")
+        if not isinstance(transport, str) or transport.strip().lower().replace("-", "_") not in {
+            "stdio",
+            "command",
+            "process",
+        }:
+            continue
+        server_env = server.get("env")
+        if server_env is not None and not isinstance(server_env, Mapping):
+            continue
+        merged = dict(server_env or {})
+        for name in names:
+            merged.setdefault(name, f"${{{name}}}")
+        server["env"] = merged
+
+
+def sandbox_fabric_config(config: Mapping[str, Any], *, model: str | None) -> dict[str, Any]:
+    """Prepare sandbox config while resolving TLS paths inside the sandbox."""
+    prepared = model_fabric_config(config, model=model)
+    names = {name for name in _HOST_TLS_ENV_NAMES if os.environ.get(name)}
+    _forward_tls_to_stdio_servers(prepared, names)
+    return prepared
+
+
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
     """Require a mapping, naming the config field in errors instead of failing on dictionary access."""
     if not isinstance(value, Mapping):
@@ -156,6 +195,7 @@ def host_fabric_config(
         configured_env = {} if configured_env is None else dict(_mapping(configured_env, "config.environment.env"))
         environment["env"] = {**inherited_tls, **configured_env}
         prepared["environment"] = environment
+        _forward_tls_to_stdio_servers(prepared, set(inherited_tls))
     sources = env_secret_vars(env_secrets, source)
     models = _model_roles(prepared)
     env = _environment_vars(prepared)
