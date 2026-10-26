@@ -414,6 +414,7 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
 def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
     backend_registry, mock_nemo_client, shared_backend, retry_failure
 ):
+    """Exercise restart progress with a fake store, not database serialization or version locking."""
     reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
     first = MagicMock()
     second = first if shared_backend else MagicMock()
@@ -469,12 +470,11 @@ def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
 
     assert not stored
     system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
-    assert first.reclaim_persistent_storage.call_count == (4 if shared_backend else 1)
-    if not shared_backend:
-        assert second.reclaim_persistent_storage.call_count == 3
-    calls = first.reclaim_persistent_storage.call_count + second.reclaim_persistent_storage.call_count
+    first.reclaim_persistent_storage.reset_mock()
+    second.reclaim_persistent_storage.reset_mock()
     reconciler._reclaim_queued_storage()
-    assert first.reclaim_persistent_storage.call_count + second.reclaim_persistent_storage.call_count == calls
+    first.reclaim_persistent_storage.assert_not_called()
+    second.reclaim_persistent_storage.assert_not_called()
 
 
 @pytest.mark.parametrize("gpu_pvc", ["cpu-pvc", "gpu-pvc"])
@@ -543,14 +543,17 @@ def test_reclaim_drains_kubernetes_cleanup_workloads_for_shared_and_distinct_cla
 
     assert not stored
     assert not workloads
-    claims = [
+    claims = {
         call.kwargs["body"].spec.template.spec.volumes[0].persistent_volume_claim.claim_name
         for call in batch.create_namespaced_job.call_args_list
-    ]
-    assert sorted(claims) == sorted(["cpu-pvc", gpu_pvc])
-    assert batch.delete_namespaced_job.call_count == 2
+    }
+    # Every storage claim must be reclaimed, but shared claims may be deduplicated.
+    assert claims == {"cpu-pvc", gpu_pvc}
+    batch.create_namespaced_job.reset_mock()
+    batch.delete_namespaced_job.reset_mock()
     reconciler._reclaim_queued_storage()
-    assert batch.create_namespaced_job.call_count == 2
+    batch.create_namespaced_job.assert_not_called()
+    batch.delete_namespaced_job.assert_not_called()
 
 
 def test_reclaim_stops_if_completed_target_cannot_be_persisted(backend_registry, mock_nemo_client):

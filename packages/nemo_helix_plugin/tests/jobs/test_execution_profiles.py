@@ -33,9 +33,22 @@ def test_a_kubernetes_profile_with_secret_and_config_map_volumes_parses():
                 "additional_volumes": [
                     {
                         "name": "tls-ca",
-                        "secret": {"secret_name": "envoy-tls", "items": [{"key": "ca.crt", "path": "ca.crt"}]},
+                        "secret": {
+                            "secret_name": "envoy-tls",
+                            "default_mode": 0o440,
+                            "optional": True,
+                            "items": [{"key": "ca.crt", "path": "tls/ca.crt", "mode": 0o400}],
+                        },
                     },
-                    {"name": "settings", "config_map": {"name": "job-settings"}},
+                    {
+                        "name": "settings",
+                        "config_map": {
+                            "name": "job-settings",
+                            "default_mode": 0o644,
+                            "optional": False,
+                            "items": [{"key": "settings.yaml", "path": "config/settings.yaml", "mode": 0o600}],
+                        },
+                    },
                 ],
                 "additional_volume_mounts": [
                     {"name": "tls-ca", "mount_path": "/etc/tls", "read_only": True},
@@ -48,6 +61,17 @@ def test_a_kubernetes_profile_with_secret_and_config_map_volumes_parses():
     profile = TypeAdapter(ExecutionProfile).validate_python(served)
 
     volumes = profile.config.storage.additional_volumes
-    assert volumes[0].secret.secret_name == "envoy-tls"
-    assert volumes[0].secret.items[0].path == "ca.crt"
-    assert volumes[1].config_map.name == "job-settings"
+    assert volumes[0].secret is not None
+    assert volumes[0].secret.model_dump() == {
+        "secret_name": "envoy-tls",
+        "default_mode": 0o440,
+        "optional": True,
+        "items": [{"key": "ca.crt", "path": "tls/ca.crt", "mode": 0o400}],
+    }
+    assert volumes[1].config_map is not None
+    assert volumes[1].config_map.model_dump() == {
+        "name": "job-settings",
+        "default_mode": 0o644,
+        "optional": False,
+        "items": [{"key": "settings.yaml", "path": "config/settings.yaml", "mode": 0o600}],
+    }
