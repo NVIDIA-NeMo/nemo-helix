@@ -256,19 +256,23 @@ Automodel `dataset.training` and `retrieve-eval` `dataset` take a fileset name w
 
 Freeze the resulting fileset and reuse it for every run. Scoring two runs on different splits measures data variance rather than model quality.
 
-Equivalent CLI, where `RESULT_PATH` is the path fragment of the `artifacts` result's `artifact_url`:
+Equivalent CLI. The `artifacts` result's `artifact_url` is `workspace/fileset#path`: split it on `#` to get the job's artifact fileset (`ARTIFACT_FILESET`) and the result path (`RESULT_PATH`). Read the fileset from the result rather than rebuilding it from the job name — the auto-created fileset is usually `job-fileset-<job>`, but a job name near the length limit gets a hash suffix, so the derived name is not always predictable.
 
 ```bash
 PREPARE_JOB=<prepare-job-name>
-RESULT_PATH=results/<attempt-id>/artifacts
 
-nemo jobs results list "$PREPARE_JOB" --workspace default --output json
+# Pull the artifacts result's URL (workspace/fileset#path) and split it.
+ARTIFACT_URL=$(nemo jobs results list "$PREPARE_JOB" --workspace default --output json \
+  | jq -r '.data[] | select(.name == "artifacts") | .artifact_url')
+ARTIFACT_FILESET=${ARTIFACT_URL%%#*}      # e.g. default/job-fileset-<job>
+ARTIFACT_FILESET=${ARTIFACT_FILESET#*/}   # strip the workspace prefix
+RESULT_PATH=${ARTIFACT_URL#*#}            # e.g. results/<attempt-id>/artifacts
 
-nemo files download "job-fileset-$PREPARE_JOB" --workspace default \
+nemo files download "$ARTIFACT_FILESET" --workspace default \
   --remote-path "$RESULT_PATH/training.jsonl" \
   -o ./artifacts/training.jsonl
 
-nemo files download "job-fileset-$PREPARE_JOB" --workspace default \
+nemo files download "$ARTIFACT_FILESET" --workspace default \
   --remote-path "$RESULT_PATH/eval_beir" \
   -o ./artifacts/
 

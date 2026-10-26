@@ -13,7 +13,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_helix_plugin.jobs.types import JOB_FILESET_NAME_PREFIX, JobControl
+from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
@@ -364,7 +364,7 @@ class JobDispatcher:
                 fileset_name = job_req.output_location
             else:
                 try:
-                    fileset_request = CreateFilesetRequest(name=f"{JOB_FILESET_NAME_PREFIX}{job_name}")
+                    fileset_request = CreateFilesetRequest(name=derive_job_fileset_name(job_name, workspace))
                 except ValidationError as exc:
                     raise RuntimeError(f"job name '{job_name}' cannot name its artifact fileset") from exc
                 fileset_resp = await self.files.create_fileset(body=fileset_request, workspace=workspace)

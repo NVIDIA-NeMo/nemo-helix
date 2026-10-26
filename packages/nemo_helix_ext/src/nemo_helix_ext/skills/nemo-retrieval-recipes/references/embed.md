@@ -82,7 +82,7 @@ the trailing slash):
 {
   "model": "default/nemotron-3-embed-1b",
   "dataset": {
-    "training": "default/job-fileset-<job>#results/<attempt>/artifacts/"
+    "training": "default/<job-fileset>#results/<attempt>/artifacts/"
   },
   "training": {
     "recipe": "bi_encoder",
@@ -143,7 +143,7 @@ training and Stage 1 mining.
 
 ```bash
 nemo evals retrieve-eval --spec '{
-  "dataset": "default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**",
+  "dataset": "default/<job-fileset>#results/<attempt>/artifacts/eval_beir/**",
   "target": {
     "embeddings": "default/nemotron-3-embed-1b-tuned",
     "query_prefix": "query: ",

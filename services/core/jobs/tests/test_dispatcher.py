@@ -16,11 +16,11 @@ from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_helix_plugin.entity_naming import NAME_PATTERN
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
-from nemo_helix_plugin.jobs.types import JobControl
+from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
@@ -1444,6 +1444,47 @@ async def test_create_then_delete_auto_fileset_round_trip(
     mock_files_client.delete_fileset.assert_awaited_once_with(
         name=f"job-fileset-{job.name}", workspace=DEFAULT_WORKSPACE
     )
+
+
+@pytest.mark.asyncio
+async def test_full_length_caller_name_derives_within_limit_fileset_and_round_trips(
+    mock_dispatcher: JobDispatcher,
+    mock_files_client,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    """A caller name at the entity-name limit submits and its derived fileset name stays within the limit.
+
+    Guards the end-to-end contract: the fileset name the service derives is a valid, within-limit
+    entity name, is stored on the job, and is the exact name delete resolves (no re-derivation).
+    """
+
+    def _echo_create(*, body, workspace):
+        fileset = MagicMock()
+        fileset.name = body.name
+        response = MagicMock()
+        response.data.return_value = fileset
+        return response
+
+    mock_files_client.create_fileset.side_effect = _echo_create
+
+    full_name = "a" * NAME_MAX_LENGTH
+    request = sample_platform_job_request.model_copy(update={"name": full_name})
+
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+
+    assert job.name == full_name
+    assert job.fileset == derive_job_fileset_name(full_name, DEFAULT_WORKSPACE)
+    assert len(job.fileset) <= NAME_MAX_LENGTH
+    assert re.fullmatch(NAME_PATTERN, job.fileset)
+
+    cancelled = await mock_dispatcher.cancel_job(job.name, DEFAULT_WORKSPACE)
+    assert cancelled is not None
+    assert cancelled.status == HelixJobStatus.CANCELLED
+
+    deleted = await mock_dispatcher.delete_job(job.name, DEFAULT_WORKSPACE)
+
+    assert deleted is True
+    mock_files_client.delete_fileset.assert_awaited_once_with(name=job.fileset, workspace=DEFAULT_WORKSPACE)
 
 
 @pytest.mark.asyncio
