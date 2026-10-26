@@ -489,6 +489,11 @@ def run(parent_stop_signal: threading.Event | None = None):
 
     logger.debug(f"Initialized NeMo Helix client with base_url: {platform_config.base_url}")
 
+    if not os.getenv("NIM_PEFT_SOURCE"):
+        # Expected outside NIM/vLLM deployments (CI, source installs): nothing to manage.
+        logger.warning("Adapters controller not started: NIM_PEFT_SOURCE is not set")
+        return
+
     adapters_controller = AdaptersController(stop_signal=local_stop_signal)
     adapters_controller_monitored = TrackLastExecutionTime(adapters_controller)
 
