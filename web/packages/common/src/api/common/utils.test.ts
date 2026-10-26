@@ -43,7 +43,7 @@ describe('getErrorMessage', () => {
       response?: {
         status: number;
         statusText: string;
-        data?: { detail?: unknown };
+        data?: unknown;
       };
       config?: {
         method?: string;
@@ -195,6 +195,20 @@ describe('getErrorMessage', () => {
 
       expect(getErrorMessage(error)).toBe('Dataset not found');
     });
+  });
+
+  it.each([
+    ['message', { message: 'Server message' }, 'Server message'],
+    ['plain text', 'Plain-text error', 'Plain-text error'],
+    ['detail precedence', { detail: 'Detail', message: 'Message' }, 'Detail'],
+    ['non-string message', { message: { reason: 'invalid' } }, '500 Internal Server Error'],
+    ['blank message', { message: '   ' }, '500 Internal Server Error'],
+    ['blank body', '   ', '500 Internal Server Error'],
+  ])('handles %s response bodies', (_label, data, expected) => {
+    const error = createAxiosError({
+      response: { status: 500, statusText: 'Internal Server Error', data },
+    });
+    expect(getErrorMessage(error)).toBe(expected);
   });
 
   describe('with network errors', () => {
