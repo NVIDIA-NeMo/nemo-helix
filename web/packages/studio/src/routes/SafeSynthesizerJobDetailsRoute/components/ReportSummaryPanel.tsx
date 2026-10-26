@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
+import { IconDocument } from '@nemo/icons/icons';
 import { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Button, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getGenerateJobReportRoute } from '@studio/routes/utils';
-import { File } from 'lucide-react';
 import { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -23,7 +23,12 @@ export const ReportSummaryPanel: FC<ReportSummaryPanelProps> = ({ jobId, jobResu
   const dpsScore = jobResultSummary?.data_privacy_score;
 
   return (
-    <Panel slotHeading="Report Summary" slotIcon={<File />} elevation="high" density="compact">
+    <Panel
+      slotHeading="Report Summary"
+      slotIcon={<IconDocument />}
+      elevation="high"
+      density="compact"
+    >
       <Stack gap="density-2xl" padding="density-xl" justify="between" className="overflow-hidden">
         <Flex gap="density-md" align="center" justify="around" className="w-full h-full">
           <Stack align="center" justify="center" gap="density-lg">

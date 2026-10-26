@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Gauge, Hash, Timer } from 'lucide-react';
+import { ChartPerformance, Numbers, Timer } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
 export interface ChatMetrics {
@@ -26,7 +26,7 @@ export const StatsBadge: FC<StatsBadgeProps> = ({
 }) => {
   const seconds = (metrics.totalMs / 1000).toFixed(1);
   const tokensPerSec = Math.max(0, Math.round(metrics.tokensPerSec));
-  const iconSize = emphasis ? 14 : 12;
+  const iconSize = emphasis ? '14' : '12';
   const toneClass =
     tone === 'brand' ? 'text-[var(--color-brand,#76b900)]' : 'text-fg-subdued opacity-60';
   return (
@@ -38,11 +38,11 @@ export const StatsBadge: FC<StatsBadgeProps> = ({
         {seconds}s
       </span>
       <span className="inline-flex items-center gap-1" title="Tokens per second">
-        <Gauge size={iconSize} />
+        <ChartPerformance size={iconSize} />
         {tokensPerSec} t/s
       </span>
       <span className="inline-flex items-center gap-1" title="Completion tokens">
-        <Hash size={iconSize} />
+        <Numbers size={iconSize} />
         {Math.round(metrics.completionTokens)} tok
       </span>
     </div>

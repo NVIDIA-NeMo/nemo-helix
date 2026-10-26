@@ -284,14 +284,10 @@ describe('NavigationDrawer', () => {
       const trigger = screen.getByRole('button', { name: 'Traces' });
 
       expect(trigger).toHaveAttribute('aria-expanded', 'true');
-      // eslint-disable-next-line testing-library/no-node-access
-      expect(document.querySelector('.lucide-chevron-down')).toBeInTheDocument();
 
       await user.click(trigger);
       expect(trigger).toHaveAttribute('aria-expanded', 'false');
       expect(screen.queryByText('Entries')).not.toBeInTheDocument();
-      // eslint-disable-next-line testing-library/no-node-access
-      expect(document.querySelector('.lucide-chevron-right')).toBeInTheDocument();
     });
 
     it('renders a sub-item with nowhere to go as text rather than a link', async () => {

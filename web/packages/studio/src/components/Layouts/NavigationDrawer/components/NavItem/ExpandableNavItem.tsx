@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronDown, ChevronRight } from '@nemo/icons/icons';
 import { Button, VerticalNavListItem, VerticalNavSubList } from '@nvidia/foundations-react-core';
 import { NavSubItem } from '@studio/components/Layouts/NavigationDrawer/components/NavItem/NavSubItem';
 import { StudioNavItem } from '@studio/components/Layouts/NavigationDrawer/components/StudioNavItem';
 import { SUB_LIST_CLASS } from '@studio/components/Layouts/NavigationDrawer/styles';
 import type { NavItem as NavItemData } from '@studio/components/Layouts/NavigationDrawer/types';
 import { resolveActive } from '@studio/components/Layouts/NavigationDrawer/utils';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { FC } from 'react';
 import { NavLink } from 'react-router';
 

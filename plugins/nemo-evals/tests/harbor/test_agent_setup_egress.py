@@ -180,6 +180,45 @@ async def test_setup_runs_inside_the_window(tmp_path, monkeypatch):
     assert events == ["open", "setup", "close"]
 
 
+class _CodexInstallEnvironment:
+    """Records each command and whether the setup window was open when it ran; codex starts uninstalled."""
+
+    def __init__(self) -> None:
+        self.open = False
+        self.commands: list[tuple[str, bool]] = []
+
+    @asynccontextmanager
+    async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
+        self.open = True
+        try:
+            yield
+        finally:
+            self.open = False
+
+    async def exec(self, command: str, **_: Any) -> ExecResult:
+        self.commands.append((command, self.open))
+        if command.startswith("for manager in"):
+            return ExecResult(stdout="apt-get", return_code=0)
+        if command.startswith("command -v") or command.endswith("command -v codex >/dev/null 2>&1"):
+            return ExecResult(return_code=1)  # neither codex nor its system packages are in the image
+        return ExecResult(stdout="codex-cli 0.153.0", return_code=0)
+
+
+async def test_codex_installs_inside_the_window(tmp_path):
+    """Harbor's codex downloads itself in setup, so every install command must run while the hosts are open."""
+    from harbor.agents.installed.codex import Codex
+
+    agent = _agent(tmp_path, inner="codex", hosts=SETUP_HOSTS)
+    assert isinstance(agent, Codex)
+    environment = _CodexInstallEnvironment()
+    await agent.setup(environment)
+    commands = [command for command, _ in environment.commands]
+    assert any("apt-get" in command and "install" in command for command in commands), commands
+    assert any("npm install -g @openai/codex" in command for command in commands), commands
+    assert all(open_ for _, open_ in environment.commands)
+    assert not environment.open
+
+
 async def test_a_failed_setup_still_closes_the_window(tmp_path, monkeypatch):
     events: list[str] = []
 

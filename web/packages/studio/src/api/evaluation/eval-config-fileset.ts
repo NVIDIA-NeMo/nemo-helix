@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isConflictError, isNotFoundError } from '@nemo/common/src/api/common/utils';
 import {
   filesCreateFileset,
   filesListFilesetFiles,
@@ -10,16 +11,6 @@ import {
 // Idempotent seeding of an eval-config fileset, shared by the agent-evaluation
 // submit flow (which supplies its own `eval-config.json`) and the optimizer
 // apply flow (which relies on the bundled react-eval default below).
-
-const isNotFoundError = (err: unknown): boolean => {
-  const e = err as { response?: { status?: number }; status?: number };
-  return e?.response?.status === 404 || e?.status === 404;
-};
-
-export const isConflictError = (err: unknown): boolean => {
-  const e = err as { response?: { status?: number }; status?: number };
-  return e?.response?.status === 409 || e?.status === 409;
-};
 
 const isCanceledError = (err: unknown): boolean => {
   const e = err as { name?: string; code?: string };

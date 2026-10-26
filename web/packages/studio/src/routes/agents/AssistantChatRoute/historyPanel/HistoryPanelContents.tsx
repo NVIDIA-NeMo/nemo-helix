@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { ChatNew, Refresh } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { Empty } from '@studio/components/Empty';
 import {
@@ -15,7 +16,6 @@ import { HistorySessionButton } from '@studio/routes/agents/AssistantChatRoute/h
 import type { AssistantHistoryPanelProps } from '@studio/routes/agents/AssistantChatRoute/historyPanel/types';
 import type { AssistantHistorySession } from '@studio/routes/agents/AssistantChatRoute/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { MessageSquarePlus, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
 export const HistoryPanelContents = ({
@@ -59,7 +59,7 @@ export const HistoryPanelContents = ({
             className="min-w-0 flex-1"
             onClick={onNewChat}
           >
-            <MessageSquarePlus size={16} />
+            <ChatNew size="16" />
             <Text kind="label/bold/md">New chat</Text>
           </Button>
           <Tooltip slotContent="Refresh history">
@@ -71,7 +71,7 @@ export const HistoryPanelContents = ({
               disabled={isLoading}
               onClick={() => void refetch()}
             >
-              <RefreshCw size={16} />
+              <Refresh size="16" />
             </Button>
           </Tooltip>
         </Flex>

@@ -224,7 +224,7 @@ result = job.get_result()
 
 ### `ModelRef` (supported by `evaluator.submit(...)`)
 
-Durable remote `evaluator.submit(...)` jobs additionally accept a `ModelRef` target. A `ModelRef` names a platform model entity (`workspace/model-name`) and is resolved by the evaluator backend when the job runs, so you do not have to resolve the endpoint yourself. Use this for platform-managed model routing. A `ModelRef` target generates outputs online, so it requires an online run config (`RunConfigOnlineModel`):
+Durable remote `evaluator.submit(...)` jobs additionally accept a `ModelRef` target. A `ModelRef` names a model the Inference Gateway serves, a platform model entity or a virtual model (`workspace/name`), and is resolved by the evaluator backend when the job runs, so you do not have to resolve the endpoint yourself. Use this for platform-managed model routing. A `ModelRef` target generates outputs online, so it requires an online run config (`RunConfigOnlineModel`):
 
 ```python
 from nhx_evals_sdk import ModelRef, RunConfigOnlineModel

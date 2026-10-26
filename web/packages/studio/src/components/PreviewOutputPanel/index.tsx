@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ChevronDown, ChevronRight } from '@nemo/icons/icons';
 import {
   Button,
   CodeSnippet,
@@ -12,7 +13,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { type ComponentProps, type FC, useState } from 'react';
 
 type CodeSnippetLanguage = NonNullable<ComponentProps<typeof CodeSnippet>['language']>;
@@ -57,7 +57,7 @@ export const PreviewOutputPanel: FC<Props> = ({
           aria-label={collapsed ? 'Expand preview' : 'Collapse preview'}
           aria-expanded={!collapsed}
         >
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          {collapsed ? <ChevronRight size="14" /> : <ChevronDown size="14" />}
         </Button>
         <Flex gap="2" align="center" className="min-w-0 flex-1" justify="between">
           <Text kind="body/bold/sm" className="shrink-0">

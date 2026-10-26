@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
+import { Close } from '@nemo/icons/icons';
 import { useModelsListModels as useListModels } from '@nemo/sdk/generated/platform/models';
 import {
   Button,
@@ -12,7 +13,6 @@ import {
   ComboboxItem,
 } from '@nvidia/foundations-react-core';
 import { keepPreviousData } from '@tanstack/react-query';
-import { X } from 'lucide-react';
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { useDebounce } from 'use-debounce';
 
@@ -109,7 +109,7 @@ export const SearchBaseModels = ({ workspace, selectedModels, setSelectedModels 
                 setSelectedModels(selectedModels.filter((selectedModel) => selectedModel !== model))
               }
             >
-              <X />
+              <Close />
             </Button>
           </li>
         ))}

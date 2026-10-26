@@ -131,6 +131,7 @@ overrides:
   antlr4-python3-runtime: BSD-3-Clause # ANTLR 4 runtime; via latex2sympy2-extended <- math-verify
   expandvars: MIT # Shell-style env var expansion
   ply: BSD-3-Clause # Python Lex-Yacc (parsing)
+  semver: BSD-3-Clause # python-semver; via harbor. Its License field holds the full BSD-3-Clause text
 
   # CLI / Terminal
   click-plugins: BSD-3-Clause # Click plugin system

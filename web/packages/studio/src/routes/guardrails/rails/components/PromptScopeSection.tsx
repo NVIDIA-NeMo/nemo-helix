@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Add, Close } from '@nemo/icons/icons';
 import {
   Button,
   Flex,
@@ -13,7 +14,6 @@ import {
   TextInput,
 } from '@nvidia/foundations-react-core';
 import type { RailScope } from '@studio/routes/guardrails/rails/types';
-import { Plus, X } from 'lucide-react';
 import { type FC, useRef, useState } from 'react';
 
 /**
@@ -146,7 +146,7 @@ export const PromptScopeSection: FC<PromptScopeSectionProps> = ({
                 onClick={() => insertVariable(variable)}
                 aria-label={`Insert ${variable} into ${title.toLowerCase()}`}
               >
-                <Plus size={14} />
+                <Add size="14" />
                 {variable}
               </Button>
             ))}
@@ -197,7 +197,7 @@ export const PromptScopeSection: FC<PromptScopeSectionProps> = ({
                   aria-label={`Remove stop sequence ${token}`}
                 >
                   {token}
-                  <X size={12} />
+                  <Close size="12" />
                 </Tag>
               ))}
             </Flex>

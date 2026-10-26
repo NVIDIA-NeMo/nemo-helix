@@ -155,6 +155,9 @@ EXAMPLES: dict[str, list[str]] = {
         "ValueError: No best checkpoint found",
         "FileNotFoundError: No epoch_step checkpoint directories found in /var/run/scratch/job/training/checkpoints",
     ],
+    "resume_checkpoint_missing": [
+        "nhx.customization_common.training.pause.ResumeCheckpointMissingError: Cannot resume: training paused at step 9, but no complete checkpoint was found in /var/run/scratch/job/training/checkpoints."
+    ],
     "checkpoint_already_published": [
         "FileExistsError: Checkpoint directory /var/run/scratch/job/training/checkpoints/epoch_1_step_99 already holds a published checkpoint. Remove it, or point checkpoint.checkpoint_dir at a fresh directory, before re-running this step."
     ],

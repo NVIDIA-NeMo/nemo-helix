@@ -17,6 +17,26 @@ Resource names for deployments, deployment configs, and providers must contain o
 
 </Note>
 
+<a id="choose-an-inference-engine"></a>
+## Choose an Inference Engine
+
+The `engine` field on a deployment config selects how the platform serves the model. We recommend vLLM unless you need a NIM.
+
+| Engine and Image | Platform Default Image | Use When | Supported Models |
+| ---------------- | ---------------------- | -------- | ---------------- |
+| **vLLM** (`engine: vllm`), recommended | `docker.io/vllm/vllm-openai`, pinned to a tested tag | Hugging Face checkpoints and models trained with Customizer | Architectures the bundled vLLM version supports; see [vLLM supported models](https://docs.vllm.ai/en/latest/models/supported_models.html) |
+| **Model-free NIM** (`engine: nim`) | `nvcr.io/nim/nvidia/vllm-model-free-nim:latest`; set `image_name` to `nvcr.io/nim/nvidia/sglang-model-free-nim` for SGLang | You want a NIM for a Hugging Face checkpoint that has no model-specific NIM | [Model-free NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim) |
+| **Model-specific NIM** (`engine: nim`) | None; set `image_name` and `image_tag` | Production serving of a model that NVIDIA publishes as a NIM | [NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html) |
+| **Multi-LLM NIM** (`engine: nim`), NIM 1.x | None; set `image_name` to `nvcr.io/nim/nvidia/llm-nim` | Existing NIM 1.x deployments only | [Multi-LLM NIM supported architectures](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html) |
+
+The model-free NIM is the NIM 2.x successor to the multi-LLM NIM. It is not a rename: each model-free NIM image bundles one engine, vLLM (`vllm-model-free-nim`) or SGLang (`sglang-model-free-nim`), and reads a different configuration than NIM 1.x. Use the model-free NIM instead of the multi-LLM NIM for new deployments; see the [NIM 1.x migration guide](https://docs.nvidia.com/nim/large-language-models/latest/reference/1.x-migration-guide.html). The platform sets the configuration that each NIM version reads.
+
+<Warning>
+
+The multi-LLM NIM cannot serve merged LoRA checkpoints from Customizer (`finetuning_type: lora_merged`). The merge step saves the model config and tokenizer with transformers 5, and the multi-LLM NIM 1.15 uses transformers 4.56. Deploy those models with [vLLM](#deploy-with-vllm) or the model-free NIM.
+
+</Warning>
+
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
 
 The Python SDK examples on this page also use these imports:
@@ -31,6 +51,7 @@ from nemo_helix_plugin.files.metadata import FilesetMetadata, ModelMetadataConte
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.types import (
     ContainerExecutorConfig,
     CreateModelAdapterRequest,
@@ -108,11 +129,11 @@ client.models.wait_for_provider_status(provider_name="my-nvidia-build")
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-nvidia-build",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -169,11 +190,11 @@ client.models.wait_for_provider_status(provider_name="openai")
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="openai",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "gpt-4",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -299,11 +320,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="llama-3-2-1b-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -369,7 +390,7 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="nemoguard-jailbreak-deployment",
     trailing_uri="v1/classify",
-    body={"input": "Tell me about vacation spots in Hawaii."},
+    body=JsonBody({"input": "Tell me about vacation spots in Hawaii."}),
 )
 ```
 
@@ -382,7 +403,9 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 
 <Warning>
 
-A NIM deployment config that sets no image uses the platform default, the [multi-LLM NIM](https://docs.nvidia.com/nim/large-language-models/1.15.0/introduction.html) (`nvcr.io/nim/nvidia/llm-nim:latest`), which only supports specific model architectures. Check the [supported architectures list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html) before deploying. If your model architecture is not listed, use a model-specific NIM image (see [Deploy from NGC](#deploy-from-ngc)) or [deploy with vLLM](#deploy-with-vllm).
+A NIM deployment config that sets no image uses the platform default, the [model-free NIM](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-free-nim.html) (`nvcr.io/nim/nvidia/vllm-model-free-nim:latest`), which only serves architectures that its vLLM version supports. Check its [support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim) before deploying. If your model architecture is not supported, use a model-specific NIM image (see [Deploy from NGC](#deploy-from-ngc)) or [deploy with vLLM](#deploy-with-vllm).
+
+The model-free NIM is the NIM 2.x successor to the [multi-LLM NIM](https://docs.nvidia.com/nim/large-language-models/1.15.0/introduction.html) (`nvcr.io/nim/nvidia/llm-nim`); see [Choose an Inference Engine](#choose-an-inference-engine). To use the multi-LLM NIM, set `image_name` to `nvcr.io/nim/nvidia/llm-nim` and check its [supported architectures](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html). It uses the `latest` tag unless you set `image_tag`, and it cannot serve merged LoRA checkpoints from Customizer.
 
 To serve models trained with Customizer, we recommend [deploying with vLLM](#deploy-with-vllm).
 
@@ -492,11 +515,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen-fs-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/qwen-2-5-1-5b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -602,11 +625,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen3-vllm-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/qwen3-1-7b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -617,6 +640,16 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 ### Deploy with LoRA Adapters
 
 vLLM deployments support LoRA adapters with hot-reload: enable LoRA on the deployment config, then register one or more adapters against the base model entity. An adapter sidecar delivers each enabled adapter to the running server, and vLLM serves it on a per-request basis. Adapters are registered on the **base model entity**, not as separate models.
+
+A deployment loads adapters up to a maximum rank and refuses adapters of a higher rank. Set the maximum to at least the highest rank you serve:
+
+| Engine and Image | Default Maximum Rank | To Raise It |
+| ---------------- | -------------------- | ----------- |
+| vLLM | 16 | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
+| Model-free NIM (vLLM or SGLang) | 16 | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Multi-LLM NIM | 32 | `executor_config.additional_envs`: `{"NIM_MAX_LORA_RANK": "<rank>"}` |
+
+vLLM accepts `--max-lora-rank` values of 1, 8, 16, 32, 64, 128, 256, 320, and 512.
 
 This example serves the [linear-algebra LoRA](https://huggingface.co/premjatin/qwen-linear-algebra-coder) on top of Qwen3-1.7B.
 
@@ -751,13 +784,13 @@ client.models.create_model_adapter(
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen3-lora-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default--linear-algebra",
         "messages": [
             {"role": "user", "content": "Find the determinant of [[2, 1], [1, 3]]."}
         ],
         "max_tokens": 256,
-    },
+    }),
 )
 ```
 
@@ -827,11 +860,15 @@ For larger models requiring multiple GPUs, parallelism configuration depends on 
 
 Model-specific NIMs (for example, `nvcr.io/nim/meta/llama-3.1-70b-instruct`) have TP/PP settings derived from manifest profiles in the container. Configure enough GPUs and the NIM selects the appropriate profile automatically.
 
+### Model-Free NIM
+
+The model-free NIM (`nvcr.io/nim/nvidia/vllm-model-free-nim:latest`), the platform's default NIM image, generates profiles at startup for tensor parallelism 1, 2, 4, or 8 and pipeline parallelism 1, 2, or 4, and selects one that fits the GPUs and memory it sees. The selected split need not use all `gpu` GPUs; for example, with `gpu: 3` no profile uses all three. To control the split, set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`; these override the selected profile. See [Model Profiles and Selection](https://docs.nvidia.com/nim/large-language-models/latest/deployment/model-profiles-and-selection.html).
+
 ### Multi-LLM NIM
 
-The multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:latest`), the platform's default NIM image, uses all GPUs for tensor parallelism by default (TP = `gpu`, PP = 1). To split the GPUs differently, set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`.
+The multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim`) uses all GPUs for tensor parallelism by default (TP = `gpu`, PP = 1). To split the GPUs differently, set `NIM_TENSOR_PARALLEL_SIZE` and `NIM_PIPELINE_PARALLEL_SIZE` in `additional_envs` so that their product equals `gpu`.
 
-This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) across 2 GPUs using tensor parallelism.
+This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) across 2 GPUs using tensor parallelism. Setting `NIM_TENSOR_PARALLEL_SIZE` works on both the model-free NIM and the multi-LLM NIM.
 
 <Tabs>
 
@@ -914,11 +951,11 @@ client.models.wait_for_deployment_status(
 response = InferenceGatewayClient.from_client(client).model_post(
     name="qwen-2-5-14b",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/qwen-2-5-14b",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
-    },
+    }),
 )
 ```
 
@@ -1011,7 +1048,7 @@ When both are set, deployment config values override fileset values.
 
 1. User sets `chat_template`, `tool_call_parser`, `tool_call_plugin`, and/or `auto_tool_choice` on the fileset via `metadata.model.tool_calling`
 2. The model-spec background task reads the fileset's `metadata.model.tool_calling` and writes them into the model entity's `spec`
-3. At deployment time, the platform reads `model_entity.spec` and any deployment-level overrides to set NIM environment variables
+3. At deployment time, the platform reads `model_entity.spec` and any deployment-level overrides and passes them to NIM (see [NIM Configuration Mapping](#nim-configuration-mapping))
 
 ```mermaid
 flowchart LR
@@ -1350,7 +1387,7 @@ client.models.create_model(
 </Tab>
 
 </Tabs>
-The platform downloads the plugin fileset at deployment time and passes the `.py` file path to NIM via the `NIM_TOOL_PARSER_PLUGIN` environment variable.
+The platform downloads the plugin fileset at deployment time and passes the `.py` file path to NIM: through the `NIM_TOOL_PARSER_PLUGIN` environment variable on NIM 1.x images, and through the `--tool-parser-plugin` flag on the vLLM model-free NIM. The SGLang model-free NIM does not support parser plugins.
 
 ### Tool Call Config Reference
 
@@ -1360,16 +1397,18 @@ The platform downloads the plugin fileset at deployment time and passes the `.py
 | `tool_call_plugin` | `string` | Fileset reference (`workspace/fileset-name`) containing a custom plugin `.py` file |
 | `auto_tool_choice` | `boolean` | When `true`, the model can decide to call tools without explicit user instruction |
 
-### NIM Environment Variable Mapping
+### NIM Configuration Mapping
 
-The platform translates tool calling configuration into NIM environment variables:
+NIM 1.x images read tool calling configuration from environment variables. The model-free NIM (NIM 2.x) does not read those variables; it takes backend flags in `NIM_PASSTHROUGH_ARGS` instead. The platform sets whichever the deployment's image reads:
 
-| Metadata Field | NIM Environment Variable | Example Value |
-|--------------|--------------------------|---------------|
-| `tool_calling.chat_template` | `NIM_CHAT_TEMPLATE` | Jinja2 template string |
-| `tool_calling.tool_call_parser` | `NIM_TOOL_CALL_PARSER` | `llama3_json` |
-| `tool_calling.tool_call_plugin` | `NIM_TOOL_PARSER_PLUGIN` | `/path/to/my_parser.py` |
-| `tool_calling.auto_tool_choice` | `NIM_ENABLE_AUTO_TOOL_CHOICE` | `1` or `0` |
+| Metadata Field | NIM 1.x Environment Variable | Model-Free NIM Flag (in `NIM_PASSTHROUGH_ARGS`) |
+|--------------|------------------------------|--------------------------------------------------|
+| `tool_calling.chat_template` | `NIM_CHAT_TEMPLATE` (Jinja2 template string) | `--chat-template` (the platform writes the template to a file in the container) |
+| `tool_calling.tool_call_parser` | `NIM_TOOL_CALL_PARSER` (for example, `llama3_json`) | `--tool-call-parser` |
+| `tool_calling.tool_call_plugin` | `NIM_TOOL_PARSER_PLUGIN` (plugin file path) | `--tool-parser-plugin` (vLLM only; the deployment fails on the SGLang model-free NIM) |
+| `tool_calling.auto_tool_choice` | `NIM_ENABLE_AUTO_TOOL_CHOICE` (`1` or `0`) | `--enable-auto-tool-choice` (when `true`; not set on the SGLang model-free NIM, which rejects the flag) |
+
+On the model-free NIM, the platform places these flags before any `NIM_PASSTHROUGH_ARGS` you set in `executor_config.additional_envs`. NIM keeps the last value of a repeated flag, so your own flags take precedence. Parser names differ between vLLM and SGLang, so set a `tool_call_parser` that the image's engine supports.
 
 ---
 
@@ -1398,12 +1437,12 @@ nemo inference gateway provider post v1/chat/completions "my-deployment" \
 response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-deployment",
     trailing_uri="v1/chat/completions",
-    body={
+    body=JsonBody({
         "model": "default/my-model",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
         "chat_template_kwargs": {"enable_thinking": False},
-    },
+    }),
 )
 ```
 

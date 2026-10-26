@@ -136,6 +136,7 @@ The full list (about 40 bullets, including all rl/GRPO environment pitfalls) is 
 - **Named model → start from its recipe** in `references/recipes.md`. Nemotron needs Hopper/Blackwell GPUs; train the **BF16** checkpoint for Nemotron MoE.
 - **Unsloth is single-GPU per job** (no `parallelism` block); multi-GPU sharding → automodel.
 - **LoRA adapters hot-reload** onto a READY `lora_enabled: true` deployment; full-weight/merged outputs register a new model entity you must deploy. Eval routing: `references/post-training-eval.md`.
+- **Deploy with vLLM by default.** For NIM, prefer the model-free NIM over the multi-LLM NIM (`llm-nim`), which cannot serve `lora_merged` outputs. See `references/post-training-eval.md` § **Pick the engine**.
 - **GRPO:** needs TWO filesets (environment + dataset) and **no environment supplied ⇒ stop and ask** (below); the environment package must contain no `.jsonl`; validate with `pi-to-gym-conversion --validate-only <dir>` before upload; report progress on **reward, not loss**. DPO: one `dataset` string ref holding both `training.jsonl` and `validation.jsonl`.
 
 ### No environment supplied (GRPO)

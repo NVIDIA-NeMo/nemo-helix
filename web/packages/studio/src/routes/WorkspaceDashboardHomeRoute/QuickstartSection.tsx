@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
+import { Sparkle, Upload, Close } from '@nemo/icons/icons';
 import { Button, Flex, Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import {
-  AGENTS_ENABLED,
   CUSTOMIZER_ENABLED,
-  DATASETS_ENABLED,
-  DEPLOYMENTS_ENABLED,
   EVALS_ENABLED,
   EXPERIMENT_ENABLED,
   INTAKE_ENABLED,
@@ -32,7 +30,6 @@ import {
   type DashboardPanelAction,
 } from '@studio/routes/WorkspaceDashboardRoute/DashboardPanel';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
-import { Sparkles, Upload, X } from 'lucide-react';
 import { useState, type FC, type ReactNode } from 'react';
 
 export interface QuickstartSectionProps {
@@ -73,14 +70,14 @@ interface QuickstartPanelConfig {
 export const QuickstartSection: FC<QuickstartSectionProps> = ({
   workspace,
   onDismiss,
-  agentsEnabled = AGENTS_ENABLED,
+  agentsEnabled = true,
   evalsEnabled = EVALS_ENABLED,
   optimizerEnabled = OPTIMIZER_ENABLED,
   intakeEnabled = INTAKE_ENABLED,
   experimentEnabled = EXPERIMENT_ENABLED,
   customizerEnabled = CUSTOMIZER_ENABLED,
-  datasetsEnabled = DATASETS_ENABLED,
-  deploymentsEnabled = DEPLOYMENTS_ENABLED,
+  datasetsEnabled = true,
+  deploymentsEnabled = true,
 }) => {
   const [dismissed, setDismissed] = useLocalStorage<boolean>(getQuickstartDismissedKey(workspace));
   const [sampleModalOpen, setSampleModalOpen] = useState(false);
@@ -207,7 +204,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           <Flex align="center" gap="density-sm">
             {canCreateSample && (
               <Button kind="secondary" size="small" onClick={() => setSampleModalOpen(true)}>
-                <Sparkles className="size-4" />
+                <Sparkle className="size-4" />
                 Try a Sample Agent
               </Button>
             )}
@@ -218,7 +215,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
               aria-label="Dismiss Quickstart"
               onClick={handleDismiss}
             >
-              <X className="size-4" />
+              <Close className="size-4" />
             </Button>
           </Flex>
         </Flex>

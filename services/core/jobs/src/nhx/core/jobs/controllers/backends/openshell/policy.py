@@ -5,10 +5,10 @@
 
 This is a separate copy from the deployments plugin's policy builder, so the
 jobs service does not depend on that plugin. It follows that builder with
-job-specific defaults: the task venv and scratch storage shape of the
-nhx-tasks-openshell image, and an egress allowlist restricted to the
-jobs-launcher and the task interpreter. Unlike that builder, a ``policy_path``
-file is layered over the generated policy.
+job-specific defaults: read-only system and image paths, /tmp for job scratch
+storage, and an egress allowlist restricted to the jobs-launcher and the task
+interpreter. Unlike that builder, a ``policy_path`` file is layered over the
+generated policy.
 
 Everything here is a property of the *sandbox*, not of a job: plain structured
 inputs in, a policy proto out.
@@ -22,14 +22,16 @@ from typing import TYPE_CHECKING, Any, Literal
 import yaml
 from google.protobuf import json_format
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
+from nemo_helix_plugin.jobs.constants import OPENSHELL_JOB_LAUNCHER_PATH
 
 if TYPE_CHECKING:
     from openshell._proto import sandbox_pb2 as sb  # ty: ignore[unresolved-import]
 
-# Filesystem shape of the nhx-tasks-openshell image (Dockerfile.nhx-tasks):
-# /app holds the read-only venv, /tools the baked jobs-launcher, /var/run/scratch
-# the task/job/config storage paths the jobs controller sets, /home/sandbox the
-# sandbox identity's home. /dev/shm is the launcher's marker tmpfs.
+# Read-only system paths plus the venv and launcher locations of the nhx-tasks-openshell
+# image (/app, /tools); paths an image lacks are skipped. The image WORKDIR is writable
+# via include_workdir, /tmp holds the job scratch storage the jobs controller sets,
+# /var/run/scratch is the scratch tree nhx-tasks-openshell creates (tasks that default
+# to /var/run/scratch/job write there), and /home/sandbox is the sandbox identity's home. /dev/shm is the launcher's marker tmpfs.
 DEFAULT_READ_ONLY: tuple[str, ...] = (
     "/usr",
     "/bin",
@@ -54,13 +56,14 @@ DEFAULT_RUN_AS_GROUP = "sandbox"
 # docker-driver happy path; harden via the profile config.
 DEFAULT_LANDLOCK_COMPATIBILITY: Literal["best_effort", "hard_requirement"] = "best_effort"
 
-# The only binaries allowed to open the platform egress connection: the
-# jobs-launcher (step-config and secrets fetch) and the task interpreter that
-# talks to the platform (files, entities, ...). OpenShell matches the resolved
-# executable, so the venv symlink (/app/.venv/bin/python -> the base image
-# interpreter) never matches; the real path is the base image's interpreter.
-# Binary paths are globs where `*` stays within one path component.
-DEFAULT_EGRESS_BINARIES: tuple[str, ...] = ("/tools/jobs-launcher", "/usr/local/bin/python3*")
+# The task interpreters allowed to open the platform egress connection (files,
+# entities, ...). The backend adds the configured jobs-launcher (step-config and
+# secrets fetch). OpenShell matches the resolved executable, so a venv symlink never
+# matches; the real path is the base interpreter: /usr/local/bin for the python base
+# images (nhx-tasks), /opt/uv/python/<version> for uv-managed python (images built by
+# `nemo agents package`). Binary paths are globs where `*` stays within one path
+# component.
+DEFAULT_EGRESS_BINARIES: tuple[str, ...] = ("/usr/local/bin/python3*", "/opt/uv/python/*/bin/python3*")
 
 # Map key for the mandatory platform egress rule. Reserved: injected into every
 # policy, so a user rule at this key is overwritten rather than merged.
@@ -120,7 +123,7 @@ class HelixEgress:
     tls: str = ""
     access: str = "full"
     enforcement: str = "enforce"
-    binaries: tuple[str, ...] = DEFAULT_EGRESS_BINARIES
+    binaries: tuple[str, ...] = (OPENSHELL_JOB_LAUNCHER_PATH, *DEFAULT_EGRESS_BINARIES)
     name: str = "nemo-helix-egress"
     key: str = PLATFORM_EGRESS_KEY
 

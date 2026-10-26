@@ -84,3 +84,17 @@ test("successful nightly notification requires the instance URL secret", async (
     /NIGHTLY_INSTANCE_URL secret is required/,
   );
 });
+
+test("pending smoke checks appear only for a successful scheduled release", async () => {
+  assert.match(
+    await notificationText(releaseEnv({ SMOKE_CHECKS_PENDING: "true" })),
+    /Smoke checks pending/,
+  );
+  for (const env of [
+    releaseEnv(),
+    releaseEnv({ SMOKE_CHECKS_PENDING: "false" }),
+    releaseEnv({ SMOKE_CHECKS_PENDING: "true", POLL_RESULT: "failure" }),
+  ]) {
+    assert.doesNotMatch(await notificationText(env), /Smoke checks pending/);
+  }
+});

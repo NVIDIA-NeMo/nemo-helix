@@ -9,8 +9,8 @@ import {
   MESSAGE_ACTIONS_CLASS,
 } from '@nemo/common/src/components/AssistantChat/messageActions';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
+import { Pencil } from '@nemo/icons/icons';
 import { Tooltip } from '@nvidia/foundations-react-core';
-import { Pencil } from 'lucide-react';
 
 export const UserMessage = ({ messageContentProps, toolCallPartComponent }: MessageRenderProps) => (
   <MessagePrimitive.Root
@@ -28,7 +28,7 @@ export const UserMessage = ({ messageContentProps, toolCallPartComponent }: Mess
       <ActionBarPrimitive.Root hideWhenRunning className={MESSAGE_ACTIONS_CLASS}>
         <Tooltip slotContent="Edit message">
           <ActionBarPrimitive.Edit aria-label="Edit message" className={ACTION_BUTTON_CLASS}>
-            <Pencil size={16} />
+            <Pencil size="16" />
           </ActionBarPrimitive.Edit>
         </Tooltip>
         <CopyAction />

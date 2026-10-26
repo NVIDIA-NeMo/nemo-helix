@@ -4,6 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
+import { InfoCircle } from '@nemo/icons/icons';
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   Banner,
@@ -40,7 +41,6 @@ import {
 import { MODEL_EVAL_CONFIG_DESCRIPTION } from '@studio/components/evaluation/submitEvaluationJob';
 import { LINK_EVAL_DOCS } from '@studio/constants/links';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
-import { Info } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form';
 
@@ -90,7 +90,7 @@ const startItems = (rerunDisabled: boolean) => [
           <Text kind="label/bold/md">Re-run an existing evaluation</Text>
           {rerunDisabled && (
             <Tooltip slotContent="No saved evaluation configurations to re-run.">
-              <Info size={14} aria-label="Why is this option disabled?" />
+              <InfoCircle size="14" aria-label="Why is this option disabled?" />
             </Tooltip>
           )}
         </Flex>

@@ -14,6 +14,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   getModelsListModelsQueryKey,
   useModelsDeleteModel,
@@ -49,7 +50,6 @@ import {
   getWorkspaceCustomizationJobDetailsRoute,
 } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 

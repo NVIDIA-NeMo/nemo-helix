@@ -13,8 +13,11 @@ import pytest
 pytest.importorskip("harbor", reason="FabricInstalledAgent builds on Harbor's BaseInstalledAgent")
 
 import harbor
+from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
+from harbor.models.task.config import MCPServerConfig
+from nemo_fabric import FabricConfigError
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
     DEFAULT_FABRIC_MAX_TURNS,
@@ -94,6 +97,23 @@ def test_it_is_an_installed_agent_wrapping_a_fabric_agent(tmp_path: Path) -> Non
     assert type(agent).setup is BaseInstalledAgent.setup
     assert agent.capabilities.atif is True
     assert agent.fabric._build_spec("write hello.txt").config.models["default"].api_key_env == "NVIDIA_API_KEY"
+
+
+def test_harbor_admits_skills_and_mcp_servers(tmp_path: Path) -> None:
+    """Harbor 0.24 refuses a task's skills or MCP servers unless the agent declares them; 0.23 has no such fields."""
+    declared = _agent(tmp_path).capabilities.model_dump()
+    expected = [field for field in ("atif", "skills", "mcp_servers") if field in AgentCapabilities.model_fields]
+
+    assert expected and all(declared[field] is True for field in expected)
+
+
+def test_mcp_servers_the_adapter_cannot_implement_fail_at_construction(tmp_path: Path) -> None:
+    """Declaring support lets Harbor through; the wrapped agent still refuses what the adapter can't do."""
+    config = {**_CONFIG, "harness": {"adapter_id": "nvidia.fabric.mini-swe-agent"}}
+    server = MCPServerConfig(name="search", transport="streamable-http", url="http://mcp.example/mcp")
+
+    with pytest.raises(FabricConfigError, match="mcp"):
+        _agent(tmp_path, fabric_config=config, mcp_servers=[server])
 
 
 async def test_state_harbor_assigns_after_construction_reaches_the_wrapped_agent(tmp_path: Path) -> None:

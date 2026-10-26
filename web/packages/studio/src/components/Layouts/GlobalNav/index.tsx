@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Collapse, Expand } from '@nemo/icons/icons';
 import { AppBar, Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/components/DocumentationLink';
 import { ThemeSwitch } from '@studio/components/Layouts/GlobalNav/components/ThemeSwitch';
 import { UserPopover } from '@studio/components/UserPopover';
-import { FLAG_OVERRIDES_ENABLED, TOUR_ENABLED } from '@studio/constants/environment';
+import { FLAG_OVERRIDES_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { AssistantTopBarChat } from '@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useSidebarState } from '@studio/util/hooks/useSidebarState';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { lazy, Suspense, type FC, type ReactNode } from 'react';
 import { Link, matchPath, useLocation } from 'react-router';
 
@@ -57,7 +57,7 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
         onClick={toggle}
         disabled={!sideNav}
       >
-        {expanded ? <PanelLeftClose /> : <PanelLeftOpen />}
+        {expanded ? <Collapse /> : <Expand />}
       </Button>
     </Tooltip>
   );
@@ -88,11 +88,9 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
         }
         slotEnd={
           <Flex gap="density-md" align="center">
-            {TOUR_ENABLED && (
-              <Suspense>
-                <WelcomeTour />
-              </Suspense>
-            )}
+            <Suspense>
+              <WelcomeTour />
+            </Suspense>
             {shouldMountAssistantTopBarChat && <AssistantTopBarChat />}
             {FLAG_OVERRIDES_ENABLED && (
               <Suspense>

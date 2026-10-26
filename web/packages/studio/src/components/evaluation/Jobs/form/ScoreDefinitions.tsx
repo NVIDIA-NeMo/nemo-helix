@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { InputErrorText } from '@nemo/common/src/components/InputErrorText';
+import { Pencil, Add, Trash } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   ScoreModal,
   type MetricPanelFormData,
   type PanelScoreFormData,
 } from '@studio/components/evaluation/Jobs/form/ScoreModal';
-import { Pencil, Plus, Trash } from 'lucide-react';
 import { FC, useState } from 'react';
 import { FieldError, useFormContext, useWatch } from 'react-hook-form';
 
@@ -60,7 +60,7 @@ export const ScoreDefinitions: FC = () => {
           onClick={() => setModalState({ mode: 'add' })}
         >
           <Flex gap="density-xs" align="center">
-            <Plus className="size-3.5" aria-hidden />
+            <Add className="size-3.5" aria-hidden />
             <Text kind="body/regular/sm">Add Score</Text>
           </Flex>
         </Button>
@@ -138,7 +138,7 @@ export const ScoreDefinitions: FC = () => {
             type="button"
             onClick={() => setModalState({ mode: 'add' })}
           >
-            <Plus className="size-3.5" aria-hidden />
+            <Add className="size-3.5" aria-hidden />
             Add Score
           </Button>
         </>

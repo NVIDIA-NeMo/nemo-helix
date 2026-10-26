@@ -4,8 +4,8 @@
 import { BadgeStatus, badgeStatus } from '@nemo/common/src/components/StatusBadge/badgeStatus';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge/index';
 import * as customQueries from '@nemo/common/src/tests/customQueries';
+import { CheckCircle } from '@nemo/icons/icons';
 import { queries, render, screen } from '@testing-library/react';
-import { CircleCheck } from 'lucide-react';
 
 const allQueries = {
   ...queries,
@@ -48,7 +48,7 @@ describe('StatusBadge component', () => {
 
     // Use querySelector with document to find SVG (escape hatch for SVG testing)
     // eslint-disable-next-line testing-library/no-node-access
-    const icon = document.querySelector('.lucide-refresh-cw');
+    const icon = document.querySelector('svg[width="12px"][height="12px"]');
     expect(icon).toBeInTheDocument();
     expect(icon).toHaveAttribute('width', '12px');
     expect(icon).toHaveAttribute('height', '12px');
@@ -59,7 +59,7 @@ describe('StatusBadge component', () => {
     render(<StatusBadge status="completed" />);
 
     // eslint-disable-next-line testing-library/no-node-access
-    const icon = document.querySelector('.lucide-circle-check');
+    const icon = document.querySelector('svg[width="12px"][height="12px"]');
     expect(icon).toBeInTheDocument();
   });
 
@@ -143,7 +143,7 @@ describe('StatusBadge component', () => {
 
   describe('statusConfig prop (config-driven path)', () => {
     const STATUS_CONFIG = {
-      success: { label: 'Success', color: 'green' as const, icon: CircleCheck },
+      success: { label: 'Success', color: 'green' as const, icon: CheckCircle },
       error: { label: 'Error', color: 'red' as const },
     };
 

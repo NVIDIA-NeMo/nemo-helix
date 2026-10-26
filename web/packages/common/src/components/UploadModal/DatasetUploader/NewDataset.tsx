@@ -12,8 +12,8 @@
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { FileUpload } from '@nemo/common/src/components/UploadModal/FileUpload';
 import { SimpleFilesTable } from '@nemo/common/src/components/UploadModal/SimpleFilesTable';
+import { IconError } from '@nemo/icons/icons';
 import { Flex, FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
-import { CircleAlert } from 'lucide-react';
 import { FC } from 'react';
 
 /**
@@ -44,7 +44,7 @@ export const NewDataset: FC = () => {
         slotLabel="Dataset Name"
         slotError={
           <Flex gap="density-md" align="center">
-            <CircleAlert className="text-feedback-danger" />
+            <IconError className="text-feedback-danger" />
             <Text kind="label/regular/sm" className="text-feedback-danger">
               {errors?.datasetName}
             </Text>

@@ -9,11 +9,19 @@ import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { AxiosError, AxiosHeaders } from 'axios';
 import { BrowserRouter } from 'react-router';
 
 // Hoisted mocks for hooks the modal calls.
-const { mockMutate, mockUseRemoteRepoMetadata } = vi.hoisted(() => ({
+const { mockMutate, mockListFilesets, mockUseRemoteRepoMetadata } = vi.hoisted(() => ({
   mockMutate: vi.fn<(args: unknown) => Promise<FilesetOutput>>(),
+  mockListFilesets:
+    vi.fn<
+      (
+        workspace: string,
+        params: { filter?: { name?: string } }
+      ) => { data?: { data: unknown[] }; isFetching: boolean; isError: boolean }
+    >(),
   mockUseRemoteRepoMetadata: vi.fn<
     (
       url: string | undefined,
@@ -32,6 +40,15 @@ vi.mock('@nemo/sdk/generated/platform/files', async () => {
   return {
     ...actual,
     useFilesCreateFileset: () => ({ mutateAsync: mockMutate, isPending: false }),
+    // A disabled query sends nothing, so a test can assert that a name was never checked.
+    useFilesListFilesets: (
+      workspace: string,
+      params: { filter?: { name?: string } },
+      options?: { query?: { enabled?: boolean } }
+    ) =>
+      options?.query?.enabled === false
+        ? { data: undefined, isFetching: false, isError: false }
+        : mockListFilesets(workspace, params),
   };
 });
 
@@ -49,6 +66,21 @@ vi.mock('@studio/routes/SecretsListRoute/SecretSearchableSelect', () => ({
 vi.mock('@studio/routes/SecretsListRoute/CreateSecretModal', () => ({
   CreateSecretModal: () => null,
 }));
+
+const conflict = () =>
+  new AxiosError('Conflict', '409', undefined, undefined, {
+    status: 409,
+    data: {},
+    statusText: 'Conflict',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+  });
+
+const takenNameExists = (_workspace: string, params: { filter?: { name?: string } }) => ({
+  data: { data: params.filter?.name === 'taken' ? [FILESET_RESPONSE] : [] },
+  isFetching: false,
+  isError: false,
+});
 
 const FILESET_RESPONSE: FilesetOutput = {
   id: 'fs-id',
@@ -81,6 +113,8 @@ describe('FilesetCreateModal', () => {
     mockUseNavigate();
     mockMutate.mockReset();
     mockMutate.mockResolvedValue(FILESET_RESPONSE);
+    mockListFilesets.mockReset();
+    mockListFilesets.mockReturnValue({ data: { data: [] }, isFetching: false, isError: false });
     mockUseRemoteRepoMetadata.mockReset();
     mockUseRemoteRepoMetadata.mockReturnValue({ data: undefined, isFetching: false });
   });
@@ -287,6 +321,91 @@ describe('FilesetCreateModal', () => {
           expect.stringContaining('/workspaces/default/filesets/mymodel/detail?tab=files')
         );
       });
+    });
+  });
+
+  describe('name uniqueness', () => {
+    const renderDatasetModal = () => {
+      const Wrapper = makeWrapper();
+      render(
+        <Wrapper>
+          <FilesetCreateModal
+            open
+            onClose={vi.fn()}
+            workspace="default"
+            purpose={FilesetPurpose.dataset}
+          />
+        </Wrapper>
+      );
+    };
+
+    it('says where the name must be unique before anything is typed', () => {
+      renderDatasetModal();
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.getAttribute('data-testid') === 'nv-form-field-helper' &&
+            element.textContent === 'Fileset names must be unique within the default workspace.'
+        )
+      ).toBeInTheDocument();
+    });
+
+    it('flags a taken name inline and blocks submit', async () => {
+      mockListFilesets.mockImplementation(takenNameExists);
+      const user = userEvent.setup();
+      renderDatasetModal();
+
+      await user.type(screen.getByRole('textbox', { name: /^name$/i }), 'taken');
+
+      expect(
+        await screen.findByText('A fileset named taken already exists in the default workspace')
+      ).toBeInTheDocument();
+      expect(mockListFilesets).toHaveBeenCalledWith('default', {
+        page_size: 1,
+        filter: { name: 'taken' },
+      });
+      expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeDisabled();
+    });
+
+    it('confirms a free name with the workspace it will be created in', async () => {
+      mockListFilesets.mockImplementation(takenNameExists);
+      const user = userEvent.setup();
+      renderDatasetModal();
+
+      await user.type(screen.getByRole('textbox', { name: /^name$/i }), 'fresh');
+
+      await waitFor(() =>
+        expect(screen.getByTestId('nv-form-field-helper')).toHaveTextContent(
+          'Your fileset will be created as fresh in the default workspace'
+        )
+      );
+      expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeEnabled();
+    });
+
+    it('does not check a malformed name', async () => {
+      const user = userEvent.setup();
+      renderDatasetModal();
+
+      await user.type(screen.getByRole('textbox', { name: /^name$/i }), 'Bad Name');
+
+      // Uppercase fails the schema from the first keystroke, so nothing is ever looked up.
+      expect(mockListFilesets).not.toHaveBeenCalled();
+    });
+
+    it('puts a 409 on submit on the name field', async () => {
+      mockMutate.mockRejectedValue(conflict());
+      const user = userEvent.setup();
+      renderDatasetModal();
+
+      await user.type(screen.getByRole('textbox', { name: /^name$/i }), 'raced');
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Create Dataset' })).toBeEnabled()
+      );
+      await user.click(screen.getByRole('button', { name: 'Create Dataset' }));
+
+      expect(
+        await screen.findByText('A fileset named raced already exists in the default workspace')
+      ).toBeInTheDocument();
     });
   });
 });

@@ -12,6 +12,7 @@ import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import Runtime
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient, WorkspacesClient
 from nhx.common.auth import Principal
@@ -159,6 +160,15 @@ def test_create_test_client_auth_defaults_use_platform_base_url():
         platform_base_url = Configuration.get_platform_config().base_url
         assert platform_base_url == "http://127.0.0.1"
         assert Configuration.get_service_config(AuthConfig).policy_decision_point_base_url == platform_base_url
+
+
+def test_create_test_client_uses_docker_runtime_without_probing_docker(monkeypatch, mocker):
+    """Test that the default platform config keeps the docker runtime without pinging the daemon."""
+    monkeypatch.delenv("NHX_RUNTIME", raising=False)
+    probe = mocker.patch("nemo_helix_plugin.capabilities._probe_docker_uncached")
+    with create_test_client(EntitiesService, client_type=ClientContext):
+        assert Configuration.get_platform_config().runtime == Runtime.DOCKER
+    probe.assert_not_called()
 
 
 def test_create_test_client_creates_default_workspace():

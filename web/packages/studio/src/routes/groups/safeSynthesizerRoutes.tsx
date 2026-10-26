@@ -3,75 +3,63 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { SAFE_SYNTHESIZER_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateSafeSynthesizerRoutes, getWorkspaceSafeSynthesizerRoute } from '@studio/routes/utils';
+import { getWorkspaceSafeSynthesizerRoute } from '@studio/routes/utils';
 import { FC, lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
-const SafeSynthesizerListRoute =
-  SAFE_SYNTHESIZER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/SafeSynthesizerListRoute').then((m) => ({
-      default: m.SafeSynthesizerListRoute as FC,
-    }))
-  );
-const SafeSynthesizerNewRoute =
-  SAFE_SYNTHESIZER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/SafeSynthesizerNewRoute').then((m) => ({
-      default: m.SafeSynthesizerNewRoute as FC,
-    }))
-  );
-const GenerateJobDetailsRoute =
-  SAFE_SYNTHESIZER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/SafeSynthesizerJobDetailsRoute').then((m) => ({
-      default: m.GenerateJobDetailsRoute as FC,
-    }))
-  );
-const GenerateJobReportRoute =
-  SAFE_SYNTHESIZER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/SafeSynthesizerJobReportRoute').then((m) => ({
-      default: m.GenerateJobReportRoute as FC,
-    }))
-  );
+const SafeSynthesizerListRoute = lazy(() =>
+  import('@studio/routes/SafeSynthesizerListRoute').then((m) => ({
+    default: m.SafeSynthesizerListRoute as FC,
+  }))
+);
+const SafeSynthesizerNewRoute = lazy(() =>
+  import('@studio/routes/SafeSynthesizerNewRoute').then((m) => ({
+    default: m.SafeSynthesizerNewRoute as FC,
+  }))
+);
+const GenerateJobDetailsRoute = lazy(() =>
+  import('@studio/routes/SafeSynthesizerJobDetailsRoute').then((m) => ({
+    default: m.GenerateJobDetailsRoute as FC,
+  }))
+);
+const GenerateJobReportRoute = lazy(() =>
+  import('@studio/routes/SafeSynthesizerJobReportRoute').then((m) => ({
+    default: m.GenerateJobReportRoute as FC,
+  }))
+);
 
-export const safeSynthesizerRoutes: RouteObject[] = gateSafeSynthesizerRoutes([
+export const safeSynthesizerRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.safeSynthesizer,
-    element: SafeSynthesizerListRoute ? <SafeSynthesizerListRoute /> : null,
+    element: <SafeSynthesizerListRoute />,
     errorElement: <RouteErrorPanel title="Safe Synthesizer" />,
   },
   {
     path: ROUTES.workspace.safeSynthesizerNew,
-    element: SafeSynthesizerNewRoute ? <SafeSynthesizerNewRoute /> : null,
+    element: <SafeSynthesizerNewRoute />,
     errorElement: <RouteErrorPanel title="Safe Synthesizer" />,
   },
   {
     path: ROUTES.workspace.safeSynthesizerJob,
-    element: GenerateJobDetailsRoute ? <GenerateJobDetailsRoute /> : null,
+    element: <GenerateJobDetailsRoute />,
     errorElement: <RouteErrorPanel title="Safe Synthesizer" />,
   },
   {
     path: ROUTES.workspace.safeSynthesizerJobReport,
-    element: GenerateJobReportRoute ? <GenerateJobReportRoute /> : null,
+    element: <GenerateJobReportRoute />,
     errorElement: <RouteErrorPanel title="Safe Synthesizer" />,
   },
-]);
+];
 
 const NavIcon = ENTITY_ICONS.safeSynthesizerJobs;
 
-export const getSafeSynthesizerSideNavItems = (workspace: string) =>
-  SAFE_SYNTHESIZER_ENABLED
-    ? [
-        {
-          id: 'safeSynthesizer',
-          slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Safe Synthesizer',
-          href: getWorkspaceSafeSynthesizerRoute(workspace),
-        },
-      ]
-    : [];
+export const getSafeSynthesizerSideNavItems = (workspace: string) => [
+  {
+    id: 'safeSynthesizer',
+    slotIcon: <NavIcon className={iconColorClass} />,
+    slotLabel: 'Safe Synthesizer',
+    href: getWorkspaceSafeSynthesizerRoute(workspace),
+  },
+];

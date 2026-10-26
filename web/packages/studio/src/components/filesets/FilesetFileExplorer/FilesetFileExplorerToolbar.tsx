@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { MagnifyingGlass } from '@nemo/icons/icons';
 import { Button, Flex, TableToolbar, TextInput } from '@nvidia/foundations-react-core';
 import { BulkActionsBar } from '@studio/components/filesets/FilesetFileExplorer/BulkActionsBar';
 import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
-import { Search } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface FilesetFileExplorerToolbarProps {
@@ -70,7 +70,7 @@ export const FilesetFileExplorerToolbar: FC<FilesetFileExplorerToolbarProps> = (
         value={searchQuery}
         onValueChange={(value) => handleSearchQueryChange(value, clearSelectedItems)}
         placeholder="Search"
-        slotStart={<Search />}
+        slotStart={<MagnifyingGlass />}
         dismissible
         data-testid="dataset-details-search-input"
         className="min-w-0 flex-1"

@@ -324,7 +324,7 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
             "tasks": "default/sort-suite",
             "target": {
                 "kind": "harbor",
-                "source": {"name": "oracle", "model_name": None},
+                "source": {"name": "oracle", "model": None},
                 "agent_kwargs": {},
                 "env_secrets": {},
                 "env_vars": {},

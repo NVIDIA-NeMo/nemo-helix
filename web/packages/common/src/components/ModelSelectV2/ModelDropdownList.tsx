@@ -6,10 +6,10 @@ import { ModelDropdownItem } from '@nemo/common/src/components/ModelSelectV2/Mod
 import type { ModelSelection } from '@nemo/common/src/components/ModelSelectV2/types';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
+import { HourglassMid } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { DropdownHeading, Flex, Text } from '@nvidia/foundations-react-core';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FC } from 'react';
 
 /** Rows the virtualizer measures: group headings and models share one flat index space. */
@@ -178,7 +178,7 @@ export const ModelDropdownList: FC<ModelDropdownListProps> = ({
 
       {loadingMore && (
         <Flex align="center" justify="center" gap="density-sm" className="w-full py-density-sm">
-          <LoaderCircle size={14} className="animate-spin" aria-hidden />
+          <HourglassMid size="14" className="animate-spin" aria-hidden />
           <Text className="text-secondary" kind="body/regular/sm">
             Loading more…
           </Text>

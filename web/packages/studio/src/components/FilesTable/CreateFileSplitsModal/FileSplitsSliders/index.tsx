@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SliderWithTextInput } from '@nemo/common/src/components/SliderWithTextInput';
+import { LockOpen, LockClosed } from '@nemo/icons/icons';
 import { Stack, Button, Flex, Label } from '@nvidia/foundations-react-core';
-import { LockOpen, Lock } from 'lucide-react';
 import { FC, useCallback, useState } from 'react';
 import { Controller, useFormContext, useWatch } from 'react-hook-form';
 
@@ -32,7 +32,7 @@ export const FileSplitsSliders: FC = () => {
       if (prev === field) {
         return null; // Unlock if already locked
       }
-      return field; // Lock the new field (automatically unlocks previous)
+      return field; // lock the new field (automatically unlocks previous)
     });
   }, []);
 
@@ -117,10 +117,10 @@ export const FileSplitsSliders: FC = () => {
                   kind="tertiary"
                   size="small"
                   onClick={() => toggleLock(fieldName)}
-                  aria-label={isLocked ? `Unlock ${label}` : `Lock ${label}`}
+                  aria-label={isLocked ? `Unlock ${label}` : `LockClosed ${label}`}
                   className="p-2"
                 >
-                  {isLocked ? <Lock size="16" /> : <LockOpen size="16" />}
+                  {isLocked ? <LockClosed size="16" /> : <LockOpen size="16" />}
                 </Button>
               }
               formFieldProps={{

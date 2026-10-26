@@ -509,6 +509,7 @@ class ExecuteAgentJob(NemoJob):
                                 "agent": agent_ref,
                             },
                             timeout_seconds=step_config.request.timeout_seconds,
+                            observe_progress=True,
                         )
                     )
                 )

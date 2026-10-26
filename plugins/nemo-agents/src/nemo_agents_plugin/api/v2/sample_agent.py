@@ -39,7 +39,7 @@ from nemo_helix_plugin.dependencies import (
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
 from nemo_helix_plugin.functions.frames import NDJSON_MEDIA_TYPE
-from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.refs import ResolvedModelReference, parse_workspace_name_ref
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_DESCRIPTION, SAMPLE_WORKSPACE_PREFIX
@@ -244,6 +244,8 @@ async def create_sample_agent(
 
     try:
         model = await AsyncModelsClient.from_client(client).resolve_model_reference(body.model)
+    except UnroutableModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc.detail)) from exc
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Model '{body.model}' not found") from exc
     try:

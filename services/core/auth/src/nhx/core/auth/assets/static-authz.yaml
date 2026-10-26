@@ -390,7 +390,6 @@ authz:
       - secrets.create
       - secrets.delete
       - secrets.update
-      - workspaces.delete
       - workspaces.update
     Admin:
       description: "Full workspace management capabilities"

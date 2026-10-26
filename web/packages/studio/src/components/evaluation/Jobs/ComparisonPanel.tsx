@@ -4,6 +4,7 @@
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { renderMultipleSelectedValues } from '@nemo/common/src/utils/form';
 import { getColorsFromLength } from '@nemo/common/src/utils/formatters';
+import { ChartPerformance, ChartHierarchy, Warning } from '@nemo/icons/icons';
 import { useEvalsListEvaluateJobResults } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
@@ -18,7 +19,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import { prettifyName } from '@studio/util/evaluations';
 import { useQuery } from '@tanstack/react-query';
-import { ChartLine, ChartNetwork, TriangleAlert } from 'lucide-react';
 import { useState, ReactNode } from 'react';
 
 interface AggregateScores {
@@ -133,7 +133,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
       <StatusMessage
         className="mx-auto"
         size="medium"
-        slotMedia={<TriangleAlert width={65} height={65} />}
+        slotMedia={<Warning width={65} height={65} />}
         slotHeading="Job Failed"
         slotSubheading="The evaluation job failed. No comparison data available."
       />
@@ -145,7 +145,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
       <TableEmptyState
         header="No Results"
         emptyMessage="No evaluation results available for comparison"
-        icon={<ChartNetwork />}
+        icon={<ChartHierarchy />}
       />
     );
   } else {
@@ -194,7 +194,7 @@ export const ComparisonPanel = ({ job, workspace, jobName }: ComparisonPanelProp
   return (
     <Panel
       elevation="high"
-      slotIcon={<ChartLine />}
+      slotIcon={<ChartPerformance />}
       slotHeading={
         <Flex align="center" justify="between" gap="density-lg">
           Detailed Metrics

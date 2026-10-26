@@ -21,7 +21,7 @@ import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from functools import cache
-from typing import Any
+from typing import Any, ClassVar
 
 from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
@@ -200,8 +200,24 @@ def _with_setup_egress(agent_class: type[BaseAgent], hosts: tuple[str, ...]) -> 
     return SetupEgressAgent
 
 
+def setup_timeout_multiplier(inner: str, multiplier: float) -> float:
+    """The setup timeout multiplier that gives ``inner`` its own setup timeout through the wrapper.
+
+    Harbor 0.24 reads ``DEFAULT_SETUP_TIMEOUT_SEC`` from the class it imports, which is :class:`AgentSetupEgress`
+    and can't know the inner agent. Scaling the multiplier keeps the inner agent's timeout (1200 s for
+    hermes) times the caller's ``multiplier``. Harbor 0.23 has no per-agent default and uses 360 s for
+    every agent, so there the multiplier is left as it is.
+    """
+    default = AgentSetupEgress.DEFAULT_SETUP_TIMEOUT_SEC
+    inner_timeout = getattr(_inner_agent_class(inner), "DEFAULT_SETUP_TIMEOUT_SEC", default)
+    return multiplier * inner_timeout / default
+
+
 class AgentSetupEgress:
     """Stands in for the real agent class in Harbor's ``AgentConfig.import_path``; never instantiated itself."""
+
+    DEFAULT_SETUP_TIMEOUT_SEC: ClassVar[float] = 360.0
+    """Harbor's own default; :func:`setup_timeout_multiplier` scales it to the inner agent's."""
 
     def __new__(cls, *args: Any, **kwargs: Any) -> BaseAgent:
         inner = kwargs.pop(INNER_AGENT_KWARG)

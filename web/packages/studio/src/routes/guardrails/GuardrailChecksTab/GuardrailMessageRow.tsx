@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { ArrowDown, ArrowUp, CopyGeneric, Trash } from '@nemo/icons/icons';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import type { GuardrailCheckMessage } from '@studio/api/guardrail-checks/types';
 import cn from 'classnames';
-import { ArrowDown, ArrowUp, Copy, type LucideIcon, Trash2 } from 'lucide-react';
 import { type FC, useRef } from 'react';
 import { type Control, type Path, useController } from 'react-hook-form';
 
@@ -32,7 +33,7 @@ const renderRoleValue = (value: string) => <Text kind="label/bold/sm">{value}</T
 /** A single icon action in the row header. */
 const RowIconButton: FC<{
   label: string;
-  icon: LucideIcon;
+  icon: FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
   onClick: () => void;
   disabled?: boolean;
 }> = ({ label, icon: Icon, onClick, disabled }) => (
@@ -134,10 +135,10 @@ export const GuardrailMessageRow: FC<GuardrailMessageRowProps> = ({
           {onMoveDown ? (
             <RowIconButton label="Move down" icon={ArrowDown} onClick={onMoveDown} />
           ) : null}
-          <RowIconButton label="Duplicate message" icon={Copy} onClick={onDuplicate} />
+          <RowIconButton label="Duplicate message" icon={CopyGeneric} onClick={onDuplicate} />
           <RowIconButton
             label="Delete message"
-            icon={Trash2}
+            icon={Trash}
             onClick={onRemove}
             disabled={!allowRemove}
           />

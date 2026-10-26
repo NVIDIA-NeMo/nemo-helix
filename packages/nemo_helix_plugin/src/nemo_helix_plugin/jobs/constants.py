@@ -31,6 +31,10 @@ TERMINAL_EXIT_CODES = (0, 137)
 # sysexits EX_TEMPFAIL. A pausable step exits with this after it writes its pause checkpoint.
 PAUSE_EXIT_CODE = 75
 
+# Default OpenShell job task image, and where every OpenShell job image carries the launcher.
+OPENSHELL_JOB_TASK_IMAGE = "nhx-tasks-openshell"
+OPENSHELL_JOB_LAUNCHER_PATH = "/tools/jobs-launcher"
+
 
 def job_storage_subpath(workspace: str, job_id: str) -> str:
     """Path of a job's storage directory *relative to the job-storage PVC root*.

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconError } from '@nemo/icons/icons';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
-import { CircleAlert } from 'lucide-react';
 import { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -27,7 +27,7 @@ export const NotFound: FC<Props> = ({
 
   return (
     <Stack className="h-full justify-center mx-auto max-w-[640px]" gap="density-md">
-      <CircleAlert className="size-16 stroke-2" color="var(--text-color-feedback-danger)" />
+      <IconError className="size-16 stroke-2" color="var(--text-color-feedback-danger)" />
       <Text kind="display/xl">{header}</Text>
       <Text kind="title/lg">{subheader}</Text>
       <Text lineHeight="150">{message}</Text>

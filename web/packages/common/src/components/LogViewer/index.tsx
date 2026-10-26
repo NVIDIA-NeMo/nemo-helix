@@ -6,6 +6,7 @@ import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 import { formatLogs, type LogLoadProgress } from '@nemo/common/src/utils/logs';
+import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
@@ -20,7 +21,6 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import classNames from 'classnames';
-import { ArrowUp, Copy, Download, WrapText } from 'lucide-react';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 
 const DEFAULT_ROW_COUNT = 30;
@@ -181,7 +181,7 @@ export const LogViewer: FC<LogViewerProps> = ({
                 aria-pressed={wrapLines}
                 onClick={() => setWrapLines((prev) => !prev)}
               >
-                <WrapText />
+                <Paragraph />
               </Button>
               {downloadFilename && (
                 <Button
@@ -202,7 +202,7 @@ export const LogViewer: FC<LogViewerProps> = ({
             aria-label="Copy logs"
             onClick={() => notify('Copied to clipboard!', 'success', { durationMs: 3000 })}
           >
-            <Copy />
+            <CopyGeneric />
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
         <CodeSnippetCode

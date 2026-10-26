@@ -12,6 +12,7 @@ import {
   getPartsFromReference,
   getURNFromNamedEntityRef,
 } from '@nemo/common/src/namedEntity';
+import { Db, FolderOpen } from '@nemo/icons/icons';
 import { useFilesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import {
   Anchor,
@@ -41,7 +42,6 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { Database, FolderOpen } from 'lucide-react';
 import { FC, useEffect, useMemo } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 
@@ -211,7 +211,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
             placeholder="Select a dataset"
             slotStart={
               selectedDropdownValue && selectedDropdownValue !== NEW_DATASET_VALUE ? (
-                <Database width={16} height={16} className="text-fg-subdued" />
+                <Db width={16} height={16} className="text-fg-subdued" />
               ) : undefined
             }
           />

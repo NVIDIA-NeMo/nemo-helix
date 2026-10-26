@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconError, HourglassMid } from '@nemo/icons/icons';
 import { Button, Panel, StatusMessage } from '@nvidia/foundations-react-core';
-import { CircleAlert, Loader2 } from 'lucide-react';
 import { useState, type FC } from 'react';
 
 export interface QuickstartSamplePanelErrorProps {
@@ -32,13 +32,13 @@ export const QuickstartSamplePanelError: FC<QuickstartSamplePanelErrorProps> = (
     <Panel data-testid="quickstart-sample-panel-error">
       <StatusMessage
         size="small"
-        slotMedia={<CircleAlert className="size-10" aria-hidden="true" />}
+        slotMedia={<IconError className="size-10" aria-hidden="true" />}
         slotHeading="Couldn't load the sample agent"
         slotSubheading="It may still be setting up, or NeMo Helix couldn't be reached."
         slotFooter={
           <Button kind="secondary" disabled={retrying} aria-busy={retrying} onClick={handleRetry}>
             Retry
-            {retrying && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+            {retrying && <HourglassMid className="size-4 animate-spin" aria-hidden="true" />}
           </Button>
         }
       />

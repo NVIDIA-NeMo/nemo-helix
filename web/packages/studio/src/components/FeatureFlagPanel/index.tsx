@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Flag } from '@nemo/icons/icons';
 import {
   Badge,
   Button,
@@ -24,7 +25,6 @@ import {
   writeStoredOverrides,
 } from '@studio/constants/featureFlags/overrides';
 import { PREVIEW } from '@studio/constants/featureFlags/utils';
-import { Flag } from 'lucide-react';
 import { useMemo, useState, type FC } from 'react';
 
 /**

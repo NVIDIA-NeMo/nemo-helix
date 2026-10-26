@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AssistantMessageCompletion } from '@nemo/common/src/components/AssistantChat/types';
+import { ChatMulti } from '@nemo/icons/icons';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import {
   Anchor,
@@ -36,7 +37,6 @@ import {
   type SwitchyardRoute,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/switchyard/switchyardResults';
 import { getVirtualModelDetailRoute } from '@studio/routes/utils';
-import { MessagesSquare } from 'lucide-react';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -152,7 +152,7 @@ export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }
   return (
     <Panel
       slotHeading="Test routing"
-      slotIcon={<MessagesSquare />}
+      slotIcon={<ChatMulti />}
       elevation="high"
       density="compact"
       data-testid="routing-test-panel"

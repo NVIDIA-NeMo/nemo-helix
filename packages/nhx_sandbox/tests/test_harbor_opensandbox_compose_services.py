@@ -327,6 +327,56 @@ async def test_start_waits_for_main_then_the_services(
     assert extension.statuses == []
 
 
+@pytest.mark.parametrize(
+    ("main", "services_timeout_sec", "expected_sec"),
+    [
+        # main's own timeout carries the wait, whatever the services' says.
+        ({"readiness": {"exec": ["true"], "timeout_sec": 900}}, 660, 900),
+        ({"readiness": {"exec": ["true"]}}, 660, 300),
+        # Without a check on main, the services' timeout does.
+        ({}, 660, 660),
+        ({}, None, 300),
+    ],
+)
+async def test_start_waits_as_long_as_the_spec_allows(
+    tmp_path: Path,
+    server: Server,
+    extension: _Extension,
+    monkeypatch: pytest.MonkeyPatch,
+    main: dict[str, Any],
+    services_timeout_sec: int | None,
+    expected_sec: int,
+) -> None:
+    spec = {**COMPOSE_SERVICES, "main": main}
+    if services_timeout_sec is not None:
+        spec["services_timeout_sec"] = services_timeout_sec
+    environment = _environment(_task(tmp_path), server, compose_services=spec)
+    deadlines: list[float] = []
+
+    async def exec_(command: str, **kwargs: Any) -> ExecResult:
+        """A command that succeeds without running anything."""
+        return ExecResult(stdout="", stderr="", return_code=0)
+
+    async def wait_for_main(command: list[str], deadline: float) -> None:
+        """Record the deadline ``start`` gives the wait for main."""
+        deadlines.append(deadline)
+
+    async def wait_for_services(deadline: float) -> None:
+        """Record the deadline ``start`` gives the wait for the services."""
+        deadlines.append(deadline)
+
+    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment, "_wait_for_main", wait_for_main)
+    monkeypatch.setattr(environment, "_wait_for_services", wait_for_services)
+
+    before = time.monotonic()
+    await environment.start(force_build=False)
+    after = time.monotonic()
+
+    assert deadlines
+    assert all(before + expected_sec <= deadline <= after + expected_sec for deadline in deadlines)
+
+
 async def test_main_readiness_timeout_reports_last_output(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:

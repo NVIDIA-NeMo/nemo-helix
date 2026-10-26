@@ -21,6 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from check_skill_frontmatter import (  # noqa: E402
+    MAX_SKILL_TOKENS,
     MalformedFrontmatterError,
     check_file,
     is_canonical_skill,
@@ -115,6 +116,20 @@ def test_check_file_flags_missing_author(tmp_path):
     violations = check_file(skill)
     assert len(violations) == 1
     assert "metadata.author" in violations[0].issue
+
+
+def test_check_file_flags_skill_over_token_limit(tmp_path):
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(VALID_FRONTMATTER + "x" * (MAX_SKILL_TOKENS * 4))
+    violations = check_file(skill)
+    assert len(violations) == 1
+    assert "tokens" in violations[0].issue
+
+
+def test_check_file_allows_skill_at_token_limit(tmp_path):
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(VALID_FRONTMATTER + "x" * (MAX_SKILL_TOKENS * 4 - len(VALID_FRONTMATTER)))
+    assert check_file(skill) == []
 
 
 @pytest.mark.parametrize(
