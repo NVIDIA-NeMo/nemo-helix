@@ -17,6 +17,13 @@ import { useEffect } from 'react';
 const isStarting = (status?: ModelDeploymentStatus) =>
   status === ModelDeploymentStatus.CREATED || status === ModelDeploymentStatus.PENDING;
 
+const findLatest = (deployments: ModelDeployment[] = []) =>
+  deployments.find(
+    (candidate) =>
+      candidate.status !== ModelDeploymentStatus.DELETING &&
+      candidate.status !== ModelDeploymentStatus.DELETED
+  );
+
 /**
  * The newest deployment of `model` that isn't being deleted, found through the configs
  * bound to it. Unlike the model's providers, this sees a deployment that is still starting
@@ -45,15 +52,11 @@ export const useLatestModelDeployment = (
       query: {
         enabled: configNames.length > 0,
         refetchInterval: (query) =>
-          isStarting(query.state.data?.data[0]?.status) ? JOB_POLLING_INTERVAL_MS : false,
+          isStarting(findLatest(query.state.data?.data)?.status) ? JOB_POLLING_INTERVAL_MS : false,
       },
     }
   );
-  const deployment = deployments?.data.find(
-    (candidate) =>
-      candidate.status !== ModelDeploymentStatus.DELETING &&
-      candidate.status !== ModelDeploymentStatus.DELETED
-  );
+  const deployment = findLatest(deployments?.data);
 
   const queryClient = useQueryClient();
   const isWaitingToServe =
