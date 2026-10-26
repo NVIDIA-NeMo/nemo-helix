@@ -24,6 +24,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from nemo_evals.config import get_config
@@ -133,6 +134,35 @@ _HARBOR_BACKEND_REQUIREMENT = (
 _SUBPROCESS_PROVIDER: Literal["subprocess"] = "subprocess"
 
 
+_INFERENCE_GATEWAY_MODEL_ROUTE_PREFIX = "/apis/inference-gateway/v2/workspaces/"
+
+
+def _platform_metric_url(url: str, client: AsyncNemoClient) -> str | None:
+    """Return a trusted platform URL for a metric model, or ``None`` for an external URL.
+
+    Model references are resolved by the API process and may be rewritten to a job-reachable
+    platform origin. A task client can use another advertised origin for the same platform. In
+    that case, recognize only the registered-model inference route and re-anchor it on the task
+    client's trusted origin before attaching workload credentials. This avoids sending a platform
+    token to the untrusted origin of an inline model that merely resembles an inference route.
+    """
+    if client.is_platform_url(url):
+        return url
+
+    parsed = urlsplit(url)
+    path = parsed.path.rstrip("/")
+    if not path.startswith(_INFERENCE_GATEWAY_MODEL_ROUTE_PREFIX):
+        return None
+    route = path.removeprefix(_INFERENCE_GATEWAY_MODEL_ROUTE_PREFIX)
+    workspace, separator, model_route = route.partition("/model/")
+    model_name, model_separator, endpoint = model_route.partition("/-/")
+    if not separator or not workspace or not model_separator or not model_name or endpoint != "v1":
+        return None
+
+    trusted = urlsplit(client.base_url)
+    return urlunsplit((trusted.scheme, trusted.netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 def _attach_platform_metric_auth(tasks: list[AgentEvalTask], client: AsyncNemoClient) -> None:
     """Give platform-routed metric models the job's refreshable workload identity.
 
@@ -146,8 +176,12 @@ def _attach_platform_metric_auth(tasks: list[AgentEvalTask], client: AsyncNemoCl
             if not isinstance(metric, BaseModel):
                 continue
             for model in collect_models(metric).values():
-                if model.api_key_secret is not None or not client.is_platform_url(model.url):
+                if model.api_key_secret is not None:
                     continue
+                platform_url = _platform_metric_url(model.url, client)
+                if platform_url is None:
+                    continue
+                model.url = platform_url
 
                 async def api_key(*, url: str = model.url) -> str:
                     headers = await client.request_headers(url=url)

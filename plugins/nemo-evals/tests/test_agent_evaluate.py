@@ -1073,6 +1073,35 @@ async def test_platform_metric_model_uses_refreshable_job_identity() -> None:
     assert await metric.model.api_key_provider() == "job-access-token"
 
 
+@pytest.mark.asyncio
+async def test_platform_metric_model_reanchors_job_route_before_authentication() -> None:
+    client = AsyncNemoClient(
+        base_url="https://runtime.platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    metric = LLMJudgeMetric(
+        model=Model(
+            url="https://compiler.platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1",
+            name="judge",
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+
+    _attach_platform_metric_auth(
+        [AgentEvalTask(id="task", intent="score", inputs={}, metrics=[metric])],
+        client,
+    )
+
+    assert isinstance(metric.model, Model)
+    assert metric.model.url == (
+        "https://runtime.platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1"
+    )
+    assert metric.model.api_key_provider is not None
+    assert await metric.model.api_key_provider() == "job-access-token"
+
+
 def test_platform_metric_auth_does_not_override_explicit_or_external_credentials() -> None:
     client = AsyncNemoClient(
         base_url="https://platform",
@@ -1105,6 +1134,31 @@ def test_platform_metric_auth_does_not_override_explicit_or_external_credentials
     assert isinstance(external.model, Model)
     assert explicit.model.api_key_provider is None
     assert external.model.api_key_provider is None
+
+
+def test_platform_metric_auth_does_not_trust_lookalike_external_route() -> None:
+    client = AsyncNemoClient(
+        base_url="https://platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    metric = LLMJudgeMetric(
+        model=Model(
+            url="https://external.example/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1/chat",
+            name="judge",
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+
+    _attach_platform_metric_auth(
+        [AgentEvalTask(id="task", intent="score", inputs={}, metrics=[metric])],
+        client,
+    )
+
+    assert isinstance(metric.model, Model)
+    assert metric.model.url.startswith("https://external.example/")
+    assert metric.model.api_key_provider is None
 
 
 def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:
