@@ -4,6 +4,7 @@
 """Integration tests: stored creator auth context (``data._auth_context``) is readable only by service principals
 and writable only by services."""
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -221,3 +222,36 @@ async def test_delegated_service_update_replaces_auth_context(
 
     assert updated.status_code == 200, updated.text
     assert (await _stored_data(repos, _NAME))[STORED_AUTH_CONTEXT_KEY] == caller
+
+
+_PROBES = {
+    "filter-field": {"filter": json.dumps({"data._auth_context.principal_id": "creator@example.com"})},
+    "filter-contains": {"filter": json.dumps({"data": {"$contains": {STORED_AUTH_CONTEXT_KEY: {}}}})},
+    "filter-nested": {"filter": json.dumps({"$or": [{"data.status": "running"}, {"data._auth_context.x": 1}]})},
+    "sort": {"sort": "-data._auth_context.principal_id"},
+    "count_by": {"count_by": "data._auth_context"},
+}
+
+
+@pytest.mark.parametrize("params", _PROBES.values(), ids=_PROBES.keys())
+async def test_user_list_cannot_query_stored_auth_context(client_with_auth: AsyncClient, repos, params) -> None:
+    """Match counts, group counts and ordering would otherwise reveal the creator auth context."""
+    await _seed_run(repos)
+
+    listed = await client_with_auth.get(f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}", params=params)
+
+    assert listed.status_code == 400, listed.text
+    assert STORED_AUTH_CONTEXT_KEY in listed.json()["detail"]
+
+
+async def test_service_principal_list_can_filter_on_stored_auth_context(
+    client_with_auth_service_principal: AsyncClient, repos
+) -> None:
+    await _seed_run(repos)
+
+    listed = await client_with_auth_service_principal.get(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}", params=_PROBES["filter-field"]
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert [entity["name"] for entity in listed.json()["data"]] == [_NAME]

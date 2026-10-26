@@ -18,12 +18,14 @@ Cross-Workspace Queries:
 - GET    /apis/entities/v2/workspaces/-/entities/{entity_type}                         - List entities across all accessible workspaces
 """
 
+import json
 import logging
 import textwrap
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
+from nhx.common.api.filter import FilterOperation
 from nhx.common.auth import ALL_WORKSPACES, is_service_principal
 from nhx.common.auth.client import AuthClient
 from nhx.core.entities.api.dependencies import (
@@ -93,10 +95,32 @@ def redact_stored_auth_context(entity: Entity, auth_client: AuthClient) -> Entit
     Delegated calls (service principal acting on behalf of a user) are redacted too: their effective
     caller is the user.
     """
-    if STORED_AUTH_CONTEXT_KEY not in entity.data or is_service_principal(auth_client.principal.effective_id):
+    if STORED_AUTH_CONTEXT_KEY not in entity.data or _can_read_stored_auth_context(auth_client):
         return entity
     data = {key: value for key, value in entity.data.items() if key != STORED_AUTH_CONTEXT_KEY}
     return entity.model_copy(update={"data": data})
+
+
+def _can_read_stored_auth_context(auth_client: AuthClient) -> bool:
+    return is_service_principal(auth_client.principal.effective_id)
+
+
+def reject_stored_auth_context_queries(
+    auth_client: AuthClient, filter: FilterOperation | None, sort: str, count_by: str | None
+) -> None:
+    """Keep callers who may not read the stored auth context from probing it through list queries.
+
+    Match counts, group counts and ordering would otherwise reveal it. The whole serialized filter is
+    checked, so values (``data[$contains]``), relationship conditions and nested operators are covered.
+    """
+    if _can_read_stored_auth_context(auth_client):
+        return
+    queried = [sort, count_by or "", json.dumps(filter.to_dict(), default=str) if filter else ""]
+    if any(STORED_AUTH_CONTEXT_KEY in text for text in queried):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Filtering, sorting or counting on '{STORED_AUTH_CONTEXT_KEY}' is not allowed.",
+        )
 
 
 def server_owned_data_keys(auth_client: AuthClient, data: dict[str, Any]) -> tuple[str, ...]:
@@ -404,6 +428,7 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
+    reject_stored_auth_context_queries(auth_client, filter, sort, count_by)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
         accessible_workspaces = await get_accessible_workspaces(repository)
