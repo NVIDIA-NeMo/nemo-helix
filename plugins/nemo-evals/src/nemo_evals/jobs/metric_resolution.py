@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from nemo_agents_plugin.jobs.gateway_proxy import platform_auth_proxy
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
 from nemo_evals.shared.metric_bundles.bundles import (
@@ -36,10 +38,18 @@ from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels
+from nhx_evals_sdk.metrics.resolution import model_ref_fields
 from nhx_evals_sdk.resolver_protocols import ModelResolver, SecretResolver
 from nhx_evals_sdk.values import Model, ModelRef
 from nhx_evals_sdk.values.common import SecretRef
+from pydantic import BaseModel
+
+#: The path every Inference Gateway route a ``ModelRef`` resolves to starts with.
+_GATEWAY_PATH_PREFIX = "/apis/inference-gateway/"
+#: Workspace segment of the placeholder refs `_rebind_models` routes a metric's models through.
+_REBIND_REF_WORKSPACE = "job-auth-proxy"
 
 
 def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
@@ -219,3 +229,89 @@ async def resolve_metrics_to_inline(
             for metric, bundle in zip(runtime_metrics, resolved_bundles, strict=True)
         ]
     return [to_inline(bundle) for bundle in final_bundles]
+
+
+@dataclass(frozen=True)
+class _BoundModels(ModelResolver):
+    """Hand back the models `_rebind_models` parked behind placeholder refs."""
+
+    models: dict[str, Model]
+
+    async def resolve_model(self, model_ref: ModelRef) -> Model:
+        return self.models[model_ref.root]
+
+
+def _gateway_models(metric: MetricWithModels) -> dict[str, Model]:
+    """The metric's model fields that call Inference Gateway with no credential of their own.
+
+    A model with ``api_key_secret`` is called as configured: its owner chose the credential.
+    """
+    if not isinstance(metric, BaseModel):
+        return {}
+    return {
+        field: model
+        for field in model_ref_fields(metric)
+        if isinstance(model := getattr(metric, field, None), Model)
+        and model.api_key_secret is None
+        and urlsplit(model.url).path.startswith(_GATEWAY_PATH_PREFIX)
+    }
+
+
+def _rebind_models(metric: MetricWithModels, models: dict[str, Model]) -> None:
+    """Replace the metric's model fields, through ``resolve_models`` so it rebuilds what it derived from them.
+
+    Metrics build their inference client from their models when constructed (RAGAS) or lazily, and
+    ``resolve_models`` is their one hook for being handed a model after that. Each field is parked
+    behind a placeholder ref that resolves to its replacement.
+    """
+    parked: dict[str, Model] = {}
+    for field, model in models.items():
+        ref = f"{_REBIND_REF_WORKSPACE}/{field}"
+        setattr(metric, field, ModelRef(ref))
+        parked[ref] = model
+    run_sync(lambda: metric.resolve_models(_BoundModels(parked)))
+
+
+@contextmanager
+def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
+    """Call Inference Gateway from the metrics' models as this job, for the duration of the block.
+
+    A stored metric's ``ModelRef`` is resolved at submit to a gateway route on the API's own
+    platform URL, with no credential: the job's identity is not known yet, and the job may reach
+    the platform at a different address. Inside the block those models point at the job's loopback
+    auth proxy, which forwards to the job's platform URL with its identity and refreshes workload
+    tokens. Afterwards the original models are restored, so results record the resolved route.
+
+    Does nothing when no metric calls the gateway, or when the job has no identity to forward
+    (an auth-disabled platform), which is how those models were called before.
+    """
+    bound = [
+        (metric, models)
+        for metric in metrics
+        if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
+    ]
+    if not bound:
+        yield
+        return
+    with platform_auth_proxy() as origin:
+        if origin is None:
+            yield
+            return
+        proxy = urlsplit(origin)
+        try:
+            for metric, models in bound:
+                _rebind_models(
+                    metric,
+                    {
+                        field: model.model_copy(
+                            update={
+                                "url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+                            }
+                        )
+                        for field, model in models.items()
+                    },
+                )
+            yield
+        finally:
+            for metric, models in bound:
+                _rebind_models(metric, models)
