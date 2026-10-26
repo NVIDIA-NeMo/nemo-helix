@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 MIDDLEWARE_NAME = "nemo-evals-closed-book"
 CONFIG_TYPE = "closed_book"
-REMOVED_TOOLS_STATE_KEY = "removed_tools"
+REMOVED_TOOLS_TELEMETRY_ATTRIBUTE = f"{MIDDLEWARE_NAME}.removed_tools"
 
 _CLIENT_TOOL_TYPE = re.compile(
     r"^(?:function|custom|namespace|local_shell|shell|apply_patch|computer|computer_use_preview"
@@ -210,7 +210,7 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 "cannot inspect; send the conversation history in the request instead.",
             )
         removed = strip_hosted_tools(request.body, anthropic=request.path.lstrip("/").startswith("v1/messages"))
-        ctx.state(MIDDLEWARE_NAME).set(REMOVED_TOOLS_STATE_KEY, removed)
+        ctx.telemetry_attributes[REMOVED_TOOLS_TELEMETRY_ATTRIBUTE] = removed
         if removed:
             logger.info(
                 "Closed-book middleware removed hosted tools",

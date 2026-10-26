@@ -34,6 +34,7 @@ class SpanAttributeField(StrEnum):
     AGENT_ID = "agent_id"
     AGENT_NAME = "agent_name"
     AGENT_VERSION = "agent_version"
+    CLIENT_ADDRESS = "client_address"
     TOOL_NAME = "tool_name"
     PROJECT = "project"
     EVALUATION_NAME = "evaluation_name"
@@ -119,6 +120,12 @@ ATTRIBUTE_SPECS = (
             "llm.agent.name",
             "agent.name",
         ),
+    ),
+    AttributeSpec(
+        field=SpanAttributeField.CLIENT_ADDRESS,
+        bag=AttributeBag.STRING,
+        bag_key="client.address",
+        source_keys=("client.address",),
     ),
     AttributeSpec(
         field=SpanAttributeField.AGENT_VERSION,

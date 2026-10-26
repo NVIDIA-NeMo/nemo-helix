@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.service import RouterConfig, Service
+from nhx.core.inference_gateway.api.call_recording import CallRecorder, intake_sink, set_global_call_recorder
 from starlette import status
 from starlette.responses import JSONResponse
 
@@ -29,6 +30,7 @@ class InferenceGatewayService(Service):
         self._http_client: Optional[aiohttp.ClientSession] = None
         self._background_tasks: Set[asyncio.Task] = set()
         self._middleware_registry = None
+        self._call_recorder: CallRecorder | None = None
 
     @property
     def title(self) -> str:
@@ -172,6 +174,11 @@ class InferenceGatewayService(Service):
         )
         logger.debug("Initialized HTTP client for inference-gateway service")
 
+        if inference_gateway_config.record_calls:
+            self._call_recorder = CallRecorder(intake_sink(client))
+            self._call_recorder.start()
+            set_global_call_recorder(self._call_recorder)
+
     async def on_shutdown(self) -> None:
         """Cleanup resources on shutdown."""
 
@@ -182,6 +189,11 @@ class InferenceGatewayService(Service):
         if self._middleware_registry is not None:
             await self._middleware_registry.shutdown()
             logger.debug("Shut down inference middleware plugins")
+
+        if self._call_recorder is not None:
+            await self._call_recorder.stop()
+            set_global_call_recorder(None)
+            self._call_recorder = None
 
         if self._http_client is not None:
             await self._http_client.close()

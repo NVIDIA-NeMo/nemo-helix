@@ -371,6 +371,8 @@ class InferenceMiddlewareContext:
         request_nemo_client: Request-scoped typed client carrying the caller's
             delegated identity and trace headers. Middleware can use it for
             nested platform calls that must preserve request context.
+        telemetry_attributes: Attributes IGW adds to its Intake record of this
+            call. Prefix keys with your plugin's name; values must be JSON.
     """
 
     request_id: str
@@ -381,6 +383,7 @@ class InferenceMiddlewareContext:
     backend_format: BackendFormat | None = None
     response_body_annotations: dict[str, Any] = field(default_factory=dict)
     request_nemo_client: AsyncNemoClient | None = None
+    telemetry_attributes: dict[str, Any] = field(default_factory=dict)
     _state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def state(self, plugin_name: str) -> PluginStateNamespace:
