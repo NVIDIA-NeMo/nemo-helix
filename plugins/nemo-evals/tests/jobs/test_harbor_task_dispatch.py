@@ -24,7 +24,14 @@ from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
+    HarborBuiltinAgentSource,
+    HarborGatewayModel,
+    HarborRunnerTarget,
+    RegisteredAgentSource,
+)
+from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.harbor_task_dispatch import (
     DISPATCH_COMMAND,
     OPENSANDBOX_ENVIRONMENT,
@@ -48,6 +55,7 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.values import ModelRef
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
 AGENT = PreparedImage(image_ref="registry.invalid/agent@sha256:" + "a" * 64, preparation_key="ka")
@@ -402,3 +410,37 @@ def test_bind_rejects_compose_tasks(tmp_path):
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
     with pytest.raises(ValueError, match="compose tasks"):
         bind_task_image(task, AGENT.image_ref)
+
+
+def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_spec, harbor_resolved_task, monkeypatch):
+    """Its sandbox would deny every call the agent makes to its gateway model, so no trial is worth starting."""
+    monkeypatch.setenv("OPEN_SANDBOX_DOMAIN", task_spec.sandbox_policy.connection.domain)
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+    spec = task_spec.spec.model_copy(
+        update={
+            "tasks": [harbor_resolved_task("offline", config={"environment": {"allow_internet": False}})],
+            "target": HarborRunnerTarget(
+                source=HarborBuiltinAgentSource(name="codex", model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+            ),
+        }
+    )
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    blocked = task_spec.model_copy(update={"spec": spec, "execution_deadline_at": future})
+
+    with pytest.raises(ValueError, match="gateway_unreachable"):
+        HarborTaskAgentEvalJob().run(blocked.model_dump(mode="json"), ctx=MagicMock(), async_client=MagicMock())
+
+
+async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_spec):
+    """The agent reads it like any other key; the gateway checks none with platform auth off."""
+    target = HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="claude-code", model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+    )
+    spec = task_spec.model_copy(update={"spec": task_spec.spec.model_copy(update={"target": target})})
+
+    compiled = await HarborTaskDispatchJob.compile(spec=spec, profile="k8s-cpu")
+
+    (step,) = compiled.steps
+    variables = {variable.name: variable for variable in step.environment or []}
+    assert variables["ANTHROPIC_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
+    assert variables["ANTHROPIC_API_KEY"].from_secret is None

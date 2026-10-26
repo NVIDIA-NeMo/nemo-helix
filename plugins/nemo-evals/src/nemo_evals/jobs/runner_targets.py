@@ -34,6 +34,7 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
@@ -117,7 +118,8 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
     if config.agent_import_path is not None:
         source = HarborImportedAgentSource(import_path=config.agent_import_path, model_name=config.agent_model_name)
     elif config.agent_name is not None:
-        source = HarborBuiltinAgentSource(name=config.agent_name, model_name=config.agent_model_name)
+        model = HarborModelName(name=config.agent_model_name) if config.agent_model_name is not None else None
+        source = HarborBuiltinAgentSource(name=config.agent_name, model=model)
     else:
         raise UnsubmittableRunnerError("Harbor config selects no agent: set agent_name or agent_import_path.")
     carried_fields = (

@@ -403,7 +403,10 @@ async def test_unreadable_metric_model_is_rejected_before_resolution(
     )
     bundle = bundle_metric(judge, HybridMetricBundlePackager())
     await _republish_task_metrics(entity_store, published, [MetricInline.model_validate_json(bundle.model_dump_json())])
-    authorizer.side_effect = _deny("/apis/models/v2/workspaces/private/models/judge")
+    authorizer.side_effect = _deny(
+        "/apis/models/v2/workspaces/private/models/judge",
+        "/apis/inference-gateway/v2/workspaces/private/virtual-models/judge",
+    )
     with pytest.raises(HTTPException) as exc:
         await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:bob")
     assert exc.value.status_code == 403
