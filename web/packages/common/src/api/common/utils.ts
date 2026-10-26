@@ -104,6 +104,23 @@ export const getErrorMessage = (error: AxiosError | Error, fallbackMessage?: str
       }
     }
 
+    // Not every error body is FastAPI-shaped: a text/plain body arrives as a
+    // bare string, and some services answer with {"message": ...}. Either says
+    // more than the status line the fallback below would produce.
+    const data: unknown = error.response?.data;
+    if (typeof data === 'string' && data.trim()) {
+      return data;
+    }
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      'message' in data &&
+      typeof data.message === 'string' &&
+      data.message
+    ) {
+      return data.message;
+    }
+
     // Handle network errors (no response received)
     if (!error.response) {
       const parts: string[] = [];

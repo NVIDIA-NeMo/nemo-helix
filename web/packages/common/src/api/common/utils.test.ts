@@ -44,7 +44,7 @@ describe('getErrorMessage', () => {
       response?: {
         status: number;
         statusText: string;
-        data?: { detail?: unknown };
+        data?: unknown;
       };
       config?: {
         method?: string;
@@ -258,6 +258,40 @@ describe('getErrorMessage', () => {
       });
 
       expect(getErrorMessage(error)).toBe('Network Error');
+    });
+  });
+
+  describe('with non-FastAPI error bodies', () => {
+    it('returns a plain-text body', () => {
+      const error = createAxiosError({
+        response: {
+          status: 500,
+          statusText: 'Internal Server Error',
+          data: 'upstream evaluator is unavailable',
+        },
+      });
+
+      expect(getErrorMessage(error)).toBe('upstream evaluator is unavailable');
+    });
+
+    it('returns the message field when the body uses one', () => {
+      const error = createAxiosError({
+        response: {
+          status: 400,
+          statusText: 'Bad Request',
+          data: { message: 'Dataset has no usable columns' },
+        },
+      });
+
+      expect(getErrorMessage(error)).toBe('Dataset has no usable columns');
+    });
+
+    it('falls back to the status line for a blank body', () => {
+      const error = createAxiosError({
+        response: { status: 400, statusText: 'Bad Request', data: '   ' },
+      });
+
+      expect(getErrorMessage(error)).toBe('400 Bad Request');
     });
   });
 
