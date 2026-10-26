@@ -329,7 +329,11 @@ class TestEachSandboxFailsAlone:
         assert api.created == [self.NAME]
         assert sleeps == [5.0, 10.0, 20.0]
 
-        monkeypatch.setattr(supervise, "_QUOTA_WAIT_SECONDS", 0)
+        monkeypatch.setattr(supervise, "_RETRY_ATTEMPTS", 2)
+        assert self._build(monkeypatch, _Api(create=ApiException(status=429, reason="Too Many Requests"))) == 2
+        assert sleeps == [5.0, 10.0, 20.0, 5.0]
+
+        monkeypatch.setattr(supervise, "_RETRY_DEADLINE_SECONDS", 0)
         assert self._build(monkeypatch, _Api(create=quota)) == 2
 
     def test_a_log_that_cannot_be_read_fails_the_group_and_the_sandbox_is_still_deleted(

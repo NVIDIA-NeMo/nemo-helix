@@ -49,9 +49,11 @@ _POD_TIMEOUT_SECONDS = 60 * 60
 #: Enforced by the kubelet, so a sandbox ends even if this step is killed before it can delete it.
 _POD_DEADLINE_SECONDS = _POD_TIMEOUT_SECONDS + 5 * 60
 
-#: How long a sandbox waits for room in the namespace's ResourceQuota, which other builds free as they end.
-_QUOTA_WAIT_SECONDS = 60 * 60
-_QUOTA_RETRY_MAX_DELAY_SECONDS = 60.0
+#: (status, text in the body) of the create errors a sandbox retries.
+_RETRYABLE_ERRORS = ((403, "exceeded quota"), (429, ""))
+_RETRY_ATTEMPTS = 60
+_RETRY_DEADLINE_SECONDS = 60 * 60
+_RETRY_MAX_DELAY_SECONDS = 60.0
 
 #: This step's namespace, which Kubernetes mounts beside the ServiceAccount token.
 _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
@@ -222,23 +224,24 @@ def _delete_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> None:
 
 
 def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> None:
-    """Create a sandbox, retrying while the namespace's ResourceQuota rejects it. Any other error raises at once.
+    """Create a sandbox, retrying `_RETRYABLE_ERRORS` with backoff until the attempts or the deadline run out.
 
-    ponytail: this step's own pod keeps its share of the quota while it waits, so enough waiting builds can use
-    all of it and wait out the deadline together; capping how many builds run at once removes that.
+    ponytail: a waiting step keeps its pod's share of the quota; capping concurrent builds removes that.
     """
-    deadline = time.monotonic() + _QUOTA_WAIT_SECONDS
-    delay = 5.0
-    while True:
+    deadline = time.monotonic() + _RETRY_DEADLINE_SECONDS
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
         try:
             api.create_namespaced_pod(namespace=namespace, body=manifest)
             return
         except ApiException as exc:
-            if exc.status != 403 or "exceeded quota" not in str(exc.body) or time.monotonic() + delay > deadline:
+            delay = min(5.0 * 2 ** (attempt - 1), _RETRY_MAX_DELAY_SECONDS)
+            retryable = any(exc.status == status and text in str(exc.body) for status, text in _RETRYABLE_ERRORS)
+            if not retryable or attempt == _RETRY_ATTEMPTS or time.monotonic() + delay > deadline:
                 raise
-        logger.warning("sandbox %s: namespace quota is full; retrying in %.0fs", sanitize_for_log(name), delay)
+            logger.warning(
+                "sandbox %s: %s; retrying in %.0fs", sanitize_for_log(name), sanitize_for_log(exc.reason), delay
+            )
         time.sleep(delay)
-        delay = min(delay * 2, _QUOTA_RETRY_MAX_DELAY_SECONDS)
 
 
 def _run_sandbox(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> tuple[str, str]:
