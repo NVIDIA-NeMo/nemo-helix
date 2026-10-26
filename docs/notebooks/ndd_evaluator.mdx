@@ -57,6 +57,7 @@ Create a Secret and Model Provider to use models hosted on `build.nvidia.com`.
 Note: these resources may already exist if you are running NeMo Helix Quickstart.
 
 ```python
+import os
 from pydantic import SecretStr
 from nemo_helix_plugin.models.types import CreateModelProviderRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
@@ -84,7 +85,7 @@ if PROVIDER_NAME not in [provider.name for provider in existing_providers]:
     client.models.create_provider(
         body=CreateModelProviderRequest(
             name=PROVIDER_NAME,
-            host_url="https://integrate.api.nvidia.com",
+            host_url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
             api_key_secret_name=SECRET_NAME,
             description="External provider for build.nvidia.com",
         )
@@ -536,6 +537,7 @@ For *each* complexity level, the accuracy score for each model is printed, allow
 
 ```python
 
+import os
 import pandas as pd
 from typing import Any
 
@@ -548,12 +550,12 @@ MODEL_SPECS = [
  {
  "name": "Qwen2.5-7B",
  "model_id": "qwen/qwen2.5-7b-instruct",
- "url": "https://integrate.api.nvidia.com/v1/chat/completions"
+ "url": os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions"
  },
  {
  "name": "Meta Llama3.3 70b",
  "model_id": "meta/llama-3.3-70b-instruct",
- "url": "https://integrate.api.nvidia.com/v1/chat/completions"
+ "url": os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions"
  }
 ]
 
