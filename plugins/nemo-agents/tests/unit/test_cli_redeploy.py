@@ -22,12 +22,14 @@ and there is no update route. These tests pin the user-visible contract:
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import httpx
+import pytest
 from nemo_agents_plugin.cli import AgentsCLI
 from typer.testing import CliRunner
 
@@ -152,6 +154,71 @@ def test_redeploy_runs_steps_in_order(tmp_path: Path, make_cli_state) -> None:
 # ---------------------------------------------------------------------------
 # Fail-fast: bad config aborts before any teardown
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("fileset", "fileset_workspace", "status"),
+    [
+        ("source", "team-a", 200),
+        ("other/source", "other", 200),
+        ("source", "team-a", 403),
+        ("source", "team-a", 404),
+    ],
+)
+def test_redeploy_checks_fileset_before_teardown(
+    tmp_path: Path, make_cli_state, fileset: str, fileset_workspace: str, status: int
+) -> None:
+    config = _write_config(tmp_path)
+    config.write_text(config.read_text() + f"reference:\n  fileset: {fileset}\n")
+    rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
+    fileset_path = f"/apis/files/v2/workspaces/{fileset_workspace}/filesets/source"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == fileset_path:
+            rec.calls.append((req.method, req.url.path))
+            return httpx.Response(
+                status,
+                json={
+                    "id": "id-source",
+                    "name": "source",
+                    "workspace": fileset_workspace,
+                    "description": "",
+                    "purpose": "generic",
+                    "storage": {"type": "local", "path": "/data/source"},
+                    "metadata": {},
+                    "custom_fields": {},
+                    "project": "",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                },
+            )
+        if req.method == "POST" and req.url.path.endswith("/agents"):
+            assert json.loads(req.read())["reference"]["fileset"] == f"{fileset_workspace}/source"
+        return rec(req)
+
+    result = runner.invoke(
+        AgentsCLI().get_cli(),
+        [
+            "redeploy",
+            "--agent",
+            "my-agent",
+            "--agent-config",
+            str(config),
+            "--workspace",
+            "team-a",
+            "--yes",
+            "--no-wait",
+        ],
+        obj=make_cli_state(handler),
+    )
+
+    assert rec.calls[0] == ("GET", fileset_path)
+    if status == 200:
+        assert result.exit_code == 0, result.output
+        assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
+    else:
+        assert result.exit_code == 1, result.output
+        assert rec.calls == [("GET", fileset_path)]
 
 
 def test_redeploy_bad_config_aborts_before_teardown(tmp_path: Path, make_cli_state) -> None:

@@ -921,7 +921,8 @@ def test_invoke_timeout_error_message() -> None:
     assert "--timeout" in result.stderr
 
 
-def test_local_invoke_runs_fabric_config_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize("with_reference", [False, True])
+def test_local_invoke_runs_fabric_config_once(tmp_path: Path, with_reference: bool) -> None:
     import json as _json
 
     from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
@@ -944,6 +945,8 @@ def test_local_invoke_runs_fabric_config_once(tmp_path: Path) -> None:
             ]
         )
     )
+    if with_reference:
+        config.write_text(config.read_text() + "reference:\n  fileset: default/source\n  container_image: agent:1\n")
     captured: dict[str, Any] = {}
 
     async def _invoke_agent_config_once(agent_config: Any, inputs: list[Any], *, base_dir: Path):
@@ -970,6 +973,7 @@ def test_local_invoke_runs_fabric_config_once(tmp_path: Path) -> None:
     assert captured["inputs"] == ["hello"]
     assert captured["agent_config"].config_format == "nemo-agents-spec-v1"
     assert captured["agent_config"].name == "fabric-agent"
+    assert "reference" not in captured["agent_config"].model_dump()
     parsed = _json.loads(result.stdout)
     assert parsed["status"] == "succeeded"
     assert parsed["response"] == "hello"

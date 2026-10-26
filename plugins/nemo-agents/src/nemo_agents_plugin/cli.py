@@ -131,6 +131,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 from pydantic import BaseModel, ValidationError
 from typer.main import get_command as _typer_get_command
 
@@ -1349,6 +1350,15 @@ def _register_platform_commands(app: typer.Typer) -> None:
         #    A bad config aborts here with zero side effects.
         config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=agent)
 
+        if reference is not None and reference.fileset is not None:
+            ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
+            files_client = shared_cli_client(FilesClient)
+            _run_sdk(
+                "GET referenced fileset",
+                lambda: files_client.get_fileset(workspace=ref.workspace, name=ref.name).data(),
+            )
+            reference.fileset = FilesetRef(f"{ref.workspace}/{ref.name}")
+
         client = _agents_client(base_url, workspace)
 
         # 2. Auto-detect runtime args from the agent's existing deployment(s).
@@ -2339,7 +2349,7 @@ def _local_fabric_invoke(config: dict[str, Any], inputs: list[Any], *, base_dir:
     from nemo_agents_plugin.fabric.translator import FabricTranslationError
 
     try:
-        agent_config = AgentConfig.model_validate(config)
+        agent_config = AgentConfig.model_validate({key: value for key, value in config.items() if key != "reference"})
         results = asyncio.run(invoke_agent_config_once(agent_config, inputs, base_dir=base_dir))
     except (FabricRuntimeExecutionError, FabricTranslationError, ValidationError) as error:
         typer.echo(f"Error: Fabric invocation failed: {error}", err=True)
