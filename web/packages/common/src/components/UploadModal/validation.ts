@@ -17,7 +17,7 @@ interface ValidateUploadFormParams {
   selectedFiles: UploadFile[];
   selectedDataset: UploadDataset | undefined;
   isDatasetRequired: boolean;
-  /** Extensions a selected file must match when `invalidFileMode` is 'disable'. */
+  /** Extensions a selected file must match when `invalidFileMode` is 'disable' or 'hide'. */
   acceptableFileTypes?: string[];
   invalidFileMode?: 'show' | 'hide' | 'disable';
 }
@@ -42,7 +42,8 @@ export const validateUploadForm = ({
   if (selectedFiles.length === 0) {
     errors.file = 'File is required.';
   } else if (
-    invalidFileMode === 'disable' &&
+    invalidFileMode !== undefined &&
+    invalidFileMode !== 'show' &&
     selectedFiles.some((f) => !isFileTypeAllowed(f, acceptableFileTypes))
   ) {
     errors.file = `Only ${acceptableFileTypes?.join(', ')} files can be selected.`;

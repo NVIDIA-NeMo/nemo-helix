@@ -133,11 +133,12 @@ export const uploadModalReducer = (
     case 'SET_FILES': {
       const newFiles = [...state.files, ...action.payload];
       // Auto-select the file if there's only one file and single file selection mode.
-      // In 'disable' mode an unsupported file has a disabled radio, so it must not be selected.
+      // In 'disable' and 'hide' modes an unsupported file can't be picked (disabled or hidden),
+      // so it must not be auto-selected either.
       const shouldAutoSelect =
         newFiles.length === 1 &&
         !state.allowMultipleFileSelection &&
-        (state.invalidFileMode !== 'disable' ||
+        (state.invalidFileMode === 'show' ||
           isFileTypeAllowed(newFiles[0], state.acceptableFileTypes));
 
       // Auto-set dataset name from first file if it's a new dataset and name is empty

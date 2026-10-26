@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getFileExtension } from '@nemo/common/src/components/DatasetFileSelect/utils';
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import type { SelectItemOption } from '@nemo/common/src/components/form/ControlledSearchableSelect';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
-import { getExistingFileId } from '@nemo/common/src/components/UploadModal/utils';
+import {
+  getExistingFileId,
+  isFileTypeAllowed,
+} from '@nemo/common/src/components/UploadModal/utils';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
@@ -79,13 +81,10 @@ export const DatasetSelect: FC<Props> = ({ project, disabled, error }) => {
       );
       dispatch({ type: 'SET_FILES', payload: uploadFiles });
       if (autoSelectFirstAcceptable && uploadFiles.length > 1) {
-        const allowed = acceptableFileTypes.map((t) => t.toLowerCase());
-        const target = uploadFiles.find((f) => {
-          const path = f.file.path;
-          if (path.includes('/')) return false;
-          const ext = getFileExtension(path)?.toLowerCase();
-          return !!ext && allowed.includes(ext);
-        });
+        // Only root-level files are auto-picked; nested files stay selectable by hand.
+        const target = uploadFiles.find(
+          (f) => !f.file.path.includes('/') && isFileTypeAllowed(f, acceptableFileTypes)
+        );
         if (target) dispatch({ type: 'TOGGLE_FILE_SELECTION', payload: target });
       }
       dispatch({ type: 'SET_FETCHING', payload: false });
