@@ -775,12 +775,16 @@ REMOTE_JUDGE_MODEL = Model(
 
 ### Job stuck in "pending" or "running" for too long
 
-Check the job status from the job resource:
+Define a status helper, then call `describe_job_status(job_v1)` while that job still exists, before running cleanup. The troubleshooting cell does not query a job that the tutorial has already deleted:
 
 ```python
-status = job_v1.get_job_status()
-print(f"Status: {status.status}")
-print(f"Details: {status.status_details}")
+from nemo_evals.sdk.job_resources import EvaluatorJobResource
+
+
+def describe_job_status(job: EvaluatorJobResource) -> None:
+    status = job.get_job_status()
+    print(f"Status: {status.status}")
+    print(f"Details: {status.status_details}")
 ```
 
 Remote jobs can report `progress: 100.0` and all samples processed before the platform job status changes to `completed`. Wait for `job.wait_until_done()` to return before downloading results or treating the job as terminal.
@@ -811,31 +815,32 @@ If scores show `None` or the job fails with parsing errors:
 
 ### Hugging Face dataset access issues
 
-For gated or private datasets, create a secret with your Hugging Face token:
+For gated or private datasets, define this helper and call it with a client scoped to an existing workspace, your real Hugging Face token, and the dataset repository ID. Defining it does not create resources after the tutorial's cleanup:
 
 ```python
 from pydantic import SecretStr
 from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
-from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.schema import SecretRef as PlatformSecretRef
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
-client.secrets.create_secret(
-    body=HelixSecretCreateRequest(name="hf-token", value=SecretStr("hf_your_token_here")),
-)
-client.files.create_fileset(
-    body=CreateFilesetRequest(
-        name="my-dataset",
-        purpose=FilesetPurpose.DATASET,
-        storage=HuggingfaceStorageConfig(
-            type=StorageConfigType.HUGGINGFACE,
-            repo_id="org/dataset",
-            repo_type="dataset",
-            token_secret=SecretRef(root="hf-token"),
+def register_private_dataset(client: NemoClient, hf_token: str, repo_id: str) -> None:
+    client.secrets.create_secret(
+        body=HelixSecretCreateRequest(name="hf-token", value=SecretStr(hf_token)),
+    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name="my-dataset",
+            purpose=FilesetPurpose.DATASET,
+            storage=HuggingfaceStorageConfig(
+                type=StorageConfigType.HUGGINGFACE,
+                repo_id=repo_id,
+                repo_type="dataset",
+                token_secret=PlatformSecretRef(root="hf-token"),
+            ),
         ),
-    ),
-)
+    )
 ```
 
 ---
