@@ -5,8 +5,8 @@
 
 Plugin authors subclass :class:`NemoJob` and register the class under the
 ``nemo.jobs`` entry-point group. The platform (or SDK) instantiates each class
-and invokes it through the :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler`
-for local execution, or POSTs it to the plugin service for remote submission.
+and submits it through the :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler`,
+which POSTs it to the plugin service for remote execution.
 
 Mental model — *Job = spec + profile + options*:
 
@@ -27,9 +27,8 @@ it executes — plugin authors never make a class-level sync/async choice:
   ``def``. They run in the task container, where there is no event loop
   and most work calls into sync library protocols.
 
-The scheduler runs the async lifecycle methods through a single
-``asyncio.run`` at the top of :meth:`NemoJobScheduler.run_local`; the
-sync ``run`` is invoked directly from the resulting canonical spec.
+The API process drives the async lifecycle methods; the task container
+invokes the sync ``run`` with the resulting canonical spec.
 
 Example::
 
@@ -60,8 +59,8 @@ Example::
 Entry-point key convention: ``<plugin-name>.<job-name>``, e.g.
 ``example.say-hello``. This lets
 :func:`~nemo_helix_plugin.discovery.discover_jobs` resolve jobs unambiguously
-across plugins; programmatic execution goes through
-:meth:`nemo_helix_plugin.scheduler.NemoJobScheduler.run_local`.
+across plugins; programmatic submission goes through
+:meth:`nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote`.
 """
 
 from __future__ import annotations
@@ -105,7 +104,7 @@ class NemoJob(_NamedPlugin):
 
         Container image key for remote execution (e.g. ``"gpu-tasks"``,
         ``"cpu-tasks"``). Used by the Jobs service to pick the right
-        container image for each step. Ignored for local execution.
+        container image for each remote task step.
 
     .. attribute:: execution_provider
         :type: str
@@ -236,8 +235,7 @@ class NemoJob(_NamedPlugin):
         async I/O is the right default — and is a class-level
         transformation that doesn't depend on instance state.
 
-        Runs on the submitter side before local ``run`` and on the plugin
-        service before custom ``compile``. The default implementation is the
+        Runs in the plugin service before custom ``compile``. The default implementation is the
         identity function — valid only when :attr:`input_spec_schema` is
         ``None``, which means input and canonical shapes coincide.
 
