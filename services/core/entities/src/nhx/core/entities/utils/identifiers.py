@@ -66,6 +66,16 @@ def generate_entity_name(entity_type: str) -> str:
     return f"{type_prefix}-{suffix}"
 
 
+def entity_id_prefix(entity_type: str) -> str:
+    """The prefix every generated ID of this entity type starts with, trailing '-' included.
+
+    Examples:
+        >>> entity_id_prefix('account')
+        'account-'
+    """
+    return f"{_normalize_entity_type(entity_type)}-"
+
+
 def generate_entity_id(entity_type: str) -> str:
     """Generate a compound entity ID with normalized type prefix and base58-encoded UUID.
 

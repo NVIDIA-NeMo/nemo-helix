@@ -38,6 +38,16 @@ class WorkspaceRepositoryInterface(ABC):
         pass
 
     @abstractmethod
+    async def get_workspace_by_id(
+        self,
+        *,
+        workspace_id: str,
+        session: AsyncSession | None = None,
+    ) -> Optional[Workspace]:
+        """Get a workspace by ID."""
+        pass
+
+    @abstractmethod
     async def list_workspaces(
         self,
         *,

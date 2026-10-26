@@ -13,9 +13,11 @@ The CLI calls these credentials Scoped Access Keys. They are NeMo-minted JWTs
 you can expire, suspend, rotate, and revoke. Kubernetes service account tokens
 and workload identity token exchange are separate features.
 
-A human HelixAdmin signs in and creates the keys. Other callers, including
-service accounts, are rejected. The service account is a NeMo identity, not an
-IdP user, and it does not sign in.
+A human HelixAdmin signs in and creates the keys. A workspace Admin can also
+create a key for a service account and bind it to their workspace; see
+[Service-bound keys and workspaces](/documentation/access-control/authentication/using-authentication#service-bound-keys-and-workspaces).
+Service accounts can never create keys. The service account is a NeMo identity,
+not an IdP user, and it does not sign in.
 
 <Note>
 
@@ -321,7 +323,8 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$NHX_INTAKE_WRITE_TOKE
 
 `nemo auth access-keys list` lists keys owned by the signed-in user. A current
 HelixAdmin also sees all service-account-bound keys, including keys created
-by other admins.
+by other admins. A workspace Admin also sees the service-account keys bound to
+the workspaces they administer.
 
 List keys:
 
@@ -339,10 +342,13 @@ nemo auth access-keys rotate ak_0123456789abcdef0123456789abcdef
 nemo auth access-keys revoke ak_0123456789abcdef0123456789abcdef
 ```
 
-Service-account keys are platform-owned. Any current human HelixAdmin can
-list, suspend, unsuspend, rotate, or revoke them by `jti`. A service-account key
-cannot create or manage other service-account keys, even if someone grants that
-service account HelixAdmin.
+Any current human HelixAdmin can list, suspend, unsuspend, rotate, or revoke a
+service-account key by `jti`. So can a human Admin of the workspace the key is
+bound to, within the limits described in
+[Service-bound keys and workspaces](/documentation/access-control/authentication/using-authentication#service-bound-keys-and-workspaces).
+A key bound to no workspace is platform-owned and stays HelixAdmin-only. A
+service-account key cannot create or manage other service-account keys, even if
+someone grants that service account HelixAdmin.
 
 `rotate` prints the replacement token once and keeps the old key usable for the
 configured rotation grace period. Update the external secret or collector
@@ -355,7 +361,7 @@ period expire.
 |---|---|---|
 | `Scoped Access Keys are not enabled` | `auth.access_keys.enabled` is false in the running config, or the signing key is not configured | Ask the operator to check the access-key configuration and `curl "$NHX_BASE_URL/apis/auth/jwks"` |
 | `nemo auth access-keys create --help` has no `--service-account` | The CLI or platform release does not support service-bound Scoped Access Keys | Upgrade the CLI and platform together |
-| `403` while creating a service-account key | The signed-in caller is not a current human HelixAdmin, or auth is disabled | Confirm the caller has `HelixAdmin` in the `system` workspace |
+| `403` while creating a service-account key | The caller is neither a current human HelixAdmin nor an Admin of the single `--workspace` named; no workspace or more than one was named; the account has keys or roles outside that workspace; or auth is disabled | Confirm the caller's roles, that exactly one `--workspace` is named, and the account's other access, or have a HelixAdmin create the key |
 | `/apis/auth/authenticate` returns `"scopes": []` | The key was created without `--scope` | Create a replacement with `--scope intake` |
 | Need a service token with an `intake:write` claim | The key was created without the Intake service scope | Create a replacement with `--scope intake` |
 | `401` from `/apis/auth/authenticate` | Bad, expired, suspended, revoked, or wrong-audience key | Run `nemo auth access-keys list` as a HelixAdmin |

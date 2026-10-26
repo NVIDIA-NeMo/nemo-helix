@@ -21,11 +21,15 @@ from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.common.config import AuthConfig
 from nhx.core.entities.api.dependencies import (
+    dep_account_credential_store,
+    dep_account_identity_store,
     dep_entity_repository_with_session,
     dep_workspace_repository_with_session,
 )
 from nhx.core.entities.api.server import app
 from nhx.core.entities.app.repository import (
+    AccountCredentialStore,
+    AccountIdentityStore,
     SQLAlchemyEntityRepository,
     SQLAlchemyWorkspaceRepository,
 )
@@ -93,6 +97,10 @@ def repos(request, session_maker):
         return {
             "workspace": SQLAlchemyWorkspaceRepository(session_maker),
             "entity": SQLAlchemyEntityRepository(session_maker),
+            # The member endpoints read a service account's credentials to authorize granting it
+            # roles outside the workspace its Scoped Access Keys are bound to.
+            "account_identity": AccountIdentityStore(session_maker),
+            "account_credential": AccountCredentialStore(session_maker),
         }
 
 
@@ -190,6 +198,8 @@ async def client_with_auth(repos) -> AsyncGenerator[AsyncClient, None]:
     try:
         app.dependency_overrides[dep_workspace_repository_with_session] = lambda: workspace_repo
         app.dependency_overrides[dep_entity_repository_with_session] = lambda: entity_repo
+        app.dependency_overrides[dep_account_identity_store] = lambda: repos["account_identity"]
+        app.dependency_overrides[dep_account_credential_store] = lambda: repos["account_credential"]
         app.dependency_overrides[get_auth_client] = lambda: auth_client
 
         wrapper = FastAPI(title="Entities integration test wrapper (auth on)")
@@ -216,6 +226,8 @@ async def client_with_auth_service_principal(repos) -> AsyncGenerator[AsyncClien
     try:
         app.dependency_overrides[dep_workspace_repository_with_session] = lambda: workspace_repo
         app.dependency_overrides[dep_entity_repository_with_session] = lambda: entity_repo
+        app.dependency_overrides[dep_account_identity_store] = lambda: repos["account_identity"]
+        app.dependency_overrides[dep_account_credential_store] = lambda: repos["account_credential"]
         app.dependency_overrides[get_auth_client] = lambda: auth_client
 
         wrapper = FastAPI(title="Entities integration test wrapper (service principal)")
@@ -243,6 +255,8 @@ async def client_with_auth_service_on_behalf_of(
     try:
         app.dependency_overrides[dep_workspace_repository_with_session] = lambda: workspace_repo
         app.dependency_overrides[dep_entity_repository_with_session] = lambda: entity_repo
+        app.dependency_overrides[dep_account_identity_store] = lambda: repos["account_identity"]
+        app.dependency_overrides[dep_account_credential_store] = lambda: repos["account_credential"]
         app.dependency_overrides[get_auth_client] = lambda: auth_client
 
         wrapper = FastAPI(title="Entities integration test wrapper (service + on-behalf-of)")
@@ -269,6 +283,8 @@ async def client(repos) -> AsyncGenerator[AsyncClient, None]:
     try:
         app.dependency_overrides[dep_workspace_repository_with_session] = lambda: workspace_repo
         app.dependency_overrides[dep_entity_repository_with_session] = lambda: entity_repo
+        app.dependency_overrides[dep_account_identity_store] = lambda: repos["account_identity"]
+        app.dependency_overrides[dep_account_credential_store] = lambda: repos["account_credential"]
         app.dependency_overrides[get_auth_client] = _create_mock_auth_client
 
         # Mount entities app at /apis/entities so tests use full platform paths

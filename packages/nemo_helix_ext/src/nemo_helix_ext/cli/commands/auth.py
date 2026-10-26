@@ -880,7 +880,10 @@ def create_access_key(
         str | None,
         typer.Option(
             "--service-account",
-            help="Bind the key to a non-human service account (HelixAdmin only).",
+            help=(
+                "Bind the key to a non-human service account. Requires HelixAdmin, or Admin of the single "
+                "--workspace the key then binds to, whose Admins can manage it."
+            ),
         ),
     ] = None,
     scope: Annotated[
@@ -908,7 +911,9 @@ def create_access_key(
             help=(
                 "Grant the key's principal workspace membership, formatted '<workspace>' or "
                 "'<workspace>:<role1>,<role2>' (role defaults to Editor). Repeat for multiple workspaces. "
-                "Replaces a separate 'nemo workspaces members create' call."
+                "Replaces a separate 'nemo workspaces members create' call. With --service-account, a "
+                "caller who isn't a HelixAdmin must name exactly one workspace and be its Admin; the key "
+                "binds to it, so that workspace's Admins can list, suspend, unsuspend, rotate and revoke it."
             ),
         ),
     ] = None,
@@ -946,7 +951,8 @@ def list_access_keys(
     """List Scoped Access Keys owned by the currently authenticated user.
 
     HelixAdmins also see every service-bound Scoped Access Key, not just the
-    ones they personally created.
+    ones they personally created. Workspace Admins also see the service-bound
+    keys bound to workspaces they administer, whoever created them.
     """
     try:
         listed = _access_key_issuer(ctx).list(page=page, page_size=page_size)
@@ -966,6 +972,7 @@ def list_access_keys(
             Column("description", None),
             Column("entity_type", None),
             Column("principal", None),
+            Column("bound_workspace", None),
             Column("status", None),
             Column("issuer", None),
             Column("audiences", None),
@@ -987,7 +994,7 @@ def revoke_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to revoke.")],
 ) -> None:
-    """Revoke a Scoped Access Key owned by the currently authenticated user."""
+    """Revoke a Scoped Access Key you own, or a service-bound key you administer."""
     try:
         result = _access_key_issuer(ctx).revoke(jti)
     except AccessKeyFeatureDisabledError as exc:
@@ -1006,7 +1013,7 @@ def suspend_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to suspend.")],
 ) -> None:
-    """Temporarily suspend a Scoped Access Key owned by the current user.
+    """Temporarily suspend a Scoped Access Key you own, or a service-bound key you administer.
 
     Unlike revocation, suspension is reversible until the key expires.
     """
@@ -1028,7 +1035,7 @@ def unsuspend_access_key(
     ctx: typer.Context,
     jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to unsuspend.")],
 ) -> None:
-    """Restore a suspended Scoped Access Key owned by the current user."""
+    """Restore a suspended Scoped Access Key you own, or a service-bound key you administer."""
     try:
         result = _access_key_issuer(ctx).unsuspend(jti)
     except AccessKeyFeatureDisabledError as exc:
