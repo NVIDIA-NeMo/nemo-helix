@@ -38,6 +38,7 @@ from nhx.core.models.api.service.model_entity_service import (
     is_trusted_repo_id,
     validate_tool_call_plugin_allowed,
 )
+from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.config import config as models_config
 from nhx.core.models.entities import Model
 from nhx.core.models.schemas import (
@@ -214,6 +215,8 @@ async def list_models(
         raise
     except InvalidFilterError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Failed to list model entities")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model entities")
