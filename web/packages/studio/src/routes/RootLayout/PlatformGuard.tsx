@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getPlatformHealthUrl, usePlatformHealth } from '@studio/api/platformHealth';
+import {
+  getPlatformHealthUrl,
+  type PlatformHealthStatus,
+  usePlatformHealth,
+} from '@studio/api/platformHealth';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { PlatformUnavailable } from '@studio/components/Layouts/PlatformUnavailable';
 import { ROUTES } from '@studio/constants/routes';
@@ -16,6 +20,12 @@ interface PlatformGuardProps {
 // stuck in a redirect loop between the identity provider and a blocked Studio.
 const UNGUARDED_PATHS: ReadonlySet<string> = new Set([ROUTES.auth.success]);
 
+// A 404 (`not-found`) leaves platform state unknown, so it must not block the app.
+const PASSABLE_STATUSES: ReadonlySet<PlatformHealthStatus | undefined> = new Set([
+  'live',
+  'not-found',
+]);
+
 /**
  * Blocks the app only while platform liveness cannot be confirmed. Without it, a stopped
  * platform surfaces as dozens of unrelated per-query errors across the UI.
@@ -24,7 +34,7 @@ export const PlatformGuard = ({ children }: PlatformGuardProps) => {
   const { pathname } = useLocation();
   const { data: status, isPending, isFetching, refetch } = usePlatformHealth();
 
-  if (UNGUARDED_PATHS.has(pathname) || status === 'live') return <>{children}</>;
+  if (UNGUARDED_PATHS.has(pathname) || PASSABLE_STATUSES.has(status)) return <>{children}</>;
   if (isPending) return <Loading description="Connecting to NeMo Helix..." />;
 
   return (

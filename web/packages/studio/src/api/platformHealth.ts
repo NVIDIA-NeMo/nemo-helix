@@ -9,11 +9,13 @@ import axios from 'axios';
  * Outcome of probing the platform's liveness endpoint.
  *
  * - `live`: the platform is reachable, even if some services or controllers are not ready.
+ * - `not-found`: the liveness endpoint answered 404. Platform state is unknown, but it may
+ *   still be reachable, so this must not block the app.
  * - `unreachable`: no usable response — connection refused, DNS failure, timeout, a dev
  *   proxy that could not reach its target, or any response (even a 200) that is not the
  *   platform's.
  */
-export type PlatformHealthStatus = 'live' | 'unreachable';
+export type PlatformHealthStatus = 'live' | 'not-found' | 'unreachable';
 
 export const PLATFORM_HEALTH_QUERY_KEY = ['platform-health'] as const;
 
@@ -29,10 +31,11 @@ const isLiveResponse = (data: unknown): boolean =>
 
 export const checkPlatformHealth = async (): Promise<PlatformHealthStatus> => {
   try {
-    const { data } = await axios.get<unknown>(getPlatformHealthUrl(), {
+    const { data, status } = await axios.get<unknown>(getPlatformHealthUrl(), {
       timeout: HEALTH_TIMEOUT_MS,
-      validateStatus: (status) => status === 200,
+      validateStatus: (status) => status === 200 || status === 404,
     });
+    if (status === 404) return 'not-found';
     // A 200 without the platform's body (e.g. a dev server's SPA fallback serving index.html) is
     // not the platform answering, so it must not unblock the app.
     return isLiveResponse(data) ? 'live' : 'unreachable';
