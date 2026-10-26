@@ -3,18 +3,22 @@
 
 """The Gym component that runs a registered agent: what it changes in the config and what it leaves alone.
 
-``nemo_gym`` and ``nemo_fabric`` are not installed here (Gym cannot be a repo dependency), so the
-module is loaded with stand-ins for the names it imports; only its pure functions are exercised.
+``nemo_gym`` is not installed here (Gym cannot be a repo dependency), so the module is loaded with
+stand-ins for the Gym names it imports; its pure functions are exercised, and its composed config is
+planned by the real ``nemo_fabric``, a dependency of the evals SDK.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import sysconfig
 import types
 from pathlib import Path
 from typing import Any, ClassVar
 
+import nemo_fabric
 import pytest
 from pydantic import BaseModel
 
@@ -34,7 +38,7 @@ class _Item(BaseModel, extra="allow"):
 
 @pytest.fixture(scope="module")
 def app():
-    for name in ("nemo_gym", "nemo_fabric", "fastapi"):
+    for name in ("nemo_gym", "fastapi"):
         if name not in sys.modules:
             try:
                 __import__(name)
@@ -42,7 +46,6 @@ def app():
                 pass
     stand_ins = {
         "fastapi": {"Body": lambda *a, **k: None, "Request": object},
-        "nemo_fabric": {"Fabric": object, "FabricConfig": object, "RunRequest": object},
         "nemo_gym": {},
         "nemo_gym.base_resources_server": {
             "NEMO_GYM_MCP_METADATA_KEY": "mcp",
@@ -167,6 +170,67 @@ def test_stdio_secret_templates_are_filled_from_the_process_env_and_gym_servers_
     untouched = _compose(app)  # a template with no value stays a template rather than becoming empty
     assert untouched["mcp"]["servers"]["calc"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"
     assert _REGISTERED["mcp"]["servers"]["calc"]["env"]["CALC_TOKEN"] == "${CALC_TOKEN}"  # the input is not mutated
+
+
+def _stage_adapter(target: Path, adapter_id: str) -> Path:
+    """Lay out an adapter descriptor the way ``uv pip install --target`` installs an adapter wheel's data."""
+    descriptor = target / "share" / "nemo-fabric" / "adapters" / "staged" / "staged.fabric-adapter.json"
+    descriptor.parent.mkdir(parents=True)
+    installed = Path(sysconfig.get_path("data"), "share", "nemo-fabric", "adapters", "deepagents")
+    template = json.loads(next(installed.glob("*.fabric-adapter.json")).read_text())
+    descriptor.write_text(json.dumps({**template, "adapter_id": adapter_id}))
+    return descriptor
+
+
+def test_adapter_descriptors_are_found_under_import_paths_once_each(app, tmp_path: Path) -> None:
+    target = tmp_path / "wheels-v1-site-packages"
+    adapters = target / "share" / "nemo-fabric" / "adapters"
+    (adapters / "a").mkdir(parents=True)
+    (adapters / "a" / "a.fabric-adapter.json").write_text("{}")
+    (adapters / "b.fabric-adapter.json").write_text("{}")
+    (adapters / "README.md").write_text("not a descriptor")
+
+    found = app.staged_adapter_descriptors(["", str(target), str(target), str(tmp_path / "missing")])
+
+    assert found == [
+        str((adapters / "a" / "a.fabric-adapter.json").resolve()),
+        str((adapters / "b.fabric-adapter.json").resolve()),
+    ]
+
+
+def test_staged_descriptors_extend_the_agents_discovery_paths_without_mutating_it(app) -> None:
+    registered = {**_REGISTERED, "discovery": {"local_paths": ["authored.fabric-adapter.json"]}}
+    staged = "/job/work/wheels-v1-site-packages/share/nemo-fabric/adapters/x/x.fabric-adapter.json"
+
+    composed = app.compose_fabric_config(registered, **_compose_kwargs(adapter_descriptors=[staged, staged]))
+
+    assert composed["discovery"]["local_paths"] == ["authored.fabric-adapter.json", staged]
+    assert registered["discovery"]["local_paths"] == ["authored.fabric-adapter.json"]
+
+
+def test_staged_descriptors_fill_a_null_discovery_section(app) -> None:
+    staged = "/job/work/wheels-v1-site-packages/share/nemo-fabric/adapters/x/x.fabric-adapter.json"
+
+    composed = app.compose_fabric_config(
+        {**_REGISTERED, "discovery": None}, **_compose_kwargs(adapter_descriptors=[staged])
+    )
+
+    assert composed["discovery"] == {"local_paths": [staged]}
+
+
+def test_fabric_plans_an_agent_whose_adapter_was_staged_with_a_target_install(app, tmp_path: Path) -> None:
+    """The Gym host's ``--target`` install leaves the descriptor outside the prefix Fabric lists (NVBug 6991629)."""
+    target = tmp_path / "wheels-v1-site-packages"
+    _stage_adapter(target, "test.staged.adapter")
+    registered = {"metadata": {"name": "a"}, "harness": {"adapter_id": "test.staged.adapter"}}
+
+    def plan(adapter_descriptors: list[str]) -> Any:
+        composed = app.compose_fabric_config(registered, **_compose_kwargs(adapter_descriptors=adapter_descriptors))
+        return nemo_fabric.Fabric().plan(nemo_fabric.FabricConfig.from_mapping(composed), base_dir=tmp_path)
+
+    with pytest.raises(nemo_fabric.FabricConfigError, match="unknown adapter `test.staged.adapter`"):
+        plan([])
+    plan(app.staged_adapter_descriptors([str(target)]))
 
 
 def test_fabric_messages_become_responses_items_ending_with_the_answer(app) -> None:

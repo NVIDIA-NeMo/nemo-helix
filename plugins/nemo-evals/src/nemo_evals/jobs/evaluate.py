@@ -21,6 +21,7 @@ from nemo_evals.api.schemas import MetricInline
 from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
 from nemo_evals.jobs.agent_spec import target_agent_identity
 from nemo_evals.jobs.metric_resolution import (
+    gateway_metric_models_as_job,
     require_resolved_model_refs,
     resolve_metrics_to_inline,
     to_runtime_bundle,
@@ -345,41 +346,42 @@ class _EvaluateJobBase(NemoJob):
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         require_resolved_model_refs(metrics, subject="EvaluateSpec")
-        if isinstance(spec.target, Model):
-            if not isinstance(params, RunConfigOnlineModel):
-                raise TypeError("model target requires RunConfigOnlineModel")
-            result = evaluator.run_sync(
-                metrics=metrics,
-                dataset=dataset,
-                config=params,
-                target=spec.target,
-                field_mapping=spec.field_mapping,
-                prompt_template=spec.prompt_template,
-            )
-        elif isinstance(spec.target, AgentBase):
-            if type(params) is not RunConfigOnline:
-                raise TypeError("agent target requires RunConfigOnline")
-            if spec.prompt_template is None:
-                raise ValueError("agent target requires prompt_template")
-            result = evaluator.run_sync(
-                metrics=metrics,
-                dataset=dataset,
-                config=params,
-                target=spec.target,
-                field_mapping=spec.field_mapping,
-                prompt_template=spec.prompt_template,
-            )
-        else:
-            if type(params) is not RunConfig:
-                raise TypeError("offline evaluation requires RunConfig")
-            result = evaluator.run_sync(
-                metrics=metrics,
-                dataset=dataset,
-                config=params,
-                target=None,
-                field_mapping=spec.field_mapping,
-                prompt_template=None,
-            )
+        with gateway_metric_models_as_job(metrics):
+            if isinstance(spec.target, Model):
+                if not isinstance(params, RunConfigOnlineModel):
+                    raise TypeError("model target requires RunConfigOnlineModel")
+                result = evaluator.run_sync(
+                    metrics=metrics,
+                    dataset=dataset,
+                    config=params,
+                    target=spec.target,
+                    field_mapping=spec.field_mapping,
+                    prompt_template=spec.prompt_template,
+                )
+            elif isinstance(spec.target, AgentBase):
+                if type(params) is not RunConfigOnline:
+                    raise TypeError("agent target requires RunConfigOnline")
+                if spec.prompt_template is None:
+                    raise ValueError("agent target requires prompt_template")
+                result = evaluator.run_sync(
+                    metrics=metrics,
+                    dataset=dataset,
+                    config=params,
+                    target=spec.target,
+                    field_mapping=spec.field_mapping,
+                    prompt_template=spec.prompt_template,
+                )
+            else:
+                if type(params) is not RunConfig:
+                    raise TypeError("offline evaluation requires RunConfig")
+                result = evaluator.run_sync(
+                    metrics=metrics,
+                    dataset=dataset,
+                    config=params,
+                    target=None,
+                    field_mapping=spec.field_mapping,
+                    prompt_template=None,
+                )
         report_row_evaluation_usage(result, ctx.usage)
         result_files = self._write_result_files(
             result, ctx.storage.persistent, run_id=ctx.job_id, started_at=started_at

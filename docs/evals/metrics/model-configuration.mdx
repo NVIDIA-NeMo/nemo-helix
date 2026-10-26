@@ -29,11 +29,16 @@ evaluator = Evaluator.from_client(client)
 
 Define the endpoint URL and model name directly:
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from nhx_evals_sdk import Model, SecretRef
 
 model = Model(
-    url="https://integrate.api.nvidia.com/v1",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -73,6 +78,8 @@ client.secrets.create_secret(
 Use `target=model` when the evaluator should call the model to generate the sample output before scoring.
 
 ```python
+import os
+
 from nhx_evals_sdk import (
     RunConfigOnlineModel,
     ExactMatchMetric,
@@ -82,7 +89,7 @@ from nhx_evals_sdk import (
 )
 
 model = Model(
-    url="https://integrate.api.nvidia.com/v1",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
@@ -118,10 +125,12 @@ result = job.get_result()
 Use a model field on the metric when the metric itself calls an LLM to score existing outputs.
 
 ```python
+import os
+
 from nhx_evals_sdk import LLMJudgeMetric, Model, RangeScore, SecretRef
 
 judge_model = Model(
-    url="https://integrate.api.nvidia.com/v1",
+    url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
     name="nvidia/nemotron-3.5-lightning-30b-a3b",
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )

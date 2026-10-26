@@ -59,6 +59,7 @@ const mockGroup = (overrides?: Partial<ExperimentResponse>, evaluations: object[
   renderRoute(<ExperimentDetailRoute />, {
     history: `/workspaces/${WORKSPACE}/experiment/${GROUP_NAME}`,
     routes: [
+      { path: ROUTES.workspace.experiment, element: <div>Experiment list destination</div> },
       {
         path: ROUTES.workspace.experimentDetail,
         element: <ExperimentDetailRoute />,
@@ -70,6 +71,37 @@ const mockGroup = (overrides?: Partial<ExperimentResponse>, evaluations: object[
 };
 
 describe('ExperimentDetailRoute', () => {
+  it('returns to the experiment list after successful deletion', async () => {
+    mockGroup();
+    server.use(
+      http.delete(
+        mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'),
+        () => new HttpResponse(null, { status: 204 })
+      )
+    );
+    await userEvent.click(
+      await screen.findByRole('button', { name: `Delete experiment ${GROUP_NAME}` })
+    );
+    await userEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete' })
+    );
+    expect(await screen.findByText('Experiment list destination')).toBeVisible();
+  });
+
+  it('offers final deletion with an explicit evaluation cascade warning', async () => {
+    mockGroup();
+    await userEvent.click(
+      await screen.findByRole('button', { name: `Delete experiment ${GROUP_NAME}` })
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText(
+        /Evaluations belonging only to the selected experiments will also be deleted/
+      )
+    ).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeVisible();
+  });
+
   it('renders the group description and summary without requesting Optimizer when disabled', async () => {
     const insightRequest = mockGroup();
 

@@ -58,6 +58,14 @@ describe('PlatformGuard', () => {
     expect(screen.queryByText("Studio can't connect to NeMo Helix")).not.toBeInTheDocument();
   });
 
+  it('allows access when the liveness endpoint is not exposed (404)', async () => {
+    server.use(http.get(getPlatformHealthUrl(), () => new HttpResponse(null, { status: 404 })));
+    renderGuard();
+
+    expect(await screen.findByText('protected content')).toBeInTheDocument();
+    expect(screen.queryByText("Studio can't connect to NeMo Helix")).not.toBeInTheDocument();
+  });
+
   it('retries on demand and unblocks once the platform comes up', async () => {
     const user = userEvent.setup();
     platformDown();

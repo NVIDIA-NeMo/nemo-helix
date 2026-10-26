@@ -68,6 +68,7 @@ from nemo_evals.jobs.gym_sandbox import (
 from nemo_evals.jobs.gym_submission import gym_runtime_target, prepare_gym_submission
 from nemo_evals.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evals.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
+from nemo_evals.jobs.metric_resolution import gateway_metric_models_as_job
 from nemo_evals.jobs.publication import publish_agent_eval_result
 from nemo_evals.jobs.registered_agent_resolution import (
     expand_mcp_secret_env,
@@ -620,7 +621,10 @@ class _AgentEvalJobBase(NemoJob):
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
-        with capture_evaluator_request_logs() as request_logs:
+        with (
+            gateway_metric_models_as_job([metric for task in tasks for metric in task.metrics]),
+            capture_evaluator_request_logs() as request_logs,
+        ):
             with capture_agent_evaluation_usage(
                 ctx.usage,
                 request_logs,

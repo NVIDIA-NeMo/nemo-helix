@@ -394,7 +394,12 @@ inline list of tasks or a **reference to a stored taskset**. Referencing a tasks
 task definitions in one place and evaluate the whole set by name, instead of inlining every task on
 each run.
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from nemo_evals.api.schemas import TasksetRef
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, ModelTarget
 from nhx_evals_sdk.values import Model
@@ -403,7 +408,7 @@ from nhx_evals_sdk.values import Model
 input_spec = AgentEvalInputSpec(
     tasks=TasksetRef("default/geography-suite"),
     target=ModelTarget(
-        model=Model(url="https://integrate.api.nvidia.com/v1", name="nvidia/nemotron-3.5-lightning-30b-a3b"),
+        model=Model(url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"), name="nvidia/nemotron-3.5-lightning-30b-a3b"),
     ),
 )
 ```

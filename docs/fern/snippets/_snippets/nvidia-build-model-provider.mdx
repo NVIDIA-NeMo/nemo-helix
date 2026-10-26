@@ -15,4 +15,6 @@ You can verify this provider exists by running `nemo inference providers list --
 
 The tutorials in these docs use this provider for inference, but you can alternatively create your own and use it instead.
 
+The NVIDIA provider-creation and evaluation examples support `NVIDIA_BASE_URL`, an OpenAI-compatible API base including `/v1`. The default is `https://integrate.api.nvidia.com/v1`. For another service, export its base URL (for example, `export NVIDIA_BASE_URL=https://inference-api.nvidia.com/v1`) and set `NVIDIA_API_KEY` to a credential authorized for that service. Model identifiers and access must also match the service. Set `NVIDIA_MODEL` to the exact chat-model ID from that service's `/v1/models` catalog; no override retains each example's public NVIDIA Build default. Anonymizer examples also support `NHX_ANON_GENERAL_MODEL` for their general-purpose model. Retrieval examples give the more specific `RETRIEVAL_CHAT_MODEL` priority over `NVIDIA_MODEL` and support `RETRIEVAL_EMBED_MODEL` for the embedding model. This does not automatically change providers you have already registered.
+
 </Note>

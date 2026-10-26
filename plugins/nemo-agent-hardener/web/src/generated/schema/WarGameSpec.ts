@@ -15,13 +15,25 @@ import type { WarGameModels } from './WarGameModels.ts';
  * agent ref) or a ready ``config`` manifest path (the CLI path).
  */
 export interface WarGameSpec {
+  /**
+     * @minLength 1
+     * @pattern \S
+     */
   config?: string;
+  /**
+     * @minLength 1
+     * @pattern \S
+     */
   manifest_id?: string;
   env_file?: string;
   driver?: string;
   stop_after_synth?: boolean;
   replay_hitlog_fileset?: string;
   benign_suite_fileset?: string;
+  /**
+     * @minimum 1
+     * @maximum 65535
+     */
   port?: number;
   defenders?: string[];
   attack_intensity?: string;

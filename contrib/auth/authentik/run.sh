@@ -1557,7 +1557,7 @@ k8s_wait_for_authentik() {
     local kubeconfig="$2"
     local deployment
 
-    for deployment in authentik-server authentik-worker nemo-helix-api nemo-helix-envoy; do
+    for deployment in authentik-server authentik-worker nemo-helix-api nemo-helix-core-controller nemo-helix-envoy; do
         k8s_kubectl_command "${context}" "${kubeconfig}" \
             -n "${HELM_NAMESPACE}" rollout status "deploy/${deployment}" --timeout=240s
     done
