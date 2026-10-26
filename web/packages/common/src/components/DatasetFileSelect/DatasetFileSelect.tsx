@@ -50,8 +50,10 @@ interface DatasetFileSelectProps {
    *  selects a file. Also hides the post-commit file list since the parent
    *  form already reflects the selection. */
   autoCommit?: boolean;
-  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``. */
-  filesetPurpose?: FilesetPurpose;
+  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``; ``null`` lists every purpose. */
+  filesetPurpose?: FilesetPurpose | null;
+  /** Let one upload carry several files while the selection stays a single file. */
+  allowMultipleUpload?: boolean;
   /** Label for the fileset picker. Defaults to ``'Dataset'``. */
   datasetLabel?: string;
   /** Auto-select the first root-level accepted file on fileset selection. */
@@ -86,6 +88,7 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
   inline = false,
   autoCommit = false,
   filesetPurpose,
+  allowMultipleUpload = false,
   datasetLabel,
   autoSelectFirstAcceptable,
   showUpdatedAt,
@@ -197,7 +200,7 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
             workspace={workspace}
             includeDataset={includeDataset}
             includeTabs={includeTabs}
-            allowMultipleFileSelection={allowMultiple}
+            allowMultipleFileSelection={allowMultiple || allowMultipleUpload}
             acceptableFileTypes={acceptedFileTypes}
             invalidFileMode={invalidFileMode}
             onSubmit={handleModalSubmit}
@@ -278,7 +281,8 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
           onSubmit={handleModalSubmit}
           acceptableFileTypes={acceptedFileTypes}
           invalidFileMode={invalidFileMode}
-          allowMultipleFileSelection={allowMultiple}
+          allowMultipleFileSelection={allowMultiple || allowMultipleUpload}
+          filesetPurpose={filesetPurpose}
           // Default modal width is too narrow for the files table; widen the
           // surface so file paths and sizes don't get truncated. Stays
           // responsive with ``max-w-[90vw]``.

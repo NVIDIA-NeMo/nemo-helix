@@ -66,8 +66,8 @@ export interface UploadModalProps {
   /** When false, the dataset picker hides the "Create new dataset" option.
    *  Defaults to ``true`` (legacy behaviour). */
   allowNewDataset?: boolean;
-  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``. */
-  filesetPurpose?: FilesetPurpose;
+  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``; ``null`` lists every purpose. */
+  filesetPurpose?: FilesetPurpose | null;
   /** Label for the fileset picker. Defaults to ``'Dataset'``. */
   datasetLabel?: string;
   /** Auto-select the first root-level accepted file on fileset selection. */

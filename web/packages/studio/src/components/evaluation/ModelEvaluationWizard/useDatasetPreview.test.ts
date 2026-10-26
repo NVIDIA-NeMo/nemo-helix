@@ -2,10 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  getFilesListFilesetFilesQueryKey,
+  getFilesRetrieveFilesetQueryKey,
+} from '@nemo/sdk/generated/platform/files';
+import {
   type MessageSelector,
   messagesPath,
   messagesShape,
+  useDatasetPreview,
 } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
+import { server } from '@studio/mocks/node';
+import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
+import { wrapper } from '@studio/tests/util/TestQueryClient';
+import { renderHook, waitFor } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+
+const downloadFileHead = vi.hoisted(() => vi.fn());
+
+vi.mock('@studio/components/filesets/hooks/useDownloadFileHead', () => ({
+  useDownloadFileHead: () => downloadFileHead,
+}));
 
 /** Mirrors ``extractUserFriendlyKeysFromRow``: `null` is a contentless message
  *  it drops, which still consumes an index. */
@@ -46,5 +63,29 @@ describe('messagesShape', () => {
     ['no messages', [], { input: false, reference: false }],
   ] as const)('handles %s', (_, roles, expected) => {
     expect(messagesShape(selectors(...roles))).toEqual(expected);
+  });
+});
+
+describe('useDatasetPreview', () => {
+  it('reads a Parquet file whole and offers its columns', async () => {
+    // Listed larger than the 64 KB head a line-delimited file is read from.
+    const listedSize = 100_000;
+    server.use(
+      http.get(mockApiUrl(getFilesRetrieveFilesetQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ name: 'data', workspace: 'ws' })
+      ),
+      http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ data: [{ path: 'rows.parquet', size: listedSize }] })
+      )
+    );
+    downloadFileHead.mockImplementation(() => parquetFile(PARQUET.twoRows).arrayBuffer());
+
+    const { result } = renderHook(() => useDatasetPreview('ws/data#rows.parquet'), { wrapper });
+
+    await waitFor(() => expect(result.current.row).toEqual({ prompt: 'hi', expected: 'hi' }));
+    expect(result.current.keyOptions.map((option) => option.value)).toEqual(['prompt', 'expected']);
+    expect(result.current.rowCount).toBe(2);
+    expect(result.current.error).toBeNull();
+    expect(downloadFileHead).toHaveBeenCalledWith(expect.objectContaining({ bytes: listedSize }));
   });
 });
