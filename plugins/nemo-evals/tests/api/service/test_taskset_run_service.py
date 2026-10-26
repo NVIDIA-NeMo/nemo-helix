@@ -8,11 +8,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from nemo_evals.api.fields import TasksetRef
+from nemo_evals.api.fields import AgentRef, TasksetRef
 from nemo_evals.api.service.taskset_run_service import TasksetRunResolutionError, pin_taskset_ref
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TasksetRevisionEntity
+from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
+from nemo_evals.jobs.agent_spec import (
+    HarborBuiltinAgentSource,
+    HarborModelName,
+    HarborRunnerTarget,
+    RegisteredAgentSource,
+)
 from nemo_evals.revisions import RevisionContentMismatchError, publish_revision
 from nemo_evals.source_authorization import remember_allowed
 from nemo_evals.taskset_runs.entities import (
@@ -596,3 +603,41 @@ async def test_read_service_propagates_storage_failures(service, seed_run, entit
             await service.list_runs("default", caller="user:alice")
         else:
             await service.list_tasks("default", "run-selected", phase=None, page=1, page_size=100)
+
+
+async def _no_network_spec(service, request, target):
+    pinned, spec = await service._resolve(request, "default")
+    task = spec.tasks[0]
+    config = {**task.spec.config, "environment": {**task.spec.config["environment"], "network_mode": "no-network"}}
+    spec.tasks = [task.model_copy(update={"spec": task.spec.model_copy(update={"config": config})})]
+    spec.target = target
+    return pinned, spec
+
+
+async def test_no_network_tasks_without_a_closed_book_route_are_refused_before_acceptance(
+    service, published, request_body, monkeypatch, entity_store
+):
+    request = TasksetRunInput.model_validate(request_body)
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
+
+    with pytest.raises(TasksetRunResolutionError, match=r"closed_book_required: no-network tasks \['task-1'\]"):
+        await service.submit(request, workspace="default", caller="user:alice")
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+
+
+async def test_a_refused_registered_agent_does_not_leave_its_files_snapshot(
+    service, published, request_body, monkeypatch, files_service
+):
+    request = TasksetRunInput.model_validate(request_body)
+    snapshot = FilesetRef("agents/request-snapshot")
+    files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot),
+        agent_kwargs={"fabric_config": {"name": "coder"}},
+    )
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
+
+    with pytest.raises(TasksetRunResolutionError, match="closed_book_required"):
+        await service.submit(request, workspace="default", caller="user:alice")
+    assert ("agents", "request-snapshot") not in files_service.filesets

@@ -30,6 +30,7 @@ from nemo_evals.config import get_config
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
 from nemo_evals.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
+    _secret_refs,
     compile_agent_eval_job,
 )
 from nemo_evals.jobs.agent_files_snapshot import (
@@ -51,6 +52,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gateway_models import (
+    add_gateway_key_placeholder,
     agent_gateway_origin,
     check_gateway_model,
     point_agent_at_gateway_model,
@@ -80,7 +82,7 @@ from nemo_evals.jobs.run_outcome import (
     report_run_outcome,
     report_status_details,
 )
-from nemo_evals.jobs.secret_env import JobEnvSecretSource
+from nemo_evals.jobs.secret_env import JobEnvSecretSource, build_task_environment
 from nemo_evals.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evals.jobs.utils import async_client_from_sync_client, require_platform_client
 from nemo_evals.source_authorization import SourceReadAuthorizer
@@ -263,9 +265,11 @@ class _AgentEvalJobBase(NemoJob):
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
             validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
-            return AgentEvalSpec(
+            spec = AgentEvalSpec(
                 tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
             )
+            add_gateway_key_placeholder(build_task_environment(_secret_refs(spec)), spec.target)
+            return spec
         except Exception:
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
