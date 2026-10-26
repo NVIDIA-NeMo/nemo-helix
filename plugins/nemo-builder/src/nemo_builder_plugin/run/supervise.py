@@ -54,6 +54,8 @@ _RETRYABLE_ERRORS = ((403, "exceeded quota"), (429, ""))
 _RETRY_ATTEMPTS = 60
 _RETRY_DEADLINE_SECONDS = 60 * 60
 _RETRY_MAX_DELAY_SECONDS = 60.0
+#: The client sets no timeout of its own, so a stalled create would outlast the retry deadline.
+_CREATE_TIMEOUT_SECONDS = 60.0
 
 #: This step's namespace, which Kubernetes mounts beside the ServiceAccount token.
 _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
@@ -230,14 +232,16 @@ def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace
     """
     deadline = time.monotonic() + _RETRY_DEADLINE_SECONDS
     for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
         try:
-            api.create_namespaced_pod(namespace=namespace, body=manifest)
+            api.create_namespaced_pod(namespace=namespace, body=manifest, _request_timeout=timeout)
             return
         except ApiException as exc:
-            delay = min(5.0 * 2 ** (attempt - 1), _RETRY_MAX_DELAY_SECONDS)
+            remaining = deadline - time.monotonic()
             retryable = any(exc.status == status and text in str(exc.body) for status, text in _RETRYABLE_ERRORS)
-            if not retryable or attempt == _RETRY_ATTEMPTS or time.monotonic() + delay > deadline:
+            if not retryable or attempt == _RETRY_ATTEMPTS or remaining <= 0:
                 raise
+            delay = min(5.0 * 2 ** (attempt - 1), _RETRY_MAX_DELAY_SECONDS, remaining)
             logger.warning(
                 "sandbox %s: %s; retrying in %.0fs", sanitize_for_log(name), sanitize_for_log(exc.reason), delay
             )
