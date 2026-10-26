@@ -29,6 +29,7 @@ import {
   MODEL_COMPARE_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
+  VIRTUAL_MODELS_ROUTE_ENABLED,
   PLUGINS_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
   SECRETS_ENABLED,
@@ -96,6 +97,9 @@ export const gateSecretsRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateGuardrailsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(GUARDRAILS_ENABLED, routes);
+
+export const gateVirtualModelsRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(VIRTUAL_MODELS_ROUTE_ENABLED, routes);
 
 export const gateInferenceProviderRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(INFERENCE_PROVIDER_ENABLED, routes);

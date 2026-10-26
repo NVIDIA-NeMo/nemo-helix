@@ -6,7 +6,7 @@ import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { GUARDRAILS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateGuardrailsRoutes, getWorkspaceVirtualModelsRoute } from '@studio/routes/utils';
+import { gateVirtualModelsRoutes, getWorkspaceVirtualModelsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 
@@ -34,7 +34,7 @@ const VirtualModelChatTab = lazy(() =>
   }))
 );
 
-export const virtualModelsRoutes: RouteObject[] = gateGuardrailsRoutes([
+export const virtualModelsRoutes: RouteObject[] = gateVirtualModelsRoutes([
   {
     path: ROUTES.workspace.virtualModels,
     element: <VirtualModelsListRoute />,
