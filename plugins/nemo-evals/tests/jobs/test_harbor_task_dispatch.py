@@ -22,7 +22,9 @@ from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConf
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
+from nemo_evals.harbor.call_leases import CallLeaseRegistrar, current_registrar
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
+from nemo_evals.jobs import harbor_task_dispatch as dispatch
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
@@ -50,6 +52,7 @@ from nemo_evals.jobs.harbor_task_spec import (
     PreparedImage,
     build_task_job_input,
 )
+from nemo_evals.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evals.tasks import harbor_task_dispatch as entrypoint
 from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
@@ -157,6 +160,33 @@ def test_dispatcher_refuses_another_sandbox_server(task_spec, monkeypatch):
     check_sandbox_server(task_spec)
 
 
+@pytest.mark.parametrize("evaluation", [None, "run-x"], ids=["no-publication", "publishes"])
+def test_a_task_job_leases_its_sandboxes_in_its_workspace_for_the_runs_evaluation(task_spec, monkeypatch, evaluation):
+    if evaluation is not None:
+        publication = PublicationSpec(
+            intake=IntakePublicationSpec(evaluation_id=evaluation, agent_name="codex", required=False)
+        )
+        task_spec = task_spec.model_copy(
+            update={"spec": task_spec.spec.model_copy(update={"publication": publication})}
+        )
+    for check in ("check_execution_deadline", "check_sandbox_server", "check_tasks_reach_the_gateway"):
+        monkeypatch.setattr(dispatch, check, lambda *args, **kwargs: None)
+    seen: list[CallLeaseRegistrar | None] = []
+    monkeypatch.setattr(
+        HarborTaskAgentEvalJob, "_run_with_client", lambda self, *a, **k: seen.append(current_registrar()) or {}
+    )
+    ctx = MagicMock(spec=JobContext)
+    ctx.workspace = "evals"
+
+    HarborTaskAgentEvalJob().run(task_spec.model_dump(mode="json"), ctx=ctx, async_client=MagicMock())
+
+    [registrar] = seen
+    assert registrar is not None
+    assert registrar._workspace == "evals"
+    assert registrar._evaluation_name == evaluation
+    assert current_registrar() is None
+
+
 def test_dispatcher_refuses_to_start_after_the_execution_deadline(task_spec):
     deadline = task_spec.execution_deadline_at
     check_execution_deadline(task_spec, now=deadline - timedelta(seconds=1))
@@ -196,6 +226,8 @@ def test_runtime_selects_opensandbox_with_frozen_policy_and_no_key(task_spec, tm
     assert kwargs["enforce_disk_limit"] is True and kwargs["max_disk_mb"] == 131_072
     assert not any(key.startswith("override_") for key in kwargs)
     assert kwargs["metadata"] == {"nemo-run": "run-0123456789abcdef", "nemo-task-index": "1", "nemo-job": ctx.job_id}
+    # The sessions publishing uses, so the gateway's spans and the published trials share them.
+    assert kwargs["call_lease_run_id"] == "run-0123456789abcdef-task-1"
     assert configured.n_concurrent_trials == 1
     assert "private-worker-value" not in json.dumps(configured.model_dump(mode="json"))
 

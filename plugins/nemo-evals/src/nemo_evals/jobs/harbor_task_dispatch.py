@@ -27,6 +27,7 @@ from nemo_evals.harbor.agent_setup_egress import (
     SETUP_HOSTS_KWARG,
     setup_timeout_multiplier,
 )
+from nemo_evals.harbor.call_leases import CallLeaseRegistrar, leasing
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
@@ -120,6 +121,7 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     - Never deletes the agent-files snapshot: sibling task Jobs and Jobs retries still stage it.
     - Runs under its own name as the SDK run id, so trials it publishes to the run's Intake Evaluation
       have stable sessions (``<run_id>-task-<i>:<trial>``) and a re-publish replaces them.
+    - Leases each sandbox's address to its trial's session, so the gateway joins the trial's calls to it.
     - Never writes the shared Evaluation's metadata: the run controller stamps the run's duration once.
     """
 
@@ -138,9 +140,16 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
             spec.sandbox_policy.agent_channel,
         )
         self._task_spec = spec
-        return self._run_with_client(
-            spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client
+        publication = spec.spec.publication.intake if spec.spec.publication is not None else None
+        registrar = CallLeaseRegistrar(
+            async_client,
+            workspace=ctx.workspace,
+            evaluation_name=publication.evaluation_id if publication is not None else None,
         )
+        with leasing(registrar):
+            return self._run_with_client(
+                spec.spec.model_dump(mode="json"), ctx=ctx, platform_client=async_client, async_client=async_client
+            )
 
     def _run_id(self) -> str | None:
         return task_job_name(self._task_spec.run_id, self._task_spec.task_index)
@@ -210,6 +219,7 @@ def configure_runtime(config: HarborRuntimeConfig, ctx: JobContext, spec: Harbor
             "max_disk_mb": policy.max_disk_mb,
             "agent_resource_overrides": policy.resource_overrides.model_dump(exclude_none=True),
             "sandbox_resource_defaults": resource_defaults(policy),
+            "call_lease_run_id": task_job_name(spec.run_id, spec.task_index),
             "metadata": {
                 "nemo-run": spec.run_id,
                 "nemo-task-index": str(spec.task_index),

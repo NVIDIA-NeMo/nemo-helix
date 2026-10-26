@@ -21,10 +21,12 @@ import logging
 import shlex
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, Literal, override
 
 from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode
+from nemo_evals.harbor.call_leases import TrialIdentity, current_registrar
 from nemo_evals.harbor.remote.resources import effective_resources
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
@@ -53,6 +55,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         agent_resource_overrides: dict[str, int] | None = None,
         sandbox_resource_defaults: dict[str, int] | None = None,
         agent_setup_hosts: list[str] | None = None,
+        call_lease_run_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         # BaseEnvironment.__init__ may validate against the policy, so set the channel first.
@@ -75,7 +78,42 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                     kwargs["session_id"],
                     ", ".join(f"{field}={getattr(config, field)}" for field in defaulted),
                 )
+        self._call_lease_run_id = call_lease_run_id
+        self._lease_name: str | None = None
         super().__init__(*args, **kwargs)
+
+    @override
+    async def _create_sandbox(self) -> Any:
+        """Create the sandbox, then lease its address to its trial while the task Job leases."""
+        sandbox = await super()._create_sandbox()
+        registrar = current_registrar()
+        record = self._record
+        if registrar is None or self._call_lease_run_id is None or record is None:
+            return sandbox
+        if not record.get("ip") or not record.get("sandbox_id"):
+            return sandbox
+        self._sandbox = sandbox
+        trial_name = self.trial_paths.trial_dir.name
+        name = f"lease-{record['sandbox_id']}".lower()
+        leased = await registrar.lease(
+            name=name,
+            client_address=record["ip"],
+            identity=TrialIdentity.of(self._call_lease_run_id, trial_name),
+            role="agent" if sandbox_role(self.session_id, trial_name) == "agent" else "verifier",
+            started_at=datetime.fromisoformat(record["started_at"]),
+        )
+        if leased:
+            self._lease_name = name
+        return sandbox
+
+    @override
+    async def stop(self, delete: bool) -> None:
+        """End the sandbox's lease before the kill, then stop it."""
+        registrar = current_registrar()
+        if self._lease_name is not None and registrar is not None:
+            name, self._lease_name = self._lease_name, None
+            await registrar.end(name=name, ended_at=datetime.now(UTC))
+        await super().stop(delete)
 
     @override
     def egress_policy(self) -> EgressPolicy:
