@@ -109,7 +109,7 @@ export const ServedView: FC<ServedViewProps> = ({ model, adapter, providerRef, d
           <LineageCard
             label="Endpoint"
             value={provider.host_url}
-            badge={
+            action={
               <CopyButton text={provider.host_url} kind="tertiary" aria-label="Copy endpoint" />
             }
           />
