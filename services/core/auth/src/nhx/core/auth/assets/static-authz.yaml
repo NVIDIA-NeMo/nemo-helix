@@ -103,6 +103,19 @@ authz:
           description: "Read inference providers"
         update:
           description: "Update inference providers"
+      call-leases:
+        create:
+          description: "Lease a sandbox address to its trial"
+          has_role: false
+        list:
+          description: "List call leases"
+          has_role: false
+        read:
+          description: "Read call leases"
+          has_role: false
+        update:
+          description: "End call leases"
+          has_role: false
       virtual-models:
         create:
           description: "Create virtual models"
@@ -930,6 +943,32 @@ authz:
         scopes:
         - inference:read
         - platform:read
+    /apis/inference-gateway/v2/workspaces/{workspace}/call-leases:
+      get:
+        permissions:
+        - inference.call-leases.list
+        scopes:
+        - inference:read
+        - platform:read
+      post:
+        permissions:
+        - inference.call-leases.create
+        scopes:
+        - inference:write
+        - platform:write
+    /apis/inference-gateway/v2/workspaces/{workspace}/call-leases/{name}:
+      get:
+        permissions:
+        - inference.call-leases.read
+        scopes:
+        - inference:read
+        - platform:read
+      patch:
+        permissions:
+        - inference.call-leases.update
+        scopes:
+        - inference:write
+        - platform:write
     /apis/inference-gateway/v2/workspaces/{workspace}/virtual-models:
       get:
         permissions:

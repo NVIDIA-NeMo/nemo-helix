@@ -3007,6 +3007,182 @@ paths:
         '422':
           description: Unable to delete config due to validation error while processing
             request.
+  /apis/inference-gateway/v2/workspaces/{workspace}/call-leases:
+    post:
+      tags:
+      - Call Leases
+      summary: Create Call Lease
+      description: Lease a sandbox's address to its trial. Repeating an identical
+        create returns the existing lease.
+      operationId: create_call_lease
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCallLeaseRequest'
+      responses:
+        '201':
+          description: Created call lease
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLease'
+        '200':
+          description: The same lease already exists; creating it again is a no-op.
+        '409':
+          description: A different lease with that name already exists.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Call Leases
+      summary: List Call Leases
+      description: List call leases in a workspace; ``workspace=-`` lists across every
+        workspace the caller can read.
+      operationId: list_call_leases
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          description: Page number (1-indexed).
+          default: 1
+          title: Page
+        description: Page number (1-indexed).
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          description: Number of results per page.
+          default: 20
+          title: Page Size
+        description: Number of results per page.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          description: Sort field. Prefix with ``-`` for descending order.
+          default: -created_at
+          title: Sort
+        description: Sort field. Prefix with ``-`` for descending order.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/CallLeaseFilter'
+        description: Filter call leases by client_address, session_id, role, and created_at.
+      responses:
+        '200':
+          description: Paginated list of call leases
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLeasesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/inference-gateway/v2/workspaces/{workspace}/call-leases/{name}:
+    patch:
+      tags:
+      - Call Leases
+      summary: End Call Lease
+      description: End a lease. Ending it again at the same time is a no-op.
+      operationId: end_call_lease
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndCallLeaseRequest'
+      responses:
+        '200':
+          description: Ended call lease
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLease'
+        '404':
+          description: Call lease not found.
+        '409':
+          description: The lease already ended at a different time.
+        '422':
+          description: ended_at is before the lease started.
+    get:
+      tags:
+      - Call Leases
+      summary: Get Call Lease
+      description: Get a call lease by workspace and name.
+      operationId: get_call_lease
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Call lease
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallLease'
+        '404':
+          description: Call lease not found.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/inference-gateway/v2/workspaces/{workspace}/model/{name}/-/{trailing_uri}:
     patch:
       tags:
@@ -10839,6 +11015,173 @@ components:
       - not_cacheable
       title: CacheStatus
       description: Cache status for files in external storage backends.
+    CallLease:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        client_address:
+          type: string
+          title: Client Address
+          description: The sandbox pod's IP address while the lease holds.
+        session_id:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Session Id
+          description: The trial's Intake session.
+        trace_id:
+          type: string
+          title: Trace Id
+          description: 'The trial''s trace id: 32 lowercase hex characters.'
+        root_span_id:
+          type: string
+          title: Root Span Id
+          description: 'The trial''s root span id: 16 lowercase hex characters.'
+        role:
+          type: string
+          enum:
+          - agent
+          - verifier
+          title: Role
+          description: Which of the trial's sandboxes holds the address.
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+          description: When the sandbox started holding the address.
+        evaluation_name:
+          title: Evaluation Name
+          description: The Intake evaluation the trial belongs to.
+          type: string
+        test_case_name:
+          title: Test Case Name
+          description: The Intake test case the trial runs.
+          type: string
+        ended_at:
+          title: Ended At
+          description: When the sandbox stopped holding the address.
+          type: string
+          format: date-time
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - client_address
+      - session_id
+      - trace_id
+      - root_span_id
+      - role
+      - started_at
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: CallLease
+      description: A sandbox address leased to one trial for ``[started_at, ended_at]``.
+    CallLeaseFilter:
+      additionalProperties: false
+      description: Filter for call lease list queries.
+      properties:
+        client_address:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by leased address.
+          title: Client Address
+        session_id:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by trial session.
+          title: Session Id
+        role:
+          description: 'Filter by sandbox role: agent or verifier.'
+          title: Role
+          type: string
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Filter by creation date.
+      title: CallLeaseFilter
+      type: object
+    CallLeasesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/CallLease'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: CallLeasesPage
     CapturedChatCompletionsRequest:
       properties:
         messages:
@@ -11599,6 +11942,62 @@ components:
       - model
       title: CreateAdapterRequest
       description: Request body for Adapter creation.
+    CreateCallLeaseRequest:
+      properties:
+        client_address:
+          type: string
+          title: Client Address
+          description: The sandbox pod's IP address while the lease holds.
+        session_id:
+          type: string
+          maxLength: 1024
+          minLength: 1
+          title: Session Id
+          description: The trial's Intake session.
+        trace_id:
+          type: string
+          title: Trace Id
+          description: 'The trial''s trace id: 32 lowercase hex characters.'
+        root_span_id:
+          type: string
+          title: Root Span Id
+          description: 'The trial''s root span id: 16 lowercase hex characters.'
+        role:
+          type: string
+          enum:
+          - agent
+          - verifier
+          title: Role
+          description: Which of the trial's sandboxes holds the address.
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+          description: When the sandbox started holding the address.
+        evaluation_name:
+          title: Evaluation Name
+          description: The Intake evaluation the trial belongs to.
+          type: string
+        test_case_name:
+          title: Test Case Name
+          description: The Intake test case the trial runs.
+          type: string
+        name:
+          type: string
+          title: Name
+          description: Lease name, unique in the workspace; one lease per sandbox.
+      type: object
+      required:
+      - client_address
+      - session_id
+      - trace_id
+      - root_span_id
+      - role
+      - started_at
+      - name
+      title: CreateCallLeaseRequest
+      description: Lease ``client_address`` to a trial from ``started_at`` until the
+        lease is ended.
     CreateFilesetRequest:
       properties:
         name:
@@ -12562,6 +12961,17 @@ components:
         This backend auto-completes jobs without actually running containers,
 
         making tests fast and deterministic.'
+    EndCallLeaseRequest:
+      properties:
+        ended_at:
+          type: string
+          format: date-time
+          title: Ended At
+      type: object
+      required:
+      - ended_at
+      title: EndCallLeaseRequest
+      description: 'End a lease: the sandbox stops holding its address at ``ended_at``.'
     Engine:
       type: string
       enum:

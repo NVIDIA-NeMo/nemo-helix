@@ -40,7 +40,7 @@ class InferenceGatewayService(Service):
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the inference gateway service."""
-        from nhx.core.inference_gateway.api.v2 import models, openai, providers, virtual_models
+        from nhx.core.inference_gateway.api.v2 import call_leases, models, openai, providers, virtual_models
 
         return [
             RouterConfig(
@@ -62,6 +62,11 @@ class InferenceGatewayService(Service):
                 virtual_models.router,
                 tag="Virtual Models",
                 description="CRUD operations for VirtualModel inference routing entities.",
+            ),
+            RouterConfig(
+                call_leases.router,
+                tag="Call Leases",
+                description="Lease a sandbox's address to its trial so its model calls and telemetry join the trial.",
             ),
         ]
 
