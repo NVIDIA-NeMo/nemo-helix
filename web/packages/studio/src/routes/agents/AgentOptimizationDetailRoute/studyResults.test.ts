@@ -256,6 +256,52 @@ describe('fetchStudyResults', () => {
     expect(failed?.metrics.map((metric) => metric.value)).toEqual([null, null]);
   });
 
+  const runPromptPhase = (promptSummary: object) => {
+    const promptHistory = JSON.stringify([
+      {
+        global_trial_number: 8,
+        status: 'completed',
+        'metric.avg_score': 4.5,
+        'metric.avg_tokens': 700,
+        'prompt.prompt': 'Rewritten prompt.',
+      },
+    ]);
+    mockResults(`fileset://${workspace}/study-artifacts#${resultDir}`);
+    mockFiles([
+      `${resultDir}/study_summary.json`,
+      `${resultDir}/trials_dataframe_params.csv`,
+      `${resultDir}/prompt_phase_summary.json`,
+      `${resultDir}/ga_history_prompts.json`,
+    ]);
+    mockDownloads({
+      [`${resultDir}/study_summary.json`]: SUMMARY,
+      [`${resultDir}/trials_dataframe_params.csv`]: TRIALS_CSV,
+      [`${resultDir}/prompt_phase_summary.json`]: JSON.stringify(promptSummary),
+      [`${resultDir}/ga_history_prompts.json`]: promptHistory,
+    });
+    return fetchStudyResults(workspace, jobName);
+  };
+
+  it("keeps the sweep's winner when the prompt winner is missing from the history", async () => {
+    const results = await runPromptPhase({
+      best_global_trial_number: 42,
+      best_metrics: { avg_score: 9, avg_tokens: 1 },
+    });
+
+    expect(results?.summary?.bestTrial).toBe(6);
+    expect(results?.summary?.bestValues).toEqual([4.19, 742]);
+  });
+
+  it("fills missing prompt winner metrics from its trial's values", async () => {
+    const results = await runPromptPhase({
+      best_global_trial_number: 8,
+      best_metrics: { avg_score: 4.6 },
+    });
+
+    expect(results?.summary?.bestTrial).toBe(8);
+    expect(results?.summary?.bestValues).toEqual([4.6, 700]);
+  });
+
   it('reads trials even when the summary is missing, falling back to CSV metric order', async () => {
     mockResults(`fileset://${workspace}/study-artifacts#${resultDir}`);
     mockFiles([`${resultDir}/trials_dataframe_params.csv`]);

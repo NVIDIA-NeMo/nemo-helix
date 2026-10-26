@@ -297,7 +297,8 @@ export const fetchStudyResults = async (
   const sweepBest = trials.find((trial) => trial.number === summary?.bestTrial);
   const promptTrials = parsePromptTrials(promptHistoryText, metrics, sweepBest?.params ?? []);
   const promptPhase = promptSummaryText ? parsePromptSummary(promptSummaryText) : null;
-  const bestTrial = promptPhase?.bestTrial ?? summary?.bestTrial ?? null;
+  const promptBest = promptTrials.find((trial) => trial.number === promptPhase?.bestTrial);
+  const bestTrial = promptBest?.number ?? summary?.bestTrial ?? null;
   const allTrials = [...trials, ...promptTrials].map((trial) => ({
     ...trial,
     paretoOptimal: trial.paretoOptimal || trial.number === bestTrial,
@@ -308,10 +309,12 @@ export const fetchStudyResults = async (
       nTrials: allTrials.length,
       bestTrial,
       metricNames: metrics,
-      bestValues:
-        promptPhase?.bestTrial != null
-          ? metrics.map((name) => toNumber(promptPhase.bestMetrics[name] as number))
-          : (summary?.bestValues ?? []),
+      bestValues: promptBest
+        ? metrics.map(
+            (name, i) =>
+              toNumber(promptPhase?.bestMetrics[name] as number) ?? promptBest.metrics[i].value
+          )
+        : (summary?.bestValues ?? []),
     },
     trials: allTrials,
     metricNames: metrics,
