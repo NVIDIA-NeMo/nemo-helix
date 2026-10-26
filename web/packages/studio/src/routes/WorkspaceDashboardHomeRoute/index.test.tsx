@@ -23,16 +23,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, generatePath, RouterProvider } from 'react-router';
 
-const flags = vi.hoisted(() => ({ jobsEnabled: true }));
-vi.mock('@studio/constants/environment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@studio/constants/environment')>();
-  return {
-    ...actual,
-    get JOBS_ENABLED() {
-      return flags.jobsEnabled;
-    },
-  };
-});
 vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agents')>()),
   useAgentsListAgents: vi.fn(),
@@ -93,7 +83,6 @@ describe('WorkspaceDashboardHomeRoute', () => {
   beforeEach(() => {
     // Call history too, so assertions about how a hook was called see only this test's render.
     vi.clearAllMocks();
-    flags.jobsEnabled = true;
     window.localStorage.clear();
     vi.mocked(useAgentsListAgents).mockReturnValue(queryResult(1));
     vi.mocked(useCompassListInsights).mockReturnValue(queryResult(4));
@@ -145,18 +134,10 @@ describe('WorkspaceDashboardHomeRoute', () => {
     expect(document.querySelector('[data-tour="dashboard-get-started"]')).toBeInTheDocument();
   });
 
-  it('shows Recent Jobs when the jobs flag is on', async () => {
+  it('shows Recent Jobs', async () => {
     renderRoute();
 
     expect(await screen.findByText('Recent Jobs')).toBeInTheDocument();
-  });
-
-  it('hides Recent Jobs when the jobs flag is off', async () => {
-    flags.jobsEnabled = false;
-    renderRoute();
-
-    await screen.findByText('Quickstart');
-    expect(screen.queryByText('Recent Jobs')).not.toBeInTheDocument();
   });
 
   it('moves focus to the get-started area instead of dropping it when Quickstart is dismissed', async () => {

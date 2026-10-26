@@ -4623,8 +4623,8 @@ components:
           description: 'Locale that determines the language and geographic location
             that a synthetic person will be sampled from. Must be a locale supported
             by a managed Nemotron Personas dataset. Managed datasets exist for the
-            following locales: en_US, en_IN, en_SG, fr_FR, hi_Deva_IN, hi_Latn_IN,
-            ja_JP, ko_KR, pt_BR.'
+            following locales: en_GB, de_DE, en_US, en_IN, en_SG, fr_FR, hi_Deva_IN,
+            hi_Latn_IN, ja_JP, ko_KR, pt_BR.'
           default: en_US
         sex:
           title: Sex

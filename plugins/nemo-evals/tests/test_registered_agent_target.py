@@ -36,6 +36,7 @@ from nemo_evals.jobs.agent_spec import (
 )
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.fabric_harness_packages import FABRIC_ADAPTER_EXTRAS
+from nemo_evals.jobs.gateway_models import agent_gateway_origin, rebase_registered_agent_config
 from nemo_evals.jobs.gym_sandbox import SandboxUnavailableError
 from nemo_evals.jobs.registered_agent_resolution import resolve_registered_agent
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -516,7 +517,7 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
     assert await _resolve(resolved) is resolved
 
 
-async def test_harbor_rebases_gateway_models_without_changing_external_models_or_host_targets(
+async def test_job_rebases_harbor_gateway_models_without_changing_external_models_or_host_targets(
     mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
@@ -532,7 +533,9 @@ async def test_harbor_rebases_gateway_models_without_changing_external_models_or
     harbor = await _resolve(_harbor_by_agent())
     fabric = await _resolve(_by_agent())
 
-    models = harbor.agent_kwargs["fabric_config"]["models"]
+    agent_kwargs = dict(harbor.agent_kwargs)
+    rebase_registered_agent_config(harbor, agent_kwargs, agent_gateway_origin(sandboxed=False))
+    models = agent_kwargs["fabric_config"]["models"]
     assert models["default"]["base_url"] == (
         "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
     )

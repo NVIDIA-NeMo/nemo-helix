@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { Beaker, IconDocument } from '@nemo/icons/icons';
 import { useEvalsGetEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -27,7 +28,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { FlaskConical, ScrollText } from 'lucide-react';
 import { FC } from 'react';
 
 const isTerminal = (status?: string) =>
@@ -122,12 +122,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
 
             <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
               <DetailsPanel evaluationJob={job} error={!!error} />
-              <Panel
-                slotHeading="Scores"
-                slotIcon={<FlaskConical />}
-                elevation="high"
-                density="compact"
-              >
+              <Panel slotHeading="Scores" slotIcon={<Beaker />} elevation="high" density="compact">
                 {isPending && (
                   <Block className="text-subtle">
                     Scores are computed once the job reaches a terminal state.
@@ -170,7 +165,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
               <Block className="text-subtle">Row results could not be loaded.</Block>
             )}
 
-            <AccordionPanel slotHeading="Logs" slotIcon={<ScrollText />}>
+            <AccordionPanel slotHeading="Logs" slotIcon={<IconDocument />}>
               <StatusLogsContent
                 workspace={workspace}
                 jobName={id}

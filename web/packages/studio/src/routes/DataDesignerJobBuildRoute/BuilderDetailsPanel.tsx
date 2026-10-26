@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronDown, ChevronRight } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Stack } from '@nvidia/foundations-react-core';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { type FC, memo } from 'react';
 
 export interface BuilderDetailsPanelProps {
@@ -37,7 +37,7 @@ export const BuilderDetailsPanel: FC<BuilderDetailsPanelProps> = memo(function B
         onClick={onToggle}
       >
         <Flex align="center" gap="density-xs">
-          {isOpen ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+          {isOpen ? <ChevronDown size="14" aria-hidden /> : <ChevronRight size="14" aria-hidden />}
           {summary}
         </Flex>
       </Button>

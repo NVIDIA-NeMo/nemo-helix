@@ -8,10 +8,10 @@ import { useExtensionWithDependency } from '@nemo/common/src/components/CodeEdit
 import { useLanguageExtension } from '@nemo/common/src/components/CodeEditor/extensions/useLanguageExtension';
 import { useLinter } from '@nemo/common/src/components/CodeEditor/extensions/useLinter';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { CopyGeneric } from '@nemo/icons/icons';
 import { Flex, Button, useTheme, Stack } from '@nvidia/foundations-react-core';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import CodeMirror from '@uiw/react-codemirror';
-import { Copy } from 'lucide-react';
 import { type FC, type MouseEvent, type ReactNode, useState, useMemo, useCallback } from 'react';
 
 import '@nemo/common/src/components/CodeEditor/styles.css';
@@ -126,7 +126,7 @@ export const CodeEditor: FC<CodeEditorProps> = ({
                 size="tiny"
                 aria-label="Copy to clipboard"
               >
-                <Copy />
+                <CopyGeneric />
               </Button>
             )}
           </Flex>

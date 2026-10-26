@@ -12,10 +12,6 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Mock brand assets icons
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Mock SafeSynthesizerFilesetPreview component
 vi.mock('@studio/components/SafeSynthesizerFilesetPreview', () => ({
   SafeSynthesizerFilesetPreview: ({ job }: { job: GenerateJob }) => (
@@ -110,7 +106,6 @@ describe('OverviewPanel', () => {
     });
 
     expect(screen.getByText('Download Report')).toBeInTheDocument();
-    expect(screen.getByTestId('download-icon')).toBeInTheDocument();
   });
 
   it('does not show download button when report is not available', () => {

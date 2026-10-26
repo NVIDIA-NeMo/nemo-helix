@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import pytest
 from nemo_helix_plugin.job_context import JobContext
+from nhx.customization_common.training.pause import ResumeCheckpointMissingError
 from nhx.unsloth.schemas import DatasetSpec, ModelLoadSpec, OutputResponse, TrainingSpec, UnslothJobOutput
 from nhx.unsloth.tasks.training.backends import unsloth_sft
 from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
@@ -248,6 +249,8 @@ def run_training(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     def run(*, pause: bool = False) -> tuple[dict[str, Any], dict[str, Any], _Progress]:
         _Poller.pause = pause
         progress = _Progress()
+        # Kept for a test whose run raises before returning it.
+        setattr(run, "progress", progress)
         result = unsloth_sft.train_sft(
             spec,
             cast(JobContext, SimpleNamespace(job_id="", workspace="default")),
@@ -298,3 +301,35 @@ def test_a_paused_run_skips_the_final_save(run_training: Any) -> None:
     assert not seen["saved"]
     # A pause is not the end of training, so neither the save phase nor completion is reported.
     assert progress.reported == []
+
+
+def test_a_pause_tells_the_resume_where_it_stopped(run_training: Any) -> None:
+    """Beside the checkpoint directory, not in it, so losing the checkpoints does not lose the marker."""
+    run_training(pause=True)
+
+    assert (run_training.checkpoints.parent / "PAUSED").read_text(encoding="utf-8") == "7\n"
+
+
+def test_a_resume_without_a_checkpoint_fails_instead_of_starting_over(run_training: Any) -> None:
+    """Starting over would train from step 0 and drop every recorded metric point past it."""
+    run_training(pause=True)
+
+    with pytest.raises(ResumeCheckpointMissingError, match="paused at step 7"):
+        run_training()
+
+    assert run_training.progress.rewound_to == []
+    # The failed resume took the marker, so a rerun of the job starts over.
+    result, _, progress = run_training()
+    assert result["paused"] is False
+    assert progress.rewound_to == [0]
+
+
+def test_a_resume_continues_from_the_pause_checkpoint(run_training: Any) -> None:
+    run_training(pause=True)
+    pause_checkpoint = _complete(run_training.checkpoints, 7)
+
+    _, seen, progress = run_training()
+
+    assert seen["resume_from_checkpoint"] == str(pause_checkpoint)
+    assert progress.rewound_to == [7]
+    assert not (run_training.checkpoints.parent / "PAUSED").exists()

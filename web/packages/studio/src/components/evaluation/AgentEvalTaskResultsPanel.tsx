@@ -9,11 +9,11 @@ import {
 } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { ListCheckmark } from '@nemo/icons/icons';
 import { Badge, Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
 import type { AgentEvalTaskDetail } from '@studio/api/evaluation/agent-evaluations';
 import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
 import { isScalar } from '@studio/util/functions';
-import { ListChecks } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 interface AgentEvalTaskResultsPanelProps {
@@ -196,7 +196,7 @@ export const AgentEvalTaskResultsPanel: FC<AgentEvalTaskResultsPanelProps> = ({ 
   }
 
   return (
-    <AccordionPanel slotHeading={`Task Results (${tasks.length})`} slotIcon={<ListChecks />}>
+    <AccordionPanel slotHeading={`Task Results (${tasks.length})`} slotIcon={<ListCheckmark />}>
       <div className="flex flex-col min-h-[400px] max-h-[640px]">
         <StudioDataView
           dataViewState={dataViewState}

@@ -31,7 +31,7 @@ export const ColumnTypeCard: FC<ColumnTypeCardProps> = ({ option, onSelect, disa
       onActivate={() => onSelect({ columnType, samplerType })}
       leading={
         <CardIconBadge>
-          <Icon size={15} className={ICON_COLOR_CLASS[color]} aria-hidden />
+          <Icon size="15" className={ICON_COLOR_CLASS[color]} aria-hidden />
         </CardIconBadge>
       }
     />

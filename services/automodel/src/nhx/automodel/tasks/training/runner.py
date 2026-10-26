@@ -21,6 +21,7 @@ from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.service.path_utils import remap_job_storage_path
 from nhx.customization_common.training.errors.classifier import classify_exception, failure_status_details
+from nhx.customization_common.training.pause import take_pause_marker
 
 from .backends.backend import AUTOMODEL_CONFIG_FILENAME, AutomodelBackend
 from .distributed import DistributedContext
@@ -172,11 +173,14 @@ class TrainingRunner:
         config_path = self._get_library_config_path()
 
         if self._dist_ctx.is_coordinator:
-            # Clear the previous run's pause marker before any pod starts training, so only a pause
-            # in this run can be mistaken for one.
-            self._pause_sentinel_path().unlink(missing_ok=True)
+            # Take the previous run's pause marker before any pod starts training, so only a pause
+            # in this run can be mistaken for one. A marker makes this run a resume, which must
+            # restore a checkpoint, so its step goes to training in the config.
+            paused_step = take_pause_marker(self._pause_sentinel_path())
             self._progress.report_running(TrainingPhase.COMPILING_CONFIG)
             config_dict = self._backend.compile_config(self._config, self._workspace_path)
+            if paused_step is not None:
+                config_dict["_paused_at_step"] = paused_step
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "w") as f:
                 yaml.dump(config_dict, f, default_flow_style=False)

@@ -4,6 +4,7 @@
 import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledCombobox } from '@nemo/common/src/components/form/ControlledCombobox';
 import { ControlledSegmentedControl } from '@nemo/common/src/components/form/ControlledSegmentedControl';
+import { Close } from '@nemo/icons/icons';
 import { useAnonymizerListEntityLabels } from '@nemo/sdk/generated/anonymizer/anonymizer';
 import { Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -19,7 +20,6 @@ import {
   customLabelCandidate,
 } from '@studio/routes/AnonymizerBuilderRoute/entityItems';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
-import { X } from 'lucide-react';
 import { FC, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -98,7 +98,7 @@ export const EntitiesSection: FC = () => {
                   onClick={() => removeLabel(label)}
                 >
                   {label}
-                  <X size={14} />
+                  <Close size="14" />
                 </Tag>
               ))}
             </Flex>

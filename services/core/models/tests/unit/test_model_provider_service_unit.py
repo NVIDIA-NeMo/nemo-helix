@@ -418,6 +418,45 @@ async def test_delete_model_provider_success(model_provider_service, mock_entity
 
 
 @pytest.mark.asyncio
+async def test_delete_model_provider_retries_when_the_provider_changes_underneath(
+    model_provider_service, mock_entity_client
+):
+    """A status write landing between the read and the delete is re-read, not surfaced as a conflict."""
+    stale = create_provider_entity(name="test-provider", workspace="default", host_url="https://api.example.com/v1")
+    stale._db_version = 1
+    current = create_provider_entity(name="test-provider", workspace="default", host_url="https://api.example.com/v1")
+    current._db_version = 2
+    mock_entity_client.get.side_effect = [stale, current]
+    mock_entity_client.delete.side_effect = [EntityConflictError("version changed"), None]
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="default", name="test-provider")
+    )
+
+    assert result is True
+    assert mock_entity_client.delete.call_args_list == [
+        call(ModelProviderEntity, "test-provider", workspace="default", expected_db_version=1),
+        call(ModelProviderEntity, "test-provider", workspace="default", expected_db_version=2),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_model_provider_gives_up_on_a_persistent_conflict(
+    model_provider_service, mock_entity_client, sample_provider_entity
+):
+    """Conflicts on every attempt are a real concurrent edit, so the conflict reaches the caller."""
+    mock_entity_client.get.return_value = sample_provider_entity
+    mock_entity_client.delete.side_effect = EntityConflictError("version changed")
+
+    with pytest.raises(EntityConflictError):
+        await model_provider_service.delete_model_provider(
+            DeleteModelProviderRequest(workspace="default", name="test-provider")
+        )
+
+    assert mock_entity_client.delete.call_count == 3
+
+
+@pytest.mark.asyncio
 async def test_delete_model_provider_not_found(model_provider_service, mock_entity_client):
     """Test deleting a non-existent model provider."""
     # Arrange

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { Info } from 'lucide-react';
 import { FC, ReactNode } from 'react';
 
 interface ListItemProps {
@@ -26,7 +26,7 @@ export const ListItem: FC<ListItemProps> = ({
       align="center"
       className={`px-2 h-full min-h-10 ${outlined ? 'border border-interaction-base rounded-md' : ''}`}
     >
-      {startIconSlot || (error && <Info className="text-feedback-danger" />)}
+      {startIconSlot || (error && <InfoCircle className="text-feedback-danger" />)}
       <Text kind="body/regular/md" className={`mr-auto ${error ? 'text-feedback-danger' : ''}`}>
         {value}
       </Text>

@@ -6,7 +6,6 @@ import { type BadgeStatus, StatusBadge } from '@nemo/common/src/components/Statu
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { LatestAnalysisRun as LatestRun } from '@studio/api/useLatestAnalysisRun';
-import { JOBS_ENABLED } from '@studio/constants/environment';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
@@ -42,7 +41,7 @@ export const LatestAnalysisRun: FC<LatestAnalysisRunProps> = ({ workspace, run, 
         <Text kind="body/regular/sm" className="text-secondary">
           requested <RelativeTime datetime={run.requestedAt} />
         </Text>
-        {JOBS_ENABLED && run.submitted ? (
+        {run.submitted ? (
           <Button
             kind="tertiary"
             size="small"

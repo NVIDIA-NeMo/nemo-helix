@@ -15,6 +15,7 @@ import {
   formatFinetuningType,
   formatTrainingPhase,
   getBaseModel,
+  getCurrentStage,
   getCustomizationTrainingProgress,
   getDatasetUri,
   getFinetuningType,
@@ -30,6 +31,8 @@ import {
   getTrainingDiagnosticsTiles,
   getTrainingTelemetry,
 } from '@studio/util/customizations';
+import { createElement, type ReactNode } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 /** Minimal automodel job (carries `parallelism`). */
 const automodelJob = (spec: Record<string, unknown>): CustomizationJob =>
@@ -642,7 +645,8 @@ describe('getGrpoProgressTiles', () => {
       }
     );
 
-    expect(tiles[1]).toEqual({ label: 'Phase', value: 'Training', hint: 'current stage' });
+    expect(tiles[1].label).toBe('Stage');
+    expect(textOf(tiles[1].value)).toBe('Training');
   });
 
   it('names the failing step instead of the duration when the run errored', () => {
@@ -756,6 +760,238 @@ describe('getJobStartDate', () => {
   });
 });
 
+describe('getCurrentStage', () => {
+  const step = (name: string, status: string, phase?: string) => ({
+    name,
+    status,
+    tasks: [{ status_details: phase ? { phase } : {} }],
+  });
+
+  it('names the first step that has not completed', () => {
+    expect(
+      getCurrentStage([
+        step('model-and-dataset-download', 'completed', 'completed'),
+        step('training', 'active', 'training'),
+        step('model-upload', 'pending'),
+      ])
+    ).toEqual({ label: 'Training' });
+  });
+
+  it.each(['validation', 'saving_checkpoint', 'checkpoint_saved', 'epoch_end', 'completed'])(
+    'stays on Training while the task reports %s, which is for logs rather than a glance',
+    (phase) => {
+      expect(getCurrentStage([step('training', 'active', phase)])).toEqual({ label: 'Training' });
+    }
+  );
+
+  it('leaves out a task phase that only repeats the stage', () => {
+    expect(getCurrentStage([step('training', 'active', 'training')])).toEqual({
+      label: 'Training',
+    });
+  });
+
+  it('never shows the previous step’s phase while the next pod starts', () => {
+    expect(
+      getCurrentStage([step('training', 'completed', 'completed'), step('model-upload', 'pending')])
+    ).toEqual({ label: 'Uploading Model', detail: 'starting' });
+  });
+
+  it('reads the phase from whichever task reports one on a multi-node step', () => {
+    expect(
+      getCurrentStage([
+        {
+          name: 'training',
+          status: 'active',
+          tasks: [{ status_details: {} }, { status_details: { phase: 'merging_adapter' } }],
+        },
+      ])
+    ).toEqual({ label: 'Training', detail: 'merging adapter' });
+  });
+
+  it('title-cases a step it has no label for', () => {
+    expect(getCurrentStage([step('model-export', 'active')])).toEqual({ label: 'Model Export' });
+  });
+
+  it('has nothing to say before the steps load', () => {
+    expect(getCurrentStage(undefined)).toBeUndefined();
+    expect(getCurrentStage([])).toBeUndefined();
+  });
+
+  it('says the next stage is starting while every created step has completed', () => {
+    // The next step is only created once the previous one completes, so this is a gap, not the end.
+    expect(getCurrentStage([step('training', 'completed', 'completed')])).toEqual({
+      label: 'Next Stage',
+      detail: 'starting',
+    });
+  });
+
+  it.each(['pausing', 'paused', 'cancelling', 'resuming'])(
+    'names a %s step by its status, not by a stale task phase',
+    (status) => {
+      expect(getCurrentStage([step('training', status, 'training')])).toEqual({
+        label: 'Training',
+        detail: status,
+      });
+    }
+  );
+
+  it('takes the phase from the live task, not a dead pod’s', () => {
+    expect(
+      getCurrentStage([
+        {
+          name: 'training',
+          status: 'active',
+          tasks: [
+            {
+              status: 'error',
+              updated_at: '2026-10-14T10:00:00Z',
+              status_details: { phase: 'training' },
+            },
+            {
+              status: 'active',
+              updated_at: '2026-10-14T11:00:00Z',
+              status_details: { phase: 'merging_adapter' },
+            },
+          ],
+        },
+      ])
+    ).toEqual({ label: 'Training', detail: 'merging adapter' });
+  });
+
+  it('takes the newest report when several live tasks carry a phase', () => {
+    expect(
+      getCurrentStage([
+        {
+          name: 'training',
+          status: 'active',
+          tasks: [
+            {
+              status: 'active',
+              updated_at: '2026-10-14T11:00:00Z',
+              status_details: { phase: 'merging_adapter' },
+            },
+            {
+              status: 'active',
+              updated_at: '2026-10-14T10:00:00Z',
+              status_details: { phase: 'training' },
+            },
+          ],
+        },
+      ])
+    ).toEqual({ label: 'Training', detail: 'merging adapter' });
+  });
+
+  it('leaves out a phase the label already says', () => {
+    expect(getCurrentStage([step('model-upload', 'active', 'uploading')])).toEqual({
+      label: 'Uploading Model',
+    });
+  });
+
+  describe('upload progress', () => {
+    const uploading = (status_details: Record<string, unknown>, status = 'active') => [
+      { name: 'model-upload', status: 'active', tasks: [{ status, status_details }] },
+    ];
+
+    it('reports bytes sent so far, including the file in flight', () => {
+      expect(
+        getCurrentStage(
+          uploading({ phase: 'uploading', uploaded_bytes: 500, total_size: 2000, progress_pct: 0 })
+        )?.upload
+      ).toEqual({ uploadedBytes: 500, totalBytes: 2000 });
+    });
+
+    it('has no progress before the upload reports its size, or for another phase', () => {
+      expect(getCurrentStage(uploading({ phase: 'uploading' }))?.upload).toBeUndefined();
+      expect(
+        getCurrentStage(uploading({ phase: 'uploading', uploaded_bytes: 0, total_size: 0 }))?.upload
+      ).toBeUndefined();
+      expect(
+        getCurrentStage([
+          {
+            name: 'model-and-dataset-download',
+            status: 'active',
+            tasks: [
+              { status_details: { phase: 'downloading', uploaded_bytes: 5, total_size: 10 } },
+            ],
+          },
+        ])?.upload
+      ).toBeUndefined();
+    });
+
+    it('never reports more sent than the total', () => {
+      expect(
+        getCurrentStage(uploading({ phase: 'uploading', uploaded_bytes: 3000, total_size: 2000 }))
+          ?.upload
+      ).toEqual({ uploadedBytes: 2000, totalBytes: 2000 });
+    });
+
+    it('ignores bytes from a dead pod’s task beside the live one', () => {
+      const steps = [
+        {
+          name: 'model-upload',
+          status: 'active',
+          tasks: [
+            {
+              status: 'error',
+              updated_at: '2026-10-14T10:00:00Z',
+              status_details: { phase: 'uploading', uploaded_bytes: 1900, total_size: 2000 },
+            },
+            {
+              status: 'active',
+              updated_at: '2026-10-14T11:00:00Z',
+              status_details: { phase: 'uploading', uploaded_bytes: 100, total_size: 2000 },
+            },
+          ],
+        },
+      ];
+
+      expect(getCurrentStage(steps)?.upload).toEqual({ uploadedBytes: 100, totalBytes: 2000 });
+    });
+  });
+
+  describe('stage timer', () => {
+    // The job started at 10:00:00 and training was created 90s later.
+    const timed = (status: string, phase?: string) => [
+      {
+        ...step('model-and-dataset-download', 'completed', 'completed'),
+        created_at: '2026-10-14T10:00:00Z',
+      },
+      { ...step('training', status, phase), created_at: '2026-10-14T10:01:30Z' },
+    ];
+
+    it('counts from when the stage began, off the job’s live timer', () => {
+      // 400s into the job is 310s into training.
+      expect(getCurrentStage(timed('active', 'merging_adapter'), 400)).toEqual({
+        label: 'Training',
+        detail: 'merging adapter',
+        elapsedSeconds: 310,
+      });
+    });
+
+    it('restarts at the next stage rather than carrying the job’s total', () => {
+      expect(getCurrentStage(timed('active', 'training'), 91)?.elapsedSeconds).toBe(1);
+    });
+
+    it('does not go negative before the job timer has caught up', () => {
+      expect(getCurrentStage(timed('active', 'training'), 0)?.elapsedSeconds).toBe(0);
+    });
+
+    it('has no timer before the job timer starts or while the step is paused', () => {
+      expect(
+        getCurrentStage(timed('active', 'training'), undefined)?.elapsedSeconds
+      ).toBeUndefined();
+      expect(getCurrentStage(timed('paused', 'training'), 400)?.elapsedSeconds).toBeUndefined();
+    });
+  });
+});
+
+/** The visible text of a tile value that may be wrapped in a Badge. */
+const textOf = (node: ReactNode): string =>
+  new DOMParser().parseFromString(
+    renderToStaticMarkup(createElement('span', null, node)),
+    'text/html'
+  ).body.textContent ?? '';
+
 describe('getTrainingDiagnosticsTiles', () => {
   const running = { isTerminal: false, duration: '1m 12s' };
   const finished = { isTerminal: true, duration: '00:01:12' };
@@ -767,7 +1003,7 @@ describe('getTrainingDiagnosticsTiles', () => {
       ['Learning Rate', '—'],
       ['Gradient Norm', '—'],
       ['Train/Val Gap', '—'],
-      ['Phase', '—'],
+      ['Stage', '—'],
     ]);
   });
 
@@ -779,7 +1015,7 @@ describe('getTrainingDiagnosticsTiles', () => {
       ['Learning Rate', '—'],
       ['Gradient Norm', '1.5000'],
       ['Train/Val Gap', '—'],
-      ['Phase', '—'],
+      ['Stage', '—'],
     ]);
   });
 
@@ -796,12 +1032,60 @@ describe('getTrainingDiagnosticsTiles', () => {
       running
     );
 
-    expect(tiles.map((tile) => [tile.label, tile.value])).toEqual([
+    expect(tiles.slice(0, 3).map((tile) => [tile.label, tile.value])).toEqual([
       ['Learning Rate', '5.00e-6'],
       ['Gradient Norm', '1.2345'],
       ['Train/Val Gap', '—'],
-      ['Phase', 'Checkpoint Saved'],
     ]);
+    expect(tiles[3].label).toBe('Stage');
+    expect(textOf(tiles[3].value)).toBe('Checkpoint Saved');
+  });
+
+  it('shows the current stage over the job-level phase, which can be another step’s', () => {
+    const tiles = getTrainingDiagnosticsTiles({ phase: 'completed' }, undefined, {
+      ...running,
+      currentStage: { label: 'Registering Model', detail: 'starting' },
+    });
+
+    expect(tiles[3].label).toBe('Stage');
+    expect(textOf(tiles[3].value)).toBe('Starting');
+    expect(tiles[3].hint).toBe('Registering Model');
+  });
+
+  it('puts the stage timer in the title and the phase in the badge', () => {
+    const tiles = getTrainingDiagnosticsTiles({}, undefined, {
+      ...running,
+      currentStage: { label: 'Training', detail: 'saving checkpoint', elapsedSeconds: 310 },
+    });
+
+    expect(tiles[3].label).toBe('Stage · 5m 10s');
+    expect(textOf(tiles[3].value)).toBe('Saving checkpoint');
+    expect(tiles[3].hint).toBe('Training');
+  });
+
+  it('badges the stage label under a generic title when it already names the phase', () => {
+    const tiles = getTrainingDiagnosticsTiles({}, undefined, {
+      ...running,
+      currentStage: { label: 'Model Upload', elapsedSeconds: 65 },
+    });
+
+    expect(tiles[3].label).toBe('Stage · 1m 5s');
+    expect(textOf(tiles[3].value)).toBe('Model Upload');
+    expect(tiles[3].hint).toBeUndefined();
+  });
+
+  it('shows upload bytes under the badge, by bytes rather than by file count', () => {
+    const GiB = 1024 ** 3;
+    const tiles = getTrainingDiagnosticsTiles({}, undefined, {
+      ...running,
+      currentStage: {
+        label: 'Uploading Model',
+        upload: { uploadedBytes: 12.6 * GiB, totalBytes: 63 * GiB },
+      },
+    });
+
+    expect(textOf(tiles[3].value)).toBe('Uploading Model');
+    expect(tiles[3].hint).toBe('12.6 GB of 63 GB (20%)');
   });
 
   it('swaps phase for duration once terminal, since phase then repeats the status badge', () => {

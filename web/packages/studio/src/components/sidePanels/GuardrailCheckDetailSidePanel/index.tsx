@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronLeft, ChevronRight } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, SidePanel, Text } from '@nvidia/foundations-react-core';
 import type { GuardrailCheckEntity } from '@studio/api/guardrail-checks/types';
 import { ConversationPane } from '@studio/components/sidePanels/GuardrailCheckDetailSidePanel/ConversationPane';
 import { ResultsPane } from '@studio/components/sidePanels/GuardrailCheckDetailSidePanel/ResultsPane';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { FC } from 'react';
 
 export interface GuardrailCheckDetailSidePanelProps {
@@ -68,7 +68,7 @@ export const GuardrailCheckDetailSidePanel: FC<GuardrailCheckDetailSidePanelProp
                 disabled={visibleIndex <= 0}
                 onClick={() => onNavigate(visibleIndex - 1)}
               >
-                <ChevronLeft size={16} />
+                <ChevronLeft size="16" />
               </Button>
               <Text kind="body/regular/md" className="tabular-nums whitespace-nowrap">
                 {visibleIndex + 1} of {visibleCount}
@@ -79,7 +79,7 @@ export const GuardrailCheckDetailSidePanel: FC<GuardrailCheckDetailSidePanelProp
                 disabled={visibleIndex >= visibleCount - 1}
                 onClick={() => onNavigate(visibleIndex + 1)}
               >
-                <ChevronRight size={16} />
+                <ChevronRight size="16" />
               </Button>
             </Flex>
           )}

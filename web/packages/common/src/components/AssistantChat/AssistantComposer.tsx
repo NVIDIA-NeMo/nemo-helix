@@ -4,9 +4,9 @@
 import { ComposerPrimitive, ThreadPrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
 import type { AssistantChatThreadProps } from '@nemo/common/src/components/AssistantChat/types';
+import { ArrowUp, IconImage, Retry, ShapeSquare } from '@nemo/icons/icons';
 import { Button, Tooltip } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { ArrowUp, ImagePlus, RotateCcw, Square } from 'lucide-react';
 
 type AssistantComposerProps = Pick<
   AssistantChatThreadProps,
@@ -59,7 +59,7 @@ export const AssistantComposer = ({
                 type="button"
                 disabled={disabled}
               >
-                <ImagePlus />
+                <IconImage />
               </Button>
             </ComposerPrimitive.AddAttachment>
           </Tooltip>
@@ -73,7 +73,7 @@ export const AssistantComposer = ({
             type="button"
             disabled={disabled}
           >
-            <RotateCcw />
+            <Retry />
           </Button>
         </Tooltip>
         <ThreadPrimitive.If running>
@@ -84,7 +84,7 @@ export const AssistantComposer = ({
               size="small"
               className="size-8 rounded-full p-0"
             >
-              <Square size={14} />
+              <ShapeSquare size="14" />
             </Button>
           </ComposerPrimitive.Cancel>
         </ThreadPrimitive.If>
@@ -96,7 +96,7 @@ export const AssistantComposer = ({
               size="small"
               className="size-8 rounded-full p-0"
             >
-              <ArrowUp size={16} />
+              <ArrowUp size="16" />
             </Button>
           </ComposerPrimitive.Send>
         </ThreadPrimitive.If>

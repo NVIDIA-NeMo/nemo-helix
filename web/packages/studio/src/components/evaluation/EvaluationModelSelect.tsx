@@ -3,6 +3,7 @@
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
+import { Filter } from '@nemo/icons/icons';
 import {
   Badge,
   Block,
@@ -25,7 +26,6 @@ import {
   useEvaluationModels,
 } from '@studio/hooks/evaluation/useEvaluationModels';
 import { useSetFieldErrorOnApiError } from '@studio/hooks/evaluation/useSetFieldErrorOnApiError';
-import { Filter } from 'lucide-react';
 import { type ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import { type FieldValues, type Path, useController, useFormContext } from 'react-hook-form';
 

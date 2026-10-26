@@ -6,6 +6,7 @@ import { JOB_NAME_MAX_LENGTH } from '@studio/components/evaluation/submitEvaluat
 import {
   type BudgetId,
   type IntentId,
+  type PromptModeId,
   type SearchParameter,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import { z } from 'zod';
@@ -50,13 +51,75 @@ const searchParameterSchema = z
     }
   });
 
+/** Versions worth sweeping: trimmed, blanks dropped, duplicates collapsed so a trial is never spent
+ *  re-running a prompt another trial already ran. */
+export const sweepableVersions = (versions: string[]): string[] => [
+  ...new Set(versions.map((version) => version.trim()).filter(Boolean)),
+];
+
+/** What keeps the prompt step from running, in page order. Its fields are only required once the
+ *  step is switched on, and then only those of the chosen mode, so a user who never opens it is
+ *  not blocked by them. Shared by the schema and the run panel so the two cannot disagree. */
+export const promptIssues = (
+  prompt: PromptOptionsValues
+): { path: keyof PromptOptionsValues; message: string }[] => {
+  if (!prompt.enabled) return [];
+  if (prompt.mode === 'versions') {
+    return sweepableVersions(prompt.versions).length < 2
+      ? [{ path: 'versions', message: 'Add at least two different prompt versions.' }]
+      : [];
+  }
+  return [
+    ...(prompt.purpose.trim()
+      ? []
+      : [{ path: 'purpose' as const, message: 'Describe what the prompt should achieve.' }]),
+    ...(prompt.model
+      ? []
+      : [{ path: 'model' as const, message: 'Pick a model to rewrite the prompt.' }]),
+  ];
+};
+
+const promptOptionsSchema = z
+  .object({
+    enabled: z.boolean(),
+    mode: z.enum(['rewrite', 'versions']),
+    purpose: z.string().trim(),
+    model: z.string(),
+    versions: z.array(z.string()).transform(sweepableVersions),
+  })
+  .superRefine((prompt, ctx) =>
+    promptIssues(prompt).forEach(({ path, message }) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: [path] })
+    )
+  );
+
 export const optimizationFormSchema = z.object({
   name: nameSchema,
   intent: z.enum(['accuracy', 'brevity', 'creativity', 'cost']),
   budget: z.enum(['quick', 'standard', 'thorough']),
   experimentId: z.string().min(1, 'Pick an evaluation to score trials against.'),
   searchSpace: z.array(searchParameterSchema).min(1, 'Sweep at least one parameter.'),
+  prompt: promptOptionsSchema,
 });
+
+export interface PromptOptionsValues {
+  enabled: boolean;
+  mode: PromptModeId;
+  /** `rewrite` only: what every rewritten version must stay true to. */
+  purpose: string;
+  /** `rewrite` only: model URN the GA calls through the gateway to mutate and recombine prompts. */
+  model: string;
+  /** `versions` only: the user's prompts, swept as one categorical dimension. */
+  versions: string[];
+}
+
+export const DEFAULT_PROMPT_OPTIONS: PromptOptionsValues = {
+  enabled: false,
+  mode: 'rewrite',
+  purpose: '',
+  model: '',
+  versions: ['', ''],
+};
 
 /** What the fields hold while editing — `name` before its transform, numbers still possibly
  *  mid-keystroke — as opposed to `z.output`, which is the submitted shape. */
@@ -66,6 +129,7 @@ export type OptimizationFormValues = {
   budget: BudgetId;
   experimentId: string;
   searchSpace: SearchParameter[];
+  prompt: PromptOptionsValues;
 };
 
 export type OptimizationFormOutput = z.output<typeof optimizationFormSchema>;

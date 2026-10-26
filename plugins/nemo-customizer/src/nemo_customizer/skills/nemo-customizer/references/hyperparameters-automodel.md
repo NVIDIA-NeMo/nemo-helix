@@ -117,7 +117,7 @@ Full template:
 | `training_type` | `sft` | `distillation` requires `teacher_model` (entity ref) |
 | `recipe` | `auto` | `auto` uses the checkpoint head; `sft`, `bi_encoder`, or `cross_encoder` explicitly selects the recipe. Explicit encoder recipes can wrap a causal-LM checkpoint. Unset batch/LR/warmup fields are rewritten for encoder recipes — see **Retrieval recipe defaults** below. |
 | `finetuning_type` | `lora` | `all_weights` (full fine-tune), `lora_merged` (merge adapter into base) |
-| `lora.rank` | `16` | Higher → more capacity, more VRAM. Typical training range 8–32; **cap at 32** if the adapter will be served with default NIM / vLLM (rank > 32 may not load) |
+| `lora.rank` | `16` | Higher → more capacity, more VRAM. Typical training range 8–32. Default vLLM and model-free NIM deployments load adapters only up to **rank 16**; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**) |
 | `lora.alpha` | `32` | Scaling; common rule of thumb **alpha ≈ 2× rank** |
 | `lora.dropout` | `0.0` | LoRA dropout (0.0–1.0) for regularization |
 | `lora.merge` | `false` | If true with `lora_merged`, output is full weights not adapter |
@@ -266,7 +266,7 @@ Apply user overrides to `/tmp/job.json` before submit. For **batch / GPU count /
 |----------------|-----------|
 | CUDA OOM | **`batch-sizing.md` tuning loop:** halve `micro_batch_size`, then `global_batch_size`, then `max_seq_length`; use TP > 1 only if the model does not fit one ≥48 GB GPU. MoE with `expert_parallel_size` > 1 needs TP 1: add GPUs and raise `expert_parallel_size`, or set `training.activation_checkpointing: true` |
 | Slow / low GPU use | **`batch-sizing.md`:** step toward high-util column or double `micro`+GBS until ~35–40 GiB; multi-GPU data parallel if model fits one GPU |
-| Underfitting | More `epochs`, slightly higher `learning_rate`, higher LoRA `rank` (≤ 32 for NIM/vLLM deploy) |
+| Underfitting | More `epochs`, slightly higher `learning_rate`, higher LoRA `rank` (above 16, raise the deployment's `--max-lora-rank`) |
 | Overfitting | Fewer `epochs`, lower `learning_rate`, higher `weight_decay`, smaller `rank` |
 | Quick smoke test | `max_steps` only (e.g. 10–50), **omit or ignore epoch goal**; or `epochs: 1` on tiny slice |
 | Reproducibility | Set `schedule.seed` |
@@ -283,13 +283,13 @@ Schema default is `5e-6` (conservative). Fixtures: `qwen3_0.6b_sft_lora.json` us
 
 ### Automodel LoRA rank / alpha
 
-**Deployment cap:** Default **NIM** and **vLLM** LoRA serving paths support rank **≤ 32**. Use `rank` 32 (not higher) when the fine-tuned adapter will be deployed for inference on those stacks unless the user confirms a higher rank is supported.
+**Deployment limit:** Default **vLLM** and **model-free NIM** deployments load adapters only up to rank **16**; the multi-LLM NIM up to 32. Keep `rank` at 16 unless the deployment raises its max rank (`post-training-eval.md` § **LoRA rank limit**).
 
 | Use case | `rank` | `alpha` |
 |----------|--------|---------|
 | Default / balanced | 16 | 32 |
 | Low VRAM / light touch | 8 | 16 |
-| More capacity (inference-safe max) | 32 | 64 |
+| More capacity (deployment needs `--max-lora-rank 32`) | 32 | 64 |
 
 ### Epochs vs dataset size
 
@@ -315,7 +315,7 @@ Use **`batch-sizing.md` § Batch sizing** and **§ Multi-GPU** for `batch` and `
 "optimizer": { "learning_rate": 2e-5, "warmup_steps": 100 }
 ```
 
-Pair with batch rows from **`batch-sizing.md`** (e.g. ≤4B default `micro` 32 / GBS 128, not `micro` 1 / GBS 4).
+Rank 32 adapters need a deployment with `--max-lora-rank` ≥ 32 (`post-training-eval.md` § **LoRA rank limit**). Pair with batch rows from **`batch-sizing.md`** (e.g. ≤4B default `micro` 32 / GBS 128, not `micro` 1 / GBS 4).
 
 ---
 

@@ -12,6 +12,7 @@ import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
+import { LayoutColumns } from '@nemo/icons/icons';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { useListEvaluatorResults } from '@nemo/sdk/generated/platform/evaluator-results';
 import {
@@ -32,7 +33,6 @@ import { tooltipClassName } from '@studio/styles/common';
 import { formatInteger } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { Columns3 } from 'lucide-react';
 import { type ComponentProps, type FC, useMemo, useState } from 'react';
 
 type SessionRow = EvaluationSessionResponse & { _rowId: string };
@@ -355,7 +355,7 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
           slotContent={<div aria-hidden className="h-0 w-[230px]" />}
         >
           <>
-            <Columns3 />
+            <LayoutColumns />
             <span className="hide-mobile">Columns</span>
           </>
         </EditColumnsMenu>

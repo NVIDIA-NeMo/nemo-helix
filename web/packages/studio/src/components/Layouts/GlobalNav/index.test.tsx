@@ -28,13 +28,9 @@ vi.mock('@studio/components/Layouts/GlobalNav/components/DocumentationLink', () 
   DocumentationLink: () => <div data-testid="documentation-link" />,
 }));
 
-vi.mock('@studio/constants/environment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@studio/constants/environment')>();
-  return {
-    ...actual,
-    TOUR_ENABLED: false,
-  };
-});
+vi.mock('@studio/components/WelcomeTour', () => ({
+  WelcomeTour: () => <div data-testid="welcome-tour" />,
+}));
 
 type ChangeListener = (e: { matches: boolean }) => void;
 

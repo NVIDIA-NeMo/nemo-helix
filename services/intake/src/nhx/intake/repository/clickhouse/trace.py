@@ -28,7 +28,7 @@ from nhx.intake.spans.domain import (
     TraceMode,
 )
 from nhx.intake.spans.span_attribute_catalog import SpanAttributeField, spec_for_field
-from nhx.intake.spans.span_rollups import METRIC_ATTRIBUTE_FIELDS, metric_aggregate_columns
+from nhx.intake.spans.span_rollups import METRIC_ATTRIBUTE_FIELDS, usage_sql
 from nhx.intake.spans.storage import (
     float_or_none,
     int_or_none,
@@ -482,45 +482,51 @@ def _trace_aggregates_sql(
     Both callers must read through ``current_spans_sql``: spans is a
     ReplacingMergeTree, so summing raw rows would double-count re-ingested spans.
     """
-    source_alias = "trace_spans"
-    select_columns, parameters = _trace_aggregate_select_columns(source_alias)
+    usage = usage_sql()
+    parameters = dict(usage.parameters)
+    parameters.update(
+        model_key=spec_for_field(SpanAttributeField.MODEL).bag_key,
+        provider_key=spec_for_field(SpanAttributeField.PROVIDER).bag_key,
+    )
+    select_columns = ",\n            ".join(
+        (
+            "workspace",
+            "source_format",
+            "trace_id",
+            usage.trace_columns,
+            _unique_string_attribute_aggregate(parameter="model_key", alias="models"),
+            _unique_string_attribute_aggregate(parameter="provider_key", alias="providers"),
+            "count() AS span_count",
+            "countIf(status = 'error') AS error_count",
+        )
+    )
     if extra_select_sql:
         select_columns = f"{select_columns},\n            {extra_select_sql}"
     current_spans = current_spans_sql(table, extra_where_sql=extra_where_sql)
     query = f"""
         SELECT
             {select_columns}
-        FROM {current_spans} AS {source_alias}
-        WHERE {source_alias}.is_deleted = 0
-        GROUP BY {source_alias}.workspace, {source_alias}.source_format, {source_alias}.trace_id
+        FROM (
+            SELECT
+                trace_spans.workspace AS workspace,
+                trace_spans.source_format AS source_format,
+                trace_spans.trace_id AS trace_id,
+                trace_spans.status AS status,
+                trace_spans.attributes_string AS attributes_string,
+                {usage.span_columns}
+            FROM {current_spans} AS trace_spans
+            WHERE trace_spans.is_deleted = 0
+        ) AS span_rows
+        GROUP BY workspace, source_format, trace_id
     """
     return query, parameters
 
 
-def _trace_aggregate_select_columns(source_alias: str) -> tuple[str, dict[str, Any]]:
-    metric_columns, parameters = metric_aggregate_columns(source_alias)
-    parameters.update(
-        model_key=spec_for_field(SpanAttributeField.MODEL).bag_key,
-        provider_key=spec_for_field(SpanAttributeField.PROVIDER).bag_key,
-    )
-    columns = (
-        f"{source_alias}.workspace AS workspace",
-        f"{source_alias}.source_format AS source_format",
-        f"{source_alias}.trace_id AS trace_id",
-        metric_columns,
-        _unique_string_attribute_aggregate(source_alias, parameter="model_key", alias="models"),
-        _unique_string_attribute_aggregate(source_alias, parameter="provider_key", alias="providers"),
-        "count() AS span_count",
-        f"countIf({source_alias}.status = 'error') AS error_count",
-    )
-    return ",\n            ".join(columns), parameters
-
-
-def _unique_string_attribute_aggregate(source_alias: str, *, parameter: str, alias: str) -> str:
-    attribute = f"{source_alias}.attributes_string[%({parameter})s]"
+def _unique_string_attribute_aggregate(*, parameter: str, alias: str) -> str:
+    attribute = f"attributes_string[%({parameter})s]"
     return f"""arraySort(groupUniqArrayIf(
                 {attribute},
-                has(mapKeys({source_alias}.attributes_string), %({parameter})s)
+                has(mapKeys(attributes_string), %({parameter})s)
                     AND {attribute} != ''
             )) AS {alias}"""
 

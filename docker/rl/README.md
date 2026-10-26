@@ -22,6 +22,16 @@ rediscovered.
 `nhx-rl-base` as a dependency, unless `USE_PREBUILT_BASES` / `RL_BASE_CONTEXT` point
 at an already-built base image.
 
+The supported training paths do not use Mooncake transfer-engine. Both the cache
+warming and worker-venv syncs skip `mooncake-transfer-engine` and
+`mooncake-transfer-engine-cuda13` with `--no-install-package`, avoiding their
+bundled Go/etcd library without modifying the upstream lock. The existing cleanup
+remains a fallback for optional Gym prefetches. The training smoke stage checks
+that Mooncake is absent from the driver, Ray and Gym venvs and shared extracted
+cache, and that installed W&B driver/worker packages meet the 0.30.0 security floor.
+Other shared-cache packages must remain: worker venvs symlink to them. These
+checks do not replace a vulnerability scan of the published digest.
+
 ## How NeMo-RL runs: the base venv is not where training happens
 
 This is the single most important thing to understand about this image. Nearly every

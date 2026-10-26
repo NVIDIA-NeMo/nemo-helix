@@ -12,7 +12,7 @@ from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickH
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.session import SessionRepository
 from nhx.intake.spans.domain import IntakeSession
-from nhx.intake.spans.span_rollups import metric_aggregate_columns
+from nhx.intake.spans.span_rollups import summed_metric_columns, usage_sql
 from nhx.intake.spans.storage import float_or_none, int_or_none, normalize_span_status
 
 
@@ -30,40 +30,64 @@ class ClickHouseSessionRepository(SessionRepository):
 
 
 def _session_detail_query(table: str) -> ClickHouseQuery:
-    """Build a primary-key-pruned aggregate over the current rows of one session."""
+    """Build a primary-key-pruned aggregate over the current rows of one session.
 
-    source_alias = "session_spans"
-    metric_columns, parameters = metric_aggregate_columns(source_alias)
+    Usage is totaled per trace first, then added across the session, so a trace that reports model calls
+    does not also add a root-only trace's fallback, or the other way around.
+    """
+
+    usage = usage_sql(scaled=False)
     statement = f"""
         SELECT
             %(session_id)s AS id,
-            any({source_alias}.workspace) AS workspace,
-            min({source_alias}.start_time) AS started_at,
-            if(
-                countIf({source_alias}.end_time = toDateTime64(0, 6)) > 0,
-                NULL,
-                max({source_alias}.end_time)
-            ) AS ended_at,
+            any(workspace) AS workspace,
+            min(started_at) AS started_at,
+            if(sum(open_spans) > 0, NULL, max(ended_at)) AS ended_at,
             multiIf(
-                countIf({source_alias}.status = 'error') > 0, 'error',
-                countIf({source_alias}.status = 'cancelled') > 0, 'cancelled',
-                countIf({source_alias}.status = 'unknown') > 0, 'unknown',
+                sum(error_spans) > 0, 'error',
+                sum(cancelled_spans) > 0, 'cancelled',
+                sum(unknown_spans) > 0, 'unknown',
                 'success'
             ) AS status,
-            {metric_columns},
-            uniqExact({source_alias}.source_format, {source_alias}.trace_id) AS trace_count,
-            count() AS span_count
-        FROM {table} AS {source_alias} FINAL
-        PREWHERE
-            {source_alias}.workspace = %(workspace)s
-            AND {source_alias}.session_id = %(session_id)s
-        WHERE {source_alias}.is_deleted = 0
+            {summed_metric_columns("trace_usage")},
+            uniqExact(source_format, trace_id) AS trace_count,
+            sum(trace_usage.span_count) AS span_count
+        FROM (
+            SELECT
+                source_format,
+                trace_id,
+                any(workspace) AS workspace,
+                min(start_time) AS started_at,
+                max(end_time) AS ended_at,
+                countIf(end_time = toDateTime64(0, 6)) AS open_spans,
+                countIf(status = 'error') AS error_spans,
+                countIf(status = 'cancelled') AS cancelled_spans,
+                countIf(status = 'unknown') AS unknown_spans,
+                count() AS span_count,
+                {usage.trace_columns}
+            FROM (
+                SELECT
+                    session_spans.workspace AS workspace,
+                    session_spans.source_format AS source_format,
+                    session_spans.trace_id AS trace_id,
+                    session_spans.start_time AS start_time,
+                    session_spans.end_time AS end_time,
+                    session_spans.status AS status,
+                    {usage.span_columns}
+                FROM {table} AS session_spans FINAL
+                PREWHERE
+                    session_spans.workspace = %(workspace)s
+                    AND session_spans.session_id = %(session_id)s
+                WHERE session_spans.is_deleted = 0
+            ) AS span_rows
+            GROUP BY source_format, trace_id
+        ) AS trace_usage
         HAVING span_count > 0
     """
     return ClickHouseQuery(
         name="sessions.get",
         statement=statement,
-        parameters=parameters,
+        parameters=usage.parameters,
     )
 
 

@@ -3,14 +3,9 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { DATASETS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import {
-  gateDatasetsRoutes,
-  gateFilesetDetailsRoutes,
-  getWorkspaceFilesetsRoute,
-} from '@studio/routes/utils';
+import { gateFilesetDetailsRoutes, getWorkspaceFilesetsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -29,7 +24,7 @@ const FilesetDetailRoute = lazy(() =>
   }))
 );
 
-export const filesetRoutes: RouteObject[] = gateDatasetsRoutes([
+export const filesetRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.filesets,
     element: <FilesetListRoute />,
@@ -56,18 +51,15 @@ export const filesetRoutes: RouteObject[] = gateDatasetsRoutes([
       errorElement: <RouteErrorPanel title="Fileset" />,
     },
   ]),
-]);
+];
 
 const NavIcon = ENTITY_ICONS.filesets;
 
-export const getFilesetSideNavItems = (workspace: string) =>
-  DATASETS_ENABLED
-    ? [
-        {
-          id: 'datasets',
-          slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Filesets',
-          href: getWorkspaceFilesetsRoute(workspace),
-        },
-      ]
-    : [];
+export const getFilesetSideNavItems = (workspace: string) => [
+  {
+    id: 'datasets',
+    slotIcon: <NavIcon className={iconColorClass} />,
+    slotLabel: 'Filesets',
+    href: getWorkspaceFilesetsRoute(workspace),
+  },
+];

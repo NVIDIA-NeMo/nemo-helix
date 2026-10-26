@@ -934,6 +934,7 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
         assert request.input == "hello"
         assert request.base_dir == ctx.storage.ephemeral / "fabric"
         assert request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
+        assert request.observe_progress is True
         (request.base_dir / "workspace" / "answer.txt").write_text("done\n")
         (request.base_dir / "artifacts" / "trace.json").write_text("{}\n")
         return FabricRuntimeResult(

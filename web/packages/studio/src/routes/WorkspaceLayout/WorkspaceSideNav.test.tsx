@@ -11,7 +11,6 @@ import type { ReactElement } from 'react';
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'false');
   vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
-  vi.stubEnv('VITE_FF_DEPLOYMENTS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
 });
@@ -62,7 +61,7 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
 const findPluginLinkWithIcon = async (name: string) => {
   const link = screen.getByRole('link', { name });
   // eslint-disable-next-line testing-library/no-node-access
-  await waitFor(() => expect(link.closest('li')?.querySelector('svg.lucide')).not.toBeNull());
+  await waitFor(() => expect(link.closest('li')?.querySelector('svg')).not.toBeNull());
   return link;
 };
 

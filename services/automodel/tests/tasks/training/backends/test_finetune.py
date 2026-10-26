@@ -22,6 +22,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from nhx.customization_common.training.pause import ResumeCheckpointMissingError
 
 #: The leaf modules finetune.py imports from. nemo_automodel exists only inside
 #: the training image, so the module cannot be imported in a plain checkout.
@@ -791,6 +792,46 @@ def test_checkpoint_statistics_continue_across_a_resume(
 
     stored = json.loads((checkpoint_dir / finetune.CHECKPOINT_STATS_FILENAME).read_text())["checkpoints"]
     assert [entry["step"] for entry in stored] == [10, 20]
+
+
+def test_a_resume_that_restored_no_checkpoint_fails_before_touching_the_metrics(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Automodel starts fresh when it finds no checkpoint. A resume must not: it would train from step 0
+    and drop every recorded point past it."""
+    built: list[str] = []
+    monkeypatch.setattr(finetune, "TrainingProgressCallback", lambda *a, **k: built.append("callback"))
+    recipe = _FakeRecipe(cfg={"_paused_at_step": 9}, checkpoint_dir="/job/training/checkpoints")
+
+    with pytest.raises(ResumeCheckpointMissingError, match="paused at step 9.*/job/training/checkpoints"):
+        _wrapper(finetune, monkeypatch, recipe)
+
+    assert recipe.calls == ["setup"]
+    assert built == []
+
+
+@pytest.mark.parametrize(
+    "cfg,restored_step",
+    [
+        ({}, 0),  # a first run
+        ({"_paused_at_step": 9}, 9),  # a resume that restored the pause checkpoint
+        ({"_paused_at_step": 9}, 8),  # or an older one, when the newest was incomplete
+    ],
+)
+def test_a_first_run_and_a_restored_resume_start(
+    finetune: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_poller: type[_FakePoller],
+    cfg: dict[str, int],
+    restored_step: int,
+) -> None:
+    recipe = _FakeRecipe(cfg=cfg)
+    recipe.step_scheduler.step = restored_step
+
+    wrapper, _ = _wrapper(finetune, monkeypatch, recipe)
+    wrapper.run_train_validation_loop()
+
+    assert recipe.calls == ["setup", "loop"]
 
 
 def test_points_past_the_restored_step_are_dropped(finetune: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:

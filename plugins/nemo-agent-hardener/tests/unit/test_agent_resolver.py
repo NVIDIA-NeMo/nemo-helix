@@ -44,6 +44,13 @@ from nemo_helix_plugin.client.client import NemoClient
 DeploymentRows = list[dict[str, Any]]
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_image_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the launcher image source; a source checkout has no published release image to default to."""
+    monkeypatch.setenv("NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY", "my-registry")
+    monkeypatch.setenv("NEMO_AGENTS_SANDBOX_IMAGE_TAG", "local")
+
+
 def _agent(**overrides: Any) -> dict:
     """A registered nemo-agents-spec-v1 agent, the only shape this plugin resolves."""
     config: dict[str, Any] = {

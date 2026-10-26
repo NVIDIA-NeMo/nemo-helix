@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Eye, Trash, Wrench } from '@nemo/icons/icons';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { Eye, Trash2, Wrench } from 'lucide-react';
 import { FC } from 'react';
 
 export interface DetailRowProps {
@@ -66,7 +66,7 @@ export const DetailRow: FC<DetailRowProps> = ({
             aria-label="Remove tool"
             disabled={disabled}
           >
-            <Trash2 />
+            <Trash />
           </Button>
         )}
       </Flex>

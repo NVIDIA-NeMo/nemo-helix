@@ -174,8 +174,10 @@ def test_native_config_controls_required_artifacts(tree, tmp_path, transport, la
         (step / "instruction.md").write_text("Complete step")
         (step / "tests/test.sh").write_text("exit 0")
     else:
+        # A separate verifier with its own image carries its tests, so the task needs no tests/test.sh.
         (tree / "task.toml").write_text(
             '[task]\nname = "commerce/checkout"\n[verifier]\nenvironment_mode = "separate"\n'
+            '[verifier.environment]\ndocker_image = "registry.example/verifier:1"\n'
         )
     member, objects = snapshot(tree)
     result = run([member], objects, tmp_path / "destination", transport)

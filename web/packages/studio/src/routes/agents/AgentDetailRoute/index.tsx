@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { Commit } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
@@ -68,7 +69,6 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { getAgentRunEvaluationRoute, getAgentsListRoute } from '@studio/routes/utils';
-import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -279,7 +279,7 @@ export const AgentDetailRoute: FC = () => {
                   aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
                 >
                   <Badge kind="solid" color="gray" className="cursor-pointer">
-                    <GitCommitHorizontal size={12} aria-hidden />
+                    <Commit size="12" aria-hidden />
                     {shortRevision(specSource.revision)}
                   </Badge>
                 </Link>

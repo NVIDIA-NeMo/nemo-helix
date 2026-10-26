@@ -30,8 +30,8 @@ export const TrainingLossPanel: FC<Props> = ({
       <Flex gap="density-5xl" align="start" wrap="wrap">
         {metrics.length > 0 && (
           <Grid cols={2} gap="density-5xl" className="m-auto w-full min-w-0 shrink-0 lg:w-[22rem]">
-            {metrics.map((tile) => (
-              <StatTile key={tile.label} {...tile} bordered={false} />
+            {metrics.map((tile, index) => (
+              <StatTile key={index} {...tile} bordered={false} />
             ))}
           </Grid>
         )}
@@ -45,8 +45,8 @@ export const TrainingLossPanel: FC<Props> = ({
             </Stack>
             {progress.length > 0 && (
               <Flex gap="density-2xl" wrap="wrap">
-                {progress.map((tile) => (
-                  <StatTile key={tile.label} {...tile} bordered={false} />
+                {progress.map((tile, index) => (
+                  <StatTile key={index} {...tile} bordered={false} />
                 ))}
               </Flex>
             )}

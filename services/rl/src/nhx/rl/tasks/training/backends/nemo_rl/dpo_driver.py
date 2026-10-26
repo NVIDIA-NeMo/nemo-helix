@@ -16,6 +16,7 @@ Jobs service.
 
 import argparse
 import logging
+from pathlib import Path
 from typing import Any, cast
 
 import nemo_rl.algorithms.dpo as dpo_algorithm
@@ -26,7 +27,13 @@ from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.customization_common.training.pause import exit_paused
+from nhx.customization_common.training.pause import (
+    check_resumed_from_pause,
+    exit_paused,
+    pause_marker_path,
+    take_pause_marker,
+    write_pause_marker,
+)
 from nhx.rl.tasks.training.backends.nemo_rl.nemo_rl_logger import (
     DPO_DEFAULT_TIME_SERIES_METRICS,
     NemoRLLogger,
@@ -109,6 +116,13 @@ def main():
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
 
+    # setup() restored the newest complete checkpoint, or started from step 0 when it found none.
+    # A resume must not start over.
+    checkpoint_dir = Path(config.checkpointing["checkpoint_dir"])
+    check_resumed_from_pause(
+        take_pause_marker(pause_marker_path(checkpoint_dir)), dpo_save_state.total_steps, checkpoint_dir
+    )
+
     # Add NemoRLLogger for progress reporting if Jobs service is configured
     job_ctx = NHXJobContext.from_env()
     # Log only the non-sensitive job id; the full context carries service URLs
@@ -172,6 +186,7 @@ def main():
     planned = planned_steps(config.dpo.max_num_steps, config.dpo.max_num_epochs, len(train_dataloader))
     if pause.stopped_training(dpo_save_state.total_steps, planned):
         print(f"Training paused at step {dpo_save_state.total_steps}", flush=True)
+        write_pause_marker(pause_marker_path(checkpoint_dir), dpo_save_state.total_steps)
         exit_paused()
 
 

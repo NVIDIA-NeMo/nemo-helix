@@ -7,9 +7,10 @@ import {
   type DatasetQualityReport,
 } from '@nemo/common/src/utils/datasetQuality';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { type FilesetOutput, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button, SegmentedControl, SidePanel, Stack } from '@nvidia/foundations-react-core';
 import { useSampleDatasetFiles } from '@studio/api/datasets/useSampleDatasetFiles';
+import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { SAMPLE_DATASETS, SampleDataset } from '@studio/constants/sampleDatasets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { DATASET_TYPE_CUSTOM, DATASET_TYPE_SAMPLE } from '@studio/routes/FilesetNewRoute/constants';
@@ -37,6 +38,12 @@ export const FilesetNewRoute: FC = () => {
     SAMPLE_DATASETS[0]
   );
   const [isSubmitPending, setIsSubmitPending] = useState(false);
+  // Once created, the fileset is in the list the name check reads, and must not count against
+  // itself while files upload or after an upload fails. A retry after a failed upload reuses it.
+  const [createdFileset, setCreatedFileset] = useState<FilesetOutput>();
+  // Reported by whichever tab shows the name, so typing does not re-render the whole panel.
+  const [nameStatus, setNameStatus] = useState<NameCheckStatus>();
+  const nameTaken = nameStatus === 'conflict';
   const [qualityReports, setQualityReports] = useState<DatasetQualityReport[]>([]);
   const [isValidating, setIsValidating] = useState(false);
   const qualityReportRef = useRef<HTMLDivElement>(null);
@@ -59,6 +66,7 @@ export const FilesetNewRoute: FC = () => {
     setValue,
     getValues,
     watch,
+    setError,
     formState: { errors },
   } = useForm<DatasetFormFields>({
     resolver: zodResolver(DatasetCreateFilesetFormSchema),
@@ -176,9 +184,13 @@ export const FilesetNewRoute: FC = () => {
     activeTab,
     storageTab,
     hasValidationErrors,
+    nameTaken,
     getValues,
+    setError,
     sampleFilesRef,
     setIsSubmitPending,
+    createdFileset,
+    onCreated: setCreatedFileset,
   });
 
   const handleClose = useCallback(() => {
@@ -210,7 +222,7 @@ export const FilesetNewRoute: FC = () => {
             <Button
               type="button"
               color="brand"
-              disabled={isSubmitPending || hasValidationErrors}
+              disabled={isSubmitPending || hasValidationErrors || nameTaken}
               onClick={handleSubmit(
                 onSubmit,
                 handleFormErrorsGeneric({ title: 'Fileset New Form Errors' })
@@ -241,6 +253,8 @@ export const FilesetNewRoute: FC = () => {
               purpose={purpose}
               activeTab={activeTab}
               workspace={workspace}
+              ownName={createdFileset?.name}
+              onNameStatusChange={setNameStatus}
               storageTab={storageTab}
               setStorageTab={setStorageTab}
               selectedSecretName={selectedSecretName}
@@ -259,8 +273,12 @@ export const FilesetNewRoute: FC = () => {
           )}
           {activeTab === DATASET_TYPE_SAMPLE && (
             <SampleDatasetSection
+              control={control}
               selectedSampleDataset={selectedSampleDataset}
               onSelectSample={handleSelectSample}
+              workspace={workspace}
+              ownName={createdFileset?.name}
+              onNameStatusChange={setNameStatus}
             />
           )}
         </Stack>

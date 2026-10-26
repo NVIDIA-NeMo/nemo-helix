@@ -79,8 +79,8 @@ export const GrpoRewardPanel: FC<Props> = ({ reward = EMPTY, metrics, progress, 
             </Stack>
             {progress.length > 0 && (
               <Flex gap="density-2xl" wrap="wrap">
-                {progress.map((tile) => (
-                  <StatTile key={tile.label} {...tile} bordered={false} />
+                {progress.map((tile, index) => (
+                  <StatTile key={index} {...tile} bordered={false} />
                 ))}
               </Flex>
             )}

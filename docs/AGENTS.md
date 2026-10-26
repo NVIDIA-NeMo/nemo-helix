@@ -24,7 +24,7 @@ Run these from the repo root (they wrap `cd docs/fern && npm run …`):
 | `make docs-broken-links` | Report broken links |
 | `make docs-fix-links` | Auto-delink references into gated pages |
 
-Normal authoring and local preview read `docs/fern/versions/latest.yml`. During production publish, `.github/workflows/publish-fern-docs.yaml` also runs `npm run materialize:versions` to generate frozen release-version entries from stable SemVer tags that already contain Fern config. Tags from before the Fern migration, such as early `0.1.x` tags, cannot become Fern versions unless those docs are backported or migrated.
+Normal authoring and local preview read `docs/fern/versions/latest.yml`. During production publish, `.github/workflows/publish-fern-docs.yaml` also runs `npm run materialize:versions` to discover `origin` release branches and generate one version per branch from its current docs. Branches without Fern navigation are skipped. A version is marked preview until a stable tag from that same release line is reachable from the branch tip; tags never supply docs content. No release-branch allowlist is needed.
 
 Use `make docs` when you are only editing `docs/fern/` config. Use `make docs-watch` when you are editing page content elsewhere under `docs/`, since it restarts the Fern dev server when repo-level docs files change outside `docs/fern/`.
 

@@ -23,7 +23,7 @@ from nhx.intake.repository.evaluation_session import (
     MetricSortTooLargeError,
 )
 from nhx.intake.spans.domain import IntakeResponseMode, SpanStatus
-from nhx.intake.spans.span_attribute_catalog import COST_SCALE, SpanAttributeField, spec_for_field
+from nhx.intake.spans.span_rollups import summed_metric_columns, usage_sql
 from nhx.intake.spans.storage import (
     float_or_none,
     int_or_none,
@@ -107,10 +107,7 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         base_parameters: dict[str, Any] = {
             "workspace": workspace,
             "evaluation_name": evaluation_name,
-            "input_tokens_key": spec_for_field(SpanAttributeField.INPUT_TOKENS).bag_key,
-            "output_tokens_key": spec_for_field(SpanAttributeField.OUTPUT_TOKENS).bag_key,
-            "cached_tokens_key": spec_for_field(SpanAttributeField.CACHED_TOKENS).bag_key,
-            "cost_key": spec_for_field(SpanAttributeField.COST_TOTAL_USD).bag_key,
+            **_SESSION_USAGE.parameters,
         }
 
         count_sql = _count_sql(
@@ -343,20 +340,17 @@ def _metric_sort_page_refs_sql(
         ),
         pre_page_metrics AS (
             SELECT
-                s.workspace AS workspace,
-                s.session_id AS session_id,
-                {_guarded_sum_sql("cost_key", scale=COST_SCALE)} AS cost_total_usd,
+                usage.workspace AS workspace,
+                usage.session_id AS session_id,
+                usage.cost_usd AS cost_total_usd,
                 if(
-                    {_guarded_sum_sql("input_tokens_key")} IS NULL AND {_guarded_sum_sql("output_tokens_key")} IS NULL,
+                    usage.input_tokens IS NULL AND usage.output_tokens IS NULL,
                     NULL,
-                    coalesce({_guarded_sum_sql("input_tokens_key")}, 0) + coalesce({_guarded_sum_sql("output_tokens_key")}, 0)
+                    coalesce(usage.input_tokens, 0) + coalesce(usage.output_tokens, 0)
                 ) AS total_tokens
-            FROM scoped_sessions AS s
-            LEFT JOIN {all_scoped_spans} AS spans
-                ON s.workspace = spans.workspace
-                AND s.session_id = spans.session_id
-                AND spans.is_deleted = 0
-            GROUP BY s.workspace, s.session_id
+            FROM (
+                {_usage_by_session_sql(all_scoped_spans)}
+            ) AS usage
         )
         SELECT
             s.session_id,
@@ -431,15 +425,15 @@ def _hydrate_by_refs_sql(
         ),
         session_metrics AS (
             SELECT
-                spans.workspace AS workspace,
-                spans.session_id AS session_id,
-                {_guarded_sum_sql("input_tokens_key")} AS input_tokens,
-                {_guarded_sum_sql("output_tokens_key")} AS output_tokens,
-                {_guarded_sum_sql("cached_tokens_key")} AS cached_tokens,
-                {_guarded_sum_sql("cost_key", scale=COST_SCALE)} AS cost_total_usd
-            FROM current_page_spans AS spans
-            WHERE spans.is_deleted = 0
-            GROUP BY spans.workspace, spans.session_id
+                usage.workspace AS workspace,
+                usage.session_id AS session_id,
+                usage.input_tokens AS input_tokens,
+                usage.output_tokens AS output_tokens,
+                usage.cached_tokens AS cached_tokens,
+                usage.cost_usd AS cost_total_usd
+            FROM (
+                {_usage_by_session_sql("current_page_spans")}
+            ) AS usage
         ),
         session_scores AS (
             SELECT
@@ -508,17 +502,42 @@ def _page_ref_parameters(refs: list[_SessionPageRef]) -> dict[str, object]:
     }
 
 
-def _guarded_sum_sql(parameter_name: str, *, scale: int = 1) -> str:
-    key = f"%({parameter_name})s"
-    sum_expr = f"sumIf(spans.attributes_number[{key}], has(mapKeys(spans.attributes_number), {key}))"
-    if scale != 1:
-        sum_expr = f"{sum_expr} / {scale}"
+_SESSION_USAGE_METRICS = ("input_tokens", "output_tokens", "cached_tokens", "cost_usd")
+_SESSION_USAGE = usage_sql(_SESSION_USAGE_METRICS, scaled=False)
+
+
+def _usage_by_session_sql(span_relation_sql: str) -> str:
+    """Sum each trace's winning usage tier, then add those totals up per session.
+
+    ``span_relation_sql`` is a FROM item of current span rows (a table, CTE, or subquery) exposing
+    ``workspace``, ``session_id``, ``source_format``, ``trace_id``, ``kind``, ``external_parent_span_id``,
+    ``attributes_number`` and ``is_deleted``.
+    """
     return f"""
-        if(
-            countIf(has(mapKeys(spans.attributes_number), {key})) = 0,
-            NULL,
-            {sum_expr}
-        )
+        SELECT
+            trace_usage.workspace AS workspace,
+            trace_usage.session_id AS session_id,
+            {summed_metric_columns("trace_usage", _SESSION_USAGE_METRICS)}
+        FROM (
+            SELECT
+                workspace,
+                session_id,
+                source_format,
+                trace_id,
+                {_SESSION_USAGE.trace_columns}
+            FROM (
+                SELECT
+                    spans.workspace AS workspace,
+                    spans.session_id AS session_id,
+                    spans.source_format AS source_format,
+                    spans.trace_id AS trace_id,
+                    {_SESSION_USAGE.span_columns}
+                FROM {span_relation_sql} AS spans
+                WHERE spans.is_deleted = 0
+            ) AS span_rows
+            GROUP BY workspace, session_id, source_format, trace_id
+        ) AS trace_usage
+        GROUP BY trace_usage.workspace, trace_usage.session_id
     """
 
 

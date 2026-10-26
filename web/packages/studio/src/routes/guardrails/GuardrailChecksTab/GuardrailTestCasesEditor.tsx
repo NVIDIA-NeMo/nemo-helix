@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ListCheckmark, Add } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import { Flex, SegmentedControl, Stack, Tabs, Text } from '@nvidia/foundations-react-core';
 import { useCreateGuardrailCheck, useRunGuardrailChecks } from '@studio/api/guardrail-checks/hooks';
@@ -17,7 +18,6 @@ import { GuardrailTestCard } from '@studio/routes/guardrails/GuardrailChecksTab/
 import { getMainModelName } from '@studio/routes/guardrails/GuardrailConfigTab/mainModel';
 import { getGuardrailChecksSubTabRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { ListChecks, Plus } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -166,7 +166,7 @@ export const GuardrailTestCasesEditor: FC<GuardrailTestCasesEditorProps> = ({
             title={runBlockedReason}
             onClick={() => void handleRunAll()}
           >
-            <ListChecks size={16} />
+            <ListCheckmark size="16" />
             Run {checks.length} {checks.length === 1 ? 'Test' : 'Tests'}
           </LoadingButton>
         </Flex>
@@ -219,7 +219,7 @@ export const GuardrailTestCasesEditor: FC<GuardrailTestCasesEditorProps> = ({
             onClick={handleAddTest}
             className="w-fit"
           >
-            <Plus size={16} />
+            <Add size="16" />
             Add Another Test
           </LoadingButton>
         </Stack>

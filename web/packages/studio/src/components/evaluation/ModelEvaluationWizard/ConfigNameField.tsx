@@ -4,7 +4,7 @@
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { type EvaluationFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useConfigNameStatus } from '@studio/components/evaluation/ModelEvaluationWizard/useConfigNameStatus';
-import { nameFieldSlots } from '@studio/components/evaluation/shared/entityNameField';
+import { nameFieldSlots } from '@studio/components/form/entityNameCheck';
 import { FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 

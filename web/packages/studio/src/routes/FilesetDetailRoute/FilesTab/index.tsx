@@ -27,6 +27,7 @@ export interface FilesTabProps {
   files: FilesetFileOutput[] | undefined;
   isFilesError: boolean;
   isFilesFetching: boolean;
+  hideFileActions?: boolean;
 }
 
 /**
@@ -44,6 +45,7 @@ export const FilesTab: FC<FilesTabProps> = ({
   files,
   isFilesError,
   isFilesFetching,
+  hideFileActions,
 }) => {
   const { getQueryParam, setQueryParam, setQueryParams } = useQueryParams();
   const currentFolder = getQueryParam(QUERY_PARAMETERS.filesetFolder) ?? undefined;
@@ -143,6 +145,7 @@ export const FilesTab: FC<FilesTabProps> = ({
               onFolderClick={handleFolderChange}
               onDeleteSuccess={handleClosePreview}
               onRenameSuccess={(newPath) => setQueryParam(QUERY_PARAMETERS.file, newPath)}
+              hideFileActions={hideFileActions}
             />
           </div>
         ) : (
@@ -162,20 +165,22 @@ export const FilesTab: FC<FilesTabProps> = ({
           </div>
         )}
       </Flex>
-      <div
-        className="w-[480px] shrink-0 h-full min-h-0 flex flex-col px-density-lg pb-density-lg"
-        data-testid="fileset-files-tab-right-panel"
-      >
-        {showSchemaEditor && !(selectedFilePath && !isSchemaAssignableFile(selectedFilePath)) && (
-          <DatasetSchemaEditor
-            workspace={workspace}
-            datasetName={filesetName}
-            fileset={fileset}
-            filesList={files}
-            selectedFilePath={selectedFilePath}
-          />
-        )}
-      </div>
+      {showSchemaEditor && (
+        <div
+          className="w-[480px] shrink-0 h-full min-h-0 flex flex-col px-density-lg pb-density-lg"
+          data-testid="fileset-files-tab-right-panel"
+        >
+          {!(selectedFilePath && !isSchemaAssignableFile(selectedFilePath)) && (
+            <DatasetSchemaEditor
+              workspace={workspace}
+              datasetName={filesetName}
+              fileset={fileset}
+              filesList={files}
+              selectedFilePath={selectedFilePath}
+            />
+          )}
+        </div>
+      )}
     </Flex>
   );
 };

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChartLegend } from '@nemo/common/src/components/charts/ChartLegend';
+import { HourglassMid } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { HeadToHeadChart } from '@studio/components/charts/EvaluationCompareChart/HeadToHeadChart';
 import { ImprovementChart } from '@studio/components/charts/EvaluationCompareChart/ImprovementChart';
@@ -19,7 +20,6 @@ import {
 import { deriveTrendMetrics } from '@studio/components/charts/ExperimentTrendChart/utils';
 import { MetricSelect } from '@studio/components/charts/MetricSelect';
 import type { EvaluationRow } from '@studio/components/dataViews/ExperimentDataView/useExperimentEvaluations';
-import { Loader2 } from 'lucide-react';
 import { type FC, type ReactNode, useMemo, useState } from 'react';
 
 interface EvaluationCompareChartProps {
@@ -110,7 +110,7 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
     if (sessions.isLoading) {
       return (
         <Flex aria-busy align="center" gap="density-md">
-          <Loader2 width={16} height={16} className="animate-spin text-brand" />
+          <HourglassMid width={16} height={16} className="animate-spin text-brand" />
           <Placeholder>Loading test case results…</Placeholder>
         </Flex>
       );

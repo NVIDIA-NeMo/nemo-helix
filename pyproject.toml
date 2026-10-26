@@ -291,7 +291,7 @@ builder-steps = ["nemo-builder-plugin"]
 generate-config-docs = "script.generate_config_docs:main"
 
 [tool.uv]
-prerelease = "if-necessary-or-explicit"
+prerelease = "if-necessary"
 index-strategy = "unsafe-best-match"
 required-version = ">=0.13.4"
 cache-keys = [{ file = "pyproject.toml" }]
@@ -373,6 +373,10 @@ override-dependencies = [
   # Only datasets>=5.1 admits the fsspec>=2026.6 the Fabric mini-swe-agent/nooa adapters require. Overrides
   # unsloth (<5) and verifiers (<4.7); unsloth-zoo#1341 measured its data path identical on datasets 5.0.1.
   "datasets>=5.1.0,<6",
+  # nemo-fabric[harbor] 0.5 caps harbor <0.24; 0.24 installs only an agent's missing system packages.
+  # The published extra allows 0.23 too, so the wheel stays installable; this lock and our images get 0.24.
+  # Remove once a Fabric release allows 0.24 (NVIDIA/NeMo-Fabric#482) and Helix's Fabric pin admits it.
+  "harbor>=0.24,<0.25",
   "jsonpath-ng>=1.6.1",
   "grpcio>=1.71.0",
   "huggingface-hub>=1.31.0,<2.0.0",

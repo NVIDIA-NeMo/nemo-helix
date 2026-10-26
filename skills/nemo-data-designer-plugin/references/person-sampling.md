@@ -13,7 +13,7 @@ Prefer `"person"` — it provides census-grounded demographics and optional pers
 
 Person sampling reads locale data from a NeMo Helix fileset named `system/nemotron-personas-dataset-<locale>` (lowercased locale). Nothing is downloaded to your machine, and the `installed` column in `nemo data-designer agent context` output describes a local library path that platform execution does not use — ignore it.
 
-Supported locales: `en_IN`, `en_SG`, `en_US`, `fr_FR`, `hi_Deva_IN`, `hi_Latn_IN`, `ja_JP`, `ko_KR`, `pt_BR`.
+Supported locales: `de_DE`, `en_GB`, `en_IN`, `en_SG`, `en_US`, `fr_FR`, `hi_Deva_IN`, `hi_Latn_IN`, `ja_JP`, `ko_KR`, `pt_BR`.
 
 `nemo data-designer validate <path>` checks that every locale your config samples from via `PersonSamplerParams` (`sampler_type="person"`) has a reachable fileset. If one is missing, validation fails and the fileset has to be created once, per locale, by someone with an NGC API key secret registered in the platform:
 
