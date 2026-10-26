@@ -6,6 +6,7 @@ import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Anchor, Card, Text } from '@nvidia/foundations-react-core';
 import { MetricTrend } from '@studio/components/charts/MetricTrend';
+import { ExperimentDeleteButton } from '@studio/components/ExperimentDeleteButton';
 import {
   DELTA_COMPARISON_LABEL,
   formatTrendDelta,
@@ -103,6 +104,7 @@ export const ExperimentCard: FC<ExperimentCardProps> = ({ group, workspace }) =>
           <Metric title="Evaluations" value={String(group.evaluation_count ?? 0)} />
         </div>
       )}
+      <ExperimentDeleteButton workspace={workspace} name={group.name} asMenu />
     </Card>
   );
 };
