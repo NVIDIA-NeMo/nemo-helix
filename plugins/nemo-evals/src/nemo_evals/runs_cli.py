@@ -722,7 +722,15 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             if stored_ref is not None and "without images" in str(exc):
                 echo(f"Check with: nemo evals tasksets build-images {stored_ref}{flag} --status", err=True)
             raise typer.Exit(code=1) from exc
-        echo(f"Run {status['run_id']} accepted: {len(refs)} tasks, queued; the run controller starts their task Jobs")
+        if status.get("phase", "accepted") == "accepted":
+            echo(
+                f"Run {status['run_id']} accepted: {len(refs)} tasks, queued; the run controller starts their task Jobs"
+            )
+        else:  # the key replayed a run that already started or ended
+            echo(
+                f"Run {status['run_id']} was already submitted with this key and is {status['phase']}; "
+                "nothing new started"
+            )
         for line in status.get("warnings", []):
             echo(f"  {line}")
         echo("")

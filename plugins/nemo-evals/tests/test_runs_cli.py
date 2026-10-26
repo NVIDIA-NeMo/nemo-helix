@@ -121,9 +121,10 @@ def submitting(monkeypatch):
         seen.bodies.append(body)
         if seen.refuse:
             raise RuntimeError('submit failed (422): "tasks without images: ac9/deep-swe-b#..."')
-        return {"run_id": "run-1", "warnings": []}
+        return {"run_id": "run-1", "phase": seen.phase, "warnings": []}
 
     seen.refuse = False
+    seen.phase = "accepted"
     monkeypatch.setattr("nemo_evals.runs_cli.submit_run", submit)
     client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "ac9")
 
@@ -167,6 +168,15 @@ def test_submit_with_a_taskset_uploads_nothing_and_requests_no_builds(submitting
         "dataset_version": "sha256:" + "a" * 64,
     }
     assert "Run run-1 accepted: 2 tasks, queued" in result.output
+
+
+@pytest.mark.parametrize("phase", ["running", "cancelled"])
+def test_a_resubmit_that_replays_a_started_run_says_it_started_nothing(submitting, phase):
+    submitting.phase = phase
+    result = submitting.invoke("--taskset", STORED, "--idempotency-key", "k")
+    assert result.exit_code == 0, result.output
+    assert f"Run run-1 was already submitted with this key and is {phase}; nothing new started" in result.output
+    assert "starts their task Jobs" not in result.output
 
 
 def test_submit_narrows_a_taskset_by_publishing_a_selection_without_uploading_tasks(submitting):
