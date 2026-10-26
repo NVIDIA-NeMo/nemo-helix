@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.jobs.execution_profiles import KubernetesKeyToPath
 from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
@@ -67,7 +68,6 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesConfigMapVolume,
     KubernetesEmptyDirVolume,
     KubernetesJobStorageConfig,
-    KubernetesKeyToPath,
     KubernetesObjectMetadata,
     KubernetesPersistentVolumeClaim,
     KubernetesSecretVolume,
@@ -662,9 +662,25 @@ def _reclaim_storage(batch_v1: MagicMock) -> bool:
     )
 
 
-def _cleanup_job(name: str, finished: str | None = None) -> client.V1Job:
+def _cleanup_job(name: str, finished: str | None = None, *, pvc_name: str = "pvc") -> client.V1Job:
     conditions = [client.V1JobCondition(type=finished, status="True")] if finished else None
-    return client.V1Job(metadata=client.V1ObjectMeta(name=name), status=client.V1JobStatus(conditions=conditions))
+    return client.V1Job(
+        metadata=client.V1ObjectMeta(name=name),
+        status=client.V1JobStatus(conditions=conditions),
+        spec=client.V1JobSpec(
+            template=client.V1PodTemplateSpec(
+                spec=client.V1PodSpec(
+                    containers=[],
+                    volumes=[
+                        client.V1Volume(
+                            name="job-storage",
+                            persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(claim_name=pvc_name),
+                        )
+                    ],
+                )
+            )
+        ),
+    )
 
 
 def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
@@ -721,6 +737,33 @@ def test_reclaim_waits_while_another_cleanup_job_runs():
     assert _reclaim_storage(batch_v1) is False
 
     assert [c.kwargs["name"] for c in batch_v1.delete_namespaced_job.call_args_list] == ["cleanup-1"]
+
+
+@pytest.mark.parametrize("foreign_status", [None, "Complete", "Failed"])
+def test_reclaim_does_not_consume_another_claims_cleanup(foreign_status):
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("foreign-cleanup", foreign_status, pvc_name="other-pvc"))
+
+    assert _reclaim_storage(batch_v1) is False
+
+    batch_v1.delete_namespaced_job.assert_not_called()
+    body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    assert body.spec.template.spec.volumes[0].persistent_volume_claim.claim_name == "pvc"
+
+
+def test_reclaim_only_finishes_and_deletes_its_own_claims_cleanup():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(
+        batch_v1,
+        _cleanup_job("own-cleanup", "Complete"),
+        _cleanup_job("foreign-cleanup", pvc_name="other-pvc"),
+    )
+
+    assert _reclaim_storage(batch_v1) is True
+
+    batch_v1.create_namespaced_job.assert_not_called()
+    batch_v1.delete_namespaced_job.assert_called_once()
+    assert batch_v1.delete_namespaced_job.call_args.kwargs["name"] == "own-cleanup"
 
 
 def test_reclaim_raises_and_deletes_a_failed_cleanup_job():
