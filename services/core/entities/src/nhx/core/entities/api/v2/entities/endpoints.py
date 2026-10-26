@@ -356,10 +356,17 @@ async def list_entities(
     auth_client: AuthClientDep,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
-    # TODO: eventually validate this, for now trust people to submit valid fields. -md
     sort: str = Query(
         "-created_at",
-        description="Sort field",
+        description=(
+            "Sort by id, workspace, entity_type, name, parent, project, created_at, updated_at, "
+            "created_by, updated_by, or db_version; or by a dotted JSON path such as data.priority "
+            "or data.owner.name. JSON path components must be nonempty; missing paths are allowed "
+            "and use the database's native null ordering. Prefix with a single '-' for descending "
+            "order. Invalid sort fields return HTTP 400. Equal values are ordered by id ascending. "
+            "Pagination uses offsets, not a snapshot: concurrent writes can cause rows to be "
+            "repeated or skipped between pages."
+        ),
         examples=["-created_at", "created_at", "-updated_at", "updated_at", "-name", "name"],
     ),
     count_by: str | None = Query(
