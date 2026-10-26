@@ -114,6 +114,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
+from nhx_evals_sdk.metrics.resolution import collect_models
 from nhx_evals_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
 
@@ -130,6 +131,36 @@ _HARBOR_BACKEND_REQUIREMENT = (
     "Harbor targets currently require the subprocess backend with access to the host Docker daemon."
 )
 _SUBPROCESS_PROVIDER: Literal["subprocess"] = "subprocess"
+
+
+def _attach_platform_metric_auth(tasks: list[AgentEvalTask], client: AsyncNemoClient) -> None:
+    """Give platform-routed metric models the job's refreshable workload identity.
+
+    A resolved ``ModelRef`` points at the protected inference-gateway route but deliberately carries
+    no persisted credential. Job pods already receive workload identity, and their typed client owns
+    the exchange and refresh lifecycle. Attach that provider only to models on the same platform;
+    explicit model secrets and third-party endpoints keep their existing authentication.
+    """
+    for task in tasks:
+        for metric in task.metrics:
+            if not isinstance(metric, BaseModel):
+                continue
+            for model in collect_models(metric).values():
+                if model.api_key_secret is not None or not client.is_platform_url(model.url):
+                    continue
+
+                async def api_key(*, url: str = model.url) -> str:
+                    headers = await client.request_headers(url=url)
+                    authorization = next(
+                        (value for name, value in (headers or {}).items() if name.lower() == "authorization"),
+                        "",
+                    )
+                    scheme, separator, token = authorization.partition(" ")
+                    if separator != " " or scheme.lower() != "bearer" or not token:
+                        raise RuntimeError("Platform inference route requires a bearer token from workload identity")
+                    return token
+
+                model.set_api_key_provider(api_key)
 
 
 def _harbor_backend_error(reason: str) -> HelixJobCompilationError:
@@ -580,6 +611,8 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         self._prepared_tasks(tasks)
+        if async_client is not None:
+            _attach_platform_metric_auth(tasks, async_client)
         target, prompt_template, params = self._resolve_target(
             spec.target, ctx, configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx)
         )

@@ -27,6 +27,7 @@ from nemo_evals.jobs.agent_evaluate import (
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
+    _attach_platform_metric_auth,
 )
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
@@ -62,6 +63,7 @@ from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.commands import add_job_commands
@@ -108,9 +110,11 @@ from nhx_evals_sdk.agent_eval.trials import (
 from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.protocol import MetricOutput
+from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 from pydantic import JsonValue, ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -1042,6 +1046,65 @@ def test_build_evaluator_without_identity_headers_forwards_no_headers() -> None:
     )
     target = _model_target("http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions")
     assert AgentEvalJob._build_evaluator(sdk, target).default_headers is None
+
+
+@pytest.mark.asyncio
+async def test_platform_metric_model_uses_refreshable_job_identity() -> None:
+    client = AsyncNemoClient(
+        base_url="https://platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    metric = LLMJudgeMetric(
+        model=Model(
+            url="https://platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1",
+            name="judge",
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+        prompt_template={"messages": [{"role": "user", "content": "{{item}} {{sample}}"}]},
+    )
+    task = AgentEvalTask(id="task", intent="score", inputs={}, metrics=[metric])
+
+    _attach_platform_metric_auth([task], client)
+
+    assert isinstance(metric.model, Model)
+    assert metric.model.api_key_provider is not None
+    assert await metric.model.api_key_provider() == "job-access-token"
+
+
+def test_platform_metric_auth_does_not_override_explicit_or_external_credentials() -> None:
+    client = AsyncNemoClient(
+        base_url="https://platform",
+        workspace="dev",
+        auth=StaticToken("job-access-token"),
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+    explicit = LLMJudgeMetric(
+        model=Model(
+            url="https://platform/apis/inference-gateway/v2/workspaces/dev/model/judge/-/v1",
+            name="judge",
+            api_key_secret=SecretRef("judge-key"),
+        ),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+    external = LLMJudgeMetric(
+        model=Model(url="https://api.example.test/v1", name="judge"),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+
+    _attach_platform_metric_auth(
+        [
+            AgentEvalTask(id="explicit", intent="score", inputs={}, metrics=[explicit]),
+            AgentEvalTask(id="external", intent="score", inputs={}, metrics=[external]),
+        ],
+        client,
+    )
+
+    assert isinstance(explicit.model, Model)
+    assert isinstance(external.model, Model)
+    assert explicit.model.api_key_provider is None
+    assert external.model.api_key_provider is None
 
 
 def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:

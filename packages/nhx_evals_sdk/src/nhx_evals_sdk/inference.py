@@ -3,7 +3,7 @@
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 from urllib.parse import parse_qsl, urlparse, urlunparse
@@ -285,7 +285,10 @@ def new_hooks(
     return preprocess_hooks, postprocess_hooks
 
 
-def new_inference_client(model: Model, api_key: str | None = None) -> AsyncOpenAI:
+def new_inference_client(
+    model: Model,
+    api_key: str | Callable[[], Awaitable[str]] | None = None,
+) -> AsyncOpenAI:
     """
     Initialize a new client for inference
     """
@@ -301,7 +304,7 @@ def new_inference_client(model: Model, api_key: str | None = None) -> AsyncOpenA
     return AsyncOpenAI(
         base_url=base_url,
         # Sometimes, a fake key is still required for the OpenAI client to work.
-        api_key=api_key or model.api_key or PLACEHOLDER_INFERENCE_API_KEY,
+        api_key=api_key or model.api_key_provider or model.api_key or PLACEHOLDER_INFERENCE_API_KEY,
         # Defer retry to resilience
         max_retries=0,
     )
