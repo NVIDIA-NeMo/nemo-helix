@@ -48,6 +48,10 @@ import type {
   EventsResponse,
   HTTPValidationError,
   HealthzApisAgentHardenerV1HealthzGet200,
+  HelixJobListResultResponse,
+  HelixJobLogPage,
+  HelixJobResultResponse,
+  HelixJobStatusResponse,
   InspectAgentRequest,
   InspectAgentResponse,
   InspectProjectRequest,
@@ -55,10 +59,6 @@ import type {
   ManifestInit,
   ManifestUpdate,
   ModelConfigDefaults,
-  HelixJobListResultResponse,
-  HelixJobLogPage,
-  HelixJobResultResponse,
-  HelixJobStatusResponse,
   SynthBenignJob,
   SynthBenignJobRequest,
   SynthBenignJobsPage,
@@ -255,11 +255,13 @@ export const agentHardenerCreateJob = (
 
 
 
-export const getAgentHardenerCreateJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateJob>>, TError,{workspace: string;data: WarGameJobRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateJob>>, TError,{workspace: string;data: WarGameJobRequest}, TContext> => {
+export const getAgentHardenerCreateJobMutationKey = () => ['agentHardenerCreateJob'] as const;
 
-const mutationKey = ['agentHardenerCreateJob'];
+export const getAgentHardenerCreateJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateJob>>, TError,AgentHardenerCreateJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateJob>>, TError,AgentHardenerCreateJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerCreateJobMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -269,7 +271,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCreateJob>>, {workspace: string;data: WarGameJobRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCreateJob>>, AgentHardenerCreateJobMutationVariables> = (props) => {
           const {workspace,data} = props ?? {};
 
           return  agentHardenerCreateJob(workspace,data,)
@@ -285,16 +287,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerCreateJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerCreateJob>>>
     export type AgentHardenerCreateJobMutationBody = WarGameJobRequest
     export type AgentHardenerCreateJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerCreateJobMutationVariables = {workspace: string;data: WarGameJobRequest}
 
     /**
  * @summary Create Job
  */
 export const useAgentHardenerCreateJob = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateJob>>, TError,{workspace: string;data: WarGameJobRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateJob>>, TError,AgentHardenerCreateJobMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerCreateJob>>,
         TError,
-        {workspace: string;data: WarGameJobRequest},
+        AgentHardenerCreateJobMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerCreateJobMutationOptions(options), queryClient);
@@ -985,11 +988,13 @@ export const agentHardenerDeleteJob = (
 
 
 
-export const getAgentHardenerDeleteJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerDeleteJobMutationKey = () => ['agentHardenerDeleteJob'] as const;
 
-const mutationKey = ['agentHardenerDeleteJob'];
+export const getAgentHardenerDeleteJobMutationOptions = <TError = ErrorType<void | HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, TError,AgentHardenerDeleteJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, TError,AgentHardenerDeleteJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerDeleteJobMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -999,7 +1004,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, AgentHardenerDeleteJobMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerDeleteJob(workspace,name,)
@@ -1014,17 +1019,18 @@ const {mutation: mutationOptions} = options ?
 
     export type AgentHardenerDeleteJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerDeleteJob>>>
 
-    export type AgentHardenerDeleteJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerDeleteJobMutationError = ErrorType<void | HTTPValidationError>
+    export type AgentHardenerDeleteJobMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Delete Job
  */
-export const useAgentHardenerDeleteJob = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, TError,{workspace: string;name: string}, TContext>, }
+export const useAgentHardenerDeleteJob = <TError = ErrorType<void | HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteJob>>, TError,AgentHardenerDeleteJobMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerDeleteJob>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerDeleteJobMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerDeleteJobMutationOptions(options), queryClient);
@@ -1049,11 +1055,13 @@ export const agentHardenerCancelJob = (
 
 
 
-export const getAgentHardenerCancelJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelJob>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelJob>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerCancelJobMutationKey = () => ['agentHardenerCancelJob'] as const;
 
-const mutationKey = ['agentHardenerCancelJob'];
+export const getAgentHardenerCancelJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelJob>>, TError,AgentHardenerCancelJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelJob>>, TError,AgentHardenerCancelJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerCancelJobMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1063,7 +1071,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCancelJob>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCancelJob>>, AgentHardenerCancelJobMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerCancelJob(workspace,name,)
@@ -1079,16 +1087,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerCancelJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerCancelJob>>>
 
     export type AgentHardenerCancelJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerCancelJobMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Cancel Job
  */
 export const useAgentHardenerCancelJob = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelJob>>, TError,{workspace: string;name: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelJob>>, TError,AgentHardenerCancelJobMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerCancelJob>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerCancelJobMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerCancelJobMutationOptions(options), queryClient);
@@ -1771,11 +1780,13 @@ export const agentHardenerCreateManifest = (
 
 
 
-export const getAgentHardenerCreateManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, TError,{workspace: string;data: ManifestInit}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, TError,{workspace: string;data: ManifestInit}, TContext> => {
+export const getAgentHardenerCreateManifestMutationKey = () => ['agentHardenerCreateManifest'] as const;
 
-const mutationKey = ['agentHardenerCreateManifest'];
+export const getAgentHardenerCreateManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, TError,AgentHardenerCreateManifestMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, TError,AgentHardenerCreateManifestMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerCreateManifestMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1785,7 +1796,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, {workspace: string;data: ManifestInit}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, AgentHardenerCreateManifestMutationVariables> = (props) => {
           const {workspace,data} = props ?? {};
 
           return  agentHardenerCreateManifest(workspace,data,)
@@ -1801,16 +1812,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerCreateManifestMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerCreateManifest>>>
     export type AgentHardenerCreateManifestMutationBody = ManifestInit
     export type AgentHardenerCreateManifestMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerCreateManifestMutationVariables = {workspace: string;data: ManifestInit}
 
     /**
  * @summary Create Manifest
  */
 export const useAgentHardenerCreateManifest = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, TError,{workspace: string;data: ManifestInit}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateManifest>>, TError,AgentHardenerCreateManifestMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerCreateManifest>>,
         TError,
-        {workspace: string;data: ManifestInit},
+        AgentHardenerCreateManifestMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerCreateManifestMutationOptions(options), queryClient);
@@ -1840,11 +1852,13 @@ export const agentHardenerInspectManifestsInspectAgentEndpoint = (
 
 
 
-export const getAgentHardenerInspectManifestsInspectAgentEndpointMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, TError,{workspace: string;data: InspectAgentRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, TError,{workspace: string;data: InspectAgentRequest}, TContext> => {
+export const getAgentHardenerInspectManifestsInspectAgentEndpointMutationKey = () => ['agentHardenerInspectManifestsInspectAgentEndpoint'] as const;
 
-const mutationKey = ['agentHardenerInspectManifestsInspectAgentEndpoint'];
+export const getAgentHardenerInspectManifestsInspectAgentEndpointMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, TError,AgentHardenerInspectManifestsInspectAgentEndpointMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, TError,AgentHardenerInspectManifestsInspectAgentEndpointMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerInspectManifestsInspectAgentEndpointMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1854,7 +1868,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, {workspace: string;data: InspectAgentRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, AgentHardenerInspectManifestsInspectAgentEndpointMutationVariables> = (props) => {
           const {workspace,data} = props ?? {};
 
           return  agentHardenerInspectManifestsInspectAgentEndpoint(workspace,data,)
@@ -1870,16 +1884,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerInspectManifestsInspectAgentEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>>
     export type AgentHardenerInspectManifestsInspectAgentEndpointMutationBody = InspectAgentRequest
     export type AgentHardenerInspectManifestsInspectAgentEndpointMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerInspectManifestsInspectAgentEndpointMutationVariables = {workspace: string;data: InspectAgentRequest}
 
     /**
  * @summary Inspect Agent Endpoint
  */
 export const useAgentHardenerInspectManifestsInspectAgentEndpoint = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, TError,{workspace: string;data: InspectAgentRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>, TError,AgentHardenerInspectManifestsInspectAgentEndpointMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectAgentEndpoint>>,
         TError,
-        {workspace: string;data: InspectAgentRequest},
+        AgentHardenerInspectManifestsInspectAgentEndpointMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerInspectManifestsInspectAgentEndpointMutationOptions(options), queryClient);
@@ -1911,11 +1926,13 @@ export const agentHardenerInspectManifestsInspectProjectEndpoint = (
 
 
 
-export const getAgentHardenerInspectManifestsInspectProjectEndpointMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,{workspace: string;data: InspectProjectRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,{workspace: string;data: InspectProjectRequest}, TContext> => {
+export const getAgentHardenerInspectManifestsInspectProjectEndpointMutationKey = () => ['agentHardenerInspectManifestsInspectProjectEndpoint'] as const;
 
-const mutationKey = ['agentHardenerInspectManifestsInspectProjectEndpoint'];
+export const getAgentHardenerInspectManifestsInspectProjectEndpointMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,AgentHardenerInspectManifestsInspectProjectEndpointMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,AgentHardenerInspectManifestsInspectProjectEndpointMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerInspectManifestsInspectProjectEndpointMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1925,7 +1942,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, {workspace: string;data: InspectProjectRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, AgentHardenerInspectManifestsInspectProjectEndpointMutationVariables> = (props) => {
           const {workspace,data} = props ?? {};
 
           return  agentHardenerInspectManifestsInspectProjectEndpoint(workspace,data,)
@@ -1941,16 +1958,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerInspectManifestsInspectProjectEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>>
     export type AgentHardenerInspectManifestsInspectProjectEndpointMutationBody = InspectProjectRequest
     export type AgentHardenerInspectManifestsInspectProjectEndpointMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerInspectManifestsInspectProjectEndpointMutationVariables = {workspace: string;data: InspectProjectRequest}
 
     /**
  * @summary Inspect Project Endpoint
  */
 export const useAgentHardenerInspectManifestsInspectProjectEndpoint = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,{workspace: string;data: InspectProjectRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,AgentHardenerInspectManifestsInspectProjectEndpointMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>,
         TError,
-        {workspace: string;data: InspectProjectRequest},
+        AgentHardenerInspectManifestsInspectProjectEndpointMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerInspectManifestsInspectProjectEndpointMutationOptions(options), queryClient);
@@ -2143,11 +2161,13 @@ export const agentHardenerUpdateManifest = (
 
 
 
-export const getAgentHardenerUpdateManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, TError,{workspace: string;name: string;data: ManifestUpdate}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, TError,{workspace: string;name: string;data: ManifestUpdate}, TContext> => {
+export const getAgentHardenerUpdateManifestMutationKey = () => ['agentHardenerUpdateManifest'] as const;
 
-const mutationKey = ['agentHardenerUpdateManifest'];
+export const getAgentHardenerUpdateManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, TError,AgentHardenerUpdateManifestMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, TError,AgentHardenerUpdateManifestMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerUpdateManifestMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2157,7 +2177,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, {workspace: string;name: string;data: ManifestUpdate}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, AgentHardenerUpdateManifestMutationVariables> = (props) => {
           const {workspace,name,data} = props ?? {};
 
           return  agentHardenerUpdateManifest(workspace,name,data,)
@@ -2173,16 +2193,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerUpdateManifestMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>>
     export type AgentHardenerUpdateManifestMutationBody = ManifestUpdate
     export type AgentHardenerUpdateManifestMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerUpdateManifestMutationVariables = {workspace: string;name: string;data: ManifestUpdate}
 
     /**
  * @summary Update Manifest
  */
 export const useAgentHardenerUpdateManifest = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, TError,{workspace: string;name: string;data: ManifestUpdate}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateManifest>>, TError,AgentHardenerUpdateManifestMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerUpdateManifest>>,
         TError,
-        {workspace: string;name: string;data: ManifestUpdate},
+        AgentHardenerUpdateManifestMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerUpdateManifestMutationOptions(options), queryClient);
@@ -2208,11 +2229,13 @@ export const agentHardenerDeleteManifest = (
 
 
 
-export const getAgentHardenerDeleteManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerDeleteManifestMutationKey = () => ['agentHardenerDeleteManifest'] as const;
 
-const mutationKey = ['agentHardenerDeleteManifest'];
+export const getAgentHardenerDeleteManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, TError,AgentHardenerDeleteManifestMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, TError,AgentHardenerDeleteManifestMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerDeleteManifestMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2222,7 +2245,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, AgentHardenerDeleteManifestMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerDeleteManifest(workspace,name,)
@@ -2238,16 +2261,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerDeleteManifestMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>>
 
     export type AgentHardenerDeleteManifestMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerDeleteManifestMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Delete Manifest
  */
 export const useAgentHardenerDeleteManifest = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, TError,{workspace: string;name: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteManifest>>, TError,AgentHardenerDeleteManifestMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerDeleteManifest>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerDeleteManifestMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerDeleteManifestMutationOptions(options), queryClient);
@@ -2280,11 +2304,13 @@ export const agentHardenerRefreshManifest = (
 
 
 
-export const getAgentHardenerRefreshManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerRefreshManifestMutationKey = () => ['agentHardenerRefreshManifest'] as const;
 
-const mutationKey = ['agentHardenerRefreshManifest'];
+export const getAgentHardenerRefreshManifestMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, TError,AgentHardenerRefreshManifestMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, TError,AgentHardenerRefreshManifestMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerRefreshManifestMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2294,7 +2320,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, AgentHardenerRefreshManifestMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerRefreshManifest(workspace,name,)
@@ -2310,16 +2336,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerRefreshManifestMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>>
 
     export type AgentHardenerRefreshManifestMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerRefreshManifestMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Refresh Manifest
  */
 export const useAgentHardenerRefreshManifest = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, TError,{workspace: string;name: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerRefreshManifest>>, TError,AgentHardenerRefreshManifestMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerRefreshManifest>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerRefreshManifestMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerRefreshManifestMutationOptions(options), queryClient);
@@ -2499,11 +2526,13 @@ export const agentHardenerValidateModelConfig = (
 
 
 
-export const getAgentHardenerValidateModelConfigMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, TError,{workspace: string;data: ValidateModelRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, TError,{workspace: string;data: ValidateModelRequest}, TContext> => {
+export const getAgentHardenerValidateModelConfigMutationKey = () => ['agentHardenerValidateModelConfig'] as const;
 
-const mutationKey = ['agentHardenerValidateModelConfig'];
+export const getAgentHardenerValidateModelConfigMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, TError,AgentHardenerValidateModelConfigMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, TError,AgentHardenerValidateModelConfigMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerValidateModelConfigMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2513,7 +2542,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, {workspace: string;data: ValidateModelRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, AgentHardenerValidateModelConfigMutationVariables> = (props) => {
           const {workspace,data} = props ?? {};
 
           return  agentHardenerValidateModelConfig(workspace,data,)
@@ -2529,16 +2558,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerValidateModelConfigMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>>
     export type AgentHardenerValidateModelConfigMutationBody = ValidateModelRequest
     export type AgentHardenerValidateModelConfigMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerValidateModelConfigMutationVariables = {workspace: string;data: ValidateModelRequest}
 
     /**
  * @summary Validate Model Config
  */
 export const useAgentHardenerValidateModelConfig = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, TError,{workspace: string;data: ValidateModelRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>, TError,AgentHardenerValidateModelConfigMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerValidateModelConfig>>,
         TError,
-        {workspace: string;data: ValidateModelRequest},
+        AgentHardenerValidateModelConfigMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerValidateModelConfigMutationOptions(options), queryClient);
@@ -2887,11 +2917,13 @@ export const agentHardenerDeleteRun = (
 
 
 
-export const getAgentHardenerDeleteRunMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerDeleteRunMutationKey = () => ['agentHardenerDeleteRun'] as const;
 
-const mutationKey = ['agentHardenerDeleteRun'];
+export const getAgentHardenerDeleteRunMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, TError,AgentHardenerDeleteRunMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, TError,AgentHardenerDeleteRunMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerDeleteRunMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2901,7 +2933,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, AgentHardenerDeleteRunMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerDeleteRun(workspace,name,)
@@ -2917,16 +2949,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerDeleteRunMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerDeleteRun>>>
 
     export type AgentHardenerDeleteRunMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerDeleteRunMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Delete Run
  */
 export const useAgentHardenerDeleteRun = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, TError,{workspace: string;name: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteRun>>, TError,AgentHardenerDeleteRunMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerDeleteRun>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerDeleteRunMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerDeleteRunMutationOptions(options), queryClient);
@@ -2962,11 +2995,13 @@ export const agentHardenerApplyMitigation = (
 
 
 
-export const getAgentHardenerApplyMitigationMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, TError,{workspace: string;name: string;data: ApplyMitigationRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, TError,{workspace: string;name: string;data: ApplyMitigationRequest}, TContext> => {
+export const getAgentHardenerApplyMitigationMutationKey = () => ['agentHardenerApplyMitigation'] as const;
 
-const mutationKey = ['agentHardenerApplyMitigation'];
+export const getAgentHardenerApplyMitigationMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, TError,AgentHardenerApplyMitigationMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, TError,AgentHardenerApplyMitigationMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerApplyMitigationMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -2976,7 +3011,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, {workspace: string;name: string;data: ApplyMitigationRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, AgentHardenerApplyMitigationMutationVariables> = (props) => {
           const {workspace,name,data} = props ?? {};
 
           return  agentHardenerApplyMitigation(workspace,name,data,)
@@ -2992,16 +3027,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerApplyMitigationMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>>
     export type AgentHardenerApplyMitigationMutationBody = ApplyMitigationRequest
     export type AgentHardenerApplyMitigationMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerApplyMitigationMutationVariables = {workspace: string;name: string;data: ApplyMitigationRequest}
 
     /**
  * @summary Apply Mitigation
  */
 export const useAgentHardenerApplyMitigation = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, TError,{workspace: string;name: string;data: ApplyMitigationRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerApplyMitigation>>, TError,AgentHardenerApplyMitigationMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerApplyMitigation>>,
         TError,
-        {workspace: string;name: string;data: ApplyMitigationRequest},
+        AgentHardenerApplyMitigationMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerApplyMitigationMutationOptions(options), queryClient);
@@ -3033,11 +3069,13 @@ export const agentHardenerComposeDefenseRoute = (
 
 
 
-export const getAgentHardenerComposeDefenseRouteMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, TError,{workspace: string;name: string;data: ComposeDefenseRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, TError,{workspace: string;name: string;data: ComposeDefenseRequest}, TContext> => {
+export const getAgentHardenerComposeDefenseRouteMutationKey = () => ['agentHardenerComposeDefenseRoute'] as const;
 
-const mutationKey = ['agentHardenerComposeDefenseRoute'];
+export const getAgentHardenerComposeDefenseRouteMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, TError,AgentHardenerComposeDefenseRouteMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, TError,AgentHardenerComposeDefenseRouteMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerComposeDefenseRouteMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3047,7 +3085,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, {workspace: string;name: string;data: ComposeDefenseRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, AgentHardenerComposeDefenseRouteMutationVariables> = (props) => {
           const {workspace,name,data} = props ?? {};
 
           return  agentHardenerComposeDefenseRoute(workspace,name,data,)
@@ -3063,16 +3101,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerComposeDefenseRouteMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>>
     export type AgentHardenerComposeDefenseRouteMutationBody = ComposeDefenseRequest
     export type AgentHardenerComposeDefenseRouteMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerComposeDefenseRouteMutationVariables = {workspace: string;name: string;data: ComposeDefenseRequest}
 
     /**
  * @summary Compose Defense Route
  */
 export const useAgentHardenerComposeDefenseRoute = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, TError,{workspace: string;name: string;data: ComposeDefenseRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>, TError,AgentHardenerComposeDefenseRouteMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerComposeDefenseRoute>>,
         TError,
-        {workspace: string;name: string;data: ComposeDefenseRequest},
+        AgentHardenerComposeDefenseRouteMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerComposeDefenseRouteMutationOptions(options), queryClient);
@@ -3101,11 +3140,13 @@ export const agentHardenerIngestEvent = (
 
 
 
-export const getAgentHardenerIngestEventMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, TError,{workspace: string;name: string;data: EventIn}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, TError,{workspace: string;name: string;data: EventIn}, TContext> => {
+export const getAgentHardenerIngestEventMutationKey = () => ['agentHardenerIngestEvent'] as const;
 
-const mutationKey = ['agentHardenerIngestEvent'];
+export const getAgentHardenerIngestEventMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, TError,AgentHardenerIngestEventMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, TError,AgentHardenerIngestEventMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerIngestEventMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3115,7 +3156,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, {workspace: string;name: string;data: EventIn}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, AgentHardenerIngestEventMutationVariables> = (props) => {
           const {workspace,name,data} = props ?? {};
 
           return  agentHardenerIngestEvent(workspace,name,data,)
@@ -3131,16 +3172,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerIngestEventMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerIngestEvent>>>
     export type AgentHardenerIngestEventMutationBody = EventIn
     export type AgentHardenerIngestEventMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerIngestEventMutationVariables = {workspace: string;name: string;data: EventIn}
 
     /**
  * @summary Ingest Event
  */
 export const useAgentHardenerIngestEvent = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, TError,{workspace: string;name: string;data: EventIn}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerIngestEvent>>, TError,AgentHardenerIngestEventMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerIngestEvent>>,
         TError,
-        {workspace: string;name: string;data: EventIn},
+        AgentHardenerIngestEventMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerIngestEventMutationOptions(options), queryClient);
@@ -3344,11 +3386,13 @@ export const agentHardenerCreateSynthBenignJob = (
 
 
 
-export const getAgentHardenerCreateSynthBenignJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, TError,{workspace: string;data: SynthBenignJobRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, TError,{workspace: string;data: SynthBenignJobRequest}, TContext> => {
+export const getAgentHardenerCreateSynthBenignJobMutationKey = () => ['agentHardenerCreateSynthBenignJob'] as const;
 
-const mutationKey = ['agentHardenerCreateSynthBenignJob'];
+export const getAgentHardenerCreateSynthBenignJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, TError,AgentHardenerCreateSynthBenignJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, TError,AgentHardenerCreateSynthBenignJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerCreateSynthBenignJobMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -3358,7 +3402,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, {workspace: string;data: SynthBenignJobRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, AgentHardenerCreateSynthBenignJobMutationVariables> = (props) => {
           const {workspace,data} = props ?? {};
 
           return  agentHardenerCreateSynthBenignJob(workspace,data,)
@@ -3374,16 +3418,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerCreateSynthBenignJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>>
     export type AgentHardenerCreateSynthBenignJobMutationBody = SynthBenignJobRequest
     export type AgentHardenerCreateSynthBenignJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerCreateSynthBenignJobMutationVariables = {workspace: string;data: SynthBenignJobRequest}
 
     /**
  * @summary Create Job
  */
 export const useAgentHardenerCreateSynthBenignJob = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, TError,{workspace: string;data: SynthBenignJobRequest}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>, TError,AgentHardenerCreateSynthBenignJobMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerCreateSynthBenignJob>>,
         TError,
-        {workspace: string;data: SynthBenignJobRequest},
+        AgentHardenerCreateSynthBenignJobMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerCreateSynthBenignJobMutationOptions(options), queryClient);
@@ -4074,11 +4119,13 @@ export const agentHardenerDeleteSynthBenignJob = (
 
 
 
-export const getAgentHardenerDeleteSynthBenignJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerDeleteSynthBenignJobMutationKey = () => ['agentHardenerDeleteSynthBenignJob'] as const;
 
-const mutationKey = ['agentHardenerDeleteSynthBenignJob'];
+export const getAgentHardenerDeleteSynthBenignJobMutationOptions = <TError = ErrorType<void | HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, TError,AgentHardenerDeleteSynthBenignJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, TError,AgentHardenerDeleteSynthBenignJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerDeleteSynthBenignJobMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4088,7 +4135,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, AgentHardenerDeleteSynthBenignJobMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerDeleteSynthBenignJob(workspace,name,)
@@ -4103,17 +4150,18 @@ const {mutation: mutationOptions} = options ?
 
     export type AgentHardenerDeleteSynthBenignJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>>
 
-    export type AgentHardenerDeleteSynthBenignJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerDeleteSynthBenignJobMutationError = ErrorType<void | HTTPValidationError>
+    export type AgentHardenerDeleteSynthBenignJobMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Delete Job
  */
-export const useAgentHardenerDeleteSynthBenignJob = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, TError,{workspace: string;name: string}, TContext>, }
+export const useAgentHardenerDeleteSynthBenignJob = <TError = ErrorType<void | HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>, TError,AgentHardenerDeleteSynthBenignJobMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerDeleteSynthBenignJob>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerDeleteSynthBenignJobMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerDeleteSynthBenignJobMutationOptions(options), queryClient);
@@ -4138,11 +4186,13 @@ export const agentHardenerCancelSynthBenignJob = (
 
 
 
-export const getAgentHardenerCancelSynthBenignJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, TError,{workspace: string;name: string}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, TError,{workspace: string;name: string}, TContext> => {
+export const getAgentHardenerCancelSynthBenignJobMutationKey = () => ['agentHardenerCancelSynthBenignJob'] as const;
 
-const mutationKey = ['agentHardenerCancelSynthBenignJob'];
+export const getAgentHardenerCancelSynthBenignJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, TError,AgentHardenerCancelSynthBenignJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, TError,AgentHardenerCancelSynthBenignJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerCancelSynthBenignJobMutationKey();
 const {mutation: mutationOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -4152,7 +4202,7 @@ const {mutation: mutationOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, {workspace: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, AgentHardenerCancelSynthBenignJobMutationVariables> = (props) => {
           const {workspace,name} = props ?? {};
 
           return  agentHardenerCancelSynthBenignJob(workspace,name,)
@@ -4168,16 +4218,17 @@ const {mutation: mutationOptions} = options ?
     export type AgentHardenerCancelSynthBenignJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>>
 
     export type AgentHardenerCancelSynthBenignJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerCancelSynthBenignJobMutationVariables = {workspace: string;name: string}
 
     /**
  * @summary Cancel Job
  */
 export const useAgentHardenerCancelSynthBenignJob = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, TError,{workspace: string;name: string}, TContext>, }
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>, TError,AgentHardenerCancelSynthBenignJobMutationVariables, TContext>, }
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof agentHardenerCancelSynthBenignJob>>,
         TError,
-        {workspace: string;name: string},
+        AgentHardenerCancelSynthBenignJobMutationVariables,
         TContext
       > => {
       return useMutation(getAgentHardenerCancelSynthBenignJobMutationOptions(options), queryClient);

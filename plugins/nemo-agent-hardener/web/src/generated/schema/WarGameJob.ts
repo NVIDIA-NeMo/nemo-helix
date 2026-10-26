@@ -7,6 +7,7 @@
  * agent-hardener (plugin)
  */
 import type { HelixJobStatus } from './HelixJobStatus.ts';
+import type { JobControl } from './JobControl.ts';
 import type { WarGameJobCustomFields } from './WarGameJobCustomFields.ts';
 import type { WarGameJobErrorDetails } from './WarGameJobErrorDetails.ts';
 import type { WarGameJobOwnership } from './WarGameJobOwnership.ts';
@@ -27,4 +28,5 @@ export interface WarGameJob {
   error_details?: WarGameJobErrorDetails;
   ownership?: WarGameJobOwnership;
   custom_fields?: WarGameJobCustomFields;
+  control?: JobControl;
 }
