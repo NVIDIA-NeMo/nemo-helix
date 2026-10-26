@@ -177,16 +177,16 @@ The launch flow starts with a strategy picker. It shows one tile per strategy th
 The Switchyard form takes the same inputs as the `switchyard` strategy's `--spec`:
 
 1. Enter a **Name** for the run. The form shows the entity name it creates.
-2. Under **Which models can it use?**, add the models to route between, most capable first. Use the arrows to reorder and the remove button to drop one. You need at least two models, and each can be added once. Every model is paired with each model below it, so the first model of a pair is its capable model and the second is its efficient model.
-3. Under **How should each pair route?**, pick one or more routing strategies and set each one's threshold, a number from 0 to 1:
+2. Under **Which models can it use?**, add the models to route between, most capable first. The first and last models carry **Most capable** and **Most efficient** badges. Use the arrows to reorder and the remove button to drop one. You need at least two models, and each can be added once. Every model is paired with each model below it, so the first model of a pair is its capable model and the second is its efficient model.
+3. Under **How should each pair route?**, pick one or more routing strategies and set each one's threshold with its slider or text box, a number from 0 to 1 that defaults to 0.5. A strategy's settings appear once you select it:
 
    | Strategy | Threshold |
    |---|---|
    | Random routing | **Capable model share**: the share of requests sent to the capable model. |
    | Stage router | **Confidence threshold**: the confidence below which a request escalates to the capable model. |
-   | LLM classifier | **Capability threshold**: the capability score above which a request escalates to the capable model. Optionally select a **Judge model**; by default each pair's capable model judges. |
+   | LLM classifier | **Capability threshold**: the capability score above which a request escalates to the capable model. Optionally select a **Judge model**; by default each pair's capable model judges. The judge setting only appears for this strategy. |
 
-The summary beside the form shows the model pairs and how many routed models the run will build, which is the number of pairs times the number of strategies. **Run optimization** stays disabled, with the reason shown above it, until the form is valid. Selecting it submits a `switchyard` run-strategy job. The stored agent is never modified.
+The summary beside the form shows the model pairs and how many routed models the run will build, which is the number of pairs times the number of strategies. **Run optimization** stays disabled, with the reason shown above it, until the form is valid. Selecting it submits a `switchyard` run-strategy job, shows an "Optimization submitted" toast, and returns you to the **Optimizations** tab, where the new run appears in the list. The stored agent is never modified. A virtual model name that would exceed the name length limit is rejected, so use a shorter agent name if the job fails for that reason.
 
 ### Review Switchyard Results
 
@@ -194,8 +194,8 @@ Select a run in the list to open its page at `/agents/optimizations/<run>`. The 
 
 When the run completes, the page lists one row per virtual model with its **Routing strategy**, **Capable model**, **Efficient model**, and **Setting** (the strategy's threshold). From a row you can:
 
-- **Test routing**: select the row to open the **Test routing** panel, which sends chat requests through that virtual model. It tallies which model answered each request, so you can compare the observed split against the strategy's setting.
-- **Deploy**: select **Deploy** to open **Deploy route as a new agent**, enter a **New agent name**, and create a new agent whose models all call that virtual model. The original agent isn't changed.
+- **Test routing**: select the row to open the **Test routing** panel, and the row is marked **Testing**. The panel is a chat that sends requests through that virtual model, with a **Routing split** that tallies how many responses came from the capable model, the efficient model, or neither (**Other**). **Clear** resets the tally, and **How this route decides** explains the selected strategy so you can read the observed split against it. Selecting the virtual model's name opens its [virtual model](/documentation/studio/virtual-models) page instead.
+- **Deploy**: select **Deploy** to open **Deploy route as a new agent**. The dialog summarizes the route, and the **New agent name** defaults to the virtual model's name. It creates a new agent whose models all call that virtual model, and can deploy it as soon as it's created. The original agent isn't changed. The new agent uses the agent configuration the run captured, so the dialog warns you if the original agent changed after the run. **Deploy** is unavailable for a route whose agent config the run didn't save.
 
 ## The Optimization Loop
 
