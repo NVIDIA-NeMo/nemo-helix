@@ -266,7 +266,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         for reclaim in reclaims:
             extra = {"job": reclaim.job_name, "workspace": reclaim.job_workspace}
             try:
-                if not self._reclaim_storage(reclaim.job_workspace, reclaim.job_name, reclaim.targets):
+                if not self._reclaim_storage(reclaim):
                     continue
                 self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
                 logger.info("Reclaimed job storage", extra=extra)
@@ -275,21 +275,34 @@ class JobReconciler(HeartbeatMixin, Controller):
             finally:
                 self.emit_heartbeat()
 
-    def _reclaim_storage(self, workspace: str, job: str, targets: list[JobStorageTarget]) -> bool:
-        """Return True once the storage is gone from every target."""
-        done = True
-        for target in targets:
+    def _reclaim_storage(self, reclaim: HelixJobStorageReclaim) -> bool:
+        """Persist each completed target before moving on to another one.
+
+        Backends may consume their completed cleanup workload when returning True. Calling
+        them again would start a new cleanup, so only unfinished targets may run on later ticks.
+        This also lets provider aliases sharing a cleanup workload make forward progress.
+        """
+        for target in reclaim.targets:
             try:
                 backend = self._backend_registry.get_backend(provider=target.provider, profile=target.profile)
             except KeyError:
                 # The profile is no longer configured, so nothing here can reach its storage.
                 logger.warning(
                     "Skipping storage reclaim for an execution profile this controller does not have",
-                    extra={"job": job, "workspace": workspace, "provider": target.provider, "profile": target.profile},
+                    extra={
+                        "job": reclaim.job_name,
+                        "workspace": reclaim.job_workspace,
+                        "provider": target.provider,
+                        "profile": target.profile,
+                    },
                 )
-                continue
-            done = backend.reclaim_persistent_storage(workspace, job) and done
-        return done
+            else:
+                if not backend.reclaim_persistent_storage(reclaim.job_workspace, reclaim.job_name):
+                    continue
+            reclaim = self._system_entities.update(
+                reclaim.model_copy(update={"targets": [pending for pending in reclaim.targets if pending != target]})
+            )
+        return not reclaim.targets
 
     def _retain_step_storage(self, step: HelixJobStepWithContext) -> None:
         job = self._jobs.get_job(name=step.job, workspace=step.workspace).data()
