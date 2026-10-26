@@ -137,6 +137,7 @@ func newLauncherOTLPLogExporter(ctx context.Context, endpointURL string) (log.Ex
 	httpClient.Transport = &authHeadersTransport{
 		source:          authConfig.source,
 		authDescription: authConfig.description,
+		operation:       "OTLP logs",
 		base:            httpClient.Transport,
 	}
 
@@ -193,13 +194,14 @@ type requestHeaderSource interface {
 type authHeadersTransport struct {
 	source          requestHeaderSource
 	authDescription string
+	operation       string
 	base            http.RoundTripper
 }
 
 func (t *authHeadersTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	headers, err := t.source.Headers(req.Context())
 	if err != nil {
-		return nil, fmt.Errorf("refresh %s for OTLP logs: %w", t.authDescription, err)
+		return nil, fmt.Errorf("refresh %s for %s: %w", t.authDescription, t.operation, err)
 	}
 
 	clonedReq := req.Clone(req.Context())
