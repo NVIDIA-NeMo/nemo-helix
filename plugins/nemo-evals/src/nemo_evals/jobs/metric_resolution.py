@@ -241,12 +241,12 @@ class _BoundModels(ModelResolver):
         return self.models[model_ref.root]
 
 
-def _gateway_models(metric: Metric) -> dict[str, Model]:
+def _gateway_models(metric: MetricWithModels) -> dict[str, Model]:
     """The metric's model fields that call Inference Gateway with no credential of their own.
 
     A model with ``api_key_secret`` is called as configured: its owner chose the credential.
     """
-    if not (isinstance(metric, MetricWithModels) and isinstance(metric, BaseModel)):
+    if not isinstance(metric, BaseModel):
         return {}
     return {
         field: model
@@ -257,14 +257,13 @@ def _gateway_models(metric: Metric) -> dict[str, Model]:
     }
 
 
-def _rebind_models(metric: Metric, models: dict[str, Model]) -> None:
+def _rebind_models(metric: MetricWithModels, models: dict[str, Model]) -> None:
     """Replace the metric's model fields, through ``resolve_models`` so it rebuilds what it derived from them.
 
     Metrics build their inference client from their models when constructed (RAGAS) or lazily, and
     ``resolve_models`` is their one hook for being handed a model after that. Each field is parked
     behind a placeholder ref that resolves to its replacement.
     """
-    assert isinstance(metric, MetricWithModels)
     parked: dict[str, Model] = {}
     for field, model in models.items():
         ref = f"{_REBIND_REF_WORKSPACE}/{field}"
@@ -286,7 +285,11 @@ def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
     Does nothing when no metric calls the gateway, or when the job has no identity to forward
     (an auth-disabled platform), which is how those models were called before.
     """
-    bound = [(metric, models) for metric in metrics if (models := _gateway_models(metric))]
+    bound = [
+        (metric, models)
+        for metric in metrics
+        if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
+    ]
     if not bound:
         yield
         return
