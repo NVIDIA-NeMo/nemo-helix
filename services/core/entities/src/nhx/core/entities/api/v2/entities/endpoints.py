@@ -18,14 +18,13 @@ Cross-Workspace Queries:
 - GET    /apis/entities/v2/workspaces/-/entities/{entity_type}                         - List entities across all accessible workspaces
 """
 
-import json
 import logging
 import textwrap
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
-from nhx.common.api.filter import FilterOperation
+from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth import ALL_WORKSPACES, is_service_principal
 from nhx.common.auth.client import AuthClient
 from nhx.core.entities.api.dependencies import (
@@ -44,7 +43,7 @@ from nhx.core.entities.api.v2.utils import (
 from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
 from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
 from nhx.core.entities.entities import Entity
-from nhx.core.entities.utils.filter import FilterDep
+from nhx.core.entities.utils.filter import FilterDep, RelationshipFilterOperation
 from nhx.core.entities.utils.identifiers import generate_entity_name
 from sqlalchemy.exc import IntegrityError
 
@@ -110,17 +109,42 @@ def reject_stored_auth_context_queries(
 ) -> None:
     """Keep callers who may not read the stored auth context from probing it through list queries.
 
-    Match counts, group counts and ordering would otherwise reveal it. The whole serialized filter is
-    checked, so values (``data[$contains]``), relationship conditions and nested operators are covered.
+    Match counts, group counts and ordering would otherwise reveal it.
     """
     if _can_read_stored_auth_context(auth_client):
         return
-    queried = [sort, count_by or "", json.dumps(filter.to_dict(), default=str) if filter else ""]
-    if any(STORED_AUTH_CONTEXT_KEY in text for text in queried):
+    if (
+        _names_stored_auth_context(sort)
+        or _names_stored_auth_context(count_by)
+        or _filters_on_stored_auth_context(filter)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Filtering, sorting or counting on '{STORED_AUTH_CONTEXT_KEY}' is not allowed.",
         )
+
+
+def _names_stored_auth_context(field: str | None) -> bool:
+    return field is not None and STORED_AUTH_CONTEXT_KEY in field.lstrip("-").split(".")
+
+
+def _filters_on_stored_auth_context(operation: FilterOperation | None) -> bool:
+    """Whether any field path in the filter tree reaches the stored auth context.
+
+    ``$hasKey`` on ``data`` is the one operator whose value names a top-level key; ``$contains`` and
+    ``$elemMatch`` only match array elements.
+    """
+    if isinstance(operation, LogicalOperation):
+        return any(_filters_on_stored_auth_context(op) for op in operation.operations)
+    if isinstance(operation, RelationshipFilterOperation):
+        return _filters_on_stored_auth_context(operation.condition)
+    if isinstance(operation, ComparisonOperation):
+        return _names_stored_auth_context(operation.field) or (
+            operation.operator == FilterOperator.HAS_KEY
+            and operation.field == "data"
+            and operation.value == STORED_AUTH_CONTEXT_KEY
+        )
+    return False
 
 
 def server_owned_data_keys(auth_client: AuthClient, data: dict[str, Any]) -> tuple[str, ...]:

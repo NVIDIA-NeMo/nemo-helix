@@ -226,7 +226,7 @@ async def test_delegated_service_update_replaces_auth_context(
 
 _PROBES = {
     "filter-field": {"filter": json.dumps({"data._auth_context.principal_id": "creator@example.com"})},
-    "filter-contains": {"filter": json.dumps({"data": {"$contains": {STORED_AUTH_CONTEXT_KEY: {}}}})},
+    "filter-has-key": {"filter": json.dumps({"data": {"$hasKey": STORED_AUTH_CONTEXT_KEY}})},
     "filter-nested": {"filter": json.dumps({"$or": [{"data.status": "running"}, {"data._auth_context.x": 1}]})},
     "sort": {"sort": "-data._auth_context.principal_id"},
     "count_by": {"count_by": "data._auth_context"},
@@ -255,3 +255,16 @@ async def test_service_principal_list_can_filter_on_stored_auth_context(
 
     assert listed.status_code == 200, listed.text
     assert [entity["name"] for entity in listed.json()["data"]] == [_NAME]
+
+
+async def test_user_list_can_filter_other_fields_for_the_key_text(client_with_auth: AsyncClient, repos) -> None:
+    """Only field paths are guarded; a value that happens to spell the key is an ordinary filter."""
+    await _seed_run(repos)
+
+    listed = await client_with_auth.get(
+        f"/apis/entities/v2/workspaces/{_WS}/entities/{_ENTITY_TYPE}",
+        params={"filter": json.dumps({"data.status": STORED_AUTH_CONTEXT_KEY})},
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["data"] == []
