@@ -10,9 +10,12 @@ per line with its line ending stripped, and sandbox listings are paginated.
 from __future__ import annotations
 
 import itertools
+import re
 import shlex
 from types import SimpleNamespace
 from typing import Any
+
+import httpx
 
 
 class SandboxApiException(Exception):
@@ -46,11 +49,35 @@ class Server:
         self.page_size = 50
         # Sandbox IDs whose kill raises.
         self.unkillable: set[str] = set()
+        # What the endpoints route answers instead of ``<pod IP>:<port>``, or raises.
+        self.endpoint_answer: httpx.Response | BaseException | None = None
+        self.endpoint_requests: list[httpx.Request] = []
         self._ids = (f"sbx-{n}" for n in itertools.count(1))
 
     def live(self) -> set[str]:
         """IDs of sandboxes the server created and nothing has killed."""
         return set(self.sandboxes) - set(self.killed)
+
+    @staticmethod
+    def pod_ip(sandbox_id: str) -> str:
+        """The pod IP the server reports for ``sbx-<n>``: ``10.244.0.<n>``."""
+        return f"10.244.0.{sandbox_id.rsplit('-', 1)[1]}"
+
+    def endpoint_route(self, request: httpx.Request) -> httpx.Response | None:
+        """Answer ``GET /v1/sandboxes/{id}/endpoints/{port}`` as a Kubernetes server without a gateway does.
+
+        Returns ``None`` for any other route, so a test's own handler can answer it.
+        """
+        match = re.fullmatch(r"/v1/sandboxes/([^/]+)/endpoints/(\d+)", request.url.path)
+        if match is None:
+            return None
+        self.endpoint_requests.append(request)
+        if isinstance(self.endpoint_answer, BaseException):
+            raise self.endpoint_answer
+        if self.endpoint_answer is not None:
+            return self.endpoint_answer
+        sandbox_id, port = match.groups()
+        return httpx.Response(200, json={"endpoint": f"{self.pod_ip(sandbox_id)}:{port}"})
 
     def kill(self, sandbox_id: str) -> None:
         """Record a kill, or raise for a sandbox listed in ``unkillable``."""

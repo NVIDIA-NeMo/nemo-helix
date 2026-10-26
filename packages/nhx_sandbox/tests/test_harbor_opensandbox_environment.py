@@ -9,14 +9,17 @@ against either runner's Harbor.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 pytest.importorskip("harbor.environments.base")
@@ -25,6 +28,7 @@ pytest.importorskip("nhx_sandbox")
 from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
+from nhx_sandbox import harbor_opensandbox_environment as environment_module
 from nhx_sandbox.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver
 from nhx_sandbox.harbor_opensandbox_environment import (
@@ -43,9 +47,18 @@ TRIAL = "hello-world__abc"
 
 
 @pytest.fixture
-def server() -> Server:
-    """A fresh mock OpenSandbox server."""
-    return Server()
+def server(monkeypatch: pytest.MonkeyPatch) -> Server:
+    """A fresh mock OpenSandbox server, which also answers the environment's own requests to the server API."""
+    server = Server()
+    real_client = httpx.AsyncClient
+
+    def client(**kwargs: Any) -> httpx.AsyncClient:
+        transport = httpx.MockTransport(lambda request: server.endpoint_route(request) or httpx.Response(404))
+        return real_client(transport=transport, **kwargs)
+
+    monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
+    monkeypatch.setattr(environment_module, "SERVER_RETRY_BASE_SEC", 0)
+    return server
 
 
 def _environment(
@@ -581,3 +594,129 @@ async def test_a_retried_create_sends_the_same_disk_limit(tmp_path: Path, server
 
     assert len(server.creates) == 2
     assert [create["resource"]["ephemeral-storage"] for create in server.creates] == ["10240Mi", "10240Mi"]
+
+
+def _record(tmp_path: Path, sandbox_id: str) -> dict[str, Any]:
+    return json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox_id)).read_text())
+
+
+@pytest.mark.parametrize("use_server_proxy", [False, True], ids=["direct", "server-proxy"])
+async def test_records_the_pod_ip_and_the_window_it_was_held(
+    tmp_path: Path, server: Server, use_server_proxy: bool
+) -> None:
+    """Gateway calls are attributed by source IP and time, so each record names its pod IP and lifetime window.
+
+    The pod IP is asked of the server without ``use_server_proxy``; a client that proxies execd would
+    otherwise get a server route back and no sandbox in a taskset run could be attributed.
+    """
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC, use_server_proxy=use_server_proxy)
+    await environment.start(force_build=False)
+    sandbox_id = _sandbox(environment).id
+
+    record = _record(tmp_path, sandbox_id)
+    assert record["ip"] == server.pod_ip(sandbox_id)
+    assert record["stopped_at"] is None
+    assert [request.url.params.get("use_server_proxy") for request in server.endpoint_requests] == [None]
+
+    await environment.stop(delete=True)
+
+    record = _record(tmp_path, sandbox_id)
+    started_at = datetime.fromisoformat(record["started_at"])
+    stopped_at = datetime.fromisoformat(record["stopped_at"])
+    assert started_at.tzinfo is not None
+    assert started_at <= stopped_at
+
+
+async def test_the_recorded_window_lies_inside_the_pods_lifetime(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``started_at`` is taken once create returns and ``stopped_at`` before the kill is sent.
+
+    While a pod exists no other pod holds its IP, so windows inside pod lifetimes never overlap
+    for one IP; a window that spilled past either end could claim another sandbox's calls.
+    """
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    real_create = environment._driver.create
+    created_at: list[datetime] = []
+
+    async def create(*args: Any, **kwargs: Any) -> Any:
+        sandbox = await real_create(*args, **kwargs)
+        created_at.append(datetime.now(UTC))
+        return sandbox
+
+    monkeypatch.setattr(environment._driver, "create", create)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+    real_kill = sandbox.kill
+    record_at_kill: list[dict[str, Any]] = []
+
+    async def kill() -> None:
+        record_at_kill.append(_record(tmp_path, sandbox.id))
+        killed_at = datetime.now(UTC)
+        await real_kill()
+        assert datetime.fromisoformat(record_at_kill[0]["stopped_at"]) <= killed_at
+
+    monkeypatch.setattr(sandbox, "kill", kill)
+    await environment.stop(delete=True)
+
+    assert datetime.fromisoformat(record_at_kill[0]["started_at"]) >= created_at[0]
+    assert record_at_kill[0]["stopped_at"] is not None
+    assert server.killed == [sandbox.id]
+
+
+async def test_stopped_at_is_recorded_when_the_sandbox_is_kept(tmp_path: Path, server: Server) -> None:
+    """``stop(delete=False)`` still ends the window; the sandbox's calls after it go unattributed, not misattributed."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    await environment.start(force_build=False)
+    sandbox_id = _sandbox(environment).id
+
+    await environment.stop(delete=False)
+
+    assert _record(tmp_path, sandbox_id)["stopped_at"] is not None
+    assert server.killed == []
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(200, json={"endpoint": "gateway.example/sandboxes/sbx-1/port/44772"}),
+        httpx.Response(200, json={"endpoint": "127.0.0.1:32768"}),
+        httpx.Response(404, json={"detail": "Pod IP is not yet available"}),
+        httpx.Response(200, text="not json"),
+        httpx.ConnectError("refused"),
+    ],
+    ids=["gateway-route", "host-mapped-port", "not-found", "bad-body", "unreachable"],
+)
+async def test_a_sandbox_without_a_readable_pod_ip_is_recorded_without_one(
+    tmp_path: Path, server: Server, caplog: pytest.LogCaptureFixture, answer: httpx.Response | Exception
+) -> None:
+    """Anything but ``<IP>:44772`` records no IP, so that sandbox's calls go unattributed rather than misattributed."""
+    server.endpoint_answer = answer
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+
+    sandbox = await environment._create_sandbox()
+
+    record = _record(tmp_path, sandbox.id)
+    assert record["ip"] is None
+    assert record["started_at"] is not None
+    assert "recorded without" in caplog.text
+    assert server.live() == {sandbox.id}
+
+
+async def test_a_create_cancelled_while_reading_the_pod_ip_kills_the_sandbox(tmp_path: Path, server: Server) -> None:
+    """The sandbox isn't the environment's until create returns, so a cancellation before that must not leak it."""
+    server.endpoint_answer = asyncio.CancelledError()
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+
+    with pytest.raises(asyncio.CancelledError):
+        await environment._create_sandbox()
+
+    assert server.live() == set()
+
+
+async def test_stop_before_start_records_nothing(tmp_path: Path, server: Server) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+
+    await environment.stop(delete=True)
+
+    assert list((tmp_path / TRIAL).glob(APPLIED_EGRESS_GLOB)) == []
