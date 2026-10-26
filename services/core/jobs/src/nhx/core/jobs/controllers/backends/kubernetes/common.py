@@ -23,16 +23,25 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     ImagePullSecret as ImagePullSecret,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesConfigMapVolume as PluginKubernetesConfigMapVolume,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesEmptyDirVolume as KubernetesEmptyDirVolume,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobStorageConfig as PluginKubernetesJobStorageConfig,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesKeyToPath as PluginKubernetesKeyToPath,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesObjectMetadata as KubernetesObjectMetadata,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesPersistentVolumeClaim as KubernetesPersistentVolumeClaim,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesSecretVolume as PluginKubernetesSecretVolume,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesVolume as PluginKubernetesVolume,
@@ -97,7 +106,7 @@ from nhx.core.jobs.controllers.backends.base import (
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -962,25 +971,12 @@ def load_from_dict(data: dict, klass: str):
 # ``to_k8s()`` is available on nested volumes.
 
 
-class KubernetesKeyToPath(BaseModel):
-    """Kubernetes volume key-to-path mapping."""
-
-    key: str = Field(description="Source key to project from the volume source")
-    path: str = Field(description="Relative file path to write the key to")
-    mode: int | None = Field(default=None, description="Optional file mode for this key")
-
-    def to_k8s(self) -> client.V1KeyToPath:
-        """Convert to Kubernetes V1KeyToPath object."""
-        return client.V1KeyToPath(key=self.key, path=self.path, mode=self.mode)
+def _key_to_path(item: PluginKubernetesKeyToPath) -> client.V1KeyToPath:
+    return client.V1KeyToPath(key=item.key, path=item.path, mode=item.mode)
 
 
-class KubernetesSecretVolume(BaseModel):
+class KubernetesSecretVolume(PluginKubernetesSecretVolume):
     """Kubernetes Secret volume definition."""
-
-    secret_name: str = Field(description="Secret name to mount")
-    default_mode: int | None = Field(default=None, description="Optional default file mode")
-    optional: bool | None = Field(default=None, description="Whether the Secret is optional")
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional Secret keys to project")
 
     def to_k8s(self) -> client.V1SecretVolumeSource:
         """Convert to Kubernetes V1SecretVolumeSource object."""
@@ -988,17 +984,12 @@ class KubernetesSecretVolume(BaseModel):
             secret_name=self.secret_name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
-class KubernetesConfigMapVolume(BaseModel):
+class KubernetesConfigMapVolume(PluginKubernetesConfigMapVolume):
     """Kubernetes ConfigMap volume definition."""
-
-    name: str = Field(description="ConfigMap name to mount")
-    default_mode: int | None = Field(default=None, description="Optional default file mode")
-    optional: bool | None = Field(default=None, description="Whether the ConfigMap is optional")
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional ConfigMap keys to project")
 
     def to_k8s(self) -> client.V1ConfigMapVolumeSource:
         """Convert to Kubernetes V1ConfigMapVolumeSource object."""
@@ -1006,7 +997,7 @@ class KubernetesConfigMapVolume(BaseModel):
             name=self.name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
@@ -1029,16 +1020,6 @@ class KubernetesVolume(PluginKubernetesVolume):
 
     secret: KubernetesSecretVolume | None = Field(default=None, description="Secret Volume configuration")
     config_map: KubernetesConfigMapVolume | None = Field(default=None, description="ConfigMap Volume configuration")
-
-    @model_validator(mode="after")
-    def validate_self(self):
-        """Ensure that exactly one volume source is specified."""
-        sources = [self.persistent_volume_claim, self.empty_dir, self.secret, self.config_map]
-        if sum(source is not None for source in sources) != 1:
-            raise ValueError(
-                "Exactly one of 'persistent_volume_claim', 'empty_dir', 'secret', or 'config_map' must be specified."
-            )
-        return self
 
     def to_k8s(self) -> client.V1Volume:
         """Convert to Kubernetes V1Volume object."""
