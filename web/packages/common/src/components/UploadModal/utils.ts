@@ -78,3 +78,18 @@ export const sanitizeFilenameForDatasetName = (filename: string): string => {
 
   return sanitized;
 };
+
+/**
+ * Returns true when the file's extension is in `acceptableFileTypes`.
+ * An empty list accepts everything. Comparison is case-insensitive.
+ */
+export const isFileTypeAllowed = (
+  file: { type: 'existing' | 'new'; file: { path?: string; name?: string } },
+  acceptableFileTypes: string[] | undefined
+): boolean => {
+  if (!acceptableFileTypes || acceptableFileTypes.length === 0) return true;
+  const name = (file.type === 'existing' ? file.file.path : file.file.name) ?? '';
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+  return acceptableFileTypes.some((t) => t.toLowerCase() === ext);
+};

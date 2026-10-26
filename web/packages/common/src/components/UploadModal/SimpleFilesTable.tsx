@@ -7,7 +7,7 @@ import { LeftOverflow } from '@nemo/common/src/components/LeftOverflow';
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { useInlinePickerSlot } from '@nemo/common/src/components/UploadModal/InlinePickerSlot';
 import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
-import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
+import { formatFileSize, isFileTypeAllowed } from '@nemo/common/src/components/UploadModal/utils';
 import { IconError } from '@nemo/icons/icons';
 import {
   Button,
@@ -42,21 +42,13 @@ export const SimpleFilesTable = () => {
     invalidFileMode,
   } = state;
 
-  const fileExtension = (uploadFile: UploadFile): string => {
-    const name = uploadFile.type === 'existing' ? uploadFile.file.path : uploadFile.file.name;
-    const dot = name.lastIndexOf('.');
-    return dot >= 0 ? name.slice(dot).toLowerCase() : '';
-  };
-
   const allowedExtensions = useMemo(
     () => new Set((acceptableFileTypes ?? []).map((ext) => ext.toLowerCase())),
     [acceptableFileTypes]
   );
 
-  const isFileAllowed = (uploadFile: UploadFile): boolean => {
-    if (allowedExtensions.size === 0) return true;
-    return allowedExtensions.has(fileExtension(uploadFile));
-  };
+  const isFileAllowed = (uploadFile: UploadFile): boolean =>
+    isFileTypeAllowed(uploadFile, acceptableFileTypes);
 
   const visibleFiles = useMemo(() => {
     if (invalidFileMode !== 'hide' || allowedExtensions.size === 0) return files;
