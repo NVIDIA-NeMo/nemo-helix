@@ -15,6 +15,11 @@ tokens and cost two or three times. Instead, each trace sums a metric over the f
 4. Any other span.
 
 A metric that no span in the trace reports is NULL. A stored 0 counts as reported, so it blocks the next tier.
+
+A session adds up its traces, except that gateway call spans win across the whole session: when any of its traces
+totals a metric from gateway call spans, only those traces count for that metric. An agent's uploaded trajectory
+lands in a trace of its own, beside the trial trace that holds the gateway's spans for the same calls.
+
 Queries apply the rule at three levels:
 
 - Per span: select ``usage_sql().span_columns`` beside the span's own columns.
@@ -56,6 +61,9 @@ multiIf(
     NULL
 )"""
 
+# Per trace and metric: whether the trace's total came from gateway call spans.
+_FROM_GATEWAY = "minIf(usage_tier, reports_{metric}) = 1 AS {metric}_from_gateway"
+
 
 @dataclass(frozen=True)
 class UsageSql:
@@ -66,25 +74,21 @@ class UsageSql:
     ``source_format``, ``kind``, ``external_parent_span_id``, ``attributes_bool`` and ``attributes_number`` without a
     table alias."""
     trace_columns: str
-    """One aggregate per metric, named after it: the metric's total for the trace, or NULL."""
+    """For each metric, the trace's total named after it, or NULL, then ``<metric>_from_gateway``: whether that total
+    came from gateway call spans. ``summed_metric_columns`` reads both."""
     parameters: dict[str, Any]
     """Each metric's attribute name, bound as ``%(<metric>_key)s``."""
 
 
 GATEWAY_CALL_ATTRIBUTE = "nemo.inference_gateway.call"
-_GATEWAY_CALL = f"attributes_bool['{GATEWAY_CALL_ATTRIBUTE}']"
 
-
-def usage_tier_expression(gateway_call: str = _GATEWAY_CALL) -> str:
-    """Per span: the usage tier number. Callers alias it as ``usage_tier``.
-
-    1 is gateway call spans, 2 is model calls, 3 is other roots, 4 is everything else. A root LLM or EMBEDDING span
-    is tier 3 so it cannot be summed with the calls beneath it. Reads ``source_format``, ``kind``,
-    ``external_parent_span_id`` and ``gateway_call``, an expression that is true for a gateway call span.
-    """
-    return f"""\
+# Per span: the usage tier number. Callers alias it as ``usage_tier``.
+# 1 is gateway call spans, 2 is model calls, 3 is other roots, 4 is everything else. A root LLM or EMBEDDING span
+# is tier 3 so it cannot be summed with the calls beneath it. Reads ``source_format``, ``kind``,
+# ``external_parent_span_id`` and ``attributes_bool``.
+USAGE_TIER_EXPRESSION = f"""\
 multiIf(
-    {gateway_call}, 1,
+    attributes_bool['{GATEWAY_CALL_ATTRIBUTE}'], 1,
     source_format = 'atif'
         OR (
             external_parent_span_id != ''
@@ -93,9 +97,6 @@ multiIf(
     external_parent_span_id = '', 3,
     4
 )"""
-
-
-USAGE_TIER_EXPRESSION = usage_tier_expression()
 _USAGE_TIER = f"{USAGE_TIER_EXPRESSION} AS usage_tier"
 
 
@@ -114,7 +115,7 @@ def usage_sql(metrics: tuple[str, ...] = _ALL_METRICS, *, scaled: bool = True) -
         total = _TRACE_TOTAL.format(metric=metric)
         if scaled:
             total = _scaled(total, metric)
-        trace_columns.append(f"{total} AS {metric}")
+        trace_columns += [f"{total} AS {metric}", _FROM_GATEWAY.format(metric=metric)]
 
     return UsageSql(
         span_columns=_select_list(span_columns, indent=16),
@@ -128,12 +129,21 @@ def summed_metric_columns(source_alias: str, metrics: tuple[str, ...] = _ALL_MET
 
     NULL when no trace reports a metric. Cost is converted from stored micro-dollars once, here.
     """
-    totals = []
-    for metric in metrics:
-        column = f"{source_alias}.{metric}"
-        guarded = f"if(countIf(isNotNull({column})) = 0, NULL, sum({column}))"
-        totals.append(f"{_scaled(guarded, metric)} AS {metric}")
+    totals = [f"{_scaled(session_total(source_alias, metric), metric)} AS {metric}" for metric in metrics]
     return _select_list(totals, indent=12)
+
+
+def session_total(source_alias: str, metric: str) -> str:
+    """Per session: one metric's unscaled total over the trace rows of ``source_alias``, or NULL.
+
+    Only the traces whose total came from gateway call spans count, when there are any.
+    """
+    column = f"{source_alias}.{metric}"
+    from_gateway = f"{source_alias}.{metric}_from_gateway"
+    return (
+        f"multiIf(countIf({from_gateway}) > 0, sumIf({column}, {from_gateway}), "
+        f"countIf(isNotNull({column})) = 0, NULL, sum({column}))"
+    )
 
 
 def _scaled(expression: str, metric: str) -> str:

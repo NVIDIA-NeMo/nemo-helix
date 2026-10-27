@@ -513,6 +513,111 @@ def test_evaluation_views_count_gateway_calls_once(client: TestClient, make_otlp
     assert evaluation.json()["tokens"]["sum"] == pytest.approx(330)
 
 
+def _trial_and_agent_traces(
+    session_id: str, *, evaluation_name: str | None = None, agent_cost_usd: float | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """An evaluation trial as recorded through the gateway: two traces of one session.
+
+    The trial trace holds the gateway's spans for the agent's two calls. The agent's uploaded trajectory is a
+    trace of its own that reports the same two calls again.
+    """
+    trial = [
+        _span(name="trial", span_id=1, session_id=session_id, evaluation_name=evaluation_name, test_case_name="case"),
+        _span(
+            name="responses",
+            span_id=2,
+            parent_span_id=1,
+            session_id=session_id,
+            input_tokens=100,
+            output_tokens=10,
+            gateway_call=True,
+        ),
+        _span(
+            name="responses",
+            span_id=3,
+            parent_span_id=1,
+            session_id=session_id,
+            input_tokens=200,
+            output_tokens=20,
+            gateway_call=True,
+        ),
+    ]
+    agent = [
+        _span(
+            name="invoke_agent",
+            span_id=11,
+            session_id=session_id,
+            kind="AGENT",
+            evaluation_name=evaluation_name,
+            test_case_name="case",
+            cost_usd=agent_cost_usd,
+        ),
+        _span(
+            name="chat",
+            span_id=12,
+            parent_span_id=11,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=98,
+            output_tokens=9,
+        ),
+        _span(
+            name="chat",
+            span_id=13,
+            parent_span_id=11,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=197,
+            output_tokens=21,
+        ),
+    ]
+    return trial, agent
+
+
+def test_a_sessions_gateway_spans_win_over_its_agents_own_trace(client: TestClient, make_otlp_request) -> None:
+    """The agent's trajectory reports the same calls in another trace; the session counts them once."""
+    session_id = "gateway-two-traces"
+    trial, agent = _trial_and_agent_traces(session_id)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(30), spans=trial)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(31), spans=agent)
+
+    session = _session(client, session_id)
+    assert (session["input_tokens"], session["output_tokens"]) == (300, 30)
+    assert session["trace_count"] == 2
+
+
+def test_a_metric_the_gateway_doesnt_report_still_counts_from_the_agent(client: TestClient, make_otlp_request) -> None:
+    """The rule picks gateway spans per metric: the gateway reports no cost, so the agent's cost counts."""
+    session_id = "gateway-no-cost"
+    trial, agent = _trial_and_agent_traces(session_id, agent_cost_usd=0.02)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(32), spans=trial)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(33), spans=agent)
+
+    session = _session(client, session_id)
+    assert session["input_tokens"] == 300
+    assert session["cost_usd"] == pytest.approx(0.02)
+
+
+def test_evaluation_views_count_a_sessions_gateway_calls_once(client: TestClient, make_otlp_request) -> None:
+    evaluation_name = "gateway-two-traces-eval"
+    _create_evaluation(client, evaluation_name)
+    session_id = "gateway-two-traces-eval-trial"
+    trial, agent = _trial_and_agent_traces(session_id, evaluation_name=evaluation_name)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(34), spans=trial)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(35), spans=agent)
+
+    listed = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
+    assert listed.status_code == 200, listed.text
+    [row] = listed.json()["data"]
+    assert (row["input_tokens"], row["output_tokens"]) == (300, 30)
+    by_tokens = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions", params={"sort": "-tokens"})
+    assert by_tokens.status_code == 200, by_tokens.text
+    assert by_tokens.json()["data"][0]["input_tokens"] == 300
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_name}")
+    assert evaluation.status_code == 200, evaluation.text
+    assert evaluation.json()["tokens"]["sum"] == pytest.approx(330)
+
+
 def test_evaluation_session_token_sort_uses_deduped_totals(client: TestClient, make_otlp_request) -> None:
     """A parent total must not push a small call ahead of a larger one."""
     evaluation_name = "usage-rollup-sort"
