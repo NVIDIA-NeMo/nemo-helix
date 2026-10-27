@@ -79,13 +79,84 @@ for path, rows in splits.items():
 
 Then upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/test.jsonl` to `<DATASET_NAME>-test` (`SKILL.md` § **Workflow** step 2). Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
+## Image rows
+
+When a source row has an image, do not use `to_sft` and do not collapse the row into one string. Write the image next to the JSONL and emit a part list. A string `content` is still one text part, so text-only rows keep `to_chat` / `to_sft` above. The assistant label stays one text part (a string).
+
+Automodel does not convert the Hugging Face dataset. Upload a directory that is already this shape. For CORD-v2, run the helper and upload what it writes (`train/` and frozen `eval/`):
+
+```bash
+uv run --no-project --with datasets --with pillow \
+  plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
+  --output /tmp/cord-v2
+nemo files upload /tmp/cord-v2/train <dataset-fileset> --workspace default
+```
+
+`nemo customization automodel --upload-dataset /tmp/cord-v2/train` uploads that same directory. The fileset root is `train.jsonl` plus `images/`.
+
+Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit.
+
+Unsloth stays on string `content` or pre-rendered `text`. Do not give it image parts.
+
+```python
+def example_image(ex):
+    image = ex.get("image")
+    if image is None and ex.get("images"):
+        image = ex["images"][0]
+    return image
+
+def user_text(ex):
+    return ex["question"]  # same text to_chat would put on the user turn
+
+def assistant_text(ex):
+    return ex["answer"]  # one text part
+
+def to_multimodal_chat(image_url: str, user: str, assistant: str):
+    return {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": user},
+                ],
+            },
+            {"role": "assistant", "content": assistant},
+        ]
+    }
+
+images = out / "images"
+images.mkdir(exist_ok=True)
+for split in ("train", "validation"):
+    if split not in ds:
+        continue
+    with (out / f"{split}.jsonl").open("w") as f:
+        for index, ex in enumerate(ds[split]):
+            image = example_image(ex)
+            if image is None:
+                f.write(json.dumps(convert(ex)) + "\n")
+                continue
+            relative = f"images/{split}_{index}.png"
+            image.save(images / f"{split}_{index}.png")
+            # user / assistant come from the dataset, the same way to_chat builds them.
+            row = to_multimodal_chat(relative, user_text(ex), assistant_text(ex))
+            f.write(json.dumps(row) + "\n")
+```
+
+`image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. Upload the directory, not only the JSONL, so `images/` lands beside `train.jsonl` in the fileset.
+
+A Gym row that needs an image uses this same part list on `responses_create_params.input[].content`. A string `content` stays one text part. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
+
+Then upload (see main skill). Validate with `nemo files list <DATASET_NAME> --workspace default`.
+
 ## Mapping to job JSON
 
 Only the **chat-template / `messages` (`to_chat`) output is backend-agnostic** — that JSONL feeds both SFT backends (automodel + unsloth). The `to_sft` (`prompt` / `completion`) shape is **automodel-only**; unsloth needs a `to_text` rendering instead (see below). Either way, the **dataset block in job JSON is shaped per backend**. (rl/DPO uses preference data, not this SFT output — see `dataset-formats.md` § NeMo-RL.)
 
 | Backend | Row format used | Dataset block in job JSON |
 |---------|----------------|---------------------------|
-| automodel (CHAT) | `to_chat` output (`messages`) | `{ "training": "default/<DATASET_NAME>", "validation": "default/<DATASET_NAME>" }` — schema auto-detected from row 1 |
+| automodel (CHAT) | `to_chat` output (`messages`, string `content`) | `{ "training": "default/<DATASET_NAME>", "validation": "default/<DATASET_NAME>" }` — schema auto-detected from row 1 |
+| automodel (MULTIMODAL) | `to_multimodal_chat` output (part list + sibling images) | same fileset refs. Text-only rows in the same file stay string `content`. |
 | automodel (SFT)  | `to_sft` output (`prompt` / `completion`) | same as above (no `prompt_template`) |
 | **unsloth (preferred)** | `to_chat` output (`messages`) | `{ "path": "default/<DATASET_NAME>", "apply_chat_template": true }` (+ `validation_path` if present) |
 | unsloth (no chat template) | **Custom `to_text` rendering**: emit `{"text": "<prompt>\n<completion>"}` rows (not the `to_sft` output directly) | `{ "path": "default/<DATASET_NAME>", "text_field": "text" }` |

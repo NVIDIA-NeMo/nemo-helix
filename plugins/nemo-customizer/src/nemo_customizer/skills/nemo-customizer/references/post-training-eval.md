@@ -109,6 +109,8 @@ Training and evaluation use the **same CHAT JSONL row shape**:
 
 The **final** turn is the label; every earlier turn is context. Send `messages[:-1]` and score against `messages[-1].content`. Do not flatten the rows to `prompt` / `expected`, and do not send the label turn; a model without a chat template gets its prompt from the completions template in **Hand-off to nemo-evals**.
 
+An image row keeps the part list on the user turn. Send `messages[:-1]` with those image parts intact. The assistant label stays one text part: a string, or a list of one `{type: text, text}`. The reference is that text, not the whole `content` list. A relative `image_url` is the fileset path the trainer reads. The inference gateway does not have that fileset, so a prompt sent there needs a `data:` URL or a URL the gateway can fetch.
+
 ## Reading the result
 
 | Observation | Likely meaning |
