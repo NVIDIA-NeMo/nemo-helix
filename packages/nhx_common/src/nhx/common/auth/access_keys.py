@@ -45,6 +45,7 @@ from .token_claims import TokenClaims, groups_from_claim, scopes_from_claim
 ACCESS_KEY_TOKEN_TYPE = "access_key"
 ACCESS_KEY_TOKEN_TYPE_CLAIM = "nhx_token_type"
 ACCESS_KEY_METADATA_CLAIM = "nhx_access_key"
+ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM = "nhx_service_attributes"
 ACCESS_KEY_JWKS_PATH = "/apis/auth/jwks"
 ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
@@ -81,6 +82,10 @@ class AccessKeyValidationError(ValueError):
     """Raised when a Scoped Access Key request conflicts with platform policy."""
 
 
+class AccessKeyServiceAttributesForbiddenError(PermissionError):
+    """Raised when a caller that isn't a platform service sets service_attributes."""
+
+
 @dataclass(frozen=True)
 class _AccessKeyTokenPayload:
     claims: dict[str, Any]
@@ -94,6 +99,7 @@ class _AccessKeyTokenPayload:
     created_at: datetime
     expires_at: datetime | None
     scope: list[str] = field(default_factory=list)
+    service_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def clear_access_key_signing_key_cache() -> None:
@@ -208,10 +214,12 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         config: AuthConfig,
         principal: Principal,
         now: Callable[[], int] | None = None,
+        acting_service: str | None = None,
     ) -> None:
         self._config = config
         self._principal = principal
         self._now = now or (lambda: int(time.time()))
+        self._acting_service = acting_service
 
     def _ensure_enabled(self) -> None:
         if not self._config.access_keys.enabled:
@@ -221,6 +229,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
     ) -> AccessKeyCreateResponse:
         self._ensure_enabled()
+        service_attributes = self._service_attributes(request)
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
         return _create_access_key_token(
@@ -230,6 +239,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             name=request.name,
             description=request.description,
             scope=request.scope,
+            service_attributes=service_attributes,
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
@@ -238,6 +248,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
     ) -> AccessKeyCreateResponse:
         self._ensure_enabled()
+        service_attributes = self._service_attributes(request)
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
         return await _create_access_key_token_async(
@@ -247,9 +258,22 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             name=request.name,
             description=request.description,
             scope=request.scope,
+            service_attributes=service_attributes,
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
+
+    def _service_attributes(self, request: AccessKeyCreateRequest) -> dict[str, dict[str, Any]]:
+        """The key's attributes by service: the request's, under the acting service's name.
+
+        Raises:
+            AccessKeyServiceAttributesForbiddenError: The request sets attributes and no service is acting.
+        """
+        if request.service_attributes is None:
+            return {}
+        if self._acting_service is None:
+            raise AccessKeyServiceAttributesForbiddenError("Only a platform service can set service_attributes")
+        return {self._acting_service: dict(request.service_attributes)}
 
     def _target_principal(
         self, request: AccessKeyCreateRequest, *, allow_service_account: bool
@@ -297,6 +321,7 @@ def _create_access_key_token(
     name: str | None = None,
     description: str | None = None,
     scope: list[str] | None = None,
+    service_attributes: dict[str, dict[str, Any]] | None = None,
     expires_in_seconds: int | None = None,
     now: int,
 ) -> AccessKeyCreateResponse:
@@ -307,6 +332,7 @@ def _create_access_key_token(
         name=name,
         description=description,
         scope=scope,
+        service_attributes=service_attributes,
         expires_in_seconds=expires_in_seconds,
         now=now,
     )
@@ -321,6 +347,7 @@ async def _create_access_key_token_async(
     name: str | None = None,
     description: str | None = None,
     scope: list[str] | None = None,
+    service_attributes: dict[str, dict[str, Any]] | None = None,
     expires_in_seconds: int | None = None,
     now: int,
 ) -> AccessKeyCreateResponse:
@@ -331,6 +358,7 @@ async def _create_access_key_token_async(
         name=name,
         description=description,
         scope=scope,
+        service_attributes=service_attributes,
         expires_in_seconds=expires_in_seconds,
         now=now,
     )
@@ -346,6 +374,7 @@ def _build_access_key_token_payload(
     name: str | None,
     description: str | None,
     scope: list[str] | None = None,
+    service_attributes: dict[str, dict[str, Any]] | None = None,
     expires_in_seconds: int | None,
     now: int,
 ) -> _AccessKeyTokenPayload:
@@ -376,6 +405,8 @@ def _build_access_key_token_payload(
     resolved_scope = list(dict.fromkeys(service.strip() for service in (scope or []) if service.strip()))
     if resolved_scope:
         claims["scope"] = " ".join(f"{service}:{verb}" for service in resolved_scope for verb in ("read", "write"))
+    if service_attributes:
+        claims[ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM] = service_attributes
     if principal.email:
         claims["email"] = principal.email
     if principal.groups:
@@ -398,6 +429,7 @@ def _build_access_key_token_payload(
         issuer=issuer,
         audiences=audiences,
         scope=resolved_scope,
+        service_attributes=dict(service_attributes or {}),
         created_at=datetime.fromtimestamp(issued_at, tz=UTC),
         expires_at=expires_at,
     )
@@ -425,6 +457,7 @@ def _access_key_response_from_payload(
         issuer=payload.issuer,
         audiences=payload.audiences,
         scope=payload.scope,
+        service_attributes=payload.service_attributes,
         created_at=payload.created_at,
         expires_at=payload.expires_at,
     )

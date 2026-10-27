@@ -201,7 +201,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '403':
-          description: Service-bound Scoped Access Keys require HelixAdmin
+          description: Service-bound Scoped Access Keys require HelixAdmin, or service_attributes
+            were set by a caller that isn't a platform service
           content:
             application/json:
               schema:
@@ -9426,6 +9427,18 @@ components:
           items:
             $ref: '#/components/schemas/AccessKeyWorkspaceGrant'
           type: array
+        service_attributes:
+          title: Service Attributes
+          description: Facts a platform service vouches for, signed into the token
+            under that service's name in the nhx_service_attributes claim. Only a
+            service principal, usually acting for a user, may set them. At most 32
+            names matching ^[A-Za-z][A-Za-z0-9_.-]{0,63}$, values nested at most one
+            object or array deep, strings of at most 256 characters, and 2048 bytes
+            as JSON.
+          nullable: true
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
       type: object
       title: AccessKeyCreateRequest
       description: Request body for creating a Scoped Access Key.
@@ -9506,6 +9519,15 @@ components:
           nullable: true
           type: string
           format: date-time
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes platform services signed into the key, by service
+            name. Read-only to the key's owner.
         token:
           type: string
           title: Token
@@ -9636,6 +9658,15 @@ components:
           nullable: true
           type: string
           format: date-time
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes platform services signed into the key, by service
+            name. Read-only to the key's owner.
       type: object
       required:
       - jti
