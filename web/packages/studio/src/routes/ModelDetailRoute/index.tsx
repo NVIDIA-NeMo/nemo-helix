@@ -96,14 +96,11 @@ export const ModelDetailRoute: FC = () => {
   // its bare name, so that is what its runs are listed under here.
   const evaluatedName = adapterName ?? modelName;
 
-  // Only a model is pre-selected. The wizard's picker cannot resolve an adapter
-  // yet, and an unrecognised ref renders as the raw string in the trigger -- so
-  // seeding one would look selected and submit a target that names no model.
-  // Pre-select the adapter here once that picker handles it.
-  const runEvaluationRoute = getEvaluationNewRoute(
-    workspace,
-    adapterName ? undefined : { model: `${workspace}/${modelName}` }
-  );
+  // An adapter is named with the `model::adapter` encoding the wizard's picker
+  // round-trips, so the run opens pre-set to the entity whose page this is.
+  const runEvaluationRoute = getEvaluationNewRoute(workspace, {
+    model: adapterName ? `${workspace}/${modelName}::${adapterName}` : `${workspace}/${modelName}`,
+  });
 
   let headerAction: { label: string; to: string } | undefined;
   if (isJobTab && job.jobName) {

@@ -176,15 +176,13 @@ describe('ModelDetailRoute', () => {
     expect(await screen.findByText('evaluations for my-adapter')).toBeInTheDocument();
   });
 
-  it('leaves the model unset when running an evaluation from an adapter', async () => {
+  it('pre-selects the adapter when running an evaluation from its page', async () => {
     mockLineage({ adapter });
     renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
 
-    // The wizard's picker cannot resolve an adapter ref yet, and a seeded one
-    // would look selected while naming no real model.
     expect(await screen.findByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
       'href',
-      '/workspaces/ws/evaluation/new'
+      '/workspaces/ws/evaluation/new?model=ws%2Fmy-model%3A%3Amy-adapter'
     );
   });
 
