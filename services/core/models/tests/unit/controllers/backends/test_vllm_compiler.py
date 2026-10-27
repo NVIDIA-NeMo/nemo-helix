@@ -3,8 +3,11 @@
 
 """Unit tests for the backend-agnostic vLLM compiler."""
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+from nemo_helix_plugin.models.types import ModelEntity, ModelSpec, ToolCallConfig
 from nhx.core.models.controllers.backends import vllm_compiler
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
 
@@ -135,6 +138,94 @@ def test_compile_vllm_args_chat_template():
     view = _view(gpu=1, model_name="qwen", chat_template="{{ messages }}")
     args = vllm_compiler.compile_vllm_args(view, model_entity=None)
     assert args[args.index("--chat-template") + 1] == "{{ messages }}"
+
+
+@pytest.mark.parametrize("auto_tool_choice", [True, False, None])
+def test_compile_vllm_args_model_tool_call_config(auto_tool_choice: bool | None):
+    model = _tool_model(ToolCallConfig(tool_call_parser="llama3_json", auto_tool_choice=auto_tool_choice))
+    args = vllm_compiler.compile_vllm_args(_view(), model)
+    assert args[args.index("--tool-call-parser") + 1] == "llama3_json"
+    assert ("--enable-auto-tool-choice" in args) is (auto_tool_choice is True)
+
+
+def _tool_model(config: ToolCallConfig | None) -> ModelEntity:
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return ModelEntity(
+        id="base-id",
+        name="base",
+        workspace="default",
+        created_at=now,
+        updated_at=now,
+        spec=ModelSpec(
+            checkpoint_model_name="llama-base",
+            family="llama",
+            num_layers=16,
+            hidden_size=2048,
+            num_attention_heads=32,
+            num_kv_heads=8,
+            ffn_hidden_size=8192,
+            vocab_size=128256,
+            tied_embeddings=True,
+            gated_mlp=True,
+            base_num_parameters=1_000_000_000,
+            precision="bfloat16",
+            tool_call_config=config,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "deployment_config,expected_parser,expected_auto",
+    [
+        (ToolCallConfig(tool_call_parser="hermes"), "hermes", True),
+        (ToolCallConfig(auto_tool_choice=False), "llama3_json", False),
+        (ToolCallConfig(auto_tool_choice=True), "llama3_json", True),
+        (ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=False), "hermes", False),
+        (ToolCallConfig(), "llama3_json", True),
+    ],
+)
+def test_compile_vllm_args_deployment_tool_config_overrides_per_field(
+    deployment_config: ToolCallConfig,
+    expected_parser: str,
+    expected_auto: bool,
+):
+    model = _tool_model(ToolCallConfig(tool_call_parser="llama3_json", auto_tool_choice=True))
+    args = vllm_compiler.compile_vllm_args(_view(tool_call_config=deployment_config), model)
+    assert args[args.index("--tool-call-parser") + 1] == expected_parser
+    assert ("--enable-auto-tool-choice" in args) is expected_auto
+
+
+def test_compile_vllm_args_deployment_enables_auto_tool_choice():
+    model = _tool_model(ToolCallConfig(auto_tool_choice=False))
+    config = ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=True)
+    args = vllm_compiler.compile_vllm_args(_view(tool_call_config=config), model)
+    assert args == ["/model-store", "--tool-call-parser", "hermes", "--enable-auto-tool-choice"]
+
+
+def test_compile_vllm_args_deployment_tool_config_without_model():
+    config = ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=True)
+    args = vllm_compiler.compile_vllm_args(_view(tool_call_config=config), None)
+    assert args == ["/model-store", "--tool-call-parser", "hermes", "--enable-auto-tool-choice"]
+
+
+@pytest.mark.parametrize("parser_args", [["--tool-call-parser", "custom"], ["--tool-call-parser=custom"]])
+@pytest.mark.parametrize("auto_flag", ["--enable-auto-tool-choice", "--no-enable-auto-tool-choice"])
+@pytest.mark.parametrize("deployment_auto", [True, False])
+def test_compile_vllm_args_raw_tool_flags_override_config(
+    parser_args: list[str],
+    auto_flag: str,
+    deployment_auto: bool,
+):
+    model = _tool_model(ToolCallConfig(tool_call_parser="llama3_json", auto_tool_choice=True))
+    raw_args = [*parser_args, auto_flag]
+    deployment_config = ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=deployment_auto)
+    args = vllm_compiler.compile_vllm_args(_view(tool_call_config=deployment_config, additional_args=raw_args), model)
+    assert args == ["/model-store", *raw_args]
+
+
+def test_compile_vllm_args_no_tool_config_unchanged():
+    assert vllm_compiler.compile_vllm_args(_view(), _tool_model(None)) == ["/model-store"]
+    assert vllm_compiler.compile_vllm_args(_view(tool_call_config=ToolCallConfig()), None) == ["/model-store"]
 
 
 def test_compile_vllm_args_trust_remote_code():

@@ -153,6 +153,21 @@ def compile_vllm_args(
     if view.chat_template and "--chat-template" not in user_flags:
         args.extend(["--chat-template", view.chat_template])
 
+    model_tool_config = getattr(getattr(model_entity, "spec", None), "tool_call_config", None)
+    tool_call_parser = getattr(model_tool_config, "tool_call_parser", None)
+    auto_tool_choice = getattr(model_tool_config, "auto_tool_choice", None)
+    if view.tool_call_config is not None:
+        if view.tool_call_config.tool_call_parser is not None:
+            tool_call_parser = view.tool_call_config.tool_call_parser
+        if view.tool_call_config.auto_tool_choice is not None:
+            auto_tool_choice = view.tool_call_config.auto_tool_choice
+
+    if tool_call_parser and "--tool-call-parser" not in user_flags:
+        args.extend(["--tool-call-parser", tool_call_parser])
+    # vLLM uses BooleanOptionalAction, so an explicit raw negative flag also wins.
+    if auto_tool_choice and not {"--enable-auto-tool-choice", "--no-enable-auto-tool-choice"} & user_flags:
+        args.append("--enable-auto-tool-choice")
+
     if view.lora_enabled and "--enable-lora" not in user_flags:
         args.append("--enable-lora")
 
