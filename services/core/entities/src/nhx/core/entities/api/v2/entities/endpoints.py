@@ -421,7 +421,6 @@ async def list_entities(
             page_size=page_size,
             sort=sort,
             filter_op=effective_filter,
-            count_by=count_by,
             relationship_child_workspaces=accessible_workspaces,
         )
     except ValueError as e:

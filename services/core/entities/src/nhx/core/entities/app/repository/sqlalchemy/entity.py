@@ -191,12 +191,11 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         page_size: int = 100,
         sort: Optional[str] = None,
         filter_op: Optional[FilterOperation] = None,
-        count_by: str | None = None,
         relationship_child_workspaces: Optional[set[str]] = None,
         session: AsyncSession | None = None,
     ) -> tuple[List[Entity], int]:
         """List entities with filtering."""
-        self.field_policy.validate_query(filter_op, sort, count_by)
+        self.field_policy.validate_query(filter_op, sort)
         async with self._get_session(session) as sess:
             # Start with base query
             query = select(DBEntity)

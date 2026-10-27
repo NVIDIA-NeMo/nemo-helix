@@ -89,7 +89,6 @@ class EntityRepositoryInterface(ABC):
         page_size: int = 100,
         sort: Optional[str] = None,
         filter_op: Optional[FilterOperation] = None,
-        count_by: str | None = None,
         relationship_child_workspaces: Optional[set[str]] = None,
         session: AsyncSession | None = None,
     ) -> tuple[List[Entity], int]:
@@ -102,7 +101,6 @@ class EntityRepositoryInterface(ABC):
             page_size: Number of items per page
             sort: Sort field (prefix with - for descending)
             filter_op: Filter operation for filtering (can include workspace filter)
-            count_by: Field to validate before either the list or grouped-count query
             relationship_child_workspaces: If set, relationship/EXISTS filters only consider
                 child entities in these workspaces. If None, child workspace is not restricted
                 (full access / same as parent scope when auth is off).
