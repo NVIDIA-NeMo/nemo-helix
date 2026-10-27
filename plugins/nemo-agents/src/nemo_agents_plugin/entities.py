@@ -18,6 +18,7 @@ from typing import Any, Self
 from nemo_helix_plugin.agents.types import (
     LABELS_DESCRIPTION,
     Labels,
+    ReferenceConfig,
 )
 from nemo_helix_plugin.agents.types import (
     NAT_WORKFLOW_CONFIG_FORMAT as NAT_WORKFLOW_CONFIG_FORMAT,
@@ -52,7 +53,6 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.agents.types import (
     ModelProviderOverride as ModelProviderOverride,
 )
-from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import FilesetRef
