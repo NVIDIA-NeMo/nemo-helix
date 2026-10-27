@@ -69,8 +69,9 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._is_healthy = False
         self._logger = logger
         # The retention sweeper runs on its own thread (see StorageRetentionSweeper) and writes the same
-        # steps and reclaim records this controller does. Each unit of work holds the lock, so a step is
-        # never reconciled and swept at once, as when both ran on this thread.
+        # steps and reclaim records this controller does. Reconciling a step, and the sweep's writes to
+        # one, hold the lock, so a step is never reconciled and swept at once, as when both ran on this
+        # thread. The sweep's reads do not, so a slow lookup never holds up reconciling.
         self._step_lock = threading.Lock()
         # Storage reclaim records outlive the jobs they describe, so they are read from the
         # entity store as the jobs service rather than through the jobs API.
@@ -249,8 +250,7 @@ class JobReconciler(HeartbeatMixin, Controller):
             if (step.status_details or {}).get(STORAGE_SWEPT_AT):
                 continue
             try:
-                with self._step_lock:
-                    self._retain_step_storage(step)
+                self._retain_step_storage(step)
             except Exception:
                 logger.exception(
                     "Could not enforce storage retention",
@@ -323,10 +323,12 @@ class JobReconciler(HeartbeatMixin, Controller):
             return
         targets = storage_targets(job.platform_spec)
         if not targets:
-            self._mark_step_swept(step)
+            with self._step_lock:
+                self._mark_step_swept(step)
             return
         # A job already marked is queued again: an earlier pass may have marked it and stopped there.
-        if not (job.status_details or {}).get(STORAGE_RECLAIMED_AT):
+        already_marked = bool((job.status_details or {}).get(STORAGE_RECLAIMED_AT))
+        if not already_marked:
             if step.status == HelixJobStatus.CANCELLED:
                 pass
             elif step.status == HelixJobStatus.PAUSED:
@@ -339,16 +341,18 @@ class JobReconciler(HeartbeatMixin, Controller):
                     return
             else:
                 return
-            if not self._mark_storage_reclaimed(step):
-                return
 
-        self._queue_storage_reclaim(job.id, step, targets)
-        swept_status = step.status
-        if step.status == HelixJobStatus.PAUSED:
-            self._jobs.cancel_job(name=step.job, workspace=step.workspace)
-            # Cancel moves the paused step to cancelling, and the sweep mark must not move it back.
-            swept_status = HelixJobStatus.CANCELLING
-        self._mark_step_swept(step, swept_status)
+        # Only the writes hold the lock. Each is guarded on the step id and status it was listed with.
+        with self._step_lock:
+            if not already_marked and not self._mark_storage_reclaimed(step):
+                return
+            self._queue_storage_reclaim(job.id, step, targets)
+            swept_status = step.status
+            if step.status == HelixJobStatus.PAUSED:
+                self._jobs.cancel_job(name=step.job, workspace=step.workspace)
+                # Cancel moves the paused step to cancelling, and the sweep mark must not move it back.
+                swept_status = HelixJobStatus.CANCELLING
+            self._mark_step_swept(step, swept_status)
 
     def _mark_storage_reclaimed(self, step: HelixJobStepWithContext) -> bool:
         """Mark the job's storage reclaimed before reclaiming it. Return False if the job moved on.

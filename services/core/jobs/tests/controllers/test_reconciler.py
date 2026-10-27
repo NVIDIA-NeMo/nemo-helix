@@ -713,19 +713,23 @@ def test_sweep_stops_when_the_controller_is_shutting_down(
     mock_jobs_client.get_job.assert_not_called()
 
 
-def test_sweep_and_reconcile_never_work_on_a_step_at_the_same_time(
+def test_sweep_writes_hold_the_step_lock_but_its_reads_do_not(
     backend_registry: BackendRegistry,
     mock_nemo_client,
     mock_jobs_client,
     test_step_active: HelixJobStepWithContext,
     test_step_error: HelixJobStepWithContext,
 ):
-    """The sweep runs on its own thread, so the lock stands in for what one thread used to guarantee."""
+    """The sweep runs on its own thread: its writes are ordered against reconciling, its reads never block it."""
     reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
     held_during: list[str] = []
 
-    def retain(step):
-        held_during.append("sweep" if reconciler._step_lock.locked() else "unlocked sweep")
+    def lookup(**_):
+        held_during.append("locked lookup" if reconciler._step_lock.locked() else "lookup")
+        return MagicMock(data=lambda: MagicMock(attempt_id=None, platform_spec={}, status_details={}))
+
+    def mark(step, status=None):
+        held_during.append("mark" if reconciler._step_lock.locked() else "unlocked mark")
 
     def sync(step):
         held_during.append("reconcile" if reconciler._step_lock.locked() else "unlocked reconcile")
@@ -734,13 +738,18 @@ def test_sweep_and_reconcile_never_work_on_a_step_at_the_same_time(
     active = _aged_step(test_step_active, HelixJobStatus.ACTIVE, datetime.timedelta(seconds=1))
     expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
     backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
-    with patch.object(reconciler, "_retain_step_storage", side_effect=retain), patch.object(backend, "sync", sync):
+    mock_jobs_client.get_job.side_effect = lookup
+    with (
+        patch.object(reconciler, "_mark_step_swept", side_effect=mark),
+        patch("nhx.core.jobs.controllers.reconciler.storage_targets", return_value=[]),
+        patch.object(backend, "sync", sync),
+    ):
         mock_jobs_client.list_steps.side_effect = [paginated_response([active]), paginated_response([])]
         reconciler.step()
         mock_jobs_client.list_steps.side_effect = [paginated_response([expired])]
         reconciler.sweep_stopped_steps()
 
-    assert held_during == ["reconcile", "sweep"]
+    assert held_during == ["reconcile", "lookup", "mark"]
 
 
 def test_sweeper_runs_the_sweep_and_reports_progress_through_its_own_heartbeat(
