@@ -160,6 +160,23 @@ class RunControllerConfig(BaseModel):
             "controller's 30 s create timeout."
         ),
     )
+    phase1_concurrency: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Open runs settled at once in a cycle's first phase (reads, settles, stops, bundles). It takes no slot, "
+            "so the caps don't depend on it; 1 settles them one after another."
+        ),
+    )
+    max_creates_per_cycle: int = Field(
+        default=10,
+        ge=2,
+        description=(
+            "Task Job creates a cycle attempts, new grants and retries of creates whose Job wasn't found alike. "
+            "Retries get up to half while grants are due, and the rest when none are. At least 2, so retries "
+            "always get one."
+        ),
+    )
 
     @model_validator(mode="after")
     def _creator_cap_within_cluster_cap(self) -> Self:

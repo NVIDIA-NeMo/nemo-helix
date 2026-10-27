@@ -198,6 +198,7 @@ class FakeJobsCluster:
         self.duration: Callable[[str], int] = lambda name: sim.rng.randint(2, 6)
         self.cancel_ticks: tuple[int, int] = (1, 3)
         self.calls: Counter[int] = Counter()  # Jobs calls that reached the service, per cycle
+        self.task_posts: Counter[int] = Counter()  # phase 2's task Job create attempts, per cycle
         self.timeouts: Counter[int] = Counter()
         self.create_posts: Counter[int] = Counter()
         self.posts_by_name: Counter[tuple[str, str]] = Counter()
@@ -301,6 +302,10 @@ class FakeJobsCluster:
         drain = sim.post_kind.get(request.name, "bundle")
         if drain in sim.drains_ended:
             sim.violate("P1", f"{drain} drain sent {request.name} after an ambiguous create this cycle")
+        if drain != "bundle":
+            self.task_posts[sim.cycle] += 1
+            if self.task_posts[sim.cycle] > sim.config.max_creates_per_cycle:
+                sim.violate("budget", f"create {self.task_posts[sim.cycle]} this cycle: {request.name}")
         try:
             return await self._create(workspace, run, request)
         except (InternalServerError, NemoTransportError):
@@ -1134,8 +1139,11 @@ class Sim:
                     3, f"{sim_run.label} tallied with cap {t.cap}, run_cap is {run_cap(sim_run.plan, self.config)}"
                 )
         used = sum(t.held for t in tallies) + stuck.total()
-        if available != max(0, self.config.max_cluster_concurrent_jobs - used):
-            self.violate(1, f"free slots {available} != cap - used ({used})")
+        # allocate() gets the free slots, cut to the create budget less what it reserves for retries (≤ half).
+        free = max(0, self.config.max_cluster_concurrent_jobs - used)
+        budget = self.config.max_creates_per_cycle
+        if not min(free, budget - budget // 2) <= available <= min(free, budget):
+            self.violate(1, f"{available} slots offered with {free} free (cap - used {used}) and a budget of {budget}")
         unheld_by_creator = Counter(j.creator for j in truth.unheld)
         for creator, count in unheld_by_creator.items():
             if stuck[creator] < count:
@@ -1310,12 +1318,16 @@ def make_sim(entity_store, files_client, harbor_resolved_task, sandbox_policy, h
     return make
 
 
+UNBOUNDED_CREATES = 10_000
+"""A create budget no scenario reaches: scenarios written before the budget fill every free slot in one cycle."""
+
+
 def caps(cluster: int, per_creator: int | None = None, per_run: int | None = None, **extra: Any) -> RunControllerConfig:
     return RunControllerConfig(
         max_cluster_concurrent_jobs=cluster,
         max_concurrent_task_jobs_per_creator=per_creator,
         default_max_concurrent_task_jobs=per_run,
-        **extra,
+        **{"max_creates_per_cycle": UNBOUNDED_CREATES, **extra},
     )
 
 
@@ -1485,6 +1497,26 @@ async def test_two_creators_converge_to_25_25(make_sim: MakeSim) -> None:
         elif reached and all(sim.queued(r) for r in a_runs + b_runs):
             sim.violate("fairness", f"left 25/25 while every run has queued tasks: {dict(held)}")
     assert reached, sim.history[-5:]
+    await sim.run_until_final(200)
+    sim.assert_clean()
+
+
+async def test_twenty_open_runs_with_the_default_concurrency_and_create_budget(make_sim: MakeSim) -> None:
+    """AC 9.3's load: 4 creators x 5 runs x 20 tasks, caps 25 / 15 / 10, phase 1 eight runs at a time, 10 creates a
+    cycle. Every invariant holds, no cycle creates more than 10, and every run ends."""
+    sim = make_sim(caps(25, per_creator=15, per_run=10, phase1_concurrency=8, max_creates_per_cycle=10))
+    sim.cluster.duration = lambda name: sim.rng.randint(4, 10)
+    runs = [
+        await sim.submit(f"{creator}{i}", tasks=20, creator=f"user:{creator}")
+        for creator in ("alice", "bob", "carol", "dave")
+        for i in range(5)
+    ]
+    report = await sim.step()
+    assert report is not None and report.open_runs == 20 and report.created == 10
+    while any(sim.queued(run) or sim.held(run) for run in runs):
+        report = await sim.step()
+        assert report is None or report.created <= 10
+        assert sim.cycle < 400, sim.history[-5:]
     await sim.run_until_final(200)
     sim.assert_clean()
 
@@ -1857,9 +1889,12 @@ async def test_cancel_after_every_member_settled_completes(make_sim: MakeSim) ->
     sim.assert_clean()
 
 
+@pytest.mark.parametrize("creates", [UNBOUNDED_CREATES, 3], ids=["any creates", "3 creates a cycle"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4, 5, 6])
-async def test_fault_heavy_random_cluster(make_sim: MakeSim, seed: int) -> None:
-    """Every fault at once, over several creators, workspaces and deadlines; all 9 invariants after every cycle."""
+async def test_fault_heavy_random_cluster(make_sim: MakeSim, seed: int, creates: int) -> None:
+    """Every fault at once, over several creators, workspaces and deadlines; all 9 invariants after every cycle.
+
+    Phase 1 settles runs 8 at a time; with 3 creates a cycle, grants and retries share a budget of 3."""
     faults = Faults(
         create_5xx_before=0.04,
         create_409_transient=0.02,
@@ -1883,7 +1918,11 @@ async def test_fault_heavy_random_cluster(make_sim: MakeSim, seed: int) -> None:
         restart=0.03,
         mid_cycle_cancel=0.002,
     )
-    sim = make_sim(caps(12, per_creator=8, per_run=5, create_grace_seconds=180), seed=seed, faults=faults)
+    sim = make_sim(
+        caps(12, per_creator=8, per_run=5, create_grace_seconds=180, max_creates_per_cycle=creates),
+        seed=seed,
+        faults=faults,
+    )
     sim.cluster.duration = lambda name: sim.rng.randint(1, 8)
     rng = random.Random(seed * 101)
     plan = [

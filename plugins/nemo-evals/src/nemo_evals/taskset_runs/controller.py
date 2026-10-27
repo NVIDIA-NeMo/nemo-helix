@@ -33,6 +33,7 @@ over them, ``result_state=ready``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import Counter
@@ -307,6 +308,12 @@ def _settled(member: TasksetRunMemberEntity) -> bool:
     return member.phase in SETTLED_MEMBER_PHASES
 
 
+def _retry_key(item: tuple[_RunState, TasksetRunMemberEntity]) -> tuple[str, int]:
+    """Where a pending create sits in the retry rotation: its run, then its task."""
+    state, member = item
+    return state.run.id, member.task_index
+
+
 def _rotated[T](items: Sequence[T], offset: int) -> list[T]:
     """``items`` starting at ``offset``: a call that always times out can't keep the ones after it from running."""
     if not items:
@@ -427,6 +434,7 @@ class TasksetRunReconciler:
         # so one Job that can't be read never keeps the run's other Jobs from being read.
         self._read_one_by_one: set[str] = set()
         self._stuck_cursor: tuple[str, str] | None = None
+        self._retry_last: tuple[str, int] | None = None  # (run id, task index) of the last retried create
 
     @property
     def grace(self) -> timedelta:
@@ -447,22 +455,35 @@ class TasksetRunReconciler:
         breaker = JobsBreaker()
         states: dict[str, _RunState] = {}
         listing_failed: list[str] = []
-        # The stuck-Job reads take a turn in the rotation, so a hanging read can't always come first or last.
-        for run in _rotated([*runs, None], self._cycle):
-            if self._stop_requested():
-                return report
-            if run is None:
-                await self._refresh_stuck(breaker)
-                continue
-            try:
-                state = await self._settle(run, now, breaker)
-            except Exception:
-                logger.exception("Run %s/%s: listing its members failed; no grants this cycle", run.workspace, run.name)
-                listing_failed.append(run.name)
-                continue
-            states[run.id] = state
-            if state.action not in {"waiting", "bundling"}:
-                logger.info("Run %s/%s: %s", run.workspace, run.name, state.action)
+        # Workers take runs, and the stuck-Job reads, in a rotation that starts one later each cycle: the breaker
+        # is shared, so a run whose reads always hang must not always go first and cut off the runs after it.
+        items = iter(_rotated([*runs, None], self._cycle))
+        stopped = False
+
+        async def worker() -> None:
+            nonlocal stopped
+            for run in items:  # shared: each run is taken once, in rotated order
+                if self._stop_requested():
+                    stopped = True
+                    return
+                if run is None:
+                    await self._refresh_stuck(breaker)
+                    continue
+                try:
+                    state = await self._settle(run, now, breaker)
+                except Exception:
+                    logger.exception(
+                        "Run %s/%s: listing its members failed; no grants this cycle", run.workspace, run.name
+                    )
+                    listing_failed.append(run.name)
+                    continue
+                states[run.id] = state
+                if state.action not in {"waiting", "bundling"}:
+                    logger.info("Run %s/%s: %s", run.workspace, run.name, state.action)
+
+        await asyncio.gather(*(worker() for _ in range(self.config.phase1_concurrency)))
+        if stopped:
+            return report
         ordered = [states[run.id] for run in runs if run.id in states]  # oldest first, as listed
         tallies = [state.tally() for state in ordered]
         stuck_by_creator = Counter(entry.creator for entry in self.stuck.values())
@@ -857,7 +878,8 @@ class TasksetRunReconciler:
             except Exception as exc:
                 logger.debug("Reading stuck Job %s/%s failed: %s", entry.workspace, entry.name, exc)
                 continue
-            if gone:
+            # Runs settle while this reads: a force settle may have put a new entry under the key since.
+            if gone and self.stuck.get(key) is entry:
                 logger.info("Stuck Job %s/%s ended or is gone; no longer counted", entry.workspace, entry.name)
                 del self.stuck[key]
 
@@ -871,27 +893,48 @@ class TasksetRunReconciler:
         stuck_by_creator: Counter[str],
         report: CycleReport,
     ) -> None:
-        """Phase 2: register in ``allocate()``'s grant order, then retry pending creates.
+        """Phase 2: register in ``allocate()``'s grant order, then retry pending creates, within one budget.
+
+        Every create attempt, a grant or a retry, spends one of ``max_creates_per_cycle``: creates are sequential
+        (~3 s each in AC 9.2), so the budget bounds the cycle. Retries get up to half of it while grants are due
+        and whatever the grants leave: grants can't starve them even when finished tasks free slots every cycle,
+        and a burst of retries can't stop every grant. Retries start just past the intent the last cycle tried, so
+        the same ones failing again can't keep the others waiting.
 
         Two drains, each ending at its first ambiguous create (a timeout or 5xx may still be saving): an
         ambiguous grant doesn't stop the retries, and an ambiguous retry doesn't stop the grants. The clock is
         read again before each create, and a run gets nothing past its ``execution_deadline_at``. An error for
         one run (a 409 on its ``running`` write after a cancel landed) ends only that run's creates this cycle.
         """
+        budget = self.config.max_creates_per_cycle
+        pending = sorted(
+            (
+                (state, member)
+                for state in ordered
+                for member in state.members
+                if member.name in state.missing and member.phase is MemberPhase.IMAGE_READY and not state.no_grant
+            ),
+            key=_retry_key,
+        )
+        if self._retry_last is not None:  # start just past the intent tried last
+            k = next((i for i, item in enumerate(pending) if _retry_key(item) > self._retry_last), 0)
+            pending = [*pending[k:], *pending[:k]]
+        reserve = min(len(pending), budget // 2)
         by_id = {state.run.id: state for state in ordered}
-        grants = allocate(tallies, free, self.config.max_concurrent_task_jobs_per_creator, stuck_by_creator)
+        grants = allocate(
+            tallies, min(free, budget - reserve), self.config.max_concurrent_task_jobs_per_creator, stuck_by_creator
+        )
         report.grants = [by_id[run_id].run.name for run_id in grants]
         granted = ((by_id[run_id], next((m for m in by_id[run_id].members if is_queued(m)), None)) for run_id in grants)
-        pending = (
-            (state, member)
-            for state in ordered
-            for member in [m for m in state.members if m.name in state.missing and m.phase is MemberPhase.IMAGE_READY]
-        )
+        attempts = 0
         async with AsyncExitStack() as stack:
             opened: dict[str, RunJobs] = {}
-            for drain in (granted, pending):  # both lazy: each pair is read after the creates before it
+            # granted is lazy: each run's next queued member is read after the creates before it.
+            for drain, retrying in ((granted, False), (iter(pending), True)):
                 breaker = JobsBreaker()
                 for state, member in drain:
+                    if attempts >= budget:
+                        break
                     if state.no_grant or member is None:
                         continue
                     if state.run.id not in opened:
@@ -906,6 +949,9 @@ class TasksetRunReconciler:
                             )
                             state.no_grant = True
                             continue
+                    if retrying:
+                        self._retry_last = _retry_key((state, member))  # before the attempt: an ambiguous one too
+                    attempts += 1
                     if not await self._register(state, member, GuardedRunJobs(opened[state.run.id], breaker), report):
                         break
                 report.jobs_timeouts += breaker.timeouts
