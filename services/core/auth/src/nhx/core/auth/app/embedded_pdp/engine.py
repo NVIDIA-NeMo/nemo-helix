@@ -3,9 +3,11 @@
 
 """OPA WASM Policy Engine using wasmtime."""
 
+import asyncio
 import json
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from functools import cache
 from typing import Any, Dict, List, Optional, cast
 
@@ -297,6 +299,32 @@ def evaluate(entrypoint: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
         }.get(entrypoint, {})
 
     return result
+
+
+@cache
+def _get_evaluation_executor() -> ThreadPoolExecutor:
+    """Return the process-wide executor that runs WASM evaluations off the event loop.
+
+    Each worker thread owns its own ``OPAPolicy`` (wasmtime stores are not shareable across threads)
+    and so its own copy of the policy data. A small dedicated pool bounds that memory, which the
+    default asyncio executor (up to 32 threads) would not.
+    """
+    from nhx.common.config import get_service_config
+    from nhx.core.auth.config import AuthServiceConfig
+
+    cfg = get_service_config(AuthServiceConfig)
+    return ThreadPoolExecutor(max_workers=cfg.embedded_pdp_threads, thread_name_prefix="embedded-pdp")
+
+
+async def evaluate_async(entrypoint: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate a policy entrypoint without blocking the event loop.
+
+    wasmtime releases the GIL while guest code runs, so concurrent requests evaluate in parallel
+    across the executor's threads instead of serializing on the loop.
+    """
+    return await asyncio.get_running_loop().run_in_executor(
+        _get_evaluation_executor(), evaluate, entrypoint, input_data
+    )
 
 
 def validate_entrypoint(entrypoint: str) -> bool:

@@ -3,6 +3,8 @@
 
 """Tests for the WASM policy engine."""
 
+import asyncio
+import threading
 from pathlib import Path
 from queue import Queue
 from threading import Thread
@@ -14,6 +16,7 @@ from nhx.core.auth.app.embedded_pdp import (
     OPAPolicy,
     PolicyEngineError,
     evaluate,
+    evaluate_async,
     get_policy,
     get_valid_entrypoints,
     reload_policy,
@@ -395,6 +398,35 @@ class TestResourceLimits:
         finally:
             Configuration.clear_override(AuthServiceConfig)
             pe._reset_policy_state_for_testing()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_async_runs_off_the_event_loop(self, minimal_authz_data):
+        """evaluate_async matches evaluate and does not run the WASM call on the loop thread."""
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+
+        set_policy_data(minimal_authz_data)
+        policy_threads: list[str] = []
+        original = pe.OPAPolicy.evaluate
+
+        def recording_evaluate(self, *args, **kwargs):
+            policy_threads.append(threading.current_thread().name)
+            return original(self, *args, **kwargs)
+
+        auth_input = {
+            "principal_id": "test@example.com",
+            "path": "/apis/models/v2/workspaces/test-workspace/models",
+            "method": "GET",
+        }
+        expected = evaluate("allow", auth_input)
+        pe.OPAPolicy.evaluate = recording_evaluate
+        try:
+            results = await asyncio.gather(*(evaluate_async("allow", auth_input) for _ in range(8)))
+        finally:
+            pe.OPAPolicy.evaluate = original
+
+        assert all(result == expected for result in results)
+        assert len(policy_threads) == 8
+        assert all(name.startswith("embedded-pdp") for name in policy_threads)
 
     def test_default_fuel_allows_normal_evaluation(self, minimal_authz_data):
         """Verify that the default fuel limit is sufficient for normal evaluations."""

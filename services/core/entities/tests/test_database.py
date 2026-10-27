@@ -37,3 +37,12 @@ async def test_close_completes_when_force_stop_lands_first(tmp_path: Path) -> No
             await conn.invalidate()
     finally:
         await engine.dispose()
+
+
+def test_postgres_pool_size_follows_connections_limit() -> None:
+    """The pool keeps ``connections_limit`` connections open rather than SQLAlchemy's default of 5."""
+    config = EntitiesConfig(
+        database_config=DatabaseConfig(url="postgresql+asyncpg://user:pw@localhost:5432/entities", connections_limit=12)
+    )
+    engine = create_async_engine_for_entities(config)
+    assert engine.sync_engine.pool.size() == 12

@@ -17,7 +17,7 @@ from nhx.core.auth.app.account_resolution import (
 )
 from nhx.core.auth.app.embedded_pdp import (
     PolicyEngineError,
-    evaluate,
+    evaluate_async,
     get_valid_entrypoints,
     load_policy_data,
     validate_entrypoint,
@@ -97,7 +97,7 @@ async def evaluate_policy(
         account_context = await resolve_authz_account_context(request.input, config)
         enriched_input = {**request.input, **account_context.to_policy_fields()}
 
-        result = evaluate(entrypoint, enriched_input)
+        result = await evaluate_async(entrypoint, enriched_input)
         return AuthzResponse(result={**result, **account_context.to_policy_fields()})
 
     except ServicePrincipalNotAllowedError as e:

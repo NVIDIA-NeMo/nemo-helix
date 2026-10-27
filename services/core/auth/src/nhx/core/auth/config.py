@@ -60,6 +60,12 @@ class AuthServiceConfig(SharedAuthConfig):
         "Default of 256 accommodates the allocation the scope-family scan makes over a "
         "production-sized authorization-data document.",
     )
+    embedded_pdp_threads: int = Field(
+        default=4,
+        ge=1,
+        description="Worker threads that evaluate embedded PDP policy off the event loop. Each thread holds "
+        "its own WASM runtime and copy of the policy data, so memory use scales with this value.",
+    )
 
     # Plugin HTTP authz fail-mode: what to do when a plugin contributes invalid authz
     # (an unruled route, or a rule referencing an undeclared / out-of-namespace permission).
