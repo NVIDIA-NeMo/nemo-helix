@@ -2264,6 +2264,97 @@ async def test_list_steps_with_status_filter(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("batch_size", [500, 2])
+async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
+    sample_platform_job_request: CreateHelixJobRequest, batch_size: int
+):
+    """A page of steps costs a store query per batch of IDs, not a request per step.
+
+    Each per-ID request was an authorized call back into the platform, so enriching a page of 50
+    steps made about 100 of them.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from nhx.common.entities.client import EntityClient
+    from nhx.core.jobs.api.v2.jobs.schemas import HelixJobSortField, HelixJobStepsListFilter
+    from nhx.core.jobs.entities import HelixJob, HelixJobAttempt
+    from nhx.testing import create_test_client
+
+    with create_test_client(client_type=EntityClient) as mock_store:
+        mock_files = AsyncMock()
+        mock_fileset_obj = MagicMock()
+        mock_fileset_obj.name = "test-fileset-id"
+        mock_resp = MagicMock()
+        mock_resp.data.return_value = mock_fileset_obj
+        mock_files.create_fileset.return_value = mock_resp
+        dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        jobs = [
+            await dispatcher.create_job(
+                sample_platform_job_request.model_copy(update={"name": f"batched-job-{index}"}), DEFAULT_WORKSPACE
+            )
+            for index in range(3)
+        ]
+
+        with (
+            patch("nhx.core.jobs.app.dispatcher._ENRICHMENT_BATCH_SIZE", batch_size),
+            patch.object(mock_store, "get_by_id", wraps=mock_store.get_by_id) as get_by_id,
+            patch.object(mock_store, "list", wraps=mock_store.list) as list_entities,
+        ):
+            steps, count = await dispatcher.list_steps(
+                filter=HelixJobStepsListFilter(),
+                sort=HelixJobSortField.CREATED_AT_ASC,
+                limit=100,
+                offset=0,
+                workspace=DEFAULT_WORKSPACE,
+            )
+
+        assert count == 3
+        assert {step.job_id for step in steps} == {job.id for job in jobs}
+        get_by_id.assert_not_called()
+        listed = [call.args[0] for call in list_entities.call_args_list]
+        expected_queries = 1 if batch_size >= 3 else 2
+        assert listed.count(HelixJobAttempt) == expected_queries
+        assert listed.count(HelixJob) == expected_queries
+
+
+@pytest.mark.asyncio
+async def test_list_steps_drops_a_step_whose_job_no_longer_exists(sample_platform_job_request: CreateHelixJobRequest):
+    """A step is listed only with its attempt and job, as when each was fetched by ID."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from nhx.common.entities.client import EntityClient
+    from nhx.core.jobs.api.v2.jobs.schemas import HelixJobSortField, HelixJobStepsListFilter
+    from nhx.core.jobs.entities import HelixJob
+    from nhx.testing import create_test_client
+
+    with create_test_client(client_type=EntityClient) as mock_store:
+        mock_files = AsyncMock()
+        mock_fileset_obj = MagicMock()
+        mock_fileset_obj.name = "test-fileset-id"
+        mock_resp = MagicMock()
+        mock_resp.data.return_value = mock_fileset_obj
+        mock_files.create_fileset.return_value = mock_resp
+        dispatcher = JobDispatcher(store=mock_store, files=mock_files, secrets=AsyncMock())
+        kept = await dispatcher.create_job(
+            sample_platform_job_request.model_copy(update={"name": "kept-job"}), DEFAULT_WORKSPACE
+        )
+        gone = await dispatcher.create_job(
+            sample_platform_job_request.model_copy(update={"name": "gone-job"}), DEFAULT_WORKSPACE
+        )
+        await mock_store.delete(HelixJob, gone.name, workspace=DEFAULT_WORKSPACE)
+
+        steps, _ = await dispatcher.list_steps(
+            filter=HelixJobStepsListFilter(),
+            sort=HelixJobSortField.CREATED_AT_ASC,
+            limit=100,
+            offset=0,
+            workspace=DEFAULT_WORKSPACE,
+        )
+
+        assert {step.job_id for step in steps} == {kept.id}
+
+
+@pytest.mark.asyncio
 async def test_get_job_by_name(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
     """get_job resolves a job by its name."""
     _, job_name, _, _, _, _ = await create_test_job_data(mock_store, "get-by-name-job")
