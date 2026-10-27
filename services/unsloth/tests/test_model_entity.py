@@ -153,9 +153,16 @@ def _resolved_config(
     )
 
 
-def _base_config(*, name: str, lora_enabled: bool) -> types.SimpleNamespace:
-    """A deployment config of the base model, as ``list_deployment_configs`` returns it."""
-    return types.SimpleNamespace(name=name, model_spec=types.SimpleNamespace(lora_enabled=lora_enabled))
+def _base_config(*, name: str, lora_enabled: bool, version: int = 1) -> types.SimpleNamespace:
+    """A deployment config of the base model, as ``list_deployment_configs`` returns it (its latest version)."""
+    return types.SimpleNamespace(
+        name=name, entity_version=version, model_spec=types.SimpleNamespace(lora_enabled=lora_enabled)
+    )
+
+
+def _deployment(name: str = "base-deploy", *, config_version: int = 1) -> types.SimpleNamespace:
+    """An active deployment, pinned to the config version it was created with."""
+    return types.SimpleNamespace(name=name, status=ModelDeploymentStatus.READY, config_version=config_version)
 
 
 def _model_entity(*, workspace: str = "default", name: str = "base", spec: object | None = None) -> MagicMock:
@@ -947,9 +954,7 @@ class TestLaunchModel:
 
         models, files = _make_clients()
         models.list_deployment_configs.return_value = _page([_base_config(name="base-cfg", lora_enabled=True)])
-        models.list_deployments.return_value = _page(
-            [types.SimpleNamespace(name="base-deploy", status=ModelDeploymentStatus.READY)]
-        )
+        models.list_deployments.return_value = _page([_deployment("base-deploy")])
 
         runner = _make_runner(models, files)
         base = _model_entity(name="llama-base", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
@@ -983,9 +988,7 @@ class TestLaunchModel:
 
         models, files = _make_clients()
         models.list_deployment_configs.return_value = _page([_base_config(name="base-cfg", lora_enabled=False)])
-        models.list_deployments.return_value = _page(
-            [types.SimpleNamespace(name="sft-deploy-llama-base", status=ModelDeploymentStatus.READY)]
-        )
+        models.list_deployments.return_value = _page([_deployment("sft-deploy-llama-base")])
         models.get_deployment_config.return_value = _response(
             _resolved_config(name="prod", model_name="llama-base", model_namespace="default")
         )
@@ -1037,9 +1040,7 @@ class TestLaunchModel:
         models.list_deployment_configs.return_value = _page(
             [_base_config(name="sft-cfg-llama-base", lora_enabled=False)]
         )
-        models.list_deployments.return_value = _page(
-            [types.SimpleNamespace(name="sft-deploy-llama-base", status=ModelDeploymentStatus.READY)]
-        )
+        models.list_deployments.return_value = _page([_deployment("sft-deploy-llama-base")])
         models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
         models.update_deployment_config.return_value = _response(
             types.SimpleNamespace(workspace="default", name="sft-cfg-llama-base")
@@ -1094,9 +1095,7 @@ class TestLaunchModel:
                 _base_config(name="lora-cfg", lora_enabled=True),
             ]
         )
-        models.list_deployments.return_value = _page(
-            [types.SimpleNamespace(name="base-deploy", status=ModelDeploymentStatus.READY)]
-        )
+        models.list_deployments.return_value = _page([_deployment("base-deploy")])
 
         runner = _make_runner(models, files)
         runner.launch_model(
@@ -1112,6 +1111,82 @@ class TestLaunchModel:
         )
 
         models.create_deployment_config.assert_not_called()
+        models.create_deployment.assert_not_called()
+
+    def test_lora_checks_the_config_version_the_base_deployment_is_pinned_to(self) -> None:
+        """A deployment keeps serving the config version it was created with.
+
+        Enabling LoRA on a config creates a new version; the running deployment stays on the
+        old one until it is repointed. Judging it by the latest version would load the
+        adapter onto a deployment that cannot serve it.
+        """
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page(
+            [_base_config(name="base-cfg", lora_enabled=True, version=2)]
+        )
+        models.list_deployments.return_value = _page([_deployment("base-deploy", config_version=1)])
+        models.get_deployment_config_version.return_value = _response(
+            _base_config(name="base-cfg", lora_enabled=False, version=1)
+        )
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(name="prod", model_name="llama-base", model_namespace="default")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="shared", name="d", status=ModelDeploymentStatus.PENDING)
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="shared", name="d", status=ModelDeploymentStatus.PENDING)
+        )
+
+        runner = _make_runner(models, files)
+        base = _model_entity(name="llama-base", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        runner.launch_model(
+            ModelEntityTaskConfig(
+                name="my-adapter",
+                workspace="default",
+                fileset=FileSetRef(workspace="default", name="fs"),
+                model_entity="default/llama-base",
+                peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                deployment_config="shared/prod",
+            ),
+            base,
+        )
+
+        models.get_deployment_config_version.assert_called_once_with(workspace="default", config="base-cfg", name="1")
+        # Pinned to a version without LoRA, so a LoRA-enabled deployment goes up alongside it.
+        assert models.create_deployment.call_args.kwargs["body"].name == _expected(
+            "sft-deploy", "llama-base", template="prod"
+        )
+
+    def test_lora_skips_the_version_lookup_when_the_deployment_runs_the_latest_config(self) -> None:
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.list_deployment_configs.return_value = _page(
+            [_base_config(name="base-cfg", lora_enabled=True, version=2)]
+        )
+        models.list_deployments.return_value = _page([_deployment("base-deploy", config_version=2)])
+
+        runner = _make_runner(models, files)
+        runner.launch_model(
+            ModelEntityTaskConfig(
+                name="my-adapter",
+                workspace="default",
+                fileset=FileSetRef(workspace="default", name="fs"),
+                model_entity="default/llama-base",
+                peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+                deployment_config="shared/prod",
+            ),
+            _model_entity(name="llama-base"),
+        )
+
+        models.get_deployment_config_version.assert_not_called()
         models.create_deployment.assert_not_called()
 
     def test_bound_string_ref_is_deployed_as_is(self) -> None:
@@ -1160,7 +1235,7 @@ class TestLaunchModel:
 
         models, files = _make_clients()
         existing_config = _base_config(name="cfg-1", lora_enabled=True)
-        active_deployment = types.SimpleNamespace(status=ModelDeploymentStatus.READY)
+        active_deployment = _deployment()
         models.list_deployment_configs.return_value = _page([existing_config])
         models.list_deployments.return_value = _page([active_deployment])
 

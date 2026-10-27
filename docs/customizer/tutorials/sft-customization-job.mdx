@@ -468,15 +468,15 @@ print(model_entity.model_dump_json(indent=2))
 
 ```python
 def find_deployment(model_entity: str):
-    """Return the active deployment that serves a model entity."""
+    """Return the newest active deployment that serves a model entity."""
     configs = client.models.list_deployment_configs(
         workspace="default",
-        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"})},
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
     ).items()
     for config in configs:
         deployments = client.models.list_deployments(
             workspace="default",
-            query_params={"filter": json.dumps({"config": config.name})},
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
         ).items()
         for deployment in deployments:
             if deployment.status in ("CREATED", "PENDING", "READY"):
@@ -617,8 +617,8 @@ For detailed information on all available hyperparameters, recommended values, a
 - Verify output model exists: `client.models.get_model(name=OUTPUT_NAME)`
 - Check job logs: `client.jobs.list_job_logs(name=job.job.name).items()`
 - Check deployment status: `client.models.get_deployment(name=deployment.name)`
-- Ensure sufficient GPU resources for `executor_config={"gpu": 1, ...}`
-- Verify the deployment config matches this tutorial: `engine="vllm"` with `docker.io/vllm/vllm-openai:v0.22.1`
+- Ensure sufficient GPU resources for the job's `deployment_config={"engine": "vllm", "gpu": 1}`
+- Check the deployment config the job created: `client.models.get_deployment_config(name=deployment.config)`
 
 
 ## Next Steps

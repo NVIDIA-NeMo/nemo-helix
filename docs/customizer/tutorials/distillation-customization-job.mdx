@@ -656,15 +656,15 @@ The output model has the same architecture as the 0.6B student—only its weight
 
 ```python
 def find_deployment(model_entity: str):
-    """Return the active deployment that serves a model entity."""
+    """Return the newest active deployment that serves a model entity."""
     configs = client.models.list_deployment_configs(
         workspace="default",
-        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"})},
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
     ).items()
     for config in configs:
         deployments = client.models.list_deployments(
             workspace="default",
-            query_params={"filter": json.dumps({"config": config.name})},
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
         ).items()
         for deployment in deployments:
             if deployment.status in ("CREATED", "PENDING", "READY"):

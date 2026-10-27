@@ -86,11 +86,12 @@ The one exception to "do not update the deployment". A LoRA job's `deployment_co
 Check **before submitting** a LoRA job:
 
 ```bash
-nemo inference deployment-configs list --workspace default --filter.model-entity-id default/<model-entity> -f json  # model_spec.lora_enabled per config
-nemo inference deployments list --workspace default --filter.config <config-name> -f json                         # status per deployment
+nemo inference deployment-configs list --workspace default --filter.model-entity-id default/<model-entity> -f json  # configs that serve the base
+nemo inference deployments list --workspace default --filter.config <config-name> -f json                         # status and config_version per deployment
+nemo inference deployment-configs versions get <config_version> --config <config-name> --workspace default -f json  # the version the deployment runs
 ```
 
-If a deployment is `CREATED`, `PENDING` or `READY`, its config has `lora_enabled: false`, and no active deployment's config has `lora_enabled: true`, **stop and ask the user** which they want. Never change the deployment without a yes.
+A deployment runs the config version it was created with (`config_version`), which is older than the listed config when the config was updated afterwards; read `model_spec.lora_enabled` from that version. If a deployment is `CREATED`, `PENDING` or `READY`, the version it runs has `lora_enabled: false`, and no active deployment runs a version with `lora_enabled: true`, **stop and ask the user** which they want. Never change the deployment without a yes.
 
 - **Enable LoRA on the existing deployment:** this restarts the base model, so anything using that deployment loses it until it is READY again. Read the config (`nemo inference deployment-configs get <config-name> --workspace default -f json`), set `model_spec.lora_enabled` to `true`, write back `engine`, `executor_config` and `model_spec` with `nemo inference deployment-configs update <config-name> --workspace default --input-file <file>`, then repoint the deployment at the new version: `nemo inference deployments update <deployment-name> --workspace default --config <config-name>`. Wait for READY, then submit; the adapter hot-loads when the job completes.
 - **Deploy alongside it:** submit as is. Tell the user the base model will run twice, on the GPUs of both deployments, until they delete one; or, if the existing deployment is named `sft-deploy-<base>` and the job uses inline parameters, that the job restarts it with LoRA instead.

@@ -372,20 +372,24 @@ When training finished, the job deployed the base model with LoRA enabled, and t
 
 ```python
 def find_deployment(model_entity: str, *, lora_enabled: bool = False):
-    """Return the active deployment that serves a model entity."""
+    """Return the newest active deployment that serves a model entity."""
     configs = client.models.list_deployment_configs(
         workspace="default",
-        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"})},
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
     ).items()
     for config in configs:
-        if lora_enabled and not config.model_spec.lora_enabled:
-            continue
         deployments = client.models.list_deployments(
             workspace="default",
-            query_params={"filter": json.dumps({"config": config.name})},
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
         ).items()
         for deployment in deployments:
-            if deployment.status in ("CREATED", "PENDING", "READY"):
+            if deployment.status not in ("CREATED", "PENDING", "READY"):
+                continue
+            # A deployment runs the config version it was created with, not necessarily the latest.
+            running = client.models.get_deployment_config_version(
+                workspace="default", config=config.name, name=str(deployment.config_version)
+            ).data()
+            if not lora_enabled or running.model_spec.lora_enabled:
                 return deployment
     raise RuntimeError(f"No active deployment serves default/{model_entity}")
 

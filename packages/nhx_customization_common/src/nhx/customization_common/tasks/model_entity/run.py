@@ -410,6 +410,9 @@ class ModelEntityRunner:
         A LoRA adapter hot-loads onto a LoRA-enabled deployment of its base model, so
         such a deployment is returned as soon as it is seen. One without LoRA is
         returned only when no LoRA-enabled deployment is active.
+
+        Each deployment is judged by the config version it is pinned to, which is older
+        than the listed (latest) version when the config was updated after deploying.
         """
         config_query = ListDeploymentConfigsQueryParams(
             filter=json.dumps({"model_entity_id": f"{me.workspace}/{me.name}"})
@@ -431,12 +434,17 @@ class ModelEntityRunner:
             for d in deployments:
                 if d.status not in ACTIVE_DEPLOYMENT_STATUSES:
                     continue
-                if c.model_spec.lora_enabled:
+                pinned = c
+                if d.config_version != c.entity_version:
+                    pinned = self.models.get_deployment_config_version(
+                        workspace=me.workspace, config=c.name, name=str(d.config_version)
+                    ).data()
+                if pinned.model_spec.lora_enabled:
                     logger.info(
                         f"Active LoRA-enabled deployment (status={d.status}) exists for config {c.name}, skipping"
                     )
-                    return c, d
-                without_lora = without_lora or (c, d)
+                    return pinned, d
+                without_lora = without_lora or (pinned, d)
 
         return without_lora
 
