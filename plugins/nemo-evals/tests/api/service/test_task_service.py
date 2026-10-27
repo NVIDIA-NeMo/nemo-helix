@@ -322,10 +322,10 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
 
 
 async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:
-    """Losing the optimistic lock is a client-retryable conflict, not a server fault — the route
-    maps this to 409, so the service must let it through rather than swallowing it."""
+    """Losing the optimistic lock on a real change is a client-retryable conflict, not a server
+    fault — the route maps this to 409, so the service must let it through rather than swallowing it."""
     service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
-    await service.create_task("task-1", _task_input(), workspace="default")
+    await service.create_task("task-1", _task_input(), workspace="default", project="proj-a")
 
     async def _stale(entity, *, original_name=None):
         raise NemoEntityConflictError("modified by another request")
@@ -333,7 +333,52 @@ async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _F
     entity_store.update = _stale
 
     with pytest.raises(NemoEntityConflictError):
-        await service.replace_task("task-1", _task_input(), workspace="default")
+        await service.replace_task("task-1", _task_input(), workspace="default", project="proj-b")
+
+
+async def test_replace_with_unchanged_content_writes_nothing_a_concurrent_writer_could_conflict_with(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """Twenty submits of one taskset PUT the same task at once (AC 9.3): all but one used to lose the
+    optimistic lock on a write that changed nothing, and their submits failed with 409."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    await service.create_task("task-1", _task_input(), workspace="default", project="proj-a")
+
+    async def _stale(entity, *, original_name=None):
+        raise NemoEntityConflictError("modified by another request")
+
+    entity_store.update = _stale
+
+    replaced, published = await service.replace_task("task-1", _task_input(), workspace="default", project="proj-a")
+    assert not published and replaced.revision == 1
+    replaced, published = await service.replace_task("task-1", _task_input(), workspace="default")
+    assert not published and replaced.project == "proj-a"
+
+
+async def test_replace_that_loses_the_create_race_republishes_onto_the_winners_task(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """Two first publishers both read "not found"; the one whose create loses replaces instead of failing."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    await service.create_task("task-1", _task_input(), workspace="default")
+    real_get = entity_store.get
+    reads = 0
+
+    async def _before_the_winner(entity_type, *args, **kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == 1:  # our first read ran before the winner's create landed
+            raise NemoEntityNotFoundError("not found")
+        return await real_get(entity_type, *args, **kwargs)
+
+    entity_store.get = _before_the_winner
+
+    replaced, published = await service.replace_task("task-1", _task_input(), workspace="default")
+    assert not published and replaced.revision == 1
+    changed = _task_input(intent="Rewritten.")
+    reads = 0
+    replaced, published = await service.replace_task("task-1", changed, workspace="default")
+    assert published and replaced.revision == 2  # a real change still publishes after a lost create
 
 
 async def test_replace_leaves_no_uncovered_head_content_when_publishing_fails(

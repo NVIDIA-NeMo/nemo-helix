@@ -337,9 +337,11 @@ class TasksetService:
         """Replace a taskset's content and publish the result, creating it if absent.
 
         Algorithm:
-            - Delegate to strict creation when no head exists.
+            - Delegate to strict creation when no head exists; if another publisher's create lands
+              first, replace onto their taskset instead.
             - Re-resolve membership and publish the head and revision together.
-            - Persist non-versioned project changes when content publication is a no-op.
+            - Persist fields outside the digest when content publication is a no-op and they changed;
+              otherwise write nothing, so identical concurrent PUTs never conflict.
 
         Note that re-submitting *identical* membership can still publish a new revision: members are
         re-resolved on every write, so if a member task published since last time, ``#latest`` now
@@ -349,8 +351,12 @@ class TasksetService:
         try:
             head = await self.entity_client.get(TasksetEntity, name=name, workspace=workspace)
         except NemoEntityNotFoundError:
-            return await self.create_taskset(name, taskset_input, workspace=workspace, project=project)
+            try:
+                return await self.create_taskset(name, taskset_input, workspace=workspace, project=project)
+            except TasksetExistsError:
+                head = await self.entity_client.get(TasksetEntity, name=name, workspace=workspace)
 
+        stored = head.model_dump(mode="json")
         if project is not None:
             # Applied rather than ignored. ``project`` is a query parameter, so an omitted value
             # means "leave it alone" — only an explicit value moves the record.
@@ -359,13 +365,15 @@ class TasksetService:
         head.tasks = await self._resolved_content(taskset_input, workspace=workspace)
         head.files_ref = taskset_input.files_ref
         head.metadata = taskset_input.metadata
+        changed = head.model_dump(mode="json") != stored
         # Publish the staged content *without* committing the head first — see the matching comment
         # in ``TaskService.replace_task``. Publishing writes the head itself, so a pre-write would
         # only open a window where a failed publish leaves the head serving uncovered content.
         revision, published_head, published = await self._publish(head, tags=set(taskset_input.tags))
-        if not published:
+        if not published and changed:
             # Publishing wrote nothing (content already published and tagged as requested), so
-            # persist what sits outside the digest — ``project``.
+            # persist what sits outside the digest — ``project``. Nothing changed: no write, so
+            # nothing to conflict with.
             published_head = await self.entity_client.update(published_head)
         logger.info(
             "Taskset replaced",
