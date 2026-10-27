@@ -72,7 +72,7 @@ Commands for the gated-model rule in `SKILL.md` § **Pre-flight**.
 nemo secrets list --workspace default
 ```
 
-The token needs **Read** access (https://huggingface.co/settings/tokens), and the user must accept the model license on the model's HF page with the same account.
+The token needs **Read** access (https://huggingface.co/settings/tokens), and the user must accept the model license on the model's Hugging Face page with the same account.
 
 ### 2. Create or update the secret
 

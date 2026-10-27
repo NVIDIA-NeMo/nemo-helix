@@ -113,7 +113,7 @@ metadata:
   adapter_agent: verifiers_agent
 ```
 
-`metadata` is provenance only — nothing in it changes how the environment installs or runs, **except** that `vf_env_id` is what dataset rows are checked against when you validate them.
+`metadata` is provenance only — nothing in it changes how the environment installs or runs. The one value that matters is `vf_env_id`: every dataset row's `vf_env_id` must equal it. Neither `--validate-only` nor submit compares them, so a mismatch surfaces only when the environment fails to load at spin-up.
 
 ### Rules every format shares
 

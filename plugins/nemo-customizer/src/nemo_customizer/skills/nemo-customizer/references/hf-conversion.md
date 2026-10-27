@@ -16,9 +16,10 @@ from huggingface_hub import file_exists, hf_hub_download
 
 def has_chat_template(repo: str) -> bool:
     """True when the repo's tokenizer ships a chat template."""
-    with open(hf_hub_download(repo, "tokenizer_config.json"), encoding="utf-8") as f:
-        if json.load(f).get("chat_template"):
-            return True
+    if file_exists(repo, "tokenizer_config.json"):
+        with open(hf_hub_download(repo, "tokenizer_config.json"), encoding="utf-8") as f:
+            if json.load(f).get("chat_template"):
+                return True
     # Newer tokenizers keep the template in its own file.
     return file_exists(repo, "chat_template.jinja")
 ```

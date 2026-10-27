@@ -22,8 +22,9 @@ uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judg
   --out-dir /tmp/mwj-data --train-size 512
 ```
 
-**NeMo Gym is not vendored in nemo-helix** and is not a platform dependency, so the two
-Gym-source formats need a checkout you provide:
+**NeMo Gym is not vendored in nemo-helix** and is not a platform dependency. Packaging a Gym
+server (`native-v1`, or `wheels-v1` from a Gym tree) runs on the machine that builds the
+package, so clone Gym there; the training cluster never needs a checkout:
 
 ```bash
 git clone https://github.com/NVIDIA-NeMo/Gym ~/workspace/Gym

@@ -83,12 +83,41 @@ EOF
 )
 
 mkdir -p my-env/wheels
-GYM_WHEEL=my-env/wheels/nemo_gym-${GYM_VERSION}-py3-none-any.whl
+
+# A wheel of the nemo_gym library alone, at the image's version. Building the Gym checkout
+# itself would package every built-in server too, so build a copy that holds only nemo_gym.
+GYM="$RL/3rdparty/Gym-workspace/Gym"
+LIB="$(mktemp -d)/nemo-gym"
+mkdir -p "$LIB" && cp -R "$GYM/nemo_gym" "$LIB/"
+python - "$GYM/pyproject.toml" "$GYM_VERSION" > "$LIB/pyproject.toml" <<'EOF'
+import json, sys, tomllib
+project = tomllib.load(open(sys.argv[1], "rb"))["project"]
+dev = project.get("optional-dependencies", {}).get("dev", [])
+print(f"""[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemo-gym"
+version = {json.dumps(sys.argv[2])}
+dependencies = {json.dumps(project.get("dependencies", []))}
+
+[project.optional-dependencies]
+dev = {json.dumps(dev)}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nemo_gym", "nemo_gym.*"]""")
+EOF
+uv build --wheel --no-config --out-dir my-env/wheels "$LIB"
+GYM_WHEEL=$(ls my-env/wheels/nemo_gym-*.whl)
+
 grep -v -e '../..' -e 'nemo-gym' -e '^#' resources_servers/my_env/requirements.txt > server.in
 
 # Resolve and download are separate steps: `--platform` requires `--no-deps`, and resolving
 # on the build host would evaluate environment markers for the wrong OS.
 cat > closure.in <<EOF
+nemo-gym[dev] @ file://$PWD/$GYM_WHEEL
 ray[default]==$RAY_VERSION
 openai==$OPENAI_VERSION
 pip
