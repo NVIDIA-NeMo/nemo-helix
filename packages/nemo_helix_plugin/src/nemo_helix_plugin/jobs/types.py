@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Any, NotRequired, Optional, Protocol, Self, TypedDict
+from typing import Annotated, Any, NotRequired, Optional, Self, TypedDict
 
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
@@ -30,6 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
+from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
 from nemo_helix_plugin.schema import Value
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
@@ -59,6 +60,8 @@ def validate_output_location(value: str | None) -> str | None:
 
 
 JOB_FILESET_NAME_PREFIX = "job-fileset-"
+# Longest job name that still fits verbatim in ``job-fileset-<name>``; a longer name is normalized,
+# truncated, and given a hash suffix by ``derive_job_fileset_name``.
 JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET = NAME_MAX_LENGTH - len(JOB_FILESET_NAME_PREFIX)
 
 
@@ -67,34 +70,27 @@ JobName = Annotated[
     Field(
         pattern=NAME_PATTERN,
         max_length=NAME_MAX_LENGTH,
-        description=(
-            f"Job name. {NAME_PATTERN_DESCRIPTION} At most {JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET} characters "
-            "when output_location is not set. Auto-generated when omitted."
-        ),
+        description=f"Job name. {NAME_PATTERN_DESCRIPTION} Auto-generated when omitted.",
     ),
 ]
 
 
-class _NamedJobRequest(Protocol):
-    @property
-    def name(self) -> str | None: ...
+def derive_job_fileset_name(job_name: str, workspace: str) -> str:
+    """Return a valid, length-safe ``job-fileset-`` name for a job's auto-created artifact fileset.
 
-    @property
-    def output_location(self) -> str | None: ...
-
-
-def validate_job_name_fits_derived_fileset[RequestT: _NamedJobRequest](request: RequestT) -> RequestT:
-    """Reject a ``name`` too long for the ``job-fileset-<name>`` fileset created when ``output_location`` is unset."""
-    if (
-        request.name is not None
-        and request.output_location is None
-        and len(request.name) > JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET
-    ):
-        raise ValueError(
-            f"name must be at most {JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET} characters when output_location is "
-            f"not set, because the job's artifact fileset is named '{JOB_FILESET_NAME_PREFIX}<name>'"
-        )
-    return request
+    A short job name nests verbatim as ``job-fileset-<name>``; a longer one is normalized,
+    truncated, and given a hash suffix via :func:`k8s_safe_name`, keyed on the ``workspace/name``
+    identity so the result is deterministic and collision-safe.
+    """
+    if len(job_name) <= JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET:
+        return f"{JOB_FILESET_NAME_PREFIX}{job_name}"
+    safe_name_part = k8s_safe_name(
+        base_name=job_name,
+        max_length=JOB_NAME_MAX_LENGTH_WITH_DERIVED_FILESET,
+        hash_input=workspace_name_identity(workspace, job_name),
+        name_type="label",
+    )
+    return f"{JOB_FILESET_NAME_PREFIX}{safe_name_part}"
 
 
 # Root folder for job artifacts inside a caller-supplied ``output_location`` fileset, so a
@@ -417,7 +413,6 @@ class CreateHelixJobRequest(BaseModel):
     output_location: Optional[str] = None
 
     _validate_output_location = field_validator("output_location")(validate_output_location)
-    _validate_name_fits_derived_fileset = model_validator(mode="after")(validate_job_name_fits_derived_fileset)
 
 
 class UpdateHelixJobRequest(BaseModel):

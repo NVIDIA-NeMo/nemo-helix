@@ -195,7 +195,10 @@ Convert-only (`enable_mining: false`) is only for inspecting `eval_beir`. It wri
 
 One `artifacts` result per job. The result is a directory inside the job
 fileset, not a separate fileset. Its `artifact_url` has this shape:
-`default/job-fileset-<job>#results/<attempt>/artifacts`. Append `/` when passing
+`<workspace>/<job-fileset>#results/<attempt>/artifacts`, where `<job-fileset>` is
+usually `job-fileset-<job>` but gets a hash suffix for a job name near the length
+limit — so take it from the returned `artifact_url`, never by rebuilding it from the
+job name. Append `/` when passing
 it as Automodel `dataset.training`; the trailing slash makes `file_io` stage the
 directory contents at the dataset root. At that root are `training.jsonl` and
 `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`). Wrapped
@@ -204,22 +207,22 @@ directory contents at the dataset root. At that root are `training.jsonl` and
 
 ```bash
 nemo jobs get-status <prepare-job> -f json
+# The artifacts result's artifact_url carries the real fileset + path.
 nemo jobs results list <prepare-job> --workspace default -f json
-nemo files list <job-fileset> --workspace default
 ```
 
-Use the returned path, not only the job fileset name:
+Use the `artifact_url` returned above, not a reconstructed `job-fileset-<job>` name:
 
 ```json
 {
   "dataset": {
-    "training": "default/job-fileset-<job>#results/<attempt>/artifacts/"
+    "training": "<workspace>/<job-fileset>#results/<attempt>/artifacts/"
   }
 }
 ```
 
-For `retrieve-eval`, select the BEIR subtree with
-`default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**`.
+For `retrieve-eval`, select the BEIR subtree by appending
+`/eval_beir/**` to that same `artifact_url`.
 
 ## Next Steps
 

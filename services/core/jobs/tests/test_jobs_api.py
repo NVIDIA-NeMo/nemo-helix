@@ -2089,10 +2089,25 @@ async def test_create_job_without_name_for_source_ending_in_separator_is_admitte
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["bad--name", "a" * 52])
+@pytest.mark.parametrize("name", ["bad--name"])
 async def test_create_job_with_name_that_cannot_name_its_fileset_returns_422(test_client: AsyncClient, name: str):
     """An invalid caller-supplied name is rejected at request validation, not reported as a state conflict."""
     response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name=name))
 
     assert response.status_code == 422
     assert "conflicts with existing platform state" not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("length", [52, 63])
+async def test_create_job_with_full_length_name_submits_without_output_location(test_client: AsyncClient, length: int):
+    """A job name longer than the derived-fileset prefix budget now submits; the service derives a
+    length-safe fileset name instead of rejecting the request."""
+    name = "a" * length
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name=name))
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["name"] == name
+    # The derived artifact fileset name stays within the entity-name limit.
+    assert len(body["fileset"]) <= 63
