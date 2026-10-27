@@ -27,7 +27,7 @@ import logging
 import math
 import random
 from collections import Counter, defaultdict
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -244,6 +244,14 @@ class FakeJobsCluster:
         self._read_faults("get")
         job = self.jobs.get((workspace, name))
         return job.response() if job is not None and job.visible(self.sim.clock.now) else None
+
+    async def list_named(self, workspace: str, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        # One call for every name; a hanging name hangs the whole list.
+        self._enter("list", next((name for name in names if name in self.hanging), names[0]))
+        self._read_faults("list")
+        now = self.sim.clock.now
+        listed = {name: self.jobs.get((workspace, name)) for name in names}
+        return {name: job.response() for name, job in listed.items() if job is not None and job.visible(now)}
 
     async def has_steps(self, workspace: str, name: str) -> bool:
         self._enter("steps", name)
@@ -483,6 +491,9 @@ class ClusterRunJobs:
 
     async def get(self, name: str) -> HelixJobResponse | None:
         return await self._cluster.get(self._workspace, name)
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        return await self._cluster.list_named(self._workspace, names)
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
         return await self._cluster.result(self._workspace, job, name)
@@ -1942,9 +1953,9 @@ async def test_deadline_between_phase_1_and_phase_2_creates_nothing(make_sim: Ma
     sim.cluster.duration = lambda name: 20
     busy = await sim.submit("busy", tasks=3)
     await sim.step()  # busy holds 3 registered Jobs
-    sim.cluster.read_latency = timedelta(seconds=8)  # each Jobs read takes 8 s from now on
+    sim.cluster.read_latency = timedelta(seconds=25)  # each Jobs read takes 25 s from now on
     late = await sim.submit("late", tasks=3, creator="user:bob", queue_timeout=timedelta(seconds=20))
-    report = await sim.step()  # starts at t+15; phase 1 reads 3 Jobs (24 s): phase 2 runs after t+35
+    report = await sim.step()  # starts at t+15; phase 1 lists busy's 3 Jobs in one 25 s read: phase 2 after t+35
     assert report is not None and late.entity.name in report.grants
     assert not [name for _, name in sim.cluster.jobs if name.startswith("run-late-")]
     await sim.run_until_final(60)

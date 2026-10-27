@@ -113,6 +113,9 @@ NO_RETRY = RetryPolicy(max_retries=0)
 """The controller's clients never retry: the platform's default retries timeouts, 5xx and 409, so a hung Jobs
 call would hold a cycle for three timeouts, and a create retried after an ambiguous attempt could be refused
 and read as a refusal of the first POST."""
+LIST_CHUNK = 100
+"""Names per Jobs list. Jobs pages by offset, so a Job deleted between two pages would shift a running Job off
+both and read as missing; names are unique in a workspace, so a list of at most this many names is one page."""
 
 
 class RunJobs(Protocol):
@@ -123,6 +126,11 @@ class RunJobs(Protocol):
     """
 
     async def get(self, name: str) -> HelixJobResponse | None: ...
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        """The Jobs now under ``names`` (at most :data:`LIST_CHUNK`), by name: one call, the answer a GET of each
+        would give. A name with no Job (or one saved without its attempt) is left out."""
+        ...
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
         """Result ``name`` of the Job now under name ``job``; its ``job`` field is that Job's id."""
@@ -168,6 +176,7 @@ class JobsBreaker:
     def __init__(self) -> None:
         self.tripped = False
         self.timeouts = 0
+        self.reads = 0  # Jobs read requests it let through: lists, GETs, results, step listings
 
     def trip(self) -> None:
         self.tripped = True
@@ -181,9 +190,10 @@ class GuardedRunJobs:
         self._inner = inner
         self._breaker = breaker
 
-    async def _jobs_call[T](self, call: Callable[[], Awaitable[T]]) -> T:
+    async def _jobs_call[T](self, call: Callable[[], Awaitable[T]], *, read: bool = False) -> T:
         if self._breaker.tripped:
             raise JobsUnavailableError("an earlier Jobs call timed out this cycle")
+        self._breaker.reads += read
         try:
             return await call()
         except (NemoTransportError, httpx.TransportError, TimeoutError):
@@ -195,16 +205,25 @@ class GuardedRunJobs:
         return self._inner.evaluations
 
     async def get(self, name: str) -> HelixJobResponse | None:
-        return await self._jobs_call(lambda: self._inner.get(name))
+        return await self._jobs_call(lambda: self._inner.get(name), read=True)
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        """Any number of names, :data:`LIST_CHUNK` per call; each call checks the breaker, so once another run's
+        timeout trips it, no later chunk is sent. Any chunk failing fails the whole list."""
+        listed: dict[str, HelixJobResponse] = {}
+        for start in range(0, len(names), LIST_CHUNK):
+            chunk = names[start : start + LIST_CHUNK]
+            listed |= await self._jobs_call(lambda chunk=chunk: self._inner.list_named(chunk), read=True)
+        return listed
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
-        return await self._jobs_call(lambda: self._inner.result(job, name))
+        return await self._jobs_call(lambda: self._inner.result(job, name), read=True)
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse:
         return await self._jobs_call(lambda: self._inner.create(request))
 
     async def has_steps(self, name: str) -> bool:
-        return await self._jobs_call(lambda: self._inner.has_steps(name))
+        return await self._jobs_call(lambda: self._inner.has_steps(name), read=True)
 
     async def cancel(self, name: str) -> None:
         await self._jobs_call(lambda: self._inner.cancel(name))
@@ -274,6 +293,7 @@ class CycleReport:
     held_by_creator: dict[str, int] = field(default_factory=dict)
     oldest_queued_wait: timedelta | None = None
     jobs_timeouts: int = 0
+    jobs_reads: int = 0  # Jobs read requests: lists, GETs, results, step listings
     created: int = 0
     phase2_skipped: str | None = None
     grants: list[str] = field(default_factory=list)  # run names in grant order, as allocate() returned them
@@ -403,6 +423,9 @@ class TasksetRunReconciler:
         # Where each run's Job reads (and the stuck-Job reads) start next cycle: just past the read that last
         # tripped the cutoff, so one Job whose GET always hangs can't keep the others from ever being read.
         self._read_cursor: dict[str, int] = {}  # run id -> task index
+        # Runs whose last Jobs list failed: read one Job at a time from the cursor until a pass reads every one,
+        # so one Job that can't be read never keeps the run's other Jobs from being read.
+        self._read_one_by_one: set[str] = set()
         self._stuck_cursor: tuple[str, str] | None = None
 
     @property
@@ -528,33 +551,60 @@ class TasksetRunReconciler:
         now: datetime,
         stop: TasksetRunPhase | None,
     ) -> None:
-        """P3 and P4 in one pass over the run's members with a Job name, starting at the run's read cursor.
+        """P3 and P4 over the run's members with a Job name: one Jobs list, then a pass from the run's read cursor.
 
-        One loop, so a Job whose GET always times out can't keep the run's other Jobs from being read: the
-        first timeout ends the cycle's Jobs calls, and the next cycle starts just past the read that tripped it.
+        The list answers what a GET of each name would, in one call per :data:`LIST_CHUNK` names. When it fails,
+        nothing it would have read is used; the run's Jobs are read one at a time instead, from this cycle until a
+        pass reads every one, so a Job whose read always fails or hangs can't keep the others from being read.
+        A timeout (of the list, a GET or a result read) ends the cycle's Jobs calls, and the next cycle starts just
+        past the member whose read was cut off.
         """
+        run_id = state.run.id
         named = [m for m in state.members if m.task_job is not None and not _settled(m)]
-        order = _from_cursor(named, lambda m: m.task_index, self._read_cursor.get(state.run.id))
-        for member in order:
+        if not named:
+            self._read_one_by_one.discard(run_id)
+            return
+        listed: dict[str, HelixJobResponse] | None = None
+        if run_id not in self._read_one_by_one:
+            try:
+                listed = await jobs.list_named([m.task_job for m in named if m.task_job is not None])
+            except Exception as exc:
+                logger.info("Run %s: listing its Jobs failed (%s); reading them one at a time", state.run.name, exc)
+                self._read_one_by_one.add(run_id)
+        every_read = True
+        for member in _from_cursor(named, lambda m: m.task_index, self._read_cursor.get(run_id)):
             if breaker.tripped:
-                self._read_cursor[state.run.id] = member.task_index
+                self._read_cursor[run_id] = member.task_index
+                every_read = False
                 break
-            job: HelixJobResponse | None = None
+            assert member.task_job is not None
+            if listed is not None:
+                job = listed.get(member.task_job)  # None: no Job under the name, as a GET's 404
+            else:
+                try:
+                    job = await jobs.get(member.task_job)
+                except Exception as exc:
+                    logger.debug("Run %s: reading Job %s failed: %s", state.run.name, member.task_job, exc)
+                    every_read = False
+                    continue  # keeps its slot and its last job_status
             if member.phase is MemberPhase.IMAGE_READY:
-                member, job = await self._resolve_intent(state, plan, member, jobs, now, stop)
+                member, job = await self._resolve_intent(state, plan, member, job, jobs, now, stop)
             if member.phase is MemberPhase.REGISTERED:
                 await self._settle_registered(state, member, job, jobs, stop)
+        if listed is None and every_read:
+            self._read_one_by_one.discard(run_id)  # every Job answered: back to one list next cycle
 
     async def _resolve_intent(
         self,
         state: _RunState,
         plan: TasksetRunPlan,
         member: TasksetRunMemberEntity,
+        job: HelixJobResponse | None,
         jobs: RunJobs,
         now: datetime,
         stop: TasksetRunPhase | None,
     ) -> tuple[TasksetRunMemberEntity, HelixJobResponse | None]:
-        """P3: read a create intent's Job as the evals service: ours → registered; foreign → failed.
+        """P3: a create intent's Job, as the run's Jobs list read it: ours → registered; foreign → failed.
 
         Returns the member as last written and, when it was adopted, the Job just read.
         """
@@ -562,7 +612,6 @@ class TasksetRunReconciler:
         request = await task_job_request(plan, state.run, index, plan.task_environments[index])
         assert request.name is not None
         try:
-            job = await jobs.get(request.name)
             found = await adoption(job, request, jobs) if job is not None else None
         except Exception as exc:
             logger.debug("Run %s: reading intent %s failed: %s", state.run.name, request.name, exc)
@@ -592,13 +641,13 @@ class TasksetRunReconciler:
     ) -> None:
         """P4: settle a registered member whose Job ended; record a changed ``job_status`` otherwise.
 
-        ``job`` is the Job when P3 just read it. Ours only when its id is ``member.job_id``: Jobs deletes only
-        ended Jobs, so another id under the name means ours ended and was deleted (``job_missing``). A result
-        counts only when it names that id too.
+        ``job`` is what the run's Jobs list read under the member's name (None: no Job there). Ours only when its
+        id is ``member.job_id``: Jobs deletes only ended Jobs, so another id under the name means ours ended and
+        was deleted (``job_missing``). A result counts only when it names that id too.
         """
         assert member.task_job is not None
         try:
-            job = _ours(job or await jobs.get(member.task_job), member)
+            job = _ours(job, member)
             status = _status(job) if job is not None else None
             result = await jobs.result(member.task_job, DEFAULT_RESULT_NAME) if status == "completed" else None
         except Exception as exc:
@@ -860,6 +909,7 @@ class TasksetRunReconciler:
                     if not await self._register(state, member, GuardedRunJobs(opened[state.run.id], breaker), report):
                         break
                 report.jobs_timeouts += breaker.timeouts
+                report.jobs_reads += breaker.reads
 
     async def _register(
         self, state: _RunState, member: TasksetRunMemberEntity, jobs: RunJobs, report: CycleReport
@@ -921,9 +971,10 @@ class TasksetRunReconciler:
         report.held_by_creator = dict(held_by_creator)
         report.oldest_queued_wait = oldest
         report.jobs_timeouts += breaker.timeouts
+        report.jobs_reads += breaker.reads
         logger.info(
             "Taskset runs: task slots %d/%d, queued tasks %d, open runs %d, oldest queued run waited %s, "
-            "held per creator %s, stuck Jobs %d, created %d, cycle %.1fs, Jobs timeouts %d%s",
+            "held per creator %s, stuck Jobs %d, created %d, cycle %.1fs, Jobs timeouts %d, Jobs reads %d%s",
             report.used,
             report.cap,
             report.queued,
@@ -934,6 +985,7 @@ class TasksetRunReconciler:
             report.created,
             time.monotonic() - started,
             report.jobs_timeouts,
+            report.jobs_reads,
             f", phase 2 skipped: {report.phase2_skipped}" if report.phase2_skipped else "",
         )
 
@@ -1294,6 +1346,17 @@ class JobsServiceRunJobs:
             return (await self._jobs.get_job(workspace=self._workspace, name=name)).data()
         except NotFoundError:
             return None
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        if len(names) > LIST_CHUNK:
+            raise ValueError(f"at most {LIST_CHUNK} names per Jobs list, got {len(names)}: more could span pages")
+        if not names:
+            return {}
+        response = await self._jobs.list_jobs(
+            workspace=self._workspace,
+            query_params={"filter": {"name": {"$in": list(names)}}, "page_size": LIST_CHUNK},
+        )
+        return {job.name: job for job in response.page().items if job.name in names}
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
         try:

@@ -3,6 +3,7 @@
 
 """Controller cycles over in-memory records and Jobs: members, slots, registration, settling, stops, bundling."""
 
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -14,8 +15,12 @@ import pytest
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.taskset_runs.controller import (
+    LIST_CHUNK,
     TERMINAL_JOB_STATUSES,
+    GuardedRunJobs,
+    JobsBreaker,
     JobsServiceRunJobs,
+    JobsUnavailableError,
     TasksetRunReconciler,
 )
 from nemo_evals.taskset_runs.entities import (
@@ -161,6 +166,14 @@ class FakeRunJobs:
         if name in self.broken:
             raise self.broken[name]
         return self.jobs.get(name)
+
+    async def list_named(self, names):
+        assert len(names) <= LIST_CHUNK, "GuardedRunJobs chunks the names"
+        await self._scripted("list")
+        broken = next((self.broken[name] for name in names if name in self.broken), None)
+        if broken is not None:
+            raise broken  # one Job that can't be read fails the whole list, as its page would
+        return {name: self.jobs[name] for name in names if name in self.jobs}
 
     async def result(self, job, name):
         await self._scripted("result")
@@ -937,17 +950,77 @@ async def test_a_task_settled_under_an_unreadable_plan_records_what_its_job_publ
     assert member.publication.evaluation_id == "eval-1"
 
 
+async def test_a_cycle_reads_each_runs_jobs_with_one_list(make_harness, harbor_plan, jobs):
+    harness = make_harness(max_cluster_concurrent_jobs=15)
+    runs = [await harness.submit(sized(harbor_plan, 5), name=f"run-{n}") for n in "abc"]
+    await harness.cycle()
+    jobs.finish(task(runs[0], 0), "completed")
+    jobs.calls.clear()
+    report = await harness.cycle()
+    assert jobs.calls.count("list") == 3 and "get" not in jobs.calls
+    assert report.jobs_reads == 4  # 3 lists and the completed Job's result
+    assert (await harness.phases(runs[0]))[0] == "succeeded"
+
+
+async def test_a_failed_list_reads_the_runs_jobs_one_at_a_time_until_every_one_answers(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 3), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "completed")
+    jobs.broken[task(run, 1)] = http_error(InternalServerError, 500)  # fails its list, then its own GET
+    jobs.calls.clear()
+    await harness.cycle()
+    reads = [call for call in jobs.calls if call in ("list", "get")]
+    assert reads == ["list", "get", "get", "get"]  # the same cycle reads them one at a time
+    assert await harness.phases(run) == ["succeeded", "registered", "registered"]  # task 1 keeps its slot
+    jobs.calls.clear()
+    await harness.cycle()
+    assert "list" not in jobs.calls  # task 1 still didn't answer: one at a time again
+    del jobs.broken[task(run, 1)]
+    await harness.cycle()  # every Job answers
+    jobs.calls.clear()
+    await harness.cycle()
+    assert jobs.calls == ["list"]
+
+
+async def test_the_guarded_list_sends_at_most_100_names_per_call_and_finds_every_job(harbor_plan, harbor_run, jobs):
+    base = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
+    requests = [base.model_copy(update={"name": f"run-a-task-{n}"}) for n in range(150)]
+    for request in requests:
+        jobs.put(request, "active")
+    jobs.finish("run-a-task-0", "completed")
+    # Jobs deletes an ended Job between the two calls: with offset pages, that would shift a running Job off both.
+    jobs.script("list", None, lambda: jobs.jobs.pop("run-a-task-0"))
+    listed = await GuardedRunJobs(jobs, JobsBreaker()).list_named([r.name for r in requests if r.name])
+    assert jobs.calls == ["list", "list"]
+    assert set(listed) == {f"run-a-task-{n}" for n in range(150)}  # task 0 was read before it was deleted
+
+
+async def test_a_failing_second_chunk_fails_the_whole_list(jobs):
+    names = [f"run-a-task-{n}" for n in range(150)]
+    jobs.script("list", None, http_error(InternalServerError, 500))
+    with pytest.raises(InternalServerError):
+        await GuardedRunJobs(jobs, JobsBreaker()).list_named(names)
+
+
+async def test_another_runs_timeout_while_a_chunk_is_in_flight_stops_the_next_chunk(jobs):
+    breaker = JobsBreaker()
+    jobs.script("list", breaker.trip)  # another run's read times out while chunk 1 is in flight
+    with pytest.raises(JobsUnavailableError):
+        await GuardedRunJobs(jobs, breaker).list_named([f"run-a-task-{n}" for n in range(150)])
+    assert jobs.calls == ["list"]
+
+
 async def test_a_jobs_timeout_in_phase_1_stops_its_reads_but_not_the_grants(make_harness, harbor_plan, jobs):
     harness = make_harness(max_cluster_concurrent_jobs=4)
     run = await harness.submit(sized(harbor_plan, 3), name="run-a")
     await harness.cycle()
     jobs.finish_all()
     later = await harness.submit(sized(harbor_plan, 1), name="run-b")
-    jobs.script("get", timeout())
+    jobs.script("list", timeout())
     jobs.calls.clear()
     report = await harness.cycle()
-    # One read, then the cutoff; phase 2 bounds itself, so a hanging read doesn't stop the free slot's grant.
-    assert jobs.calls == ["get", "create"] and report.jobs_timeouts == 1 and report.phase2_skipped is None
+    # One list, then the cutoff; phase 2 bounds itself, so a hanging read doesn't stop the free slot's grant.
+    assert jobs.calls == ["list", "create"] and report.jobs_timeouts == 1 and report.phase2_skipped is None
     assert await harness.phases(run) == ["registered"] * 3  # members keep their state
     assert await harness.phases(later) == ["registered"]
 
@@ -1611,3 +1684,31 @@ def test_the_controller_creates_on_behalf_of_the_stored_principal(harbor_run):
     principal = on_behalf_of(harbor_run.with_auth_context(snapshot))
     assert not isinstance(principal, str)
     assert (principal.id, principal.email, list(principal.groups or [])) == ("user:bob", "bob@ac9.test", ["ac9-users"])
+
+
+async def test_the_jobs_adapter_lists_up_to_100_names_in_one_request(harbor_plan, harbor_run):
+    fake = FakeRunJobs()
+    names = []
+    for index in range(2):
+        request = await task_job_request(harbor_plan, harbor_run, index, harbor_plan.task_environments[index])
+        names.append(fake.put(request, "active").name)
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        asked = json.loads(request.url.params["filter"])["name"]["$in"]
+        data = [fake.jobs[name].model_dump(mode="json") for name in asked if name in fake.jobs]
+        pagination = {"page": 1, "page_size": LIST_CHUNK, "current_page_size": len(data), "total_pages": 1}
+        return httpx.Response(200, json={"data": data, "pagination": pagination | {"total_results": len(data)}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        async with AsyncNemoClient(base_url="http://platform.test", http_client=http_client) as client:
+            adapter = JobsServiceRunJobs(client, client, "default")
+            listed = await adapter.list_named([*names, "run-gone-task-9"])
+            with pytest.raises(ValueError, match="at most 100"):
+                await adapter.list_named([f"n-{n}" for n in range(LIST_CHUNK + 1)])
+    assert set(listed) == set(names) and all(listed[name].id == fake.jobs[name].id for name in names)
+    (request,) = seen  # the 101-name call never reached Jobs
+    assert request.url.path == "/apis/jobs/v2/workspaces/default/jobs"
+    assert request.url.params["page_size"] == str(LIST_CHUNK)
+    assert json.loads(request.url.params["filter"]) == {"name": {"$in": [*names, "run-gone-task-9"]}}
