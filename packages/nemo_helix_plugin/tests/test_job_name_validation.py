@@ -91,7 +91,7 @@ def test_full_length_name_is_accepted_without_output_location(make_request: Requ
 
 @REQUEST_FACTORIES
 def test_long_name_is_accepted_with_output_location(make_request: RequestFactory) -> None:
-    """A caller-supplied fileset is used as-is, so the derived-fileset length cap does not apply."""
+    """A caller-supplied fileset is used as-is, so no fileset name is derived from the job name."""
     name = "a" * NAME_MAX_LENGTH
     assert make_request(name, "shared-fs").name == name
 
@@ -143,7 +143,7 @@ def test_derived_fileset_name_is_valid_for_every_job_name_length(length: int) ->
     name = "a" * length
     derived = derive_job_fileset_name(name, _WS)
     assert len(derived) <= NAME_MAX_LENGTH
-    # Constructing the request applies NAME_PATTERN + the length cap, so this asserts validity.
+    # Constructing the request applies NAME_PATTERN + the length limit, so this asserts validity.
     CreateFilesetRequest(name=derived)
 
 
