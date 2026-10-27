@@ -81,7 +81,7 @@ Then upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/test.j
 
 ## Image rows
 
-When a source row has an image, do not use `to_sft` and do not collapse the row into one string. Write the image next to the JSONL and emit a part list. A string `content` is still one text part, so text-only rows keep `to_chat` / `to_sft` above. The assistant label stays one text part (a string).
+When a source row has an image, write the image next to the JSONL and emit a part list. A string `content` is still one text part. Text-only rows in this same file use `to_chat`, so every line is a `messages` row. An image file needs a chat model. The assistant label stays one text part (a string).
 
 Automodel does not convert the Hugging Face dataset. Upload a directory that is already this shape. For CORD-v2, run the helper and upload what it writes (`train/` and frozen `eval/`):
 
@@ -125,6 +125,7 @@ def to_multimodal_chat(image_url: str, user: str, assistant: str):
         ]
     }
 
+out = Path("/tmp/train-data")
 images = out / "images"
 images.mkdir(exist_ok=True)
 for split in ("train", "validation"):
@@ -134,7 +135,7 @@ for split in ("train", "validation"):
         for index, ex in enumerate(ds[split]):
             image = example_image(ex)
             if image is None:
-                f.write(json.dumps(convert(ex)) + "\n")
+                f.write(json.dumps(to_chat(ex)) + "\n")
                 continue
             relative = f"images/{split}_{index}.png"
             image.save(images / f"{split}_{index}.png")
