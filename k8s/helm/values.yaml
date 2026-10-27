@@ -644,8 +644,11 @@ baseHelixConfig: |
   # -- jobs is the configuration specific to executing jobs on the platform
   jobs:
     # -- executor_defaults is the default configuration applied to all executor profiles
+    max_active_jobs_per_user: {{ .Values.core.jobs.maxActiveJobsPerUser }}
+    max_active_jobs_per_workspace: {{ .Values.core.jobs.maxActiveJobsPerWorkspace }}
     executor_defaults:
       kubernetes_job:
+        max_active_jobs: {{ .Values.core.jobs.maxActiveJobs }}
         service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
         launcher_image: {{ include "nhx-core.image" . | quote }}
         storage:
@@ -658,6 +661,7 @@ baseHelixConfig: |
         step_network_policies_enabled: true
         {{- end }}
       volcano_job:
+        max_active_jobs: {{ .Values.core.jobs.maxActiveJobs }}
         service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
         launcher_image: {{ include "nhx-core.image" . | quote }}
         storage:
@@ -1140,6 +1144,12 @@ core:
   # -- Service account configuration for pods created by the jobs controller (Kubernetes/Volcano job pods).
   # @default -- This object has the following default values for the jobs service account configuration.
   jobs:
+    # -- Maximum number of jobs admitted to run concurrently on the Kubernetes and Volcano executors.
+    maxActiveJobs: 500
+    # -- Default maximum number of jobs a single user may have admitted concurrently.
+    maxActiveJobsPerUser: 50
+    # -- Default maximum number of jobs a single workspace may have admitted concurrently.
+    maxActiveJobsPerWorkspace: 200
     serviceAccount:
       # -- Specifies whether a service account should be created for job pods.
       create: true
