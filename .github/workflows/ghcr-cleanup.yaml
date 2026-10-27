@@ -55,8 +55,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/cleanup-ghcr-ci-images.sh
 
-  cleanup-nightly-releases:
-    name: Delete GHCR nightly release versions older than 90 days
+  cleanup-releases:
+    name: Delete RC build artifacts older than 90 days
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,7 +64,7 @@ jobs:
     env:
       DRY_RUN: ${{ inputs['dry-run'] || 'false' }}
       STALE_HOURS: "2160"
-      CLEANUP_SCOPE: nightly-release
+      CLEANUP_SCOPE: release
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -78,7 +78,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Delete stale nightly release versions
+      - name: Delete RC build artifacts older than 90 days
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

@@ -3,7 +3,7 @@
 
 name: Release
 run-name: >-
-  Release ${{ github.event_name == 'schedule' && 'nightly' || inputs['release-type'] }}
+  Release ${{ github.event_name == 'schedule' && 'rc' || inputs['release-type'] }}
   by @${{ github.actor }}
 
 on:
@@ -17,12 +17,12 @@ on:
         description: "Release type."
         required: false
         type: choice
-        default: nightly
+        default: rc
         options:
-          - nightly
+          - rc
           - stable
       source-sha:
-        description: "Exact source commit SHA. Required for stable releases. Nightlies use the latest release/X.X version series; a pinned SHA must belong to that branch's history."
+        description: "Exact source commit SHA. Required for stable releases. RCs use the latest release/X.X version series; a pinned SHA must belong to that branch's history."
         required: false
         type: string
         default: ""
@@ -111,7 +111,7 @@ env:
   #   path        - package directory checked before any later release work starts
   #   independent - optional. Releases on its own version line: excluded from every scope
   #                 except `custom`, where it must be the only artifact selected, and not
-  #                 released as a nightly.
+  #                 released as an RC.
   #   tagPrefix   - optional. Git tag prefix for an independent wheel. Must match the
   #                 `pattern-prefix` its dynamic versioning reads.
   RELEASE_WHEELS_JSON: >-
@@ -146,13 +146,13 @@ env:
   RELEASE_HELM_PATH: k8s/helm
   RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-helix-dev
   STABLE_IMAGE_REGISTRY: nvcr.io/nvidia/nemo-helix
-  RELEASE_PUBLISH_NIGHTLY_WHEELS: "true"
-  RELEASE_NIGHTLY_WHEEL_INDEX: https://pypi.nvidia.com
+  RELEASE_PUBLISH_RC_WHEELS: "true"
+  RELEASE_RC_WHEEL_INDEX: https://pypi.nvidia.com
   RELEASE_STABLE_WHEEL_INDEX: https://pypi.org/simple
-  # Nightly GHCR readiness checks authenticate with the repository GITHUB_TOKEN.
-  RELEASE_NIGHTLY_CONTAINER_REGISTRY: ghcr.io/nvidia-nemo/nemo-helix
+  # RC GHCR readiness checks authenticate with the repository GITHUB_TOKEN.
+  RELEASE_RC_CONTAINER_REGISTRY: ghcr.io/nvidia-nemo/nemo-helix
   RELEASE_STABLE_CONTAINER_REGISTRY: nvcr.io/nvidia/nemo-helix
-  RELEASE_NIGHTLY_HELM_OCI_REGISTRY: oci://ghcr.io/nvidia-nemo/nemo-helix
+  RELEASE_RC_HELM_OCI_REGISTRY: oci://ghcr.io/nvidia-nemo/nemo-helix
   # Stable charts must be promoted from RELEASE_HELM_REGISTRY before polling.
   RELEASE_STABLE_HELM_REPOSITORY: https://helm.ngc.nvidia.com/nvidia/nemo-helix
   RELEASE_NGC_CATALOG_BASE: https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo-helix
@@ -170,7 +170,7 @@ jobs:
       release_tag: ${{ steps.plan.outputs.release_tag }}
       tag_prefix: ${{ steps.plan.outputs.tag_prefix }}
       release_label: ${{ steps.plan.outputs.release_label }}
-      nightly_timestamp: ${{ steps.plan.outputs.nightly_timestamp }}
+      rc_timestamp: ${{ steps.plan.outputs.rc_timestamp }}
       wheel_version: ${{ steps.wheel-version.outputs.wheel_version }}
       helm_version: ${{ steps.helm-version.outputs.helm_version }}
       wheel_ids: ${{ steps.plan.outputs.wheel_ids }}
@@ -200,7 +200,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            const { resolveReleasePlan, resolveNightlyBaseVersion } = require("./.github/scripts/release-plan.cjs");
+            const { resolveReleasePlan, resolveRcBaseVersion } = require("./.github/scripts/release-plan.cjs");
             const plan = await resolveReleasePlan({
               context,
               loadSourceWorkflow: async (ref) => {
@@ -227,13 +227,13 @@ jobs:
                 head,
               })).data,
             });
-            let nightlyBaseVersion = "";
-            if (plan.releaseType === "nightly" && plan.sourceBranch) {
+            let rcBaseVersion = "";
+            if (plan.releaseType === "rc" && plan.sourceBranch) {
               const tags = await github.paginate(github.rest.repos.listTags, {
                 ...context.repo,
                 per_page: 100,
               });
-              nightlyBaseVersion = resolveNightlyBaseVersion(plan.sourceBranch, tags);
+              rcBaseVersion = resolveRcBaseVersion(plan.sourceBranch, tags);
             }
             const outputs = {
               release_type: plan.releaseType,
@@ -245,8 +245,8 @@ jobs:
               release_tag: plan.releaseTag,
               tag_prefix: plan.tagPrefix,
               release_label: plan.releaseLabel,
-              nightly_timestamp: plan.nightlyTimestamp,
-              nightly_base_version: nightlyBaseVersion,
+              rc_timestamp: plan.rcTimestamp,
+              rc_base_version: rcBaseVersion,
               wheel_ids: JSON.stringify(plan.wheelIds),
               container_ids: JSON.stringify(plan.containerIds),
               wheel_artifacts: JSON.stringify(plan.wheels),
@@ -262,7 +262,11 @@ jobs:
             };
             Object.entries(outputs).forEach(([name, value]) => core.setOutput(name, value));
             core.info(`Planned ${plan.releaseType} release ${plan.releaseLabel} from ${plan.sourceSha}`);
-            if (plan.sourceBranch) core.info(`Selected nightly source branch: ${plan.sourceBranch}`);
+            if (plan.sourceBranch) core.info(`Selected RC source branch: ${plan.sourceBranch}`);
+
+      - name: Preserve release tooling from the workflow revision
+        shell: bash
+        run: cp .github/scripts/stamp_sdk_version.py "${RUNNER_TEMP}/stamp_sdk_version.py"
 
       - name: Checkout selected source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -314,18 +318,18 @@ jobs:
           RELEASE_TYPE: ${{ steps.plan.outputs.release_type }}
           RELEASE_VERSION: ${{ steps.plan.outputs.version }}
           IS_PRERELEASE: ${{ steps.plan.outputs.is_prerelease }}
-          NIGHTLY_TIMESTAMP: ${{ steps.plan.outputs.nightly_timestamp }}
-          NIGHTLY_BASE_VERSION: ${{ steps.plan.outputs.nightly_base_version }}
+          RC_TIMESTAMP: ${{ steps.plan.outputs.rc_timestamp }}
+          RC_BASE_VERSION: ${{ steps.plan.outputs.rc_base_version }}
         run: |
           set -euo pipefail
 
-          if [[ -n "${NIGHTLY_BASE_VERSION}" ]]; then
-            echo "wheel_version=${NIGHTLY_BASE_VERSION}.dev${NIGHTLY_TIMESTAMP}" >> "${GITHUB_OUTPUT}"
+          if [[ -n "${RC_BASE_VERSION}" ]]; then
+            echo "wheel_version=${RC_BASE_VERSION}.dev${RC_TIMESTAMP}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
-            cadence="nightly"
+          if [[ "${RELEASE_TYPE}" == "rc" ]]; then
+            cadence="rc"
           elif [[ "${IS_PRERELEASE}" == "true" ]]; then
             cadence="prerelease"
           else
@@ -336,13 +340,13 @@ jobs:
             --source-root .
             --sdk-id "$(jq -r '.[0]' <<< "${WHEEL_IDS}")"
             --cadence "${cadence}"
-            --nightly-timestamp "${NIGHTLY_TIMESTAMP}"
+            --rc-timestamp "${RC_TIMESTAMP}"
             --print-version
           )
           if [[ "${RELEASE_TYPE}" == "stable" ]]; then
             args+=(--release-label "${RELEASE_VERSION}")
           fi
-          wheel_version="$(python3 .github/scripts/stamp_sdk_version.py "${args[@]}")"
+          wheel_version="$(python3 "${RUNNER_TEMP}/stamp_sdk_version.py" "${args[@]}")"
           echo "wheel_version=${wheel_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Resolve Helm version
@@ -353,18 +357,18 @@ jobs:
           HELM_CHART: ${{ env.RELEASE_HELM_PATH }}
           RELEASE_TYPE: ${{ steps.plan.outputs.release_type }}
           RELEASE_VERSION: ${{ steps.plan.outputs.version }}
-          NIGHTLY_TIMESTAMP: ${{ steps.plan.outputs.nightly_timestamp }}
+          RC_TIMESTAMP: ${{ steps.plan.outputs.rc_timestamp }}
           HELM_VERSION_OVERRIDE: ${{ steps.plan.outputs.helm_version_override }}
-          NIGHTLY_BASE_VERSION: ${{ steps.plan.outputs.nightly_base_version }}
+          RC_BASE_VERSION: ${{ steps.plan.outputs.rc_base_version }}
         run: |
           set -euo pipefail
 
           if [[ -n "${HELM_VERSION_OVERRIDE}" ]]; then
             helm_version="${HELM_VERSION_OVERRIDE}"
-          elif [[ -n "${NIGHTLY_BASE_VERSION}" ]]; then
-            helm_version="${NIGHTLY_BASE_VERSION}-nightly-${NIGHTLY_TIMESTAMP}"
-          elif [[ "${RELEASE_TYPE}" == "nightly" ]]; then
-            # Nightlies align to the release core from the latest release or
+          elif [[ -n "${RC_BASE_VERSION}" ]]; then
+            helm_version="${RC_BASE_VERSION}-rc-${RC_TIMESTAMP}"
+          elif [[ "${RELEASE_TYPE}" == "rc" ]]; then
+            # RCs align to the release core from the latest release or
             # RC tag. Build-metadata chart fixes use helm-version instead.
             base_version="$(
               git tag --merged HEAD --list \
@@ -390,10 +394,10 @@ jobs:
               )"
             fi
             if [[ -z "${base_version}" ]]; then
-              echo "Unable to resolve Helm chart base version for nightly release." >&2
+              echo "Unable to resolve Helm chart base version for RC release." >&2
               exit 1
             fi
-            helm_version="${base_version}-nightly-${NIGHTLY_TIMESTAMP}"
+            helm_version="${base_version}-rc-${RC_TIMESTAMP}"
           else
             helm_version="${RELEASE_VERSION}"
           fi
@@ -418,7 +422,7 @@ jobs:
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
-          PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
+          PUBLISH_RC_WHEELS: ${{ env.RELEASE_PUBLISH_RC_WHEELS }}
           DRY_RUN: ${{ needs.plan-release.outputs.dry_run }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ needs.plan-release.outputs.source_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -430,7 +434,7 @@ jobs:
             const releaseType = process.env.RELEASE_TYPE;
             const title = releaseType === "stable"
               ? "*:ship: Release started*"
-              : "*:crescent_moon: Nightly release started*";
+              : "*:test_tube: RC release started*";
             const lines = [
               title,
               `Release: ${process.env.RELEASE_LABEL}`,
@@ -439,8 +443,8 @@ jobs:
               "*Artifacts:*",
             ];
             if (wheels.length > 0) {
-              const wheelAction = releaseType === "nightly"
-                && process.env.PUBLISH_NIGHTLY_WHEELS !== "true"
+              const wheelAction = releaseType === "rc"
+                && process.env.PUBLISH_RC_WHEELS !== "true"
                 ? "stage"
                 : "publish";
               lines.push(`*:python: Wheels to ${wheelAction}:*`);
@@ -565,10 +569,10 @@ jobs:
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
-          NIGHTLY_TIMESTAMP: ${{ needs.plan-release.outputs.nightly_timestamp }}
+          RC_TIMESTAMP: ${{ needs.plan-release.outputs.rc_timestamp }}
           WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
-          PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
+          PUBLISH_RC_WHEELS: ${{ env.RELEASE_PUBLISH_RC_WHEELS }}
         with:
           # ACT reports the payload without requiring the cross-repository dispatch token.
           github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
@@ -582,24 +586,24 @@ jobs:
               clientPayload: {
                 ref: process.env.SOURCE_SHA,
                 cadence: process.env.RELEASE_TYPE !== "stable"
-                  ? "nightly"
+                  ? "rc"
                   : process.env.IS_PRERELEASE === "true"
                     ? "prerelease"
                     : "release",
                 release_label: process.env.RELEASE_LABEL,
-                nightly_timestamp: process.env.NIGHTLY_TIMESTAMP,
+                rc_timestamp: process.env.RC_TIMESTAMP,
                 wheel_version: process.env.WHEEL_VERSION,
                 wheels: JSON.parse(process.env.WHEEL_IDS),
-                publish_nightly_wheels: process.env.PUBLISH_NIGHTLY_WHEELS === "true",
+                publish_rc_wheels: process.env.PUBLISH_RC_WHEELS === "true",
               },
             });
 
   dispatch-container-stage:
-    name: Dispatch nightly container builds
+    name: Dispatch RC container builds
     needs: plan-release
     if: >-
       needs.plan-release.outputs.has_containers == 'true' &&
-      needs.plan-release.outputs.release_type == 'nightly' &&
+      needs.plan-release.outputs.release_type == 'rc' &&
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -677,7 +681,7 @@ jobs:
         shell: bash
         env:
           HELM_CHART: ${{ env.RELEASE_HELM_PATH }}
-          NIGHTLY_IMAGE_REGISTRY: ${{ env.RELEASE_NIGHTLY_CONTAINER_REGISTRY }}
+          RC_IMAGE_REGISTRY: ${{ env.RELEASE_RC_CONTAINER_REGISTRY }}
           STABLE_IMAGE_REGISTRY: ${{ env.STABLE_IMAGE_REGISTRY }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
@@ -693,8 +697,8 @@ jobs:
           helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
           helm dependency build "${chart_dir}"
 
-          if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
-            release_registry="${NIGHTLY_IMAGE_REGISTRY}"
+          if [[ "${RELEASE_TYPE}" == "rc" ]]; then
+            release_registry="${RC_IMAGE_REGISTRY}"
           else
             release_registry="${STABLE_IMAGE_REGISTRY}"
           fi
@@ -721,14 +725,14 @@ jobs:
         run: |
           echo "::notice::Dry run: packaged ${CHART_PACKAGE}"
 
-      - name: Push nightly Helm chart to GHCR
+      - name: Push RC Helm chart to GHCR
         if: >-
-          needs.plan-release.outputs.release_type == 'nightly' &&
+          needs.plan-release.outputs.release_type == 'rc' &&
           needs.plan-release.outputs.dry_run != 'true'
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
-          HELM_OCI_REGISTRY: ${{ env.RELEASE_NIGHTLY_HELM_OCI_REGISTRY }}
+          HELM_OCI_REGISTRY: ${{ env.RELEASE_RC_HELM_OCI_REGISTRY }}
           CHART_PACKAGE: ${{ steps.package.outputs.chart_package }}
         run: |
           set -euo pipefail
@@ -800,7 +804,7 @@ jobs:
               clientPayload: {
                 ref: process.env.SOURCE_SHA,
                 cadence: process.env.RELEASE_TYPE !== "stable"
-                  ? "nightly"
+                  ? "rc"
                   : process.env.IS_PRERELEASE === "true"
                     ? "prerelease"
                     : "release",
@@ -848,8 +852,8 @@ jobs:
         if: >-
           needs.plan-release.outputs.has_wheels == 'true' &&
           needs.plan-release.outputs.dry_run != 'true' &&
-          (needs.plan-release.outputs.release_type != 'nightly' ||
-          env.RELEASE_PUBLISH_NIGHTLY_WHEELS == 'true')
+          (needs.plan-release.outputs.release_type != 'rc' ||
+          env.RELEASE_PUBLISH_RC_WHEELS == 'true')
         shell: bash
         env:
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
@@ -859,8 +863,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
-            wheel_index="${RELEASE_NIGHTLY_WHEEL_INDEX}"
+          if [[ "${RELEASE_TYPE}" == "rc" ]]; then
+            wheel_index="${RELEASE_RC_WHEEL_INDEX}"
           else
             wheel_index="${RELEASE_STABLE_WHEEL_INDEX}"
           fi
@@ -877,7 +881,7 @@ jobs:
             echo "Found ${package}==${WHEEL_VERSION}"
           done < <(jq -r '.[]' <<< "${WHEEL_IDS}")
 
-      # Stable containers are public. Nightly GHCR containers require the
+      # Stable containers are public. RC GHCR containers require the
       # repository GITHUB_TOKEN.
       - name: Wait for selected containers in the final registry
         if: >-
@@ -890,13 +894,13 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           CONTAINER_REGISTRY: >-
-            ${{ needs.plan-release.outputs.release_type == 'nightly' &&
-            env.RELEASE_NIGHTLY_CONTAINER_REGISTRY ||
+            ${{ needs.plan-release.outputs.release_type == 'rc' &&
+            env.RELEASE_RC_CONTAINER_REGISTRY ||
             env.RELEASE_STABLE_CONTAINER_REGISTRY }}
         run: |
           set -euo pipefail
 
-          if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
+          if [[ "${RELEASE_TYPE}" == "rc" ]]; then
             printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io \
               --username "${GITHUB_ACTOR}" --password-stdin
           fi
@@ -910,7 +914,7 @@ jobs:
             echo "Found ${ref}"
           done < <(jq -r '.[]' <<< "${CONTAINER_IDS}")
 
-      # The stable Helm repository is public. Nightly GHCR charts require the
+      # The stable Helm repository is public. RC GHCR charts require the
       # repository GITHUB_TOKEN.
       - name: Wait for Helm chart in the final registry
         if: >-
@@ -922,15 +926,15 @@ jobs:
           CHART_ID: ${{ env.RELEASE_HELM_ID }}
           CHART_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
           GHCR_TOKEN: ${{ github.token }}
-          NIGHTLY_HELM_OCI_REGISTRY: ${{ env.RELEASE_NIGHTLY_HELM_OCI_REGISTRY }}
+          RC_HELM_OCI_REGISTRY: ${{ env.RELEASE_RC_HELM_OCI_REGISTRY }}
           STABLE_HELM_REPOSITORY: ${{ env.RELEASE_STABLE_HELM_REPOSITORY }}
         run: |
           set -euo pipefail
 
-          if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
+          if [[ "${RELEASE_TYPE}" == "rc" ]]; then
             printf '%s' "${GHCR_TOKEN}" | helm registry login ghcr.io \
               --username "${GITHUB_ACTOR}" --password-stdin
-            chart_ref="${NIGHTLY_HELM_OCI_REGISTRY}/${CHART_ID}"
+            chart_ref="${RC_HELM_OCI_REGISTRY}/${CHART_ID}"
             chart_is_available() {
               helm show chart "${chart_ref}" --version "${CHART_VERSION}" >/dev/null 2>&1
             }
@@ -1013,7 +1017,7 @@ jobs:
 
             const title = process.env.RELEASE_TYPE === "stable"
               ? "*:warning: Release artifact polling delayed*"
-              : "*:warning: Nightly artifact polling delayed*";
+              : "*:warning: RC artifact polling delayed*";
             const lines = [
               title,
               `Release: ${process.env.RELEASE_LABEL}`,
@@ -1208,7 +1212,7 @@ jobs:
         env:
           SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
-          NIGHTLY_INSTANCE_URL: ${{ secrets.NIGHTLY_INSTANCE_URL }}
+          RC_INSTANCE_URL: ${{ secrets.RC_INSTANCE_URL }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
@@ -1219,14 +1223,17 @@ jobs:
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           CHART_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
-          NIGHTLY_WHEEL_INDEX: ${{ env.RELEASE_NIGHTLY_WHEEL_INDEX }}
+          CONTAINER_REGISTRY: >-
+            ${{ needs.plan-release.outputs.release_type == 'rc' &&
+            env.RELEASE_RC_CONTAINER_REGISTRY ||
+            env.RELEASE_STABLE_CONTAINER_REGISTRY }}
+          RC_WHEEL_INDEX: ${{ env.RELEASE_RC_WHEEL_INDEX }}
           STABLE_WHEEL_INDEX: ${{ env.RELEASE_STABLE_WHEEL_INDEX }}
-          PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
+          PUBLISH_RC_WHEELS: ${{ env.RELEASE_PUBLISH_RC_WHEELS }}
           NGC_CATALOG_BASE: ${{ env.RELEASE_NGC_CATALOG_BASE }}
           POLL_RESULT: ${{ needs.poll-final-release.result }}
           GITHUB_RELEASE_RESULT: ${{ needs.create-github-release.result }}
           DEPLOYMENT_RESULT: ${{ needs.signal-deployment.result }}
-          SMOKE_CHECKS_PENDING: ${{ needs.schedule-smoke.outputs.scheduled }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
         with:

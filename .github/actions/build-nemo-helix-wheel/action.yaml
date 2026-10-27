@@ -30,26 +30,26 @@ inputs:
     required: true
   cadence:
     description: >
-      Forwarded to stamp_sdk_version.py. One of `nightly`, `prerelease`, `release`.
+      Forwarded to stamp_sdk_version.py. One of `rc`, `prerelease`, `release`.
     required: false
-    default: nightly
+    default: rc
   release-label:
     description: >
       Forwarded to stamp_sdk_version.py. Required for `cadence: prerelease`
       (e.g. `1.0.0-a1`, `1.0.0-b1`, `1.0.0-rc0`) or `cadence: release` (e.g.
-      `1.0.0`); ignored for `nightly`.
+      `1.0.0`); ignored for `rc`.
     required: false
     default: ""
-  nightly-timestamp:
+  rc-timestamp:
     description: >
-      Forwarded to stamp_sdk_version.py. Required for `cadence: nightly`. Must
+      Forwarded to stamp_sdk_version.py. Required for `cadence: rc`. Must
       be exactly 14 digits in `YYYYMMDDHHMMSS` form.
     required: false
     default: "19700101000000"
   wheel-version:
     description: >
-      Optional exact nightly version, such as 0.6.0.dev20260916032117.
-      Must match nightly-timestamp. When omitted, resolve from source tags.
+      Optional exact rc version, such as 0.6.0.dev20260916032117.
+      Must match rc-timestamp. When omitted, resolve from source tags.
     required: false
     default: ""
   python-version:
@@ -101,7 +101,7 @@ runs:
         PACKAGE: ${{ inputs.package }}
         CADENCE: ${{ inputs.cadence }}
         RELEASE_LABEL: ${{ inputs.release-label }}
-        NIGHTLY_TIMESTAMP: ${{ inputs.nightly-timestamp }}
+        RC_TIMESTAMP: ${{ inputs.rc-timestamp }}
         WHEEL_VERSION: ${{ inputs.wheel-version }}
         # Run the stamp script from the action's own checkout (the workflow
         # ref), not from inputs.source-root. For ci.yaml these are the same;
@@ -115,7 +115,7 @@ runs:
           --source-root "${SOURCE_ROOT}"
           --sdk-id "${PACKAGE}"
           --cadence "${CADENCE}"
-          --nightly-timestamp "${NIGHTLY_TIMESTAMP}"
+          --rc-timestamp "${RC_TIMESTAMP}"
           --wheel-version "${WHEEL_VERSION}"
           --print-version
         )
