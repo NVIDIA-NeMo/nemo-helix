@@ -205,26 +205,31 @@ def initialize_logging(resource: Resource | None = None):
 
     final_processors: list = [structlog.stdlib.ProcessorFormatter.remove_processors_meta]
 
-    # TODO: Reenable with more granular controls
-    if False and settings.otel_logs_exporter == "otlp":
+    if not settings.otel_sdk_disabled and settings.otel_logs_exporter == "otlp":
         # NOTE: deferred imports -- only reached when OTEL log export is enabled
         from opentelemetry._logs import set_logger_provider
-        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
         from opentelemetry.sdk._logs import LoggerProvider
         from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
         from .tracing import create_otel_resource
 
+        protocol = settings.otel_exporter_otlp_logs_protocol or settings.otel_exporter_otlp_protocol
+        endpoint = settings.otel_exporter_otlp_logs_endpoint or settings.otel_exporter_otlp_endpoint
+        if protocol == "http/protobuf":
+            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+            # HTTP general endpoints are base URLs; signal-specific endpoints are used as-is.
+            if not settings.otel_exporter_otlp_logs_endpoint and endpoint:
+                endpoint = endpoint.rstrip("/") + "/v1/logs"
+        elif protocol == "grpc":
+            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+        else:
+            raise ValueError(f"Unsupported OTLP logs protocol: {protocol}")
+
         if resource is None:
             resource = create_otel_resource()
         logger_provider = LoggerProvider(resource=resource)
-        logger_provider.add_log_record_processor(
-            BatchLogRecordProcessor(
-                OTLPLogExporter(
-                    endpoint=settings.otel_exporter_otlp_logs_endpoint or settings.otel_exporter_otlp_endpoint
-                )
-            )
-        )
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint)))
         set_logger_provider(logger_provider)
         otel_logger = logger_provider.get_logger(__name__)
         final_processors.append(create_otel_log_processor(otel_logger))
