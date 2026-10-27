@@ -877,6 +877,7 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
             is_local=False,
         )
     authorize.assert_awaited_once()
+    assert isinstance(spec, ExecuteAgentStepConfig)
     assert spec.secrets == {}
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
         get_config.return_value.jobs.default_image = "registry.example/tasks:test"

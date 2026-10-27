@@ -437,7 +437,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                     host=egress.host,
                     port=egress.port,
                     workspace=step.workspace,
-                    binaries=list(egress.binaries or DEFAULT_EGRESS_BINARIES),
+                    binaries=list(dict.fromkeys((launcher, *(egress.binaries or DEFAULT_EGRESS_BINARIES)))),
                     job=step.job,
                     step=step.name,
                     fileset=step.fileset,

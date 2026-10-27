@@ -199,6 +199,7 @@ class TestSchedule:
         backend = _backend(
             mock_nemo_client,
             mock_platform_config,
+            launcher_tool_path="/app/bin/custom-jobs-launcher",
             gateway_credentials={
                 "gateway_id": "gateway",
                 "registration_key_file": "/run/key",
@@ -218,6 +219,9 @@ class TestSchedule:
         spec = _create_request(backend).spec
         assert list(spec.providers) == ["owned-provider"]
         assert set(spec.policy.network_policies) == {"nemo_workload"}
+        assert "/app/bin/custom-jobs-launcher" in {
+            binary.path for binary in spec.policy.network_policies["nemo_workload"].binaries
+        }
         assert "API_TOKEN" not in spec.environment
         assert "token" not in spec.environment["NEMO_JOB_SECRETS"]
 
