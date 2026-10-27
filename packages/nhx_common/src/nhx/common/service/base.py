@@ -18,6 +18,10 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute, iter_route_contexts
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nhx.common.api.creator_snapshot_projection import (
+    CreatorSnapshotProjectionMiddleware,
+    collect_creator_snapshot_routes,
+)
 from nhx.common.api.utils import register_query_param_schemas
 from nhx.common.auth import Principal
 from nhx.common.config import Configuration, HelixConfig, ServiceConfig, get_platform_config
@@ -572,6 +576,8 @@ class Service(ABC, Generic[TConfig]):
                 if isinstance(route, APIRoute) and not route.tags:
                     route.tags.append(rc.tag)
             app.include_router(rc.router, prefix=rc.prefix)
+
+        app.add_middleware(CreatorSnapshotProjectionMiddleware, registrations=collect_creator_snapshot_routes(app))
 
         return app
 

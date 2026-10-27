@@ -19,6 +19,10 @@ import uvicorn
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from nhx.common.api.creator_snapshot_projection import (
+    CreatorSnapshotProjectionMiddleware,
+    collect_creator_snapshot_routes,
+)
 from nhx.common.api.utils import QueryParamSchemaFastAPI
 from nhx.common.auth import AuthorizationMiddleware
 from nhx.common.config import get_auth_config, get_platform_config
@@ -265,6 +269,9 @@ def create_app(
     )
     app.add_middleware(ConflictRetryMiddleware)
 
+    projection_routes = []
+    app.add_middleware(CreatorSnapshotProjectionMiddleware, registrations=projection_routes)
+
     pyleak_threshold = float(os.environ.get("PYLEAK_THRESHOLD", "0"))
     if pyleak_threshold > 0:
         app.add_middleware(PyleakMiddleware, threshold=pyleak_threshold)
@@ -319,6 +326,7 @@ def create_app(
         if service_instance._service_config is not None:
             app.state.service_configs[type(service_instance._service_config)] = service_instance._service_config
 
+    projection_routes.extend(collect_creator_snapshot_routes(app))
     app.add_exception_handler(Exception, platform_global_exception_handler)
     return app
 

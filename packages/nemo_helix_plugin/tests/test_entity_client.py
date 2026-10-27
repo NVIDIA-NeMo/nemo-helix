@@ -279,7 +279,7 @@ def test_sync_entity_client_auth_context_uses_typed_default_headers() -> None:
     }
 
 
-def test_sync_entity_client_auth_context_strips_delegated_trusted_service_headers() -> None:
+def test_sync_entity_client_auth_context_hydrates_delegated_trusted_service_headers() -> None:
     entities_client = EntitiesClient(
         base_url="http://testserver",
         default_headers={
@@ -294,10 +294,10 @@ def test_sync_entity_client_auth_context_strips_delegated_trusted_service_header
     finally:
         client.close()
 
-    assert result.auth_context is None
+    assert result.auth_context == _stored_entity_with_auth_context().data["_auth_context"]
 
 
-def test_sync_entity_client_auth_context_strips_malformed_service_header() -> None:
+def test_sync_entity_client_auth_context_hydrates_malformed_service_header() -> None:
     entities_client = EntitiesClient(
         base_url="http://testserver",
         default_headers={"X-NHX-Principal-Id": "service:"},
@@ -309,7 +309,7 @@ def test_sync_entity_client_auth_context_strips_malformed_service_header() -> No
     finally:
         client.close()
 
-    assert result.auth_context is None
+    assert result.auth_context == _stored_entity_with_auth_context().data["_auth_context"]
 
 
 def test_sync_entity_client_auth_context_uses_service_workload_token_provider() -> None:
@@ -331,7 +331,7 @@ def test_sync_entity_client_auth_context_uses_service_workload_token_provider() 
     }
 
 
-def test_sync_entity_client_auth_context_strips_malformed_service_workload_token_provider() -> None:
+def test_sync_entity_client_auth_context_hydrates_malformed_service_workload_token_provider() -> None:
     entities_client = EntitiesClient(
         base_url="http://testserver",
         auth=_ServiceTokenProvider(service_principal_id="service:"),
@@ -343,10 +343,10 @@ def test_sync_entity_client_auth_context_strips_malformed_service_workload_token
     finally:
         client.close()
 
-    assert result.auth_context is None
+    assert result.auth_context == _stored_entity_with_auth_context().data["_auth_context"]
 
 
-def test_sync_entity_client_auth_context_strips_user_bearer_token() -> None:
+def test_sync_entity_client_auth_context_hydrates_user_bearer_token() -> None:
     entities_client = EntitiesClient(
         base_url="http://testserver",
         auth="user-token",
@@ -358,10 +358,10 @@ def test_sync_entity_client_auth_context_strips_user_bearer_token() -> None:
     finally:
         client.close()
 
-    assert result.auth_context is None
+    assert result.auth_context == _stored_entity_with_auth_context().data["_auth_context"]
 
 
-def test_sync_entity_client_auth_context_strips_delegated_service_workload_token_provider() -> None:
+def test_sync_entity_client_auth_context_hydrates_delegated_service_workload_token_provider() -> None:
     entities_client = EntitiesClient(
         base_url="http://testserver",
         auth=_ServiceTokenProvider(delegates_principal=True),
@@ -373,7 +373,21 @@ def test_sync_entity_client_auth_context_strips_delegated_service_workload_token
     finally:
         client.close()
 
+    assert result.auth_context == _stored_entity_with_auth_context().data["_auth_context"]
+
+
+def test_entity_client_preserves_redacted_absence_as_none_on_update_payload() -> None:
+    stored = _stored_entity_with_auth_context()
+    stored.data.pop("_auth_context")
+    client = SyncEntityClient(EntitiesClient(base_url="http://testserver"))
+
+    try:
+        result = client._convert_api_entity_to_model(stored, _EntityWithAuthContext)
+    finally:
+        client.close()
+
     assert result.auth_context is None
+    assert result._get_data_fields()["_auth_context"] is None
 
 
 @pytest.mark.asyncio

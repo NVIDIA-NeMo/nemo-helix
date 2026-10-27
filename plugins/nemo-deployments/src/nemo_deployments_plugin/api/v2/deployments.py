@@ -22,6 +22,7 @@ from nemo_deployments_plugin.validation import (
     detect_prerequisite_cycle,
     prerequisite_names,
 )
+from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -36,7 +37,12 @@ from nemo_helix_plugin.schema import PaginationData
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(
+    route_class=creator_snapshot_route_class(
+        response_paths={Deployment: ("auth_context",), DeploymentPage: ("data[].auth_context",)},
+        purpose="Deployment creator identity",
+    )
+)
 
 _deployment_filter_dep = make_filter_obj_dep(DeploymentFilter)
 

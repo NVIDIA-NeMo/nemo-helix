@@ -11,6 +11,7 @@ from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
 from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
 from nhx.core.entities.entities import Entity
@@ -26,8 +27,13 @@ MAX_GROUP_COUNT_ROWS = 1000
 class SQLAlchemyEntityRepository(EntityRepositoryInterface):
     """SQLAlchemy implementation of Entity repository."""
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+    def __init__(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+        field_policy: EntityFieldPolicy = NO_OP_ENTITY_FIELD_POLICY,
+    ):
         self.session_maker = session_maker
+        self.field_policy = field_policy
         self._write_lock = Lock()
 
     def _is_sqlite(self, session: AsyncSession) -> bool:
@@ -119,14 +125,14 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 parent=parent,
                 project=project,
                 created_by=created_by,
-                data=data,
+                data=self.field_policy.create_data(data),
             )
 
             sess.add(db_entity)
             await sess.commit()
             await sess.refresh(db_entity)
 
-            return db_entity.to_pydantic()
+            return self.field_policy.project(db_entity.to_pydantic())
 
     async def get_entity_by_id(
         self,
@@ -141,7 +147,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             if db_entity is None:
                 return None
 
-            return db_entity.to_pydantic()
+            return self.field_policy.project(db_entity.to_pydantic())
 
     async def get_entity_by_name(
         self,
@@ -174,7 +180,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             if db_entity is None:
                 return None
 
-            return db_entity.to_pydantic()
+            return self.field_policy.project(db_entity.to_pydantic())
 
     async def list_entities(
         self,
@@ -185,10 +191,12 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         page_size: int = 100,
         sort: Optional[str] = None,
         filter_op: Optional[FilterOperation] = None,
+        count_by: str | None = None,
         relationship_child_workspaces: Optional[set[str]] = None,
         session: AsyncSession | None = None,
     ) -> tuple[List[Entity], int]:
         """List entities with filtering."""
+        self.field_policy.validate_query(filter_op, sort, count_by)
         async with self._get_session(session) as sess:
             # Start with base query
             query = select(DBEntity)
@@ -227,7 +235,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             result = await sess.execute(query)
             db_entities = result.scalars().all()
 
-            entities = [e.to_pydantic() for e in db_entities]
+            entities = [self.field_policy.project(entity.to_pydantic()) for entity in db_entities]
 
             return entities, total
 
@@ -242,6 +250,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         session: AsyncSession | None = None,
     ) -> dict[str, int]:
         """Count filtered entities grouped by a direct string data field."""
+        self.field_policy.validate_query(filter_op, group_by=group_by)
         async with self._get_session(session) as sess:
             parts = group_by.split(".")
             if len(parts) != 2 or parts[0] != "data" or not parts[1].isidentifier():
@@ -297,7 +306,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             if existing_entity is None:
                 raise EntityNotFoundError(f"Entity with ID '{entity_id}' not found")
 
-            existing_entity.data = data
+            existing_entity.data = self.field_policy.update_data(data, existing_entity.data)
             if name is not None:
                 existing_entity.name = name
             if project is not None:
@@ -312,7 +321,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 ) from err
             await sess.refresh(existing_entity)
 
-            return existing_entity.to_pydantic()
+            return self.field_policy.project(existing_entity.to_pydantic())
 
     async def update_entity_by_name(
         self,
@@ -354,7 +363,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                     f"Expected version {expected_db_version}, but current version is {existing_entity.db_version}. Please refetch and retry."
                 )
 
-            existing_entity.data = data
+            existing_entity.data = self.field_policy.update_data(data, existing_entity.data)
             if new_name is not None:
                 existing_entity.name = new_name
             if project is not None:
@@ -369,7 +378,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 ) from err
             await sess.refresh(existing_entity)
 
-            return existing_entity.to_pydantic()
+            return self.field_policy.project(existing_entity.to_pydantic())
 
     async def delete_entity(
         self,

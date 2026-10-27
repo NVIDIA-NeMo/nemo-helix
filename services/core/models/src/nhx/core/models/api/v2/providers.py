@@ -4,6 +4,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -27,7 +28,12 @@ from nhx.core.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(
+    route_class=creator_snapshot_route_class(
+        response_paths={ModelProvider: ("auth_context",), Page[ModelProvider]: ("data[].auth_context",)},
+        purpose="Model provider creator identity",
+    )
+)
 
 
 @router.get(

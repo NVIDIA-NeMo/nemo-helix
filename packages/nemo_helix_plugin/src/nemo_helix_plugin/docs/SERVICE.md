@@ -88,6 +88,27 @@ Wire format:
 }
 ```
 
+### Protected creator snapshots
+
+If a service response model exposes a stored creator snapshot as `auth_context`, register the response shape on its router. The platform projects the field after serialization for callers who cannot read it; route handlers and the SDK should not redact it themselves.
+
+```python
+from fastapi import APIRouter
+from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
+
+router = APIRouter(
+    route_class=creator_snapshot_route_class(
+        response_paths={
+            Widget: ("auth_context",),
+            WidgetPage: ("data[].auth_context",),
+        },
+        purpose="Widget creator identity",
+    )
+)
+```
+
+Register each response model that carries the snapshot, including create, update, get, and list shapes. The path selectors describe the serialized JSON (`data[]` means each item in a page). The response property must be optional because unauthorized responses omit it. This is a field policy, not route authorization: keep the route's normal `@path_rule` and derive any persisted creator snapshot from the authenticated principal, never from a caller-supplied request body. For raw Entity Store `data._auth_context`, the request-bound repository policy handles both writes and reads automatically.
+
 ### NemoFilter
 
 Base for query filter models. `extra="forbid"` inherited — field typos in query params return 422 instead of silently returning unfiltered results:

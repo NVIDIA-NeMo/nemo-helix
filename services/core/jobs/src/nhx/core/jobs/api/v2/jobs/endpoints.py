@@ -12,6 +12,7 @@ from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
 from fastapi.openapi.models import Example
+from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.jobs.types import JobControl
@@ -108,7 +109,12 @@ _CREATE_JOB_OPENAPI_EXAMPLES: dict[str, Example] = {
     }
 }
 
-router = APIRouter()
+router = APIRouter(
+    route_class=creator_snapshot_route_class(
+        response_paths={Page[HelixJobStepWithContext]: ("data[].auth_context",)},
+        purpose="Job step creator identity",
+    )
+)
 
 platform_config = get_platform_config()
 _JOB_STATUS_VALUES = ", ".join(job_status.value for job_status in HelixJobStatus)

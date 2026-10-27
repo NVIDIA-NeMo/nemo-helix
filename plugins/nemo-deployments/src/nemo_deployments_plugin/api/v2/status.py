@@ -11,10 +11,16 @@ from nemo_deployments_plugin.api.v2.dependencies import get_entity_client, requi
 from nemo_deployments_plugin.authz import scope
 from nemo_deployments_plugin.entities import Deployment, Volume
 from nemo_deployments_plugin.schema import UpdateDeploymentStatusRequest, UpdateVolumeStatusRequest
+from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 
-router = APIRouter()
+router = APIRouter(
+    route_class=creator_snapshot_route_class(
+        response_paths={Deployment: ("auth_context",)},
+        purpose="Deployment creator identity",
+    )
+)
 
 
 @router.put("/deployments/{name}/status", response_model=Deployment, tags=["Deployment Status"])

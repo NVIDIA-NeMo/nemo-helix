@@ -7,7 +7,9 @@ from typing import Annotated
 
 from fastapi import Depends
 from nhx.common.auth.client import AuthClient
+from nhx.common.auth.creator_snapshot import CreatorSnapshotCapabilities
 from nhx.common.auth.dependencies import get_auth_client
+from nhx.core.entities.api.creator_snapshot_policy import CreatorSnapshotEntityPolicy
 from nhx.core.entities.app.repository import (
     EntityRepositoryInterface,
     WorkspaceRepositoryInterface,
@@ -20,9 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 def dep_entity_repository_with_session(
     session_maker: async_sessionmaker[AsyncSession] = Depends(get_async_session_maker),
+    auth_client: AuthClient = Depends(get_auth_client),
 ) -> EntityRepositoryInterface:
     """Dependency function for Entity repository with injected session maker."""
-    return dep_entity_repository(session_maker)
+    policy = CreatorSnapshotEntityPolicy(CreatorSnapshotCapabilities.from_auth_client(auth_client))
+    return dep_entity_repository(session_maker, policy)
 
 
 def dep_workspace_repository_with_session(

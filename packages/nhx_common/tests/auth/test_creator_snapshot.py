@@ -20,6 +20,7 @@ from nhx.common.config import AuthConfig
             (True, False, True),
         ),
         (Principal(id="user@example.com"), True, (True, False, False)),
+        (Principal(id="service-account:probe"), True, (True, False, False)),
         (Principal(id="service:jobs"), False, (False, True, True)),
         (Principal(id="user@example.com"), False, (False, True, True)),
         (Principal(), False, (False, True, True)),
