@@ -4,7 +4,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, page_policy_routes
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import Page
@@ -31,11 +31,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 provider_policy = AuthContextResponsePolicy(dto_type=ModelProvider, field="auth_context")
-provider_items = ItemPolicyRoutes(router, provider_policy)
-provider_pages = page_policy_routes(router, provider_policy, Page[ModelProvider])
+provider_routes = PolicyRoutes(router, provider_policy)
 
 
-@provider_pages.get(
+@provider_routes.get(
     "/v2/workspaces/{workspace}/providers",
     summary="List ModelProviders By Workspace",
     response_description="Return model providers for a workspace",
@@ -81,7 +80,7 @@ async def list_providers(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@provider_items.post(
+@provider_routes.post(
     "/v2/workspaces/{workspace}/providers",
     summary="Create ModelProvider",
     response_description="Create a new model provider",
@@ -133,7 +132,7 @@ async def create_provider(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@provider_items.put(
+@provider_routes.put(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Upsert ModelProvider",
     response_description="Create or update a model provider",
@@ -180,7 +179,7 @@ async def upsert_provider(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@provider_items.put(
+@provider_routes.put(
     "/v2/workspaces/{workspace}/providers/{name}/status",
     summary="Update ModelProvider Status Fields",
     response_description="Update status-related fields of a model provider",
@@ -226,7 +225,7 @@ async def update_provider_status(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@provider_items.get(
+@provider_routes.get(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Get ModelProvider",
     response_description="Return model provider details",

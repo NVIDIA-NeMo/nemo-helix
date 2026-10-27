@@ -13,11 +13,8 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.api.response_policy import (
-    ItemPolicyRoutes,
-    ListPolicyRoutes,
+    PolicyRoutes,
     ResponsePolicy,
-    nemo_page_policy_routes,
-    page_policy_routes,
 )
 from nemo_helix_plugin.auth import RuntimeAuthClient
 from nemo_helix_plugin.schema import NemoListResponse, Page
@@ -71,24 +68,21 @@ def _app(monkeypatch: pytest.MonkeyPatch) -> tuple[FastAPI, Item]:
     item = Item(n="alpha", secret="stored", description=None)
     policy = SecretPolicy(dto_type=Item, field="secret")
     router = APIRouter()
-    items = ItemPolicyRoutes(router, policy)
-    pages = page_policy_routes(router, policy, Page[Item])
-    plugin_pages = nemo_page_policy_routes(router, policy, NemoListResponse[Item])
-    lists = ListPolicyRoutes(router, policy)
+    routes = PolicyRoutes(router, policy)
 
-    @items.get("/item", tags=["Items"])
+    @routes.get("/item", tags=["Items"])
     def get_item(workspace: str) -> Item:
         return item
 
-    @pages.get("/page")
+    @routes.get("/page")
     async def get_page(workspace: str) -> Page[Item]:
         return Page(data=[item])
 
-    @plugin_pages.get("/plugin-page")
+    @routes.get("/plugin-page")
     async def get_plugin_page(workspace: str) -> NemoListResponse[Item]:
         return NemoListResponse(data=[item])
 
-    @lists.get("/list")
+    @routes.get("/list")
     async def get_list(workspace: str) -> list[Item]:
         return [item]
 
@@ -96,7 +90,7 @@ def _app(monkeypatch: pytest.MonkeyPatch) -> tuple[FastAPI, Item]:
     async def unrelated(workspace: str) -> Other:
         return Other(secret="unrelated")
 
-    @items.get("/error")
+    @routes.get("/error")
     async def error(workspace: str) -> Item:
         raise HTTPException(status_code=400, detail="bad")
 
@@ -143,9 +137,9 @@ def test_raw_response_cannot_bypass_validation(monkeypatch: pytest.MonkeyPatch) 
         lambda request: AuthClient(principal=Principal(id="user@example.com"), config=AuthConfig(enabled=True)),
     )
     router = APIRouter()
-    items = ItemPolicyRoutes(router, SecretPolicy(dto_type=Item, field="secret"))
+    routes = PolicyRoutes(router, SecretPolicy(dto_type=Item, field="secret"))
 
-    @items.get("/broken")
+    @routes.get("/broken")
     async def broken() -> Item:
         return cast(Item, Response(content='{"secret":"leak"}', media_type="application/json"))
 
@@ -162,10 +156,10 @@ def test_computed_field_alias_is_projected_without_mutating_model(monkeypatch: p
 
     monkeypatch.setattr(response_policy, "current_auth_client", caller)
     router = APIRouter()
-    items = ItemPolicyRoutes(router, ComputedPolicy(dto_type=ComputedItem, field="secret"))
+    routes = PolicyRoutes(router, ComputedPolicy(dto_type=ComputedItem, field="secret"))
     item = ComputedItem(name="alpha")
 
-    @items.get("/computed")
+    @routes.get("/computed")
     def get_computed() -> ComputedItem:
         return item
 
@@ -196,8 +190,13 @@ async def test_concurrent_callers_do_not_share_read_access(monkeypatch: pytest.M
 
 @pytest.mark.parametrize("field", ["absent", "name"])
 def test_rejects_invalid_field_at_registration(field: str) -> None:
+    routes = PolicyRoutes(APIRouter(), SecretPolicy(dto_type=Item, field=field))
+
+    def valid() -> Item:
+        return Item(n="ok")
+
     with pytest.raises(ValueError, match="optional and serializable"):
-        ItemPolicyRoutes(APIRouter(), SecretPolicy(dto_type=Item, field=field))
+        routes.get("/invalid")(valid)
 
 
 def test_policy_can_protect_a_different_optional_field(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -206,9 +205,9 @@ def test_policy_can_protect_a_different_optional_field(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(response_policy, "current_auth_client", caller)
     router = APIRouter()
-    items = ItemPolicyRoutes(router, SecretPolicy(dto_type=Item, field="description"))
+    routes = PolicyRoutes(router, SecretPolicy(dto_type=Item, field="description"))
 
-    @items.get("/other-field")
+    @routes.get("/other-field")
     def get_other_field() -> Item:
         return Item(n="alpha", secret="public", description="private")
 
@@ -219,34 +218,57 @@ def test_policy_can_protect_a_different_optional_field(monkeypatch: pytest.Monke
 
 def test_rejects_wrong_dto_and_response_options_at_registration() -> None:
     router = APIRouter()
-    items = ItemPolicyRoutes(router, SecretPolicy(dto_type=Item, field="secret"))
+    routes = PolicyRoutes(router, SecretPolicy(dto_type=Item, field="secret"))
 
     with pytest.raises(ValueError, match="registered DTO"):
 
-        @cast(Any, items.get("/wrong"))
+        @cast(Any, routes.get("/wrong"))
         def wrong() -> Other:
             return Other()
 
     with pytest.raises(ValueError, match="registered DTO"):
 
-        @cast(Any, items.get("/raw"))
+        @cast(Any, routes.get("/wrong-page"))
+        def wrong_page() -> Page[Other]:
+            return Page(data=[Other()])
+
+    with pytest.raises(ValueError, match="registered DTO"):
+
+        @cast(Any, routes.get("/wrong-plugin-page"))
+        async def wrong_plugin_page() -> NemoListResponse[Other]:
+            return NemoListResponse(data=[Other()])
+
+    with pytest.raises(ValueError, match="registered DTO"):
+
+        @cast(Any, routes.get("/wrong-list"))
+        def wrong_list() -> list[Other]:
+            return [Other()]
+
+    with pytest.raises(ValueError, match="registered DTO"):
+
+        @cast(Any, routes.get("/raw"))
         def raw() -> Response:
             return Response()
 
     with pytest.raises(ValueError, match="registered DTO"):
 
-        @cast(Any, items.get("/stream"))
+        @cast(Any, routes.get("/stream"))
         def stream() -> StreamingResponse:
             return StreamingResponse(iter([b"body"]))
 
     def valid() -> Item:
         return Item(n="ok")
 
-    for options in ({"status_code": 204}, {"response_model_by_alias": False}, {"response_class": Response}):
+    for options in (
+        {"status_code": 204},
+        {"response_model_by_alias": False},
+        {"response_class": Response},
+        {"response_model": Item},
+    ):
         with pytest.raises(ValueError, match="requires a JSON response"):
-            items.get("/invalid", **options)(valid)
+            routes.get("/invalid", **options)(valid)
 
     non_json_router = APIRouter(default_response_class=Response)
-    non_json_items = ItemPolicyRoutes(non_json_router, SecretPolicy(dto_type=Item, field="secret"))
+    non_json_routes = PolicyRoutes(non_json_router, SecretPolicy(dto_type=Item, field="secret"))
     with pytest.raises(ValueError, match="requires a JSON response"):
-        non_json_items.get("/invalid")(valid)
+        non_json_routes.get("/invalid")(valid)

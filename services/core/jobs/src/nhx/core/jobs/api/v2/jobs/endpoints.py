@@ -12,7 +12,7 @@ from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
 from fastapi.openapi.models import Example
-from nemo_helix_plugin.api.response_policy import page_policy_routes
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
@@ -111,10 +111,9 @@ _CREATE_JOB_OPENAPI_EXAMPLES: dict[str, Example] = {
 }
 
 router = APIRouter()
-step_pages = page_policy_routes(
+step_routes = PolicyRoutes(
     router,
     AuthContextResponsePolicy(dto_type=HelixJobStepWithContext, field="auth_context"),
-    Page[HelixJobStepWithContext],
 )
 
 platform_config = get_platform_config()
@@ -1053,7 +1052,7 @@ async def download_job_result(
 
 
 # Job Steps Endpoints
-@step_pages.get(
+@step_routes.get(
     "/v2/workspaces/{workspace}/jobs/{name}/steps",
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
@@ -1195,7 +1194,7 @@ async def update_job_step_status(
         return step_entity
 
 
-@step_pages.get(
+@step_routes.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps",
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(

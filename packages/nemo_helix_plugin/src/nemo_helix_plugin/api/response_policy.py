@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from inspect import iscoroutinefunction
+from operator import getitem
 from typing import Annotated, Any, ClassVar, Coroutine, get_args, get_type_hints, overload
 
 from fastapi import APIRouter, Request, Response
@@ -70,7 +71,7 @@ def item_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field:
             content.pop(wire_field, None)
         return content
 
-    return Annotated.__getitem__((policy.dto_type, BeforeValidator(unbox), WrapSerializer(serialize_item)))
+    return getitem(Annotated, (policy.dto_type, BeforeValidator(unbox), WrapSerializer(serialize_item)))
 
 
 def page_response_model[PageT: BaseModel](page_type: type[PageT], wire_field: str) -> Any:
@@ -81,7 +82,7 @@ def page_response_model[PageT: BaseModel](page_type: type[PageT], wire_field: st
                 item.pop(wire_field, None)
         return content
 
-    return Annotated.__getitem__((page_type, BeforeValidator(unbox), WrapSerializer(serialize_page)))
+    return getitem(Annotated, (page_type, BeforeValidator(unbox), WrapSerializer(serialize_page)))
 
 
 def list_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field: str) -> Any:
@@ -93,7 +94,7 @@ def list_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field:
         return content
 
     list_type = list.__class_getitem__(policy.dto_type)
-    return Annotated.__getitem__((list_type, BeforeValidator(unbox), WrapSerializer(serialize_list)))
+    return getitem(Annotated, (list_type, BeforeValidator(unbox), WrapSerializer(serialize_list)))
 
 
 class PolicyRoute(APIRoute):
@@ -136,36 +137,66 @@ def boxed_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
     return boxed
 
 
-class ProtectedRouteDecorator[ResultT]:
+class PolicyDecorator[DTO: BaseModel]:
     def __init__(
         self,
         router: APIRouter,
+        policy: ResponsePolicy[DTO],
         path: str,
         method: str,
-        expected_type: object,
-        response_model: Any,
-        route_class: type[PolicyRoute],
         options: dict[str, Any],
     ) -> None:
         self.router = router
+        self.policy = policy
         self.path = path
         self.method = method
-        self.expected_type = expected_type
-        self.response_model = response_model
-        self.route_class = route_class
         self.options = options
 
     @overload
-    def __call__[**Params](self, endpoint: Callable[Params, ResultT]) -> Callable[Params, ResultT]: ...
+    def __call__[**Params](self, endpoint: Callable[Params, DTO]) -> Callable[Params, DTO]: ...
+
+    @overload
+    def __call__[**Params](self, endpoint: Callable[Params, Awaitable[DTO]]) -> Callable[Params, Awaitable[DTO]]: ...
+
+    @overload
+    def __call__[**Params](self, endpoint: Callable[Params, Page[DTO]]) -> Callable[Params, Page[DTO]]: ...
 
     @overload
     def __call__[**Params](
-        self, endpoint: Callable[Params, Awaitable[ResultT]]
-    ) -> Callable[Params, Awaitable[ResultT]]: ...
+        self, endpoint: Callable[Params, Awaitable[Page[DTO]]]
+    ) -> Callable[Params, Awaitable[Page[DTO]]]: ...
+
+    @overload
+    def __call__[**Params](
+        self, endpoint: Callable[Params, NemoListResponse[DTO]]
+    ) -> Callable[Params, NemoListResponse[DTO]]: ...
+
+    @overload
+    def __call__[**Params](
+        self, endpoint: Callable[Params, Awaitable[NemoListResponse[DTO]]]
+    ) -> Callable[Params, Awaitable[NemoListResponse[DTO]]]: ...
+
+    @overload
+    def __call__[**Params](self, endpoint: Callable[Params, list[DTO]]) -> Callable[Params, list[DTO]]: ...
+
+    @overload
+    def __call__[**Params](
+        self, endpoint: Callable[Params, Awaitable[list[DTO]]]
+    ) -> Callable[Params, Awaitable[list[DTO]]]: ...
 
     def __call__(self, endpoint: Callable[..., Any]) -> Callable[..., Any]:
-        if get_type_hints(endpoint).get("return") != self.expected_type:
-            raise ValueError("Protected route must declare its registered DTO return type")
+        result_type = get_type_hints(endpoint).get("return")
+        wire_field = wire_field_for(self.policy)
+        if result_type is self.policy.dto_type:
+            response_model = item_response_model(self.policy, wire_field)
+        elif result_type is Page.__class_getitem__(
+            self.policy.dto_type
+        ) or result_type is NemoListResponse.__class_getitem__(self.policy.dto_type):
+            response_model = page_response_model(result_type, wire_field)
+        elif result_type == list.__class_getitem__(self.policy.dto_type):
+            response_model = list_response_model(self.policy, wire_field)
+        else:
+            raise ValueError("Protected route must return the registered DTO, a page of it, or a list of it")
         status_code = self.options.get("status_code")
         response_class = self.options.get("response_class", self.router.default_response_class)
         if (
@@ -178,79 +209,30 @@ class ProtectedRouteDecorator[ResultT]:
             or self.options.get("response_model_by_alias") is False
             or self.options.get("response_model_include") is not None
             or self.options.get("response_model_exclude") is not None
+            or "response_model" in self.options
         ):
             raise ValueError("Protected route requires a JSON response with aliased, complete model fields")
         self.router.add_api_route(
             self.path,
             boxed_endpoint(endpoint),
             methods=[self.method],
-            response_model=self.response_model,
-            route_class_override=self.route_class,
+            response_model=response_model,
+            route_class_override=bound_route_class(self.policy),
             **self.options,
         )
         return endpoint
 
 
-class ItemPolicyRoutes[DTO: BaseModel]:
+class PolicyRoutes[DTO: BaseModel]:
     def __init__(self, router: APIRouter, policy: ResponsePolicy[DTO]) -> None:
         self.router = router
-        self.dto_type = policy.dto_type
-        wire_field = wire_field_for(policy)
-        self.response_model = item_response_model(policy, wire_field)
-        self.route_class = bound_route_class(policy)
+        self.policy = policy
 
-    def get(self, path: str, **options: Any) -> ProtectedRouteDecorator[DTO]:
-        return ProtectedRouteDecorator(
-            self.router, path, "GET", self.dto_type, self.response_model, self.route_class, options
-        )
+    def get(self, path: str, **options: Any) -> PolicyDecorator[DTO]:
+        return PolicyDecorator(self.router, self.policy, path, "GET", options)
 
-    def post(self, path: str, **options: Any) -> ProtectedRouteDecorator[DTO]:
-        return ProtectedRouteDecorator(
-            self.router, path, "POST", self.dto_type, self.response_model, self.route_class, options
-        )
+    def post(self, path: str, **options: Any) -> PolicyDecorator[DTO]:
+        return PolicyDecorator(self.router, self.policy, path, "POST", options)
 
-    def put(self, path: str, **options: Any) -> ProtectedRouteDecorator[DTO]:
-        return ProtectedRouteDecorator(
-            self.router, path, "PUT", self.dto_type, self.response_model, self.route_class, options
-        )
-
-
-class _PagePolicyRoutes[PageT: BaseModel]:
-    def __init__(self, router: APIRouter, policy: ResponsePolicy[Any], page_type: type[PageT]) -> None:
-        self.router = router
-        self.page_type = page_type
-        wire_field = wire_field_for(policy)
-        self.response_model = page_response_model(page_type, wire_field)
-        self.route_class = bound_route_class(policy)
-
-    def get(self, path: str, **options: Any) -> ProtectedRouteDecorator[PageT]:
-        return ProtectedRouteDecorator(
-            self.router, path, "GET", self.page_type, self.response_model, self.route_class, options
-        )
-
-
-def page_policy_routes[DTO: BaseModel](
-    router: APIRouter, policy: ResponsePolicy[DTO], page_type: type[Page[DTO]]
-) -> _PagePolicyRoutes[Page[DTO]]:
-    return _PagePolicyRoutes(router, policy, page_type)
-
-
-def nemo_page_policy_routes[DTO: BaseModel](
-    router: APIRouter, policy: ResponsePolicy[DTO], page_type: type[NemoListResponse[DTO]]
-) -> _PagePolicyRoutes[NemoListResponse[DTO]]:
-    return _PagePolicyRoutes(router, policy, page_type)
-
-
-class ListPolicyRoutes[DTO: BaseModel]:
-    def __init__(self, router: APIRouter, policy: ResponsePolicy[DTO]) -> None:
-        self.router = router
-        self.dto_type = policy.dto_type
-        wire_field = wire_field_for(policy)
-        self.response_model = list_response_model(policy, wire_field)
-        self.route_class = bound_route_class(policy)
-
-    def get(self, path: str, **options: Any) -> ProtectedRouteDecorator[list[DTO]]:
-        list_type = list.__class_getitem__(self.dto_type)
-        return ProtectedRouteDecorator(
-            self.router, path, "GET", list_type, self.response_model, self.route_class, options
-        )
+    def put(self, path: str, **options: Any) -> PolicyDecorator[DTO]:
+        return PolicyDecorator(self.router, self.policy, path, "PUT", options)

@@ -4,7 +4,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, ListPolicyRoutes, page_policy_routes
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -27,12 +27,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 deployment_policy = AuthContextResponsePolicy(dto_type=ModelDeployment, field="auth_context")
-deployment_items = ItemPolicyRoutes(router, deployment_policy)
-deployment_pages = page_policy_routes(router, deployment_policy, Page[ModelDeployment])
-deployment_lists = ListPolicyRoutes(router, deployment_policy)
+deployment_routes = PolicyRoutes(router, deployment_policy)
 
 
-@deployment_pages.get(
+@deployment_routes.get(
     "/v2/workspaces/{workspace}/deployments",
     summary="List ModelDeployments",
     response_description="Return model deployments for a workspace",
@@ -88,7 +86,7 @@ async def list_deployments(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployments")
 
 
-@deployment_items.post(
+@deployment_routes.post(
     "/v2/workspaces/{workspace}/deployments",
     summary="Create ModelDeployment",
     response_description="Create a new model deployment",
@@ -137,7 +135,7 @@ async def create_deployment(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create deployment")
 
 
-@deployment_items.get(
+@deployment_routes.get(
     "/v2/workspaces/{workspace}/deployments/{name}",
     summary="Get Latest ModelDeployment",
     response_description="Return the latest version of a model deployment",
@@ -208,7 +206,7 @@ async def get_deployment_models(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment models")
 
 
-@deployment_lists.get(
+@deployment_routes.get(
     "/v2/workspaces/{workspace}/deployments/{name}/versions",
     summary="List ModelDeployment Versions",
     response_description="Return all versions of a model deployment",
@@ -235,7 +233,7 @@ async def list_deployment_versions(
         )
 
 
-@deployment_items.get(
+@deployment_routes.get(
     "/v2/workspaces/{workspace}/deployments/{deployment}/versions/{name}",
     summary="Get Specific ModelDeployment Version",
     response_description="Return a specific version of a model deployment",
@@ -279,7 +277,7 @@ async def get_deployment_version(
         )
 
 
-@deployment_items.post(
+@deployment_routes.post(
     "/v2/workspaces/{workspace}/deployments/{name}",
     summary="Update ModelDeployment",
     response_description="Update a model deployment (creates new version)",
@@ -324,7 +322,7 @@ async def update_deployment(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deployment")
 
 
-@deployment_items.post(
+@deployment_routes.post(
     "/v2/workspaces/{workspace}/deployments/{name}/status",
     summary="Update ModelDeployment Status",
     response_description="Update ModelDeployment status and status_message",

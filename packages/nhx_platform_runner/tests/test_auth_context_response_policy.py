@@ -9,7 +9,7 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
-from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, PolicyRoute
+from nemo_helix_plugin.api.response_policy import PolicyRoute, PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nhx.common.auth.middleware import AuthorizationMiddleware
 from nhx.common.config import AuthConfig
@@ -29,9 +29,9 @@ class SnapshotService(Service):
 
     def get_routers(self) -> list[RouterConfig]:
         router = APIRouter()
-        items = ItemPolicyRoutes(router, AuthContextResponsePolicy(dto_type=SnapshotItem, field="auth_context"))
+        routes = PolicyRoutes(router, AuthContextResponsePolicy(dto_type=SnapshotItem, field="auth_context"))
 
-        @items.get("/item")
+        @routes.get("/item")
         async def get_item() -> SnapshotItem:
             return SnapshotItem(name="item", auth_context={"principal_id": "creator"})
 
