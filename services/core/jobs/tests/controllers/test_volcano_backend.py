@@ -48,6 +48,7 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    UNSTARTED_PAUSE_MESSAGE,
     KubernetesJobStorageConfig,
     KubernetesObjectMetadata,
     PodStatus,
@@ -1948,6 +1949,57 @@ def test_volcano_pausing_running_job_without_pods_keeps_pausing(volcano_job, tes
 
     assert update.status == HelixJobStatus.PAUSING
     terminate.assert_not_called()
+
+
+def _unscheduled_pod(uid: str) -> client.V1Pod:
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase="Pending"),
+    )
+
+
+def test_volcano_pausing_unscheduled_pods_is_paused_after_the_deadline(
+    volcano_job, mock_jobs_client, test_step_pausing
+):
+    """Pods still waiting for GPUs have nothing to save, so the deadline does not turn the pause into an error."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    job = {"status": {"state": {"phase": "Pending"}, "pending": 2}, "metadata": {"name": "vj"}}
+    pods = {"leader": _unscheduled_pod("uid-leader"), "worker": _unscheduled_pod("uid-worker")}
+    volcano_job._core_v1.read_namespaced_pod.side_effect = lambda namespace, name: pods[name.split("-")[-1]]  # ty: ignore[invalid-assignment]
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=list(pods.values()),
+        ),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    assert update.status_details == {"message": UNSTARTED_PAUSE_MESSAGE}
+    terminate.assert_called_once_with(job)
+    task_updates = {
+        call.kwargs["name"]: call.kwargs["body"] for call in mock_jobs_client.update_attempt_step_task.call_args_list
+    }
+    assert set(task_updates) == {"task-uid-leader", "task-uid-worker"}
+    assert all(body.status == HelixJobStatus.PAUSED for body in task_updates.values())
+
+
+def test_volcano_pausing_pending_job_without_pods_is_paused(volcano_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Pending"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels", return_value=[]),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    terminate.assert_called_once_with(job)
 
 
 def test_volcano_pausing_without_a_job_is_paused_after_the_deadline(volcano_job, test_step_pausing):

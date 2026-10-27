@@ -552,6 +552,33 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     return False, 0
 
 
+UNSTARTED_PAUSE_MESSAGE = "Job paused before its task started"
+
+
+def task_never_started(pods: list[V1Pod], *, workload_has_live_pods: bool) -> bool:
+    """Return whether no task container of a step has started, so it has no progress to save.
+
+    A pod waiting to be scheduled, pulling its image, or running init containers has
+    not started its task. When no pod is listed but the workload still reports a live
+    one, the list may have missed it, so the task counts as started until the next read.
+    """
+    if not pods:
+        return not workload_has_live_pods
+    for pod in pods:
+        statuses = pod.status.container_statuses if pod.status is not None else None
+        for status in statuses or []:
+            if status.name != NEMO_JOB_TASK_CONTAINER_NAME:
+                continue
+            state = status.state
+            if state is not None and (state.running is not None or state.terminated is not None):
+                return False
+            if status.last_state is not None and status.last_state.terminated is not None:
+                return False
+            if isinstance(status.restart_count, int) and status.restart_count > 0:
+                return False
+    return True
+
+
 def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
     """Return when the last task container exited.
 
