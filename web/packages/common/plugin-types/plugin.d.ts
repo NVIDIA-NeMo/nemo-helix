@@ -5852,7 +5852,7 @@ declare namespace external_d_exports {
 //#endregion
 //#region src/components/CreateSecretModal/index.d.ts
 declare const secretFormSchema: ZodObject<{
-  name: ZodEffects<ZodString, string, string>;
+  name: ZodEffects<ZodEffects<ZodString, string, string>, string, string>;
   description: ZodOptional<ZodString>;
   value: ZodString;
 }, "strip", ZodTypeAny, {

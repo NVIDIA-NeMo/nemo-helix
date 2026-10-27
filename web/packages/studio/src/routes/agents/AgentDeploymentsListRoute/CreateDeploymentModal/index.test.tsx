@@ -121,22 +121,23 @@ describe('CreateDeploymentModal', () => {
   });
 
   it.each([
-    ['deployment with spaces', 'Deployment name cannot contain spaces'],
-    ['Invalid-deployment', 'Deployment name must be lowercase'],
-  ])('does not submit the invalid deployment name %s', async (name, expectedError) => {
+    ['deployment with spaces', 'deployment-with-spaces'],
+    ['Invalid-deployment', 'invalid-deployment'],
+  ])('shows preview and submits the sanitized name for %s', async (name, sanitized) => {
     const user = userEvent.setup();
     const captured = captureCreate();
     renderModal();
 
     const dialog = await getDeploymentDialog();
-    await user.type(
-      within(dialog).getByRole('textbox', { name: 'Deployment Name (optional)' }),
-      name
-    );
+    await user.type(within(dialog).getByRole('textbox', { name: /Deployment Name/ }), name);
+
+    expect(await within(dialog).findByText(sanitized)).toBeInTheDocument();
+
     await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
 
-    expect(await within(dialog).findByText(new RegExp(expectedError))).toBeInTheDocument();
-    expect(captured.body).toBeUndefined();
+    await waitFor(() =>
+      expect(captured.body).toEqual({ agent, name: sanitized, deployment_mode: 'subprocess' })
+    );
   });
 
   it('creates a Docker deployment with the selected container image', async () => {
