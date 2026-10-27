@@ -185,7 +185,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
   // Derived, not stored: an armed replace targets one fileset, so editing the name
   // disarms it in the same render rather than one render later.
-  const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
+  const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === agentPreview;
 
   const resetAndClose = () => {
     resetMutation();
