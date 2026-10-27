@@ -19,35 +19,43 @@ const range = (from: number, to: number): HelixJobLog[] =>
 
 describe('diffLogs', () => {
   it('reports no change for identical lists', () => {
-    expect(diffLogs(range(0, 5), range(0, 5))).toEqual({ dropped: 0, added: [] });
+    expect(diffLogs(range(0, 5), range(0, 5))).toEqual({ prepended: [], dropped: 0, added: [] });
   });
 
   it('treats everything as appended when there was nothing before', () => {
-    expect(diffLogs([], range(0, 3))).toEqual({ dropped: 0, added: range(0, 3) });
+    expect(diffLogs([], range(0, 3))).toEqual({ prepended: [], dropped: 0, added: range(0, 3) });
   });
 
   it('reports an append', () => {
-    expect(diffLogs(range(0, 5), range(0, 8))).toEqual({ dropped: 0, added: range(5, 8) });
+    expect(diffLogs(range(0, 5), range(0, 8))).toEqual({
+      prepended: [],
+      dropped: 0,
+      added: range(5, 8),
+    });
   });
 
   it('reports entries trimmed from the head', () => {
-    expect(diffLogs(range(0, 5), range(2, 5))).toEqual({ dropped: 2, added: [] });
+    expect(diffLogs(range(0, 5), range(2, 5))).toEqual({ prepended: [], dropped: 2, added: [] });
   });
 
   it('reports a sliding window as a trim plus an append', () => {
-    expect(diffLogs(range(0, 5), range(3, 9))).toEqual({ dropped: 3, added: range(5, 9) });
+    expect(diffLogs(range(0, 5), range(3, 9))).toEqual({
+      prepended: [],
+      dropped: 3,
+      added: range(5, 9),
+    });
   });
 
   it('matches entries by content rather than identity', () => {
     const next = range(1, 6).map((log) => ({ ...log }));
 
-    expect(diffLogs(range(0, 5), next)).toEqual({ dropped: 1, added: [makeLog(5)] });
+    expect(diffLogs(range(0, 5), next)).toEqual({ prepended: [], dropped: 1, added: [makeLog(5)] });
   });
 
-  it('ignores fields the viewer does not show', () => {
+  it('tells apart the same line logged by different tasks', () => {
     const next = [...range(0, 3).map((log) => ({ ...log, job_task: 'other' })), makeLog(3)];
 
-    expect(diffLogs(range(0, 3), next)).toEqual({ dropped: 0, added: [makeLog(3)] });
+    expect(diffLogs(range(0, 3), next)).toBeNull();
   });
 
   it('keeps the most content when repeated lines allow several alignments', () => {
@@ -55,7 +63,7 @@ describe('diffLogs', () => {
     const prev = [repeated, repeated];
     const next = [repeated, repeated, repeated];
 
-    expect(diffLogs(prev, next)).toEqual({ dropped: 0, added: [repeated] });
+    expect(diffLogs(prev, next)).toEqual({ prepended: [], dropped: 0, added: [repeated] });
   });
 
   it('skips an alignment that only matches at its ends', () => {
@@ -65,7 +73,35 @@ describe('diffLogs', () => {
     const prev = [x, a, b, a];
     const next = [a, c, a, y];
 
-    expect(diffLogs(prev, next)).toEqual({ dropped: 3, added: [c, a, y] });
+    expect(diffLogs(prev, next)).toEqual({ prepended: [], dropped: 3, added: [c, a, y] });
+  });
+
+  it('reports older entries loaded in front', () => {
+    expect(diffLogs(range(5, 8), range(0, 8))).toEqual({
+      prepended: range(0, 5),
+      dropped: 0,
+      added: [],
+    });
+  });
+
+  it('reports older entries loaded in front alongside an append', () => {
+    expect(diffLogs(range(5, 8), range(0, 10))).toEqual({
+      prepended: range(0, 5),
+      dropped: 0,
+      added: range(8, 10),
+    });
+  });
+
+  it('skips a prepend alignment that only matches at its ends', () => {
+    // One entry in, A lines up with A at both ends, but C sits where B should.
+    const [a, b, c, x] = ['A', 'B', 'C', 'X'].map((message, i) => makeLog(i, message));
+
+    expect(diffLogs([a, b, a], [x, a, c, a, b, a])).toEqual({
+      prepended: [x, a, c],
+      dropped: 0,
+      added: [],
+    });
+    expect(diffLogs([a, b, a], [x, a, c, a])).toBeNull();
   });
 
   it('returns null when the lists share nothing', () => {

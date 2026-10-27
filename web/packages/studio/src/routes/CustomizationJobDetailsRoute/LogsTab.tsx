@@ -17,7 +17,7 @@ export const LogsTab: FC<Props> = ({ customizationJobName, workspace, jobStatus 
   const {
     data: logs,
     isLoading,
-    loadProgress,
+    paging,
   } = useJobLogs({
     workspace,
     name: customizationJobName,
@@ -29,7 +29,7 @@ export const LogsTab: FC<Props> = ({ customizationJobName, workspace, jobStatus 
       <LogViewer
         logs={logs ?? []}
         isLoading={isLoading}
-        loadProgress={loadProgress}
+        paging={paging}
         downloadFilename={`${customizationJobName}.log`}
         fillHeight
       />

@@ -9702,14 +9702,15 @@ interface Props$4<DataType> {
 export declare const StudioDataView: <DataType>({ attributes, children, makeColumns, dataViewState, onRowClick, maxTwoLines, renderBulkActions, scrollContainerRef, searchField, toolbarSlotStart, toolbarSlotEnd }: Props$4<DataType>) => import("react/jsx-runtime").JSX.Element;
 //#endregion
 //#region src/utils/logs.d.ts
-/**
- * Incremental state of a multi-page log fetch. `total` is the server-side line count
- * for the whole job, known once the first page resolves.
- */
-interface LogLoadProgress {
-  /** Lines fetched so far across every page walked. Not reduced by retention trimming. */
-  loaded: number;
-  total: number;
+/** Reaches the parts of a log that weren't loaded up front. */
+interface LogPaging {
+  /** The server holds lines older than the ones loaded. */
+  hasOlderLogs: boolean;
+  isFetchingOlderLogs: boolean;
+  /** Prepends the next page of older lines to the loaded logs. */
+  fetchOlderLogs: () => Promise<void>;
+  /** Fetches every line of the log, oldest first, e.g. for download. */
+  fetchAllLogs: () => Promise<HelixJobLog[]>;
 }
 //#endregion
 //#region src/components/LogViewer/index.d.ts
@@ -9720,9 +9721,9 @@ interface LogViewerProps {
   rows?: number;
   fillHeight?: boolean;
   emptyMessage?: string;
-  /** Progress of the initial multi-page fetch, shown beneath the loading spinner.
-   *  Ignored once logs are on screen. Callers that fetch in one shot can omit it. */
-  loadProgress?: LogLoadProgress | null;
+  /** Reaches lines not passed in `logs`: older pages behind "Load previous logs", and the
+   *  whole log for download. Without it, both stop at `logs`. */
+  paging?: LogPaging;
   /** Where the copy confirmation goes. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
 }

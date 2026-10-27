@@ -39,7 +39,8 @@ interface LogEditorProps {
   scrollLocked: boolean;
 }
 
-/** Owns the editor's document, applying head trims and tail appends as edits to keep scroll. */
+/** Owns the editor's document, applying head trims, head prepends and tail appends as edits to
+ *  keep scroll. */
 export const LogEditor: FC<LogEditorProps> = ({
   logs,
   resetKey,
@@ -70,14 +71,20 @@ export const LogEditor: FC<LogEditorProps> = ({
   );
 
   useEffect(() => {
-    if (!view) return;
+    if (!view) {
+      return;
+    }
     const synced = syncedRef.current;
-    if (synced.logs === logs && synced.resetKey === resetKey) return;
+    if (synced.logs === logs && synced.resetKey === resetKey) {
+      return;
+    }
     syncedRef.current = { logs, resetKey };
 
     const isReset = synced.resetKey !== resetKey;
     const diff = isReset ? null : diffLogs(synced.logs, logs);
-    if (diff && diff.dropped === 0 && diff.added.length === 0) return;
+    if (diff && diff.prepended.length === 0 && diff.dropped === 0 && diff.added.length === 0) {
+      return;
+    }
 
     const { doc } = view.state;
     // A pinned reader has no place to keep, and with wrapping on a trim-plus-append edit
@@ -93,6 +100,10 @@ export const LogEditor: FC<LogEditorProps> = ({
     // A full replace would map CodeMirror's scroll anchor to the top; editing only the edges
     // keeps the lines on screen in place.
     const changes: ChangeSpec[] = [];
+    if (diff.prepended.length > 0) {
+      // diffLogs only reports a prepend when prev had entries, so the document isn't empty.
+      changes.push({ from: 0, insert: formatLogsForDisplay(diff.prepended) + '\n' });
+    }
     if (diff.dropped > 0) {
       // diffLogs only reports a trim when some entries survive, so this line exists.
       const firstKept = doc.line(countLines(synced.logs.slice(0, diff.dropped)) + 1);

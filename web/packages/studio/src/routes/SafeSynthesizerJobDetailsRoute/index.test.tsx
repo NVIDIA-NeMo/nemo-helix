@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
+import type { LogPaging } from '@nemo/common/src/utils/logs';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import * as safeSynthesizerApi from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import {
@@ -73,6 +74,13 @@ const mockuseWorkspaceFromPath = vi.mocked(useWorkspaceFromPath);
 const mockUseJobLogs = vi.mocked(useJobLogs);
 const mockUseBreadcrumbs = vi.mocked(useBreadcrumbs);
 
+const LOG_PAGING: LogPaging = {
+  hasOlderLogs: false,
+  isFetchingOlderLogs: false,
+  fetchOlderLogs: vi.fn(),
+  fetchAllLogs: vi.fn(),
+};
+
 // Helper function to create test wrapper
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -143,7 +151,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 0,
-      loadProgress: null,
+      paging: LOG_PAGING,
       refetch: vi.fn(),
     });
     mockUseBreadcrumbs.mockReturnValue({
@@ -303,7 +311,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 3,
-      loadProgress: null,
+      paging: LOG_PAGING,
       refetch: vi.fn(),
     });
 
@@ -340,7 +348,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 1,
-      loadProgress: null,
+      paging: LOG_PAGING,
       refetch: vi.fn(),
     });
 
@@ -380,7 +388,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       isLoading: false,
       error: null,
       total: 2,
-      loadProgress: null,
+      paging: LOG_PAGING,
       refetch: vi.fn(),
     });
 

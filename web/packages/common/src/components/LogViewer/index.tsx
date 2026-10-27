@@ -4,12 +4,9 @@
 import { LogEditor } from '@nemo/common/src/components/LogViewer/LogEditor';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
+import { getErrorMessage } from '@nemo/common/src/utils/error';
 import { triggerDownload } from '@nemo/common/src/utils/file';
-import {
-  formatLogs,
-  formatLogsForDisplay,
-  type LogLoadProgress,
-} from '@nemo/common/src/utils/logs';
+import { formatLogs, formatLogsForDisplay, type LogPaging } from '@nemo/common/src/utils/logs';
 import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -23,40 +20,11 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useState } from 'react';
 
 import '@nemo/common/src/components/LogViewer/styles.css';
 
 const DEFAULT_ROW_COUNT = 30;
-
-// The page walk reports after every page, which on a long job is several updates a
-// second. Coalescing them keeps the aria-live region from queueing an announcement
-// per page while still reading as live progress.
-const PROGRESS_UPDATE_INTERVAL_MS = 1_000;
-
-/** Emits `value` immediately, then at most once per `intervalMs`, always settling on
- *  the latest value. */
-function useThrottledValue<T>(value: T, intervalMs: number): T {
-  const [throttled, setThrottled] = useState(value);
-  const lastEmitRef = useRef(0);
-
-  useEffect(() => {
-    if (value === throttled) return;
-    const emit = () => {
-      lastEmitRef.current = Date.now();
-      setThrottled(value);
-    };
-    const waitMs = intervalMs - (Date.now() - lastEmitRef.current);
-    if (waitMs <= 0) {
-      emit();
-      return;
-    }
-    const timer = setTimeout(emit, waitMs);
-    return () => clearTimeout(timer);
-  }, [value, throttled, intervalMs]);
-
-  return throttled;
-}
 
 interface LogViewerProps {
   logs: HelixJobLog[];
@@ -65,9 +33,9 @@ interface LogViewerProps {
   rows?: number;
   fillHeight?: boolean;
   emptyMessage?: string;
-  /** Progress of the initial multi-page fetch, shown beneath the loading spinner.
-   *  Ignored once logs are on screen. Callers that fetch in one shot can omit it. */
-  loadProgress?: LogLoadProgress | null;
+  /** Reaches lines not passed in `logs`: older pages behind "Load previous logs", and the
+   *  whole log for download. Without it, both stop at `logs`. */
+  paging?: LogPaging;
   /** Where the copy confirmation goes. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
 }
@@ -79,58 +47,58 @@ export const LogViewer: FC<LogViewerProps> = ({
   rows = DEFAULT_ROW_COUNT,
   fillHeight = false,
   emptyMessage = 'No logs available yet',
-  loadProgress,
+  paging,
   onNotify,
 }) => {
   const [showAllLogs, setShowAllLogs] = useState(fillHeight);
   const [wrapLines, setWrapLines] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const tailLogs = logs?.slice(-rows) || [];
   const displayedLogs = showAllLogs ? logs : tailLogs;
   // Copy what's on screen; download keeps the raw messages.
   const logText = formatLogsForDisplay(displayedLogs);
   const hasMoreLogs = logs && logs.length > rows;
-
-  // Announce the wait straight away; the counts join it once the first page tells us
-  // the denominator.
-  const progressLabel =
-    loadProgress && loadProgress.total > 0
-      ? `Loading logs... ${loadProgress.loaded.toLocaleString()} of ${loadProgress.total.toLocaleString()} lines`
-      : 'Loading logs...';
-  const throttledProgressLabel = useThrottledValue(progressLabel, PROGRESS_UPDATE_INTERVAL_MS);
+  const hasHiddenLogs = !showAllLogs && hasMoreLogs;
+  const isFetchingOlderLogs = !!paging?.isFetchingOlderLogs;
 
   const notify = useNotify(onNotify);
 
-  const handleDownload = () => {
-    if (downloadFilename) {
+  const handleLoadPrevious = () => {
+    setShowAllLogs(true);
+    // Reveal the lines already here before asking the server for older ones.
+    if (hasHiddenLogs || !paging) {
+      return;
+    }
+    paging
+      .fetchOlderLogs()
+      .catch((error: unknown) =>
+        notify(`Failed to load previous logs: ${getErrorMessage(error)}`, 'error')
+      );
+  };
+
+  const handleDownload = async () => {
+    if (!downloadFilename) {
+      return;
+    }
+    // Without older lines on the server, what's loaded is already the whole log.
+    if (!paging?.hasOlderLogs) {
       triggerDownload(formatLogs(logs), downloadFilename);
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      triggerDownload(formatLogs(await paging.fetchAllLogs()), downloadFilename);
+    } catch (error) {
+      notify(`Failed to download logs: ${getErrorMessage(error)}`, 'error');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
   if (isLoading) {
     return (
-      <Flex
-        direction="column"
-        align="center"
-        justify="center"
-        gap="density-sm"
-        className="h-full min-h-32 w-full"
-      >
+      <Flex align="center" justify="center" className="h-full min-h-32 w-full">
         <Spinner size="medium" aria-label="Loading..." />
-        {/* The fetch walks the log a page at a time, so on a large job this sits here
-            for many round-trips. Mounted for every caller that opts into progress,
-            so that the counts arriving with the first page are a mutation inside a
-            live region already in the DOM — screen readers that only announce such
-            mutations skip a region that appears already populated. */}
-        {loadProgress !== undefined && (
-          <Text
-            kind="mono/md"
-            className="text-subtle"
-            aria-live="polite"
-            data-testid="log-load-progress"
-          >
-            {throttledProgressLabel}
-          </Text>
-        )}
       </Flex>
     );
   }
@@ -174,7 +142,8 @@ export const LogViewer: FC<LogViewerProps> = ({
                   kind="tertiary"
                   title="Download logs"
                   aria-label="Download logs"
-                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  onClick={() => void handleDownload()}
                 >
                   <Download />
                 </Button>
@@ -190,13 +159,19 @@ export const LogViewer: FC<LogViewerProps> = ({
             <CopyGeneric />
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
-        {!showAllLogs && hasMoreLogs && (
+        {(hasHiddenLogs || paging?.hasOlderLogs) && (
           // Zero-height anchor so the fade starts at the editor's top edge.
           <Block className="relative z-10 h-0">
             <Block className="absolute inset-x-px top-px max-h-none rounded-t-md py-5 text-center bg-[linear-gradient(to_bottom,var(--nv-code-snippet-custom-background),transparent)]">
-              <Tag color="gray" kind="solid" onClick={() => setShowAllLogs(true)}>
+              <Tag
+                color="gray"
+                kind="solid"
+                disabled={isFetchingOlderLogs}
+                aria-busy={isFetchingOlderLogs}
+                onClick={handleLoadPrevious}
+              >
                 <ArrowUp />
-                Load previous logs
+                {isFetchingOlderLogs ? 'Loading previous logs...' : 'Load previous logs'}
               </Tag>
             </Block>
           </Block>

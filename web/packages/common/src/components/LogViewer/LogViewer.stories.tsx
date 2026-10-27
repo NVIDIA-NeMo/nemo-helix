@@ -3,7 +3,7 @@
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
-import type { LogLoadProgress } from '@nemo/common/src/utils/logs';
+import type { LogPaging } from '@nemo/common/src/utils/logs';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Flex,
@@ -16,6 +16,9 @@ import { type ComponentProps, type FC, useEffect, useMemo, useState } from 'reac
 
 const LOG_START_MS = Date.parse('2026-01-01T00:00:00Z');
 const LOG_INTERVAL_MS = 250;
+const PAGED_TAIL_SIZE = 200;
+const PAGED_PAGE_SIZE = 500;
+const PAGED_LATENCY_MS = 600;
 
 const LEVELS = ['INFO', 'INFO', 'INFO', 'DEBUG', 'WARNING', 'ERROR'] as const;
 const MESSAGES = [
@@ -75,7 +78,9 @@ const makeLogs = (count: number, options: LogOptions): HelixJobLog[] =>
 const useStreamedCount = (intervalMs: number) => {
   const [count, setCount] = useState(0);
   useEffect(() => {
-    if (intervalMs <= 0) return;
+    if (intervalMs <= 0) {
+      return;
+    }
     const timer = setInterval(() => setCount((prev) => prev + 1), intervalMs);
     return () => clearInterval(timer);
   }, [intervalMs]);
@@ -106,30 +111,43 @@ const GeneratedLogViewer: FC<StoryArgs> = ({
   return <LogViewer {...props} logs={logs} />;
 };
 
-/** Walks a log a page at a time like the job detail routes, then shows it. */
-const PageWalkLogViewer: FC<StoryArgs> = ({ lineCount, ...args }) => {
-  const pageSize = Math.max(1, Math.ceil(lineCount / 10));
-  const [progress, setProgress] = useState<LogLoadProgress | null>(null);
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  useEffect(() => {
-    let loaded = 0;
-    const timer = setInterval(() => {
-      loaded = Math.min(lineCount, loaded + pageSize);
-      setProgress({ loaded, total: lineCount });
-      if (loaded >= lineCount) clearInterval(timer);
-    }, 400);
-    return () => clearInterval(timer);
-  }, [lineCount, pageSize]);
-
-  const isLoading = !progress || progress.loaded < lineCount;
-  return (
-    <GeneratedLogViewer
-      {...args}
-      lineCount={isLoading ? 0 : lineCount}
-      isLoading={isLoading}
-      loadProgress={progress}
-    />
+/** Hands over only the newest lines of a longer log, like useJobLogs, and pages older ones in
+ *  behind "Load previous logs". Remount (key) it when `lineCount` changes. */
+const PagedLogViewer: FC<StoryArgs> = ({
+  lineCount,
+  longLines,
+  multiline,
+  carriageReturns,
+  streamIntervalMs,
+  ...props
+}) => {
+  const streamedCount = useStreamedCount(streamIntervalMs);
+  const serverLogs = useMemo(
+    () => makeLogs(lineCount + streamedCount, { longLines, multiline, carriageReturns }),
+    [lineCount, streamedCount, longLines, multiline, carriageReturns]
   );
+  const [start, setStart] = useState(() => Math.max(0, lineCount - PAGED_TAIL_SIZE));
+  const [isFetchingOlderLogs, setIsFetchingOlderLogs] = useState(false);
+  const logs = useMemo(() => serverLogs.slice(start), [serverLogs, start]);
+
+  const paging: LogPaging = {
+    hasOlderLogs: start > 0,
+    isFetchingOlderLogs,
+    fetchOlderLogs: async () => {
+      setIsFetchingOlderLogs(true);
+      await delay(PAGED_LATENCY_MS);
+      setStart((prev) => Math.max(0, prev - PAGED_PAGE_SIZE));
+      setIsFetchingOlderLogs(false);
+    },
+    fetchAllLogs: async () => {
+      await delay(PAGED_LATENCY_MS);
+      return serverLogs;
+    },
+  };
+
+  return <LogViewer {...props} logs={logs} paging={paging} />;
 };
 
 /** `fillHeight` stretches to its container, as in the customization job's Logs tab. */
@@ -178,7 +196,6 @@ const meta = {
     lineCount: { control: { type: 'number', min: 0, step: 100 } },
     streamIntervalMs: { control: { type: 'number', min: 0, step: 100 } },
     rows: { control: { type: 'number', min: 1 } },
-    loadProgress: { control: 'object' },
   },
 } satisfies Meta<StoryArgs>;
 
@@ -259,24 +276,14 @@ export const NoDownload: Story = {
   args: { downloadFilename: undefined },
 };
 
-/** Callers that fetch in one shot omit `loadProgress`, leaving a bare spinner. */
 export const Loading: Story = {
   args: { isLoading: true },
 };
 
-/** The total isn't known until the first page lands. */
-export const LoadingBeforeTotal: Story = {
-  args: { isLoading: true, loadProgress: null },
-};
-
-export const LoadingWithProgress: Story = {
-  args: { isLoading: true, loadProgress: { loaded: 12_000, total: 48_000 } },
-};
-
-/** Progress counts climb page by page, then the logs replace the spinner. */
-export const PageWalk: Story = {
-  args: { lineCount: 5_000 },
-  render: (args) => <PageWalkLogViewer {...args} />,
+/** Only the newest lines are loaded; "Load previous logs" pages older ones in from the server. */
+export const PagedFromServer: Story = {
+  args: { lineCount: 2_000 },
+  render: (args) => <PagedLogViewer key={args.lineCount} {...args} />,
   decorators: [withPanel],
 };
 

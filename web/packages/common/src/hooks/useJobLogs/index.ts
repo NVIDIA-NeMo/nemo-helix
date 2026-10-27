@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  LOGS_MAX_FETCH_ITERATIONS,
+  LOGS_MAX_PAGE_SIZE,
+  LOGS_TAIL_SIZE,
+} from '@nemo/common/src/constants';
+import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { isSameLogEntry, type LogPaging } from '@nemo/common/src/utils/logs';
+import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import { getJobsPageJobLogsQueryKey, jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobLog,
@@ -8,69 +16,32 @@ import type {
   HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import {
-  hashKey,
   useQuery,
   useQueryClient,
   type QueryObserverResult,
   type RefetchOptions,
 } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
-
-import { LOGS_MAX_FETCH_ITERATIONS, LOGS_MAX_PAGES, LOGS_PAGE_SIZE } from '../../constants';
-import { CJobTerminalStatuses } from '../../constants/query';
-import type { LogLoadProgress } from '../../utils/logs';
-import { getJobRefetchInterval } from '../../utils/query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // After a job goes terminal, refetchInterval stops polling — but OTLP log
 // shipping can still be in flight, so the final lines would be lost. Refetch a
 // few times post-terminal to capture the tail. Bounded and self-clearing.
 const LOG_SETTLE_DELAYS_MS = [2_000, 6_000, 12_000];
 
-// Progress lives in a module store keyed by query key rather than in component state,
-// for two reasons. The log query key is shared — a viewer and a download button can
-// observe the same job — and React Query runs the queryFn of whichever observer won
-// the fetch, so per-instance state freezes on the loser's last count. And the hook is
-// not remounted when the :jobName route param changes, so per-instance state would
-// paint the previous job's count for the frame before the new queryFn resets it.
-const progressByQueryKey = new Map<string, LogLoadProgress | null>();
-const progressListeners = new Map<string, Set<() => void>>();
-
-function reportProgress(queryKeyHash: string, progress: LogLoadProgress | null): void {
-  const listeners = progressListeners.get(queryKeyHash);
-  // Nothing mounted is watching this job — don't retain an entry for it. Keeping the
-  // store bounded to live subscribers is what makes unsubscribe a safe place to evict.
-  if (!listeners) return;
-  progressByQueryKey.set(queryKeyHash, progress);
-  listeners.forEach((listener) => listener());
-}
-
-function subscribeToProgress(queryKeyHash: string, listener: () => void): () => void {
-  const listeners = progressListeners.get(queryKeyHash) ?? new Set<() => void>();
-  progressListeners.set(queryKeyHash, listeners);
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) {
-      progressListeners.delete(queryKeyHash);
-      progressByQueryKey.delete(queryKeyHash);
-    }
-  };
-}
-
 export interface UseJobLogsOptions {
   workspace: string;
   name: string;
   enabled?: boolean;
   jobStatus?: HelixJobStatus;
-  pageSize?: number;
-  /** Max pages of logs to retain in memory. Defaults to LOGS_MAX_PAGES.
-   *  Set to Infinity for download scenarios where all logs are needed. */
-  maxPages?: number;
 }
 
 interface JobLogsQueryData {
   logs: HelixJobLog[];
   total: number;
+  /** Cursor for the lines just older than `logs[0]`; null once the start of the log is held. */
+  olderCursor: string | null;
+  /** Lines the last poll brought in, so the next one's window can reach back past as many. */
+  growth: number;
 }
 
 export interface UseJobLogsResult {
@@ -78,10 +49,7 @@ export interface UseJobLogsResult {
   isLoading: boolean;
   error: Error | null;
   total: number;
-  /** Advances as the cursor walk pages through the log, `null` until the first page
-   *  resolves and again whenever a new walk starts. Meant for the initial load, which
-   *  blocks on every page; refetches already have data on screen. */
-  loadProgress: LogLoadProgress | null;
+  paging: LogPaging;
   refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<JobLogsQueryData>>;
 }
 
@@ -92,8 +60,50 @@ export function getJobLogsQueryKey(
   return [...getJobsPageJobLogsQueryKey(workspace, name), 'all'];
 }
 
-function getPageQueryKey(workspace: string, name: string, cursor: string | undefined) {
-  return [...getJobsPageJobLogsQueryKey(workspace, name), 'page', cursor ?? 'initial'];
+function toQueryData(page: HelixJobLogPage): JobLogsQueryData {
+  // The server sends null when there's no older page; the generated type and mocks use ''.
+  return { logs: page.data, total: page.total, olderCursor: page.prev_page || null, growth: 0 };
+}
+
+/** Folds a fresh tail window into the lines already held, or returns null if it doesn't reach
+ *  back to them. The window replaces everything from where it starts, so lines shipped late
+ *  into that span land in place. */
+function mergeTail(
+  prev: JobLogsQueryData | undefined,
+  page: HelixJobLogPage
+): JobLogsQueryData | null {
+  const [first] = page.data;
+  if (!prev?.logs.length || !first) {
+    return toQueryData(page);
+  }
+
+  // Any overlap starts within the last window's worth of held lines.
+  const searchFrom = Math.max(0, prev.logs.length - page.data.length);
+  for (let i = prev.logs.length - 1; i >= searchFrom; i--) {
+    if (isSameLogEntry(prev.logs[i], first)) {
+      return {
+        logs: [...prev.logs.slice(0, i), ...page.data],
+        total: page.total,
+        olderCursor: prev.olderCursor,
+        growth: Math.max(0, page.total - prev.total),
+      };
+    }
+  }
+  return null;
+}
+
+/** Every line of a job's log, oldest first, paged back from the tail at the server's max. */
+export async function fetchAllJobLogs(workspace: string, name: string): Promise<HelixJobLog[]> {
+  let page = await jobsPageJobLogs(workspace, name, { tail: LOGS_MAX_PAGE_SIZE });
+  const pages = [page.data];
+  for (let i = 0; page.prev_page && i < LOGS_MAX_FETCH_ITERATIONS; i++) {
+    page = await jobsPageJobLogs(workspace, name, {
+      page_cursor: page.prev_page,
+      limit: LOGS_MAX_PAGE_SIZE,
+    });
+    pages.push(page.data);
+  }
+  return pages.reverse().flat();
 }
 
 export const useJobLogs = ({
@@ -101,71 +111,75 @@ export const useJobLogs = ({
   name,
   enabled,
   jobStatus,
-  pageSize = LOGS_PAGE_SIZE,
-  maxPages = LOGS_MAX_PAGES,
 }: UseJobLogsOptions): UseJobLogsResult => {
   const queryClient = useQueryClient();
   const queryKey = getJobLogsQueryKey(workspace, name);
-  const queryKeyHash = hashKey(queryKey);
-  const maxRetainedLogs = maxPages * pageSize;
-
-  // Subscribed before useQuery so this effect registers ahead of the one that kicks
-  // off the fetch — otherwise the walk's first report would land with no listener.
-  const loadProgress = useSyncExternalStore(
-    useCallback(
-      (listener: () => void) => subscribeToProgress(queryKeyHash, listener),
-      [queryKeyHash]
-    ),
-    useCallback(() => progressByQueryKey.get(queryKeyHash) ?? null, [queryKeyHash])
-  );
 
   const query = useQuery<JobLogsQueryData>({
     queryKey,
     queryFn: async ({ signal }) => {
-      let allLogs: HelixJobLog[] = [];
-      let cursor: string | undefined;
-      let total = 0;
-      // Counted separately from allLogs, which the retention cap trims back to the
-      // tail — otherwise progress would stall at maxRetainedLogs on exactly the long
-      // logs this is here to narrate.
-      let fetched = 0;
-
-      reportProgress(queryKeyHash, null);
-
-      for (let i = 0; i < LOGS_MAX_FETCH_ITERATIONS; i++) {
-        if (signal.aborted) break;
-
-        const pageCursor = cursor;
-        const pageKey = getPageQueryKey(workspace, name, pageCursor);
-        const cached = queryClient.getQueryData<HelixJobLogPage>(pageKey);
-        const isCachedFullPage = cached !== undefined && cached.data.length >= pageSize;
-
-        const page = await queryClient.fetchQuery({
-          queryKey: pageKey,
-          queryFn: ({ signal }) =>
-            jobsPageJobLogs(workspace, name, { limit: pageSize, page_cursor: pageCursor }, signal),
-          staleTime: isCachedFullPage ? Infinity : 0,
-        });
-
-        allLogs.push(...page.data);
-        total = page.total;
-        fetched += page.data.length;
-
-        if (maxRetainedLogs !== Infinity && allLogs.length > maxRetainedLogs) {
-          allLogs = allLogs.slice(-maxRetainedLogs);
-        }
-
-        if (!signal.aborted) reportProgress(queryKeyHash, { loaded: fetched, total });
-
-        if (!page.next_page || page.data.length === 0) break;
-        cursor = page.next_page;
+      // Reach back past as many lines as the last poll brought in, so a busy log still
+      // overlaps the held lines in one request.
+      const growth = queryClient.getQueryData<JobLogsQueryData>(queryKey)?.growth ?? 0;
+      const tail = Math.min(LOGS_MAX_PAGE_SIZE, LOGS_TAIL_SIZE + growth);
+      const page = await jobsPageJobLogs(workspace, name, { tail }, signal);
+      // Read after each await, so older lines fetched while this was in flight are kept.
+      const prev = queryClient.getQueryData<JobLogsQueryData>(queryKey);
+      const merged = mergeTail(prev, page);
+      // More lines arrived than the window holds: widen it back to the held lines, so older
+      // pages the user loaded aren't dropped.
+      const wider = Math.min(LOGS_MAX_PAGE_SIZE, page.total - (prev?.total ?? 0) + LOGS_TAIL_SIZE);
+      if (merged || wider <= tail) {
+        return merged ?? toQueryData(page);
       }
-
-      return { logs: allLogs, total };
+      const widerPage = await jobsPageJobLogs(workspace, name, { tail: wider }, signal);
+      // Still no overlap (past the API's cap, or a new attempt): start over.
+      const latest = queryClient.getQueryData<JobLogsQueryData>(queryKey);
+      return mergeTail(latest, widerPage) ?? toQueryData(widerPage);
     },
     enabled: enabled ?? !!(workspace && name),
     refetchInterval: () => getJobRefetchInterval(jobStatus),
   });
+
+  const [isFetchingOlderLogs, setIsFetchingOlderLogs] = useState(false);
+  const isFetchingOlderRef = useRef(false);
+  const fetchOlderLogs = useCallback(async () => {
+    const key = getJobLogsQueryKey(workspace, name);
+    const cursor = queryClient.getQueryData<JobLogsQueryData>(key)?.olderCursor;
+    if (!cursor || isFetchingOlderRef.current) {
+      return;
+    }
+
+    isFetchingOlderRef.current = true;
+    setIsFetchingOlderLogs(true);
+    try {
+      const page = await jobsPageJobLogs(workspace, name, {
+        page_cursor: cursor,
+        limit: LOGS_MAX_PAGE_SIZE,
+      });
+      queryClient.setQueryData<JobLogsQueryData>(key, (latest) =>
+        // A poll that started over since this was sent has moved on from this cursor.
+        latest?.olderCursor === cursor
+          ? {
+              ...latest,
+              logs: [...page.data, ...latest.logs],
+              olderCursor: page.prev_page || null,
+            }
+          : latest
+      );
+    } finally {
+      isFetchingOlderRef.current = false;
+      setIsFetchingOlderLogs(false);
+    }
+  }, [queryClient, workspace, name]);
+
+  const fetchAllLogs = useCallback(() => fetchAllJobLogs(workspace, name), [workspace, name]);
+
+  const hasOlderLogs = !!query.data?.olderCursor;
+  const paging = useMemo<LogPaging>(
+    () => ({ hasOlderLogs, isFetchingOlderLogs, fetchOlderLogs, fetchAllLogs }),
+    [hasOlderLogs, isFetchingOlderLogs, fetchOlderLogs, fetchAllLogs]
+  );
 
   const isTerminal = !!jobStatus && CJobTerminalStatuses.includes(jobStatus);
   const { refetch } = query;
@@ -176,8 +190,12 @@ export const useJobLogs = ({
   // log panel on a finished job.
   const sawActiveRef = useRef(false);
   useEffect(() => {
-    if (jobStatus && !isTerminal) sawActiveRef.current = true;
-    if (!isTerminal || !sawActiveRef.current) return;
+    if (jobStatus && !isTerminal) {
+      sawActiveRef.current = true;
+    }
+    if (!isTerminal || !sawActiveRef.current) {
+      return;
+    }
     const timers = LOG_SETTLE_DELAYS_MS.map((ms) => setTimeout(() => void refetch(), ms));
     return () => timers.forEach(clearTimeout);
   }, [jobStatus, isTerminal, refetch]);
@@ -187,7 +205,7 @@ export const useJobLogs = ({
     isLoading: query.isLoading,
     error: query.error,
     total: query.data?.total ?? 0,
-    loadProgress,
+    paging,
     refetch: query.refetch,
   };
 };

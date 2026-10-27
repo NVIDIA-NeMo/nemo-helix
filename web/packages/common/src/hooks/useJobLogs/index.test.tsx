@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { LOGS_MAX_PAGE_SIZE, LOGS_TAIL_SIZE } from '@nemo/common/src/constants';
+import { fetchAllJobLogs, useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type { HelixJobLog, HelixJobLogPage } from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-
-import { useJobLogs } from './index';
 
 vi.mock('@nemo/sdk/generated/platform/jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/jobs')>();
@@ -22,31 +22,28 @@ const mockJobsPageJobLogs = vi.mocked(jobsPageJobLogs);
 const WORKSPACE = 'test-workspace';
 const JOB_NAME = 'test-job';
 
-function makeLog(index: number): HelixJobLog {
+function makeLog(index: number, message = `Log message ${index}`): HelixJobLog {
   return {
     timestamp: `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`,
     job: JOB_NAME,
     job_step: 'step',
     job_task: 'task',
-    message: `Log message ${index}`,
+    message,
   };
 }
 
-function makePage(
-  logs: HelixJobLog[],
-  total: number,
-  nextPage: string | null = null
-): HelixJobLogPage {
+const range = (from: number, to: number): HelixJobLog[] =>
+  Array.from({ length: to - from }, (_, i) => makeLog(from + i));
+
+/** A page as the tail and cursor modes return it: oldest first, with no `next_page`. */
+function makePage(logs: HelixJobLog[], total: number, prevPage = ''): HelixJobLogPage {
   return {
     data: logs,
     total,
-    next_page: nextPage ?? '',
-    prev_page: '',
+    next_page: '',
+    prev_page: prevPage,
   };
 }
-
-/** Drains every pending microtask, so a queryFn's page walk runs to completion. */
-const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -71,52 +68,47 @@ function createWrapper() {
   );
 }
 
+async function renderLoaded(firstPage: HelixJobLogPage) {
+  mockJobsPageJobLogs.mockResolvedValueOnce(firstPage);
+  const view = renderHook(() => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME }), {
+    wrapper: createWrapper(),
+  });
+  await waitFor(() => expect(view.result.current.isLoading).toBe(false));
+  return view;
+}
+
 describe('useJobLogs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns logs from a single page', async () => {
-    const logs = [makeLog(0), makeLog(1), makeLog(2)];
-    mockJobsPageJobLogs.mockResolvedValueOnce(makePage(logs, 3));
+  it('loads the newest lines in a single tail request', async () => {
+    const { result } = await renderLoaded(makePage(range(0, 3), 3));
 
-    const { result } = renderHook(() => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME }), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.data).toEqual(logs);
+    expect(result.current.data).toEqual(range(0, 3));
     expect(result.current.total).toBe(3);
     expect(result.current.error).toBeNull();
+    expect(result.current.paging.hasOlderLogs).toBe(false);
+    expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
+    expect(mockJobsPageJobLogs).toHaveBeenCalledWith(
+      WORKSPACE,
+      JOB_NAME,
+      { tail: LOGS_TAIL_SIZE },
+      expect.any(AbortSignal)
+    );
   });
 
-  it('paginates through multiple pages', async () => {
-    const page1 = Array.from({ length: 3 }, (_, i) => makeLog(i));
-    const page2 = Array.from({ length: 2 }, (_, i) => makeLog(i + 3));
+  it('reports older lines when the tail comes with a cursor', async () => {
+    const { result } = await renderLoaded(makePage(range(5, 8), 8, 'older-1'));
 
-    mockJobsPageJobLogs
-      .mockResolvedValueOnce(makePage(page1, 5, 'cursor-1'))
-      .mockResolvedValueOnce(makePage(page2, 5));
-
-    const { result } = renderHook(
-      () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 3 }),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.data).toEqual([...page1, ...page2]);
-    expect(result.current.total).toBe(5);
-    expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(2);
+    expect(result.current.data).toEqual(range(5, 8));
+    expect(result.current.total).toBe(8);
+    expect(result.current.paging.hasOlderLogs).toBe(true);
   });
 
   it('returns empty array when there are no logs', async () => {
-    mockJobsPageJobLogs.mockResolvedValueOnce(makePage([], 0));
+    const { result } = await renderLoaded(makePage([], 0));
 
-    const { result } = renderHook(() => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME }), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.data).toEqual([]);
     expect(result.current.total).toBe(0);
   });
@@ -152,234 +144,303 @@ describe('useJobLogs', () => {
     await waitFor(() => expect(result.current.error).toBeTruthy());
   });
 
-  it('trims logs to maxRetainedLogs keeping the tail', async () => {
-    // maxPages=5, pageSize=2 -> maxRetainedLogs=10
-    // 6 full pages of 2 = 12 logs total, should trim to last 10
-    const pageSize = 2;
-    const maxPages = 5;
-    const maxRetained = maxPages * pageSize; // 10
+  describe('polling', () => {
+    it('appends the lines a poll brings in', async () => {
+      const { result } = await renderLoaded(makePage(range(0, 3), 3));
 
-    const pages = Array.from({ length: 6 }, (_, p) =>
-      Array.from({ length: 2 }, (_, i) => makeLog(p * 2 + i))
-    );
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(1, 5), 5, 'older-1'));
+      await act(() => result.current.refetch());
 
-    mockJobsPageJobLogs
-      .mockResolvedValueOnce(makePage(pages[0], 12, 'c1'))
-      .mockResolvedValueOnce(makePage(pages[1], 12, 'c2'))
-      .mockResolvedValueOnce(makePage(pages[2], 12, 'c3'))
-      .mockResolvedValueOnce(makePage(pages[3], 12, 'c4'))
-      .mockResolvedValueOnce(makePage(pages[4], 12, 'c5'))
-      .mockResolvedValueOnce(makePage(pages[5], 12));
-
-    const { result } = renderHook(
-      () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize, maxPages }),
-      { wrapper: createWrapper() }
-    );
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-    expect(result.current.data).toHaveLength(maxRetained);
-    expect(result.current.data[0].message).toBe('Log message 2');
-    expect(result.current.data[9].message).toBe('Log message 11');
-  });
-
-  it('caches full pages and only refetches the last page', async () => {
-    const pageSize = 3;
-    const fullPage = Array.from({ length: 3 }, (_, i) => makeLog(i));
-    const lastPage = [makeLog(3)];
-    const lastPageUpdated = [makeLog(3), makeLog(4)];
-
-    // Initial fetch: full page + partial last page
-    mockJobsPageJobLogs
-      .mockResolvedValueOnce(makePage(fullPage, 4, 'c1'))
-      .mockResolvedValueOnce(makePage(lastPage, 4));
-
-    // Per-page cache entries need gcTime > 0 to survive between outer query runs
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, gcTime: Infinity },
-      },
-    });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    );
-
-    const { result } = renderHook(
-      () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize }),
-      { wrapper }
-    );
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.data).toHaveLength(4);
-    expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(2);
-
-    // Simulate refetch: full page should come from cache, only last page refetches
-    mockJobsPageJobLogs.mockClear();
-    mockJobsPageJobLogs.mockResolvedValueOnce(makePage(lastPageUpdated, 5));
-
-    const { data: refetchData } = await act(() => result.current.refetch());
-
-    // Only 1 API call (last page). Full page resolved from cache.
-    expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
-    expect(refetchData?.logs).toHaveLength(5);
-  });
-
-  it('fetches all logs on manual refetch when disabled', async () => {
-    const logs = [makeLog(0), makeLog(1)];
-    mockJobsPageJobLogs.mockResolvedValueOnce(makePage(logs, 2));
-
-    const { result } = renderHook(
-      () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, enabled: false }),
-      { wrapper: createWrapper() }
-    );
-
-    expect(mockJobsPageJobLogs).not.toHaveBeenCalled();
-
-    const { data } = await act(() => result.current.refetch());
-
-    expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
-    expect(data?.logs).toEqual(logs);
-  });
-  describe('loadProgress', () => {
-    // The page walk reports progress via setState from inside the queryFn, so each
-    // step has to be flushed inside act() rather than awaited with waitFor.
-    it('advances as the walk pages through the log', async () => {
-      const page1 = deferred<HelixJobLogPage>();
-      const page2 = deferred<HelixJobLogPage>();
-      mockJobsPageJobLogs.mockReturnValueOnce(page1.promise).mockReturnValueOnce(page2.promise);
-
-      const { result } = renderHook(
-        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 2 }),
-        { wrapper: createWrapper() }
-      );
-
-      // Nothing to report until the first page tells us the total.
-      expect(result.current.loadProgress).toBeNull();
-
-      await act(async () => {
-        page1.resolve(makePage([makeLog(0), makeLog(1)], 4, 'c1'));
-        await tick();
-      });
-
-      expect(result.current.loadProgress).toEqual({ loaded: 2, total: 4 });
-      // The walk is still mid-flight, which is exactly when this matters.
-      expect(result.current.isLoading).toBe(true);
-
-      await act(async () => {
-        page2.resolve(makePage([makeLog(2), makeLog(3)], 4));
-        await tick();
-      });
-
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
-      expect(result.current.loadProgress).toEqual({ loaded: 4, total: 4 });
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 5)));
+      expect(result.current.total).toBe(5);
+      // Everything from the first load on is held, so nothing older is missing.
+      expect(result.current.paging.hasOlderLogs).toBe(false);
+      expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(2);
     });
 
-    it('counts fetched lines rather than the trimmed retained set', async () => {
-      // maxPages=5, pageSize=2 retains 10 lines, but the walk still fetches all 12.
-      const pageSize = 2;
-      const maxPages = 5;
-      const pages = Array.from({ length: 6 }, (_, p) =>
-        Array.from({ length: 2 }, (_, i) => makeLog(p * 2 + i))
-      );
-      pages.forEach((page, i) =>
-        mockJobsPageJobLogs.mockResolvedValueOnce(
-          makePage(page, 12, i === pages.length - 1 ? null : `c${i + 1}`)
-        )
-      );
+    it('keeps accumulating past the tail window', async () => {
+      const { result } = await renderLoaded(makePage(range(0, 3), 3));
 
-      const { result } = renderHook(
-        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize, maxPages }),
-        { wrapper: createWrapper() }
-      );
+      // Four-line windows, three new lines per poll: each window overlaps the last by one.
+      for (let end = 6; end <= 12; end += 3) {
+        mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(end - 4, end), end, 'older'));
+        await act(() => result.current.refetch());
+      }
 
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-      expect(result.current.data).toHaveLength(10);
-      expect(result.current.loadProgress).toEqual({ loaded: 12, total: 12 });
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 12)));
     });
 
-    it('clears between walks so a refetch never shows a stale count', async () => {
-      mockJobsPageJobLogs.mockResolvedValueOnce(makePage([makeLog(0), makeLog(1)], 2));
+    it('takes the server’s view of the overlap, so late lines land in place', async () => {
+      const { result } = await renderLoaded(makePage(range(0, 4), 4));
 
-      const { result } = renderHook(
-        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 2 }),
-        { wrapper: createWrapper() }
+      const late = makeLog(2, 'shipped late');
+      mockJobsPageJobLogs.mockResolvedValueOnce(
+        makePage([makeLog(1), makeLog(2), late, makeLog(3), makeLog(4)], 6, 'older-1')
       );
+      await act(() => result.current.refetch());
 
-      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
-
-      const nextWalk = deferred<HelixJobLogPage>();
-      mockJobsPageJobLogs.mockReturnValueOnce(nextWalk.promise);
-
-      act(() => {
-        void result.current.refetch();
-      });
-      await waitFor(() => expect(result.current.loadProgress).toBeNull());
-
-      act(() => {
-        nextWalk.resolve(makePage([makeLog(0), makeLog(1), makeLog(2)], 3));
-      });
-      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 3, total: 3 }));
+      await waitFor(() =>
+        expect(result.current.data).toEqual([...range(0, 3), late, ...range(3, 5)])
+      );
     });
 
-    it("never carries a finished job's count into the next job", async () => {
-      mockJobsPageJobLogs.mockResolvedValueOnce(makePage([makeLog(0), makeLog(1)], 2));
+    it('widens a poll that skips past what is held, keeping loaded older lines', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(0, 6), 9));
+      await act(() => result.current.paging.fetchOlderLogs());
 
-      // The route element is reused across :jobName changes, so the hook re-runs
-      // without remounting. Record every rendered value, not just the settled one —
-      // the regression this guards is a single frame of the old job's count.
-      const seen: ({ loaded: number; total: number } | null)[] = [];
+      // 14 lines arrived since the last poll, more than the window holds.
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(20, 23), 23, 'older-poll'));
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(7, 23), 23, 'older-wide'));
+      await act(() => result.current.refetch());
+
+      expect(mockJobsPageJobLogs).toHaveBeenLastCalledWith(
+        WORKSPACE,
+        JOB_NAME,
+        { tail: LOGS_TAIL_SIZE + 14 },
+        expect.any(AbortSignal)
+      );
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 23)));
+      expect(result.current.total).toBe(23);
+      expect(result.current.paging.hasOlderLogs).toBe(false);
+    });
+
+    it('sizes the next poll by how many lines the last one brought in', async () => {
+      const { result } = await renderLoaded(makePage(range(0, 3), 3));
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(2, 17), 17, 'older-1'));
+      await act(() => result.current.refetch());
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(16, 31), 31, 'older-2'));
+      await act(() => result.current.refetch());
+
+      expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(3);
+      expect(mockJobsPageJobLogs).toHaveBeenLastCalledWith(
+        WORKSPACE,
+        JOB_NAME,
+        { tail: LOGS_TAIL_SIZE + 14 },
+        expect.any(AbortSignal)
+      );
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 31)));
+    });
+
+    it('takes the first lines of an empty log in one request', async () => {
+      const { result } = await renderLoaded(makePage([], 0));
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(0, 5), 5));
+      await act(() => result.current.refetch());
+
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 5)));
+      expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(2);
+    });
+
+    it('starts over when even the widened poll does not reach what is held', async () => {
+      // More lines arrived than one request can hold.
+      const { result } = await renderLoaded(makePage(range(0, 3), 3, 'older-a'));
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(10, 13), 13, 'older-poll'));
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(8, 13), 13, 'older-b'));
+      await act(() => result.current.refetch());
+
+      await waitFor(() => expect(result.current.data).toEqual(range(8, 13)));
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(5, 8), 13));
+      await act(() => result.current.paging.fetchOlderLogs());
+
+      expect(mockJobsPageJobLogs).toHaveBeenLastCalledWith(WORKSPACE, JOB_NAME, {
+        page_cursor: 'older-b',
+        limit: LOGS_MAX_PAGE_SIZE,
+      });
+    });
+
+    it('starts over without widening when a new attempt holds fewer lines', async () => {
+      const { result } = await renderLoaded(makePage(range(0, 3), 3));
+
+      const attempt2 = [makeLog(0, 'attempt 2')];
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(attempt2, 1));
+      await act(() => result.current.refetch());
+
+      await waitFor(() => expect(result.current.data).toEqual(attempt2));
+      expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(2);
+    });
+
+    it("never carries one job's lines into the next", async () => {
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(0, 3), 3));
       const { result, rerender } = renderHook(
-        ({ name }) => {
-          const jobLogs = useJobLogs({ workspace: WORKSPACE, name, pageSize: 2 });
-          seen.push(jobLogs.loadProgress);
-          return jobLogs;
-        },
+        ({ name }) => useJobLogs({ workspace: WORKSPACE, name }),
         { wrapper: createWrapper(), initialProps: { name: JOB_NAME } }
       );
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 3)));
 
-      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 2, total: 2 }));
-
-      const nextJob = deferred<HelixJobLogPage>();
-      mockJobsPageJobLogs.mockReturnValueOnce(nextJob.promise);
-
-      seen.length = 0;
+      // Opens with the previous job's last line, which must not stitch the two together.
+      const otherJobLogs = [makeLog(2), makeLog(3, 'other job')];
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(otherJobLogs, 2));
       rerender({ name: 'other-job' });
 
-      expect(seen.length).toBeGreaterThan(0);
-      expect(seen).toEqual(seen.map(() => null));
+      await waitFor(() => expect(result.current.data).toEqual(otherJobLogs));
+    });
+  });
 
-      act(() => {
-        nextJob.resolve(makePage([makeLog(0)], 1));
+  describe('fetchOlderLogs', () => {
+    it('prepends the next page of older lines at the server max', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(3, 6), 9, 'older-2'));
+      await act(() => result.current.paging.fetchOlderLogs());
+
+      expect(mockJobsPageJobLogs).toHaveBeenLastCalledWith(WORKSPACE, JOB_NAME, {
+        page_cursor: 'older-1',
+        limit: LOGS_MAX_PAGE_SIZE,
       });
-      await waitFor(() => expect(result.current.loadProgress).toEqual({ loaded: 1, total: 1 }));
+      expect(result.current.data).toEqual(range(3, 9));
+      expect(result.current.paging.hasOlderLogs).toBe(true);
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(0, 3), 9));
+      await act(() => result.current.paging.fetchOlderLogs());
+
+      expect(mockJobsPageJobLogs).toHaveBeenLastCalledWith(WORKSPACE, JOB_NAME, {
+        page_cursor: 'older-2',
+        limit: LOGS_MAX_PAGE_SIZE,
+      });
+      expect(result.current.data).toEqual(range(0, 9));
+      expect(result.current.paging.hasOlderLogs).toBe(false);
     });
 
-    it('reports the same progress to every observer of the job', async () => {
-      mockJobsPageJobLogs
-        .mockResolvedValueOnce(makePage([makeLog(0), makeLog(1)], 4, 'c1'))
-        .mockResolvedValueOnce(makePage([makeLog(2), makeLog(3)], 4));
+    it('does nothing once the start of the log is held', async () => {
+      const { result } = await renderLoaded(makePage(range(0, 3), 3));
 
-      // A log panel and a download button on the same route observe one shared query
-      // key, and only one of them owns the queryFn that walks the pages. Both have to
-      // see the walk.
-      const { result } = renderHook(
-        () => ({
-          viewer: useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, pageSize: 2 }),
-          downloader: useJobLogs({
-            workspace: WORKSPACE,
-            name: JOB_NAME,
-            pageSize: 2,
-            maxPages: Infinity,
-          }),
-        }),
-        { wrapper: createWrapper() }
+      await act(() => result.current.paging.fetchOlderLogs());
+
+      expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports the fetch while it is in flight and ignores repeat calls', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+
+      const older = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(older.promise);
+      let firstCall!: Promise<void>;
+      act(() => {
+        firstCall = result.current.paging.fetchOlderLogs();
+      });
+      await waitFor(() => expect(result.current.paging.isFetchingOlderLogs).toBe(true));
+
+      await act(() => result.current.paging.fetchOlderLogs());
+      expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        older.resolve(makePage(range(0, 6), 9));
+        await firstCall;
+      });
+
+      expect(result.current.paging.isFetchingOlderLogs).toBe(false);
+      expect(result.current.data).toEqual(range(0, 9));
+    });
+
+    it('keeps the older page when a poll lands while it is in flight', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+
+      const older = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(older.promise);
+      let olderCall!: Promise<void>;
+      act(() => {
+        olderCall = result.current.paging.fetchOlderLogs();
+      });
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(7, 10), 10, 'older-poll'));
+      await act(() => result.current.refetch());
+      await waitFor(() => expect(result.current.data).toEqual(range(6, 10)));
+
+      await act(async () => {
+        older.resolve(makePage(range(0, 6), 10));
+        await olderCall;
+      });
+
+      expect(result.current.data).toEqual(range(0, 10));
+    });
+
+    it('keeps the older page when it lands while a poll is in flight', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+
+      const poll = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(poll.promise);
+      let pollCall!: Promise<unknown>;
+      act(() => {
+        pollCall = result.current.refetch();
+      });
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(0, 6), 9));
+      await act(() => result.current.paging.fetchOlderLogs());
+      expect(result.current.data).toEqual(range(0, 9));
+
+      await act(async () => {
+        poll.resolve(makePage(range(7, 10), 10, 'older-poll'));
+        await pollCall;
+      });
+
+      await waitFor(() => expect(result.current.data).toEqual(range(0, 10)));
+    });
+
+    it('drops an older page once a poll has started over', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+
+      const older = deferred<HelixJobLogPage>();
+      mockJobsPageJobLogs.mockReturnValueOnce(older.promise);
+      let olderCall!: Promise<void>;
+      act(() => {
+        olderCall = result.current.paging.fetchOlderLogs();
+      });
+
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(20, 23), 23, 'older-poll'));
+      mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(15, 23), 23, 'older-new'));
+      await act(() => result.current.refetch());
+
+      await act(async () => {
+        older.resolve(makePage(range(0, 6), 23));
+        await olderCall;
+      });
+
+      expect(result.current.data).toEqual(range(15, 23));
+      expect(result.current.paging.hasOlderLogs).toBe(true);
+    });
+
+    it('rejects when the request fails, leaving the held lines alone', async () => {
+      const { result } = await renderLoaded(makePage(range(6, 9), 9, 'older-1'));
+
+      mockJobsPageJobLogs.mockRejectedValueOnce(new Error('Network failure'));
+      await act(() =>
+        expect(result.current.paging.fetchOlderLogs()).rejects.toThrow('Network failure')
       );
 
-      await waitFor(() => {
-        expect(result.current.viewer.loadProgress).toEqual({ loaded: 4, total: 4 });
-        expect(result.current.downloader.loadProgress).toEqual({ loaded: 4, total: 4 });
-      });
+      expect(result.current.data).toEqual(range(6, 9));
+      expect(result.current.paging.isFetchingOlderLogs).toBe(false);
     });
+  });
+});
+
+describe('fetchAllJobLogs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('walks back from the tail at the server max and returns the lines oldest first', async () => {
+    mockJobsPageJobLogs
+      .mockResolvedValueOnce(makePage(range(6, 9), 9, 'older-1'))
+      .mockResolvedValueOnce(makePage(range(3, 6), 9, 'older-2'))
+      .mockResolvedValueOnce(makePage(range(0, 3), 9));
+
+    await expect(fetchAllJobLogs(WORKSPACE, JOB_NAME)).resolves.toEqual(range(0, 9));
+
+    expect(mockJobsPageJobLogs.mock.calls).toEqual([
+      [WORKSPACE, JOB_NAME, { tail: LOGS_MAX_PAGE_SIZE }],
+      [WORKSPACE, JOB_NAME, { page_cursor: 'older-1', limit: LOGS_MAX_PAGE_SIZE }],
+      [WORKSPACE, JOB_NAME, { page_cursor: 'older-2', limit: LOGS_MAX_PAGE_SIZE }],
+    ]);
+  });
+
+  it('makes one request when the tail holds the whole log', async () => {
+    mockJobsPageJobLogs.mockResolvedValueOnce(makePage(range(0, 3), 3));
+
+    await expect(fetchAllJobLogs(WORKSPACE, JOB_NAME)).resolves.toEqual(range(0, 3));
+    expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
   });
 });

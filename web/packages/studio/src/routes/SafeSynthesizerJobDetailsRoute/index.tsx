@@ -56,7 +56,7 @@ export const GenerateJobDetailsRoute: FC = () => {
   const {
     data: logs,
     isLoading,
-    loadProgress,
+    paging,
   } = useJobLogs({
     workspace,
     name: safeSynthesizerJobName,
@@ -114,7 +114,7 @@ export const GenerateJobDetailsRoute: FC = () => {
             jobId={safeSynthesizerJobName}
             isLoading={isLoading}
             logs={logs}
-            loadProgress={loadProgress}
+            paging={paging}
           />
         </Stack>
       </Stack>

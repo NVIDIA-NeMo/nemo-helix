@@ -3,14 +3,18 @@
 
 import { EditorView } from '@codemirror/view';
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
+import { triggerDownload } from '@nemo/common/src/utils/file';
+import { formatLogs, type LogPaging } from '@nemo/common/src/utils/logs';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // Shiki loads asynchronously; highlighting isn't under test.
 vi.mock('@nemo/common/src/components/LogViewer/extensions/useShikiHighlighting', () => ({
   useShikiHighlighting: () => [],
 }));
+
+vi.mock('@nemo/common/src/utils/file', () => ({ triggerDownload: vi.fn() }));
 
 function makeLog(index: number): HelixJobLog {
   return {
@@ -22,73 +26,22 @@ function makeLog(index: number): HelixJobLog {
   };
 }
 
+const range = (from: number, to: number) =>
+  Array.from({ length: to - from }, (_, i) => makeLog(from + i));
+
+const makePaging = (overrides: Partial<LogPaging> = {}): LogPaging => ({
+  hasOlderLogs: true,
+  isFetchingOlderLogs: false,
+  fetchOlderLogs: vi.fn().mockResolvedValue(undefined),
+  fetchAllLogs: vi.fn().mockResolvedValue([]),
+  ...overrides,
+});
+
 describe('LogViewer', () => {
-  it('shows a bare spinner while loading with no progress reported', () => {
+  it('shows a spinner while loading', () => {
     render(<LogViewer logs={[]} isLoading />);
 
     expect(screen.getByLabelText('Loading...')).toBeInTheDocument();
-    expect(screen.queryByText(/Loading logs\.\.\./)).not.toBeInTheDocument();
-  });
-
-  it('narrates the page walk when progress is reported', () => {
-    render(<LogViewer logs={[]} isLoading loadProgress={{ loaded: 12000, total: 40132 }} />);
-
-    // Thousands separators: five-digit line counts are the whole point.
-    expect(screen.getByText('Loading logs... 12,000 of 40,132 lines')).toBeInTheDocument();
-    expect(screen.getByLabelText('Loading...')).toBeInTheDocument();
-  });
-
-  it('says it is loading before the first page establishes a total', () => {
-    render(<LogViewer logs={[]} isLoading loadProgress={{ loaded: 0, total: 0 }} />);
-
-    // The denominator is unknown until the first page lands, but the wait starts now.
-    expect(screen.getByText('Loading logs...')).toBeInTheDocument();
-  });
-
-  it('drops the progress caption once logs are on screen', () => {
-    render(<LogViewer logs={[makeLog(0), makeLog(1)]} loadProgress={{ loaded: 2, total: 2 }} />);
-
-    expect(screen.queryByText(/Loading logs\.\.\./)).not.toBeInTheDocument();
-    expect(screen.getByText('2 lines')).toBeInTheDocument();
-  });
-
-  it('mounts the live region before the first page establishes a total', () => {
-    // A live region that appears already populated is skipped by screen readers that
-    // only announce mutations inside a region already in the DOM, so it has to be
-    // present (and empty) for the whole load.
-    const { rerender } = render(<LogViewer logs={[]} isLoading loadProgress={null} />);
-
-    const region = screen.getByTestId('log-load-progress');
-    expect(region).toHaveAttribute('aria-live', 'polite');
-    expect(region.textContent).toBe('Loading logs...');
-
-    rerender(<LogViewer logs={[]} isLoading loadProgress={{ loaded: 1000, total: 40132 }} />);
-
-    expect(region.textContent).toBe('Loading logs... 1,000 of 40,132 lines');
-  });
-
-  it('coalesces rapid page reports into one announcement per interval', () => {
-    vi.useFakeTimers();
-    try {
-      const { rerender } = render(
-        <LogViewer logs={[]} isLoading loadProgress={{ loaded: 1000, total: 40132 }} />
-      );
-      const region = screen.getByTestId('log-load-progress');
-
-      // Three more pages land back to back. The first change goes out immediately;
-      // the rest must collapse into a single trailing update rather than queueing a
-      // polite announcement per page.
-      for (const loaded of [2000, 3000, 4000]) {
-        rerender(<LogViewer logs={[]} isLoading loadProgress={{ loaded, total: 40132 }} />);
-      }
-      expect(region.textContent).toBe('Loading logs... 2,000 of 40,132 lines');
-
-      act(() => vi.advanceTimersByTime(1_000));
-
-      expect(region.textContent).toBe('Loading logs... 4,000 of 40,132 lines');
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('groups thousands in the line count', () => {
@@ -126,6 +79,113 @@ describe('LogViewer', () => {
     expect(screen.queryByText('Load previous logs')).not.toBeInTheDocument();
   });
 
+  describe('paging older logs in', () => {
+    it('reveals the lines already loaded before fetching older ones', async () => {
+      const paging = makePaging();
+      render(<LogViewer logs={range(0, 5)} rows={2} paging={paging} />);
+
+      await userEvent.click(screen.getByText('Load previous logs'));
+
+      expect(screen.getByText('5 lines')).toBeInTheDocument();
+      expect(paging.fetchOlderLogs).not.toHaveBeenCalled();
+
+      await userEvent.click(screen.getByText('Load previous logs'));
+
+      expect(paging.fetchOlderLogs).toHaveBeenCalledTimes(1);
+    });
+
+    it('fetches older lines straight away when every loaded line is showing', async () => {
+      const paging = makePaging();
+      render(<LogViewer logs={range(0, 2)} rows={5} paging={paging} />);
+
+      await userEvent.click(screen.getByText('Load previous logs'));
+
+      expect(paging.fetchOlderLogs).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers no previous logs once the start of the log is loaded', () => {
+      render(
+        <LogViewer logs={range(0, 2)} rows={5} paging={makePaging({ hasOlderLogs: false })} />
+      );
+
+      expect(screen.queryByText('Load previous logs')).not.toBeInTheDocument();
+    });
+
+    it('holds the button while older lines are on their way', () => {
+      render(
+        <LogViewer logs={range(0, 2)} rows={5} paging={makePaging({ isFetchingOlderLogs: true })} />
+      );
+
+      expect(screen.getByRole('button', { name: /Loading previous logs/ })).toBeDisabled();
+    });
+
+    it('reports a failed fetch', async () => {
+      const onNotify = vi.fn();
+      const paging = makePaging({
+        fetchOlderLogs: vi.fn().mockRejectedValue(new Error('Network failure')),
+      });
+      render(<LogViewer logs={range(0, 2)} rows={5} paging={paging} onNotify={onNotify} />);
+
+      await userEvent.click(screen.getByText('Load previous logs'));
+
+      await waitFor(() =>
+        expect(onNotify).toHaveBeenCalledWith(
+          'Failed to load previous logs: Network failure',
+          'error',
+          undefined
+        )
+      );
+    });
+  });
+
+  describe('downloading', () => {
+    it('fetches the whole log when older lines are still on the server', async () => {
+      const paging = makePaging({ fetchAllLogs: vi.fn().mockResolvedValue(range(0, 6)) });
+      render(<LogViewer logs={range(4, 6)} downloadFilename="job.txt" paging={paging} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Download logs' }));
+
+      await waitFor(() =>
+        expect(triggerDownload).toHaveBeenCalledWith(formatLogs(range(0, 6)), 'job.txt')
+      );
+    });
+
+    it('downloads what is loaded when that is the whole log', async () => {
+      const paging = makePaging({ hasOlderLogs: false });
+      render(<LogViewer logs={range(0, 2)} downloadFilename="job.txt" paging={paging} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Download logs' }));
+
+      expect(triggerDownload).toHaveBeenCalledWith(formatLogs(range(0, 2)), 'job.txt');
+      expect(paging.fetchAllLogs).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed download', async () => {
+      const onNotify = vi.fn();
+      const paging = makePaging({
+        fetchAllLogs: vi.fn().mockRejectedValue(new Error('Network failure')),
+      });
+      render(
+        <LogViewer
+          logs={range(0, 2)}
+          downloadFilename="job.txt"
+          paging={paging}
+          onNotify={onNotify}
+        />
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Download logs' }));
+
+      await waitFor(() =>
+        expect(onNotify).toHaveBeenCalledWith(
+          'Failed to download logs: Network failure',
+          'error',
+          undefined
+        )
+      );
+    });
+  });
+
   it('appends new lines to the editor', () => {
     const { rerender } = render(<LogViewer logs={[makeLog(0)]} fillHeight />);
 
@@ -139,11 +199,11 @@ describe('LogViewer', () => {
   describe('syncing the document', () => {
     const getView = (): EditorView => {
       const view = EditorView.findFromDOM(screen.getByTestId('log-viewer-code'));
-      if (!view) throw new Error('editor not mounted');
+      if (!view) {
+        throw new Error('editor not mounted');
+      }
       return view;
     };
-    const range = (from: number, to: number) =>
-      Array.from({ length: to - from }, (_, i) => makeLog(from + i));
     const docLines = () => getView().state.doc.toString().split('\n');
     // jsdom has no layout, so the editor always looks scrolled to the bottom.
     const scrollUp = () => {
@@ -182,6 +242,20 @@ describe('LogViewer', () => {
         },
       ]);
       expect(docLines()).toEqual([2, 3, 4, 5, 6, 7].map(line));
+    });
+
+    it('inserts older lines above without rewriting the ones on screen', () => {
+      const { rerender } = render(<LogViewer logs={range(5, 8)} fillHeight />);
+      scrollUp();
+      const docChanges = spyOnDocChanges();
+
+      rerender(<LogViewer logs={range(0, 8)} fillHeight />);
+
+      const line = (i: number) => `[${makeLog(i).timestamp}]   Log message ${i}`;
+      expect(docChanges()).toEqual([
+        { changes: [{ from: 0, insert: `${[0, 1, 2, 3, 4].map(line).join('\n')}\n` }] },
+      ]);
+      expect(docLines()).toEqual([0, 1, 2, 3, 4, 5, 6, 7].map(line));
     });
 
     it('slides the tail without replacing it', () => {

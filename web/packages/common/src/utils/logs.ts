@@ -25,12 +25,20 @@ export const formatLogEntryForDisplay = (log: HelixJobLog): string =>
 export const formatLogsForDisplay = (logs: readonly HelixJobLog[]): string =>
   logs.map(formatLogEntryForDisplay).join('\n');
 
-/**
- * Incremental state of a multi-page log fetch. `total` is the server-side line count
- * for the whole job, known once the first page resolves.
- */
-export interface LogLoadProgress {
-  /** Lines fetched so far across every page walked. Not reduced by retention trimming. */
-  loaded: number;
-  total: number;
+/** Compares log entries by content, since every fetch returns fresh objects. */
+export const isSameLogEntry = (a: HelixJobLog, b: HelixJobLog): boolean =>
+  a.timestamp === b.timestamp &&
+  a.message === b.message &&
+  a.job_step === b.job_step &&
+  a.job_task === b.job_task;
+
+/** Reaches the parts of a log that weren't loaded up front. */
+export interface LogPaging {
+  /** The server holds lines older than the ones loaded. */
+  hasOlderLogs: boolean;
+  isFetchingOlderLogs: boolean;
+  /** Prepends the next page of older lines to the loaded logs. */
+  fetchOlderLogs: () => Promise<void>;
+  /** Fetches every line of the log, oldest first, e.g. for download. */
+  fetchAllLogs: () => Promise<HelixJobLog[]>;
 }

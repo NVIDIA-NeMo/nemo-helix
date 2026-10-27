@@ -131,7 +131,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
     data: logs,
     isLoading: isLoadingLogs,
     error: logsError,
-    loadProgress,
+    paging,
     refetch: refetchLogs,
   } = useJobLogs({
     workspace,
@@ -270,7 +270,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             <LogViewer
               logs={logs}
               isLoading={isLoadingLogs && logs.length === 0}
-              loadProgress={loadProgress}
+              paging={paging}
               downloadFilename={`optimize-${jobName}-logs.txt`}
               emptyMessage={
                 isQueued
