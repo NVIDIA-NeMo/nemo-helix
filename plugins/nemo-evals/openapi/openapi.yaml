@@ -7524,6 +7524,54 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
+    PublicationOutcome:
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: 'Platform job status vocabulary: COMPLETED when everything
+            published, ERROR otherwise. Only those two are ever emitted here.'
+        evaluation_id:
+          type: string
+          title: Evaluation Id
+          description: Evaluation the results were published under.
+        trial_count:
+          type: integer
+          title: Trial Count
+          description: Trials actually published (partial on failure).
+          default: 0
+        evaluator_result_count:
+          type: integer
+          title: Evaluator Result Count
+          description: Evaluator-result rows written.
+          default: 0
+        skipped:
+          items:
+            type: string
+          type: array
+          title: Skipped
+          description: 'Score outputs Intake cannot represent, as ''trial_id: name
+            (reason)''.'
+        error:
+          title: Error
+          description: Why publication failed; absent on success.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      - evaluation_id
+      title: PublicationOutcome
+      description: 'What publication did, as reported in the job output.
+
+
+        Deliberately not ``PublishReport``: that is the publisher''s internal shape
+        and names the
+
+        Evaluation ``experiment_id``, which contradicts the ``evaluation_id`` the
+        job API accepts. This
+
+        is the public contract, so it uses the API''s vocabulary and omits the rest.'
     PublicationSpec:
       properties:
         intake:
@@ -9474,6 +9522,11 @@ components:
           title: Error
           description: Stored reason the task failed, was cancelled or expired.
           type: string
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/PublicationOutcome'
+          description: What the task published to Intake, as its Job reported it when
+            the task settled; omitted when it reported nothing.
       additionalProperties: false
       type: object
       required:

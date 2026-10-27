@@ -11,6 +11,7 @@ from typing import Literal, Self
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
+from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.taskset_runs.entities import (
     MemberPhase,
     ResultState,
@@ -320,6 +321,13 @@ class TasksetRunTask(BaseModel):
         description="The Job's status as the controller last read it; omitted until the task's Job is registered.",
     )
     error: str | None = Field(default=None, description="Stored reason the task failed, was cancelled or expired.")
+    publication: PublicationOutcome | None = Field(
+        default=None,
+        description=(
+            "What the task published to Intake, as its Job reported it when the task settled; omitted when it "
+            "reported nothing."
+        ),
+    )
 
 
 def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
@@ -339,6 +347,7 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
         job=member.task_job,
         job_status=member.job_status,
         error=member.error,
+        publication=member.publication,
     )
 
 

@@ -1020,11 +1020,10 @@ def run_task_jobs(
 def run_tasks(client: NemoClient, run: dict[str, Any], *, workspace: str) -> list[TaskStateView]:
     """Every task of ``run`` from ``/tasks``, named from its pinned taskset revision.
 
-    Jobs is read only for a settled task with a Job, for what it published: a queued or running task costs no Jobs call.
+    No Jobs call: what a settled task published comes from ``/tasks``, where the controller recorded it.
     """
     taskset_workspace, name, digest = _split_ref(run["taskset_ref"])
     refs = Evaluator.from_client(client).tasksets.retrieve(name, revision=digest, workspace=taskset_workspace).tasks
-    jobs = JobsClient.from_client(client)
     items: list[dict[str, Any]] = []
     page = 1
     while True:
@@ -1036,18 +1035,17 @@ def run_tasks(client: NemoClient, run: dict[str, Any], *, workspace: str) -> lis
     views: list[TaskStateView] = []
     for item in items:
         index, job_name = item["task_index"], item.get("job")
-        publication = None
-        if item["phase"] in SETTLED_MEMBER_PHASES and job_name:
-            try:
-                job = jobs.get_job(workspace=workspace, name=job_name).data()
-                publication = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
-            except NotFoundError:
-                pass
         member = refs[index] if index < len(refs) else None
         task = _split_ref(member.root if isinstance(member, TaskRef) else str(member))[1] if member else item["task"]
         views.append(
             TaskStateView(
-                index, task, task_state(item), job_name, item.get("error"), publication, item.get("job_status")
+                index,
+                task,
+                task_state(item),
+                job_name,
+                item.get("error"),
+                item.get("publication"),
+                item.get("job_status"),
             )
         )
     return views

@@ -621,6 +621,7 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
             "job": "recorded-job-10",
             "job_status": "error",
             "error": "saved diagnostic",
+            "publication": None,
         }
     ]
     assert result.pagination.model_dump() == {

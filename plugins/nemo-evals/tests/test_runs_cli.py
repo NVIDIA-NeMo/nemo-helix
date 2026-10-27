@@ -975,7 +975,14 @@ def test_an_sdk_error_exits_with_a_message_not_a_traceback(command):
 
 RUN_ID = "run-0123456789abcdef"
 RECORDED_TASKS = [  # GET …/runs/{id}/tasks, as the API returns it (nulls omitted)
-    {"task": "task-0", "task_index": 0, "phase": "succeeded", "job": f"{RUN_ID}-task-0", "job_status": "completed"},
+    {
+        "task": "task-0",
+        "task_index": 0,
+        "phase": "succeeded",
+        "job": f"{RUN_ID}-task-0",
+        "job_status": "completed",
+        "publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2},
+    },
     {"task": "task-1", "task_index": 1, "phase": "registered", "job": f"{RUN_ID}-task-1", "job_status": "active"},
     {"task": "task-2", "task_index": 2, "phase": "image_ready", "job": f"{RUN_ID}-task-2"},
     {"task": "task-3", "task_index": 3, "phase": "image_ready"},
@@ -1009,11 +1016,6 @@ def recorded_platform(tasks_page_size=2):
         "created_at": NOW,
         "updated_at": NOW,
     }
-    jobs = {
-        f"{RUN_ID}-task-0": job(f"{RUN_ID}-task-0", "completed", "greet")
-        | {"status_details": {"publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2}}},
-        f"{RUN_ID}-task-4": job(f"{RUN_ID}-task-4", "error", "buzz"),
-    }
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -1030,8 +1032,7 @@ def recorded_platform(tasks_page_size=2):
         if "/tasksets/debug-1f9c2a7e" in path:
             return httpx.Response(200, json=taskset)
         if "/jobs/" in path:
-            name = path.rsplit("/", 1)[1]
-            return httpx.Response(200, json=jobs[name]) if name in jobs else httpx.Response(404, json={"detail": "x"})
+            return httpx.Response(404, json={"detail": "x"})  # no bundle Job yet
         raise AssertionError(f"unexpected {request.method} {request.url}")
 
     client = NemoClient(
@@ -1040,7 +1041,7 @@ def recorded_platform(tasks_page_size=2):
     return client, requests
 
 
-def test_status_reads_the_run_and_its_tasks_with_no_jobs_call_for_a_queued_or_running_task():
+def test_status_reads_the_run_and_its_tasks_with_no_jobs_call_per_task():
     client, requests = recorded_platform()
     app = typer.Typer()
     add_runs_commands(app, lambda: client)
@@ -1062,8 +1063,9 @@ def test_status_reads_the_run_and_its_tasks_with_no_jobs_call_for_a_queued_or_ru
     assert lines[-1] == "2/5 done (1 succeeded, 1 failed)"
     task_pages = [r.url.params["page"] for r in requests if r.url.path.endswith("/tasks")]
     assert task_pages == ["1", "2", "3"]
+    # What task-0 published comes from /tasks, as the controller recorded it: no task Job is read.
     jobs_read = [r.url.path.rsplit("/", 1)[1] for r in requests if "/jobs/" in r.url.path]
-    assert [name for name in jobs_read if "-task-" in name] == [f"{RUN_ID}-task-0", f"{RUN_ID}-task-4"]
+    assert [name for name in jobs_read if "-task-" in name] == []
 
 
 def test_status_json_lists_each_tasks_state():
