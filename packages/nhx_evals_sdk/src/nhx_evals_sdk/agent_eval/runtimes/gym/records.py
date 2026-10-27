@@ -22,6 +22,8 @@ NG_TASK_INDEX = "_ng_task_index"
 NG_ROLLOUT_INDEX = "_ng_rollout_index"
 #: Gym appends this to a capture key past the first attempt, so it is part of the join.
 NG_ATTEMPT_INDEX = "_ng_attempt_index"
+#: Set on a record Gym routes to the failures sidecar instead of the rollouts file.
+NG_FAILURE_CLASS = "_ng_failure_class"
 #: Fields excluded from a row's content hash (runtime-injected, not task-defining).
 RUNTIME_KEYS = frozenset({NG_TASK_INDEX, NG_ROLLOUT_INDEX})
 
