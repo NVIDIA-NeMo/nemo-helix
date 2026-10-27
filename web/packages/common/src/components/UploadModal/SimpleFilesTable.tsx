@@ -42,24 +42,21 @@ export const SimpleFilesTable = () => {
     invalidFileMode,
   } = state;
 
-  const allowedExtensions = useMemo(
-    () => new Set((acceptableFileTypes ?? []).map((ext) => ext.toLowerCase())),
-    [acceptableFileTypes]
-  );
+  const hasTypeRestriction = acceptableFileTypes.length > 0;
 
   const isFileAllowed = (uploadFile: UploadFile): boolean =>
     isFileTypeAllowed(uploadFile, acceptableFileTypes);
 
   const visibleFiles = useMemo(() => {
-    if (invalidFileMode !== 'hide' || allowedExtensions.size === 0) return files;
+    if (invalidFileMode !== 'hide' || !hasTypeRestriction) return files;
     return files.filter(isFileAllowed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, allowedExtensions, invalidFileMode]);
+  }, [files, acceptableFileTypes, invalidFileMode]);
 
   const hasValidSelection = selectedFiles.some((file) => isFileAllowed(file));
   const disabledFilesMessage =
     invalidFileMode === 'disable' &&
-    allowedExtensions.size > 0 &&
+    hasTypeRestriction &&
     !hasValidSelection &&
     visibleFiles.some((file) => !isFileAllowed(file))
       ? `Only ${acceptableFileTypes.join(', ')} files can be selected. Upload a supported file or choose a different fileset.`
@@ -74,7 +71,7 @@ export const SimpleFilesTable = () => {
         return { id: uploadFile.id, name, size, isDisabled, uploadFile };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleFiles, invalidFileMode, allowedExtensions]
+    [visibleFiles, invalidFileMode, acceptableFileTypes]
   );
 
   const dataViewState = DataView.useDataViewState({ pagination: { pageSize: 10 } });
