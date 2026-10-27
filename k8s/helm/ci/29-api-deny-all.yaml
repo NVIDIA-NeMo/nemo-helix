@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Exercise API ingress isolation with every default allowance disabled.
+builder:
+  enabled: false
+
+networkPolicies:
+  enabled: true
+  api:
+    sameReleasePods:
+      enabled: false
+    managedJobs:
+      enabled: false
+    modelPullers:
+      enabled: false

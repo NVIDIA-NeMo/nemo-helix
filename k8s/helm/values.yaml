@@ -252,6 +252,10 @@ networkPolicies:
         matchLabels:
           app: nemo-job
           nhx.nvidia.com/managed_by: jobs-controller
+    # -- Allow Models-controller weight-puller pods in the same namespace to reach the Files API. Model servers and sandbox pods are not included.
+    modelPullers:
+      # -- Enable ingress from Models-controller weight-puller pods.
+      enabled: true
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
