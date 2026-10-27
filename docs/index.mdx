@@ -44,9 +44,9 @@ Every capability is reachable from every surface. Pick the one that fits the mom
 
 ### Foundations
 
-Shared services every capability builds on: [object](/documentation/get-started/core-concepts/entities) and [data storage](/documentation/get-started/core-concepts/manage-files), [trace ingestion](/documentation/agents/traces-and-insights/collect-agent-traces), [model registry](/documentation/models-and-inference#model-registry), [experiments](/documentation/evaluate-models/experiments), [jobs](/documentation/kubernetes-deployment/setup/jobs) and session management, [inference gateway](/documentation/models-and-inference#inference-gateway), [authentication](/documentation/access-control/authentication) and [authorization](/documentation/access-control/authorization), and [secrets management](/documentation/get-started/core-concepts/manage-secrets). [Workspaces](/documentation/get-started/core-concepts/workspaces) and [projects](/documentation/get-started/core-concepts/projects) scope every artifact, so what your team produces can be shared, referenced, and governed instead of copied between laptops.
+Shared services every capability builds on: [object](/documentation/get-started/core-concepts/entities) and [data storage](/documentation/get-started/core-concepts/manage-files), trace ingestion, model registry, experiments, jobs and session management, [inference gateway](/documentation/models-and-inference#inference-gateway), authentication and authorization, and [secrets management](/documentation/get-started/core-concepts/manage-secrets). [Workspaces](/documentation/get-started/core-concepts/workspaces) and [projects](/documentation/get-started/core-concepts/projects) scope every artifact, so what your team produces can be shared, referenced, and governed instead of copied between laptops.
 
-**These are defaults, not lock-in.** Each foundation is an interface with a working implementation attached, so [`nemo setup`](/documentation/get-started/setup) gets you running in minutes. When you move to your own environment, swap them: point storage at your object store, the database at your [managed Postgres](/documentation/kubernetes-deployment/setup/helm/database-setup#external-postgresql-database) and ClickHouse, identity at your [IdP over OIDC](/documentation/access-control/authentication/oidc-setup), and inference at any [OpenAI-compatible gateway](/documentation/models-and-inference#add-external-providers).
+**These are defaults, not lock-in.** Each foundation is an interface with a working implementation attached, so `nemo setup` gets you running in minutes. When you move to your own environment, swap them: point storage at your object store, the database at your managed Postgres and ClickHouse, identity at your IdP over OIDC, and inference at any OpenAI-compatible gateway.
 
 ## Architecture Diagram
 
@@ -120,6 +120,10 @@ flowchart TB
 
 - [Setup](/documentation/get-started) - install, configure providers, and run
   local services.
+- [Database Setup](/documentation/kubernetes-deployment/setup/helm/database-setup) - point
+  Helix at your managed PostgreSQL database.
+- [OIDC Setup](/documentation/access-control/authentication/oidc-setup) - connect Helix to
+  your identity provider.
 - [About Agents](/documentation/agents) - learn the managed agent lifecycle.
 - [Register Agents](/documentation/agents/register-agents) - bring an agent from code, a container
   image, a remote endpoint, or its traces.
