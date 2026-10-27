@@ -131,10 +131,21 @@ async function sendReleaseNotification({ env, fetchImpl }) {
       lines.push(`Registry: ${env.CONTAINER_REGISTRY}`);
       blocks.push({
         type: "container",
-        title: {
-          type: "plain_text",
-          text: `:docker_: Containers · ${containerIds.length} ${containerIds.length === 1 ? "image" : "images"}`,
-          emoji: true,
+        rich_text_title: {
+          type: "rich_text",
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "emoji", name: "docker_" },
+                {
+                  type: "text",
+                  text: ` Containers · ${containerIds.length} ${containerIds.length === 1 ? "image" : "images"}`,
+                  style: { bold: true },
+                },
+              ],
+            },
+          ],
         },
         subtitle: { type: "mrkdwn", text: `Tag: \`${env.RELEASE_LABEL}\`` },
         is_collapsible: true,
