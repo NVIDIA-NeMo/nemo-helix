@@ -56,7 +56,7 @@ jobs:
         run: bash .github/scripts/cleanup-ghcr-ci-images.sh
 
   cleanup-releases:
-    name: Delete GHCR timestamped build versions older than 90 days
+    name: Delete RC build artifacts older than 90 days
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,7 +78,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Delete stale timestamped build versions
+      - name: Delete RC build artifacts older than 90 days
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
