@@ -30,7 +30,7 @@ def _to_dict(config: _ConfigInput) -> dict[str, Any]:
     if config is None:
         return {}
     if hasattr(config, "model_dump"):
-        return config.model_dump(exclude_unset=True)
+        return config.model_dump()
     if isinstance(config, dict):
         return config.copy()
     raise ValueError(f"Config must be a dict, a Pydantic model, or None; got {type(config)!r}")
