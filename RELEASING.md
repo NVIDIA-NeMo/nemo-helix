@@ -94,7 +94,7 @@ Examples:
 | Helm-only validation | `release-scope: helm`, `dry-run: true`. |
 | Stable Helm-only chart override | `release-type: stable`, `source-sha: <40-character SHA>`, `version: 0.1.0`, `release-scope: helm`, `helm-version: 0.1.0+helmfix1`. |
 
-RCs also run automatically Monday through Friday at 8:00 PM
+RCs also run automatically Monday through Friday at 4:00 PM
 America/Los_Angeles.
 
 ## What the workflow does
