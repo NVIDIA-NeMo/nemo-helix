@@ -50,71 +50,7 @@ Shared services every capability builds on: [object](/documentation/get-started/
 
 ## Architecture Diagram
 
-```mermaid
-flowchart TB
-    Users["Users and applications"]
-
-    subgraph AccessTier["UNIFIED ACCESS"]
-        direction LR
-        CLI["NeMo CLI"]
-        SDK["Python SDK"]
-        Studio["NeMo Studio"]
-        REST["REST APIs"]
-        CLI ~~~ SDK ~~~ Studio ~~~ REST
-    end
-
-    subgraph CapabilityTier["SERVICES"]
-        direction LR
-        Agents["Managed Agents"]
-        Optimization["Optimization"]
-        Guardrails["Guardrails"]
-        Evaluator["Evaluator"]
-        FineTuning["Fine Tuning"]
-        garak["garak"]
-        DataDesigner["Data Designer"]
-        Anonymizer["Anonymizer"]
-        SafeSynthesizer["Safe Synthesizer"]
-        Agents ~~~ Optimization ~~~ Guardrails
-        Evaluator ~~~ FineTuning ~~~ garak
-        DataDesigner ~~~ Anonymizer ~~~ SafeSynthesizer
-    end
-
-    subgraph SharedTier["PLATFORM CAPABILITIES"]
-        direction LR
-        IGW["Models and Inference"]
-        Secrets["Secrets"]
-        Files["Files"]
-        Entities["Entity Store"]
-        Jobs["Jobs"]
-        IGW ~~~ Secrets ~~~ Files
-        Entities ~~~ Jobs
-    end
-
-    subgraph ProviderTier["MODEL PROVIDERS"]
-        direction TB
-        NVIDIABuild["NVIDIA Build"]
-        OpenAI["OpenAI"]
-        Anthropic["Anthropic"]
-        Gemini["Gemini"]
-        Ollama["Ollama"]
-        NVIDIABuild ~~~ OpenAI ~~~ Anthropic ~~~ Gemini ~~~ Ollama
-    end
-
-    subgraph OutputTier["OUTPUTS"]
-        direction TB
-        Datasets["Datasets"]
-        Configs["Configs"]
-        Reports["Reports"]
-        JobArtifacts["Job artifacts"]
-        Datasets ~~~ Configs ~~~ Reports ~~~ JobArtifacts
-    end
-
-    Users --> AccessTier
-    AccessTier --> CapabilityTier
-    CapabilityTier --> SharedTier
-    SharedTier --> ProviderTier
-    SharedTier --> OutputTier
-```
+![NeMo Helix architecture. Surfaces (NeMo Studio, NeMo CLI, Python SDK, NeMo Skills) call plugin APIs in NeMo Helix. Helix plugins (Connect, Fine-Tune, Generate data, Evaluate, Intake, Safeguard, Optimize, Route, Deployments, Third-party) run on Helix core (Auth, Entities, Files, Jobs, Secrets, Models, Gateway), alongside managed agents Compass and Email Triage. Production traces flow from the customer agent through Relay into Intake, managed agents propose changes as PRs, a developer reviews and merges them into the agent code repo, and the approved agent deploys to the online serving stack (NIM, Dynamo, Guardrails).](./_images/nemo-helix-architecture.png)
 
 ## Where to Go Next
 
