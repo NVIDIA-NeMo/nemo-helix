@@ -319,7 +319,11 @@ class TasksetService:
             # roll the head back rather than leave a half-created taskset behind.
             logger.exception("Publishing revision 1 failed; rolling back the taskset record")
             try:
-                await self.entity_client.delete(TasksetEntity, name=name, workspace=workspace)
+                # Only the head as we created it: a publisher whose create lost to ours may have
+                # published onto it since, and deleting by name alone would remove their taskset.
+                await self.entity_client.delete(
+                    TasksetEntity, name=name, workspace=workspace, expected_db_version=created.db_version
+                )
             except Exception:
                 # Report the rollback failure, but re-raise the *original* error: replacing it
                 # would hide why the publish failed and leave the caller debugging the cleanup.

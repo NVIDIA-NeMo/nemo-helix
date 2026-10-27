@@ -19,6 +19,7 @@ from nemo_evals.api.schemas import (
 )
 from nemo_evals.api.service.task_service import MetricRefNotFoundError, TaskService
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
+from nemo_evals.entities import TaskEntity
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -319,6 +320,29 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
 
     entity_store.create = real_create.__get__(entity_store)
     assert await service.get_task("default", "task-1") is None, "the orphaned head must not survive"
+
+
+async def test_create_rollback_spares_a_head_another_publisher_wrote(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """A replace that lost the create race publishes onto our head; our failed publish must not delete theirs."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    real_create = type(entity_store).create
+
+    async def _theirs_lands_then_ours_fails(entity):
+        if entity.__entity_type__ == "task_revision":
+            head = await entity_store.get(TaskEntity, "task-1", workspace="default")
+            await entity_store.update(head)  # the other publisher's pointer write
+            raise RuntimeError("store unavailable")
+        return await real_create(entity_store, entity)
+
+    entity_store.create = _theirs_lands_then_ours_fails
+
+    with pytest.raises(RuntimeError):
+        await service.create_task("task-1", _task_input(), workspace="default")
+
+    entity_store.create = real_create.__get__(entity_store)
+    assert await service.get_task("default", "task-1") is not None
 
 
 async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:

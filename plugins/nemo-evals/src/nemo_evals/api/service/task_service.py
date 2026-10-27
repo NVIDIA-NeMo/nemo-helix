@@ -258,7 +258,11 @@ class TaskService:
             # transaction, so roll the head back by hand rather than leaving a half-created task.
             logger.exception("Publishing revision 1 failed; rolling back the task record")
             try:
-                await self.entity_client.delete(TaskEntity, name=name, workspace=workspace)
+                # Only the head as we created it: a publisher whose create lost to ours may have
+                # published onto it since, and deleting by name alone would remove their task.
+                await self.entity_client.delete(
+                    TaskEntity, name=name, workspace=workspace, expected_db_version=created.db_version
+                )
             except Exception:
                 # Report the rollback failure, but re-raise the *original* error: replacing it
                 # would hide why the publish failed and leave the caller debugging the cleanup.
