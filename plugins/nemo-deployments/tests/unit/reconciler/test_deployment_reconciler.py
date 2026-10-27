@@ -583,6 +583,48 @@ async def test_delete_records_deleting_event_when_status_set_without_history(
 
 
 @pytest.mark.asyncio
+async def test_delete_records_deleting_event_when_status_fields_already_match(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = make_deployment()
+    dep.desired_state = "STOPPED"
+    dep.status = "DELETING"
+    dep.status_message = "Stopping deployment"
+    dep.status_history = [StatusEvent(status="READY", message="running", timestamp=NOW.isoformat())]
+    mock_backend.delete_status = BackendStatusUpdate(status="FAILED", status_message="docker paused")
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status_history[-1].status == "DELETING"
+    mock_entities.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_db_version_from_deleting_save(
+    deployment_reconciler: DeploymentReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    dep = make_deployment()
+    dep.desired_state = "STOPPED"
+    saved = dep.model_copy(deep=True)
+    saved._db_version = dep.db_version + 1
+    mock_entities.update.side_effect = lambda entity: saved
+
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+
+    mock_entities.delete.assert_awaited_once_with(
+        Deployment,
+        name="dep1",
+        workspace="default",
+        expected_db_version=saved.db_version,
+    )
+
+
+@pytest.mark.asyncio
 async def test_delete_timeout_before_boundary_stays_deleting(
     patch_reconciler_now,
     mock_entities: AsyncMock,

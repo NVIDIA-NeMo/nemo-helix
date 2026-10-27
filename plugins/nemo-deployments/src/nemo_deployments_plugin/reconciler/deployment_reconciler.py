@@ -201,7 +201,7 @@ class DeploymentReconciler:
         self._drift_cache.remove(dep_id)
         backend = self._try_resolve_backend(deployment)
         if not _last_event_is(deployment, "DELETING"):
-            await self._update_deployment_status(
+            deployment = await self._record_status(
                 deployment,
                 BackendStatusUpdate(status="DELETING", status_message="Stopping deployment"),
             )
@@ -449,7 +449,10 @@ class DeploymentReconciler:
             and deployment.error_details == update.error_details
         ):
             return
+        await self._record_status(deployment, update)
 
+    async def _record_status(self, deployment: Deployment, update: BackendStatusUpdate) -> Deployment:
+        """Apply the update, append a history event, and return the saved entity."""
         deployment.status = update.status
         deployment.status_message = update.status_message
         deployment.endpoints = update.endpoints
@@ -462,10 +465,10 @@ class DeploymentReconciler:
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
         )
-        await self._save(deployment)
+        return await self._save(deployment)
 
-    async def _save(self, deployment: Deployment) -> None:
-        await self._entities.update(deployment)
+    async def _save(self, deployment: Deployment) -> Deployment:
+        return await self._entities.update(deployment)
 
 
 def _starting_timestamp(deployment: Deployment) -> datetime | None:

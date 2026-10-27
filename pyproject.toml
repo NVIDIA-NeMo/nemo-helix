@@ -639,6 +639,8 @@ extra-paths = [
   "plugins/nemo-guardrails/tests",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
+  # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
+  "plugins/nemo-deployments/tests/unit",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",
