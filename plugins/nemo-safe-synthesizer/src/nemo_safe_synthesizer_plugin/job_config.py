@@ -10,7 +10,7 @@ from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_safe_synthesizer.config.job import SafeSynthesizerJobConfig as SafeSynthesizerJobConfigInternal
 from nemo_safe_synthesizer.config.job import SafeSynthesizerParameters as SafeSynthesizerParametersInternal
 from nemo_safe_synthesizer.config.replace_pii import PiiReplacerConfig
-from pydantic import Field, model_validator
+from pydantic import Field, SerializationInfo, field_serializer, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,12 @@ class SafeSynthesizerJobConfig(SafeSynthesizerJobConfigInternal):
         description="Whether to run LLM training and generation phases. "
         "When False the task only performs PII replacement and returns the processed data.",
     )
+
+    @field_serializer("config")
+    def _serialize_config(self, config: SafeSynthesizerParameters, info: SerializationInfo) -> dict[str, Any]:
+        # Apply this to storage and responses as well as task dispatch, so
+        # reloading the spec does not make omitted defaults explicit.
+        return config.model_dump(mode=info.mode, exclude_unset=True)
 
     @model_validator(mode="before")
     @classmethod
