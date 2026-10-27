@@ -216,7 +216,7 @@ async def _resolve_agent_reference(
     ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
     qualified = FilesetRef(f"{ref.workspace}/{ref.name}")
     try:
-        (await files_client.get_fileset(workspace=ref.workspace, name=ref.name)).data()
+        await files_client.get_fileset(workspace=ref.workspace, name=ref.name)
     except NotFoundError as exc:
         raise HTTPException(status_code=400, detail=f"Fileset '{qualified}' not found.") from exc
     except PermissionDeniedError as exc:
