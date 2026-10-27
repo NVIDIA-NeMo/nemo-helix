@@ -139,12 +139,12 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, touchedFields },
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(createProviderFormSchema),
     defaultValues,
     disabled: isPending,
-    mode: 'onBlur',
+    mode: 'onTouched',
   });
 
   const rawProviderName = watch('name');
@@ -153,7 +153,8 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
     providerPreview && existingNames.has(providerPreview)
       ? 'A provider with this name already exists.'
       : undefined;
-  const nameError = (touchedFields.name ? errors.name?.message : undefined) ?? nameConflict;
+  const nameError =
+    (touchedFields.name || isSubmitted ? errors.name?.message : undefined) ?? nameConflict;
 
   const handlePresetChange = useCallback(
     (next: InferenceProviderPresetId) => {

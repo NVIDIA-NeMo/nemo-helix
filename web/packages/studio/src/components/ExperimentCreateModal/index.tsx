@@ -47,12 +47,12 @@ export const ExperimentCreateModal: FC<ExperimentCreateModalProps> = ({
   const {
     reset,
     handleSubmit,
-    formState: { errors, isSubmitting, touchedFields },
+    formState: { errors, isSubmitted, isSubmitting, touchedFields },
     setError,
     control,
   } = useForm<ExperimentCreateFormFields>({
     resolver: zodResolver(experimentCreateSchema),
-    mode: 'onBlur',
+    mode: 'onTouched',
     defaultValues: experimentCreateDefaults,
   });
 
@@ -61,7 +61,7 @@ export const ExperimentCreateModal: FC<ExperimentCreateModalProps> = ({
   } = useController({ control, name: 'name' });
 
   const preview = toValidEntityName(nameValue, '');
-  const nameError = touchedFields.name ? errors.name?.message : undefined;
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
 
   const formDisabled = isSubmitting;
 

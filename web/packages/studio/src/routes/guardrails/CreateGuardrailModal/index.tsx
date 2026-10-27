@@ -73,16 +73,16 @@ export const CreateGuardrailModal: FC<Props> = ({ open, onClose, sourceConfig })
     handleSubmit,
     reset,
     watch,
-    formState: { errors, touchedFields },
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm<FormData>({
     resolver: zodResolver(createGuardrailFormSchema),
     defaultValues: { name: defaultName },
-    mode: 'onBlur',
+    mode: 'onTouched',
   });
 
   const rawName = watch('name');
   const preview = toValidEntityName(rawName ?? '', '');
-  const nameError = touchedFields.name ? errors.name?.message : undefined;
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
 
   const {
     mutateAsync: createConfig,

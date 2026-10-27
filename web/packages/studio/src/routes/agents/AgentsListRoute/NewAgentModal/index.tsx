@@ -140,12 +140,12 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setValue,
     handleSubmit,
     reset: resetForm,
-    formState: { errors, touchedFields },
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
     defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
     disabled: isPending || deployOnCreate.isDeploying,
-    mode: 'onBlur',
+    mode: 'onTouched',
   });
 
   const tracedAgents = useTraceAgentNames(workspace, open && tab === 'imported-traces');
@@ -166,7 +166,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
 
   const watchedName = useWatch({ control, name: 'name' });
   const agentPreview = toValidEntityName(watchedName ?? '', '');
-  const agentNameError = touchedFields.name ? errors.name?.message : undefined;
+  const agentNameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });

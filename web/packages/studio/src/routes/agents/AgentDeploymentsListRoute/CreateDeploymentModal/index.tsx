@@ -158,18 +158,18 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     handleSubmit,
     watch,
     setValue,
-    formState: { errors, touchedFields },
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(deploymentFormSchema),
     defaultValues: makeDefaultValues(agentProp, initialImage, deploymentModes),
     disabled: isPending,
-    mode: 'onBlur',
+    mode: 'onTouched',
   });
   const deploymentMode = watch('deploymentMode');
   const selectedAgent = watch('agent');
   const rawDeploymentName = watch('name');
   const deploymentPreview = rawDeploymentName ? toValidEntityName(rawDeploymentName, '') : '';
-  const nameError = touchedFields.name ? errors.name?.message : undefined;
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
   const enteredImage = watch('image')?.trim();
 
   const { data: selectedAgentDetails, isLoading: isSelectedAgentLoading } = useAgentsGetAgent(
