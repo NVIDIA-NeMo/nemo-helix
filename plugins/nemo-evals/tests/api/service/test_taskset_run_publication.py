@@ -1,20 +1,26 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Submit with publication.intake: one Intake Evaluation per run, created before any task Job."""
+"""Submit with publication.intake: one Intake Evaluation per run, created before the run is accepted."""
 
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
+
+import httpx
 import pytest
 from fastapi import HTTPException
 from nemo_evals.api.service.taskset_run_service import (
     RunEvaluationDeniedError,
     RunEvaluationError,
+    RunEvaluationMismatchError,
     TasksetRunResolutionError,
 )
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.run_evaluation import EVALUATION_SOURCE, RUN_ID_KEY
-from nemo_evals.taskset_runs.task_jobs import TaskJobsIncompleteError
+from nemo_evals.taskset_runs.task_jobs import task_job_request
+from nemo_helix_plugin.client.errors import InternalServerError
 from nemo_helix_plugin.intake.types import EvaluationResponse
 
 pytestmark = pytest.mark.usefixtures("published")
@@ -52,20 +58,20 @@ async def test_a_missing_experiment_is_rejected_before_acceptance(service, publi
     assert not await runs(entity_store) and not fake_evaluations.created
 
 
-async def test_acceptance_creates_the_runs_evaluation_before_any_task_job(
-    service, publishing, fake_evaluations, fake_task_jobs, run_store
+async def test_submit_creates_the_runs_evaluation_before_accepting_it(
+    service, publishing, fake_evaluations, fake_task_jobs, run_store, entity_store
 ):
-    jobs_at_create: list[int] = []
+    runs_at_create: list[int] = []
     create = fake_evaluations.create
 
     async def recording_create(workspace, body):
-        jobs_at_create.append(len(fake_task_jobs.created))
+        runs_at_create.append(len(await runs(entity_store)))
         await create(workspace, body)
 
     fake_evaluations.create = recording_create
     outcome = await submit(service, publishing)
 
-    assert jobs_at_create == [0]  # task Jobs publish to it, so it exists before the first one
+    assert runs_at_create == [0]  # task Jobs publish to it, so every stored run already has it
     (body,) = fake_evaluations.created
     run = await run_store.find("default", RUN)
     taskset, _, digest = run.taskset_ref.partition("#")
@@ -81,10 +87,32 @@ async def test_acceptance_creates_the_runs_evaluation_before_any_task_job(
     assert plan.intake is not None
     assert (plan.intake.experiment_id, plan.intake.agent_name) == ("exp-1", "oracle")
     assert outcome.status.warnings[-1] == f"Intake: Evaluation {RUN} in Experiment swe-agent-tuning"
-    (job,) = fake_task_jobs.created
+    job = await task_job_request(plan, run, 0, plan.task_environments[0])  # what the controller will create
     publication = HarborTaskJobSpec.model_validate(job.spec).spec.publication
     assert publication is not None and publication.intake is not None
     assert (publication.intake.evaluation_id, publication.intake.required) == (RUN, False)
+
+
+async def test_intake_setup_doesnt_come_out_of_the_runs_execution_budget(
+    service, publishing, fake_evaluations, run_store
+):
+    """The queue timeout starts once the Evaluation exists: a slow Intake call can't accept a run already expired."""
+    now = [datetime(2026, 10, 14, 12, tzinfo=UTC)]
+    service._clock = lambda: now[0]
+    create = fake_evaluations.create
+
+    async def slow_create(workspace, body):
+        now[0] += timedelta(seconds=45)
+        await create(workspace, body)
+
+    fake_evaluations.create = slow_create
+    publishing["timeout_seconds"] = 30
+    await submit(service, publishing)
+
+    run = await run_store.find("default", RUN)
+    assert run.accepted_at == datetime(2026, 10, 14, 12, 0, 45, tzinfo=UTC)
+    assert run.timeout_seconds == 30  # counted from the run's first slot, not from acceptance
+    assert run.execution_deadline_at == run.accepted_at + timedelta(seconds=service._config.runs.queue_timeout_seconds)
 
 
 async def test_a_requested_dataset_names_the_evaluations_dataset(service, publishing, fake_evaluations):
@@ -97,16 +125,38 @@ async def test_a_requested_dataset_names_the_evaluations_dataset(service, publis
     assert (body.dataset_name, body.dataset_version) == ("datacurve/deep-swe", "sha256:" + "a" * 64)
 
 
-async def test_a_keyed_retry_adopts_the_evaluation_and_creates_no_second_one(
-    service, publishing, fake_evaluations, fake_task_jobs
+async def test_a_keyed_retry_after_a_failed_accept_adopts_the_evaluation(
+    service, publishing, fake_evaluations, entity_store, monkeypatch
 ):
-    fake_task_jobs.refuse = {f"{RUN}-task-0"}
-    with pytest.raises(TaskJobsIncompleteError):
+    """An accept that fails after the Evaluation was created leaves it behind; the same key's retry adopts it."""
+    accept = service._store.accept
+
+    async def failing_accept(acceptance):
+        raise RuntimeError("entity store unavailable")
+
+    monkeypatch.setattr(service._store, "accept", failing_accept)
+    with pytest.raises(RuntimeError, match="entity store unavailable"):
         await submit(service, publishing)
-    fake_task_jobs.refuse = set()
-    replay = await submit(service, publishing)
-    assert replay.created is False and len(fake_evaluations.created) == 1 and len(fake_task_jobs.created) == 1
-    assert replay.status.warnings[-1].startswith(f"Intake: Evaluation {RUN}")
+    assert not await runs(entity_store) and len(fake_evaluations.created) == 1
+
+    monkeypatch.setattr(service._store, "accept", accept)
+    outcome = await submit(service, publishing)
+    assert outcome.created is True and len(await runs(entity_store)) == 1 and len(fake_evaluations.created) == 1
+    assert outcome.status.warnings[-1] == f"Intake: Evaluation {RUN} in Experiment swe-agent-tuning"
+
+
+async def test_a_keyed_retry_asking_for_another_dataset_is_refused(
+    service, publishing, fake_evaluations, entity_store, monkeypatch
+):
+    """The Evaluation an earlier attempt left names another dataset: nothing is adopted, no run is stored."""
+    monkeypatch.setattr(service._store, "accept", AsyncMock(side_effect=RuntimeError("entity store unavailable")))
+    with pytest.raises(RuntimeError, match="entity store unavailable"):
+        await submit(service, publishing)
+    monkeypatch.undo()
+    publishing["publication"]["intake"] |= {"dataset_name": "datacurve/deep-swe", "dataset_version": "v2"}
+    with pytest.raises(RunEvaluationMismatchError, match="created with different dataset metadata"):
+        await submit(service, publishing)
+    assert not await runs(entity_store) and len(fake_evaluations.created) == 1
 
 
 @pytest.mark.parametrize(
@@ -115,26 +165,35 @@ async def test_a_keyed_retry_adopts_the_evaluation_and_creates_no_second_one(
     ids=["other-run", "other-experiment"],
 )
 async def test_a_foreign_evaluation_under_the_runs_name_is_never_adopted(
-    service, publishing, fake_evaluations, fake_task_jobs, metadata, experiments
+    service, publishing, fake_evaluations, entity_store, metadata, experiments
 ):
     fake_evaluations.evaluations[RUN] = EvaluationResponse(
         id="eval-x", name=RUN, workspace="default", experiment_ids=experiments, dataset_name="d", metadata=metadata
     )
     with pytest.raises(RunEvaluationError, match="belongs to something else"):
         await submit(service, publishing)
-    assert not fake_task_jobs.created  # no task Job may publish into someone else's Evaluation
+    assert not await runs(entity_store)  # no task Job may publish into someone else's Evaluation
 
 
-async def test_a_keyed_submit_whose_evaluation_failed_starts_no_jobs_and_a_retry_completes_both(
-    service, publishing, fake_evaluations, fake_task_jobs
+async def test_an_intake_outage_stores_no_run_and_a_keyed_retry_adopts_the_evaluation(
+    service, publishing, fake_evaluations, fake_task_jobs, entity_store, files_service
 ):
-    fake_evaluations.fail = {"create"}
+    """Intake saved the Evaluation but its reply was lost: submit fails, and the retry adopts that Evaluation."""
+    create = fake_evaluations.create
+
+    async def lost_reply(workspace, body):
+        await create(workspace, body)
+        raise InternalServerError(httpx.Response(503, json={"detail": "intake unavailable"}))
+
+    fake_evaluations.create = lost_reply
     with pytest.raises(RunEvaluationError, match="creating its Intake Evaluation failed"):
         await submit(service, publishing)
-    assert not fake_task_jobs.created
-    fake_evaluations.fail = set()
-    await submit(service, publishing)
-    assert len(fake_evaluations.created) == 1 and len(fake_task_jobs.created) == 1
+    assert not await runs(entity_store) and not files_service.filesets
+
+    fake_evaluations.create = create
+    outcome = await submit(service, publishing)
+    assert outcome.created is True and len(await runs(entity_store)) == 1
+    assert len(fake_evaluations.created) == 1
 
 
 async def test_a_caller_who_may_not_create_evaluations_is_refused_before_acceptance(
@@ -149,7 +208,7 @@ async def test_a_caller_who_may_not_create_evaluations_is_refused_before_accepta
         await submit(service, publishing)
     assert exc.value.status_code == 403
     assert exc.value.detail == "you may not create Intake Evaluations in workspace default"
-    assert not await runs(entity_store) and not fake_task_jobs.created
+    assert not await runs(entity_store)
 
 
 async def test_a_caller_who_may_not_read_the_experiment_is_refused_before_the_lookup(
@@ -170,19 +229,9 @@ async def test_a_caller_who_may_not_read_the_experiment_is_refused_before_the_lo
     assert not await runs(entity_store)
 
 
-async def test_an_evaluation_create_denied_after_acceptance_starts_no_jobs(
-    service, publishing, fake_evaluations, fake_task_jobs
-):
+async def test_an_evaluation_create_denied_stores_no_run(service, publishing, fake_evaluations, entity_store):
     """Submit checked the permission first, so a 403 here means it was revoked since: no unpublished run."""
     fake_evaluations.fail = {"create-denied"}
     with pytest.raises(RunEvaluationDeniedError, match=f"run {RUN}: Intake refused to create its Evaluation"):
         await submit(service, publishing)
-    assert not fake_task_jobs.created
-
-
-async def test_a_task_job_failure_keeps_the_intake_notice(service, publishing, fake_task_jobs):
-    fake_task_jobs.refuse = {f"{RUN}-task-0"}
-    with pytest.raises(TaskJobsIncompleteError) as exc:
-        await submit(service, publishing)
-    assert exc.value.notices == (f"Intake: Evaluation {RUN} in Experiment swe-agent-tuning",)
-    assert str(exc.value).endswith(f"; Intake: Evaluation {RUN} in Experiment swe-agent-tuning")
+    assert not await runs(entity_store)

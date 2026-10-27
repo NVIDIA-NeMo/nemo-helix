@@ -14,6 +14,7 @@ import {
   trendVisibilityStorageKey,
 } from '@studio/components/charts/ExperimentTrendChart/visibility';
 import { ExperimentDataView } from '@studio/components/dataViews/ExperimentDataView';
+import { ExperimentDeleteButton } from '@studio/components/ExperimentDeleteButton';
 import { ExperimentEditModal } from '@studio/components/ExperimentEditModal';
 import { OriginatingInsightLink } from '@studio/components/OriginatingInsightLink';
 import { OPTIMIZER_ENABLED } from '@studio/constants/environment';
@@ -25,8 +26,10 @@ import { getExperimentRoute } from '@studio/routes/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { type FC, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 
 export const ExperimentDetailRoute: FC = () => {
+  const navigate = useNavigate();
   const workspace = useWorkspaceFromPath();
   const { experimentName } = useRequiredPathParams([ROUTE_PARAMS.experimentName]);
   const { data: group, error } = useGetExperiment(workspace, experimentName);
@@ -96,10 +99,19 @@ export const ExperimentDetailRoute: FC = () => {
           }
           slotDescription={group?.description || undefined}
           slotActions={
-            <Button kind="secondary" disabled={!group} onClick={() => setEditOpen(true)}>
-              <Pencil />
-              Edit
-            </Button>
+            <Flex gap="density-sm">
+              <Button kind="secondary" disabled={!group} onClick={() => setEditOpen(true)}>
+                <Pencil />
+                Edit
+              </Button>
+              {group && (
+                <ExperimentDeleteButton
+                  workspace={workspace}
+                  name={group.name}
+                  onDeleted={() => navigate(getExperimentRoute(workspace))}
+                />
+              )}
+            </Flex>
           }
         />
         {error ? (

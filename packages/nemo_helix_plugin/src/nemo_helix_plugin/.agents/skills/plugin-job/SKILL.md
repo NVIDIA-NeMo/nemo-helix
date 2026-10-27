@@ -195,15 +195,17 @@ from nemo_helix_plugin.discovery import discover_jobs
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 job_cls = discover_jobs()["data-designer.generate"]
-result = NemoJobScheduler().run_local(
+result = NemoJobScheduler().submit_remote(
     job_cls,
     {"num_records": 10, "model": "gpt-oss-120b"},
+    base_url="http://localhost:8080",
 )
 ```
 
-`run_local` is synchronous. It drives `NemoJob.to_spec` once via
-`asyncio.run` to produce the canonical spec, then calls `run` directly.
-`KeyError` if no job is registered under the key.
+`submit_remote` is synchronous. It POSTs the spec to the plugin service's
+per-job submit route; the platform validates it, runs `to_spec`, and executes
+`run` in a job container. There is no in-process runner (`run_local` was
+removed). `KeyError` if no job is registered under the key.
 
 ## In Job Containers
 

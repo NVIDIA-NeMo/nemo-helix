@@ -170,7 +170,7 @@ describe('AgentOptimizationDetailRoute', () => {
 
       expect(await screen.findByText('results/switchyard/agent-routed.yaml')).toBeInTheDocument();
       await waitFor(() =>
-        expect(screen.getByTestId('nv-code-snippet-code')).toHaveTextContent(
+        expect(screen.getByTestId('log-viewer-code')).toHaveTextContent(
           'Created routed virtual model'
         )
       );

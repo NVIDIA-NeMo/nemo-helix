@@ -90,6 +90,14 @@ NHX_PREFIX_BASE = "NHX_"
 NHX_CONFIG_FILE_PATH_ENV_VAR = "NHX_CONFIG_FILE_PATH"
 NHX_CONFIG_FILE_PATH_DEFAULT = "/etc/nhx/config.yaml"
 NHX_CONFIG_WARNINGS_DISABLED_ENV_VAR = "NHX_CONFIG_WARNINGS_DISABLED"
+# Canonical env vars carrying the platform base URL, in the order consumers
+# resolve them (NEMO_BASE_URL first, then NHX_BASE_URL, then the config default).
+# This is the authoritative contract, so consumers should import these rather
+# than hardcode the literals. ``PLATFORM_BASE_URL_ENV_VARS`` preserves the
+# precedence order.
+NEMO_BASE_URL_ENV_VAR = "NEMO_BASE_URL"
+NHX_BASE_URL_ENV_VAR = "NHX_BASE_URL"
+PLATFORM_BASE_URL_ENV_VARS = (NEMO_BASE_URL_ENV_VAR, NHX_BASE_URL_ENV_VAR)
 
 _NHX_DATA_DIR_ENV_VAR = "NHX_DATA_DIR"
 _XDG_DATA_HOME_ENV_VAR = "XDG_DATA_HOME"
@@ -842,8 +850,11 @@ __all__ = [
     "DockerConfig",
     "EnvironmentFirstSettings",
     "ImagePullSecret",
+    "NEMO_BASE_URL_ENV_VAR",
+    "NHX_BASE_URL_ENV_VAR",
     "NemoConfig",
     "NemoHelixConfig",
+    "PLATFORM_BASE_URL_ENV_VARS",
     "PLATFORM_SERVICE_NAMES",
     "HelixConfig",
     "Runtime",

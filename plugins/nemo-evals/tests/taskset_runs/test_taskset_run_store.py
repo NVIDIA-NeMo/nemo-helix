@@ -27,6 +27,7 @@ from nemo_evals.taskset_runs.store import (
     RunRequestConflict,
     TasksetRunStore,
 )
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.entities import EntityClient
@@ -36,6 +37,7 @@ from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityN
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import ValidationError
 
 
@@ -59,6 +61,7 @@ def make_run(acceptance, *, phase=TasksetRunPhase.ACCEPTED) -> TasksetRunEntity:
         request_digest=acceptance.request_digest,
         idempotency_key=acceptance.idempotency_key,
         accepted_at=acceptance.accepted_at,
+        timeout_seconds=acceptance.timeout_seconds,
         execution_deadline_at=acceptance.execution_deadline_at,
         finalization_deadline_at=acceptance.finalization_deadline_at,
         phase=phase,
@@ -1007,3 +1010,91 @@ async def test_request_cancel_gives_up_when_every_write_conflicts(store, entity_
         await store.request_cancel(run.workspace, run.name, now=CANCEL_AT)
     assert update.call_count == CANCEL_WRITE_ATTEMPTS
     assert (await entity_store.get(TasksetRunEntity, name=run.name, workspace=run.workspace)) == run
+
+
+async def test_members_are_created_once_queued_and_task_job_and_job_id_are_write_once(
+    store, entity_store, acceptance
+) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    member = await store.create_member(run, 3)
+    assert member is not None and (member.name, member.task_index, member.phase) == ("task-3", 3, "image_ready")
+    assert member.parent == run.id
+    assert await store.create_member(run, 3) is None  # exists = done
+
+    intent = await store.update_member(member, task_job=f"{run.name}-task-3")
+    with pytest.raises(NemoEntityConflictError):
+        await store.update_member(member, task_job=f"{run.name}-task-3")  # stale version
+    with pytest.raises(ValueError, match="write-once"):
+        await store.update_member(intent, task_job="other")
+    with pytest.raises(ValueError, match="registered without its Job's id"):
+        await store.update_member(intent, phase=MemberPhase.REGISTERED)
+    registered = await store.update_member(
+        intent, phase=MemberPhase.REGISTERED, job_id="job-1", job_status=HelixJobStatus.ACTIVE
+    )
+    with pytest.raises(ValueError, match="job_id is write-once"):
+        await store.update_member(registered, job_id="job-2")
+    done = await store.update_member(registered, phase=MemberPhase.SUCCEEDED, bundle_ref="ref")
+    with pytest.raises(ValueError, match="illegal taskset run member transition"):
+        await store.update_member(done, phase=MemberPhase.FAILED)
+    assert [m.phase for m in await store.list_all_members(run)] == [MemberPhase.SUCCEEDED]
+
+
+async def test_set_state_checks_transitions(store, entity_store, acceptance) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    # Its first slot writes running before any Job, so an accepted run never completes without it.
+    with pytest.raises(ValueError, match="illegal taskset run transition"):
+        await store.set_state(run, phase=TasksetRunPhase.COMPLETED)
+    assert (await store.set_state(run, phase=TasksetRunPhase.EXPIRED)).phase is TasksetRunPhase.EXPIRED
+    running = await entity_store.create(
+        make_run(acceptance, phase=TasksetRunPhase.RUNNING).model_copy(update={"name": "r2"})
+    )
+    with pytest.raises(ValueError, match="illegal taskset run transition"):
+        await store.set_state(running, phase=TasksetRunPhase.ACCEPTED)
+    assert (await store.set_state(running, phase=TasksetRunPhase.RUNNING)).phase is TasksetRunPhase.RUNNING  # no-op
+
+
+async def test_start_counts_both_deadlines_from_the_first_slot_in_one_versioned_write(
+    store, entity_store, acceptance
+) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    now = acceptance.accepted_at + timedelta(minutes=50)
+    started = await store.start(run, now=now)
+    assert (started.phase, started.started_at) == (TasksetRunPhase.RUNNING, now)
+    assert started.execution_deadline_at == now + timedelta(seconds=acceptance.timeout_seconds)
+    grace = acceptance.finalization_deadline_at - acceptance.execution_deadline_at
+    assert started.finalization_deadline_at == started.execution_deadline_at + grace  # submit's grace, kept
+    assert (await store.find(run.workspace, run.name)) == started
+    with pytest.raises(NemoEntityConflictError):  # a stale copy: another writer (here, the start) went first
+        await store.start(run, now=now + timedelta(minutes=1))
+
+
+async def test_open_runs_repeated_across_pages_are_listed_once(store, entity_store, acceptance, monkeypatch) -> None:
+    run = await entity_store.create(make_run(acceptance))
+    other = await entity_store.create(make_run(acceptance).model_copy(update={"name": "other"}))
+    real_list = entity_store.list
+
+    async def shifted(*args, **kwargs):
+        page = await real_list(*args, **{**kwargs, "page": 1})  # a finished run shifted page 2 back onto page 1
+        return page.model_copy(update={"pagination": page.pagination.model_copy(update={"total_pages": 2})})
+
+    monkeypatch.setattr(entity_store, "list", shifted)
+    assert [r.name for r in await store.list_open_runs(page_size=1000)] == [run.name, other.name]
+
+
+async def test_accept_stores_the_callers_full_principal_for_the_controller(store, entity_store, acceptance) -> None:
+    principal = AuthContext(
+        principal_id="user:bob",
+        principal_email="bob@ac9.test",
+        principal_groups=["ac9-users"],
+        principal_account_id="a1",
+    )
+    run = (await store.accept(replace(acceptance, auth_context=principal))).run
+    stored = await entity_store.get(TasksetRunEntity, name=run.name, workspace=run.workspace)
+    assert stored.auth_context == principal
+    assert "_auth_context" in stored._get_data_fields()  # persisted with the record
+    assert "auth_context" not in stored.model_dump()  # never part of the status DTO's source
+    assert (await store.set_state(stored, phase=TasksetRunPhase.RUNNING)).auth_context == principal
+
+
+async def test_accept_without_a_principal_stores_none(store, acceptance) -> None:
+    assert (await store.accept(acceptance)).run.auth_context is None

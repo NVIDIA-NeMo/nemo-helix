@@ -42,6 +42,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import ipaddress
 import json
 import logging
 import math
@@ -52,6 +53,7 @@ import stat
 import tarfile
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, override
 
@@ -142,6 +144,10 @@ SERVER_RETRY_BASE_SEC = 0.5
 SERVER_RETRY_MAX_SEC = 8.0
 # The readiness wait polls the services status on every poll, so each read gets only this long.
 PROVISIONING_STATUS_BUDGET_SEC = 30
+# execd's port, which every sandbox pod listens on; its direct endpoint is ``<pod IP>:<port>``.
+EXECD_PORT = 44772
+# The pod IP is optional, so its lookup gives up after this long in all, retries included.
+SANDBOX_IP_LOOKUP_BUDGET_SEC = 15
 # How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 
@@ -176,6 +182,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         use_server_proxy: Route execd traffic through the server instead of to the pod directly.
         ready_timeout_sec: How long a new sandbox may take to become healthy.
         sandbox_timeout_sec: The sandbox's server-side lifetime.
+        sandbox_expires_at: ISO-8601 time, with its UTC offset, no sandbox may outlive. Each create gets ``sandbox_timeout_sec``
+            cut to the time left then (at least 1 s), so a sandbox created late (a retry, a separate verifier)
+            ends at the same time as the first. ``None`` keeps ``sandbox_timeout_sec`` as is.
         request_timeout_sec: Per-request SDK timeout; ``None`` keeps the SDK default.
         health_check_poll_interval_sec: How often the readiness wait polls.
         metadata: Labels for every sandbox, such as the ownership labels cleanup selects on.
@@ -215,6 +224,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         use_server_proxy: bool = False,
         ready_timeout_sec: float = DEFAULT_READY_TIMEOUT_SEC,
         sandbox_timeout_sec: float = DEFAULT_SANDBOX_TIMEOUT_SEC,
+        sandbox_expires_at: str | None = None,
         request_timeout_sec: float | None = None,
         health_check_poll_interval_sec: float = DEFAULT_HEALTH_CHECK_POLL_INTERVAL_SEC,
         metadata: dict[str, str] | None = None,
@@ -250,6 +260,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         )
         self._ready_timeout_sec = ready_timeout_sec
         self._sandbox_timeout_sec = sandbox_timeout_sec
+        self._sandbox_expires_at = datetime.fromisoformat(sandbox_expires_at) if sandbox_expires_at else None
         self._health_check_poll_interval_sec = health_check_poll_interval_sec
         self._metadata = dict(metadata or {})
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
@@ -260,6 +271,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._max_disk_mb = max_disk_mb
         self._disk_limit_mb: int | None = None
         self._sandbox: Any | None = None
+        self._record: dict[str, Any] | None = None
+        self._record_path: Path | None = None
         self._image_uid: int | None = None
         self._image_uid_probed = False
         self._image_uid_lock = asyncio.Lock()
@@ -431,6 +444,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 network_policy=to_opensandbox_policy(egress_policy),
                 extensions=self._extensions(),
                 sandbox_timeout_sec=self._sandbox_timeout_sec,
+                expires_at=self._sandbox_expires_at,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,
@@ -440,6 +454,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             # ready timeout.
             failure_check=self._provisioning_failure if uses_extension else None,
         )
+        started_at = datetime.now(UTC)
+        recorded_id = sandbox_id(sandbox)
         try:
             await verify_applied_egress(
                 sandbox,
@@ -448,18 +464,53 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 label=f"OpenSandbox sandbox {sandbox_id(sandbox)} (session {self.session_id})",
                 require_readback=True,
             )
+            ip = await self._sandbox_ip(recorded_id) if recorded_id else None
         except BaseException as exc:
             await self._driver.safe_kill(sandbox)
             if isinstance(exc, EgressVerificationError):
                 raise RuntimeError(str(exc)) from exc
             raise
-        self._record_applied_egress(sandbox_id(sandbox), egress_policy)
+        self._record_applied_egress(recorded_id, egress_policy, ip=ip, started_at=started_at)
         return sandbox
 
-    def _record_applied_egress(self, recorded_id: str | None, policy: EgressPolicy) -> None:
-        """Write the verified policy and its hash into the trial directory for the supervisor.
+    async def _sandbox_ip(self, recorded_id: str) -> str | None:
+        """The pod IP from execd's direct endpoint, or ``None`` if the server doesn't report one."""
+        try:
+            async with asyncio.timeout(SANDBOX_IP_LOOKUP_BUDGET_SEC):
+                response = await self._server().get(
+                    f"/sandboxes/{recorded_id}/endpoints/{EXECD_PORT}",
+                    timeout=SANDBOX_IP_LOOKUP_BUDGET_SEC,
+                    deadline=time.monotonic() + SANDBOX_IP_LOOKUP_BUDGET_SEC,
+                )
+            response.raise_for_status()
+            endpoint = str(response.json()["endpoint"])
+        except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError):
+            self.logger.warning(
+                "Could not read sandbox %s's pod IP; it is recorded without one", recorded_id, exc_info=True
+            )
+            return None
+        host, _, port = endpoint.rpartition(":")
+        try:
+            ip = ipaddress.ip_address(host.strip("[]"))
+        except ValueError:
+            ip = None
+        if ip is None or port != str(EXECD_PORT):
+            self.logger.warning(
+                "Sandbox %s's execd endpoint %r is not <pod IP>:%d; it is recorded without an IP",
+                recorded_id,
+                endpoint,
+                EXECD_PORT,
+            )
+            return None
+        return str(ip)
+
+    def _record_applied_egress(
+        self, recorded_id: str | None, policy: EgressPolicy, *, ip: str | None, started_at: datetime
+    ) -> None:
+        """Write the verified policy, its hash, and the pod IP and start time into the trial directory.
 
         The agent and a separate verifier share the trial directory, so each sandbox writes its own file.
+        ``stop`` fills in ``stopped_at``.
         """
         payload = to_opensandbox_policy(policy)
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -472,13 +523,40 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             "policy": payload,
             "disk_requested_mb": self._effective_storage_mb,
             "disk_limit_mb": self._disk_limit_mb,
+            "ip": ip,
+            "started_at": started_at.isoformat(),
+            "stopped_at": None,
         }
-        filename = applied_egress_filename(recorded_id or self.session_id)
+        self._record = record
+        self._record_path = self.trial_paths.trial_dir / applied_egress_filename(recorded_id or self.session_id)
         try:
             self.trial_paths.trial_dir.mkdir(parents=True, exist_ok=True)
-            (self.trial_paths.trial_dir / filename).write_text(json.dumps(record, indent=2))
+            self._write_record(self._record_path, record)
         except OSError:
             self.logger.warning("Could not record the applied egress policy", exc_info=True)
+
+    def _record_stopped(self) -> None:
+        """Fill in the record's ``stopped_at``."""
+        if self._record is None or self._record_path is None:
+            return
+        self._record["stopped_at"] = datetime.now(UTC).isoformat()
+        try:
+            self._write_record(self._record_path, self._record)
+        except OSError:
+            self.logger.warning("Could not record when the sandbox stopped", exc_info=True)
+        self._record = None
+        self._record_path = None
+
+    @staticmethod
+    def _write_record(path: Path, record: dict[str, Any]) -> None:
+        """Replace *path* with *record* in one rename, so a failed write leaves the previous record whole."""
+        temporary = path.with_name(f"{path.name}.tmp")
+        try:
+            temporary.write_text(json.dumps(record, indent=2))
+            temporary.replace(path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+            raise
 
     @override
     async def start(self, force_build: bool) -> None:
@@ -720,6 +798,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Kill the sandbox when ``delete`` is set, and always release the client."""
         if not self._sandbox:
             return
+        self._record_stopped()
         try:
             if delete:
                 await self._sandbox.kill()

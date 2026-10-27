@@ -5,15 +5,18 @@ import type { StudioDataView } from '@nemo/common/src/components/DataView/Studio
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
 import { EM_DASH } from '@nemo/common/src/constants';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
-import { Cancel, CheckCircle, CloseCircle, Refresh } from '@nemo/icons/icons';
-import { Badge, Button, Text } from '@nvidia/foundations-react-core';
+import { Cancel, CheckCircle, CloseCircle, Eye, Refresh } from '@nemo/icons/icons';
+import { Badge, Button, Flex, Text } from '@nvidia/foundations-react-core';
 import {
   formatParamValue,
   METRIC_SORT_PREFIX,
   PARAM_SORT_PREFIX,
   paramValue,
 } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
-import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
+import type {
+  Trial,
+  TrialPhase,
+} from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { type ComponentProps, useCallback } from 'react';
 
 const formatMetric = (value: number | null): string => {
@@ -40,20 +43,32 @@ const TRIAL_STATUS_CONFIG: Record<string, StatusConfigEntry> = {
   WAITING: { label: 'Waiting', color: 'gray', icon: Refresh },
 };
 
+const PHASE_LABELS: Record<TrialPhase, string> = {
+  numeric: 'Parameter sweep',
+  prompt: 'Prompt rewrite',
+};
+
 type MakeTrialColumns = NonNullable<ComponentProps<typeof StudioDataView<Trial>>['makeColumns']>;
 
 interface UseTrialColumnsOptions {
   metricNames: string[];
   paramNames: string[];
   numericParams: ReadonlySet<string>;
+  /** Parameters holding prose, such as prompts, previewed on one line with the full text a click away. */
+  textParams: ReadonlySet<string>;
+  showPhase: boolean;
   onDeploy?: (trial: Trial) => void;
+  onViewParam: (trial: Trial, name: string) => void;
 }
 
 export const useTrialColumns = ({
   metricNames,
   paramNames,
   numericParams,
+  textParams,
+  showPhase,
   onDeploy,
+  onViewParam,
 }: UseTrialColumnsOptions): MakeTrialColumns =>
   useCallback<MakeTrialColumns>(
     ({ accessor, display }) => [
@@ -64,6 +79,17 @@ export const useTrialColumns = ({
         enableSorting: true,
         cell: ({ row }) => <Text kind="body/semibold/md">Trial {row.original.number}</Text>,
       }),
+      ...(showPhase
+        ? [
+            accessor('phase', {
+              id: 'phase',
+              header: 'Phase',
+              size: 150,
+              enableSorting: true,
+              cell: ({ row }) => <Text>{PHASE_LABELS[row.original.phase]}</Text>,
+            }),
+          ]
+        : []),
       ...metricNames.map((name) =>
         accessor(
           (row: Trial) => row.metrics.find((metric) => metric.name === name)?.value ?? null,
@@ -86,10 +112,25 @@ export const useTrialColumns = ({
         accessor((row: Trial) => paramValue(row, name) ?? '', {
           id: `${PARAM_SORT_PREFIX}${name}`,
           header: name,
-          size: 150,
+          size: textParams.has(name) ? 320 : 150,
           enableSorting: true,
           cell: ({ row }) => {
             const value = paramValue(row.original, name);
+            if (value && textParams.has(name)) {
+              return (
+                <Flex align="center" gap="1" className="min-w-0">
+                  <Text className="line-clamp-2 min-w-0">{value}</Text>
+                  <Button
+                    kind="tertiary"
+                    size="small"
+                    onClick={() => onViewParam(row.original, name)}
+                    aria-label={`View ${name} for trial ${row.original.number}`}
+                  >
+                    <Eye />
+                  </Button>
+                </Flex>
+              );
+            }
             return (
               <Text className={`${numericParams.has(name) ? 'tabular-nums' : ''}`}>
                 {value === undefined || value === '' ? EM_DASH : formatParamValue(value)}
@@ -162,5 +203,5 @@ export const useTrialColumns = ({
         ),
       }),
     ],
-    [metricNames, paramNames, numericParams, onDeploy]
+    [metricNames, paramNames, numericParams, textParams, showPhase, onDeploy, onViewParam]
   );

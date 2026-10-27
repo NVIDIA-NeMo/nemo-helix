@@ -10,6 +10,7 @@ from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
+from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -65,6 +66,8 @@ async def list_prompts(
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception(f"Failed to list prompts for workspace {_sanitize_for_log(workspace)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

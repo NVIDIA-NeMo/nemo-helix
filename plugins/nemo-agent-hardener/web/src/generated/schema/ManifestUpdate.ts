@@ -20,11 +20,15 @@ import type { WarGameModels } from './WarGameModels.ts';
 export interface ManifestUpdate {
   /** Replace the cached benign suite (tool,payload,label,rationale,persona rows). */
   benign_suite?: ManifestUpdateBenignSuiteItem[];
-  /** Victim port the war-game will target. */
+  /**
+     * Victim port the war-game will target.
+     * @minimum 1
+     * @maximum 65535
+     */
   port?: number;
   /** Allow-listed egress host[:port] entries the victim may reach. */
   egress?: string[];
-  /** Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets`, which names them and resolves the values from the Secrets store at run time. */
+  /** Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from the Secrets store at run time. */
   env?: ManifestUpdateEnv;
   /** Enabled defender keys ('guardrails','openshell'); empty means agent-hardener defaults. */
   defenders?: string[];

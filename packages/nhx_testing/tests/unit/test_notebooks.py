@@ -5,10 +5,46 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import papermill
 import pytest
-from nhx.testing.notebooks import execute_notebook
+from nhx.testing.notebooks import cleanup_notebook_deployments, execute_notebook
+
+
+@pytest.mark.parametrize("execution_fails", [False, True])
+def test_cleanup_notebook_deployments_preserves_existing(execution_fails):
+    client = MagicMock()
+    client.models.list_deployments.return_value.items.side_effect = [
+        [SimpleNamespace(name="existing")],
+        [SimpleNamespace(name="existing"), SimpleNamespace(name="notebook-model")],
+    ]
+    client.models.wait_for_deployment_status.return_value = True
+
+    def run():
+        with cleanup_notebook_deployments(client):
+            if execution_fails:
+                raise RuntimeError("notebook failed")
+
+    if execution_fails:
+        with pytest.raises(RuntimeError, match="notebook failed"):
+            run()
+    else:
+        run()
+    client.models.delete_deployment.assert_called_once_with(name="notebook-model", workspace="default")
+    client.models.wait_for_deployment_status.assert_called_once_with(
+        "notebook-model", "DELETED", workspace="default", timeout=600
+    )
+
+
+def test_cleanup_notebook_deployments_reports_timeout():
+    client = MagicMock()
+    client.models.list_deployments.return_value.items.side_effect = [[], [SimpleNamespace(name="notebook-model")]]
+    client.models.wait_for_deployment_status.return_value = False
+    with pytest.raises(TimeoutError, match="Notebook deployment default/notebook-model"):
+        with cleanup_notebook_deployments(client):
+            pass
 
 
 @pytest.mark.parametrize("suffix", [".md", ".mdx"])

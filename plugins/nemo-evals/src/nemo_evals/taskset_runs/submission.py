@@ -37,22 +37,25 @@ def check_timeout(timeout_seconds: int | None, runs: TasksetRunsConfig) -> int:
     return timeout
 
 
-def resolve_deadlines(accepted_at: datetime, timeout: int, runs: TasksetRunsConfig) -> tuple[datetime, datetime]:
+def resolve_deadlines(start: datetime, budget: int, grace: int) -> tuple[datetime, datetime]:
     """Calculate elapsed-time deadlines without consulting a clock.
 
+    Submit calls it with ``accepted_at`` and the queue timeout; the run controller calls it again with the
+    run's first slot and its execution budget (see ``TasksetRunStore.start``).
+
     Args:
-        accepted_at: Timezone-aware acceptance timestamp supplied by submit.
-        timeout: Effective execution budget in seconds.
-        runs: Operator settings supplying the finalization grace period.
+        start: Timezone-aware time the budget counts from.
+        budget: Seconds until the execution deadline.
+        grace: Seconds after the execution deadline to save the result.
 
     Returns:
         Execution deadline and finalization deadline, preserving the input timezone.
 
     Raises:
-        ValueError: accepted_at is naive, including a tzinfo that supplies no UTC offset.
+        ValueError: start is naive, including a tzinfo that supplies no UTC offset.
     """
-    if accepted_at.utcoffset() is None:
-        raise ValueError("accepted_at must be timezone-aware")
-    execution = accepted_at.astimezone(timezone.utc) + timedelta(seconds=timeout)
-    finalization = execution + timedelta(seconds=runs.finalization_grace_seconds)
-    return execution.astimezone(accepted_at.tzinfo), finalization.astimezone(accepted_at.tzinfo)
+    if start.utcoffset() is None:
+        raise ValueError("start must be timezone-aware")
+    execution = start.astimezone(timezone.utc) + timedelta(seconds=budget)
+    finalization = execution + timedelta(seconds=grace)
+    return execution.astimezone(start.tzinfo), finalization.astimezone(start.tzinfo)

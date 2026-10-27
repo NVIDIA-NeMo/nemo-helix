@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import datetime
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from kubernetes import client as kubernetes_client
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nhx.common.entities import EntityConflictError
@@ -17,6 +19,10 @@ from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, HelixJobSpec,
 from nhx.core.jobs.config import JobsStorageConfig
 from nhx.core.jobs.controllers.backends import JobUpdate
 from nhx.core.jobs.controllers.backends.exceptions import JobStorageError
+from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    KubernetesObjectMetadata,
+    reclaim_job_persistent_storage,
+)
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.reconciler import JobReconciler
@@ -221,6 +227,7 @@ def _job(
 def _reconciler(backend_registry, mock_nemo_client, storage_config: JobsStorageConfig | None = None):
     system_entities = MagicMock()
     system_entities.list.return_value = SimpleNamespace(data=[])
+    system_entities.update.side_effect = lambda entity: entity
     reconciler = JobReconciler(
         backend_registry,
         mock_nemo_client,
@@ -400,6 +407,179 @@ def test_deleted_job_storage_is_reclaimed_on_every_backend_then_cleared(
 
     reclaim.assert_called_once_with("team", "train-llama")
     system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
+
+
+@pytest.mark.parametrize("shared_backend", [False, True])
+@pytest.mark.parametrize("retry_failure", [False, True])
+def test_reclaim_persists_progress_across_ticks_and_controller_restarts(
+    backend_registry, mock_nemo_client, shared_backend, retry_failure
+):
+    """Exercise restart progress with a fake store, not database serialization or version locking."""
+    reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    first = MagicMock()
+    second = first if shared_backend else MagicMock()
+    # A completed cleanup is consumed: another call would create a new workload.
+    if shared_backend:
+        first.reclaim_persistent_storage.side_effect = [
+            False,
+            True,
+            JobStorageError("cleanup failed") if retry_failure else False,
+            True,
+        ]
+    else:
+        first.reclaim_persistent_storage.side_effect = [True, AssertionError("completed target restarted")]
+        second.reclaim_persistent_storage.side_effect = [
+            JobStorageError("cleanup failed") if retry_failure else False,
+            False,
+            True,
+        ]
+    reconciler._backend_registry = MagicMock()
+    reconciler._backend_registry.get_backend.side_effect = lambda *, provider, profile: {
+        "cpu": first,
+        "gpu": second,
+    }[provider]
+    record = HelixJobStorageReclaim(
+        name=HelixJobStorageReclaim.name_for_job("deleted-job"),
+        workspace="system",
+        job_id="deleted-job",
+        job_workspace="team",
+        job_name="train",
+        targets=[
+            JobStorageTarget(provider="cpu", profile="default"),
+            JobStorageTarget(provider="gpu", profile="default"),
+        ],
+    )
+    stored = {record.name: record}
+    system_entities.list.side_effect = lambda *args, **kwargs: SimpleNamespace(data=list(stored.values()))
+
+    def persist(entity):
+        stored[entity.name] = entity
+        return entity
+
+    system_entities.update.side_effect = persist
+    system_entities.delete_by_id.side_effect = lambda *args: stored.clear()
+
+    for _ in range(3):
+        # Read the saved record rather than retaining progress only in controller memory.
+        reconciler._reclaim_queued_storage()
+        if not stored:
+            break
+        assert len(stored[record.name].targets) == 1
+        system_entities.delete_by_id.assert_not_called()
+        reconciler = JobReconciler(reconciler._backend_registry, mock_nemo_client, system_entity_client=system_entities)
+
+    assert not stored
+    system_entities.delete_by_id.assert_called_once_with(HelixJobStorageReclaim, record.id)
+    first.reclaim_persistent_storage.reset_mock()
+    second.reclaim_persistent_storage.reset_mock()
+    reconciler._reclaim_queued_storage()
+    first.reclaim_persistent_storage.assert_not_called()
+    second.reclaim_persistent_storage.assert_not_called()
+
+
+@pytest.mark.parametrize("gpu_pvc", ["cpu-pvc", "gpu-pvc"])
+def test_reclaim_drains_kubernetes_cleanup_workloads_for_shared_and_distinct_claims(
+    backend_registry, mock_nemo_client, gpu_pvc
+):
+    reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    batch = MagicMock()
+    workloads = {}
+    batch.list_namespaced_job.side_effect = lambda **kwargs: SimpleNamespace(items=list(workloads.values()))
+
+    def create(*, namespace, body):
+        workloads[body.metadata.name] = body
+
+    batch.create_namespaced_job.side_effect = create
+    batch.delete_namespaced_job.side_effect = lambda *, name, **kwargs: workloads.pop(name)
+
+    def backend(pvc_name):
+        return SimpleNamespace(
+            reclaim_persistent_storage=partial(
+                reclaim_job_persistent_storage,
+                namespace="jobs",
+                batch_v1=batch,
+                pvc_name=pvc_name,
+                permissions_image="permissions:latest",
+                execution_backend="kubernetes_job",
+                execution_profile="default",
+                job_metadata=KubernetesObjectMetadata(),
+                pod_metadata=KubernetesObjectMetadata(),
+            )
+        )
+
+    backends = {"cpu": backend("cpu-pvc"), "gpu": backend(gpu_pvc)}
+    reconciler._backend_registry = MagicMock()
+    reconciler._backend_registry.get_backend.side_effect = lambda *, provider, profile: backends[provider]
+    # The backend contract takes workspace and job positionally, unlike the Kubernetes helper.
+    for configured in backends.values():
+        reclaim = configured.reclaim_persistent_storage
+        configured.reclaim_persistent_storage = lambda workspace, job, reclaim=reclaim: reclaim(
+            workspace=workspace, job_id=job
+        )
+    record = HelixJobStorageReclaim(
+        name=HelixJobStorageReclaim.name_for_job("deleted-job"),
+        workspace="system",
+        job_id="deleted-job",
+        job_workspace="team",
+        job_name="train",
+        targets=[JobStorageTarget(provider=provider, profile="default") for provider in backends],
+    )
+    stored = {record.name: record}
+    system_entities.list.side_effect = lambda *args, **kwargs: SimpleNamespace(data=list(stored.values()))
+
+    def persist(entity):
+        stored[entity.name] = entity
+        return entity
+
+    system_entities.update.side_effect = persist
+    system_entities.delete_by_id.side_effect = lambda *args: stored.clear()
+
+    for _ in range(3):
+        reconciler._reclaim_queued_storage()
+        for workload in workloads.values():
+            workload.status = kubernetes_client.V1JobStatus(
+                conditions=[kubernetes_client.V1JobCondition(type="Complete", status="True")]
+            )
+
+    assert not stored
+    assert not workloads
+    claims = {
+        call.kwargs["body"].spec.template.spec.volumes[0].persistent_volume_claim.claim_name
+        for call in batch.create_namespaced_job.call_args_list
+    }
+    # Every storage claim must be reclaimed, but shared claims may be deduplicated.
+    assert claims == {"cpu-pvc", gpu_pvc}
+    batch.create_namespaced_job.reset_mock()
+    batch.delete_namespaced_job.reset_mock()
+    reconciler._reclaim_queued_storage()
+    batch.create_namespaced_job.assert_not_called()
+    batch.delete_namespaced_job.assert_not_called()
+
+
+def test_reclaim_stops_if_completed_target_cannot_be_persisted(backend_registry, mock_nemo_client):
+    reconciler, system_entities = _reconciler(backend_registry, mock_nemo_client)
+    record = HelixJobStorageReclaim(
+        name=HelixJobStorageReclaim.name_for_job("deleted-job"),
+        workspace="system",
+        job_id="deleted-job",
+        job_workspace="team",
+        job_name="train",
+        targets=[
+            JobStorageTarget(provider="cpu", profile="default"),
+            JobStorageTarget(provider="gpu", profile="default"),
+        ],
+    )
+    system_entities.list.return_value = SimpleNamespace(data=[record])
+    system_entities.update.side_effect = EntityConflictError("concurrent update")
+    backend = MagicMock()
+    reconciler._backend_registry = MagicMock()
+    reconciler._backend_registry.get_backend.return_value = backend
+
+    reconciler._reclaim_queued_storage()
+
+    backend.reclaim_persistent_storage.assert_called_once_with("team", "train")
+    assert len(record.targets) == 2
+    system_entities.delete_by_id.assert_not_called()
 
 
 def _run_retention(reconciler, mock_jobs_client, step, job):

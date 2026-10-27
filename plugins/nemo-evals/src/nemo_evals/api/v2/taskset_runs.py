@@ -13,6 +13,7 @@ from nemo_evals.api.service.taskset_run_service import (
     IntakeUnavailableError,
     RunEvaluationDeniedError,
     RunEvaluationError,
+    RunEvaluationMismatchError,
     TasksetRunResolutionError,
     TasksetRunService,
     utc_now,
@@ -35,7 +36,6 @@ from nemo_evals.taskset_runs.store import (
     TasksetRunStore,
 )
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
-from nemo_evals.taskset_runs.task_jobs import TaskJobsIncompleteError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.log_utils import sanitize_for_log
@@ -64,13 +64,18 @@ router = APIRouter()
     responses={
         200: {"model": TasksetRunSubmitResponse, "description": "Replay an identical existing run."},
         201: {"description": "Accept a new run with frozen taskset and agent inputs."},
-        409: {"description": "The idempotency key already belongs to a different request."},
+        409: {
+            "description": (
+                "The idempotency key already belongs to a different request, or the run's Intake Evaluation "
+                "exists with different dataset metadata."
+            )
+        },
         422: {
             "description": "Invalid request, excessive timeout, missing or incompatible source, "
             "unconfigured execution, or a task without images."
         },
         503: {
-            "description": "The run was accepted but some task Jobs, or its Intake Evaluation, weren't created; "
+            "description": "Reading image builds, or Intake, failed before the run was accepted; "
             "retry the same request."
         },
     },
@@ -99,16 +104,16 @@ async def submit_taskset_run(
         service: Caller-delegated request-scoped acceptance service.
 
     Returns:
-        Public run status with advisory overlap warnings and one notice per task Job;
-        201 for acceptance or 200 for replay. Submission creates one task Job per task
-        right after acceptance; a keyed replay creates any that are still missing.
+        Public run status with advisory notices; 201 for acceptance or 200 for replay. Submission starts
+        no task Jobs (the run controller does) and no image builds: a task whose image isn't built yet is
+        rejected (422). A keyed replay returns the stored status.
 
     Raises:
         RequestValidationError: The execution budget exceeds the operator maximum.
-        HTTPException: Source denial (403), conflicting key (409), resolution rejection
-            (422), an unavailable image build service before acceptance (503, safe to resend), missing
-            task Jobs after acceptance (503), an Intake Evaluation refused after acceptance (403, not
-            retried), or a sanitized unexpected failure (500).
+        HTTPException: Source denial (403), conflicting key or Evaluation dataset (409), resolution rejection
+            (422), an unavailable image build service before acceptance (503, safe to resend), an Intake
+            Evaluation that couldn't be created before acceptance (503), an Intake Evaluation refused
+            before acceptance (403, not retried), or a sanitized unexpected failure (500).
             When the request omits idempotency_key, submit generates one. A 5xx then names it in the
             detail and the ``x-idempotency-key`` header and says not to retry automatically: the SDK
             would resend the keyless request and accept a second run. Resubmit with that key instead.
@@ -145,13 +150,16 @@ async def submit_taskset_run(
         # Raised before acceptance, so no run exists yet: resending the same request is safe, keyed or not.
         raise HTTPException(status_code=503, detail=str(exc), headers={"x-should-retry": "true"}) from exc
     except RunEvaluationDeniedError as exc:
-        # Accepted but refused its Evaluation, so no Job started; an automatic retry would be refused the same way.
+        # Refused its Evaluation, so nothing was accepted; an automatic retry would be refused the same way.
         headers = {"x-should-retry": "false"} | ({"x-idempotency-key": key} if generated else {})
         detail = f"{exc}; once you may create Intake Evaluations, resubmit with idempotency_key={key}"
         raise HTTPException(status_code=403, detail=detail, headers=headers) from exc
-    except (TaskJobsIncompleteError, RunEvaluationError) as exc:
-        # The run is already accepted here. Its ID is derived from (workspace, caller, idempotency_key),
-        # so a retry with the same key finds this run and creates only its missing Jobs.
+    except RunEvaluationMismatchError as exc:
+        # Nothing was accepted; the same key always resolves to this Evaluation, so a retry is refused the same way.
+        raise HTTPException(status_code=409, detail=str(exc), headers={"x-should-retry": "false"}) from exc
+    except RunEvaluationError as exc:
+        # Nothing was accepted, but Intake may have created the Evaluation. The run ID is derived from
+        # (workspace, caller, idempotency_key), so a retry with the same key adopts that Evaluation.
         raise _server_error(503, str(exc), key, generated=generated) from exc
     except HTTPException:
         raise
@@ -239,7 +247,7 @@ async def get_taskset_run(
     run_id: str,
     service: TasksetRunService = Depends(get_taskset_run_service),
 ) -> TasksetRunStatus:
-    """Read one stored run without loading its plan or joining its tasks and Jobs.
+    """Read one stored run and its progress, counted from its members, without loading its plan or reading Jobs.
 
     Args:
         workspace: Workspace that scopes the record lookup.
@@ -247,7 +255,8 @@ async def get_taskset_run(
         service: Shared request-scoped run service.
 
     Returns:
-        Current stored status, excluding null optionals and internal metadata.
+        Current stored status with ``progress`` (omitted while the run has no members), excluding null
+        optionals and internal metadata.
 
     Raises:
         HTTPException: The record is absent (404), or an unexpected storage or
@@ -343,7 +352,7 @@ async def list_taskset_run_tasks(
 
     Returns:
         Stored task page and filtered counts; existing runs with no members return
-        an empty page. Null Job/error details are omitted.
+        an empty page. Null Job, Job status and error details are omitted.
 
     Raises:
         HTTPException: The parent run is absent (404), or unexpected storage or

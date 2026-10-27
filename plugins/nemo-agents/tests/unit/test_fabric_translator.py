@@ -215,6 +215,42 @@ class TestTranslateAgentConfig:
             PLATFORM_IGW_API_KEY_ENV: PLATFORM_IGW_API_KEY_PLACEHOLDER,
         }
 
+    def test_proxy_origin_overrides_platform_base_url_in_the_merged_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The agent's SDK resolves the platform through NEMO_BASE_URL / NHX_BASE_URL.
+        # When a per-job proxy is active, both must resolve to its origin in the
+        # MERGED Fabric environment -- the proxy origin is injected via runtime_env
+        # (the override layer that wins the merge), so the task process's direct
+        # URL in os.environ does not clobber it.
+        monkeypatch.setenv("NEMO_BASE_URL", "http://command-platform:8080")
+        monkeypatch.setenv("NHX_BASE_URL", "http://shared-platform:8080")
+        monkeypatch.setenv("NHX_WORKSPACE", "request-workspace")
+        config = AgentConfig.model_validate(_example_yaml_config())
+
+        fabric_config = translate_agent_config(config, harness_name="codex", proxy_origin="http://127.0.0.1:9100")
+
+        environment = fabric_config.environment
+        assert environment is not None
+        assert environment.env["NEMO_BASE_URL"] == "http://127.0.0.1:9100"
+        assert environment.env["NHX_BASE_URL"] == "http://127.0.0.1:9100"
+        # Non-base-URL platform env is still forwarded unchanged.
+        assert environment.env["NHX_WORKSPACE"] == "request-workspace"
+
+    def test_no_proxy_origin_leaves_the_direct_platform_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Without a proxy the agent keeps the task process's direct platform URL, unchanged.
+        monkeypatch.setenv("NEMO_BASE_URL", "http://command-platform:8080")
+        monkeypatch.setenv("NHX_BASE_URL", "http://shared-platform:8080")
+        monkeypatch.setenv("NHX_WORKSPACE", "request-workspace")
+        config = AgentConfig.model_validate(_example_yaml_config())
+
+        fabric_config = translate_agent_config(config, harness_name="codex")
+
+        environment = fabric_config.environment
+        assert environment is not None
+        assert environment.env["NEMO_BASE_URL"] == "http://command-platform:8080"
+        assert environment.env["NHX_BASE_URL"] == "http://shared-platform:8080"
+
     def test_promotes_legacy_model_settings_base_url(self) -> None:
         payload = _example_yaml_config()
         payload["default_harness"] = "codex"

@@ -4,7 +4,6 @@
 """Caller-scoped run acceptance and stored-record reads without execution joins."""
 
 import asyncio
-import dataclasses
 import logging
 from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
@@ -38,13 +37,16 @@ from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
+from nemo_evals.jobs.gateway_models import require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
-from nemo_evals.taskset_runs.entities import TERMINAL_RUN_PHASES, MemberPhase, TasksetRunEntity
+from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
+from nemo_evals.taskset_runs.progress import build_progress
 from nemo_evals.taskset_runs.run_evaluation import (
+    EvaluationDatasetMismatchError,
     ForeignEvaluationError,
     IntakeRunEvaluations,
     RunEvaluations,
@@ -53,7 +55,8 @@ from nemo_evals.taskset_runs.run_evaluation import (
 from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
-from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs, TaskJobsIncompleteError, create_task_jobs
+from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig
@@ -129,7 +132,7 @@ class IntakeUnavailableError(RuntimeError):
 
 
 class RunEvaluationError(RuntimeError):
-    """The accepted run's Intake Evaluation couldn't be created; no task Jobs were started."""
+    """The run's Intake Evaluation couldn't be created; the run wasn't accepted."""
 
     def __init__(self, run_id: str, reason: str) -> None:
         super().__init__(f"run {run_id}: {reason}")
@@ -138,6 +141,10 @@ class RunEvaluationError(RuntimeError):
 
 class RunEvaluationDeniedError(RunEvaluationError):
     """Intake refused the caller the run's Evaluation; a retry fails the same way until the caller may create it."""
+
+
+class RunEvaluationMismatchError(RunEvaluationError):
+    """The run's Evaluation exists with another dataset; a retry of this request fails the same way."""
 
 
 async def pin_taskset_ref(entity_client: EntityClient, ref: TasksetRef, workspace: str) -> TasksetRef:
@@ -184,20 +191,23 @@ class TasksetRunService:
         preparer: ImagePreparer = prepare_task_images,
         task_jobs: TaskJobs | None = None,
         evaluations: RunEvaluations | None = None,
+        auth_context: AuthContext | None = None,
     ) -> None:
         """Bind request-scoped storage, identity and budget dependencies.
 
         Args:
             store: Run acceptance and replay boundary.
             entity_client: Caller-delegated entity resolver.
-            async_client: Caller-delegated platform client for spec resolution, image reads and task Jobs.
+            async_client: Caller-delegated platform client for spec resolution, image reads and Jobs checks.
             authorize: Caller-scoped source read authorizer, independent of service privileges.
             config: Operator configuration including run budgets and ``runs.harbor``.
             clock: Aware acceptance clock, invoked after resolution.
             platform: Platform configuration naming the OpenSandbox server and the default dispatcher image.
-            preparer: Checks every task, then prepares each one's images, before acceptance.
-            task_jobs: Jobs operations for fan-out; defaults to the Jobs service as the caller.
+            preparer: Checks every task, then reads each one's images, before acceptance.
+            task_jobs: Jobs operations submit's checks need; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
+            auth_context: The caller's full principal, stored on each new run for the run controller to
+                create on the caller's behalf; None with auth off.
         """
         self._store = store
         self._entities = entity_client
@@ -209,20 +219,24 @@ class TasksetRunService:
         self._preparer = preparer
         self._task_jobs = task_jobs or JobsServiceTaskJobs(AsyncJobsClient.from_client(async_client))
         self._evaluations = evaluations or IntakeRunEvaluations(AsyncIntakeClient.from_client(async_client))
+        self._auth_context = auth_context
 
     async def get(self, workspace: str, run_id: str) -> TasksetRunStatus | None:
-        """Read one stored run without joining members, plans or Jobs.
+        """Read one stored run with its progress counted from its members, without loading plans or reading Jobs.
 
         Args:
             workspace: Workspace that scopes the record lookup.
             run_id: Public run name in that workspace.
 
         Returns:
-            Stored public status, or None only when the record is absent. Storage
-            and projection failures propagate for the route to report as errors.
+            Stored public status with ``progress`` (None while the run has no members), or None only
+            when the record is absent. Storage and projection failures propagate for the route to report as errors.
         """
         run = await self._store.find(workspace, run_id)
-        return to_status(run) if run is not None else None
+        if run is None:
+            return None
+        members = await self._store.list_all_members(run)
+        return to_status(run).model_copy(update={"progress": build_progress(members) if members else None})
 
     async def list_runs(
         self,
@@ -297,7 +311,10 @@ class TasksetRunService:
         )
 
     async def submit(self, req: TasksetRunInput, *, workspace: str, caller: str) -> SubmitOutcome:
-        """Authorize, freeze and atomically accept a run, or replay its original status.
+        """Authorize, freeze and atomically accept a run, or replay its stored status.
+
+        Submit starts no task Jobs and no image builds: the controller starts the task Jobs, and every task's
+        image must be built already.
 
         Args:
             req: Validated Kubernetes Harbor taskset submission, with its idempotency_key set (the route
@@ -313,15 +330,15 @@ class TasksetRunService:
             HTTPException: The caller cannot read a source.
             TasksetRunResolutionError: A source is missing or incompatible.
             RunRequestConflict: The key already belongs to another logical request.
+            RunEvaluationError: The run's Intake Evaluation couldn't be created; nothing was accepted.
             ValueError: ``req`` has no idempotency_key.
             Exception: Unexpected storage and integrity failures propagate.
         """
         caller = normalize_run_caller(caller)
-        # These checks run before the replay lookup on purpose: they decide whether a retry may start more
-        # task Jobs, using today's operator config and source access. A lowered timeout maximum, a removed
-        # dispatcher or sandbox profile, disabled runs or revoked access stops new Jobs at once, instead of an
-        # old idempotency_key starting them. How the Jobs run (images, TTL, egress, deadlines) stays frozen in
-        # the accepted plan. Run status stays readable via GET.
+        # These checks run before the replay lookup on purpose: a lowered timeout maximum, a removed dispatcher
+        # or sandbox profile, disabled runs or revoked access refuse a retry as they would a new request.
+        # How the Jobs run (images, TTL, egress, deadlines) stays frozen in the accepted plan. Run status stays
+        # readable via GET.
         timeout = check_timeout(req.timeout_seconds, self._config.runs)
         harbor, policy, dispatcher_profile = await self._check_execution(req)
         await self._authorize(req, workspace)
@@ -333,27 +350,22 @@ class TasksetRunService:
         run_id = derive_run_id(workspace, caller, req.idempotency_key)
         replay = await self._store.replay(workspace, run_id, digest)
         if replay is not None:
-            # A retry completes the task Jobs an earlier attempt didn't create.
-            warnings = await self._start_task_jobs(replay)
-            status = TasksetRunSubmitResponse(**to_status(replay).model_dump(), warnings=warnings)
-            return SubmitOutcome(status, created=False)
+            return SubmitOutcome(TasksetRunSubmitResponse(**to_status(replay).model_dump()), created=False)
 
         pinned, spec = await self._resolve(req, workspace)
         source = registered_agent_source(spec.target)
         snapshot = source.files if source is not None else None
         acceptance_started = False
         try:
-            if req.execution.max_concurrent_task_jobs is not None and (
-                len(spec.tasks) > req.execution.max_concurrent_task_jobs
-            ):
-                raise TasksetRunResolutionError(
-                    f"this deployment starts every task Job at once: {len(spec.tasks)} tasks exceed "
-                    f"execution.max_concurrent_task_jobs={req.execution.max_concurrent_task_jobs}; select fewer tasks"
+            configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+            try:
+                await require_closed_book_route(
+                    spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
                 )
+            except ValueError as exc:
+                raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared = await self._prepare_images(spec.tasks, policy, caller=caller)
-            accepted_at = self._clock()
-            execution, finalization = resolve_deadlines(accepted_at, timeout, self._config.runs)
             plan = TasksetRunPlan(
                 run_id=run_id,
                 workspace=workspace,
@@ -366,14 +378,26 @@ class TasksetRunService:
                 task_environments=prepared,
                 intake=intake,
             )
+            # Before accept, so every stored run has its Evaluation. An accept that fails after this leaves the
+            # Evaluation behind; a retry with the same idempotency_key derives the same run id and adopts it.
+            notices = await self._ensure_run_evaluation(plan) if intake is not None else []
+            # Until its first task gets a slot, the run's deadlines count the queue timeout from acceptance; the
+            # run controller restarts them from that slot with the execution budget (TasksetRunStore.start).
+            runs = self._config.runs
+            accepted_at = self._clock()
+            execution, finalization = resolve_deadlines(
+                accepted_at, runs.queue_timeout_seconds, runs.finalization_grace_seconds
+            )
             acceptance = RunAcceptance(
                 plan=plan,
                 idempotency_key=req.idempotency_key,
                 request_digest=digest,
                 accepted_at=accepted_at,
+                timeout_seconds=timeout,
                 execution_deadline_at=execution,
                 finalization_deadline_at=finalization,
                 discard_on_loss=(snapshot.root,) if snapshot is not None else (),
+                auth_context=self._auth_context,
             )
             acceptance_started = True
             result = await self._store.accept(acceptance)
@@ -387,8 +411,10 @@ class TasksetRunService:
             raise
 
         warnings = await self._duplicate_warnings(result.run, caller) if result.created else []
-        warnings += await self._start_task_jobs(result.run)
-        status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=warnings)
+        configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
+        if (resources := defaulted_resources_notice(configs, policy)) is not None:
+            notices.append(resources)
+        status = TasksetRunSubmitResponse(**to_status(result.run).model_dump(), warnings=[*warnings, *notices])
         return SubmitOutcome(status, created=result.created)
 
     def _default_dispatcher_image(self) -> str:
@@ -429,9 +455,8 @@ class TasksetRunService:
     ) -> list[PreparedHarborEnvironment]:
         """Each task's prepared images, in task order.
 
-        Every task is checked before any is prepared, so a task the run can't take never leaves image builds
-        behind for the others. Up to ``MAX_CONCURRENT_IMAGE_PREPARATIONS`` run at once, so submit time doesn't
-        grow task by task. All or nothing: an exception from any task cancels the others and fails the submit.
+        Every task is checked before any task's builds are read. Up to ``MAX_CONCURRENT_IMAGE_PREPARATIONS`` run
+        at once, so submit time doesn't grow task by task. All or nothing: an exception from any task cancels the others and fails the submit.
 
         Raises:
             TasksetRunResolutionError: Some task has no images; the message names each one and why.
@@ -462,7 +487,7 @@ class TasksetRunService:
         return [p.environment for p in preparations if p.environment is not None]
 
     def _image_builds(self, workspace: str) -> ImageBuildService:
-        """The image build service for tasks in ``workspace``, starting builds as the caller."""
+        """The image build service for tasks in ``workspace``; the preparer only reads builds through it."""
         jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=workspace)
         return ImageBuildService(self._entities, jobs, builder_authorizer(self._authorizer))
 
@@ -539,64 +564,31 @@ class TasksetRunService:
                 status_code=403, detail=f"you may not create Intake Evaluations in workspace {workspace}"
             ) from exc
 
-    async def _ensure_run_evaluation(self, run: TasksetRunEntity, plan: TasksetRunPlan) -> list[str]:
-        """Create (or adopt) the run's Intake Evaluation before any task Job can publish to it.
+    async def _ensure_run_evaluation(self, plan: TasksetRunPlan) -> list[str]:
+        """Create (or adopt) the run's Intake Evaluation before the run is accepted.
 
         Returns:
             Notices for the submit response.
 
         Raises:
-            RunEvaluationDeniedError: Intake refused the caller the Evaluation. No task Job has started.
-            RunEvaluationError: The Evaluation isn't the run's, or Intake failed to create it.
-                No task Job has started; a retry with the run's idempotency_key creates it and then the Jobs.
+            RunEvaluationDeniedError: Intake refused the caller the Evaluation. Nothing was accepted.
+            RunEvaluationMismatchError: The run's Evaluation exists with another dataset. Nothing was accepted.
+            RunEvaluationError: The Evaluation isn't the run's, or Intake failed to create it. Nothing was
+                accepted; a retry with the same idempotency_key adopts an Evaluation this attempt created.
         """
         assert plan.intake is not None
         try:
-            await ensure_run_evaluation(self._evaluations, run, plan)
+            await ensure_run_evaluation(self._evaluations, plan.workspace, plan.run_id, plan)
         except ForeignEvaluationError as exc:
-            raise RunEvaluationError(run.name, str(exc)) from exc
+            raise RunEvaluationError(plan.run_id, str(exc)) from exc
+        except EvaluationDatasetMismatchError as exc:
+            raise RunEvaluationMismatchError(plan.run_id, str(exc)) from exc
         except PermissionDeniedError as exc:
-            # Submit checked the permission before accepting, so it was revoked since; retrying can't help.
-            raise RunEvaluationDeniedError(run.name, "Intake refused to create its Evaluation") from exc
+            # Submit checked the permission just before, so it was revoked since; retrying can't help.
+            raise RunEvaluationDeniedError(plan.run_id, "Intake refused to create its Evaluation") from exc
         except NemoClientError as exc:
-            raise RunEvaluationError(run.name, f"creating its Intake Evaluation failed: {exc}") from exc
-        return [f"Intake: Evaluation {run.name} in Experiment {plan.intake.experiment}"]
-
-    async def _start_task_jobs(self, run: TasksetRunEntity) -> list[str]:
-        """Create or adopt every task Job of ``run`` from its stored plan; one notice per task Job.
-
-        Images come from the plan, never prepared again: a retry must give each Job the images it was accepted with.
-        An ended run (a replay, or a concurrent winner's run returned by accept) gets no Jobs and no notices,
-        nor does one past its execution deadline: the controller is expiring it. A Job this misses because
-        the run expires mid fan-out refuses to start (``check_execution_deadline``).
-        """
-        if run.phase in TERMINAL_RUN_PHASES or self._clock() >= run.execution_deadline_at:
-            return []
-        plan = await self._store.load_plan(run)
-        harbor = self._config.runs.harbor
-        if harbor is None or plan.dispatcher_profile not in harbor.dispatcher_profiles:
-            # A retry that omits dispatcher_profile passes submit's check on today's default, so check the
-            # profile the plan froze: an operator who removed it has stopped new Jobs on it.
-            raise TasksetRunResolutionError(
-                f"run {run.name}'s dispatcher_profile {plan.dispatcher_profile!r} is no longer allowed"
-            )
-        if plan.sandbox_policy.profile not in harbor.sandbox_profiles:
-            # Likewise for a request that omits execution.sandbox: it passes on today's default profile.
-            raise TasksetRunResolutionError(
-                f"run {run.name}'s sandbox profile {plan.sandbox_policy.profile!r} is no longer offered"
-            )
-        notices = await self._ensure_run_evaluation(run, plan) if plan.intake is not None else []
-        configs = [(t.id, t.spec.config) for t in plan.spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
-        if (resources := defaulted_resources_notice(configs, plan.sandbox_policy)) is not None:
-            notices.append(resources)
-        try:
-            names = await create_task_jobs(self._task_jobs, plan, run, plan.task_environments)
-        except TaskJobsIncompleteError as exc:
-            raise dataclasses.replace(exc, notices=(*exc.notices, *notices)) from None
-        return [
-            *(f"task {i} ({task.id}): Job {name}" for i, (task, name) in enumerate(zip(plan.spec.tasks, names))),
-            *notices,
-        ]
+            raise RunEvaluationError(plan.run_id, f"creating its Intake Evaluation failed: {exc}") from exc
+        return [f"Intake: Evaluation {plan.run_id} in Experiment {plan.intake.experiment}"]
 
     async def _resolve(self, req: TasksetRunInput, workspace: str) -> tuple[TasksetRef, AgentEvalSpec]:
         """Pin before resolving so a concurrent publication cannot replace task members.

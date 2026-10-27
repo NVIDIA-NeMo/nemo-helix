@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Generic GitHub -> NeMo Helix agent trigger: a `/helix-*` PR comment reacts 👀 and
-# fires a `repository_dispatch` to the worker repo (fire-and-forget; the agent replies
+# Generic GitHub -> NeMo Helix agent trigger: a `/helix-*` PR comment fires a
+# `repository_dispatch` to the worker repo (fire-and-forget; the agent acks + replies
 # itself). Architecture + the trigger->agent mapping: see HELIX_AGENT_DISPATCH.md.
 
 name: Helix agent dispatch
@@ -32,10 +32,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: React 👀 and dispatch
+      - name: Dispatch Helix agent
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          DISPATCH_REPO: ${{ secrets.AUTOMATION_DISPATCH_REPO }}
         with:
           github-token: ${{ env.ACT == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |

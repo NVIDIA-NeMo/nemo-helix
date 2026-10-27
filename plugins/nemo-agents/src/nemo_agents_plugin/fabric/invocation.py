@@ -34,6 +34,9 @@ class AgentConfigInvocationRequest:
     caller_context: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float | None = None
     observe_progress: bool = False
+    # When set, the agent's platform base URL resolves to this per-job auth-proxy
+    # origin so its SDK reaches the platform authenticated as the job's identity.
+    proxy_origin: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +89,7 @@ def _local_environment_path(base_dir: Path, configured_path: str, *, field: str)
 
 async def invoke_agent_config_request_once(request: AgentConfigInvocationRequest) -> FabricRuntimeResult:
     """Translate a Platform agent config and run one input through Fabric once."""
-    fabric_config = translate_agent_config(request.agent_config)
+    fabric_config = translate_agent_config(request.agent_config, proxy_origin=request.proxy_origin)
     await asyncio.to_thread(ensure_local_workspace_dir, request.agent_config, request.base_dir)
     if request.agent_config.environment.provider == "local":
         artifacts_dir = _local_environment_path(

@@ -19,7 +19,7 @@ Complete the [tutorials prerequisites](/documentation/anonymize-data/tutorials#p
 
 - A running NeMo Helix cluster with the `nemo anonymizer` CLI available (see [Setup](/documentation/get-started)).
 - An inference provider configured (default examples use `nvidia-build`).
-- A fileset named `anonymizer-inputs` with `anonymizer-input.csv` uploaded.
+- A fileset named `anonymizer-inputs` containing `anonymizer-input.csv` in your current workspace. Upload a CSV with `id` and `biography` columns before running this notebook; see [Upload an Input Fileset](/documentation/anonymize-data/tutorials#upload-an-input-fileset).
 
 ## What `run` Does
 
@@ -42,6 +42,8 @@ Job artifacts (under the `artifacts/` directory):
 
 ## Step 1: Build an `AnonymizerRequest`
 
+Set `NVIDIA_MODEL` and `NHX_ANON_GENERAL_MODEL` to override the thinking and general-purpose model IDs below. Use exact IDs from the chosen provider's catalog, with credentials authorized for both models; the role aliases stay unchanged.
+
 `AnonymizerRequest` contains the execution fields shared by preview and run (`config`, `data`, `model_configs`, and `selected_models`). A run processes the full input file, so it does not include `num_records`:
 
 ```python
@@ -58,6 +60,7 @@ client = NemoClient.from_config()
 anonymizer = AnonymizerResource(client)
 WORKSPACE = client.resolve_workspace()
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
+GENERAL_MODEL = os.environ.get("NHX_ANON_GENERAL_MODEL", "openai/gpt-oss-20b")
 
 config = AnonymizerConfig(
     replace=Redact(format_template="[REDACTED_{label}]"),
@@ -67,8 +70,9 @@ model_configs = [
     # The Anonymizer plugin manages a default PII entity detector, so it is not
     # configured here (you may override it with a ModelConfig, but that is
     # optional). These entries cover the remaining LLM roles.
-    ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model="openai/gpt-oss-120b"),
-    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
+    # Keep the library's role alias; the retired 120B endpoint is not used.
+    ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model=GENERAL_MODEL),
+    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model=os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")),
 ]
 
 request = AnonymizerRequest(

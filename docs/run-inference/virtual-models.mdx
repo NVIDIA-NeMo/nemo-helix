@@ -185,6 +185,62 @@ The other routers take a list of models per role:
 `llm_classifier` adds `"mode": "capability"`, a `base_threshold`, and a `models.judge` list. Judge calls
 go directly to the judge's provider.
 
+### Classifier Output Token Limits
+
+`max_output_tokens` controls the classifier's judge output, not the routed backend model's response.
+It is optional in both classifier configurations:
+
+| `config_type` | Location in the middleware entry |
+|---|---|
+| `llm_classifier` | `config.max_output_tokens` |
+| `stage_router` with a classifier | `config.classifier.max_output_tokens` |
+
+Omit the field or set it to JSON `null` to use the native Switchyard default. Both forms leave the
+native constructor argument unset; `null` does not mean an unlimited output budget. An explicit
+integer, such as `64`, overrides the native default.
+
+For a top-level `llm_classifier`, this middleware entry uses the native default:
+
+```json
+{
+  "name": "nemo-switchyard",
+  "config_type": "llm_classifier",
+  "config": {
+    "mode": "capability",
+    "base_threshold": 0.5,
+    "max_output_tokens": null,
+    "models": {
+      "judge": ["default/<judge-model>"],
+      "capable": ["default/<strong-model>"],
+      "efficient": ["default/<weak-model>"]
+    }
+  }
+}
+```
+
+For a `stage_router`, put the limit inside the optional `classifier` object. Enabling the classifier
+also requires a `models.judge` list. This example overrides the limit with `64`; omitting only
+`max_output_tokens` or replacing `64` with `null` uses the native default while keeping the classifier
+enabled:
+
+```json
+{
+  "name": "nemo-switchyard",
+  "config_type": "stage_router",
+  "config": {
+    "confidence_threshold": 0.5,
+    "classifier": {"base_threshold": 0.5, "max_output_tokens": 64},
+    "models": {
+      "judge": ["default/<judge-model>"],
+      "capable": ["default/<strong-model>"],
+      "efficient": ["default/<weak-model>"]
+    }
+  }
+}
+```
+
+These are virtual-model middleware settings, not fields in the optimization strategy's `--spec`.
+
 To find a good split for an agent automatically, run the
 [`switchyard` optimization strategy](/documentation/agents/optimize-agents#switchyard), which creates
 one virtual model per model pair and routing strategy and evaluates them as candidate agents.

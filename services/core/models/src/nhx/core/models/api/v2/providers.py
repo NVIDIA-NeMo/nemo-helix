@@ -13,6 +13,7 @@ from nhx.common.entities.client import EntityConflictError, EntityValidationErro
 from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 from nhx.core.models.api.permissions import check_deployment_access, check_secret_access
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
+from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
@@ -69,6 +70,8 @@ async def list_providers(
             filter_operation=parsed_filter.operation,
         )
         return result
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception as e:
         logger.exception(f"Failed to list model providers for workspace {workspace}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

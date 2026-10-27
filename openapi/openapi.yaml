@@ -1274,6 +1274,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to create entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1351,7 +1353,14 @@ paths:
         required: false
         schema:
           type: string
-          description: Sort field
+          description: 'Sort by id, workspace, entity_type, name, parent, project,
+            created_at, updated_at, created_by, updated_by, or db_version; or by a
+            dotted JSON path such as data.priority or data.owner.name. JSON path components
+            must be nonempty; missing paths are allowed and use the database''s native
+            null ordering. Prefix with a single ''-'' for descending order. Invalid
+            sort fields return HTTP 400. Equal values are ordered by id ascending.
+            Pagination uses offsets, not a snapshot: concurrent writes can cause rows
+            to be repeated or skipped between pages.'
           examples:
           - -created_at
           - created_at
@@ -1361,7 +1370,14 @@ paths:
           - name
           default: -created_at
           title: Sort
-        description: Sort field
+        description: 'Sort by id, workspace, entity_type, name, parent, project, created_at,
+          updated_at, created_by, updated_by, or db_version; or by a dotted JSON path
+          such as data.priority or data.owner.name. JSON path components must be nonempty;
+          missing paths are allowed and use the database''s native null ordering.
+          Prefix with a single ''-'' for descending order. Invalid sort fields return
+          HTTP 400. Equal values are ordered by id ascending. Pagination uses offsets,
+          not a snapshot: concurrent writes can cause rows to be repeated or skipped
+          between pages.'
       - name: count_by
         in: query
         required: false
@@ -1407,6 +1423,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntitiesPage'
+        '403':
+          description: Not allowed to list entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1463,6 +1481,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to read entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1526,6 +1546,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to update entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1591,6 +1613,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Not allowed to delete entities in the requested workspace.
         '422':
           description: Validation Error
           content:

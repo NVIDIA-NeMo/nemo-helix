@@ -24,6 +24,11 @@ NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor tas
 - OpenShell agent deployments route service requests through the gateway using the service host header. Operators can configure either gateway compute driver, TLS certificate paths, and explicit sandbox policy settings. The gateway's user-authentication requirements still apply; see [OpenShell](/documentation/kubernetes-deployment/setup/helm/openshell).
 - Agent deployment failures retain more useful startup and container-log diagnostics. Local Docker agents can reach the platform gateway and Intake endpoints, with platform-bound telemetry URLs rewritten for the selected endpoint while independent collectors retain their own destinations. See [Deploy Agents](/documentation/agents/deploy-agents).
 
+### Switchyard API and Configuration
+
+- Switchyard optimization generates content-addressed virtual-model names in the form `<agent>-<digest>`, replacing positional names. Exact reruns reuse the same virtual models; changed routing content gets new names. Read `switchyard-result.json` to locate candidates and their `agent-<virtual-model>.yaml` artifacts rather than constructing names. See [Optimize Agents](/documentation/agents/optimize-agents#switchyard). ([PR #2797](https://github.com/NVIDIA-NeMo/nemo-helix/pull/2797))
+- Classifier `max_output_tokens` may be omitted or set to JSON `null` to use the native Switchyard default; explicit integers remain supported. This applies to both `llm_classifier` and the nested `stage_router.classifier` configuration. See [Classifier Output Token Limits](/documentation/models-and-inference/virtual-models#classifier-output-token-limits). ([PR #2807](https://github.com/NVIDIA-NeMo/nemo-helix/pull/2807))
+
 ### Agent Evaluation
 
 - Kubernetes Harbor taskset runs freeze the selected task revisions, build their images, and launch one task Job per task. The `nemo evals runs` commands support submission and inspection, including task imports from a pinned public Git repository, sandbox resource overrides, idempotent submission, and publication to an Intake experiment. (documentation not yet available)

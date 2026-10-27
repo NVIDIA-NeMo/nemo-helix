@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
-import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelDeployment, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
+import { useLatestModelDeployment } from '@studio/hooks/useLatestModelDeployment';
 import { useModelDeploymentStatuses } from '@studio/hooks/useModelDeploymentStatuses';
 import { parseFilesetRef, useModelLineage } from '@studio/hooks/useModelLineage';
 import { renderHook } from '@testing-library/react';
 
 vi.mock('@nemo/sdk/generated/platform/models');
+vi.mock('@studio/hooks/useLatestModelDeployment');
 vi.mock('@studio/hooks/useCustomizationJobForModel');
 vi.mock('@studio/hooks/useModelDeploymentStatuses');
 
@@ -30,6 +32,12 @@ const model = {
   model_providers: ['ws/provider'],
   adapters: [adapter],
 } as ModelEntity;
+
+const mockLatestDeployment = (deployment?: Partial<ModelDeployment>) =>
+  vi.mocked(useLatestModelDeployment).mockReturnValue({
+    deployment: deployment as ModelDeployment | undefined,
+    isLoading: false,
+  });
 
 const mockModelQuery = (state: { data?: ModelEntity; isLoading?: boolean; isError?: boolean }) =>
   mockGetModel.mockReturnValue({
@@ -59,6 +67,7 @@ describe('useModelLineage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockJob.mockReturnValue({ jobName: 'job-1', isLoading: false });
+    mockLatestDeployment();
     mockStatuses.mockImplementation(
       (targets) =>
         new Map(
@@ -86,7 +95,10 @@ describe('useModelLineage', () => {
 
     expect(result.current.adapter).toBe(adapter);
     expect(mockJob).toHaveBeenCalledWith(adapter);
-    expect(mockStatuses).toHaveBeenCalledWith([expect.objectContaining({ model, adapter })]);
+    expect(mockStatuses).toHaveBeenCalledWith([
+      expect.objectContaining({ model, adapter }),
+      { key: 'base', model },
+    ]);
     expect(result.current.job.workspace).toBe('adapter-ws');
     expect(result.current.fileset).toEqual({ workspace: 'adapter-ws', name: 'my-adapter-files' });
   });
@@ -119,5 +131,41 @@ describe('useModelLineage', () => {
     rerender();
     expect(result.current.isError).toBe(true);
     expect(result.current.deployment).toEqual({ kind: 'unknown' });
+  });
+
+  describe('when nothing serves the model', () => {
+    beforeEach(() => {
+      mockModelQuery({ data: model });
+      mockStatuses.mockImplementation(
+        (targets) => new Map(targets.map((target) => [target.key, { kind: 'not-deployed' }]))
+      );
+    });
+
+    it("reports the model's latest deployment as not serving yet", () => {
+      mockLatestDeployment({ name: 'starting', status: 'PENDING' });
+      const { result } = renderHook(() => useModelLineage('ws', 'my-model'));
+
+      expect(result.current.deployment).toMatchObject({
+        kind: 'not-serving',
+        deployment: { name: 'starting' },
+      });
+      expect(result.current.baseDeployment).toBe(result.current.deployment);
+    });
+
+    it('stays not deployed when the model has no deployment', () => {
+      const { result } = renderHook(() => useModelLineage('ws', 'my-model'));
+
+      expect(result.current.deployment).toEqual({ kind: 'not-deployed' });
+    });
+
+    it("gives an adapter page its base model's deployment too", () => {
+      mockLatestDeployment({ name: 'failed', status: 'ERROR' });
+      const { result } = renderHook(() => useModelLineage('ws', 'my-model', 'my-adapter'));
+
+      expect(result.current.baseDeployment).toMatchObject({
+        kind: 'not-serving',
+        deployment: { name: 'failed' },
+      });
+    });
   });
 });

@@ -183,7 +183,11 @@ jobs:
           docker pull "$IMAGE_REGISTRY/nhx-tasks:$IMAGE_TAG"
       - name: Load API image into Kind
         timeout-minutes: 5
-        run: kind load docker-image --name "$KIND_CLUSTER_NAME" "$IMAGE_REGISTRY/nhx-api:$IMAGE_TAG"
+        # Export only the runner's platform; Kind otherwise imports missing architectures.
+        run: |
+          docker image save --platform linux/amd64 --output "$RUNNER_TEMP/nhx-api.tar" "$IMAGE_REGISTRY/nhx-api:$IMAGE_TAG"
+          kind load image-archive --name "$KIND_CLUSTER_NAME" "$RUNNER_TEMP/nhx-api.tar"
+          rm "$RUNNER_TEMP/nhx-api.tar"
       - name: Install published chart
         timeout-minutes: 10
         run: |
@@ -228,6 +232,9 @@ jobs:
     needs: [prepare, macos, kubernetes]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         if: always()
@@ -246,6 +253,6 @@ jobs:
         with:
           script: |
             const { finishSmoke } = require("./.github/scripts/release-smoke.cjs");
-            const { result, text } = await finishSmoke({ env: process.env, fetchImpl: fetch });
+            const { result, text } = await finishSmoke({ env: process.env, fetchImpl: fetch, github, context });
             await core.summary.addRaw(text).write();
             if (result !== "passed") core.setFailed(`Smoke checks ${result}`);

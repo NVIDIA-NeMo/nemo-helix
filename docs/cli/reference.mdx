@@ -7351,7 +7351,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the ExecuteAgentJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `agent (other union forms)`, `environment (other union forms)`, `workdir.artifact_mounts`, `extension.config`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `agent (other union forms)`, `context`, `environment (other union forms)`, `workdir.artifact_mounts`, `extension.config`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -9128,6 +9128,7 @@ nemo evals [OPTIONS] COMMAND [ARGS]...
 * `info`: Print the current plugin status.
 * `metric-types`: Print available evaluator metric names or a metric JSON...
 * `runs`: Kubernetes taskset runs: one Job per Harbor task.
+* `tasksets`: Harbor tasksets for Kubernetes runs: publish, build images.
 
 *Jobs:*
 
@@ -9184,7 +9185,8 @@ nemo evals runs [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `list`: List a workspace's runs, newest first.
-* `status`: Show each task Job of a run and its status.
+* `status`: Show a run's progress and each task's state.
+* `tasks`: List a run's tasks with their state and Job.
 * `cancel`: Request a run's cancel; the run controller acts on it,...
 * `download`: Download a run's merged result bundle (report.html,...
 * `results`: Show each completed task's scores (every Harbor reward)...
@@ -9215,7 +9217,7 @@ nemo evals runs list [OPTIONS]
 
 ##### nemo evals runs status
 
-Show each task Job of a run and its status.
+Show a run's progress and each task's state.
 
 **Usage:**
 
@@ -9233,6 +9235,32 @@ nemo evals runs status [OPTIONS] RUN_ID
 * `--watch`: Refresh until every task Job is done.
 * `--poll-seconds <FLOAT>`: Refresh interval with --watch. [default: 15.0]
 * `--json`: Print JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals runs tasks
+
+List a run's tasks with their state and Job.
+
+**Usage:**
+
+```shell
+nemo evals runs tasks [OPTIONS] RUN_ID
+```
+
+**Arguments:**
+
+* `<RUN_ID>`: Run name, e.g. run-7f3a…
+
+**Options:**
+
+* `--phase <CHOICE>`: Only tasks in this phase. [possible values: image_preparing, image_ready, registered, succeeded, failed, cancelled, expired]
+* `--page <INTEGER RANGE>`: One-based page number. [default: 1]
+* `--page-size <INTEGER RANGE>`: Tasks per page. [default: 100]
+* `--workspace`: Workspace of the run; default: configured.
+* `--json`: Print the API page as JSON.
 
 **Help:**
 
@@ -9322,7 +9350,9 @@ nemo evals runs submit [OPTIONS]
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
 * `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: &lt;url>@&lt;ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>.
-* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
+* `--taskset`: Stored taskset, workspace/name#digest (from `nemo evals tasksets create`): uploads no tasks and requests no image builds; submit refuses a task whose image isn't built.
+* `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --taskset, --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
+* `--dataset`: Intake dataset, NAME[@VERSION], for the run's Evaluation (with --taskset and --experiment); `tasksets create` prints it. --harbor-hub and --harbor-git set it themselves.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without --spec-file). [default: oracle]
 * `--sandbox-profile`: Operator sandbox profile; default: the operator's (without --spec-file).
@@ -9330,12 +9360,79 @@ nemo evals runs submit [OPTIONS]
 * `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
 * `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
 * `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
-* `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
+* `--no-build-images`: Don't request or wait for image builds here; submit rejects a task whose image isn't built yet.
 * `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
 * `--poll-seconds <FLOAT>`: Image-build polling interval. [default: 10.0]
 * `--experiment`: Intake Experiment (name) to publish the run to: one Evaluation per run, trials as each task ends.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo evals tasksets
+
+Harbor tasksets for Kubernetes runs: publish, build images.
+
+**Usage:**
+
+```shell
+nemo evals tasksets [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `create`: Publish the selected tasks and a taskset of exactly...
+* `build-images`: Request every task's image build and return; rerunning it...
+
+##### nemo evals tasksets create
+
+Publish the selected tasks and a taskset of exactly those; without --json the last line printed is its ref.
+
+**Usage:**
+
+```shell
+nemo evals tasksets create [OPTIONS]
+```
+
+**Options:**
+
+* `--harbor-dir <PATH>`: Local Harbor dataset directory.
+* `--harbor-hub`: Harbor Hub dataset, org/name@ref.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: &lt;url>@&lt;ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>.
+* `--tasks`: Indexes or names, comma-separated; default all.
+* `--list-tasks`: Print the selectable tasks and exit.
+* `--workspace`: Workspace for the tasks and the taskset; default: the configured workspace.
+* `--json`: Print the taskset as JSON.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo evals tasksets build-images
+
+Request every task's image build and return; rerunning it retries failed builds and repairs stuck ones.
+
+**Usage:**
+
+```shell
+nemo evals tasksets build-images [OPTIONS] REF
+```
+
+**Arguments:**
+
+* `<REF>`: Taskset, workspace/name#digest; the workspace defaults to the configured.
+
+**Options:**
+
+* `--wait`: Follow the builds until each is ready or failed.
+* `--status`: Only read the builds; start none. Exit 0 when all are ready, 1 when one failed or was never requested, 3 while some are building.
+* `--poll-seconds <FLOAT>`: Polling interval with --wait. [default: 10.0]
 
 **Help:**
 

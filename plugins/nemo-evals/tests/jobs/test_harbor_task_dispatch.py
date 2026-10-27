@@ -444,3 +444,16 @@ async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_s
     variables = {variable.name: variable for variable in step.environment or []}
     assert variables["ANTHROPIC_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
     assert variables["ANTHROPIC_API_KEY"].from_secret is None
+
+
+def test_every_sandbox_ends_at_the_runs_execution_deadline(task_spec, tmp_path):
+    """The deadline goes to the environment as an absolute time, so each create (a retry, a separate verifier)
+    gets the time left then, not a lifetime measured once when the dispatcher started."""
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec)
+    assert configured.environment is not None
+    kwargs = configured.environment.kwargs
+    assert kwargs["sandbox_timeout_sec"] == task_spec.sandbox_policy.max_sandbox_lifetime_s
+    expires_at = kwargs["sandbox_expires_at"]
+    assert isinstance(expires_at, str) and datetime.fromisoformat(expires_at) == task_spec.execution_deadline_at

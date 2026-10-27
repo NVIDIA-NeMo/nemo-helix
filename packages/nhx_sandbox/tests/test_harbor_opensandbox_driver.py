@@ -11,6 +11,8 @@ that no sandbox is left running after a failed, retried or cancelled create.
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -20,6 +22,7 @@ from nhx_sandbox.harbor_opensandbox_driver import (
     Connection,
     CreateRequest,
     OpenSandboxDriver,
+    SandboxExpiredError,
     harbor_backoff_sec,
 )
 from opensandbox_mocks import SandboxApiException, Server, execution, mock_sdk
@@ -99,6 +102,53 @@ async def test_transient_errors_are_retried_and_orphans_killed(server: Server) -
     labels = {create["metadata"][CREATE_ATTEMPT_METADATA_KEY] for create in server.creates}
     assert len(labels) == 1
     assert server.live() == {sandbox.id}
+
+
+async def test_each_retry_gets_only_the_time_left_before_the_expiry(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lifetime is cut again before every attempt, so a retried sandbox doesn't outlive ``expires_at`` by
+    the time the failed attempts took."""
+    expires_at = datetime(2026, 10, 23, 13, tzinfo=UTC)
+    now = [expires_at.timestamp() - 100]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    server.create_failures.append(SandboxApiException("timed out"))
+
+    def a_minute_later(attempt: int) -> float:
+        now[0] += 60  # the failed attempt and its backoff
+        return 0
+
+    driver = OpenSandboxDriver(
+        Connection(domain="opensandbox.example", api_key="", request_timeout_sec=90),
+        sdk=mock_sdk(server),
+        retry_wait=a_minute_later,
+    )
+    await driver.create(_request(expires_at=expires_at))
+
+    assert [create["timeout"].total_seconds() for create in server.creates] == [100, 40]
+
+
+async def test_a_retry_after_the_expiry_is_not_sent(server: Server, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry that would start past ``expires_at`` fails the create instead of making a one-second sandbox."""
+    expires_at = datetime(2026, 10, 23, 13, tzinfo=UTC)
+    now = [expires_at.timestamp() - 30]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    server.create_failures.append(SandboxApiException("timed out"))
+
+    def a_minute_later(attempt: int) -> float:
+        now[0] += 60
+        return 0
+
+    driver = OpenSandboxDriver(
+        Connection(domain="opensandbox.example", api_key="", request_timeout_sec=90),
+        sdk=mock_sdk(server),
+        retry_wait=a_minute_later,
+    )
+    with pytest.raises(SandboxExpiredError):
+        await driver.create(_request(expires_at=expires_at))
+
+    assert [create["timeout"].total_seconds() for create in server.creates] == [30]
+    assert server.live() == set()
 
 
 async def test_gives_up_after_the_last_attempt_and_kills_everything(server: Server) -> None:

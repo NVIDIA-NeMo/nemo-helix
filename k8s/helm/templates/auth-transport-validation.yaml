@@ -1,0 +1,20 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $auth := default (dict) $config.auth -}}
+{{- $oidc := default (dict) (get $auth "oidc") -}}
+{{- $workload := default (dict) (get $oidc "workload") -}}
+{{- if and (eq (get $auth "enabled") true) (not (empty $workload)) -}}
+{{- $platform := default (dict) $config.platform -}}
+{{- $baseUrl := default "" (get $platform "base_url") -}}
+{{- if not (hasPrefix "https://" $baseUrl) -}}
+{{- fail "platform.base_url must use https:// when auth.oidc.workload is configured" -}}
+{{- end -}}
+{{- $advertisedBaseUrl := default "" (get $platform "advertised_base_url") -}}
+{{- if and $advertisedBaseUrl (not (hasPrefix "https://" $advertisedBaseUrl)) -}}
+{{- fail "platform.advertised_base_url must use https:// when auth.oidc.workload is configured" -}}
+{{- end -}}
+{{- end -}}

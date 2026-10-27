@@ -46,6 +46,7 @@ from nemo_agents_plugin.jobs.execute_extensions import (
 )
 from nemo_agents_plugin.jobs.gateway_proxy import (
     exports_otlp_to_intake,
+    job_has_platform_identity,
     optional_platform_auth_proxy,
     platform_auth_proxy,
     rewrite_gateway_models,
@@ -111,6 +112,9 @@ FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
 FABRIC_ERROR_FILENAME = "fabric_error.json"
 SUCCESSFUL_FABRIC_STATUSES = {"succeeded"}
 DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS = 60 * 60
+# Key in the Fabric request context that holds the platform's own fields. The
+# rest of the context belongs to the caller, so this one name is reserved.
+NEMO_HELIX_CONTEXT_KEY = "nemo_helix"
 
 # Name Fabric gives the agent process's captured stderr. It lives under a
 # runtime/invocation directory Fabric names itself, so it is found by search
@@ -187,6 +191,14 @@ class ExecuteAgentJobConfig(BaseModel):
         ),
     )
     input: str = Field(description="Prompt to pass to the agent.")
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-run parameters handed to the agent as the top level of the Fabric request context. "
+            f"The {NEMO_HELIX_CONTEXT_KEY!r} key is reserved for platform fields. Stored on the job "
+            "spec in plaintext: pass parameters here, not secrets."
+        ),
+    )
     environment: str | AgentEnvironmentInline | None = Field(
         default=None,
         description=(
@@ -251,6 +263,13 @@ class ExecuteAgentJobConfig(BaseModel):
         _validate_agent_config_format(value.config_format)
         if not value.config:
             raise ValueError("Inline agent definitions require a non-empty config.")
+        return value
+
+    @field_validator("context")
+    @classmethod
+    def _validate_context(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if NEMO_HELIX_CONTEXT_KEY in value:
+            raise ValueError(f"Context key {NEMO_HELIX_CONTEXT_KEY!r} is reserved for platform fields.")
         return value
 
     @field_validator("image")
@@ -463,12 +482,18 @@ class ExecuteAgentJob(NemoJob):
             and supports_intake_atif_export(step_config.agent.config, base_dir=fabric_dirs.base)
         )
         # Starting a proxy nothing would use is not free: it resolves the job's
-        # credentials up front, failing a run that never needed them. And a job
-        # that wants one only for telemetry would rather run untraced than not
-        # at all, which inference cannot say.
+        # credentials up front. A job routing inference through the gateway must
+        # fail if its proxy cannot start -- inference has no degraded mode. Any
+        # other job with a platform identity may still reach the platform API at
+        # any point (to read its own record, list jobs, or submit sub-jobs), so
+        # its proxy starts and its origin is published for the agent to call --
+        # but, like a telemetry-only job, it degrades to API-less rather than
+        # failing when credentials or a port cannot be had, which the optional
+        # variant allows. An auth-disabled job has no identity to forward, so the
+        # proxy yields ``None`` and callers reach the platform directly as before.
         if routes_inference_through_gateway(agent_config):
             proxy = platform_auth_proxy()
-        elif exports_telemetry or exports_otlp_to_intake(agent_config):
+        elif job_has_platform_identity() or exports_telemetry or exports_otlp_to_intake(agent_config):
             proxy = optional_platform_auth_proxy()
         else:
             proxy = nullcontext(None)
@@ -500,14 +525,15 @@ class ExecuteAgentJob(NemoJob):
                             agent_config=rewrite_intake_otlp_endpoints(
                                 rewrite_gateway_models(agent_config, proxy_origin), proxy_origin
                             ),
+                            # Route the agent's platform base URL through the proxy so its
+                            # SDK reaches the platform authenticated as the job's identity.
+                            # Injected via the translator's runtime-override layer, not the
+                            # agent config, so the task process's direct URL cannot clobber it.
+                            proxy_origin=proxy_origin,
                             input=step_config.request.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,
-                            caller_context={
-                                "job_id": ctx.job_id,
-                                "job_workspace": ctx.workspace,
-                                "agent": agent_ref,
-                            },
+                            caller_context=_caller_context(step_config.request.context, ctx=ctx, agent_ref=agent_ref),
                             timeout_seconds=step_config.request.timeout_seconds,
                             observe_progress=True,
                         )
@@ -672,6 +698,18 @@ def _log_agent_stderr(artifacts_dir: Path) -> None:
             )
         else:
             logger.error("Agent stderr (%s):\n%s", path, tail.text)
+
+
+def _caller_context(context: dict[str, Any], *, ctx: JobContext, agent_ref: str) -> dict[str, Any]:
+    """Build the Fabric request context: the caller's own keys, plus the platform's under a reserved key."""
+    return {
+        **context,
+        NEMO_HELIX_CONTEXT_KEY: {
+            "job_id": ctx.job_id,
+            "job_workspace": ctx.workspace,
+            "agent": agent_ref,
+        },
+    }
 
 
 class _StderrTail(NamedTuple):
