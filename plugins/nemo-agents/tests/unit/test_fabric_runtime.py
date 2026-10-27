@@ -17,11 +17,13 @@ from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeExecutionError,
     FabricRuntimeStartError,
     FabricRuntimeTimeoutError,
+    StreamingMethod,
     invoke_fabric_runtime,
     run_fabric_agent_once,
     stream_fabric_agent_once,
     stream_fabric_runtime,
 )
+from nemo_agents_plugin.fabric.streaming import iter_fabric_chat_completion_sse
 from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig
 
 
@@ -77,6 +79,7 @@ class _FakeRuntime:
         self.runtime_id = "runtime-1"
         self.invoke_requests: list[Any] = []
         self.invoke_stream_requests: list[Any] = []
+        self.invoke_openai_stream_requests: list[Any] = []
         self.stream = stream
 
     async def __aenter__(self) -> "_FakeRuntime":
@@ -108,6 +111,13 @@ class _FakeRuntime:
 
     def invoke_stream(self, *, request: Any) -> "_FakeInvokeStream":
         self.invoke_stream_requests.append(request)
+        if self.invoke_error is not None:
+            raise self.invoke_error
+        self.stream = self.stream or _FakeInvokeStream(result=self.result)
+        return self.stream
+
+    def invoke_openai_stream(self, *, request: Any) -> "_FakeInvokeStream":
+        self.invoke_openai_stream_requests.append(request)
         if self.invoke_error is not None:
             raise self.invoke_error
         self.stream = self.stream or _FakeInvokeStream(result=self.result)
@@ -407,7 +417,8 @@ class TestRunFabricAgentOnce:
 
 @pytest.mark.asyncio
 class TestStreamFabricAgentOnce:
-    async def test_keeps_ephemeral_runtime_alive_for_stream_context(self) -> None:
+    @pytest.mark.parametrize("method", list(StreamingMethod))
+    async def test_keeps_ephemeral_runtime_alive_for_stream_context(self, method: StreamingMethod) -> None:
         fabric_config = FabricConfig(
             metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
         )
@@ -421,10 +432,11 @@ class TestStreamFabricAgentOnce:
             caller_context={"source": "server"},
         )
 
-        async with stream_fabric_agent_once(request, fabric=fake_fabric) as stream:
+        async with stream_fabric_agent_once(request, fabric=fake_fabric, streaming_method=method) as stream:
             assert fake_runtime.entered is True
             assert fake_runtime.exited is False
-            assert [record async for record in stream.records()] == [{"type": "span", "message": "thinking"}]
+            expected_records = [] if method is StreamingMethod.BUFFERED else [{"type": "span", "message": "thinking"}]
+            assert [record async for record in stream.records()] == expected_records
             result = await stream.result()
 
         assert fake_runtime.exited is True
@@ -434,10 +446,16 @@ class TestStreamFabricAgentOnce:
                 "base_dir": Path("/tmp/agent"),
                 "fabric_config": fabric_config,
                 "overrides": None,
-                "streaming": True,
+                **({"streaming": True} if method is StreamingMethod.RELAY else {}),
             }
         ]
-        fabric_request = fake_runtime.invoke_stream_requests[0]
+        requests_by_method = {
+            StreamingMethod.RELAY: fake_runtime.invoke_stream_requests,
+            StreamingMethod.OPENAI: fake_runtime.invoke_openai_stream_requests,
+            StreamingMethod.BUFFERED: fake_runtime.invoke_requests,
+        }
+        assert sum(len(requests) for requests in requests_by_method.values()) == 1
+        fabric_request = requests_by_method[method][0]
         assert fabric_request.input == "hello"
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"source": "server"}
@@ -619,6 +637,38 @@ class TestInvokeFabricRuntime:
 
 @pytest.mark.asyncio
 class TestStreamFabricRuntime:
+    async def test_buffered_stream_opens_sse_and_finishes_invocation_after_disconnect(self) -> None:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class _BlockingRuntime(_FakeRuntime):
+            async def invoke(self, *, request: Any) -> Any:
+                started.set()
+                await release.wait()
+                return await super().invoke(request=request)
+
+        runtime = _BlockingRuntime()
+        stream = stream_fabric_runtime(
+            cast(Any, runtime), FabricInvocationRequest(), streaming_method=StreamingMethod.BUFFERED
+        )
+        events = iter_fabric_chat_completion_sse(stream, completion_id="test", model="test")
+        assert '"role":"assistant"' in await anext(events)
+        await started.wait()
+        next_event = asyncio.ensure_future(anext(events))
+        await asyncio.sleep(0)
+        next_event.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await next_event
+
+        cleanup = asyncio.create_task(stream.aclose())
+        await asyncio.sleep(0)
+        assert not cleanup.done()
+        release.set()
+        await cleanup
+
+        assert (await stream.result()).response == "hello"
+        assert len(runtime.invoke_requests) == 1
+
     async def test_starts_streaming_turn_and_preserves_request_context(self) -> None:
         fake_runtime = _FakeRuntime()
         request = FabricInvocationRequest(
@@ -642,11 +692,14 @@ class TestStreamFabricRuntime:
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
 
-    async def test_wraps_stream_start_errors(self) -> None:
+    @pytest.mark.parametrize("method", [StreamingMethod.RELAY, StreamingMethod.OPENAI])
+    async def test_wraps_stream_start_errors(self, method: StreamingMethod) -> None:
         fake_runtime = _FakeRuntime(invoke_error=fabric_runtime.FabricError("streaming unavailable"))
 
         with pytest.raises(FabricRuntimeExecutionError, match="Fabric runtime streaming failed"):
-            stream_fabric_runtime(cast(Any, fake_runtime), FabricInvocationRequest())
+            stream_fabric_runtime(cast(Any, fake_runtime), FabricInvocationRequest(), streaming_method=method)
+
+        assert not fake_runtime.invoke_requests
 
     async def test_wraps_stream_result_errors(self) -> None:
         fake_runtime = _FakeRuntime()

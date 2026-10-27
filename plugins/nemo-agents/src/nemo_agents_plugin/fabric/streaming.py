@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterable, AsyncIterator, Mapping
-from enum import StrEnum
 from typing import Any
 
 from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeResult,
     FabricRuntimeStream,
+    StreamingMethod,
     fabric_streaming_options,
 )
 from nemo_agents_plugin.fabric.serving_models import (
@@ -46,14 +46,6 @@ _TEXT_EVENT_TYPES = frozenset(
         "text_delta",
     }
 )
-
-
-class StreamingMethod(StrEnum):
-    """How serving obtains output for an OpenAI streaming response."""
-
-    RELAY = "relay"
-    OPENAI = "openai"
-    BUFFERED = "buffered"
 
 
 def resolve_streaming_method(plan: RunPlan, config: FabricConfig) -> StreamingMethod:
@@ -162,6 +154,26 @@ def openai_chat_completion_error_sse(error: BaseException) -> str:
     )
 
 
+async def iter_fabric_chat_completion_sse(
+    stream: FabricRuntimeStream, *, completion_id: str, model: str
+) -> AsyncIterator[str]:
+    """Preserve native chunks or frame Relay/buffered text as OpenAI SSE."""
+    if stream.streaming_method is StreamingMethod.OPENAI:
+        async for chunk in stream.records():
+            yield _to_sse_frame(chunk)
+        result = await stream.result()
+        if result.status != "succeeded":
+            raise FabricStreamResultError(result)
+        yield "data: [DONE]\n\n"
+    else:
+        async for event in iter_openai_chat_completion_sse(
+            completion_id=completion_id,
+            content_chunks=iter_fabric_assistant_text_deltas(stream),
+            model=model,
+        ):
+            yield event
+
+
 async def iter_fabric_assistant_text_deltas(stream: FabricRuntimeStream) -> AsyncIterator[str]:
     """Yield assistant text deltas and validate the terminal Fabric result."""
     emitted_text = False
@@ -174,12 +186,14 @@ async def iter_fabric_assistant_text_deltas(stream: FabricRuntimeStream) -> Asyn
     result = await stream.result()
     if result.status != "succeeded":
         raise FabricStreamResultError(result)
+    if stream.streaming_method is StreamingMethod.BUFFERED and not isinstance(result.response, str):
+        raise ValueError("Fabric invocation did not return a text response.")
     if not emitted_text and isinstance(result.response, str) and result.response:
         yield result.response
 
 
-def _to_sse_frame(chunk: ChatCompletionStreamResponse | ChatCompletionStreamErrorResponse) -> str:
-    data = chunk.model_dump(mode="json", exclude_none=True)
+def _to_sse_frame(chunk: ChatCompletionStreamResponse | ChatCompletionStreamErrorResponse | Mapping[str, Any]) -> str:
+    data = dict(chunk) if isinstance(chunk, Mapping) else chunk.model_dump(mode="json", exclude_none=True)
     return f"data: {json.dumps(data, separators=(',', ':'))}\n\n"
 
 

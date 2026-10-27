@@ -46,8 +46,7 @@ from nemo_agents_plugin.fabric.session_manager import (
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
 from nemo_agents_plugin.fabric.streaming import (
-    iter_fabric_assistant_text_deltas,
-    iter_openai_chat_completion_sse,
+    iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
@@ -255,10 +254,9 @@ class _StreamingChatCompletionIterator:
 
     async def _iter_events(self) -> AsyncGenerator[str, None]:
         try:
-            text_deltas = iter_fabric_assistant_text_deltas(self._fabric_stream)
-            async for event in iter_openai_chat_completion_sse(
+            async for event in iter_fabric_chat_completion_sse(
+                self._fabric_stream,
                 completion_id=self._completion_id,
-                content_chunks=text_deltas,
                 model=self._model,
             ):
                 yield event

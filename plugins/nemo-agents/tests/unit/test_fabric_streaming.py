@@ -14,6 +14,7 @@ from nemo_agents_plugin.fabric.streaming import (
     StreamingMethod,
     extract_assistant_text_delta,
     iter_fabric_assistant_text_deltas,
+    iter_fabric_chat_completion_sse,
     iter_openai_chat_completion_sse,
     resolve_streaming_method,
 )
@@ -23,8 +24,14 @@ from nemo_fabric import FabricConfig, RunPlan
 class _FakeFabricRuntimeStream(FabricRuntimeStream):
     """A Fabric runtime stream that replays scripted ATOF records and a terminal result."""
 
-    def __init__(self, records: list[dict[str, Any]], *, result: FabricRuntimeResult | None = None) -> None:
-        super().__init__(stream=None)
+    def __init__(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        result: FabricRuntimeResult | None = None,
+        streaming_method: StreamingMethod = StreamingMethod.RELAY,
+    ) -> None:
+        super().__init__(stream=None, streaming_method=streaming_method)
         self._records = records
         self._result = result or FabricRuntimeResult(status="succeeded", response="done")
         self.result_awaited = False
@@ -78,6 +85,34 @@ async def test_iter_openai_chat_completion_sse_frames_content_chunks() -> None:
 
     terminal_chunk = _event_payload(events[3])
     assert terminal_chunk["choices"] == [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_chat_completion_sse_preserves_native_chunks() -> None:
+    chunks = [
+        {
+            "id": "native-id",
+            "object": "chat.completion.chunk",
+            "model": "native-model",
+            "created": 123,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": "hello"}}],
+        },
+        {
+            "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}}],
+        },
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+        {"choices": [], "usage": {"completion_tokens": 12, "prompt_tokens": 5, "total_tokens": 17}},
+    ]
+    stream = _FakeFabricRuntimeStream(chunks, streaming_method=StreamingMethod.OPENAI)
+
+    events = [
+        event
+        async for event in iter_fabric_chat_completion_sse(stream, completion_id="platform-id", model="platform-model")
+    ]
+
+    assert [_event_payload(event) for event in events[:-1]] == chunks
+    assert events[-1] == "data: [DONE]\n\n"
+    assert stream.result_awaited
 
 
 @pytest.mark.parametrize(
