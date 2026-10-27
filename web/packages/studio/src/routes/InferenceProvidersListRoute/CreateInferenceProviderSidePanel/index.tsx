@@ -254,7 +254,7 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
           <LoadingButton
             type="submit"
             loading={isPending}
-            disabled={isPending || isProvidersLoading}
+            disabled={isPending || isProvidersLoading || !!nameConflict}
           >
             Add Provider
           </LoadingButton>
