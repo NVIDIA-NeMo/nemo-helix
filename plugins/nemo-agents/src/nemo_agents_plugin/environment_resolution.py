@@ -56,6 +56,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.environment import OpenShellEnvironmentSettings
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding as ResolvedProviderFulfillment
 
 
@@ -92,6 +93,11 @@ class MergedEnvironment:
 
     def require_runtime_support(self, backend: str = "") -> None:
         """Reserve provider bindings for the gateway-aware execution backend."""
+        if backend == "openshell" and self.secrets:
+            raise EnvironmentResolutionError(
+                "OpenShell secrets require external injection bindings in settings.openshell.providers; "
+                "process-environment secret injection is not supported."
+            )
         if self.providers and backend != "openshell":
             raise EnvironmentResolutionError(
                 "Provider fulfillments require a configured OpenShell execution backend; "
@@ -198,7 +204,7 @@ def merge_environment_spec_into_agent_config(
     if env_spec is None:
         return MergedEnvironment(config=config, secrets={})
     if config.get("config_format") != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-        if env_spec.providers:
+        if _openshell_settings(env_spec).providers:
             raise EnvironmentResolutionError("Provider fulfillments require a nemo-agents-spec-v1 agent config.")
         return MergedEnvironment(config=config, secrets=dict(env_spec.secrets))
 
@@ -211,6 +217,15 @@ def merge_environment_spec_into_agent_config(
     return MergedEnvironment(config=merged, secrets=secrets, providers=providers)
 
 
+def _openshell_settings(env_spec: EnvironmentSpecInline) -> OpenShellEnvironmentSettings:
+    try:
+        settings = OpenShellEnvironmentSettings.model_validate(env_spec.settings.get("openshell", {}))
+        settings.validate_secrets(env_spec.secrets)
+    except ValueError as exc:
+        raise EnvironmentResolutionError(str(exc)) from exc
+    return settings
+
+
 def _partition_provider_secrets(
     config: dict[str, Any],
     env_spec: EnvironmentSpecInline,
@@ -219,15 +234,16 @@ def _partition_provider_secrets(
     workspace: str,
 ) -> dict[str, ResolvedProviderFulfillment]:
     """Remove bound secrets from env injection and reject alternate exposure paths."""
-    if not env_spec.providers:
+    settings = _openshell_settings(env_spec)
+    if not settings.providers:
         return {}
-    consumed = {alias for provider in env_spec.providers.values() for alias in provider.credentials.values()}
+    consumed = {alias for provider in settings.providers.values() for alias in provider.credentials.values()}
     providers = {
         name: ResolvedProviderFulfillment(
             profile=provider.profile,
             credentials={slot: env_spec.secrets[alias] for slot, alias in provider.credentials.items()},
         )
-        for name, provider in env_spec.providers.items()
+        for name, provider in settings.providers.items()
     }
     slots = {slot: ref for provider in providers.values() for slot, ref in provider.credentials.items()}
     _reject_plaintext_secret_collisions(config, slots)
@@ -294,6 +310,11 @@ def _merge_environment_block(config: dict[str, Any], env_spec: EnvironmentSpecIn
     # Dict mirror fields: Agent supplies the base, EnvironmentSpec keys win on collision.
     for config_key in ("connection", "metadata", "settings"):
         spec_value = getattr(env_spec, config_key)
+        if config_key == "settings":
+            spec_value = {key: value for key, value in spec_value.items() if key != "openshell"}
+            existing = environment.get("settings")
+            if isinstance(existing, dict):
+                existing.pop("openshell", None)
         if spec_value:
             environment[config_key] = {**environment.get(config_key, {}), **spec_value}
 

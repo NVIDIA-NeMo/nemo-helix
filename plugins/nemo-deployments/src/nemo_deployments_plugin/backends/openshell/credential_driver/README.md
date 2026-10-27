@@ -88,7 +88,7 @@ OpenShell supports one active credential driver per gateway. This adapter reject
 
 Configure `gateway_credentials` on each Helix OpenShell executor/profile as described in the [environment integration guide](../../../../../../nemo-agents/docs/provider-fulfillments.md). Controllers check approved profiles and credential slots, create per-workload providers, attach them before launch, and retry cleanup using gateway ownership labels. They never persist tickets into user-visible job or deployment configuration.
 
-Provider-bearing sandboxes use a restricted platform REST policy. They cannot fetch bound secrets or submit another job with broader authority. Ordinary env-secret references and input filesets remain explicit allowances; the gateway must enforce these rules and attachment authorization. Driver RPCs identify a provider, not a sandbox, so a unique name alone is insufficient. Users with gateway administrator privileges are outside this sandbox threat model.
+Provider-bearing sandboxes use a restricted platform REST policy. They cannot fetch bound secrets or submit another job with broader authority. Process-env secret references are rejected; input filesets remain explicit allowances; the gateway must enforce these rules and attachment authorization. Driver RPCs identify a provider, not a sandbox, so a unique name alone is insufficient. Users with gateway administrator privileges are outside this sandbox threat model.
 
 `credential_refresh_verified` defaults to false. The optional `renewal_mode: helix` makes the existing Jobs and Deployments controllers update active, attached providers with fresh registration tickets, by default every 10 seconds. A five-minute driver cache lifetime passed sustained requests and rotation on stock OpenShell 0.1.2 using the original process placeholder; 30 seconds did not reliably outlast its retained placeholder history. A confirmed permission denial or secret deletion records cleanup intent in provider config, then detaches and deletes the provider. Controllers and orphan sweeps retry unfinished cleanup after restart; a revoked provider is not renewed even if permission returns. Outages alone do not trigger removal or extend existing expiry. This renews active but idle sandboxes too. The default `renewal_mode: gateway` requires renewal support in the selected gateway build. Validate the configured lifetime, rotation, cleanup, outages and platform isolation before enabling your installation. Synthetic gateway tests do not establish real Helix authorization.
 
@@ -96,23 +96,8 @@ Helix lifecycle changes and Secrets permission checks are evaluated on every res
 
 ## Protocol and tests
 
-`protocol/` contains only the generated descriptor needed by `wire.py` and its license notice. The `.proto` sources are not vendored. The descriptor was generated with `grpcio-tools==1.78.0` from OpenShell v0.1.2, source commit `6648bd0c290efbc41ba131ee9831ee45cd431f94`. Sources: [credential driver](https://github.com/NVIDIA/OpenShell/blob/v0.1.2/proto/credential_driver.proto), [datamodel](https://github.com/NVIDIA/OpenShell/blob/v0.1.2/proto/datamodel.proto), [extension](https://github.com/NVIDIA/OpenShell/blob/v0.1.2/proto/extension.proto), [options](https://github.com/NVIDIA/OpenShell/blob/v0.1.2/proto/options.proto).
+OpenShell 0.1.6 includes `credential_driver_pb2`, `credential_driver_pb2_grpc` and the extension protocol. The driver subclasses the SDK's `CredentialDriverServicer` and uses its server registration. `wire.py` only converts SDK messages to/from the validated request dictionaries. No protocol sources or generated descriptors are vendored.
 
-The SDK omits driver stubs, so `wire.py` uses these official descriptors in a private pool. This avoids collisions with the SDK's generated datamodel. No field numbers or service paths are reimplemented.
-
-To regenerate, check out that OpenShell commit separately and run from this module directory, setting `OPENSHELL_SOURCE` to the absolute path of that checkout:
-
-```sh
-uv run --no-project --with grpcio-tools==1.78.0 python -m grpc_tools.protoc \
-  -I "$OPENSHELL_SOURCE/proto" --include_imports \
-  --descriptor_set_out=protocol/credential_driver.pb \
-  "$OPENSHELL_SOURCE/proto/credential_driver.proto"
-```
+The workspace temporarily obtains the official 0.1.6 wheel from GitHub release assets because PyPI publication is pending. Remove that UV source override when the same release becomes available on PyPI.
 
 Tests: `test_credential_driver.py`, `test_credential_provisioning.py` and `test_openshell_launch.py` under `plugins/nemo-deployments/tests/unit/`, plus the jobs/deployments backend tests. Coverage includes ticket integrity, replay, restart, concurrent retries, staged updates, active workload checks, replacement/deletion, expiry, permission/backend failures, atomic batch validation, real Unix-socket gRPC exchanges, provider attachment, orphan cleanup and an HTTP proxy subprocess exchange. The provisioning tests use real CreateProvider protobufs and the real StoreCredential handler behind a fake gateway; they do not run an OpenShell gateway or sandbox.
-
-## Upstream SDK simplification
-
-The SDK bindings are being added upstream in [OpenShell PR #4760](https://github.com/NVIDIA/OpenShell/pull/4760). Keep the generated descriptor and private descriptor loader until those bindings land and are available in the SDK version supported by Helix.
-
-With a released SDK containing those bindings, this adapter could implement `CredentialDriverServicer` and use `add_CredentialDriverServicer_to_server`, replacing the private descriptor loader and generic gRPC registration. No gateway protocol change is required. The current `wire.py` remains compatible with the pinned 0.1.2 SDK.

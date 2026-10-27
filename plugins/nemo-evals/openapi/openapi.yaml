@@ -4783,21 +4783,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref. Entries consumed
-            by providers are reserved for external injection; only unconsumed entries
-            become secret-backed process env vars.
-        providers:
-          patternProperties:
-            ^\S+$:
-              $ref: '#/components/schemas/ProviderFulfillment'
-          propertyNames:
-            minLength: 1
-          type: object
-          title: Providers
-          description: Named provider fulfillments. Consumed secret entries are reserved
-            for external credential injection, never process-env injection. Requires
-            an operator-enabled OpenShell execution backend.
-          additionalProperties: true
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -4845,6 +4831,7 @@ components:
           title: Mcp
           description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
             MCP dependency.
+      additionalProperties: false
       type: object
       title: EnvironmentSpecInline
       description: 'Inline environment spec - the dependencies and configuration an
@@ -7538,38 +7525,6 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
-    ProviderFulfillment:
-      properties:
-        profile:
-          type: string
-          minLength: 1
-          pattern: ^\S+$
-          title: Profile
-          description: Operator-approved credential injection profile identifier.
-        credentials:
-          patternProperties:
-            ^[A-Za-z_][A-Za-z0-9_]*$:
-              type: string
-              pattern: ^[A-Za-z_][A-Za-z0-9_]*$
-          type: object
-          minProperties: 1
-          title: Credentials
-          description: Profile credential slot -> key in this EnvironmentSpec's secrets
-            map, not a secret value.
-          additionalProperties: true
-      additionalProperties: false
-      type: object
-      required:
-      - profile
-      - credentials
-      title: ProviderFulfillment
-      description: 'Bind an approved injection profile to existing environment secret
-        entries.
-
-
-        This describes intent only. Runtime support must be checked before launching
-
-        an agent; storing a fulfillment does not grant access to its credentials.'
     PublicationOutcome:
       properties:
         status:

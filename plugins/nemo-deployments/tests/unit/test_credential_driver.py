@@ -450,12 +450,10 @@ async def test_real_grpc_registration_resolution_and_delete(
         async with grpc.aio.insecure_channel(f"unix:{socket}") as channel:
 
             async def call(method: str, data: dict) -> dict:
-                request_name, response_name = wire.METHODS[method]
-                rpc = channel.unary_unary(
-                    f"/{wire.SERVICE}/{method}",
-                    request_serializer=wire.message_type(request_name).SerializeToString,
-                    response_deserializer=wire.message_type(response_name).FromString,
-                )
+                from openshell._proto import credential_driver_pb2_grpc
+
+                request_name, _ = wire.METHODS[method]
+                rpc = getattr(credential_driver_pb2_grpc.CredentialDriverStub(channel), method)
                 return wire.data(await rpc(wire.message(request_name, data), timeout=5))
 
             caps = await call(
@@ -509,7 +507,7 @@ async def test_real_grpc_registration_resolution_and_delete(
 
 
 @pytest.mark.asyncio
-async def test_driver_descriptor_can_coexist_with_pinned_sdk(harness: Harness) -> None:
+async def test_driver_uses_first_party_sdk_messages(harness: Harness) -> None:
     dm = pytest.importorskip("openshell._proto.datamodel_pb2")
     pb = pytest.importorskip("openshell._proto.openshell_pb2")
     from nemo_deployments_plugin.backends.openshell.credential_driver import wire

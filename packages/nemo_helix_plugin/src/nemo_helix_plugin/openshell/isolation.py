@@ -20,14 +20,8 @@ def _segment(value: str) -> str:
 def validate_provider_environment(
     bindings: dict[str, GatewayProviderBinding], *, workspace: str, secret_env: dict[str, str], env_names: set[str]
 ) -> None:
-    bound_refs = {
-        parse_qualified_name(ref, default_workspace=workspace)
-        for binding in bindings.values()
-        for ref in binding.credentials.values()
-    }
-    for ref in secret_env.values():
-        if parse_qualified_name(ref, default_workspace=workspace) in bound_refs:
-            raise ValueError("A gateway-bound secret cannot also be injected into the process environment.")
+    if secret_env:
+        raise ValueError("OpenShell secrets require gateway provider bindings; process-env injection is not supported.")
     keys = [key for binding in bindings.values() for key in binding.credentials]
     if len(keys) != len(set(keys)):
         raise ValueError("Gateway credential slots must be unique across providers.")
@@ -114,16 +108,8 @@ def restricted_platform_policy(
         rules.extend(
             {"allow": {"method": "GET", "path": path}} for path in (prefix, f"{prefix}/files", f"{prefix}/-/**")
         )
-    for ref in (secret_env or {}).values():
-        secret_workspace, secret = parse_qualified_name(ref, default_workspace=workspace)
-        rules.append(
-            {
-                "allow": {
-                    "method": "GET",
-                    "path": f"/apis/secrets/v2/workspaces/{_segment(secret_workspace)}/secrets/{_segment(secret)}/access",
-                }
-            }
-        )
+    if secret_env:
+        raise ValueError("OpenShell sandboxes cannot fetch secret values from the platform.")
     data = json_format.MessageToDict(policy, preserving_proto_field_name=True)
     data["network_policies"] = {
         "nemo_workload": {

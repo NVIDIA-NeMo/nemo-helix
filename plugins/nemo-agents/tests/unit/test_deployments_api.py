@@ -617,8 +617,15 @@ class TestCreateDeployment:
                 "environment": {
                     "environment_spec": {
                         "secrets": {"SERVICE_SECRET": "default/service-token"},
-                        "providers": {
-                            "service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}
+                        "settings": {
+                            "openshell": {
+                                "providers": {
+                                    "service": {
+                                        "profile": "service-read",
+                                        "credentials": {"API_TOKEN": "SERVICE_SECRET"},
+                                    }
+                                }
+                            }
                         },
                     },
                 },

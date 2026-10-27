@@ -48,9 +48,6 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.agents.types import (
     ModelProviderOverride as ModelProviderOverride,
 )
-from nemo_helix_plugin.agents.types import (
-    ProviderFulfillment as ProviderFulfillment,
-)
 from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity

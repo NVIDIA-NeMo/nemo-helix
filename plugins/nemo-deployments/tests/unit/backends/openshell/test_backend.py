@@ -1663,3 +1663,20 @@ def test_launch_script_defaults_to_the_sandbox_identitys_home(tmp_path: Path) ->
             break
         time.sleep(0.05)
     assert log.read_text().strip() == str(home)
+
+
+async def test_create_rejects_env_secret_before_resolution(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_stub.GetSandbox.side_effect = _not_found()
+    mock_entities.get.return_value = _config_with_env(
+        [EnvVar.model_validate({"name": "TOKEN", "secret_ref": {"workspace": "default", "name": "token"}})]
+    )
+    with patch("nemo_deployments_plugin.backends.openshell.backend.resolve_deployment_config_secrets") as resolve:
+        update = await openshell_backend.create_deployment(
+            workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+        )
+    assert update.status == "FAILED"
+    assert "gateway provider bindings" in update.status_message
+    resolve.assert_not_called()
+    mock_stub.CreateSandbox.assert_not_called()

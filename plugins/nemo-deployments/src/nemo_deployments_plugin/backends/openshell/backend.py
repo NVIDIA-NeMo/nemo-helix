@@ -88,7 +88,7 @@ logger = logging.getLogger(__name__)
 
 _OPENSHELL_INSTALL_HINT = (
     "The 'openshell' package is required for OpenShellDeploymentBackend. "
-    'Install it with: uv pip install "openshell>=0.1.2" "grpcio>=1.78.0" "protobuf>=6.31.1"'
+    'Install it with: uv pip install "openshell>=0.1.6" "grpcio>=1.78.0" "protobuf>=6.31.1"'
 )
 
 _SERVE_LOG = "/tmp/nemo-serve.log"
@@ -380,6 +380,10 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
         try:
             config = await self._load_deployment_config(workspace, config_name)
+            if any(var.secret_ref is not None for container in config.containers for var in container.env):
+                raise ValueError(
+                    "OpenShell secrets require gateway provider bindings; process-env injection is not supported."
+                )
             provider_bindings = config.gateway_providers
             if provider_bindings:
                 from nemo_helix_plugin.openshell.isolation import validate_provider_environment

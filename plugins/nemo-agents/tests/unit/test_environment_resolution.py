@@ -23,7 +23,6 @@ from nemo_agents_plugin.entities import (
     EnvironmentSpecInline,
     McpFulfillment,
     ModelProviderOverride,
-    ProviderFulfillment,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -31,6 +30,7 @@ from nemo_agents_plugin.environment_resolution import (
     resolve_environment,
 )
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.environment import ProviderFulfillment
 from pydantic import ValidationError
 
 
@@ -140,6 +140,7 @@ def _provider_spec(**overrides: Any) -> EnvironmentSpecInline:
         "providers": {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}},
     }
     data.update(overrides)
+    data["settings"] = {"openshell": {"providers": data.pop("providers")}}
     return EnvironmentSpecInline.model_validate(data)
 
 
@@ -175,16 +176,18 @@ def test_provider_secrets_are_separate_from_agent_config_and_env_injection() -> 
     ],
 )
 def test_provider_fulfillment_rejects_invalid_or_unknown_bindings(fulfillment: dict[str, Any]) -> None:
-    with pytest.raises(ValidationError):
-        _provider_spec(providers={"service": fulfillment})
+    with pytest.raises(ValueError):
+        merge_environment_spec_into_agent_config(_agent_config(), _provider_spec(providers={"service": fulfillment}))
 
 
 def test_provider_fulfillment_rejects_duplicate_slots_and_empty_secret_refs() -> None:
     provider = ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "SERVICE_SECRET"})
-    with pytest.raises(ValidationError, match="duplicate credential slots"):
-        _provider_spec(providers={"one": provider, "two": provider})
-    with pytest.raises(ValidationError, match="empty secret entry"):
-        _provider_spec(secrets={"SERVICE_SECRET": " "})
+    with pytest.raises(ValueError, match="duplicate credential slots"):
+        merge_environment_spec_into_agent_config(
+            _agent_config(), _provider_spec(providers={"one": provider, "two": provider})
+        )
+    with pytest.raises(ValueError, match="empty secret entry"):
+        merge_environment_spec_into_agent_config(_agent_config(), _provider_spec(secrets={"SERVICE_SECRET": " "}))
 
 
 @pytest.mark.parametrize("alias", ["SERVICE_SECRET", "API_TOKEN"])
@@ -522,3 +525,34 @@ class TestRuntimeBaseDir:
 
         assert config.exists()
         assert tmp_path.exists()
+
+
+@pytest.mark.parametrize("with_provider", [False, True])
+def test_openshell_rejects_any_unbound_secret(with_provider: bool) -> None:
+    spec = _provider_spec() if with_provider else EnvironmentSpecInline(secrets={"TOKEN": "team/token"})
+    result = merge_environment_spec_into_agent_config(_agent_config(), spec)
+    with pytest.raises(EnvironmentResolutionError, match="external injection bindings"):
+        result.require_runtime_support("openshell")
+
+
+def test_openshell_settings_are_consumed_outside_agent_config() -> None:
+    spec = _provider_spec(secrets={"SERVICE_SECRET": "team/service-token"})
+    spec.settings["unrelated"] = "kept"
+    result = merge_environment_spec_into_agent_config(_agent_config(), spec)
+    result.require_runtime_support("openshell")
+    assert result.config["environment"]["settings"] == {"unrelated": "kept"}
+    assert result.secrets == {}
+    assert "openshell" in spec.settings
+
+
+def test_environment_rejects_obsolete_top_level_providers() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        EnvironmentSpecInline.model_validate({"providers": {"service": {}}})
+
+
+def test_openshell_rejects_mcp_process_secret() -> None:
+    spec = EnvironmentSpecInline(mcp={"tool": {"url": "https://service.example", "secrets": {"TOKEN": "team/token"}}})
+    result = merge_environment_spec_into_agent_config(_agent_config(mcp={"servers": {"tool": {}}}), spec)
+    with pytest.raises(EnvironmentResolutionError, match="external injection bindings"):
+        result.require_runtime_support("openshell")
+    result.require_runtime_support("docker")

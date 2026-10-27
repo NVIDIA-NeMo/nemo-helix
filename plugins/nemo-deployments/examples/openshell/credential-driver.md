@@ -86,6 +86,8 @@ Mount the same signing key into the trusted Helix controller, then configure its
 
 The optional `renewal_mode: helix` controller configuration sends periodic provider updates for active sandboxes, including idle ones. Five minutes avoids the retained-placeholder expiry observed with a 30-second lifetime in the OpenShell 0.1.2 test. Confirmed permission denial or deletion triggers provider detachment and deletion; cleanup intent survives controller restarts in provider config. Temporary outages retry without extending expiry. Removing a provider does not promise to terminate already-running processes. Starting the sidecar alone does not enable renewal; the controller must be running. Keep `credential_refresh_verified: false` until your installation passes the configured lifetime, rotation, cleanup and isolation checks.
 
+The examples now use OpenShell 0.1.6 for the gateway, supervisor and sandbox runtime together. The earlier live acceptance results above used 0.1.2; rerun those checks before enabling 0.1.6. Gateway authentication remains explicitly configured in the example TOML, as required by 0.1.6.
+
 ## Restart, rotate and stop
 
 The driver has `restart: unless-stopped`. On process startup it takes an exclusive socket lock. It can remove its own stale socket after a crash, but refuses to replace a live listener, a symlink, a regular file or another user's socket. The binding database survives container recreation.

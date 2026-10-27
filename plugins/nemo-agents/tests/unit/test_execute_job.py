@@ -29,7 +29,6 @@ from nemo_agents_plugin.entities import (
     ComputeSpecInline,
     EnvironmentSpecInline,
     McpFulfillment,
-    ProviderFulfillment,
 )
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs import gateway_proxy
@@ -835,8 +834,12 @@ async def test_to_spec_rejects_local_provider_credentials_before_workdir_access(
     environment = AgentEnvironmentInline(
         environment_spec=EnvironmentSpecInline(
             secrets={"SERVICE_SECRET": "default/service-token"},
-            providers={
-                "service": ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "SERVICE_SECRET"})
+            settings={
+                "openshell": {
+                    "providers": {
+                        "service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}
+                    }
+                }
             },
         )
     )
@@ -863,8 +866,12 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
     environment = AgentEnvironmentInline(
         environment_spec=EnvironmentSpecInline(
             secrets={"SERVICE_SECRET": "default/service-token"},
-            providers={
-                "service": ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "SERVICE_SECRET"})
+            settings={
+                "openshell": {
+                    "providers": {
+                        "service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}
+                    }
+                }
             },
         )
     )

@@ -379,6 +379,7 @@ class ExecuteAgentJob(NemoJob):
             raise ValueError(str(exc)) from exc
 
         if merged.providers:
+            merged.require_runtime_support("openshell")
             if is_local:
                 raise ValueError("Gateway provider bindings require remote OpenShell execution.")
             await authorize_provider_references(

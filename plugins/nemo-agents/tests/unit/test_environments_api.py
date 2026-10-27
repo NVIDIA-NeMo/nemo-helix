@@ -105,15 +105,15 @@ class TestEnvironmentSpecRoutes:
             json={
                 "name": "service-access",
                 "secrets": {"SERVICE_SECRET": "default/service-token"},
-                "providers": providers,
+                "settings": {"openshell": {"providers": providers}},
             },
         )
         assert resp.status_code == 201
-        assert resp.json()["providers"] == providers
+        assert resp.json()["settings"]["openshell"]["providers"] == providers
         created = entity_client.create.call_args[0][0]
-        assert created.providers["service"].credentials == {"API_TOKEN": "SERVICE_SECRET"}
+        assert created.settings["openshell"]["providers"]["service"]["credentials"] == {"API_TOKEN": "SERVICE_SECRET"}
 
-    def test_create_rejects_unknown_provider_secret_alias(self) -> None:
+    def test_create_rejects_old_top_level_provider_field(self) -> None:
         entity_client = AsyncMock()
         resp = _test_client(entity_client).post(
             "/apis/agents/v2/workspaces/default/environment-specs",

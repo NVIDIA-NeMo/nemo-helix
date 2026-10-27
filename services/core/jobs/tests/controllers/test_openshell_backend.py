@@ -170,6 +170,24 @@ class TestSandboxName:
 
 
 class TestSchedule:
+    @pytest.mark.parametrize("with_provider", [False, True])
+    def test_rejects_env_secret_before_sandbox_creation(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, with_provider
+    ):
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        payload = step.step_spec.model_dump()
+        payload["environment"] = [{"name": "TOKEN", "from_secret": {"name": "default/token"}}]
+        if with_provider:
+            payload["gateway_providers"] = {
+                "service": {"profile": "service-read", "credentials": {"API_TOKEN": "default/another-token"}}
+            }
+        step.step_spec = type(step.step_spec).model_validate(payload)
+        result = backend.schedule(step.step_spec.executor, step)
+        assert result.status == HelixJobStatus.ERROR
+        assert "gateway provider bindings" in result.status_details["message"]
+        backend._client.create_sandbox.assert_not_called()
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("auth_enabled", [True, False])
     async def test_provider_preparation_uses_platform_auth_mode(

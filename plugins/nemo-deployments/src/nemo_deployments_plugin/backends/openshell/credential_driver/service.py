@@ -20,6 +20,7 @@ from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFou
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.openshell.types import GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from openshell._proto import credential_driver_pb2_grpc as driver_grpc  # ty: ignore[unresolved-import]
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -59,7 +60,7 @@ class ResolveRequest(BaseModel):
     credentials: list[LookupRequest] = Field(min_length=1, max_length=32)
 
 
-class CredentialDriver:
+class CredentialDriver(driver_grpc.CredentialDriverServicer):
     def __init__(
         self,
         registry: BindingRegistry,
@@ -229,21 +230,20 @@ class CredentialDriver:
             return wire.message("ResolveCredentialsResponse", {"credentials": results})
         raise RegistrationDenied("Unsupported credential operation.")
 
+    async def GetCapabilities(self, request: Message, context: grpc.aio.ServicerContext) -> Message:
+        return await self.dispatch("GetCapabilities", request, context)
+
+    async def StoreCredential(self, request: Message, context: grpc.aio.ServicerContext) -> Message:
+        return await self.dispatch("StoreCredential", request, context)
+
+    async def ResolveCredentials(self, request: Message, context: grpc.aio.ServicerContext) -> Message:
+        return await self.dispatch("ResolveCredentials", request, context)
+
+    async def DeleteCredential(self, request: Message, context: grpc.aio.ServicerContext) -> Message:
+        return await self.dispatch("DeleteCredential", request, context)
+
+    async def ListCredentials(self, request: Message, context: grpc.aio.ServicerContext) -> None:
+        await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Credential enumeration is not supported.")
+
     def add_to_server(self, server: grpc.aio.Server) -> None:
-        handlers = {}
-        for name, (request_name, _) in wire.METHODS.items():
-
-            def handler_for(method: str) -> Callable:
-                async def handle(request: Message, context: grpc.aio.ServicerContext) -> Message:
-                    if method == "ListCredentials":
-                        await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Credential enumeration is not supported.")
-                    return await self.dispatch(method, request, context)
-
-                return handle
-
-            handlers[name] = grpc.unary_unary_rpc_method_handler(
-                handler_for(name),
-                request_deserializer=wire.message_type(request_name).FromString,
-                response_serializer=lambda response: response.SerializeToString(),
-            )
-        server.add_generic_rpc_handlers((grpc.method_handlers_generic_handler(wire.SERVICE, handlers),))
+        driver_grpc.add_CredentialDriverServicer_to_server(self, server)

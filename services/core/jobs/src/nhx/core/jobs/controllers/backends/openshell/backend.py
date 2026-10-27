@@ -98,7 +98,7 @@ logger = logging.getLogger(__name__)
 
 _OPENSHELL_INSTALL_HINT = (
     "The 'openshell' package is required for the OpenShell job backend. "
-    'Install it with: uv pip install "openshell>=0.1.2" "grpcio>=1.78.0" "protobuf>=6.31.1"'
+    'Install it with: uv pip install "openshell>=0.1.6" "grpcio>=1.78.0" "protobuf>=6.31.1"'
 )
 
 # OpenShell rejects a longer sandbox name with INVALID_ARGUMENT (63-char DNS label).
@@ -316,6 +316,13 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         step: HelixJobStepWithContext,
     ) -> JobUpdate:
         step_spec = self._require_step_spec(step)
+        if any(item.from_secret is not None for item in step_spec.environment or []):
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={
+                    "message": "OpenShell secrets require gateway provider bindings; process-env injection is not supported."
+                },
+            )
         platform_config = get_platform_config()
 
         env = dict(self._execution_profile_config.env)

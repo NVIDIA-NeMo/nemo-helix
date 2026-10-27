@@ -18,7 +18,7 @@
 # Bring up:
 #   # one-time JWT key generation (writes /var/lib/openshell/tls/jwt/*):
 #   docker run --rm --user 0 -v /var/lib/openshell:/var/lib/openshell \
-#     ghcr.io/nvidia/openshell/gateway:0.1.2 generate-certs \
+#     ghcr.io/nvidia/openshell/gateway:0.1.6 generate-certs \
 #     --output-dir /var/lib/openshell/tls --server-san host.openshell.internal
 #   docker compose up -d      # from this directory (examples/openshell/)
 #   openshell gateway add http://127.0.0.1:17670 --local --name docker-dev
@@ -33,7 +33,7 @@ services:
     # Pinned, and kept in step with the `openshell` client pin in the plugin's
     # pyproject: the gateway enforces request limits the client does not, so :latest
     # turns a gateway release into an unexplained deployment failure.
-    image: ghcr.io/nvidia/openshell/gateway:${IMAGE_TAG:-0.1.2}
+    image: ghcr.io/nvidia/openshell/gateway:${IMAGE_TAG:-0.1.6}
     restart: unless-stopped
 
     # The image ENTRYPOINT is the gateway binary and its CMD bakes
