@@ -14,7 +14,7 @@ from nhx.guardrails.app.utils.context_utils import (
 )
 from nhx.guardrails.app.utils.platform_request_headers import get_platform_auth_headers_from_context
 from nhx.guardrails.config import settings
-from nhx.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.entities.values._private import Model, ModelParameters, RailsConfig
 from nhx.guardrails.entities.values.chat import GuardrailChatCompletionRequest
 from nhx.guardrails.entities.values.check import GuardrailCheckRequest
 from nhx.guardrails.entities.values.completions import GuardrailCompletionRequest
@@ -92,7 +92,9 @@ def model_with_req_scoped_custom_headers(model: Model, req_custom_headers: dict[
     # Add merged default headers to model's `parameters`
     parameters = {**params, "default_headers": merged_default_headers}
 
-    return model.model_copy(update={"parameters": parameters})
+    # `model_copy` skips validation, so build `ModelParameters` explicitly. Downstream code
+    # (e.g. `apply_platform_auth_headers`) relies on `parameters` being a model, not a dict.
+    return model.model_copy(update={"parameters": ModelParameters.model_validate(parameters)})
 
 
 def set_main_model_merged_custom_headers_into_context(model: Optional[Model]) -> None:
@@ -135,10 +137,14 @@ def update_models_in_config(config: RailsConfig, main_model: Model):
 
     if main_model_index is not None:
         merged_params = {**(models[main_model_index].parameters or {}), **main_model_parameters}
-        models[main_model_index] = main_model.model_copy(update={"parameters": merged_params})
+        models[main_model_index] = main_model.model_copy(
+            update={"parameters": ModelParameters.model_validate(merged_params)}
+        )
     else:
         # If there's no main model, we add the current one.
-        models.append(main_model.model_copy(update={"parameters": main_model_parameters}))
+        models.append(
+            main_model.model_copy(update={"parameters": ModelParameters.model_validate(main_model_parameters)})
+        )
 
     updated_config = config.model_copy(update={"models": models})
 
