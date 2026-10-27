@@ -3,9 +3,7 @@
 
 # Service credentials in OpenShell sandboxes
 
-Helix binds existing Secrets references to operator-approved OpenShell injection profiles. The agent receives a placeholder; the trusted OpenShell gateway resolves the credential through the NeMo credential driver and injects it into matching outbound requests. Jobs support this feature when their OpenShell backend is configured and enabled by the operator.
-
-Deployment and in-memory execution reject provider bindings.
+Helix binds existing Secrets references to operator-approved OpenShell injection profiles. The agent receives a placeholder; the trusted OpenShell gateway resolves the credential through the NeMo credential driver and injects it into matching outbound requests. Jobs and deployments support this feature when their OpenShell backend is configured and enabled by the operator.
 
 ## Environment configuration
 
@@ -36,14 +34,14 @@ Compilation rejects missing aliases, duplicate slots, plaintext env conflicts, a
 
 1. The Helix controller checks the profile approval and secret access, then creates a dedicated OpenShell provider for each workload binding using a signed registration ticket.
 2. The credential driver validates the ticket and stores reference and ownership metadata in a persistent registry. Registration does not fetch the secret value.
-3. On credential resolution, the driver checks the owning job attempt/step and reads the secret. With platform auth enabled, it delegates the read to the workload creator. OpenShell receives the value; the sandbox receives a placeholder.
+3. On credential resolution, the driver checks the owning job attempt/step or deployment and reads the secret. With platform auth enabled, it delegates the read to the workload creator. OpenShell receives the value; the sandbox receives a placeholder.
 4. Controllers attach providers before launch and remove them after sandbox deletion. Ownership labels support retries and cleanup after controller restarts; an orphan sweep reclaims unattached providers after a ten-minute grace period.
 
 Provider-bearing sandboxes have a restricted platform REST allowlist enforced by OpenShell. It permits required workload operations, declared filesets, inference and telemetry, while excluding secret reads, entity access, token minting and new job submission. The gateway's network policy, TLS inspection and attachment authorization must remain enforced. Gateway administrators are trusted.
 
 ## Operator configuration
 
-Run the [credential driver](../../nemo-deployments/src/nemo_deployments_plugin/backends/openshell/credential_driver/README.md) beside a dedicated gateway. Add this block inside the OpenShell job execution profile `config`:
+Run the [credential driver](../../nemo-deployments/src/nemo_deployments_plugin/backends/openshell/credential_driver/README.md) beside a dedicated gateway. Add this block inside the OpenShell executor `config` for deployments or execution profile `config` for jobs:
 
 ```yaml
 gateway_credentials:
@@ -63,7 +61,7 @@ The gateway ID and signing key must match the driver. Install profiles through O
 
 | Setting | Behavior |
 | --- | --- |
-| `renewal_mode: helix` | Jobs controllers update active, attached providers with fresh tickets, including idle sandboxes. |
+| `renewal_mode: helix` | Jobs and Deployments controllers update active, attached providers with fresh tickets, including idle sandboxes. |
 | `renewal_interval_seconds` | Minimum interval between successful updates; default 10 seconds, range 1–15. Controller polling and gateway propagation add delay. |
 | `renewal_mode: gateway` | Default; Helix sends no periodic updates. Requires renewal support in the selected gateway build. |
 | `credential_refresh_verified` | Defaults to false and blocks provider workloads until the operator verifies refresh behavior. It is an attestation, not automatic capability detection. |
@@ -78,6 +76,6 @@ The driver has no value cache. OpenShell is trusted to hold resolved credentials
 
 In Helix renewal mode, confirmed permission denial or a missing secret records cleanup intent, then detaches and deletes the affected provider. Cleanup retries after failure or controller restart. Restoring permission does not undo recorded cleanup or recreate a missing provider during renewal; start a new workload to restore access. Other providers remain independently renewable. Temporary outages retry without extending existing expiry.
 
-Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Source-service token revocation is separate. The Jobs controller retains responsibility for job lifecycle.
+Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Source-service token revocation is separate. Ordinary workload controllers retain responsibility for job and deployment lifecycle.
 
 Upgrade all environment consumers before storing these specs. Older consumers that discard `settings.openshell` may inject the referenced secrets into process environments; mixed-version consumers are unsupported. The credential driver accepts registration tickets only, so its gateway cannot also serve unrelated raw provider credentials.

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -46,6 +47,7 @@ from nemo_deployments_plugin.entities import (
     ConfigFile,
     Container,
     ContainerPort,
+    Deployment,
     DeploymentConfig,
     EnvVar,
     ExecAction,
@@ -58,10 +60,52 @@ from nemo_deployments_plugin.secrets import SecretResolutionError
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayCredentialConfig, GatewayProviderBinding, GatewayWorkload
 
 pytest.importorskip("openshell")  # platform-restricted extra; skip where not installed (e.g. CI)
 
-from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
+from openshell._proto import openshell_pb2 as pb
+
+
+@pytest.mark.parametrize("mode,auth_enabled", [("helix", True), ("helix", False), ("gateway", True)])
+async def test_renewal_delegates_creator_and_current_workload(openshell_backend, mode, auth_enabled):
+    openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file="/run/key",
+        renewal_mode=mode,
+        credential_refresh_verified=True,
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    workload = GatewayWorkload(kind="deployment", workspace="default", name="srv", id="current-id")
+    bindings = {"service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})}
+    context = AuthContext(principal_id="user-1") if auth_enabled else None
+    provisioner = MagicMock(prepare=AsyncMock())
+    requester_context = MagicMock()
+    requester_context.__aenter__ = AsyncMock(return_value=MagicMock())
+    requester_context.__aexit__ = AsyncMock(return_value=False)
+    with (
+        patch.object(openshell_backend, "_provider_provisioner", return_value=provisioner),
+        patch(
+            "nemo_deployments_plugin.backends.openshell.backend.get_async_nemo_client", return_value=requester_context
+        ) as client,
+        patch("nemo_deployments_plugin.backends.openshell.backend.AsyncSecretsClient.from_client"),
+        patch("nemo_deployments_plugin.backends.openshell.backend.platform_auth_enabled", return_value=auth_enabled),
+    ):
+        await openshell_backend.renew_gateway_credentials(workload=workload, bindings=bindings, auth_context=context)
+    if mode == "gateway":
+        provisioner.prepare.assert_not_awaited()
+        client.assert_not_called()
+    else:
+        client.assert_called_once_with(
+            as_service="deployments", internal=True, on_behalf_of=context.to_principal() if context else None
+        )
+        args = provisioner.prepare.call_args
+        assert args.args == (bindings,)
+        assert args.kwargs["renew"] is True
+        assert args.kwargs["workload"] == workload
+        assert args.kwargs["workload_id"] == _sandbox_name("default", "srv")
+        assert args.kwargs["auth_context"] == context
+        assert args.kwargs["auth_enabled"] is auth_enabled
 
 
 class FakeRpcError(grpc.RpcError):
@@ -208,6 +252,52 @@ def _delivery_requests(mock_stub: MagicMock) -> list[pb.ExecSandboxRequest]:
 
 def test_registry_contains_openshell() -> None:
     assert BACKEND_CLASSES["openshell"] is OpenShellDeploymentBackend
+
+
+@pytest.mark.parametrize("auth_enabled", [True, False])
+async def test_provider_created_before_sandbox_and_attached(openshell_backend, mock_entities, mock_stub, auth_enabled):
+    config = _config()
+    config.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
+    }
+    deployment = Deployment(name="srv", workspace="default", deployment_config="cfg1")
+    deployment._id = "deployment-1"
+    mock_entities.get.side_effect = [config, deployment]
+    mock_stub.GetSandbox.side_effect = _not_found()
+    openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file=Path("/run/key"),
+        credential_refresh_verified=True,
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    from nemo_deployments_plugin.backends.openshell.config import HelixEgressConfig
+
+    openshell_backend._executor_config.platform_egress = HelixEgressConfig()
+    provisioner = AsyncMock()
+    provisioner.prepare.return_value = ["owned-provider"]
+    with (
+        patch.object(openshell_backend, "_provider_provisioner", return_value=provisioner),
+        patch("nemo_deployments_plugin.backends.openshell.backend.get_async_nemo_client") as client,
+        patch("nemo_deployments_plugin.backends.openshell.backend.platform_auth_enabled", return_value=auth_enabled),
+    ):
+        client.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        client.return_value.__aexit__ = AsyncMock(return_value=None)
+        result = await openshell_backend.create_deployment(
+            workspace="default",
+            name="srv",
+            config_name="cfg1",
+            labels={},
+            backend_config={},
+            auth_context=AuthContext(principal_id="user-1") if auth_enabled else None,
+        )
+    assert result.status == "STARTING"
+    assert provisioner.prepare.await_args.kwargs["auth_enabled"] is auth_enabled
+    request = mock_stub.CreateSandbox.call_args.args[0]
+    assert list(request.spec.providers) == ["owned-provider"]
+    assert set(request.spec.policy.network_policies) == {"nemo_workload"}
+    assert request.labels["nemo-helix/workload-id"] == "deployment-1"
+    assert "API_TOKEN" not in request.spec.environment
+    assert provisioner.prepare.await_args.kwargs["workload"].id == "deployment-1"
 
 
 async def test_load_deployment_config_wraps_an_entities_client_that_accepts_query_params() -> None:
@@ -1573,3 +1663,44 @@ def test_launch_script_defaults_to_the_sandbox_identitys_home(tmp_path: Path) ->
             break
         time.sleep(0.05)
     assert log.read_text().strip() == str(home)
+
+
+async def test_create_rejects_env_secret_before_resolution(
+    openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock, mock_entities: AsyncMock
+) -> None:
+    mock_stub.GetSandbox.side_effect = _not_found()
+    mock_entities.get.return_value = _config_with_env(
+        [EnvVar.model_validate({"name": "TOKEN", "secret_ref": {"workspace": "default", "name": "token"}})]
+    )
+    with patch("nemo_deployments_plugin.backends.openshell.backend.resolve_deployment_config_secrets") as resolve:
+        update = await openshell_backend.create_deployment(
+            workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+        )
+    assert update.status == "FAILED"
+    assert "gateway provider bindings" in update.status_message
+    resolve.assert_not_called()
+    mock_stub.CreateSandbox.assert_not_called()
+
+
+def test_backend_import_without_optional_openshell_sdk():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+sys.modules["openshell"] = None
+from nemo_deployments_plugin.backends.openshell.backend import _ensure_openshell, MissingBackendDependencyError
+try:
+    _ensure_openshell()
+except MissingBackendDependencyError:
+    pass
+else:
+    raise AssertionError("Selecting OpenShell must report the missing optional SDK")
+""",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr

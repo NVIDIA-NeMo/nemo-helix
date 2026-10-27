@@ -565,6 +565,7 @@ class AgentDeploymentController(NemoController):
                 auth_context=dep.auth_context,
                 resources=dep.compute.resources if dep.compute is not None else None,
                 secrets=dep.secrets or None,
+                providers=dep.providers or None,
                 use_image_entrypoint=dep.use_image_entrypoint,
             )
         except Exception as exc:

@@ -26,6 +26,7 @@ from nemo_deployments_plugin.types import (
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 WORKLOAD_IDENTITY_TOKEN_MAX_EXPIRATION_SECONDS = 86400
@@ -339,6 +340,7 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
     """Immutable PodSpec-shaped deployment template."""
 
     containers: list[Container] = Field(default_factory=list)
+    gateway_providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
     init_containers: list[Container] = Field(default_factory=list, alias="initContainers")
     volume_mounts: list[VolumeMount] = Field(default_factory=list, alias="volumeMounts")
     config_files: list[ConfigFile] = Field(default_factory=list, alias="configFiles")

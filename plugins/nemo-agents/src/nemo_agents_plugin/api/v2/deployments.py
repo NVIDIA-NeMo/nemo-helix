@@ -66,7 +66,9 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityValidationError,
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.schema import PaginationData
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +149,13 @@ async def create_deployment(
     resolved_environment = await _resolve_deployment_environment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
-    merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
+    merged = _merge_environment(
+        resolved_config, resolved_environment.environment_spec, workspace=workspace, backend=body.deployment_mode
+    )
+    if merged.providers:
+        await authorize_provider_references(
+            merged.providers, workspace=workspace, secrets_client=AsyncSecretsClient.from_client(files_client)
+        )
 
     # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
     spec = SpecRevision()
@@ -163,6 +171,7 @@ async def create_deployment(
         environment=body.environment,
         compute=resolved_environment.compute_spec,
         secrets=merged.secrets,
+        providers=merged.providers,
         spec_revision=spec.revision,
         spec_tracked_revision=spec.tracked_revision,
         status="pending",
@@ -213,10 +222,12 @@ async def _resolve_deployment_environment(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline | None) -> MergedEnvironment:
+def _merge_environment(
+    config: dict[str, Any], env_spec: EnvironmentSpecInline | None, *, workspace: str, backend: str = ""
+) -> MergedEnvironment:
     try:
-        merged = merge_environment_spec_into_agent_config(config, env_spec)
-        merged.require_runtime_support()
+        merged = merge_environment_spec_into_agent_config(config, env_spec, workspace=workspace)
+        merged.require_runtime_support(backend)
         return merged
     except EnvironmentResolutionError as exc:
         # 422: e.g. a secret env var bound to conflicting references.
