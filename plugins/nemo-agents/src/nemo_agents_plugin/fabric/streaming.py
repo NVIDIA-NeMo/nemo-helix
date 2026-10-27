@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenAI-compatible SSE framing for Fabric-backed streaming responses.
+"""Transport selection and OpenAI-compatible SSE framing for Fabric responses.
 
 Server-Sent Events (SSE) stream newline-delimited HTTP frames. OpenAI Chat
 Completions streams encode each JSON chunk as ``data: <json>`` and terminate
@@ -12,8 +12,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterable, AsyncIterator, Mapping
-from typing import TYPE_CHECKING, Any
+from enum import StrEnum
+from typing import Any
 
+from nemo_agents_plugin.fabric.runtime import (
+    FabricRuntimeResult,
+    FabricRuntimeStream,
+    fabric_streaming_options,
+)
 from nemo_agents_plugin.fabric.serving_models import (
     ChatCompletionStreamChoice,
     ChatCompletionStreamDelta,
@@ -21,9 +27,7 @@ from nemo_agents_plugin.fabric.serving_models import (
     ChatCompletionStreamErrorResponse,
     ChatCompletionStreamResponse,
 )
-
-if TYPE_CHECKING:
-    from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStream
+from nemo_fabric import FabricConfig, RunPlan
 
 # Fabric streams raw ATOF records. ATOF's envelope tells us which records
 # represent completed LLM work; the payload remains producer-defined, so the
@@ -42,6 +46,41 @@ _TEXT_EVENT_TYPES = frozenset(
         "text_delta",
     }
 )
+
+
+class StreamingMethod(StrEnum):
+    """How serving obtains output for an OpenAI streaming response."""
+
+    RELAY = "relay"
+    OPENAI = "openai"
+    BUFFERED = "buffered"
+
+
+def resolve_streaming_method(plan: RunPlan, config: FabricConfig) -> StreamingMethod:
+    """Prefer Relay, then native streaming, otherwise buffer the completion.
+
+    Inspect the plan before adding serving-owned Relay configuration. Selection
+    checks declared support and configuration without modifying either input.
+    Telemetry export settings do not control serving-owned Relay streaming.
+    Invalid Relay streaming configuration raises rather than falling back.
+    """
+    resolved = plan.get("adapter_descriptor")
+    if not isinstance(resolved, Mapping):
+        return StreamingMethod.BUFFERED
+    descriptor = resolved.get("descriptor", resolved)
+    if not isinstance(descriptor, Mapping):
+        return StreamingMethod.BUFFERED
+
+    telemetry = descriptor.get("telemetry")
+    providers = telemetry.get("providers") if isinstance(telemetry, Mapping) else None
+    if isinstance(providers, Mapping) and isinstance(providers.get("relay"), Mapping):
+        fabric_streaming_options(config)
+        return StreamingMethod.RELAY
+
+    capabilities = descriptor.get("capabilities")
+    if plan.capabilities.streaming and isinstance(capabilities, Mapping) and capabilities.get("streaming") is True:
+        return StreamingMethod.OPENAI
+    return StreamingMethod.BUFFERED
 
 
 class FabricStreamResultError(RuntimeError):

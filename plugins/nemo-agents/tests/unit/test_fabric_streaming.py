@@ -8,13 +8,16 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStream
+from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStartError, FabricRuntimeStream
 from nemo_agents_plugin.fabric.streaming import (
     FabricStreamResultError,
+    StreamingMethod,
     extract_assistant_text_delta,
     iter_fabric_assistant_text_deltas,
     iter_openai_chat_completion_sse,
+    resolve_streaming_method,
 )
+from nemo_fabric import FabricConfig, RunPlan
 
 
 class _FakeFabricRuntimeStream(FabricRuntimeStream):
@@ -228,3 +231,78 @@ async def test_iter_fabric_assistant_text_deltas_raises_failed_terminal_result()
 
     with pytest.raises(FabricStreamResultError, match="terminal failure"):
         _ = [text async for text in iter_fabric_assistant_text_deltas(stream)]
+
+
+def _streaming_plan(config: FabricConfig, descriptor: dict[str, Any] | None, *, streaming: bool = False) -> RunPlan:
+    assert config.harness is not None
+    return RunPlan.from_mapping(
+        {
+            "base_dir": "/tmp",
+            "config": config.model_dump(mode="json"),
+            "adapter": {"adapter_id": config.harness.adapter_id, "adapter_kind": "python"},
+            "capabilities": {"streaming": streaming},
+            "adapter_descriptor": {"descriptor": descriptor} if descriptor is not None else None,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "streaming", "expected"),
+    [
+        ({"telemetry": {"providers": {"relay": {}}}}, False, StreamingMethod.RELAY),
+        (
+            {"telemetry": {"providers": {"relay": {}}}, "capabilities": {"streaming": True}},
+            True,
+            StreamingMethod.RELAY,
+        ),
+        ({"capabilities": {"streaming": True}}, True, StreamingMethod.OPENAI),
+        ({"capabilities": {"streaming": True}}, False, StreamingMethod.BUFFERED),
+        ({"capabilities": {"streaming": False}}, True, StreamingMethod.BUFFERED),
+        (None, True, StreamingMethod.BUFFERED),
+        ({}, False, StreamingMethod.BUFFERED),
+    ],
+)
+def test_resolve_streaming_method(
+    descriptor: dict[str, Any] | None, streaming: bool, expected: StreamingMethod
+) -> None:
+    config = FabricConfig.model_validate(
+        {"metadata": {"name": "test-agent"}, "harness": {"adapter_id": "nvidia.fabric.custom"}}
+    )
+    plan = _streaming_plan(config, descriptor, streaming=streaming)
+    before_config, before_plan = config.model_dump(), plan.to_mapping()
+
+    assert resolve_streaming_method(plan, config) is expected
+    assert config.model_dump() == before_config
+    assert plan.to_mapping() == before_plan
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_streaming_method_validates_remote_collector(configured: bool) -> None:
+    config = FabricConfig.model_validate(
+        {
+            "metadata": {"name": "remote"},
+            "harness": {"adapter_id": "nvidia.fabric.remote-agent", "settings": {"relay_streaming": True}},
+            "relay": {
+                "observability": {
+                    "atof": {
+                        "enabled": True,
+                        "sinks": (
+                            [{"name": "nemo-fabric-stream", "type": "stream", "url": "http://collector:8080/v1/atof"}]
+                            if configured
+                            else []
+                        ),
+                    }
+                }
+            },
+        }
+    )
+    plan = _streaming_plan(
+        config,
+        {"telemetry": {"providers": {"relay": {"outputs": ["atof"]}}}, "capabilities": {"streaming": True}},
+        streaming=True,
+    )
+    if configured:
+        assert resolve_streaming_method(plan, config) is StreamingMethod.RELAY
+    else:
+        with pytest.raises(FabricRuntimeStartError, match="shared collector"):
+            resolve_streaming_method(plan, config)
