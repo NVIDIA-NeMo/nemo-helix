@@ -318,7 +318,7 @@ async def test_resolved_lightning_model_warns_before_analysis_and_in_report(monk
 
     seen = {}
     _stub_pipeline(monkeypatch, seen)
-    monkeypatch.setattr(FakeModelClient, "model", "openai/nvidia/nemotron-3.5-lightning-30b")
+    monkeypatch.setattr(FakeModelClient, "model", "nvidia/nemotron-3.5-lightning-30b")
 
     async def analyze(*args, **kwargs):
         assert "NVIDIA Nemotron 3.5 Super VL" in caplog.text
