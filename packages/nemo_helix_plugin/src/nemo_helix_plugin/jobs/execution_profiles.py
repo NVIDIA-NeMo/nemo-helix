@@ -160,6 +160,12 @@ class DockerJobNetworkConfig(BaseModel):
 class DockerJobExecutionProfileConfig(JobExecutionProfileConfig):
     """Configuration for Docker Job execution profile."""
 
+    max_active_jobs: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum number of jobs admitted to run concurrently on this executor.",
+    )
+
     storage: DockerJobStorageConfig = Field(
         default_factory=DockerJobStorageConfig, description="Docker storage configuration"
     )
@@ -303,6 +309,12 @@ class KubernetesWorkloadIdentityConfig(BaseModel):
 
 class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
     """Common configuration for Kubernetes execution environment."""
+
+    max_active_jobs: int = Field(
+        default=500,
+        ge=1,
+        description="Maximum number of jobs admitted to run concurrently on this executor.",
+    )
 
     # Only a pull that has already *failed* is counted -- a slow pull of a large
     # image reports ContainerCreating and never reaches this budget -- so the
@@ -459,6 +471,12 @@ class VolcanoJobExecutionProfile(BaseExecutionProfile):
 
 
 class SubprocessJobExecutionProfileConfig(JobExecutionProfileConfig):
+    max_active_jobs: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum number of jobs admitted to run concurrently on this executor.",
+    )
+
     working_directory: str = Field(
         default="/tmp/nhx-subprocess-jobs",
         description="Root directory for subprocess job state, config, storage, and logs.",
