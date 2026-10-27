@@ -15,6 +15,7 @@ from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs.entities import MemberPhase, ResultState, TasksetRunMemberEntity, TasksetRunPhase
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx.core.entities.service import EntitiesService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
@@ -140,6 +141,7 @@ async def test_m1_submission_has_empty_task_page(read_client, published, request
     """The real submit path creates an accepted run whose task collection is empty until M4."""
     submitted = await read_client.post(PATH, json=request_body)
     assert submitted.status_code == 201
+    assert submitted.json()["progress"] is None  # only GET /runs/{id} counts members
     response = await read_client.get(f"{PATH}/{submitted.json()['run_id']}/tasks")
     assert response.status_code == 200
     assert response.json() == {
@@ -255,7 +257,7 @@ async def test_read_routes_sanitize_unexpected_storage_errors(
     assert response.status_code == 500 and response.json() == {"detail": "Internal server error"}
 
 
-async def test_status_cost_is_one_run_read_with_twenty_thousand_members(
+async def test_status_cost_is_one_run_read_and_one_member_page_with_twenty_thousand_members(
     read_client, seed_run, entity_store, run_store, files_service, monkeypatch
 ):
     """Status work stays constant with 20 runs of 1,000 tasks; this is a query budget, not a latency benchmark."""
@@ -271,12 +273,84 @@ async def test_status_cost_is_one_run_read_with_twenty_thousand_members(
             member._parent = run.id
             await entity_store.create(member)
     get = AsyncMock(wraps=entity_store.get)
+    list_ = AsyncMock(wraps=entity_store.list)
     monkeypatch.setattr(entity_store, "get", get)
-    monkeypatch.setattr(entity_store, "list", AsyncMock(side_effect=AssertionError("status joined members")))
+    monkeypatch.setattr(entity_store, "list", list_)
     monkeypatch.setattr(run_store, "load_plan", AsyncMock(side_effect=AssertionError("status loaded plan")))
     response = await read_client.get(f"{PATH}/run-19")
     assert response.status_code == 200 and response.json()["run_id"] == "run-19"
+    assert response.json()["progress"] == {
+        "tasks": 1000,
+        "members": {"registered": 1000},
+        "queued": 0,
+        "task_jobs": {},
+    }
     assert get.await_count == 1 and not files_service.calls
+    assert list_.await_count == 1 and list_.await_args is not None and list_.await_args.kwargs["page_size"] == 1000
+
+
+async def test_run_state_comes_from_members_without_jobs(
+    read_client, seed_run, entity_store, fake_task_jobs, monkeypatch
+):
+    """GET /runs/{id} counts progress and /tasks adds job_status, from Evals records only; GET /runs leaves progress out."""
+    run = await seed_run(phase=TasksetRunPhase.RUNNING)
+    for index, phase, job_status in [
+        (0, MemberPhase.REGISTERED, HelixJobStatus.ACTIVE),
+        (1, MemberPhase.REGISTERED, HelixJobStatus.PENDING),
+        (2, MemberPhase.IMAGE_READY, None),  # a create intent
+        (3, MemberPhase.IMAGE_READY, None),  # queued
+        (4, MemberPhase.FAILED, HelixJobStatus.ERROR),
+    ]:
+        member = TasksetRunMemberEntity(
+            name=f"task-{index}",
+            workspace="default",
+            task_index=index,
+            phase=phase,
+            task_job=f"run-selected-task-{index}" if index != 3 else None,
+            job_status=job_status,
+            error="job_failed: exit 1" if phase is MemberPhase.FAILED else None,
+        )
+        member._parent = run.id
+        await entity_store.create(member)
+    monkeypatch.setattr(fake_task_jobs, "is_subprocess_profile", AsyncMock(side_effect=AssertionError("Jobs call")))
+    response = await read_client.get(f"{PATH}/run-selected")
+    assert response.status_code == 200
+    assert response.json()["progress"] == {
+        "tasks": 5,
+        "members": {"registered": 2, "image_ready": 2, "failed": 1},
+        "queued": 1,
+        "task_jobs": {"active": 1, "pending": 1},
+    }
+    listed = await read_client.get(PATH)
+    assert listed.status_code == 200 and "progress" not in listed.json()["data"][0]
+    tasks = await read_client.get(f"{PATH}/run-selected/tasks")
+    assert tasks.status_code == 200
+    assert tasks.json()["data"] == [
+        {
+            "task": "task-0",
+            "task_index": 0,
+            "phase": "registered",
+            "job": "run-selected-task-0",
+            "job_status": "active",
+        },
+        {
+            "task": "task-1",
+            "task_index": 1,
+            "phase": "registered",
+            "job": "run-selected-task-1",
+            "job_status": "pending",
+        },
+        {"task": "task-2", "task_index": 2, "phase": "image_ready", "job": "run-selected-task-2"},
+        {"task": "task-3", "task_index": 3, "phase": "image_ready"},
+        {
+            "task": "task-4",
+            "task_index": 4,
+            "phase": "failed",
+            "job": "run-selected-task-4",
+            "job_status": "error",
+            "error": "job_failed: exit 1",
+        },
+    ]
 
 
 class RunReadTestService(NemoServiceAdapter):

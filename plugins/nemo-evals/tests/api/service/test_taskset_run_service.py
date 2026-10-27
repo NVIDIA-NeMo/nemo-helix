@@ -31,6 +31,7 @@ from nemo_evals.taskset_runs.entities import (
 )
 from nemo_evals.taskset_runs.store import PlanStorageError, RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
@@ -443,7 +444,7 @@ async def test_repeated_source_is_checked_once_but_denials_are_not_remembered():
     assert authorize.await_count == 3
 
 
-async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
+async def test_get_reads_stored_state_without_plan_or_source_resolution(
     service, run_store, seed_run, files_service, authorizer, monkeypatch
 ):
     """One stored run read preserves terminal/cancellation/result state even with an unavailable plan."""
@@ -457,7 +458,6 @@ async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
     find = AsyncMock(wraps=run_store.find)
     monkeypatch.setattr(run_store, "find", find)
     monkeypatch.setattr(run_store, "load_plan", AsyncMock(side_effect=AssertionError("plan read")))
-    monkeypatch.setattr(run_store, "list_members", AsyncMock(side_effect=AssertionError("member read")))
     status = await service.get("default", run.name)
     find.assert_awaited_once_with("default", run.name)
     assert status.model_dump(mode="json") == {
@@ -475,9 +475,52 @@ async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
         "error": "execution expired",
         "created_by": "user:alice",
         "idempotency_key": "original-key",
+        "progress": None,  # no members yet
     }
     assert not files_service.calls
     authorizer.assert_not_awaited()
+
+
+async def test_get_counts_progress_from_every_member_page_without_jobs(
+    service, run_store, entity_store, seed_run, fake_task_jobs, monkeypatch
+):
+    """``progress`` counts the run's members, across pages, on each read; Jobs is never called."""
+    run = await seed_run(phase=TasksetRunPhase.RUNNING)
+    states = [
+        (MemberPhase.IMAGE_READY, None, None),  # queued
+        (MemberPhase.IMAGE_READY, "intent", None),  # a create intent: holds a slot, not queued
+        (MemberPhase.REGISTERED, "job", HelixJobStatus.ACTIVE),
+        (MemberPhase.REGISTERED, "job", HelixJobStatus.ACTIVE),
+        (MemberPhase.REGISTERED, "job", HelixJobStatus.PENDING),
+        (MemberPhase.SUCCEEDED, "job", HelixJobStatus.COMPLETED),
+        (MemberPhase.FAILED, "job", HelixJobStatus.ERROR),
+    ]
+    for index, (phase, job, job_status) in enumerate(states):
+        member = TasksetRunMemberEntity(
+            name=f"task-{index}",
+            workspace="default",
+            task_index=index,
+            phase=phase,
+            task_job=f"{run.name}-task-{index}" if job else None,
+            job_status=job_status,
+        )
+        member._parent = run.id
+        await entity_store.create(member)
+    original = run_store.list_members
+
+    async def small_pages(run, *, phase, page, page_size):  # the store reads pages of 1,000; force several
+        return await original(run, phase=phase, page=page, page_size=3)
+
+    monkeypatch.setattr(run_store, "list_members", small_pages)
+    monkeypatch.setattr(fake_task_jobs, "is_subprocess_profile", AsyncMock(side_effect=AssertionError("Jobs call")))
+    status = await service.get("default", run.name)
+    assert status.progress is not None
+    assert status.progress.model_dump(mode="json") == {
+        "tasks": 7,
+        "members": {"image_ready": 2, "registered": 3, "succeeded": 1, "failed": 1},
+        "queued": 1,
+        "task_jobs": {"active": 2, "pending": 1},
+    }
 
 
 async def test_get_missing_and_cross_workspace_returns_none(service, seed_run):
@@ -559,6 +602,7 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
             task_index=index,
             phase=MemberPhase.FAILED,
             task_job=f"recorded-job-{index}",
+            job_status=HelixJobStatus.ERROR,
             error="saved diagnostic",
         )
         member._parent = run.id
@@ -575,7 +619,9 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
             "task_index": 10,
             "phase": "failed",
             "job": "recorded-job-10",
+            "job_status": "error",
             "error": "saved diagnostic",
+            "publication": None,
         }
     ]
     assert result.pagination.model_dump() == {

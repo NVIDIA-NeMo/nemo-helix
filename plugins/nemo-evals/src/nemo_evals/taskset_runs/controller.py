@@ -47,7 +47,9 @@ from filesets import AsyncFilesetFileSystem, parse_fileset_ref
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
+from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.result_persistence import agent_eval_result_entity
+from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
 from nemo_evals.jobs.taskset_bundle import BUNDLE_JOB_SOURCE, TasksetBundleJob
 from nemo_evals.taskset_runs.entities import (
     SETTLED_MEMBER_PHASES,
@@ -87,6 +89,7 @@ from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager
 from nemo_helix_plugin.jobs.schemas import HelixJobResultResponse, HelixJobStatus
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
 from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -614,15 +617,24 @@ class TasksetRunReconciler:
         elif result is not None:
             state.replace(
                 await self.store.update_member(
-                    member, phase=MemberPhase.SUCCEEDED, bundle_ref=result.artifact_url, job_status=job.status
+                    member,
+                    phase=MemberPhase.SUCCEEDED,
+                    bundle_ref=result.artifact_url,
+                    job_status=job.status,
+                    publication=_publication(job),
                 )
             )
         else:
             assert status is not None
             error = {"completed": "no_result", "cancelled": "job_cancelled"}.get(status) or _job_error(job)
+            # A cancelled or expired task may have published before its Job ended (AC 9 issue 19): record it too.
             state.replace(
                 await self.store.update_member(
-                    member, phase=_ended_phase(stop, status), error=error, job_status=job.status
+                    member,
+                    phase=_ended_phase(stop, status),
+                    error=error,
+                    job_status=job.status,
+                    publication=_publication(job),
                 )
             )
 
@@ -762,7 +774,11 @@ class TasksetRunReconciler:
                 return
             if _status(job) in TERMINAL_JOB_STATUSES:
                 ended = f"{error}; its Job ended {_status(job)}"
-                state.replace(await self.store.update_member(member, phase=phase, error=ended, job_status=job.status))
+                state.replace(
+                    await self.store.update_member(
+                        member, phase=phase, error=ended, job_status=job.status, publication=_publication(job)
+                    )
+                )
                 return
             state.matched.add(member.name)
             if job.status != member.job_status:
@@ -1228,6 +1244,21 @@ def _utc(value: datetime) -> datetime:
 def _status(job: HelixJobResponse) -> str:
     status = job.status
     return status.value if hasattr(status, "value") else str(status)
+
+
+def _publication(job: HelixJobResponse) -> PublicationOutcome | None:
+    """What an ended task Job reported publishing; None when it reported nothing or a shape we can't read.
+
+    The dispatcher reports it best effort, and an older one may report another shape: neither may block a settle.
+    """
+    reported = (job.status_details or {}).get(PUBLICATION_STATUS_KEY)
+    if reported is None:
+        return None
+    try:
+        return PublicationOutcome.model_validate(reported)
+    except ValidationError as exc:
+        logger.warning("Job %s reported a publication that doesn't validate: %s", job.name, exc)
+        return None
 
 
 class JobsServiceRunJobs:

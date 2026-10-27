@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar, Self
 
+from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -208,6 +209,13 @@ class TasksetRunMemberEntity(EntityBase):
     job_status: HelixJobStatus | None = Field(
         default=None,
         description="The task Job's status as the controller last read it; display only, at most one cycle old.",
+    )
+    publication: PublicationOutcome | None = Field(
+        default=None,
+        description=(
+            "What the task published to Intake, as its ended Job reported it when the member settled; None when "
+            "the Job reported nothing or the member settled without reading an ended Job."
+        ),
     )
     create_sent_at: datetime | None = Field(
         default=None,

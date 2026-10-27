@@ -247,7 +247,7 @@ async def get_taskset_run(
     run_id: str,
     service: TasksetRunService = Depends(get_taskset_run_service),
 ) -> TasksetRunStatus:
-    """Read one stored run without loading its plan or joining its tasks and Jobs.
+    """Read one stored run and its progress, counted from its members, without loading its plan or reading Jobs.
 
     Args:
         workspace: Workspace that scopes the record lookup.
@@ -255,7 +255,8 @@ async def get_taskset_run(
         service: Shared request-scoped run service.
 
     Returns:
-        Current stored status, excluding null optionals and internal metadata.
+        Current stored status with ``progress`` (omitted while the run has no members), excluding null
+        optionals and internal metadata.
 
     Raises:
         HTTPException: The record is absent (404), or an unexpected storage or
@@ -351,7 +352,7 @@ async def list_taskset_run_tasks(
 
     Returns:
         Stored task page and filtered counts; existing runs with no members return
-        an empty page. Null Job/error details are omitted.
+        an empty page. Null Job, Job status and error details are omitted.
 
     Raises:
         HTTPException: The parent run is absent (404), or unexpected storage or

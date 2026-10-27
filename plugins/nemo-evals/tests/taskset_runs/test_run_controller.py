@@ -872,6 +872,71 @@ async def test_job_outcomes_settle_members_and_release_slots(make_harness, harbo
     assert report.created == 2 and len(jobs.active(run.name)) == 2
 
 
+PUBLISHED = {"status": "completed", "evaluation_id": "eval-1", "trial_count": 2}
+
+
+def published(jobs: FakeRunJobs, name: str, publication: Any = PUBLISHED) -> None:
+    """Job ``name`` reports ``publication`` in its status details, as the dispatcher does before it ends."""
+    jobs.jobs[name] = jobs.jobs[name].model_copy(update={"status_details": {"publication": publication}})
+
+
+@pytest.mark.parametrize(
+    ("stop", "status", "phase"),
+    [
+        (None, "completed", "succeeded"),
+        (None, "error", "failed"),
+        ("cancelled", "cancelled", "cancelled"),  # cancelled tasks may already have published (AC 9 issue 19)
+        ("expired", "cancelled", "expired"),
+    ],
+)
+async def test_a_settled_task_records_what_its_job_published(harness, harbor_plan, jobs, stop, status, phase):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    at = None
+    if stop == "cancelled":
+        await harness.cancel(run, BEFORE_DEADLINE)
+        at = BEFORE_DEADLINE
+    elif stop == "expired":
+        at = AFTER_EXECUTION
+    await harness.cycle(at=at)  # a stop cancels the Job; without one, nothing changes yet
+    published(jobs, task(run, 0))
+    jobs.finish(task(run, 0), status)
+    await harness.cycle()
+    (member,) = await harness.members(run)
+    assert member.phase.value == phase
+    assert member.publication is not None and member.publication.model_dump(exclude_defaults=True) == {
+        "status": HelixJobStatus.COMPLETED,
+        "evaluation_id": "eval-1",
+        "trial_count": 2,
+    }
+
+
+@pytest.mark.parametrize("reported", [None, {"status": "completed"}], ids=["not reported", "invalid"])
+async def test_a_publication_not_reported_or_unreadable_is_none_and_the_task_still_settles(
+    harness, harbor_plan, jobs, reported
+):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    if reported is not None:
+        published(jobs, task(run, 0), reported)  # no evaluation_id: doesn't validate
+    jobs.finish(task(run, 0), "completed")
+    await harness.cycle()
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.SUCCEEDED and member.publication is None
+
+
+async def test_a_task_settled_under_an_unreadable_plan_records_what_its_job_published(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    harness.plan_errors[run.name] = ValueError("invalid plan")
+    published(jobs, task(run, 0))
+    jobs.finish(task(run, 0), "completed")
+    await harness.cycle()
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.FAILED and member.publication is not None
+    assert member.publication.evaluation_id == "eval-1"
+
+
 async def test_a_jobs_timeout_in_phase_1_stops_its_reads_but_not_the_grants(make_harness, harbor_plan, jobs):
     harness = make_harness(max_cluster_concurrent_jobs=4)
     run = await harness.submit(sized(harbor_plan, 3), name="run-a")
