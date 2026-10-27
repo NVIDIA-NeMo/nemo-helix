@@ -41,7 +41,7 @@ Provider-bearing sandboxes have a restricted platform REST allowlist enforced by
 
 ## Operator configuration
 
-Run the [credential driver](../../nemo-deployments/src/nemo_deployments_plugin/backends/openshell/credential_driver/README.md) beside a dedicated gateway. Add this block inside the OpenShell executor `config` for deployments or execution profile `config` for jobs:
+Run the [credential-driver sidecar](../../nemo-deployments/examples/openshell/credential-driver.md) beside a dedicated gateway. Add this block inside the OpenShell executor `config` for deployments or execution profile `config` for jobs:
 
 ```yaml
 gateway_credentials:

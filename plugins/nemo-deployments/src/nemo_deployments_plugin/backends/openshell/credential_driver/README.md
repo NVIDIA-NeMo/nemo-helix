@@ -5,6 +5,7 @@
 
 The gateway-side driver implements OpenShell's credential-driver protocol using the OpenShell 0.1.6 SDK. It binds existing NeMo secret references to providers, resolves their values for the trusted gateway, and never creates, updates or deletes the underlying secrets.
 
+For environment bindings, controller configuration, renewal and feature limits, see the [environment integration guide](../../../../../../nemo-agents/docs/provider-fulfillments.md). For container setup, use the [Compose sidecar guide](../../../../../examples/openshell/credential-driver.md).
 
 ## Credential lifecycle
 

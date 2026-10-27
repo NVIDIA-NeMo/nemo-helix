@@ -139,6 +139,20 @@ async def test_driver_rejects_mismatched_auth_mode_before_secret_access(harness:
     assert not harness.calls
 
 
+def test_auth_disabled_sidecar_needs_only_signing_key(tmp_path: Path) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    destination = tmp_path / "private"
+    prepare_credentials(source, destination, auth_disabled=True)
+    assert (destination / "registration.key").read_bytes() == KEY
+    assert not (destination / "helix.token").exists()
+    with pytest.raises(FileNotFoundError):
+        prepare_credentials(source, destination)  # Missing token never selects disabled mode implicitly.
+
+
 @pytest.mark.asyncio
 async def test_register_restart_retry_and_delete_preserve_user_secret(harness: Harness) -> None:
     ticket = await harness.issue()
@@ -315,6 +329,29 @@ def socket_directory() -> Iterator[Path]:
         yield Path(name)
 
 
+@pytest.mark.asyncio
+async def test_sidecar_recovers_stale_socket_and_rejects_second_driver(
+    harness: Harness, socket_directory: Path
+) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.server import running_server
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import check_ready
+
+    path = socket_directory / "driver.sock"
+    # SIGKILL leaves the same filesystem artifact: a socket with no listener.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+        stale.bind(str(path))
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    async with running_server(driver, path):
+        await check_ready(path)
+        with pytest.raises(ValueError, match="Another credential driver"):
+            async with running_server(driver, path):
+                pytest.fail("A second driver acquired the socket")
+        await check_ready(path)
+    assert not path.exists()
+    assert not harness.calls  # Readiness does not read secrets or require Helix.
+
+
 @pytest.mark.parametrize("kind", ["file", "symlink", "listener"])
 def test_sidecar_does_not_remove_other_socket_owners(socket_directory: Path, kind: str) -> None:
     from nemo_deployments_plugin.backends.openshell.credential_driver.server import socket_lease
@@ -333,6 +370,48 @@ def test_sidecar_does_not_remove_other_socket_owners(socket_directory: Path, kin
             with socket_lease(path):
                 pytest.fail("Existing path was accepted")
         assert path.lstat().st_ino == inode
+
+
+def test_sidecar_stages_private_files_and_rotates_only_token(tmp_path: Path) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
+
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    (source / "helix.token").write_text("token-one")
+    prepare_credentials(source, destination)
+    assert destination.stat().st_mode & 0o777 == 0o700
+    assert read_private_file(destination / "registration.key") == KEY
+    assert read_private_file(destination / "helix.token") == b"token-one"
+    inode = (destination / "helix.token").stat().st_ino
+    (source / "helix.token").write_text("token-two")
+    prepare_credentials(source, destination)
+    assert read_private_file(destination / "helix.token") == b"token-two"
+    assert (destination / "helix.token").stat().st_ino != inode
+    (source / "registration.key").write_bytes(b"replacement-signing-key-32-bytes!")
+    (source / "helix.token").write_text("token-three")
+    with pytest.raises(ValueError, match="explicit migration"):
+        prepare_credentials(source, destination)
+    assert read_private_file(destination / "registration.key") == KEY
+    assert read_private_file(destination / "helix.token") == b"token-two"
+
+
+@pytest.mark.parametrize("invalid", ["symlink", "empty", "oversize", "short-key"])
+def test_sidecar_rejects_invalid_mounted_credentials(tmp_path: Path, invalid: str) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
+
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY if invalid != "short-key" else b"short")
+    token = source / "helix.token"
+    if invalid == "symlink":
+        token.symlink_to(source / "registration.key")
+    else:
+        token.write_bytes(b"x" * (65537 if invalid == "oversize" else 0) if invalid != "short-key" else b"token")
+    with pytest.raises((OSError, ValueError)):
+        prepare_credentials(source, destination)
+    assert not destination.exists()
 
 
 @pytest.mark.asyncio
