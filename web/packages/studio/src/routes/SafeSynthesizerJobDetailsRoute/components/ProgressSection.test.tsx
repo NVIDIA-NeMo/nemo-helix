@@ -8,32 +8,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-// Mock the highlighted code region to avoid act() warnings from async Shiki
-// highlighting. LogViewer composes the snippet from primitives, so only
-// CodeSnippetCode needs standing in for — the actions row stays real.
-vi.mock('@nvidia/foundations-react-core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nvidia/foundations-react-core')>();
-  return {
-    ...actual,
-    CodeSnippetCode: ({
-      value,
-      className,
-      ref,
-    }: {
-      value?: string;
-      className?: string;
-      ref?: React.Ref<HTMLElement>;
-    }) => (
-      <pre
-        data-testid="nv-code-snippet-code"
-        ref={ref as React.Ref<HTMLPreElement>}
-        className={className}
-      >
-        {value}
-      </pre>
-    ),
-  };
-});
+// Shiki loads asynchronously; highlighting isn't under test.
+vi.mock('@nemo/common/src/components/LogViewer/extensions/useShikiHighlighting', () => ({
+  useShikiHighlighting: () => [],
+}));
 
 // Helper to create mock log entries
 const createMockLog = (
