@@ -195,6 +195,8 @@ class FakeEntityStore(EntityClient):
         key = self._key(entity_type, name, workspace, parent)
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
+        if expected_db_version is not None and self.entities[key]._db_version != expected_db_version:
+            raise NemoEntityConflictError(f"{workspace}/{name} was modified")
         deleted = self.entities.pop(key)
         return DeleteResponse(id=deleted.id)
 
