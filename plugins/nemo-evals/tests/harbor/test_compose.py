@@ -120,9 +120,17 @@ def test_image_and_build_sources(tmp_path: Path) -> None:
     assert task.services["b"].source == ComposeBuild(
         context_path="environment", dockerfile="odoo/Dockerfile", args={"V": "1"}, target="prod"
     )
-    # Compose builds when both are given, and names the result by `image`.
+    # Harbor runs `docker compose build` before starting a built task, so a build wins over `image`.
     assert task.services["c"].source == ComposeBuild(context_path="environment/c")
     assert task.services["d"].source == ComposeImage(reference="docker.io/library/postgres:18")
+
+
+def test_a_prebuilt_task_runs_the_image_of_a_service_that_also_has_a_build(tmp_path: Path) -> None:
+    # Harbor skips `docker compose build` for a prebuilt task, and `up` pulls the published image.
+    task = _parsed(
+        tmp_path, "services:\n  c: {image: acme/c:1, build: {context: ./c}}\n", task_toml=PREBUILT, dockerfile=None
+    )
+    assert task.services["c"].source == ComposeImage(reference="docker.io/acme/c:1")
 
 
 @pytest.mark.parametrize(
@@ -133,6 +141,9 @@ def test_image_and_build_sources(tmp_path: Path) -> None:
         ('FROM a\nENTRYPOINT ["/one"]\nENTRYPOINT ["/two"]\n', ["/two"]),
         ('FROM a\nENTRYPOINT ["/one"]\nENTRYPOINT []\n', None),
         ('FROM a AS build\nENTRYPOINT ["/build"]\nFROM b\nRUN true\n', None),
+        # A stage built from an earlier one inherits its entrypoint; stage names match in any case.
+        ('FROM a AS Base\nENTRYPOINT ["/base"]\nFROM --platform=linux/amd64 base\nRUN true\n', ["/base"]),
+        ('FROM a AS base\nENTRYPOINT ["/base"]\nFROM base AS app\nENTRYPOINT ["/app"]\nFROM app\n', ["/app"]),
         ('FROM a\nENTRYPOINT [\\\n  "/multi",\\\n  "line"\\\n]\n', ["/multi", "line"]),
         ('ENTRYPOINT ["/start.sh", \\\n\n  # a note\n  "--flag"]\n', ["/start.sh", "--flag"]),
         ('FROM a\n# ENTRYPOINT ["/comment"]\nRUN true\n', None),
@@ -257,6 +268,23 @@ def test_main_settings(tmp_path: Path) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("dockerfile", "why"),
+    [
+        pytest.param("FROM a\n" + "#" * (256 * 1024), "over the 262144 byte limit", id="oversized"),
+        pytest.param(None, "is a symlink", id="symlinked"),
+    ],
+)
+def test_mains_dockerfile_is_read_like_the_tasks_other_files(tmp_path: Path, dockerfile: str | None, why: str) -> None:
+    task = _task(tmp_path, "services:\n  db:\n    image: redis\n", dockerfile=dockerfile, files={"real": "FROM a\n"})
+    if dockerfile is None:
+        (task / "environment" / "Dockerfile").symlink_to("real")
+
+    with pytest.raises(ComposeError) as caught:
+        parse_compose(task)
+    assert caught.value.code == "compose_invalid" and why in str(caught.value)
+
+
 def test_main_entrypoint_in_compose_wins_over_the_dockerfile(tmp_path: Path) -> None:
     spec = _spec(
         tmp_path,
@@ -333,7 +361,6 @@ def test_depends_on_list_form_means_started(tmp_path: Path) -> None:
         ({"test": "pg_isready -U x"}, {"exec": ["sh", "-c", "pg_isready -U x"]}),
         ({"test": ["NONE"]}, None),
         ({"disable": True}, None),
-        ({"interval": "5s"}, None),
     ],
 )
 def test_healthcheck_becomes_readiness(tmp_path: Path, healthcheck: dict, readiness: dict | None) -> None:
@@ -502,7 +529,7 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
         tmp_path,
         """
         x-common: &common
-          restart: always
+          logging: {driver: json-file}
         services:
           main:
             network_mode: "service:a"
@@ -515,7 +542,6 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
             container_name: cache
             hostname: cache
             labels: [a=b]
-            logging: {driver: json-file}
             network_mode: "service:b"
             healthcheck:
               test: [CMD, redis-cli, ping]
@@ -530,6 +556,45 @@ def test_features_with_no_effect_in_a_pod_are_accepted(tmp_path: Path) -> None:
     )
 
     assert [service["name"] for service in spec["services"]] == ["a", "b"]
+
+
+def test_dollar_signs_reach_the_pod_as_compose_passes_them(tmp_path: Path) -> None:
+    # Kubernetes would expand `$(TOKEN)` and turn `$$` into `$`; Compose does neither, so each `$` is doubled.
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          db:
+            image: redis
+            entrypoint: ["/entry.sh", "$$(TOKEN)"]
+            command: [echo, "$$(TOKEN)", "cost: $$$$5"]
+            environment: {TOKEN: secret, ECHO: "$$(TOKEN)"}
+            healthcheck:
+              test: [CMD-SHELL, "test $$(cat /ready) = ok"]
+        """,
+    )
+
+    db = _service(spec, "db")
+    assert db["command"] == ["/entry.sh", "$$(TOKEN)"]
+    assert db["args"] == ["echo", "$$(TOKEN)", "cost: $$$$5"]
+    assert db["env"] == {"TOKEN": "secret", "ECHO": "$$(TOKEN)"}
+    assert db["readiness"] == {"exec": ["sh", "-c", "test $$(cat /ready) = ok"]}
+
+
+@pytest.mark.parametrize(("count", "accepted"), [(16, True), (17, False)])
+def test_a_file_with_more_services_than_a_sandbox_runs_is_refused_first(
+    tmp_path: Path, count: int, accepted: bool
+) -> None:
+    # The services form one reverse `depends_on` chain, the case whose start order is slowest to work out.
+    compose = "services:\n" + "".join(
+        f"  s{index}:\n    image: redis\n" + (f"    depends_on: [s{index + 1}]\n" if index < count - 1 else "")
+        for index in range(count)
+    )
+    if accepted:
+        assert len(_spec(tmp_path, compose)["services"]) == count
+    else:
+        error = _error(tmp_path, compose)
+        assert error.code == "compose_unsupported" and "17 services besides main" in error.detail
 
 
 def test_a_service_may_be_named_verifier(tmp_path: Path) -> None:
@@ -662,6 +727,69 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
             "services.db.entrypoint: empty",
             id="empty-entrypoint-string",
         ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    restart: always\n",
+            "compose_unsupported",
+            "services.db.restart",
+            id="restart",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    healthcheck: {interval: 1s}\n",
+            "compose_unsupported",
+            "services.db.healthcheck: no `test`",
+            id="healthcheck-without-test",
+        ),
+        pytest.param(
+            "services:\n  main:\n    depends_on: {db: {condition: service_healthy}}\n  db:\n    image: redis\n",
+            "compose_unsupported",
+            "services.main.depends_on.db: db has no healthcheck test",
+            id="healthy-wait-on-a-service-without-a-healthcheck",
+        ),
+        # `checker` would start next to `seed`, without waiting for it to finish.
+        pytest.param(
+            """
+            services:
+              seed:
+                image: x
+                depends_on: {main: {condition: service_healthy}}
+              checker:
+                image: x
+                depends_on: {seed: {condition: service_completed_successfully}}
+            """,
+            "compose_unsupported",
+            "services.checker.depends_on.seed: service_completed_successfully between two services that start after main",
+            id="after-main-waits-for-another-to-finish",
+        ),
+        pytest.param(
+            """
+            services:
+              worker:
+                image: x
+                depends_on: [main]
+                healthcheck: {test: [CMD, "true"]}
+              reporter:
+                image: x
+                depends_on: {worker: {condition: service_healthy}}
+            """,
+            "compose_unsupported",
+            "services.reporter.depends_on.worker: service_healthy between two services",
+            id="after-main-waits-for-another-to-be-healthy",
+        ),
+        *(
+            pytest.param(
+                f"services:\n  db:\n    image: redis\n    healthcheck: {{test: [CMD, 'true'], interval: {value}}}\n",
+                "compose_invalid",
+                "services.db.healthcheck.interval: not a duration",
+                id=f"numeric-duration-{value}",
+            )
+            for value in ("5", ".inf", ".nan")
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    expose: ['\u00b2']\n",
+            "compose_unsupported",
+            "services.db.expose[0]: port ranges and names",
+            id="non-ascii-digit-port",
+        ),
     ],
 )
 def test_a_file_the_parser_refuses_names_why(tmp_path: Path, compose: str, code: str, names: str) -> None:
@@ -696,13 +824,13 @@ def test_build_context_must_stay_under_environment(tmp_path: Path, build: str) -
             for port in ("44772", "15353", "18080")
         ),
         pytest.param("services:\n  egress:\n    image: redis\n", "compose_reserved_name", "egress", id="reserved-name"),
-        # Names are Kubernetes labels, so a compose name with an underscore can't be used.
+        # Names are Kubernetes labels, so a compose name with an underscore can't be used. Compose accepts both files.
         pytest.param(
-            "services:\n  my_db:\n    image: redis\n", "compose_invalid", "services.my_db.name", id="spec-rule"
+            "services:\n  my_db:\n    image: redis\n", "compose_unsupported", "services.my_db.name", id="spec-rule"
         ),
         pytest.param(
             "services:\n  a: {image: redis, expose: ['80']}\n  b: {image: redis, expose: ['80']}\n",
-            "compose_invalid",
+            "compose_unsupported",
             "same port",
             id="two-services-on-one-port",
         ),

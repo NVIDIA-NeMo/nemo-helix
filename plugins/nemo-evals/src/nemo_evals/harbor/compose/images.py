@@ -14,7 +14,7 @@ from typing import Any
 
 from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference
 from nemo_evals.harbor.compose.models import ComposeBuild, ComposeError, ComposeImage, ComposeProblems
-from nemo_evals.harbor.compose.resolve import ENVIRONMENT_DIR, Interpolator, path_in_environment
+from nemo_evals.harbor.compose.resolve import ENVIRONMENT_DIR, Interpolator, path_in_environment, read_data_file
 from nemo_evals.harbor.compose.service_options import parse_environment
 
 _BUILD_KEYS = frozenset({"context", "dockerfile", "args", "target"})
@@ -45,18 +45,22 @@ def normalize_image(reference: str) -> str:
 
 
 def parse_image_source(
-    name: str, raw_service: Mapping[str, Any], interpolator: Interpolator, problems: ComposeProblems
+    name: str, raw_service: Mapping[str, Any], interpolator: Interpolator, problems: ComposeProblems, *, prebuilt: bool
 ) -> ComposeImage | ComposeBuild | None:
-    """Read where service ``name``'s image comes from; ``build`` wins when both ``build`` and ``image`` are set, as in Compose.
+    """Read where service ``name``'s image comes from, in a task that is ``prebuilt`` or not.
+
+    When a service sets both ``build`` and ``image``, the one Harbor runs wins. Harbor runs ``docker compose build``
+    before starting a built task, so ``build`` wins there. A prebuilt task skips that step, and ``up`` pulls the
+    published ``image`` instead.
 
     Returns None, with the problem recorded, when the service has neither or its reference is invalid.
     """
     path = f"services.{name}"
     build = raw_service.get("build")
-    if build is not None:
+    image = raw_service.get("image")
+    if build is not None and not (prebuilt and isinstance(image, str) and image):
         return parse_build_source(name, build, interpolator, problems)
 
-    image = raw_service.get("image")
     if not isinstance(image, str) or not image:
         problems.invalid(path, "has neither `image` nor `build`")
         return None
@@ -125,11 +129,14 @@ def dockerfile_path(build: ComposeBuild | None) -> str | None:
 def dockerfile_entrypoint(text: str) -> list[str] | None:
     """Find the ``ENTRYPOINT`` the last build stage of a Dockerfile ends with: exec form as written, shell form as ``sh -c``.
 
-    A new ``FROM`` starts over, since its base image's entrypoint isn't known here. Given
-    ``ENTRYPOINT ["/start.sh"]`` this returns ``["/start.sh"]``; given ``ENTRYPOINT /start.sh`` it returns
-    ``["sh", "-c", "/start.sh"]``.
+    A stage built ``FROM`` an earlier stage starts from that stage's entrypoint, as Docker does. Any other ``FROM``
+    starts over, since its base image's entrypoint isn't known here. Given ``ENTRYPOINT ["/start.sh"]`` this returns
+    ``["/start.sh"]``; given ``ENTRYPOINT /start.sh`` it returns ``["sh", "-c", "/start.sh"]``.
     """
     entrypoint: list[str] | None = None
+    # Each named stage's entrypoint so far, by its name in lower case, as Docker matches stage names.
+    stages: dict[str, list[str] | None] = {}
+    stage: str | None = None
     continued = ""
     for line in text.splitlines():
         stripped = line.strip()
@@ -146,28 +153,34 @@ def dockerfile_entrypoint(text: str) -> list[str] | None:
 
         keyword, _, arguments = instruction.partition(" ")
         if keyword.upper() == "FROM":
-            entrypoint = None
+            # `FROM [--platform=...] <image or stage> [AS <name>]`
+            words = [word for word in arguments.split() if not word.startswith("--")]
+            entrypoint = stages.get(words[0].lower()) if words else None
+            stage = words[2].lower() if len(words) >= 3 and words[1].upper() == "AS" else None
         elif keyword.upper() == "ENTRYPOINT":
             entrypoint = _parse_entrypoint_arguments(arguments.strip())
+        if stage is not None:
+            stages[stage] = entrypoint
     return entrypoint
 
 
 def read_dockerfile_entrypoint(
-    environment_dir: Path, dockerfile: str, path: str, problems: ComposeProblems
+    task_dir: Path, dockerfile: str, path: str, problems: ComposeProblems
 ) -> list[str] | None:
-    """Read the ``ENTRYPOINT`` of the Dockerfile at ``dockerfile`` (relative to ``environment/``).
+    """Read the ``ENTRYPOINT`` of the task's Dockerfile at ``dockerfile`` (relative to ``environment/``).
 
-    A Dockerfile that isn't there or can't be read is recorded against ``path``.
+    It's read like the task's other files (see :func:`read_data_file`): size-capped, and refused through a symlink. A
+    Dockerfile that isn't there or can't be read is recorded against ``path``.
     """
-    file = environment_dir / dockerfile
+    file = task_dir / ENVIRONMENT_DIR / dockerfile
     if not file.is_file():
         problems.invalid(path, f"main's Dockerfile {dockerfile} is not in the task")
         return None
 
     try:
-        return dockerfile_entrypoint(file.read_text(encoding="utf-8", errors="replace"))
-    except OSError as error:
-        problems.invalid(path, f"can't read main's Dockerfile: {error}")
+        return dockerfile_entrypoint(read_data_file(file, f"main's Dockerfile {dockerfile}", task_dir))
+    except ComposeError as error:
+        problems.invalid(path, error.detail)
         return None
 
 

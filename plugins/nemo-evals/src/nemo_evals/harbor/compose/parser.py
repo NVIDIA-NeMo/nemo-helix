@@ -46,12 +46,17 @@ from nemo_evals.harbor.compose.service_options import (
     parse_ports,
     parse_readiness,
 )
-from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE
+from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, MAX_SERVICES
 
 _COMPLETED = "service_completed_successfully"
+_HEALTHY = "service_healthy"
+_STARTED = "service_started"
 
-# Service keys that a pod already behaves as, or that images prebuilt elsewhere make moot.
-_NO_EFFECT_KEYS = frozenset({"pull_policy", "restart", "container_name", "hostname", "labels", "logging"})
+# Service keys that a pod already behaves as, or that images prebuilt elsewhere make moot. Two do differ a little:
+# another service can't reach one by its `container_name`, only by its service name, and `hostname` prints the pod's
+# name. They're accepted anyway, since the tasks that set them reach every service by its service name. `restart` is
+# not among them: a pod can't give each service its own restart policy.
+_NO_EFFECT_KEYS = frozenset({"pull_policy", "container_name", "hostname", "labels", "logging"})
 
 # The service keys read so far; any other key is recorded as unsupported.
 _SERVICE_KEYS = frozenset(
@@ -99,11 +104,20 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
 
     # Merge the task's file over Harbor's base file and interpolate it, as `docker compose` would.
     resolved = resolve_compose(task_dir, compose_file, compose_path, problems)
+    # The file is untrusted and the sandbox runs at most `MAX_SERVICES`, so a larger one is refused before any of the
+    # per-service work below, whose start order grows with the cube of the number of services.
+    if len(resolved.services) > MAX_SERVICES:
+        raise ComposeError(
+            "compose_unsupported",
+            f"the file defines {len(resolved.services)} services besides main; a sandbox runs at most {MAX_SERVICES}",
+            compose_path=compose_path,
+        )
 
     # Parse every service before raising, so a task with several problems reports all of them.
     service_parser = ServiceParser(task_dir, resolved.interpolator, problems)
     parsed_services = {
-        name: service_parser.service(name, raw_service) for name, raw_service in resolved.services.items()
+        name: service_parser.service(name, raw_service, prebuilt=resolved.prebuilt)
+        for name, raw_service in resolved.services.items()
     }
     main, main_build = service_parser.main(
         resolved.main, resolved.harbor_main, prebuilt=resolved.prebuilt, read_entrypoint=read_entrypoint
@@ -139,14 +153,14 @@ class ServiceParser:
         self._interpolator = interpolator
         self._problems = problems
 
-    def service(self, name: str, raw_service: dict[str, Any]) -> ComposeService | None:
-        """Read service ``name`` (any service but ``main``); None when it has no usable image source.
+    def service(self, name: str, raw_service: dict[str, Any], *, prebuilt: bool) -> ComposeService | None:
+        """Read service ``name`` (any service but ``main``) of a task that is ``prebuilt`` or not.
 
-        In that case the problem is recorded in ``problems`` instead of raised.
+        None when it has no usable image source; the problem is then recorded in ``problems`` instead of raised.
         """
         path = f"services.{name}"
         self._check_keys(name, raw_service, _SERVICE_KEYS)
-        source = parse_image_source(name, raw_service, self._interpolator, self._problems)
+        source = parse_image_source(name, raw_service, self._interpolator, self._problems, prebuilt=prebuilt)
         if source is None:
             return None
 
@@ -190,7 +204,7 @@ class ServiceParser:
             # The sandbox replaces `main`'s command, so carry over the image's own ENTRYPOINT from its Dockerfile.
             if build is not None and entrypoint is None and read_entrypoint:
                 entrypoint = read_dockerfile_entrypoint(
-                    self._task_dir / ENVIRONMENT_DIR, str(dockerfile_path(build)), f"{path}.build", self._problems
+                    self._task_dir, str(dockerfile_path(build)), f"{path}.build", self._problems
                 )
 
         settings = ComposeMainSettings(
@@ -296,6 +310,32 @@ def _start_order(services: Mapping[str, ComposeService], compose_path: str) -> l
     return ordered
 
 
+def _check_waits(
+    services: Mapping[str, ComposeService], main_depends_on: Mapping[str, str], after_main: set[str], compose_path: str
+) -> None:
+    """Raise for every wait on another service that the pod would start without honoring.
+
+    * ``service_healthy`` on a service with no ``test`` in the compose file: nothing in the pod runs an image's own
+      ``HEALTHCHECK``, so the dependent would start at once. Compose waits for the image's check, or refuses the file
+      when there is none.
+    * ``service_healthy`` or ``service_completed_successfully`` between two ``after_main`` services: those are regular
+      containers, which Kubernetes starts in order but never holds on another's health or exit. ``service_started``
+      is honored by that order.
+    """
+    problems = ComposeProblems()
+    waits = [(MAIN_SERVICE, main_depends_on), *((name, service.depends_on) for name, service in services.items())]
+    for name, depends_on in waits:
+        for dependency, condition in depends_on.items():
+            if dependency == MAIN_SERVICE:
+                continue
+            path = f"services.{name}.depends_on.{dependency}"
+            if condition == _HEALTHY and services[dependency].readiness is None:
+                problems.unsupported(f"{path}: {dependency} has no healthcheck test in the compose file")
+            elif name in after_main and dependency in after_main and condition != _STARTED:
+                problems.unsupported(f"{path}: {condition} between two services that start after main")
+    problems.raise_if_any(compose_path)
+
+
 def _run_once_services(services: Mapping[str, ComposeService], main_depends_on: Mapping[str, str]) -> set[str]:
     """Find the services that something waits on to finish (``service_completed_successfully``).
 
@@ -318,8 +358,8 @@ def _with_roles(
     check; anything else is a ``sidecar``.
 
     Raises:
-        ComposeError: A dependency doesn't exist, the services form a cycle, or a service and ``main`` wait for
-            each other.
+        ComposeError: A dependency doesn't exist, the services form a cycle, a service and ``main`` wait for each
+            other, or a wait is one the pod can't honor (see :func:`_check_waits`).
     """
     _check_dependencies(services, main_depends_on, compose_path)
 
@@ -332,6 +372,7 @@ def _with_roles(
             compose_path=compose_path,
             paths=tuple(clash),
         )
+    _check_waits(services, main_depends_on, after_main, compose_path)
 
     run_once = _run_once_services(services, main_depends_on)
     result: dict[str, ComposeService] = {}

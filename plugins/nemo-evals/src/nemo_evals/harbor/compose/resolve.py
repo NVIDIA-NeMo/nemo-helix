@@ -409,7 +409,7 @@ class Interpolator:
             return {}
 
         try:
-            return _parse_dotenv(_read_data_file(file, "environment/.env", task_dir), interpolator, "environment/.env")
+            return _parse_dotenv(read_data_file(file, "environment/.env", task_dir), interpolator, "environment/.env")
         except ComposeError as error:
             raise ComposeError(
                 error.code, error.detail, compose_path=f"{task_dir.name}/{ENVIRONMENT_DIR}/.env"
@@ -647,7 +647,7 @@ def read_env_files(
             continue
 
         try:
-            variables.update(_parse_dotenv(_read_data_file(file, entry, task_dir), interpolator, entry_path))
+            variables.update(_parse_dotenv(read_data_file(file, entry, task_dir), interpolator, entry_path))
         except ComposeError as error:
             problems.invalid(entry_path, error.detail)
     return variables
@@ -664,7 +664,7 @@ def _reached_through_symlink(path: Path, task_dir: Path) -> bool:
     return path.resolve() != task_dir.resolve() / path.relative_to(task_dir)
 
 
-def _read_data_file(path: Path, label: str, task_dir: Path) -> str:
+def read_data_file(path: Path, label: str, task_dir: Path) -> str:
     """Read a text file from ``task_dir``, refusing a symlink, an oversized file, or bytes that aren't UTF-8.
 
     A symlink, or a folder above the file that is one, could point at the task's tests or outside the task, so it's

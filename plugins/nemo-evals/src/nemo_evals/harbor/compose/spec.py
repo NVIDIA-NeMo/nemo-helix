@@ -45,7 +45,7 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
 
     Raises:
         ComposeError: The file defines only ``main``, a service has no image, or the spec breaks a rule of
-            ``ComposeServices``.
+            ``ComposeServices`` (``compose_unsupported``: the parser has already refused what Compose itself would).
     """
     if not task.services:
         raise ComposeError(
@@ -64,12 +64,13 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
         "main": _main_spec(task.main, wait_budget_sec),
     }
 
-    # `ComposeServices` is the sandbox's own model, so whatever it rejects would also fail on the server.
+    # `ComposeServices` is the sandbox's own model, so whatever it rejects would also fail on the server. The parser
+    # has already refused what Compose would, so anything rejected here is a limit of the sandbox, not of Compose.
     try:
         return ComposeServices.model_validate(spec)
     except ValidationError as error:
         raise ComposeError(
-            "compose_invalid", _validation_detail(error, list(task.services)), compose_path=task.compose_path
+            "compose_unsupported", _validation_detail(error, list(task.services)), compose_path=task.compose_path
         ) from error
 
 
@@ -187,18 +188,29 @@ def _service_spec(name: str, service: ComposeService, images: Mapping[str, str],
             compose_path=compose_path,
         )
 
+    # Each string the pod runs or sets is escaped, since Kubernetes expands it and Compose doesn't (see `_literal`).
     spec: dict[str, Any] = {"name": name, "image": image, "role": service.role}
     if service.command is not None:
-        spec["command"] = service.command
+        spec["command"] = [_literal(argument) for argument in service.command]
     if service.args is not None:
-        spec["args"] = service.args
+        spec["args"] = [_literal(argument) for argument in service.args]
     if service.env:
-        spec["env"] = service.env
+        spec["env"] = {variable: _literal(value) for variable, value in service.env.items()}
     if service.ports:
         spec["ports"] = [port.port for port in service.ports]
     if service.readiness is not None and service.role != "run_once":
-        spec["readiness"] = {"exec": service.readiness.exec_}
+        spec["readiness"] = {"exec": [_literal(argument) for argument in service.readiness.exec_]}
     return spec
+
+
+def _literal(text: str) -> str:
+    """Escape ``text`` so a pod passes it on exactly as Compose would.
+
+    Kubernetes rewrites a container's ``command``, ``args`` and ``env`` values, and its exec probes: ``$(NAME)``
+    becomes that variable's value, and ``$$`` becomes ``$``. Compose does neither, so ``echo $(TOKEN)`` must print
+    ``$(TOKEN)``. Doubling every ``$`` makes Kubernetes give back the original text.
+    """
+    return text.replace("$", "$$")
 
 
 def _validation_detail(error: ValidationError, service_names: list[str]) -> str:

@@ -153,11 +153,12 @@ def parse_dependency_conditions(value: Any, path: str, problems: ComposeProblems
 
 
 def _duration_seconds(value: Any, default: float, path: str, problems: ComposeProblems) -> float:
-    """Read a compose duration in seconds: ``"1m30s"`` is 90.0, ``"5s"`` is 5.0, and a bare number is seconds already."""
+    """Read a compose duration in seconds: ``"1m30s"`` is 90.0 and ``"5s"`` is 5.0.
+
+    Compose requires a string, so a bare number (``5``, ``.inf``) is invalid, as it is there.
+    """
     if value is None:
         return default
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
 
     if isinstance(value, str):
         text = value.replace(" ", "")
@@ -218,8 +219,11 @@ def parse_readiness(value: Any, path: str, problems: ComposeProblems) -> Compose
         if key not in _HEALTHCHECK_KEYS:
             problems.unsupported(f"{path}.{key}")
 
-    # With no `test`, the healthcheck only tunes timings of one the image defines, which the pod never runs.
-    if value.get("disable") is True or "test" not in value:
+    if value.get("disable") is True:
+        return None
+    # With no `test`, the healthcheck only tunes the image's own `HEALTHCHECK`, which nothing in the pod runs.
+    if "test" not in value:
+        problems.unsupported(f"{path}: no `test` (it would tune the image's own HEALTHCHECK)")
         return None
 
     command = _healthcheck_command(value["test"], f"{path}.test", problems)
@@ -246,7 +250,8 @@ def _container_port(value: Any, path: str, problems: ComposeProblems) -> int | N
 
     # Only the container side matters in a pod: drop the protocol (`/tcp`), then any host IP and host port before it.
     text = str(value).split("/", 1)[0].rsplit(":", 1)[-1]
-    if not text.isdigit():
+    # `isdigit` alone also takes digits like `²`, which `int` can't read.
+    if not (text.isascii() and text.isdigit()):
         problems.unsupported(f"{path}: port ranges and names")
         return None
     return int(text)
