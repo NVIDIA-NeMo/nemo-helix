@@ -256,7 +256,7 @@ Automodel `dataset.training` and `retrieve-eval` `dataset` take a fileset name w
 
 Freeze the resulting fileset and reuse it for every run. Scoring two runs on different splits measures data variance rather than model quality.
 
-Equivalent CLI, where `RESULT_PATH` is the path fragment of the `artifacts` result's `artifact_url` and `ARTIFACT_FILESET` is the fileset part (don't assume `job-fileset-<job>` — a long job name gets a hash suffix):
+Equivalent CLI, where `RESULT_PATH` is the path fragment of the `artifacts` result's `artifact_url` and `ARTIFACT_FILESET` is the fileset part with the `workspace/` prefix stripped (don't assume `job-fileset-<job>` — a long job name gets a hash suffix):
 
 ```bash
 PREPARE_JOB=<prepare-job-name>
@@ -264,7 +264,7 @@ RESULT_PATH=results/<attempt-id>/artifacts
 
 nemo jobs results list "$PREPARE_JOB" --workspace default --output json
 
-ARTIFACT_FILESET=<fileset from the artifacts result's artifact_url, e.g. default/job-fileset-...>
+ARTIFACT_FILESET=<fileset name from the artifacts result's artifact_url, e.g. job-fileset-...>
 
 nemo files download "$ARTIFACT_FILESET" --workspace default \
   --remote-path "$RESULT_PATH/training.jsonl" \
