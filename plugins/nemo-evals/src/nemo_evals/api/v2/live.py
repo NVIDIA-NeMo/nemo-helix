@@ -37,7 +37,7 @@ from nemo_evals.jobs.metric_resolution import (
 from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
@@ -232,23 +232,26 @@ async def run_live_evaluation(
                 # Each model ref is checked as the caller: resolution alone routes a ref to a
                 # VirtualModel the caller may not read.
                 authorize = caller_model_read_authorizer(async_client)
-                target = request.target
-                if isinstance(target, ModelRef):
-                    target = await resolve_model_ref(target, async_client=async_client, authorize=authorize)
-                    # Scoring reads the target from the request.
-                    request = request.model_copy(update={"target": target})
-                _reject_target_secret(target)
-                metrics = await _resolve_metrics(
-                    request.metrics,
-                    workspace=workspace,
-                    entity_client=entity_client,
-                    async_client=async_client,
-                    authorize=authorize,
-                )
-                params = _live_params(request.params, target)
-                async with delegated_service_client(async_client) as secrets_access_client:
+                # Model refs and secrets are read as the evals service on behalf of the caller. A ref
+                # resolved with the caller's client would hide a passthrough VirtualModel they can't read.
+                async with delegated_service_client(async_client) as service_client:
+                    target = request.target
+                    if isinstance(target, ModelRef):
+                        target = await resolve_model_ref(target, async_client=service_client, authorize=authorize)
+                        # Scoring reads the target from the request.
+                        request = request.model_copy(update={"target": target})
+                    _reject_target_secret(target)
+                    metrics = await _resolve_metrics(
+                        request.metrics,
+                        workspace=workspace,
+                        entity_client=entity_client,
+                        async_client=async_client,
+                        model_client=service_client,
+                        authorize=authorize,
+                    )
+                    params = _live_params(request.params, target)
                     secret_resolver = HelixMetricSecretResolver(
-                        client_from_platform(secrets_access_client, AsyncSecretsClient), workspace=workspace
+                        client_from_platform(service_client, AsyncSecretsClient), workspace=workspace
                     )
                     output, results = await _score(
                         metrics, request=request, params=params, secret_resolver=secret_resolver
@@ -299,6 +302,7 @@ async def _resolve_metrics(
     workspace: str,
     entity_client: EntityClient,
     async_client: AsyncNemoClient,
+    model_client: AsyncHelixClient,
     authorize: SourceReadAuthorizer,
 ) -> list[Metric]:
     """Resolve any judge model references and return executable runtime metrics.
@@ -313,6 +317,7 @@ async def _resolve_metrics(
         entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
         async_client=async_client,
         model_authorize=authorize,
+        model_client=model_client,
     )
     runtime = [unbundle_metric(to_runtime_bundle(metric)) for metric in resolved]
     model_backed = [metric for metric in runtime if isinstance(metric, MetricWithModels)]

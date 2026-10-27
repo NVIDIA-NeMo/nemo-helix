@@ -286,6 +286,7 @@ async def resolve_metrics_to_inline(
     async_client: AsyncHelixClient | None,
     authorize: SourceReadAuthorizer | None = None,
     model_authorize: SourceReadAuthorizer | None = None,
+    model_client: AsyncHelixClient | None = None,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
@@ -299,6 +300,7 @@ async def resolve_metrics_to_inline(
     When ``authorize`` is set, each stored metric and model is checked as the caller before it is read.
     ``model_authorize`` checks model refs instead of ``authorize``, for a caller that has no check for
     stored metrics; when it is unset, ``authorize`` covers models too.
+    ``model_client`` resolves model refs instead of ``async_client``, which still reads stored metrics.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
     files_client = None
@@ -317,9 +319,10 @@ async def resolve_metrics_to_inline(
     final_bundles = resolved_bundles
     unresolved = unresolved_model_refs(runtime_metrics)
     if unresolved:
-        if async_client is None:
+        resolving_client = model_client if model_client is not None else async_client
+        if resolving_client is None:
             raise ValueError("resolving metric model references requires a platform client")
-        models_client = client_from_platform(async_client, AsyncModelsClient)
+        models_client = client_from_platform(resolving_client, AsyncModelsClient)
         resolver: ModelResolver = HelixMetricModelResolver(
             models_client, authorize=model_authorize if model_authorize is not None else authorize
         )

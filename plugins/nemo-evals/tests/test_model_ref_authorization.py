@@ -7,11 +7,15 @@ Drives the real evaluate job routes and the real ``/live`` route, with the reque
 pointed at a fake platform that grants or denies each model and VirtualModel read. Every model is
 served through a VirtualModel of the same name, so reading either is enough for the model entity;
 a user-managed VirtualModel, which serves something else under that name, must itself be readable.
+Refs resolve as the evals service on behalf of the caller, which may read either, so a passthrough
+the caller can't read is still recognized as one.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
@@ -23,6 +27,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_evals.api.v2 import live as live_routes
+from nemo_evals.jobs import evaluate as evaluate_module
 from nemo_evals.jobs.evaluate import EvaluateInputSpec, EvaluateJob
 from nemo_evals.jobs.metric_resolution import caller_model_read_authorizer, resolve_metrics_to_inline
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
@@ -55,13 +60,15 @@ class _Platform:
     virtual_model_readable: bool = True
     reads: list[str] = field(default_factory=list)
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
+    def handle(self, request: httpx.Request, *, as_service: bool = False) -> httpx.Response:
+        """Answer a read as the caller, or as the evals service, which may read whatever exists."""
         path = request.url.path
-        self.reads.append(path)
+        if not as_service:
+            self.reads.append(path)
         if path == _VIRTUAL_MODEL_PATH:
             if self.virtual_model == "missing":
                 return httpx.Response(404, json={"detail": "not found"})
-            if not self.virtual_model_readable:
+            if not self.virtual_model_readable and not as_service:
                 return httpx.Response(403, json={"detail": "Forbidden"})
             default_entity = "default/judge" if self.virtual_model == "passthrough" else "default/other-model"
             return httpx.Response(
@@ -76,7 +83,7 @@ class _Platform:
         if path == _MODEL_PATH:
             if not self.model_exists:
                 return httpx.Response(404, json={"detail": "not found"})
-            if not self.model_readable:
+            if not self.model_readable and not as_service:
                 return httpx.Response(403, json={"detail": "Forbidden"})
             return httpx.Response(
                 200,
@@ -90,13 +97,39 @@ class _Platform:
             )
         return httpx.Response(404, json={"detail": f"unexpected path {path}"})
 
-    def client(self) -> AsyncNemoClient:
+    def client(self, base_url: str = _PLATFORM) -> AsyncNemoClient:
         """The caller's request-scoped client, as the platform injects it."""
-        return AsyncNemoClient(
-            base_url=_PLATFORM,
+        caller = AsyncNemoClient(
+            base_url=base_url,
             workspace="default",
             http_client=httpx.AsyncClient(transport=httpx.MockTransport(self.handle)),
         )
+        _SERVICE_CLIENTS[id(caller)] = AsyncNemoClient(
+            base_url=base_url,
+            workspace="default",
+            http_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: self.handle(request, as_service=True))
+            ),
+        )
+        return caller
+
+
+#: The evals service's client for each caller client a ``_Platform`` handed out.
+_SERVICE_CLIENTS: dict[int, AsyncNemoClient] = {}
+
+
+@pytest.fixture(autouse=True)
+def _delegated_service_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Resolve refs with the platform's service view of the caller's client, as the real helper does."""
+
+    @asynccontextmanager
+    async def delegated(request_client: AsyncNemoClient) -> AsyncGenerator[AsyncNemoClient, None]:
+        yield _SERVICE_CLIENTS.get(id(request_client), request_client)
+
+    monkeypatch.setattr(evaluate_module, "delegated_service_client", delegated)
+    monkeypatch.setattr(live_routes, "delegated_service_client", delegated)
+    yield
+    _SERVICE_CLIENTS.clear()
 
 
 def _job_response(spec: dict[str, Any]) -> MagicMock:
@@ -203,6 +236,7 @@ _DENIED = {
 
 _ALLOWED = {
     "passthrough-and-model-readable": _Platform(),
+    "model-readable-passthrough-virtual-model-not": _Platform(virtual_model_readable=False),
     "user-virtual-model-readable-model-not": _Platform(model_readable=False, virtual_model="user"),
     "user-virtual-model-with-no-model-entity": _Platform(model_exists=False, virtual_model="user"),
 }
@@ -360,12 +394,7 @@ async def test_a_target_ref_resolved_over_loopback_is_stored_with_the_service_ur
     """Embedded auth resolves over loopback; the job must get an address it can reach."""
     monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api:8080")
-    platform = _Platform()
-    loopback_client = AsyncNemoClient(
-        base_url="http://localhost:8080",
-        workspace="default",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(platform.handle)),
-    )
+    loopback_client = _Platform().client(base_url="http://localhost:8080")
 
     spec = await EvaluateJob.to_spec(
         EvaluateInputSpec.model_validate(_target_ref_spec()),

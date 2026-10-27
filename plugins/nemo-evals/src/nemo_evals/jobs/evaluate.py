@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Annotated, Any, ClassVar, Self, TypeAlias
 import nemo_evals.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evals.shared.metric_bundles.inline  # noqa: F401
 from fastapi import HTTPException, status
+from nemo_evals.api.dependencies import delegated_service_client
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
 from nemo_evals.jobs.agent_spec import target_agent_identity
@@ -368,15 +370,19 @@ class _EvaluateJobBase(NemoJob):
         authorize = caller_model_read_authorizer(async_sdk) if async_sdk is not None else None
         target = submit_spec.target
         try:
-            metrics = await resolve_metrics_to_inline(
-                submit_spec.metrics,
-                workspace=workspace,
-                entity_client=entity_client,
-                async_client=async_sdk,
-                model_authorize=authorize,
-            )
-            if isinstance(target, ModelRef):
-                target = await resolve_model_ref(target, async_client=async_sdk, authorize=authorize)
+            # Refs resolve as the evals service on behalf of the caller, as taskset runs do: the caller
+            # may read a model but not its passthrough VirtualModel, which would hide that it is one.
+            async with delegated_service_client(async_sdk) if async_sdk is not None else nullcontext() as model_client:
+                metrics = await resolve_metrics_to_inline(
+                    submit_spec.metrics,
+                    workspace=workspace,
+                    entity_client=entity_client,
+                    async_client=async_sdk,
+                    model_authorize=authorize,
+                    model_client=model_client,
+                )
+                if isinstance(target, ModelRef):
+                    target = await resolve_model_ref(target, async_client=model_client, authorize=authorize)
         except HTTPException as exc:
             # The job routes answer 403 only for a PermissionError; any other exception becomes a 422.
             if exc.status_code == status.HTTP_403_FORBIDDEN:
