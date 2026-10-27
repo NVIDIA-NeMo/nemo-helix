@@ -94,6 +94,11 @@ class JobReconciler(HeartbeatMixin, Controller):
             logger.debug("Stop signal received, skipping reconciliation step")
             return
 
+        # Keep fetch, per-step reconciliation, cleanup, and their logs in one trace.
+        with tracer.start_as_current_span("jobs_reconciler/step"):
+            self._reconcile()
+
+    def _reconcile(self) -> None:
         fetch_started_at = time.monotonic()
         with tracer.start_as_current_span("jobs_reconciler/fetch_steps_for_reconciliation"):
             try:

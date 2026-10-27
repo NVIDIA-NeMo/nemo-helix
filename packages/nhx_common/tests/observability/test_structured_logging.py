@@ -5,10 +5,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from io import StringIO
+from unittest.mock import Mock
 
 import pytest
-from nhx.common.observability.structured_logging import _sanitize_log_strings
+from nhx.common.observability.otel import settings
+from nhx.common.observability.structured_logging import _sanitize_log_strings, initialize_logging
+from opentelemetry._logs import SeverityNumber
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
 
 
 @pytest.mark.parametrize(
@@ -57,6 +66,77 @@ def test_sanitize_log_strings_sanitizes_exception_field() -> None:
     event = {"event": "boom", "exception": "Traceback (most recent call last):\n  ...\nValueError: pwn"}
     result = _sanitize_log_strings(logging.getLogger(), "info", event)
     assert "\n" not in result["exception"]
+
+
+@pytest.mark.parametrize("log_format", ["plain", "json"])
+def test_otlp_logging_exports_trace_context_and_structured_fields(monkeypatch, log_format):
+    resource = Resource.create({"service.name": "logging-test"})
+    provider = LoggerProvider(resource=resource)
+    exporter = InMemoryLogRecordExporter()
+    tracer_provider = TracerProvider()
+    monkeypatch.setattr("opentelemetry.sdk._logs.LoggerProvider", Mock(return_value=provider))
+    monkeypatch.setattr("opentelemetry._logs.set_logger_provider", Mock())
+    exporter_factory = Mock(return_value=exporter)
+    monkeypatch.setattr("opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter", exporter_factory)
+    monkeypatch.setattr(settings, "otel_sdk_disabled", False)
+    monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
+    monkeypatch.setattr(settings, "otel_exporter_otlp_logs_endpoint", "http://logs:4317")
+    monkeypatch.setattr(settings, "log_format", log_format)
+    monkeypatch.setattr(settings, "log_level", "INFO")
+    monkeypatch.setattr(settings, "extra_log_config", "")
+    monkeypatch.setattr(settings, "log_internal_requests", False)
+    root = logging.getLogger()
+    saved_handlers, saved_level = list(root.handlers), root.level
+    output = StringIO()
+    try:
+        initialize_logging(resource)
+        handler = root.handlers[0]
+        assert isinstance(handler, logging.StreamHandler)
+        handler.setStream(output)
+        with tracer_provider.get_tracer(__name__).start_as_current_span("test") as span:
+            root.info("correlated log", extra={"job": "test-job"})
+            root.info("sensitive log", extra={"sensitive": True})
+            root.info("internal log", extra={"internal": True})
+        provider.force_flush()
+        logs = exporter.get_finished_logs()
+        assert len(logs) == 1
+        record = logs[0].log_record
+        assert record.body == "correlated log"
+        assert record.severity_number == SeverityNumber.INFO
+        assert record.trace_id == span.get_span_context().trace_id
+        assert record.span_id == span.get_span_context().span_id
+        assert record.attributes is not None
+        assert record.attributes["trace_id"] == f"{record.trace_id:032x}"
+        assert record.attributes["span_id"] == f"{record.span_id:016x}"
+        assert record.attributes["job"] == "test-job"
+        assert logs[0].resource.attributes["service.name"] == "logging-test"
+        assert "correlated log" in output.getvalue()
+        assert "sensitive log" not in output.getvalue()
+        assert "internal log" not in output.getvalue()
+        if log_format == "json":
+            assert json.loads(output.getvalue())["trace_id"] == f"{record.trace_id:032x}"
+        exporter_factory.assert_called_once_with(endpoint="http://logs:4317")
+    finally:
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
+        provider.shutdown()
+        tracer_provider.shutdown()
+
+
+@pytest.mark.parametrize(("exporter", "sdk_disabled"), [("none", False), ("otlp", True)])
+def test_otlp_logging_respects_disabled_settings(monkeypatch, exporter, sdk_disabled):
+    exporter_factory = Mock()
+    monkeypatch.setattr("opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter", exporter_factory)
+    monkeypatch.setattr(settings, "otel_logs_exporter", exporter)
+    monkeypatch.setattr(settings, "otel_sdk_disabled", sdk_disabled)
+    root = logging.getLogger()
+    saved_handlers, saved_level = list(root.handlers), root.level
+    try:
+        initialize_logging()
+        exporter_factory.assert_not_called()
+    finally:
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
 
 
 def test_initialize_logging_wires_sanitizer_into_chain() -> None:

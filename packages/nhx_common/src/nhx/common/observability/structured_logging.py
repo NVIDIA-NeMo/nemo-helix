@@ -205,8 +205,7 @@ def initialize_logging(resource: Resource | None = None):
 
     final_processors: list = [structlog.stdlib.ProcessorFormatter.remove_processors_meta]
 
-    # TODO: Reenable with more granular controls
-    if False and settings.otel_logs_exporter == "otlp":
+    if not settings.otel_sdk_disabled and settings.otel_logs_exporter == "otlp":
         # NOTE: deferred imports -- only reached when OTEL log export is enabled
         from opentelemetry._logs import set_logger_provider
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter

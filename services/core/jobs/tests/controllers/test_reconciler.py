@@ -3,6 +3,7 @@
 
 import datetime
 import threading
+import logging
 import time
 from functools import partial
 from types import SimpleNamespace
@@ -31,6 +32,10 @@ from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.reconciler import JobReconciler
 from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from services.core.jobs.tests.controllers.client_mocks import data_response, paginated_response
 
@@ -185,6 +190,60 @@ def test_job_reconciler_marks_itself_unhealthy_after_transport_failure(
     job_reconciler.step()
 
     assert not job_reconciler.is_healthy
+
+
+@pytest.mark.parametrize("has_steps", [False, True])
+def test_reconciler_tick_traces_work_and_correlates_summary_logs(
+    backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, monkeypatch, caplog, has_steps
+):
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr("nhx.core.jobs.controllers.reconciler.tracer", provider.get_tracer(__name__))
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_active] if has_steps else [])
+    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    log_contexts = {}
+
+    class CaptureContext(logging.Handler):
+        def emit(self, record):
+            log_contexts[record.getMessage()] = trace.get_current_span().get_span_context()
+
+    logger = logging.getLogger("nhx.core.jobs.controllers.reconciler")
+    handler = CaptureContext()
+    logger.addHandler(handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=logger.name):
+            reconciler.step()
+        spans = exporter.get_finished_spans()
+        root = next(span for span in spans if span.name == "jobs_reconciler/step")
+        assert root.parent is None
+        children = [span for span in spans if span is not root]
+        assert any(span.name == "jobs_reconciler/fetch_steps_for_reconciliation" for span in children)
+        assert any(span.name == "jobs_reconciler/cleanup_backend_steps" for span in children)
+        assert any(span.name == "jobs_reconciler/reconcile_job_step" for span in children) == has_steps
+        assert all(span.context.trace_id == root.context.trace_id for span in children)
+        assert all(span.parent is not None and span.parent.span_id == root.context.span_id for span in children)
+        summary = log_contexts["Reconciler fetched job steps"]
+        assert summary.is_valid
+        assert summary.trace_id == root.context.trace_id
+        assert summary.span_id == root.context.span_id
+        assert log_contexts["Running job cleanup for expired job steps"] == summary
+        assert not trace.get_current_span().get_span_context().is_valid
+    finally:
+        logger.removeHandler(handler)
+        provider.shutdown()
+
+
+def test_reconciler_stopped_tick_does_not_emit_spans(backend_registry, mock_nemo_client, monkeypatch):
+    tracer = MagicMock()
+    monkeypatch.setattr("nhx.core.jobs.controllers.reconciler.tracer", tracer)
+    stop_signal = threading.Event()
+    stop_signal.set()
+    reconciler = JobReconciler(backend_registry, mock_nemo_client, stop_signal=stop_signal)
+
+    reconciler.step()
+
+    tracer.start_as_current_span.assert_not_called()
 
 
 def _aged_step(
