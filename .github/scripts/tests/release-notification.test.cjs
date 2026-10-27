@@ -77,7 +77,10 @@ test("RC blocks preserve every artifact, version and URL in the compact layout",
     `:python: *Python wheels* · \`${env.WHEEL_VERSION}\`\n<https://example.test/rc/nemo-helix/|nemo-helix>`,
   );
   const images = blocks.find((b) => b.type === "container");
-  assert.equal(images.title.text, ":docker_: Containers · 13 images");
+  assert.equal(images.title, undefined);
+  const heading = images.rich_text_title.elements[0].elements;
+  assert.deepEqual(heading[0], { type: "emoji", name: "docker_" });
+  assert.equal(heading[1].text, " Containers · 13 images");
   assert.equal(images.is_collapsible, true);
   assert.equal(images.default_collapsed, true);
   assert.equal(images.subtitle.text, `Tag: \`${env.RELEASE_LABEL}\``);
@@ -174,7 +177,11 @@ test("artifact subsets omit unselected sections and keep accurate counts", async
     const { blocks } = await notification(releaseEnv(overrides));
     const content = JSON.stringify(blocks);
     for (const emoji of ["python", "docker_", "helm"]) {
-      assert.equal(content.includes(`:${emoji}:`), emoji === selected);
+      const present =
+        emoji === "docker_"
+          ? blocks.some((block) => block.type === "container")
+          : content.includes(`:${emoji}:`);
+      assert.equal(present, emoji === selected);
     }
     assert.equal(blocks.at(-1).elements[0].text, count);
     for (const block of blocks) {
