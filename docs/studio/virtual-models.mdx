@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "NeMo Studio Virtual Models"
-description: "Inspect inference routes in Studio when the Guardrails preview feature is enabled."
+description: "Inspect inference routes and their middleware pipelines in Studio."
 ---
 
-<Warning>
+<Note>
 
-The Virtual Models Studio UI is a preview feature and is disabled by default. An administrator must set `studio.feature_flags.guardrails_enabled: true` in the platform configuration and restart Studio before **Models > Virtual Models** appears. This flag also enables **Governance > Guardrails**.
+**Models > Virtual Models** appears when the Guardrails preview feature or agent optimizations are enabled. Restart Studio after changing either flag.
 
-</Warning>
+</Note>
 
 Use **Models > Virtual Models** in the NeMo Studio workspace sidebar to inspect inference routes and their middleware pipelines for the selected workspace.
 
@@ -18,14 +18,14 @@ Use **Models > Virtual Models** in the NeMo Studio workspace sidebar to inspect 
 
 The Virtual Models table shows all user-created virtual models in the current workspace. Controller-managed passthrough routes are hidden. Select a row or choose **View** from the row actions menu to open the virtual model detail page.
 
-| Action | Where | Result |
-|--------|-------|--------|
-| View details | Select a row or row actions > **View** | Opens the virtual model detail page on the **Details** tab. |
-| Chat | Row actions > **Chat** | Opens the virtual model detail page on the **Chat** tab. |
-| Search | **Search by name...** search bar | Filters the list to virtual models whose names match the query. |
-| Filter by base model | **Default Model** filter | Shows only virtual models backed by the selected base model. |
-| Filter by date | **Created At** filter | Narrows results to a specific creation date range. |
-| Delete a virtual model | Row actions > **Delete** | Removes the virtual model and its middleware pipelines after you confirm. |
+| Action                 | Where                                  | Result                                                                    |
+| ---------------------- | -------------------------------------- | ------------------------------------------------------------------------- |
+| View details           | Select a row or row actions > **View** | Opens the virtual model detail page on the **Details** tab.               |
+| Chat                   | Row actions > **Chat**                 | Opens the virtual model detail page on the **Chat** tab.                  |
+| Search                 | **Search by name...** search bar       | Filters the list to virtual models whose names match the query.           |
+| Filter by base model   | **Default Model** filter               | Shows only virtual models backed by the selected base model.              |
+| Filter by date         | **Created At** filter                  | Narrows results to a specific creation date range.                        |
+| Delete a virtual model | Row actions > **Delete**               | Removes the virtual model and its middleware pipelines after you confirm. |
 
 The table shows each virtual model's name, default model, middleware call count (or **None**), and creation time.
 
@@ -39,23 +39,23 @@ Selecting a row opens the detail page for a single virtual model. The page has t
 
 The **Details** tab lists the following fields.
 
-| Field | Description |
-|-------|-------------|
-| Created | When the virtual model was first created. |
-| Default model | The backend model entity IGW routes requests to, if configured. When omitted, a request middleware plugin handles backend routing. |
+| Field           | Description                                                                                                                                                                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Created         | When the virtual model was first created.                                                                                                                                                                                                                                                     |
+| Default model   | The backend model entity IGW routes requests to, if configured. When omitted, a request middleware plugin handles backend routing.                                                                                                                                                            |
 | Autoprovisioned | Whether the route is controller-managed. The Models controller deletes controller-managed virtual models once no ModelProvider serves the matching entity; setting this field manually opts the virtual model into that cleanup behavior. Controller-managed models are hidden from the list. |
-| Override proxy | An optional plugin-provided proxy identifier (format: `plugin-name.proxy-name`) that overrides the default IGW proxy, if set. |
-| Models | Backend model entries associated with this virtual model, displayed as `model (backend_format)`. |
+| Override proxy  | An optional plugin-provided proxy identifier (format: `plugin-name.proxy-name`) that overrides the default IGW proxy, if set.                                                                                                                                                                 |
+| Models          | Backend model entries associated with this virtual model, displayed as `model (backend_format)`.                                                                                                                                                                                              |
 
 ### Middleware
 
 The **Details** tab shows three ordered middleware pipelines applied to every request through this virtual model.
 
-| Pipeline | When it runs |
-|----------|-------------|
-| Request middleware | Before the request reaches the backend model. |
-| Response middleware | After the model responds, before the response is returned to the caller. |
-| Post-response middleware | After the response is returned to the caller. |
+| Pipeline                 | When it runs                                                             |
+| ------------------------ | ------------------------------------------------------------------------ |
+| Request middleware       | Before the request reaches the backend model.                            |
+| Response middleware      | After the model responds, before the response is returned to the caller. |
+| Post-response middleware | After the response is returned to the caller.                            |
 
 Each middleware entry shows its plugin name, config type, config reference, and inline config payload if one is set. A guardrails middleware entry, for example, shows the plugin `nemo-guardrails`, the config type `guardrail_config`, and a config ID pointing to a workspace guardrail configuration.
 
