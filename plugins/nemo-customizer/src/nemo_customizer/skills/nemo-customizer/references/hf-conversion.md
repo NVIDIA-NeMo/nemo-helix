@@ -3,24 +3,35 @@
 
 # Hugging Face dataset conversion
 
-Run from **nemo-helix** git root: `uv run python …` (plugin brings `datasets` + `transformers`).
-
-Do **not** ask the user for local paths when they gave an HF dataset id — convert and upload in the same session.
+Run from **nemo-helix** git root: `uv run python …` (the workspace environment has `datasets` and `huggingface_hub`).
 
 ## Chat-template check
 
+Read the template from the tokenizer's config files. Unlike loading the tokenizer, this downloads one small file and runs no code from the repo.
+
 ```python
-from transformers import AutoTokenizer
-has_chat = bool(getattr(AutoTokenizer.from_pretrained("<hf-repo>", trust_remote_code=True), "chat_template", None))
+import json
+from huggingface_hub import file_exists, hf_hub_download
+
+
+def has_chat_template(repo: str) -> bool:
+    """True when the repo's tokenizer ships a chat template."""
+    if file_exists(repo, "tokenizer_config.json"):
+        with open(hf_hub_download(repo, "tokenizer_config.json"), encoding="utf-8") as f:
+            if json.load(f).get("chat_template"):
+                return True
+    # Newer tokenizers keep the template in its own file.
+    return file_exists(repo, "chat_template.jinja")
 ```
 
-If the model entity already exists: `nemo models get <entity> --workspace default` → use `spec.is_chat` or `spec.chat_template` instead of re-downloading tokenizer weights.
+A gated repo needs `HF_TOKEN` in the shell that runs this.
+
+If the model entity already exists: `nemo models get <entity> --workspace default` → use `spec.is_chat` or `spec.chat_template` instead of downloading anything.
 
 ## Conversion script (adapt `to_chat` per dataset)
 
 ```python
 from datasets import load_dataset
-from transformers import AutoTokenizer
 import json
 from pathlib import Path
 
@@ -28,7 +39,7 @@ HF_REPO = "<hf-repo>"
 HF_DATASET = "<hf-dataset>"   # e.g. tau/commonsense_qa
 DATASET_NAME = HF_DATASET.split("/")[-1].lower()   # fileset name, e.g. commonsense_qa
 
-has_chat = bool(getattr(AutoTokenizer.from_pretrained(HF_REPO, trust_remote_code=True), "chat_template", None))
+has_chat = has_chat_template(HF_REPO)   # from the check above
 
 def to_chat(ex):
     # MCQA example (tau/commonsense_qa):
@@ -54,7 +65,7 @@ for split in ("train", "validation"):
                 f.write(json.dumps(convert(ex)) + "\n")
 ```
 
-Then upload (see main skill). Validate with `nemo files list <DATASET_NAME> --workspace default`.
+Then upload it (`SKILL.md` § **Workflow** step 2). Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
 ## Mapping to job JSON
 

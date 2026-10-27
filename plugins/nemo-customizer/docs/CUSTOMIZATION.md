@@ -41,3 +41,28 @@ automodel = "nemo_automodel_plugin.contributor:AutomodelContributor"
 ## Jobs
 
 Use `add_job_routes(YourJob, service_name="customization", ...)` so Jobs records use `source=customization`.
+
+## Skills
+
+The plugin ships two skills under `src/nemo_customizer/skills/`: `nemo-customizer` (submit and
+monitor training jobs) and `nemo-gym-environments` (build GRPO reward environments). They are
+installed into coding agents without the repository, so every path they reference must resolve
+inside the installed skill. Repository paths belong here, not in the skills.
+
+When a schema or validator changes, update the skill text from these sources. `nemo customization
+<plugin> explain` prints the same schemas from an installed build.
+
+| Topic | Source |
+|---|---|
+| Submit schemas | `plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py`, `plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`, `plugins/nemo-rl/src/nemo_rl_plugin/schema.py` |
+| automodel schema → compiler mapping | `services/automodel/src/nhx/automodel/adapter.py`, `services/automodel/src/nhx/automodel/api/v2/jobs/schemas.py` |
+| automodel dataset schema detection | `DatasetSchema` in `services/automodel/` dataset preparation |
+| unsloth canonical schema and training driver | `services/unsloth/src/nhx/unsloth/schemas.py`, `services/unsloth/src/nhx/unsloth/tasks/training/backends/unsloth_sft.py` |
+| rl canonical schema and DPO config builder | `services/rl/src/nhx/rl/schemas.py`, `services/rl/src/nhx/rl/tasks/training/backends/nemo_rl/dpo_config.py` |
+| Gym environment manifest and dataset rows | `services/rl/src/nhx/rl/schemas/environment.py` |
+| Environment validation, converter, `build_policy_model_yaml` | `services/rl/src/nhx/rl/tasks/environment/validate.py`, `convert.py`, `package.py`, `__main__.py` |
+| GRPO example scripts | `scripts/grpo-examples/` |
+
+The JSON files under `plugins/nemo-*/tests/fixtures/` are smoke-test inputs. They set whatever
+makes a test cheap (`max_steps: 20`, a 0.6B model) and cover one path, so never take field sets,
+defaults or recommended values from them, and keep the skills from pointing agents at them.

@@ -181,12 +181,12 @@ After **Training configuration**, branch on output type:
 
 | Output | When | Report section |
 |--------|------|----------------|
-| LoRA adapter | `save_method: lora` (default) | **Using the adapter** — below |
-| Full model | `finetuning_type: all_weights`, `save_method: merged_16bit` / `merged_4bit`, or **rl (DPO)** (always full-weight) | **Using the fine-tuned model** — below |
+| LoRA adapter | `save_method: lora` (default), or GRPO with `finetuning_type: "lora"` | **Using the adapter** — below |
+| Full model | `finetuning_type: all_weights` (including full-weight GRPO), `save_method: merged_16bit` / `merged_4bit`, or **rl (DPO)** (always full-weight) | **Using the fine-tuned model** — below |
 
 ### Using the adapter (LoRA / `save_method: lora`)
 
-**Automodel / unsloth LoRA only** — DPO (rl) never produces an adapter; for rl output use **Using the fine-tuned model** below. Run these discovery commands (parse stdout only; do not pipe `2>&1` into JSON parsers):
+**LoRA adapters only** — DPO never produces an adapter; for full-weight output use **Using the fine-tuned model** below. Run these discovery commands:
 
 1. `nemo models get <model-entity> --workspace default` — confirm `<output.name>` appears under `adapters` with `enabled: true`.
 2. `nemo inference providers list --workspace default -f json` — pick a **READY** provider whose `served_models` includes `default/<model-entity>` (base entity). Record its `name` as `<provider>` (often matches the deployment name).
@@ -263,7 +263,7 @@ uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer
 Uses CHAT `messages` rows unchanged from the training fileset (`messages[:-1]` at inference). Repeat `--adapter` for multi-adapter compare. `--provider` is optional when a READY provider is auto-discovered. Set `NHX_BASE_URL` (or pass `--base-url`) when the platform is not localhost. LoRA only — full SFT / merged outputs need a deployed model entity (see **Using the fine-tuned model**).
 ```
 
-### Using the fine-tuned model (full SFT / merged checkpoint / DPO)
+### Using the fine-tuned model (full SFT / merged checkpoint / DPO / full-weight GRPO)
 
 When `finetuning_type: all_weights`, `save_method` is `merged_16bit` / `merged_4bit`, or the backend is **rl (DPO)**, the job registers a **model** entity at `output.name` with full fine-tuned weights. **Deploy that entity before inference or eval** — full checkpoints are not hot-reloaded onto the base model's LoRA deployment.
 

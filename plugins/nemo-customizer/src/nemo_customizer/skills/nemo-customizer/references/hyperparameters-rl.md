@@ -1,11 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-<!-- NeMo-RL (DPO + GRPO) job JSON reference. Index + source-of-truth: `hyperparameters.md`. Preference dataset formats: `dataset-formats.md` § NeMo-RL. -->
+<!-- NeMo-RL (DPO + GRPO) job JSON reference. Index: `hyperparameters.md`. Preference dataset formats: `dataset-formats.md` § NeMo-RL. -->
 
 # NeMo-RL job JSON (DPO + GRPO)
 
-The `rl` backend (`nemo customization rl --job-json`) runs on a Ray cluster — **Kubernetes runtime only**, full-weight (no LoRA). Schema: `RlJobInput` in `plugins/nemo-rl/src/nemo_rl_plugin/schema.py`. Run `nemo customization rl explain` for the live schema.
+The `rl` backend (`nemo customization rl --job-json`) runs on a Ray cluster — **Kubernetes runtime only**. **DPO is full-weight only; GRPO trains full weights or a LoRA adapter** (§ **LoRA (GRPO only)**). Schema: `RlJobInput`; run `nemo customization rl explain` for the live schema.
 
 Discriminated by `training.type`: `"dpo"` or `"grpo"`. **`training.type` is required** — it is the union discriminator, so a payload that omits it is rejected with `union_tag_not_found` rather than defaulting to DPO.
 
@@ -35,19 +35,7 @@ Discriminated by `training.type`: `"dpo"` or `"grpo"`. **`training.type` is requ
 
 ## GRPO job JSON layout (NeMo Gym)
 
-GRPO needs **two** FileSets: an environment package (code + config that runs a rollout and returns a reward) and a dataset of prompt rows. Building or converting the environment is the bulk of the work and has its own reference — **`gym-environments.md`** covers all three formats (`native-v1`, `wheels-v1`, `adapter-wheels-v1`), how to convert a Prime Intellect / verifiers env, how to package one of Gym's own, validation, and upload.
-
-The short version, for a Prime Intellect hub env, on an **internet-capable host** (training clusters have no hub egress):
-
-```bash
-# Dedicated env, not the project .venv. See gym-environments.md.
-UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
-.venv-conversion/bin/pi-to-gym-conversion \
-  --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
-  --out-dir ./ascii-tree-pkg --validation-fraction 0.1 --upload
-```
-
-That writes the package plus `training.jsonl` / `validation.jsonl` and, with `--upload`, creates both FileSets. Then submit:
+GRPO needs **two** FileSets beyond the model: an environment package (code + config that runs a rollout and returns a reward) and a dataset of Gym rollout rows. The **nemo-gym-environments** skill builds, converts, validates and uploads both. Then submit:
 
 ```json
 {
@@ -66,9 +54,9 @@ That writes the package plus `training.jsonl` / `validation.jsonl` and, with `--
 }
 ```
 
-- `environment` is **required** for GRPO — a string ref to a FileSet with `purpose=environment` carrying a valid `nemo-environment.yaml`. Any of the three formats works. See `gym-environments.md`.
-- `dataset` is Gym JSONL (`training.jsonl` required, `validation.jsonl` optional) — rollout rows with the prompt under `responses_create_params.input`, **not** DPO preference triples and **not** `messages[]` at the top level. Schema and conversion: `dataset-formats.md` § **NeMo-RL (GRPO)**.
-- `sandboxed` is **not** a job field — platform config `NHX_RL_SANDBOXED_GYM_DEFAULT` (default `true`). Shared clusters fail closed until OpenSandbox is declared installed (`NHX_SANDBOX_CLUSTER_CAPABLE=true`, Helm `sandboxClusterCapable` — a **platform** setting, not `NHX_RL_*`) and `NHX_RL_JOB_STORAGE_PVC_CLAIM` names the job-storage PVC the Gym sandbox re-mounts for the environment and dataset. Both are checked **at submit** — the job compiler raises and the API returns 422, before any GPU is claimed. See `rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**.
+- `environment` is **required** for GRPO — a string ref to a FileSet with `purpose=environment` carrying a valid `nemo-environment.yaml`, in any of the three formats.
+- `dataset` is Gym JSONL (`training.jsonl` required, `validation.jsonl` optional) — rollout rows, **not** DPO preference triples and **not** `messages[]` at the top level.
+- `sandboxed` is **not** a job field: it is platform config (`NHX_RL_SANDBOXED_GYM_DEFAULT`, default `true`), and so are the two settings submit checks for it (`rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**).
 
 ## Field reference — shared training knobs
 
@@ -84,7 +72,7 @@ That writes the package plus `training.jsonl` / `validation.jsonl` and, with `--
 | `warmup_steps` | `0` | Linear warmup steps. |
 | `optimizer_type` | `null` → `adamw_with_cosine_annealing` | One of `adamw_with_cosine_annealing`, `adam_with_cosine_annealing`, `adamw_with_flat_lr`, `adam_with_flat_lr` (optimizer × LR-scheduler). |
 | `epochs` | `1` | Passes over the dataset. |
-| `max_steps` | `null` | Global step cap. Caps the run at `min(max_steps, epochs × steps_per_epoch)`, so it's safe to combine with `epochs` to stop smoke jobs mid-epoch — omit for real runs. |
+| `max_steps` | `null` | Global step cap. Caps the run at `min(max_steps, epochs × steps_per_epoch)`, so combined with `epochs` it stops a run mid-epoch. |
 | `val_check_interval` | `null` | Float ≤ 1.0 = fraction of epoch; > 1.0 = step count. |
 | `val_at_end` | `true` | Run a final validation pass after the last step. Keep enabled: it makes the final checkpoint carry validation metrics so best-checkpoint selection (`metric_name`/`keep_top_k`) works — otherwise NeMo-RL warns and falls back to the latest checkpoint. Set `false` only to skip the extra eval. **GRPO:** ignored when the dataset ships no `validation.jsonl` — the compiler disables validation rather than fail in `setup()`. |
 | `keep_top_k` | `1` | Number of best checkpoints to retain (DPO ranks by validation loss; GRPO by `val:total_reward/mean`). |

@@ -1,11 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-<!-- Unsloth job JSON reference. Index + integrations + source-of-truth: `hyperparameters.md`. Batch sizing (single GPU): `batch-sizing.md`. -->
+<!-- Unsloth job JSON reference. Index + integrations: `hyperparameters.md`. Batch sizing (single GPU): `batch-sizing.md`. -->
 
 # Unsloth job JSON
 
-Job JSON for `nemo customization unsloth --job-json` uses **`UnslothJobInput`** (`plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). The canonical post-transform shape lives in `services/unsloth/src/nhx/unsloth/schemas.py` (`UnslothJobOutput`) and is what the training driver consumes in the GPU container.
+Job JSON for `nemo customization unsloth --job-json` uses **`UnslothJobInput`**. Only fields in that schema are accepted (`extra="forbid"`).
 
 **Schema dump:**
 
@@ -179,7 +179,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | Field | Default | Notes |
 |-------|---------|-------|
 | `epochs` | `1` | Full passes over the training data. Ignored when `max_steps` is set. |
-| `max_steps` | `null` | Total optimizer steps. When set, it overrides `epochs` and the trainer runs exactly this many steps. Setting both is valid. Use it for smoke tests; omit it for real runs so `epochs` controls duration. |
+| `max_steps` | `null` | Total optimizer steps. When set, it overrides `epochs` and the trainer runs exactly this many steps. Setting both is valid. |
 | `warmup_steps` | `0` | Linear warmup. Mutex with `warmup_ratio`. |
 | `warmup_ratio` | `null` | Fractional warmup over total steps. Mutex with `warmup_steps`. |
 | `lr_scheduler_type` | `"linear"` | `"linear"`, `"cosine"`, `"constant"`, `"constant_with_warmup"`, `"cosine_with_restarts"`. |
@@ -189,7 +189,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | `eval_steps` | `null` | If set with `validation_path`, eval every N steps. When `null` and `validation_path` is set, the training driver defaults to **one validation pass per effective epoch** at `max(1, effective_steps - 1)` (same effective-step cap as automodel's default `val_check_interval`). |
 | `seed` | `3407` | Trainer seed (`TrainingArguments.seed`). |
 
-**Hard mutex enforced by the schema:** `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time. `epochs` and `max_steps` are not mutually exclusive; keep both when a user sets both.
+**Hard mutex enforced by the schema:** `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time. `epochs` and `max_steps` are not mutually exclusive.
 
 ### Unsloth `batch`
 
