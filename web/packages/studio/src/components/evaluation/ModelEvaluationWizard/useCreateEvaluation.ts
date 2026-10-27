@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage, isConflictError } from '@nemo/common/src/api/common/utils';
+import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
 import { useEvalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
@@ -19,16 +20,50 @@ import {
   MODEL_EVAL_CONFIG_DESCRIPTION,
   serializeEvalConfig,
 } from '@studio/components/evaluation/submitEvaluationJob';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
+import { buildModelPayload, parseEvaluationModelValue } from '@studio/util/evaluations';
 import { toWorkspaceModelRef } from '@studio/util/models';
 import { useNavigate } from 'react-router';
 
-export function useCreateEvaluation() {
+/**
+ * @param selectedModel The current `model` form value, watched by the caller. An
+ *   adapter's parent entity has to be fetched before submit, for the workspace
+ *   its composite name carries -- and a hook cannot run inside the submit
+ *   handler.
+ */
+export function useCreateEvaluation(selectedModel: string = '') {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const toast = useToast();
   const { mutateAsync: createEvaluateJob, isPending } = useEvalsCreateEvaluateJob();
+
+  const { modelUrn, adapterName } = parseEvaluationModelValue(selectedModel);
+  const parentModel = useModelEntity(modelUrn, { enabled: Boolean(adapterName) });
+
+  /** The run's `spec.target`, or undefined once the failure has been reported.
+   *
+   *  A model is sent as a `workspace/name` ref and resolved server-side, which
+   *  is what keeps the browser's origin out of the job's URL. A ref has no form
+   *  for a LoRA adapter -- it resolves by looking up a VirtualModel or model
+   *  entity of that name, and an adapter has neither -- so an adapter stays an
+   *  inline model.
+   */
+  const buildTarget = (modelValue: string): string | { url: string; name: string } | undefined => {
+    const { modelUrn, adapterName: adapter } = parseEvaluationModelValue(modelValue);
+    if (!adapter) {
+      return toWorkspaceModelRef(workspace, modelUrn);
+    }
+    const built = buildModelPayload(modelValue, parentModel ? [parentModel] : [], PLATFORM_BASE_URL);
+    if (!built.ok) {
+      toast.error(built.error);
+      return undefined;
+    }
+    // The adapter branch always returns an inline Model; only the no-adapter
+    // branch, handled above, yields a bare ModelRef string.
+    return built.payload as { url: string; name: string };
+  };
 
   const createEvaluation = async (
     values: EvaluationFormValues,
@@ -42,6 +77,12 @@ export function useCreateEvaluation() {
     // takes the name the user typed, verbatim.
     const reusing = Boolean(values.configSource) && values.configSource !== NEW_CONFIG;
     const fileset = reusing ? values.configSource : values.name;
+
+    // An adapter is served by its parent's provider, not by a model route of its
+    // own, so it needs the provider-proxy target `buildModelPayload` builds. A
+    // plain model keeps the model-entity gateway URL it has always used.
+    const target = buildTarget(values.model);
+    if (!target) return;
 
     try {
       if (!reusing) {
@@ -83,9 +124,7 @@ export function useCreateEvaluation() {
           // starts returning 503 "ResourceExhausted: Worker local total request
           // limit reached".
           params: { ignore_request_failure: false, parallelism: 4 },
-          // A `workspace/name` ref: the server resolves it to a gateway route the
-          // job can reach. A URL built here would carry the browser's origin.
-          target: toWorkspaceModelRef(workspace, values.model),
+          target,
           prompt_template: spec.prompt_template,
           ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
         },

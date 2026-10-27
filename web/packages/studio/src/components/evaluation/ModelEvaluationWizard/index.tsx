@@ -294,7 +294,8 @@ const ModelEvaluationWizardInner: FC<{
 }> = ({ workspace, step, setStep, mode, onModeChange }) => {
   const form = useFormContext<EvaluationFormValues>();
   const bindings = useDatasetBindings();
-  const { createEvaluation, isPending } = useCreateEvaluation();
+  const selectedModel = useWatch({ control: form.control, name: 'model' });
+  const { createEvaluation, isPending } = useCreateEvaluation(selectedModel);
   const configSource = useWatch({ control: form.control, name: 'configSource' });
 
   const reusing = mode === EXISTING_CONFIG;
