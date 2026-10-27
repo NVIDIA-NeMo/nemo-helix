@@ -87,6 +87,17 @@ class BuilderConfig(NemoConfig):
         description="The one the push step runs on, the only step that holds the registry credential and signing key.",
     )
 
+    max_concurrent_builds: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Most build jobs running at once, across every workspace. A submit over it returns its images `queued`, "
+            "and the `builder-queue` controller starts each job, oldest first, as a running one ends. Size it to the "
+            "build namespace's ResourceQuota: each running build holds a sandbox plus a step pod. Null starts every "
+            "job as it is submitted."
+        ),
+    )
+
     registry: str | None = Field(
         default=None,
         description=(

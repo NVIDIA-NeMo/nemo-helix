@@ -39,11 +39,16 @@ Build pods run in another namespace, so the platform's URL they get must be name
 {{- if .Values.builder.enabled }}
 platform:
   base_url: {{ printf "http://%s.%s.svc:%s" (include "nhx-api.api-servicename" .) .Release.Namespace (toString .Values.api.service.port) | quote }}
-{{- if .Values.builder.devRegistry.enabled }}
+{{- if or .Values.builder.devRegistry.enabled .Values.builder.maxConcurrentBuilds }}
 builder:
+  {{- if .Values.builder.devRegistry.enabled }}
   # Fully qualified: registry clients, cosign's among them, speak plain HTTP by default only to a `.local` host.
   registry: {{ printf "http://%s.%s.svc.cluster.local:5000" (include "nemo-helix.builder.devRegistryName" .) .Release.Namespace | quote }}
   {{- end }}
+  {{- with .Values.builder.maxConcurrentBuilds }}
+  max_concurrent_builds: {{ . | int }}
+  {{- end }}
+{{- end }}
 {{- end }}
 {{- end -}}
 
