@@ -6,11 +6,11 @@
 Submit only accepts a run (its images are built and frozen in the plan); this
 controller does the rest, in cycles of two phases:
 
-- **Phase 1** settles every open run, oldest first: it creates the run's members (one per task, queued in
+- **The settle phase** settles every open run, oldest first: it creates the run's members (one per task, queued in
   ``image_ready``), resolves create intents, settles members whose Job ended, stops a cancelled or expired run,
   and once every member has settled ends the run or finalizes it (bundle Job, result record). Each run reports
   a :class:`RunTally`: the task-Job slots it holds and the tasks it has queued.
-- **Phase 2** hands out the free slots (:func:`allocate`): each goes to the creator holding the fewest, and
+- **The grant phase** hands out the free slots (:func:`allocate`): each goes to the creator holding the fewest, and
   within that creator to its oldest run below its caps. It registers in grant order, then retries pending
   creates, which already hold a slot.
 
@@ -170,7 +170,7 @@ class JobsUnavailableError(Exception):
 class JobsBreaker:
     """The first Jobs timeout or connection error ends the Jobs calls it guards, until the next cycle.
 
-    Phase 1 and the stuck-Job reads share one; each phase-2 drain has its own. A fast 5xx is an answer, not a
+    Settling and the stuck-Job reads share one; each grant-phase drain has its own. A fast 5xx is an answer, not a
     timeout, and doesn't trip it.
     """
 
@@ -259,15 +259,15 @@ class StuckJob:
 
 @dataclass
 class _RunState:
-    """One open run through one cycle: what phase 1 learned, and what phase 2 needs to register its tasks."""
+    """One open run through one cycle: what settling learned, and what the grant phase needs to register its tasks."""
 
     run: TasksetRunEntity
     creator: str
     members: list[TasksetRunMemberEntity]
     plan: TasksetRunPlan | None = None
     cap: int | None = 0
-    no_grant: bool = True  # stopping, finalizing, plan unavailable, or an error: phase 2 skips the run
-    missing: set[str] = field(default_factory=set)  # intents whose Job read 404 this cycle: phase 2 retries them
+    no_grant: bool = True  # stopping, finalizing, plan unavailable, or an error: the grant phase skips the run
+    missing: set[str] = field(default_factory=set)  # intents whose Job read 404 this cycle: granting retries them
     matched: set[str] = field(default_factory=set)  # members whose running Job read as theirs (job_id) this pass
     action: str = "waiting"
 
@@ -296,7 +296,7 @@ class CycleReport:
     jobs_timeouts: int = 0
     jobs_reads: int = 0  # Jobs read requests: lists, GETs, results, step listings
     created: int = 0
-    phase2_skipped: str | None = None
+    grant_skipped: str | None = None
     grants: list[str] = field(default_factory=list)  # run names in grant order, as allocate() returned them
 
 
@@ -449,7 +449,7 @@ class TasksetRunReconciler:
             runs = await self.store.list_open_runs()
         except Exception:
             logger.exception("Listing open taskset runs failed; skipping this cycle")
-            report.phase2_skipped = "open runs couldn't be listed"
+            report.grant_skipped = "open runs couldn't be listed"
             return report
         now = self._clock()
         breaker = JobsBreaker()
@@ -481,7 +481,7 @@ class TasksetRunReconciler:
                 if state.action not in {"waiting", "bundling"}:
                     logger.info("Run %s/%s: %s", run.workspace, run.name, state.action)
 
-        await asyncio.gather(*(worker() for _ in range(self.config.phase1_concurrency)))
+        await asyncio.gather(*(worker() for _ in range(self.config.settle_concurrency)))
         if stopped:
             return report
         ordered = [states[run.id] for run in runs if run.id in states]  # oldest first, as listed
@@ -489,20 +489,20 @@ class TasksetRunReconciler:
         stuck_by_creator = Counter(entry.creator for entry in self.stuck.values())
         free = task_slots(tallies, stuck_by_creator, self.config)
         if listing_failed:
-            report.phase2_skipped = f"members of {', '.join(listing_failed)} couldn't be listed"
-        # A tripped breaker doesn't skip phase 2: it bounds itself (each drain ends at its first ambiguous create),
+            report.grant_skipped = f"members of {', '.join(listing_failed)} couldn't be listed"
+        # A tripped breaker doesn't skip granting: it bounds itself (each drain ends at its first ambiguous create),
         # and a single Job whose GET hangs must not stop every grant in the cluster.
         elif self._stop_requested():
-            report.phase2_skipped = "shutting down"
+            report.grant_skipped = "shutting down"
         else:
             await self._hand_out(ordered, tallies, free, stuck_by_creator, report)
         self._report(report, ordered, stuck_by_creator, breaker, now, started, runs)
         return report
 
-    # ---- phase 1 ---------------------------------------------------------------------------------------
+    # ---- settle phase -----------------------------------------------------------------------------------
 
     async def _settle(self, run: TasksetRunEntity, now: datetime, breaker: JobsBreaker) -> _RunState:
-        """Phase 1 for one run. Raises only when its members can't all be listed; every other exit reports a tally."""
+        """Settle one run. Raises only when its members can't all be listed; every other exit reports a tally."""
         members = await self.store.list_all_members(run)
         state = _RunState(run=run, creator=run.created_by or DEVELOPMENT_CALLER, members=members)
         try:
@@ -640,7 +640,7 @@ class TasksetRunReconciler:
             logger.debug("Run %s: reading intent %s failed: %s", state.run.name, request.name, exc)
             return member, None
         if job is None:
-            state.missing.add(member.name)  # pending; phase 2 retries the create, a stop may settle it
+            state.missing.add(member.name)  # pending; the grant phase retries the create, a stop may settle it
         elif found == "ours":
             registered = await self.store.update_member(
                 member, phase=MemberPhase.REGISTERED, job_id=job.id, job_status=job.status
@@ -885,7 +885,7 @@ class TasksetRunReconciler:
                 logger.info("Stuck Job %s/%s ended or is gone; no longer counted", entry.workspace, entry.name)
                 del self.stuck[key]
 
-    # ---- phase 2 ---------------------------------------------------------------------------------------
+    # ---- grant phase ------------------------------------------------------------------------------------
 
     async def _hand_out(
         self,
@@ -895,7 +895,7 @@ class TasksetRunReconciler:
         stuck_by_creator: Counter[str],
         report: CycleReport,
     ) -> None:
-        """Phase 2: register in ``allocate()``'s grant order, then retry pending creates, within one budget.
+        """The grant phase: register in ``allocate()``'s grant order, then retry pending creates, within one budget.
 
         Every create attempt, a grant or a retry, spends one of ``max_creates_per_cycle``: creates are sequential
         (~3 s each in AC 9.2), so the budget bounds the cycle. Retries get up to half of it while grants are due
@@ -1034,7 +1034,7 @@ class TasksetRunReconciler:
             time.monotonic() - started,
             report.jobs_timeouts,
             report.jobs_reads,
-            f", phase 2 skipped: {report.phase2_skipped}" if report.phase2_skipped else "",
+            f", grant phase skipped: {report.grant_skipped}" if report.grant_skipped else "",
         )
 
 

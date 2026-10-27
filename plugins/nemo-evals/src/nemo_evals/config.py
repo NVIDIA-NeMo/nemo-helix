@@ -160,11 +160,11 @@ class RunControllerConfig(BaseModel):
             "controller's 30 s create timeout."
         ),
     )
-    phase1_concurrency: int = Field(
+    settle_concurrency: int = Field(
         default=8,
         ge=1,
         description=(
-            "Open runs settled at once in a cycle's first phase (reads, settles, stops, bundles). It takes no slot, "
+            "Open runs settled at once in a cycle's settle phase (reads, settles, stops, bundles). It takes no slot, "
             "so the caps don't depend on it; 1 settles them one after another."
         ),
     )

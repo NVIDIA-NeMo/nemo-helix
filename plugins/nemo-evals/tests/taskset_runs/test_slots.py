@@ -81,8 +81,8 @@ def test_past_grace_and_the_refusal_restore():
 
 def test_phase_1_concurrency_and_the_create_budget_default_to_8_and_10():
     config = RunControllerConfig()
-    assert (config.phase1_concurrency, config.max_creates_per_cycle) == (8, 10)
+    assert (config.settle_concurrency, config.max_creates_per_cycle) == (8, 10)
     with pytest.raises(ValidationError):
-        RunControllerConfig(phase1_concurrency=0)
+        RunControllerConfig(settle_concurrency=0)
     with pytest.raises(ValidationError):
         RunControllerConfig(max_creates_per_cycle=1)  # 1 // 2 would reserve nothing for retries

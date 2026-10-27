@@ -319,7 +319,7 @@ async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_sub
 
 
 async def test_service_client_lists_jobs_without_any_binding(auth_subprocess_platform: str) -> None:
-    """Phase 1's one list per run needs no binding either: it finds the run's Job, and leaves out a name with none."""
+    """Settling's one list per run needs no binding either: it finds the run's Job, and leaves out a name with none."""
     async with _controller_client(auth_subprocess_platform) as service:
         space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
         task_job = f"{run.name}-task-0"

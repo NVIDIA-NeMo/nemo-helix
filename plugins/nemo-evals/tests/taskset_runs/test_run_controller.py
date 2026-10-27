@@ -639,7 +639,9 @@ async def test_a_run_whose_jobs_client_wont_open_for_its_creates_doesnt_stop_the
     async def failing_for_a_creates(workspace, run):
         if run is not None:
             opens[run.name] = opens.get(run.name, 0) + 1
-            if run.name == a.name and opens[a.name] == 2:  # phase 1's open worked; phase 2's fails (no token)
+            if (
+                run.name == a.name and opens[a.name] == 2
+            ):  # the settle phase's open worked; the grant phase's fails (no token)
                 raise RuntimeError("token unavailable")
         async with real(workspace, run) as inner:
             yield inner
@@ -988,7 +990,7 @@ async def test_a_failed_list_reads_the_runs_jobs_one_at_a_time_until_every_one_a
 
 
 async def test_a_list_skipped_by_another_runs_timeout_keeps_its_run_on_one_list(make_harness, harbor_plan, jobs):
-    harness = make_harness(phase1_concurrency=1)
+    harness = make_harness(settle_concurrency=1)
     for name in ("run-a", "run-b"):
         await harness.submit(sized(harbor_plan, 1), name=name)
     await harness.cycle()
@@ -1039,8 +1041,8 @@ async def test_a_jobs_timeout_in_phase_1_stops_its_reads_but_not_the_grants(make
     jobs.script("list", timeout())
     jobs.calls.clear()
     report = await harness.cycle()
-    # One list, then the cutoff; phase 2 bounds itself, so a hanging read doesn't stop the free slot's grant.
-    assert jobs.calls == ["list", "create"] and report.jobs_timeouts == 1 and report.phase2_skipped is None
+    # One list, then the cutoff; the grant phase bounds itself, so a hanging read doesn't stop the free slot's grant.
+    assert jobs.calls == ["list", "create"] and report.jobs_timeouts == 1 and report.grant_skipped is None
     assert await harness.phases(run) == ["registered"] * 3  # members keep their state
     assert await harness.phases(later) == ["registered"]
 
@@ -1477,7 +1479,7 @@ async def test_a_start_write_slower_than_the_budget_sends_no_job(harness, harbor
     assert stored.error == "1 of 1 tasks expired at the execution deadline, 1 of them still queued"
 
 
-# ---- 20 open runs: phase 1 settles runs concurrently, phase 2 spends one create budget --------------------
+# ---- 20 open runs: runs settle concurrently, the grant phase spends one create budget ------------------------
 
 CONFLICT = http_error(ConflictError, 409, "scripted conflict")  # with no Job under the name: the create stays pending
 
@@ -1494,8 +1496,8 @@ def budget(harness: Harness, creates: int, **caps: Any) -> None:
     harness.reconciler.config = config(max_creates_per_cycle=creates, **caps)
 
 
-async def test_phase_1_settles_up_to_phase1_concurrency_runs_at_once(make_harness, harbor_plan, jobs):
-    harness = make_harness(phase1_concurrency=4)
+async def test_settle_phase_settles_up_to_settle_concurrency_runs_at_once(make_harness, harbor_plan, jobs):
+    harness = make_harness(settle_concurrency=4)
     for n in range(20):
         await harness.submit(sized(harbor_plan, 1), name=f"run-{n:02}")
     settle = harness.reconciler._settle
@@ -1517,7 +1519,7 @@ async def test_phase_1_settles_up_to_phase1_concurrency_runs_at_once(make_harnes
 
 
 async def test_one_runs_hanging_list_never_starves_the_others_finished_jobs(make_harness, harbor_plan, jobs):
-    harness = make_harness(phase1_concurrency=8)
+    harness = make_harness(settle_concurrency=8)
     runs = [await harness.submit(sized(harbor_plan, 1), name=f"run-{n:02}") for n in range(20)]
     await harness.cycle()
     bad, others = runs[0], runs[1:]
@@ -1531,7 +1533,7 @@ async def test_one_runs_hanging_list_never_starves_the_others_finished_jobs(make
 
 
 async def test_workers_take_runs_in_a_rotation_that_moves_by_one_each_cycle(make_harness, harbor_plan, jobs):
-    harness = make_harness(phase1_concurrency=1)
+    harness = make_harness(settle_concurrency=1)
     runs = [await harness.submit(sized(harbor_plan, 1), name=f"run-{n}") for n in range(3)]
     taken: list[list[str]] = []
     settle, refresh = harness.reconciler._settle, harness.reconciler._refresh_stuck
@@ -1556,7 +1558,7 @@ async def test_workers_take_runs_in_a_rotation_that_moves_by_one_each_cycle(make
 
 async def test_a_shutdown_while_the_first_runs_settle_starts_no_other_run(entity_store, store, jobs, harbor_plan):
     stopping = False
-    harness = Harness(entity_store, store, jobs, config(phase1_concurrency=2))
+    harness = Harness(entity_store, store, jobs, config(settle_concurrency=2))
     harness.reconciler._stop_requested = lambda: stopping
     for n in range(5):
         await harness.submit(sized(harbor_plan, 1), name=f"run-{n}")
@@ -1766,8 +1768,8 @@ async def test_a_member_listing_failure_skips_phase_2(harness, harbor_plan, jobs
 
     monkeypatch.setattr(harness.store, "list_all_members", broken)
     report = await harness.cycle()
-    assert report.phase2_skipped and not jobs.created
-    assert len(await real(await harness.run(other))) == 2  # phase 1 still settled the other run
+    assert report.grant_skipped and not jobs.created
+    assert len(await real(await harness.run(other))) == 2  # the settle phase still settled the other run
 
 
 # ---- the real Jobs adapter ------------------------------------------------------------------------------
