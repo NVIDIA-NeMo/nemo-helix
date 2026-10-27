@@ -78,7 +78,8 @@ class AuthServiceConfig(SharedAuthConfig):
         default_factory=list,
         description=(
             "Additional service principal names allowed for stable account materialization. "
-            "Built-in Helix services and installed plugin services are allowed automatically."
+            "Built-in Helix services, installed plugin services, and installed inference middleware "
+            "are allowed automatically."
         ),
     )
 

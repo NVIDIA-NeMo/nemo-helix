@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
+from nemo_helix_plugin.discovery import discover_entry_points
 from nhx.common.auth.principal_identifier import (
     InvalidPrincipalIdentifier,
     parse_principal_identifier,
@@ -143,6 +144,8 @@ def _available_service_names(config: AuthServiceConfig) -> set[str]:
         names.update(get_available_services().keys())
     except Exception:
         logger.debug("Could not load Helix service registry for service principal allowlist", exc_info=True)
+    # The inference gateway authenticates each middleware it loads as service:<entry-point name>.
+    names.update(discover_entry_points("nemo.inference_middleware").keys())
     return names
 
 
