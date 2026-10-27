@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { deployOnCreateFormSchema } from '@studio/api/agents/useDeployOnCreate';
 import { z } from 'zod';
 
@@ -41,9 +42,15 @@ export const IGNORED_EXTENSIONS = ['.pyc', '.pyo', '.pyd', '.so', '.dylib', '.dl
 
 export const agentNameSchema = z
   .string()
-  .trim()
-  .min(1, 'Name is required')
-  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens');
+  .superRefine((value, ctx) => {
+    if (sanitizeEntityName(value) === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: value ? 'Name must contain at least one letter or number.' : 'Name is required.',
+      });
+    }
+  })
+  .transform((value) => toValidEntityName(value, value));
 
 export const uploadAgentFormSchema = z
   .object({

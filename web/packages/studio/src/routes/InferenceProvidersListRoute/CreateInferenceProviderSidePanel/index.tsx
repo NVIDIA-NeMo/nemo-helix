@@ -15,7 +15,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { ENTITY_NAME_HELP, entityNameSchema } from '@nemo/common/src/utils/entityName';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import {
   getModelsListProvidersQueryKey,
   useModelsCreateProvider,
@@ -37,7 +37,17 @@ import { z } from 'zod';
 const PROVIDERS_PAGE_SIZE = 100;
 
 const createProviderFormSchema = z.object({
-  name: entityNameSchema('Name'),
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value ? 'Name must contain at least one letter or number.' : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
   host_url: z.string().min(1, 'Host URL is required').url('Enter a valid URL').max(2048),
   api_key_secret_name: z.string().max(255).optional().or(z.literal('')),
 });
@@ -123,27 +133,27 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
     },
   });
 
-  const formSchema = useMemo(
-    () =>
-      createProviderFormSchema.refine((data) => !existingNames.has(data.name), {
-        path: ['name'],
-        message: 'A provider with this name already exists.',
-      }),
-    [existingNames]
-  );
-
   const {
     control,
     reset: resetForm,
     handleSubmit,
     setValue,
-    formState: { errors },
+    watch,
+    formState: { errors, touchedFields },
   } = useForm({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(createProviderFormSchema),
     defaultValues,
     disabled: isPending,
-    mode: 'onChange',
+    mode: 'onBlur',
   });
+
+  const rawProviderName = watch('name');
+  const providerPreview = toValidEntityName(rawProviderName ?? '', '');
+  const nameConflict =
+    providerPreview && existingNames.has(providerPreview)
+      ? 'A provider with this name already exists.'
+      : undefined;
+  const nameError = (touchedFields.name ? errors.name?.message : undefined) ?? nameConflict;
 
   const handlePresetChange = useCallback(
     (next: InferenceProviderPresetId) => {
@@ -275,8 +285,14 @@ export const CreateInferenceProviderSidePanel: FC<CreateInferenceProviderSidePan
               name="name"
               label="Name"
               formFieldProps={{
-                slotInfo: ENTITY_NAME_HELP,
-                slotError: errors.name?.message,
+                slotHelp: nameError ? undefined : providerPreview ? (
+                  <>
+                    Your provider will be created as{' '}
+                    <span className="text-primary">{providerPreview}</span>
+                  </>
+                ) : undefined,
+                slotError: nameError,
+                status: nameError ? 'error' : undefined,
               }}
             />
             <ControlledTextInput
