@@ -14,12 +14,16 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunEntity,
     TasksetRunMemberEntity,
     TasksetRunPhase,
+    assert_member_transition,
+    assert_run_transition,
 )
+from nemo_evals.taskset_runs.identifiers import member_name
 from nemo_evals.taskset_runs.plan_storage import PlanDigestMismatchError as PlanDigestMismatchError
 from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorageError
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
-from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
+from nemo_evals.taskset_runs.submission import resolve_deadlines
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
 from nemo_helix_plugin.entities.base import EntityUpdateClientProtocol
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -82,10 +86,12 @@ class RunAcceptance:
         request_digest: Digest of the logical submit request. A same-key retry with
             a different digest raises ``RunRequestConflict``.
         accepted_at: When submit accepted the request; copied onto the run.
-        execution_deadline_at: ``accepted_at`` plus the effective timeout; unfinished
-            tasks expire then. Fixed here so retries do not extend it.
-        finalization_deadline_at: ``execution_deadline_at`` plus operator grace; the
-            final result must be saved by then.
+        timeout_seconds: The effective execution budget, counted from the run's first
+            slot (``TasksetRunStore.start``).
+        execution_deadline_at: ``accepted_at`` plus the queue timeout; the run expires
+            then unless its first task gets a slot. Fixed here so retries do not extend it.
+        finalization_deadline_at: ``execution_deadline_at`` plus the operator grace;
+            ``start`` keeps that grace, so a later config change doesn't move it.
         discard_on_loss: Qualified refs to uniquely named filesets owned only by this
             request (for example its agent-files snapshot). They are deleted, best
             effort, once another request's run is proven to have won; shared
@@ -96,6 +102,7 @@ class RunAcceptance:
     idempotency_key: str
     request_digest: str
     accepted_at: datetime
+    timeout_seconds: int
     execution_deadline_at: datetime
     finalization_deadline_at: datetime
     discard_on_loss: tuple[str, ...] = ()
@@ -215,8 +222,14 @@ class TasksetRunStore:
     share one copy of the run invariants and the retry policy.
     """
 
-    def __init__(self, entities_client: AsyncEntitiesClient, files_client: AsyncFilesClient) -> None:
-        """Production constructor: applies ``_ACCEPT_RETRY_POLICY`` (no 409 retries).
+    def __init__(
+        self,
+        entities_client: AsyncEntitiesClient,
+        files_client: AsyncFilesClient,
+        *,
+        retry: RetryPolicy = _ACCEPT_RETRY_POLICY,
+    ) -> None:
+        """Production constructor: applies ``retry``, by default ``_ACCEPT_RETRY_POLICY`` (no 409 retries).
 
         The policy is applied to a copy of ``entities_client`` before it is wrapped,
         so 5xx and transport errors are still retried but a 409 reaches ``accept``
@@ -226,8 +239,9 @@ class TasksetRunStore:
         Args:
             entities_client: Raw authorized client; its own retry policy is not mutated.
             files_client: Authorized client for the same workspace's plan files.
+            retry: Entity Store retries; the run controller passes none, so one hung call can't hold a cycle.
         """
-        self._bind(EntityClient(entities_client.with_retry(_ACCEPT_RETRY_POLICY)), files_client)
+        self._bind(EntityClient(entities_client.with_retry(retry)), files_client)
 
     @classmethod
     def _with_entity_adapter(cls, entity_client: RunEntityClient, files_client: AsyncFilesClient) -> Self:
@@ -328,6 +342,7 @@ class TasksetRunStore:
             idempotency_key=acceptance.idempotency_key,
             request_digest=acceptance.request_digest,
             accepted_at=acceptance.accepted_at,
+            timeout_seconds=acceptance.timeout_seconds,
             execution_deadline_at=acceptance.execution_deadline_at,
             finalization_deadline_at=acceptance.finalization_deadline_at,
             phase=TasksetRunPhase.ACCEPTED,
@@ -440,14 +455,16 @@ class TasksetRunStore:
         )
         return _to_page(result, sort="-created_at")
 
-    async def list_open_runs(self, *, page_size: int = 50) -> list[TasksetRunEntity]:
+    async def list_open_runs(self, *, page_size: int = 1000) -> list[TasksetRunEntity]:
         """Every run in every workspace that hasn't finished (accepted or running), oldest first.
 
         For the run controller, whose client acts as the evals service principal. Reads every page:
-        a backlog of old open runs must not hide newer ones. A run that finishes
-        mid-scan shifts later pages, so one may be skipped until the next pass.
+        a backlog of old open runs must not hide newer ones. Pages of 1,000 (the Entity Store maximum)
+        make a multi-page scan rare; a run that finishes mid-scan shifts later pages, so one may be
+        skipped (its held slots go uncounted for a cycle) or repeated, and repeats are dropped.
         """
         runs: list[TasksetRunEntity] = []
+        seen: set[tuple[str, str]] = set()
         page = 1
         while True:
             result = await self.entity_client.list(
@@ -462,7 +479,10 @@ class TasksetRunStore:
                 page=page,
                 page_size=page_size,
             )
-            runs.extend(result.data)
+            for run in result.data:
+                if (run.workspace, run.name) not in seen:
+                    seen.add((run.workspace, run.name))
+                    runs.append(run)
             if not result.data or page >= result.pagination.total_pages:
                 return runs
             page += 1
@@ -477,13 +497,15 @@ class TasksetRunStore:
     ) -> TasksetRunEntity:
         """Write the run's phase, result state and error; a versioned update of only those fields.
 
-        A terminal phase is never changed. Raises ``NemoEntityConflictError`` when another writer
-        updated the run first; the controller re-reads it on its next pass.
+        A terminal phase is never changed, and a phase change must pass ``assert_run_transition``.
+        Raises ``NemoEntityConflictError`` when another writer updated the run first; the controller
+        re-reads it on its next pass.
         """
         if run.phase in TERMINAL_RUN_PHASES:
             return run
         update: dict[str, object] = {}
-        if phase is not None:
+        if phase is not None and phase is not run.phase:
+            assert_run_transition(run.phase, phase)
             update["phase"] = phase
         if result_state is not None:
             update["result_state"] = result_state
@@ -491,6 +513,25 @@ class TasksetRunStore:
             update["error"] = error
         if not update:
             return run
+        return await self.entity_client.update(run.model_copy(update=update))
+
+    async def start(self, run: TasksetRunEntity, *, now: datetime) -> TasksetRunEntity:
+        """The run's first slot: start its execution clock; one versioned write, before its first create intent.
+
+        Writes ``running``, ``started_at`` and both deadlines, counted from ``now``. Every task Job carries the
+        run's execution deadline, so this happens once, before any member has a ``task_job``.
+        Raises ``NemoEntityConflictError`` when another writer (a cancel) updated the run first.
+        """
+        assert run.started_at is None, f"run {run.name} already started"
+        assert_run_transition(run.phase, TasksetRunPhase.RUNNING)
+        grace = (run.finalization_deadline_at - run.execution_deadline_at).total_seconds()  # submit's grace
+        execution, finalization = resolve_deadlines(now, run.timeout_seconds, int(grace))
+        update = {
+            "phase": TasksetRunPhase.RUNNING,
+            "started_at": now,
+            "execution_deadline_at": execution,
+            "finalization_deadline_at": finalization,
+        }
         return await self.entity_client.update(run.model_copy(update=update))
 
     async def request_cancel(self, workspace: str, run_id: str, *, now: datetime) -> TasksetRunEntity:
@@ -542,8 +583,7 @@ class TasksetRunStore:
 
         Returns:
             Stored members and filtered pagination counts. No plan or Jobs reads occur;
-            storage failures propagate. TODO(M4 story 4): nothing writes members yet, so pages
-            are empty until the controller does.
+            storage failures propagate.
         """
         conditions: list[FilterOperation] = [
             ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run.id),
@@ -560,6 +600,63 @@ class TasksetRunStore:
             page_size=page_size,
         )
         return _to_page(result, sort="task_index")
+
+    async def list_all_members(self, run: TasksetRunEntity) -> list[TasksetRunMemberEntity]:
+        """Every member of ``run`` in task-index order, reading every page; any failed page raises.
+
+        For the run controller, the only member writer: members are created once and never deleted,
+        so offset pages are stable.
+        """
+        members: list[TasksetRunMemberEntity] = []
+        page = 1
+        while True:
+            result = await self.list_members(run, phase=None, page=page, page_size=1000)
+            members.extend(result.data)
+            assert result.pagination is not None
+            if not result.data or page >= result.pagination.total_pages:
+                return members
+            page += 1
+
+    async def create_member(self, run: TasksetRunEntity, task_index: int) -> TasksetRunMemberEntity | None:
+        """Create task ``task_index``'s member under ``run``, queued (``image_ready``): its images are in the plan.
+
+        A named create, so a repeat is harmless.
+
+        Returns:
+            The new member, or None when it already exists.
+        """
+        member = TasksetRunMemberEntity(
+            name=member_name(task_index), workspace=run.workspace, task_index=task_index, phase=MemberPhase.IMAGE_READY
+        )
+        member._parent = run.id
+        member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        try:
+            return await member_client.create(member)
+        except NemoEntityConflictError:
+            return None
+
+    async def update_member(self, member: TasksetRunMemberEntity, **changes: object) -> TasksetRunMemberEntity:
+        """A versioned write of ``changes`` to ``member``.
+
+        The phase must pass ``assert_member_transition``, ``task_job`` and ``job_id`` are write-once, and a
+        registered member has its Job's ``job_id``.
+
+        Raises:
+            ValueError: An illegal phase change, ``task_job`` or ``job_id`` rewritten, or registered without a
+                ``job_id``.
+            NemoEntityConflictError: Another write landed first; the next cycle re-reads the member.
+        """
+        phase = changes.get("phase", member.phase)
+        assert isinstance(phase, MemberPhase)
+        assert_member_transition(member.phase, phase)
+        for key in ("task_job", "job_id"):
+            old = getattr(member, key)
+            if old is not None and changes.get(key, old) != old:
+                raise ValueError(f"member {member.name}'s {key} is write-once ({old})")
+        if phase is MemberPhase.REGISTERED and changes.get("job_id", member.job_id) is None:
+            raise ValueError(f"member {member.name} can't be registered without its Job's id")
+        member_client = cast(EntityUpdateClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        return await member_client.update(member.model_copy(update=changes))
 
     async def list_active(self, workspace: str, caller: str, taskset_ref: str | None = None) -> list[TasksetRunEntity]:
         """Read all pages of this caller's active runs for overlap warnings.

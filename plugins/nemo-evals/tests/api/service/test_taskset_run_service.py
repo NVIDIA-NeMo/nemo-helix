@@ -103,8 +103,11 @@ async def test_accept_freezes_resolved_harbor_content(
     assert result.status.phase == TasksetRunPhase.ACCEPTED
     assert result.status.result_state == ResultState.PENDING
     assert result.status.accepted_at == NOW
-    assert result.status.execution_deadline_at == NOW + timedelta(seconds=86_400)
-    assert result.status.finalization_deadline_at == NOW + timedelta(seconds=87_000)
+    # Until its first slot the run waits at most the queue timeout; its budget counts from that slot.
+    assert result.status.timeout_seconds == 86_400
+    assert result.status.started_at is None
+    assert result.status.execution_deadline_at == NOW + timedelta(seconds=172_800)
+    assert result.status.finalization_deadline_at == NOW + timedelta(seconds=172_800 + 1_800)
     run = await run_store.find("default", result.status.run_id)
     plan = await run_store.load_plan(run)
     assert plan.taskset_ref == f"default/suite#{published[1].content_hash}"
@@ -464,6 +467,8 @@ async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
         "phase": "expired",
         "result_state": "ready",
         "accepted_at": "2026-10-14T12:00:00Z",
+        "timeout_seconds": 3600,
+        "started_at": None,
         "execution_deadline_at": "2026-10-14T13:00:00Z",
         "finalization_deadline_at": "2026-10-14T14:00:00Z",
         "cancel_requested_at": "2026-10-14T12:00:00Z",

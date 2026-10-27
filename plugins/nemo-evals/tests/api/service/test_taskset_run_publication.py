@@ -96,7 +96,7 @@ async def test_submit_creates_the_runs_evaluation_before_accepting_it(
 async def test_intake_setup_doesnt_come_out_of_the_runs_execution_budget(
     service, publishing, fake_evaluations, run_store
 ):
-    """The deadlines start once the Evaluation exists: a slow Intake call can't accept a run already expired."""
+    """The queue timeout starts once the Evaluation exists: a slow Intake call can't accept a run already expired."""
     now = [datetime(2026, 10, 14, 12, tzinfo=UTC)]
     service._clock = lambda: now[0]
     create = fake_evaluations.create
@@ -111,7 +111,8 @@ async def test_intake_setup_doesnt_come_out_of_the_runs_execution_budget(
 
     run = await run_store.find("default", RUN)
     assert run.accepted_at == datetime(2026, 10, 14, 12, 0, 45, tzinfo=UTC)
-    assert run.execution_deadline_at == run.accepted_at + timedelta(seconds=30)
+    assert run.timeout_seconds == 30  # counted from the run's first slot, not from acceptance
+    assert run.execution_deadline_at == run.accepted_at + timedelta(seconds=service._config.runs.queue_timeout_seconds)
 
 
 async def test_a_requested_dataset_names_the_evaluations_dataset(service, publishing, fake_evaluations):

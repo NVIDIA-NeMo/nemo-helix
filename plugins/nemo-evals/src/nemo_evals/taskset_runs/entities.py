@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import ClassVar
 
 from nemo_helix_plugin.entities import EntityBase
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import Field
 
 
@@ -20,13 +21,13 @@ class TasksetRunPhase(StrEnum):
     """
 
     ACCEPTED = "accepted"  # Created by submit with its plan; no task Job started yet. There is no earlier phase.
-    RUNNING = "running"  # The controller has started work on the run's tasks.
+    RUNNING = "running"  # The run's first task got a slot; its execution clock started (started_at).
     COMPLETED = "completed"  # Every task settled and at least one succeeded, within the failure tolerance.
     FAILED = (
         "failed"  # The run could not proceed, e.g. too many failed tasks, no task succeeded, or a plan digest mismatch.
     )
-    CANCELLED = "cancelled"  # A caller cancelled the run; remaining task Jobs are cancelled.
-    EXPIRED = "expired"  # execution_deadline_at passed before every task settled.
+    CANCELLED = "cancelled"  # A caller cancelled the run; remaining task Jobs are cancelled, finished tasks bundled.
+    EXPIRED = "expired"  # execution_deadline_at passed before every task settled; finished tasks are bundled.
 
 
 TERMINAL_RUN_PHASES = frozenset(
@@ -47,7 +48,7 @@ class ResultState(StrEnum):
     """
 
     PENDING = "pending"  # Combined results are not finalized yet.
-    READY = "ready"  # Combined results are saved and readable.
+    READY = "ready"  # Combined results are saved and readable; for an expired or cancelled run, the finished tasks'.
     FAILED = "failed"  # The finalization deadline passed before the result was saved.
     NONE = "none"  # Nothing to combine, e.g. no task succeeded.
 
@@ -106,11 +107,23 @@ class TasksetRunEntity(EntityBase):
         description="Availability of the combined results, tracked independently of phase.",
     )
     accepted_at: datetime = Field(description="When submit accepted the run.")
+    timeout_seconds: int = Field(gt=0, description="Execution budget in seconds, counted from started_at.")
+    started_at: datetime | None = Field(
+        default=None,
+        description="When the run's first task got a slot and its execution clock started; None until then.",
+    )
     execution_deadline_at: datetime = Field(
-        description="accepted_at plus the effective timeout; unfinished tasks expire then. Retries do not reset it."
+        description=(
+            "Unfinished tasks expire then. Until the run starts, accepted_at plus the queue timeout; from its "
+            "first slot, started_at plus timeout_seconds. Fixed before the run's first task Job; retries do not "
+            "reset it."
+        )
     )
     finalization_deadline_at: datetime = Field(
-        description="execution_deadline_at plus operator grace; the final result must be saved by then."
+        description=(
+            "execution_deadline_at plus the operator grace at submit; the final result must be saved by then. "
+            "Starting the run keeps that grace."
+        )
     )
     cancel_requested_at: datetime | None = Field(
         default=None,
@@ -160,9 +173,45 @@ class TasksetRunMemberEntity(EntityBase):
     phase: MemberPhase = Field(description="Image preparation and execution progress of this task.")
     task_job: str | None = Field(
         default=None,
-        description="Name of this task's Jobs Service Job (<run_id>-task-<index>); None until registered.",
+        description=(
+            "Name of this task's Jobs Service Job (<run_id>-task-<index>). Written before the create (the create "
+            "intent: the task holds a slot from then on) and never changed after; None while queued."
+        ),
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Id of the Job registered under task_job (created, or adopted as ours); written with registered and "
+            "never changed. A Job under task_job with another id isn't ours: ours ended and was deleted."
+        ),
     )
     error: str | None = Field(default=None, description="Why this task failed or expired; None otherwise.")
+    bundle_ref: str | None = Field(
+        default=None, description="The task's agent-eval-results bundle; set when the member succeeds."
+    )
+    job_status: HelixJobStatus | None = Field(
+        default=None,
+        description="The task Job's status as the controller last read it; display only, at most one cycle old.",
+    )
+    create_sent_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the last create of task_job with an unknown outcome was sent. Until create_grace after it, "
+            "a 404 or stepless read of the Job doesn't prove that no create of ours is still saving."
+        ),
+    )
+
+
+def is_queued(member: TasksetRunMemberEntity) -> bool:
+    """Waiting for a slot: images in the plan, no create intent yet."""
+    return member.phase is MemberPhase.IMAGE_READY and member.task_job is None
+
+
+def holds_slot(member: TasksetRunMemberEntity) -> bool:
+    """Counted against the caps: registered, or a create intent (``task_job`` written before the create)."""
+    return member.phase is MemberPhase.REGISTERED or (
+        member.phase is MemberPhase.IMAGE_READY and member.task_job is not None
+    )
 
 
 _ALLOWED_RUN_TRANSITIONS = {
@@ -193,3 +242,32 @@ def assert_run_transition(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
     """
     if new not in _ALLOWED_RUN_TRANSITIONS.get(old, frozenset()):
         raise ValueError(f"illegal taskset run transition: {old} -> {new}")
+
+
+# Members are created in image_ready (their images are in the plan), so image_preparing is unused. Settled phases
+# have no way out. Same-phase writes are allowed: image_ready → image_ready (the create intent, create_sent_at) and
+# registered → registered (job_status).
+_ALLOWED_MEMBER_TRANSITIONS = {
+    MemberPhase.IMAGE_READY: frozenset(
+        {
+            MemberPhase.IMAGE_READY,
+            MemberPhase.REGISTERED,
+            MemberPhase.FAILED,
+            MemberPhase.CANCELLED,
+            MemberPhase.EXPIRED,
+        }
+    ),
+    MemberPhase.REGISTERED: frozenset(
+        {MemberPhase.REGISTERED, MemberPhase.SUCCEEDED, MemberPhase.FAILED, MemberPhase.CANCELLED, MemberPhase.EXPIRED}
+    ),
+}
+
+
+def assert_member_transition(old: MemberPhase, new: MemberPhase) -> None:
+    """Guard member writes: a settled member never changes, and a member never goes back to the queue.
+
+    Raises:
+        ValueError: The transition is illegal or starts at a settled phase.
+    """
+    if new not in _ALLOWED_MEMBER_TRANSITIONS.get(old, frozenset()):
+        raise ValueError(f"illegal taskset run member transition: {old} -> {new}")

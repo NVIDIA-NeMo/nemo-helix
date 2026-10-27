@@ -26,6 +26,8 @@ RUN_ID_KEY = "taskset_run_id"
 SOURCE_KEY = "source"
 EVALUATION_SOURCE = "nemo-evals.taskset-run"
 RESULT_STATE_KEY = "result_state"
+QUEUE_DURATION_KEY = "queue_duration_sec"
+"""Seconds the run waited for its first task slot; its duration (``eval_duration_sec``) counts from acceptance."""
 
 
 class RunEvaluations(Protocol):
@@ -164,12 +166,17 @@ async def stamp_run_evaluation(
             logger.warning("Run %s: no Intake Evaluation of its own to stamp", run.name)
             return
         metadata = dict(existing.metadata)
-        accepted_at = (
-            run.accepted_at if run.accepted_at.utcoffset() is not None else run.accepted_at.replace(tzinfo=UTC)
-        )
+        accepted_at = _aware(run.accepted_at)
         metadata[EVAL_DURATION_KEY] = f"{(now - accepted_at).total_seconds():.1f}"
+        started_at = _aware(run.started_at) if run.started_at is not None else now  # never started: queued throughout
+        metadata[QUEUE_DURATION_KEY] = f"{(started_at - accepted_at).total_seconds():.1f}"
         metadata[RESULT_STATE_KEY] = result_state.value
         await evaluations.patch(run.workspace, run.name, EvaluationPatchRequest(status=phase.value, metadata=metadata))
     except Exception:
         # The run's own state is authoritative; a missing stamp only leaves the Evaluation "running".
         logger.warning("Run %s: stamping its Intake Evaluation failed", run.name, exc_info=True)
+
+
+def _aware(value: datetime) -> datetime:
+    """Entity Store may return naive timestamps; they are UTC."""
+    return value if value.utcoffset() is not None else value.replace(tzinfo=UTC)

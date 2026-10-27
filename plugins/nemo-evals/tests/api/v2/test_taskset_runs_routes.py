@@ -60,6 +60,7 @@ async def test_get_run_returns_all_stored_status_fields(read_client, seed_run, f
         "phase": "expired",
         "result_state": "ready",
         "accepted_at": "2026-10-14T12:00:00Z",
+        "timeout_seconds": 3600,
         "execution_deadline_at": "2026-10-14T13:00:00Z",
         "finalization_deadline_at": "2026-10-14T14:00:00Z",
         "cancel_requested_at": "2026-10-14T12:00:00Z",

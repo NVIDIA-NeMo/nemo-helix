@@ -64,6 +64,7 @@ def acceptance(plan: TasksetRunPlan) -> RunAcceptance:
         idempotency_key="key",
         request_digest="request-digest",
         accepted_at=accepted_at,
+        timeout_seconds=3600,
         execution_deadline_at=accepted_at + timedelta(hours=1),
         finalization_deadline_at=accepted_at + timedelta(hours=2),
     )

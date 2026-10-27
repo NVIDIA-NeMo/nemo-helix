@@ -109,6 +109,7 @@ def seed_run(entity_store):
             "plan_digest": "b" * 64,
             "request_digest": "c" * 64,
             "accepted_at": NOW,
+            "timeout_seconds": 3600,
             "execution_deadline_at": NOW + timedelta(hours=1),
             "finalization_deadline_at": NOW + timedelta(hours=2),
         }
