@@ -5,6 +5,7 @@ import datetime
 import logging
 import threading
 import time
+from collections.abc import Callable
 from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -67,7 +68,10 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._stop_signal = stop_signal
         self._is_healthy = False
         self._logger = logger
-        self._last_retention_at: float | None = None
+        # The retention sweeper runs on its own thread (see StorageRetentionSweeper) and writes the same
+        # steps and reclaim records this controller does. Each unit of work holds the lock, so a step is
+        # never reconciled and swept at once, as when both ran on this thread.
+        self._step_lock = threading.Lock()
         # Storage reclaim records outlive the jobs they describe, so they are read from the
         # entity store as the jobs service rather than through the jobs API.
         self._system_entities = system_entity_client or SyncEntityClient(
@@ -119,10 +123,13 @@ class JobReconciler(HeartbeatMixin, Controller):
             extra={"count": len(steps_to_reconcile), "duration_seconds": time.monotonic() - fetch_started_at},
         )
         for step in steps_to_reconcile:
-            with start_span_with_ctx(
-                tracer,
-                "jobs_reconciler/reconcile_job_step",
-                JobContext(id=step.job, step_name=step.name),
+            with (
+                self._step_lock,
+                start_span_with_ctx(
+                    tracer,
+                    "jobs_reconciler/reconcile_job_step",
+                    JobContext(id=step.job, step_name=step.name),
+                ),
             ):
                 try:
                     provider, profile = extract_provider_profile(step)
@@ -216,40 +223,42 @@ class JobReconciler(HeartbeatMixin, Controller):
                 finally:
                     self.emit_heartbeat()
 
-        self._enforce_storage_retention()
-
-    def _enforce_storage_retention(self) -> None:
-        """Reclaim queued storage every tick, and queue stopped jobs' storage on the retention interval."""
         if self._stop_signal and self._stop_signal.is_set():
             return
         self._reclaim_queued_storage()
 
-        # Listing every stopped step is the expensive part, so it runs on a slower interval.
-        now = time.monotonic()
-        interval = self._storage_config.retention_interval_seconds
-        if self._last_retention_at is not None and now - self._last_retention_at < interval:
-            return
-        self._last_retention_at = now
+    def sweep_stopped_steps(self, on_progress: Callable[[], None] | None = None) -> None:
+        """Queue the storage of stopped jobs for reclaim. Runs on the retention interval, off the reconcile tick.
+
+        Listing every stopped step takes minutes on a platform with long job history, so this is not
+        part of ``step()``: it would hold up reconciling and make the controller look stalled.
+        ``on_progress`` reports each completed page of the listing and each swept step.
+        """
         try:
             steps = self._list_steps_with_status(
-                [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value]
+                [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value],
+                on_progress=on_progress,
             )
         except NemoClientError:
             logger.exception("Could not fetch paused and failed steps for storage retention")
             return
 
         for step in steps:
+            if self._stop_signal and self._stop_signal.is_set():
+                return
             if (step.status_details or {}).get(STORAGE_SWEPT_AT):
                 continue
             try:
-                self._retain_step_storage(step)
+                with self._step_lock:
+                    self._retain_step_storage(step)
             except Exception:
                 logger.exception(
                     "Could not enforce storage retention",
                     extra={"job": step.job, "step": step.name, "workspace": step.workspace},
                 )
             finally:
-                self.emit_heartbeat()
+                if on_progress is not None:
+                    on_progress()
 
     def _reclaim_queued_storage(self) -> None:
         """Reclaim the storage of deleted and stopped jobs, and clear each record once it is gone.
@@ -266,9 +275,10 @@ class JobReconciler(HeartbeatMixin, Controller):
         for reclaim in reclaims:
             extra = {"job": reclaim.job_name, "workspace": reclaim.job_workspace}
             try:
-                if not self._reclaim_storage(reclaim):
-                    continue
-                self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
+                with self._step_lock:
+                    if not self._reclaim_storage(reclaim):
+                        continue
+                    self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
                 logger.info("Reclaimed job storage", extra=extra)
             except Exception:
                 logger.exception("Could not reclaim job storage", extra=extra)
@@ -463,7 +473,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         """
         Return the list of steps to reconcile.
         """
-        steps = self._list_steps_with_status(statuses)
+        steps = self._list_steps_with_status(statuses, on_progress=self.emit_heartbeat)
         cleanup_query = cast(
             ListStepsQueryParams,
             {
@@ -480,8 +490,13 @@ class JobReconciler(HeartbeatMixin, Controller):
             self._step_reconciliation_errors.add(1, attributes={"error_type": "task_cleanup_fetch"})
         return steps
 
-    def _list_steps_with_status(self, statuses: list[str]) -> list[HelixJobStepWithContext]:
-        """Return every step, across jobs and workspaces, in one of ``statuses``."""
+    def _list_steps_with_status(
+        self, statuses: list[str], on_progress: Callable[[], None] | None = None
+    ) -> list[HelixJobStepWithContext]:
+        """Return every step, across jobs and workspaces, in one of ``statuses``.
+
+        ``on_progress`` is called for each step received, so each fetched page reports progress.
+        """
         # Iterate through all pages to get all steps.
         # deepObject query param: sent as ``filter[status]=pending,active,...``
         # (comma form), which the steps-list route splits back into a list. The
@@ -493,13 +508,16 @@ class JobReconciler(HeartbeatMixin, Controller):
                 "sort": "updated_at",
             },
         )
-        return list(
-            self._jobs.list_steps(
-                name="-",  # Use "-" to indicate all jobs
-                workspace="-",  # Cross-workspace query
-                query_params=query,
-            ).items()
-        )
+        steps: list[HelixJobStepWithContext] = []
+        for step in self._jobs.list_steps(
+            name="-",  # Use "-" to indicate all jobs
+            workspace="-",  # Cross-workspace query
+            query_params=query,
+        ).items():
+            steps.append(step)
+            if on_progress is not None:
+                on_progress()
+        return steps
 
 
 def _storage_clock(step: HelixJobStepWithContext) -> datetime.datetime | None:
