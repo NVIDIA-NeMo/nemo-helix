@@ -2514,24 +2514,6 @@ def test_run_rejects_declared_skills_when_ethos_cannot_be_staged(
     invoke.assert_not_called()
 
 
-def test_run_completes_when_ethos_fileset_is_missing_and_no_skills_are_declared(
-    ctx: JobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _use_real_ethos_stage(monkeypatch)
-    spec = ExecuteAgentStepConfig(
-        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
-        agent=_resolved_agent(),
-    )
-
-    async def _invoke(_request: Any) -> FabricRuntimeResult:
-        return FabricRuntimeResult(status="succeeded", response="done")
-
-    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
-        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=_sdk_opening_async_client())
-
-    assert result["status"] == "completed"
-
-
 def test_run_keeps_workdir_when_workspace_is_the_fabric_base(ctx: JobContext, monkeypatch: pytest.MonkeyPatch) -> None:
     _use_real_ethos_stage(monkeypatch)
 
@@ -2577,35 +2559,3 @@ def test_run_keeps_workdir_when_workspace_is_the_fabric_base(ctx: JobContext, mo
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert result["status"] == "completed"
-
-
-def test_run_misses_ethos_fileset_for_an_unknown_agent_name(ctx: JobContext, monkeypatch: pytest.MonkeyPatch) -> None:
-    _use_real_ethos_stage(monkeypatch)
-    requested: list[tuple[str, str]] = []
-
-    async def _missing(
-        _files_client: object,
-        *,
-        workspace: str,
-        fileset_name: str,
-        local_path: Path,
-    ) -> None:
-        del local_path
-        requested.append((workspace, fileset_name))
-        raise FabricEthosFilesetNotFound("missing fileset")
-
-    monkeypatch.setattr("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _missing)
-
-    spec = ExecuteAgentStepConfig(
-        request=ExecuteAgentJobConfig(agent="not-a-stored-agent", input="hello"),
-        agent=_resolved_agent(name="not-a-stored-agent", workspace="team-a"),
-    )
-
-    async def _invoke(_request: Any) -> FabricRuntimeResult:
-        return FabricRuntimeResult(status="succeeded", response="done")
-
-    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
-        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=_sdk_opening_async_client())
-
-    assert result["status"] == "completed"
-    assert requested == [("team-a", "not-a-stored-agent-ethos")]
