@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
+import httpx
 import pytest
 import typer
 from click.testing import Result
@@ -30,6 +32,11 @@ RUNS = "/analysis-runs"
 RUN = f"/analysis-runs/{RUN_NAME}"
 
 pytestmark = pytest.mark.usefixtures("configured_models")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
 
 
 def _invoke(app: typer.Typer, *args: str) -> Result:
@@ -126,13 +133,62 @@ def test_create_reads_the_ethos_file_and_sends_its_contents(
 ) -> None:
     """``--ethos`` takes a path like ``nemo compass analyze``; the API wants the Markdown."""
     api.on("POST", RUNS, run_response_json())
-    ethos = tmp_path / "ETHOS.md"
+    api.ethos_response = httpx.Response(200, content=b"Stored ethos")
+    (tmp_path / "ETHOS.md").write_text("Local ethos", encoding="utf-8")
+    ethos = tmp_path / "override.md"
     ethos.write_text("# Ethos\n\nBe careful.\n", encoding="utf-8")
 
     result = _create(app, "--ethos", str(ethos))
 
     assert result.exit_code == 0, result.output
     assert api.requests[0].body["ethos"] == "# Ethos\n\nBe careful."
+    assert api.files_requests == []
+    assert f"Using ethos from local file: {ethos}" in result.stderr
+
+
+@pytest.mark.parametrize("stored", [True, False])
+def test_ethos_discovery_prefers_fileset_then_current_directory(
+    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path, caplog: pytest.LogCaptureFixture, stored: bool
+) -> None:
+    api.on("POST", RUNS, run_response_json())
+    local = tmp_path / "ETHOS.md"
+    local.write_text("Local ethos", encoding="utf-8")
+    if stored:
+        api.ethos_response = httpx.Response(200, content=b"Stored ethos")
+    with caplog.at_level(logging.INFO):
+        result = _create(app, "--workspace", "research")
+    assert result.exit_code == 0, result.output
+    assert api.requests[0].body["ethos"] == ("Stored ethos" if stored else "Local ethos")
+    assert api.files_requests[0].url.path == "/apis/files/v2/workspaces/research/filesets/demo-agent-ethos/-/ETHOS.md"
+    assert (
+        "Using ethos from fileset: research/demo-agent-ethos#ETHOS.md"
+        if stored
+        else f"Using ethos from local file: {local}"
+    ) in caplog.text
+    assert "Stored ethos" not in caplog.text
+    assert "Local ethos" not in caplog.text
+
+
+def test_empty_fileset_falls_back_to_lowercase_local_ethos(
+    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path
+) -> None:
+    api.on("POST", RUNS, run_response_json())
+    api.ethos_response = httpx.Response(200, content=b"  \n")
+    (tmp_path / "ethos.md").write_text("Local ethos", encoding="utf-8")
+    result = _create(app)
+    assert result.exit_code == 0, result.output
+    assert api.requests[0].body["ethos"] == "Local ethos"
+
+
+@pytest.mark.parametrize("status,content", [(403, b"Forbidden"), (500, b"Failed"), (200, b"\xff")])
+def test_fileset_errors_do_not_silently_fall_back(
+    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path, status: int, content: bytes
+) -> None:
+    api.ethos_response = httpx.Response(status, content=content)
+    (tmp_path / "ETHOS.md").write_text("Local ethos", encoding="utf-8")
+    result = _create(app)
+    assert result.exit_code != 0
+    assert api.requests == []
 
 
 def test_create_without_an_ethos_omits_it(app: typer.Typer, api: FakeCompassAPI) -> None:
@@ -142,12 +198,15 @@ def test_create_without_an_ethos_omits_it(app: typer.Typer, api: FakeCompassAPI)
 
     assert result.exit_code == 0, result.output
     assert "ethos" not in api.requests[0].body
+    assert "ethos analysis will be skipped" in result.stderr
 
 
 def test_an_unreadable_ethos_fails_before_anything_is_submitted(
     app: typer.Typer, api: FakeCompassAPI, tmp_path: Path
 ) -> None:
     """Submitting without it would analyze the agent against no contract at all."""
+    api.ethos_response = httpx.Response(200, content=b"Stored ethos")
+    (tmp_path / "ETHOS.md").write_text("Local ethos", encoding="utf-8")
     result = _create(app, "--ethos", str(tmp_path / "missing.md"))
 
     assert result.exit_code == 2
@@ -253,6 +312,8 @@ def test_create_code_prints_the_typed_client_call_without_sending(app: typer.Typ
 
     assert result.exit_code == 0, result.output
     assert api.requests == []
+    assert api.files_requests == []
+    assert "Code output skips ethos discovery" in result.stderr
     assert "from nemo_compass_plugin.client import CompassClient" in result.stdout
     assert "client.create_analysis_run(" in result.stdout
     assert f'default_model="{CONFIGURED_DEFAULT}"' in result.stdout
