@@ -11,7 +11,7 @@ from io import StringIO
 from unittest.mock import Mock
 
 import pytest
-from nhx.common.observability.otel import settings
+from nhx.common.observability.otel import OTELSettings, settings
 from nhx.common.observability.structured_logging import _sanitize_log_strings, initialize_logging
 from opentelemetry._logs import SeverityNumber
 from opentelemetry.sdk._logs import LoggerProvider
@@ -69,7 +69,19 @@ def test_sanitize_log_strings_sanitizes_exception_field() -> None:
 
 
 @pytest.mark.parametrize("log_format", ["plain", "json"])
-def test_otlp_logging_exports_trace_context_and_structured_fields(monkeypatch, log_format):
+@pytest.mark.parametrize("logs_endpoint", [None, "http://logs:4318/custom"])
+@pytest.mark.parametrize(
+    ("logs_protocol", "general_protocol", "transport"),
+    [
+        (None, "grpc", "grpc"),
+        (None, "http/protobuf", "http"),
+        ("grpc", "http/protobuf", "grpc"),
+        ("http/protobuf", "grpc", "http"),
+    ],
+)
+def test_otlp_logging_exports_trace_context_and_structured_fields(
+    monkeypatch, log_format, logs_endpoint, logs_protocol, general_protocol, transport
+):
     resource = Resource.create({"service.name": "logging-test"})
     provider = LoggerProvider(resource=resource)
     exporter = InMemoryLogRecordExporter()
@@ -77,10 +89,21 @@ def test_otlp_logging_exports_trace_context_and_structured_fields(monkeypatch, l
     monkeypatch.setattr("opentelemetry.sdk._logs.LoggerProvider", Mock(return_value=provider))
     monkeypatch.setattr("opentelemetry._logs.set_logger_provider", Mock())
     exporter_factory = Mock(return_value=exporter)
-    monkeypatch.setattr("opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter", exporter_factory)
+    other_exporter_factory = Mock()
+    other_transport = "http" if transport == "grpc" else "grpc"
+    monkeypatch.setattr(
+        f"opentelemetry.exporter.otlp.proto.{transport}._log_exporter.OTLPLogExporter", exporter_factory
+    )
+    monkeypatch.setattr(
+        f"opentelemetry.exporter.otlp.proto.{other_transport}._log_exporter.OTLPLogExporter", other_exporter_factory
+    )
     monkeypatch.setattr(settings, "otel_sdk_disabled", False)
     monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
-    monkeypatch.setattr(settings, "otel_exporter_otlp_logs_endpoint", "http://logs:4317")
+    monkeypatch.setattr(settings, "otel_exporter_otlp_logs_protocol", logs_protocol)
+    monkeypatch.setattr(settings, "otel_exporter_otlp_protocol", general_protocol)
+    monkeypatch.setattr(settings, "otel_exporter_otlp_logs_endpoint", logs_endpoint)
+    general_endpoint = "http://collector:4318/base/"
+    monkeypatch.setattr(settings, "otel_exporter_otlp_endpoint", general_endpoint)
     monkeypatch.setattr(settings, "log_format", log_format)
     monkeypatch.setattr(settings, "log_level", "INFO")
     monkeypatch.setattr(settings, "extra_log_config", "")
@@ -115,12 +138,30 @@ def test_otlp_logging_exports_trace_context_and_structured_fields(monkeypatch, l
         assert "internal log" not in output.getvalue()
         if log_format == "json":
             assert json.loads(output.getvalue())["trace_id"] == f"{record.trace_id:032x}"
-        exporter_factory.assert_called_once_with(endpoint="http://logs:4317")
+        expected_endpoint = logs_endpoint or (
+            general_endpoint.rstrip("/") + "/v1/logs" if transport == "http" else general_endpoint
+        )
+        exporter_factory.assert_called_once_with(endpoint=expected_endpoint)
+        other_exporter_factory.assert_not_called()
     finally:
         root.handlers[:] = saved_handlers
         root.setLevel(saved_level)
         provider.shutdown()
         tracer_provider.shutdown()
+
+
+def test_log_protocol_settings_load_environment_and_default_to_grpc(monkeypatch):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_PROTOCOL", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", raising=False)
+    defaults = OTELSettings()
+    assert defaults.otel_exporter_otlp_protocol == "grpc"
+    assert defaults.otel_exporter_otlp_logs_protocol is None
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", "grpc")
+    configured = OTELSettings()
+    assert configured.otel_exporter_otlp_protocol == "http/protobuf"
+    assert configured.otel_exporter_otlp_logs_protocol == "grpc"
 
 
 @pytest.mark.parametrize(("exporter", "sdk_disabled"), [("none", False), ("otlp", True)])
