@@ -6,12 +6,13 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric import session_manager
-from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricRuntimeResult
+from nemo_agents_plugin.fabric import server, session_manager
+from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricRuntimeResult, FabricRuntimeStream
 from nemo_agents_plugin.fabric.session_manager import FabricSessionManager
 from nemo_agents_plugin.fabric.session_registry import (
     FabricSessionNotFoundError,
@@ -727,12 +728,15 @@ async def test_invoke_session_serializes_turns_for_same_runtime(
 
 
 @pytest.mark.asyncio
-async def test_stream_session_serializes_turns_for_same_runtime(
+@pytest.mark.parametrize("method", list(StreamingMethod))
+async def test_stream_session_holds_lock_until_cleanup_finishes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
+    monkeypatch.setattr(server, "_FABRIC_STREAM_CLEANUP_TIMEOUT_SECONDS", 0.01)
     registry = FabricSessionRegistry()
-    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1", streaming_method=method)
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -743,18 +747,25 @@ async def test_stream_session_serializes_turns_for_same_runtime(
     release_first = asyncio.Event()
     invocation_order: list[str] = []
 
+    async def close_stream() -> None:
+        first_started.set()
+        await release_first.wait()
+
     def stream_fabric_runtime(
         runtime: Any, request: FabricInvocationRequest, *, streaming_method: StreamingMethod
-    ) -> object:
+    ) -> FabricRuntimeStream:
+        assert streaming_method is method
         invocation_order.append(request.input)
-        return object()
+        return cast(FabricRuntimeStream, SimpleNamespace(aclose=close_stream))
 
     monkeypatch.setattr(session_manager, "stream_fabric_runtime", stream_fabric_runtime)
 
-    async def stream_first() -> None:
-        async with manager.stream_session(session, FabricInvocationRequest(input="first")):
-            first_started.set()
-            await release_first.wait()
+    async def stream_first() -> server._StreamingChatCompletionIterator:
+        context = manager.stream_session(session, FabricInvocationRequest(input="first"))
+        stream = await context.__aenter__()
+        iterator = server._iter_streaming_chat_completion(context, stream, completion_id="first", model="test-model")
+        await iterator.aclose()
+        return iterator
 
     async def stream_second() -> None:
         async with manager.stream_session(session, FabricInvocationRequest(input="second")):
@@ -763,14 +774,17 @@ async def test_stream_session_serializes_turns_for_same_runtime(
     first = asyncio.create_task(stream_first())
     await first_started.wait()
     second = asyncio.create_task(stream_second())
-    await asyncio.sleep(0)
+    iterator = await asyncio.wait_for(first, timeout=1)
 
     assert invocation_order == ["first"]
+    assert session.invocation_lock.locked()
 
     release_first.set()
-    await asyncio.gather(first, second)
+    assert iterator._close_task is not None
+    await asyncio.gather(iterator._close_task, second)
 
     assert invocation_order == ["first", "second"]
+    assert not session.invocation_lock.locked()
 
 
 @pytest.mark.asyncio
@@ -1023,9 +1037,11 @@ async def test_one_shot_and_session_invocations_share_concurrency_limit(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(StreamingMethod))
 async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
     monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
     manager = FabricSessionManager(
@@ -1033,7 +1049,7 @@ async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
         base_dir=tmp_path,
         session_registry=FabricSessionRegistry(),
         max_concurrent_invocations=1,
-        fabric=cast(Any, _FakeFabric(_FakeRuntime())),
+        fabric=cast(Any, _FakeFabric(_FakeRuntime(), method=method)),
     )
     stream_started = asyncio.Event()
     release_stream = asyncio.Event()
@@ -1042,10 +1058,13 @@ async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
 
     @asynccontextmanager
     async def stream_fabric_agent_once(request: Any, *, fabric: Any, streaming_method: StreamingMethod) -> Any:
+        assert streaming_method is method
         invocation_order.append(request.input)
         try:
             yield object()
         finally:
+            stream_started.set()
+            await release_stream.wait()
             stream_cleaned_up.set()
 
     async def run_fabric_agent_once(request: Any, *, fabric: Any) -> FabricRuntimeResult:
@@ -1058,8 +1077,7 @@ async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
 
     async def consume_stream() -> None:
         async with manager.stream_once(FabricInvocationRequest(input="stream")):
-            stream_started.set()
-            await release_stream.wait()
+            pass
 
     streaming = asyncio.create_task(consume_stream())
     await stream_started.wait()

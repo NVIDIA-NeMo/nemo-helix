@@ -90,12 +90,16 @@ class _FakeFabricStream:
         self.aclose_completions = 0
 
     async def records(self) -> Any:
+        if self.streaming_method is StreamingMethod.BUFFERED:
+            return
         for record in self._records:
             yield record
         if self._block_after_records:
             await asyncio.Event().wait()
 
     async def result(self) -> FabricRuntimeResult:
+        if self.streaming_method is StreamingMethod.BUFFERED and self._block_after_records:
+            await asyncio.Event().wait()
         return self._result
 
     async def aclose(self) -> None:
@@ -692,8 +696,9 @@ async def test_streaming_chat_completion_closes_stream_on_generator_close() -> N
 
 
 @pytest.mark.asyncio
-async def test_streaming_chat_completion_closes_stream_before_first_event() -> None:
-    fabric_stream = _FakeFabricStream([{"data": {"choices": [{"delta": {"content": "partial"}}]}}])
+@pytest.mark.parametrize("method", list(StreamingMethod))
+async def test_streaming_chat_completion_closes_stream_before_first_event(method: StreamingMethod) -> None:
+    fabric_stream = _FakeFabricStream(streaming_method=method)
     stream_context = _FakeStreamContext(fabric_stream)
     events = server._iter_streaming_chat_completion(
         stream_context,
@@ -709,8 +714,9 @@ async def test_streaming_chat_completion_closes_stream_before_first_event() -> N
 
 
 @pytest.mark.asyncio
-async def test_streaming_response_closes_stream_after_client_disconnect() -> None:
-    fabric_stream = _FakeFabricStream([{"data": {"choices": [{"delta": {"content": "partial"}}]}}])
+@pytest.mark.parametrize("method", list(StreamingMethod))
+async def test_streaming_response_closes_stream_after_client_disconnect(method: StreamingMethod) -> None:
+    fabric_stream = _FakeFabricStream([{"choices": [{"delta": {"content": "partial"}}]}], streaming_method=method)
     stream_context = _FakeStreamContext(fabric_stream)
     iterator = server._iter_streaming_chat_completion(
         stream_context,
@@ -768,11 +774,13 @@ async def test_streaming_response_cleanup_failure_does_not_mask_client_disconnec
 
 
 @pytest.mark.asyncio
-async def test_streaming_response_completes_cleanup_after_asgi_cancellation() -> None:
+@pytest.mark.parametrize("method", list(StreamingMethod))
+async def test_streaming_response_completes_cleanup_after_asgi_cancellation(method: StreamingMethod) -> None:
     fabric_stream = _FakeFabricStream(
-        [{"data": {"choices": [{"delta": {"content": "partial"}}]}}],
+        [{"choices": [{"delta": {"content": "partial"}}]}],
         block_after_records=True,
         close_checkpoint=True,
+        streaming_method=method,
     )
     stream_context = _FakeStreamContext(fabric_stream, exit_checkpoint=True)
     iterator = server._iter_streaming_chat_completion(
@@ -842,14 +850,17 @@ async def test_streaming_response_bounds_cleanup_wait_without_cancelling_cleanup
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(StreamingMethod))
 async def test_streaming_response_bounds_cleanup_after_direct_task_cancellation(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    method: StreamingMethod,
 ) -> None:
     cleanup_release = asyncio.Event()
     fabric_stream = _FakeFabricStream(
-        [{"data": {"choices": [{"delta": {"content": "partial"}}]}}],
+        [{"choices": [{"delta": {"content": "partial"}}]}],
         block_after_records=True,
+        streaming_method=method,
     )
     stream_context = _FakeStreamContext(fabric_stream, exit_waiter=cleanup_release)
     iterator = server._iter_streaming_chat_completion(

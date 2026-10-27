@@ -461,13 +461,14 @@ class TestStreamFabricAgentOnce:
         assert fabric_request.context == {"source": "server"}
         assert result.response == "hello"
 
-    async def test_runtime_setup_does_not_consume_result_timeout(self) -> None:
+    @pytest.mark.parametrize("method", list(StreamingMethod))
+    async def test_runtime_setup_does_not_consume_result_timeout(self, method: StreamingMethod) -> None:
         class _SlowInvokeStream(_FakeInvokeStream):
             async def result(self) -> Any:
                 await asyncio.sleep(0.06)
                 return await super().result()
 
-        fake_runtime = _FakeRuntime(stream=_SlowInvokeStream(), enter_delay=0.06)
+        fake_runtime = _FakeRuntime(stream=_SlowInvokeStream(), enter_delay=0.06, invoke_delay=0.06)
         request = FabricOneShotRequest(
             fabric_config=FabricConfig(
                 metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
@@ -479,13 +480,15 @@ class TestStreamFabricAgentOnce:
         async with stream_fabric_agent_once(
             request,
             fabric=_FakeFabric(runtime=fake_runtime, start_delay=0.06),
+            streaming_method=method,
         ) as stream:
             result = await stream.result()
 
         assert result.status == "succeeded"
         assert fake_runtime.exit_calls == 1
 
-    async def test_cleans_up_runtime_when_stream_start_fails(self) -> None:
+    @pytest.mark.parametrize("method", [StreamingMethod.RELAY, StreamingMethod.OPENAI])
+    async def test_cleans_up_runtime_when_stream_start_fails(self, method: StreamingMethod) -> None:
         fake_runtime = _FakeRuntime(invoke_error=fabric_runtime.FabricError("stream unavailable"))
         request = FabricOneShotRequest(
             fabric_config=FabricConfig(
@@ -495,7 +498,9 @@ class TestStreamFabricAgentOnce:
         )
 
         with pytest.raises(FabricRuntimeExecutionError, match="stream unavailable"):
-            async with stream_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime)):
+            async with stream_fabric_agent_once(
+                request, fabric=_FakeFabric(runtime=fake_runtime), streaming_method=method
+            ):
                 pass
 
         assert fake_runtime.exited is True
@@ -532,9 +537,13 @@ class TestStreamFabricAgentOnce:
 
         assert fake_runtime.exit_calls == 1
 
-    async def test_cleans_up_runtime_after_stream_result_error(self) -> None:
+    @pytest.mark.parametrize("method", list(StreamingMethod))
+    async def test_cleans_up_runtime_after_stream_result_error(self, method: StreamingMethod) -> None:
         stream = _FakeInvokeStream(result_error=fabric_runtime.FabricError("result failed"))
-        fake_runtime = _FakeRuntime(stream=stream)
+        fake_runtime = _FakeRuntime(
+            stream=stream,
+            invoke_error=fabric_runtime.FabricError("result failed") if method is StreamingMethod.BUFFERED else None,
+        )
         request = FabricOneShotRequest(
             fabric_config=FabricConfig(
                 metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
@@ -542,19 +551,22 @@ class TestStreamFabricAgentOnce:
             base_dir=Path("/tmp/agent"),
         )
 
-        with pytest.raises(FabricRuntimeExecutionError, match="Fabric runtime streaming failed: result failed"):
-            async with stream_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime)) as runtime_stream:
+        with pytest.raises(FabricRuntimeExecutionError, match="result failed"):
+            async with stream_fabric_agent_once(
+                request, fabric=_FakeFabric(runtime=fake_runtime), streaming_method=method
+            ) as runtime_stream:
                 await runtime_stream.result()
 
         assert fake_runtime.exit_calls == 1
 
-    async def test_cleans_up_runtime_after_stream_result_timeout(self) -> None:
+    @pytest.mark.parametrize("method", list(StreamingMethod))
+    async def test_cleans_up_runtime_after_stream_result_timeout(self, method: StreamingMethod) -> None:
         class _SlowInvokeStream(_FakeInvokeStream):
             async def result(self) -> Any:
                 await asyncio.sleep(1.0)
                 return await super().result()
 
-        fake_runtime = _FakeRuntime(stream=_SlowInvokeStream())
+        fake_runtime = _FakeRuntime(stream=_SlowInvokeStream(), invoke_delay=1.0)
         request = FabricOneShotRequest(
             fabric_config=FabricConfig(
                 metadata=MetadataConfig(name="test-agent"), harness=HarnessConfig(adapter_id="nvidia.fabric.codex")
@@ -564,7 +576,9 @@ class TestStreamFabricAgentOnce:
         )
 
         with pytest.raises(FabricRuntimeTimeoutError, match="timed out after 0.01s"):
-            async with stream_fabric_agent_once(request, fabric=_FakeFabric(runtime=fake_runtime)) as runtime_stream:
+            async with stream_fabric_agent_once(
+                request, fabric=_FakeFabric(runtime=fake_runtime), streaming_method=method
+            ) as runtime_stream:
                 await runtime_stream.result()
 
         assert fake_runtime.exit_calls == 1
