@@ -19,6 +19,7 @@ import httpx
 import pytest
 from nhx_evals_sdk.agent_eval.runtimes.gym import discover_gym_tasks, sandboxed
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
+from nhx_evals_sdk.agent_eval.runtimes.gym.results import GYM_FAILURE_RECORD
 from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
     MODEL_CALLS_RESULT_KEY,
     PROXY_AUTH_HEADER,
@@ -27,6 +28,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.sandboxed import (
     _stamp_rollout_indices,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig
+from nhx_evals_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialError
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from pydantic import ValidationError
 
@@ -386,6 +388,78 @@ async def test_a_task_the_host_never_answered_fails_the_run(tasks, tmp_path, mon
     # The check that fires is the CLI runner's own, reached because this runner writes the records
     # where that parser reads them -- which is the reuse claim, stated as a test.
     assert "will not be scored" in str(excinfo.value)
+
+
+def _host_answering(monkeypatch: pytest.MonkeyPatch, records_by_task: dict[int, dict[str, Any]]) -> None:
+    """Answer each posted example with its task's record from ``records_by_task``, identity echoed."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        examples = json.loads(request.content.decode())["examples"]
+        results = [
+            {
+                NG_TASK_INDEX: e[NG_TASK_INDEX],
+                NG_ROLLOUT_INDEX: e[NG_ROLLOUT_INDEX],
+                **records_by_task[e[NG_TASK_INDEX]],
+            }
+            for e in examples
+        ]
+        return httpx.Response(200, json={"results": results})
+
+    bind_http_transport(monkeypatch, httpx.MockTransport(handle))
+
+
+async def test_a_gym_failure_record_is_a_failed_trial_not_a_zero_score(tasks, tmp_path, monkeypatch) -> None:
+    """The host returns Gym's failure records inline; Gym itself would have kept them out of the scores.
+
+    A producer error scored as a completed 0.0 is indistinguishable from an agent that answered wrong,
+    and the error that says otherwise is lost.
+    """
+    failure = {
+        "reward": 0.0,
+        "response": {"output": []},
+        "_ng_failure_class": "remote_agent_error",
+        "error": "RuntimeError: customer workload failed",
+    }
+    _host_answering(monkeypatch, {0: {"reward": 0.0, "response": "answer-0"}, 1: failure})
+    runner = SandboxedGymAgentTaskRunner(config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL))
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    by_task = {trial.task_id: trial for trial in trials}
+    scored, failed = by_task[tasks[0].id], by_task[tasks[1].id]
+    assert scored.status == AgentEvalTrialStatus.COMPLETED, "a real 0.0 must stay a completed score"
+    assert scored.metadata["reward"] == 0.0
+    assert failed.status == AgentEvalTrialStatus.FAILED
+    assert failed.error == TrialError(type="remote_agent_error", message="RuntimeError: customer workload failed")
+    assert failed.metadata["reward"] is None
+    assert failed.metadata[GYM_FAILURE_RECORD] == {
+        "_ng_failure_class": "remote_agent_error",
+        "error": "RuntimeError: customer workload failed",
+    }
+    assert failed.evidence is not None
+    assert failed.evidence.require("rollout_failures").ref == str(tmp_path / "gym_run" / "rollouts_failures.jsonl")
+
+
+async def test_a_kill_shaped_gym_record_keeps_its_diagnosis(tasks, tmp_path, monkeypatch) -> None:
+    """Gym drops a kill-shaped failure so it can retry it on resume; nothing retries it here.
+
+    Dropping it would turn the OOM the host reported into a bare "no rollout for this task".
+    """
+    _host_answering(
+        monkeypatch,
+        {
+            0: {"reward": 1.0, "response": "answer-0"},
+            1: {"_ng_failure_class": "oom", "_ng_no_persist": True, "_ng_failure_message": "OOMKilled"},
+        },
+    )
+    runner = SandboxedGymAgentTaskRunner(config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL))
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    (killed,) = [trial for trial in trials if trial.task_id == tasks[1].id]
+    assert killed.status == AgentEvalTrialStatus.FAILED
+    assert killed.error == TrialError(type="oom", message="OOMKilled")
+    assert killed.metadata["reward"] is None
 
 
 def test_runner_info_records_the_host_but_not_the_token() -> None:

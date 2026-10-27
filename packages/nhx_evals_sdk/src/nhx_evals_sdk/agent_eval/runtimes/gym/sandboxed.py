@@ -42,11 +42,16 @@ from typing import Any
 import httpx
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY
 from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import materialize_dataset, source_datasets
-from nhx_evals_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
+from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
+    NG_FAILURE_CLASS,
+    NG_ROLLOUT_INDEX,
+    NG_TASK_INDEX,
+)
 from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     aggregate_scores_from_gym,
     capture_filename,
     ensure_fresh_output,
+    failures_path_for,
     read_run_aggregations,
     require_full_coverage,
     trials_from_rollouts,
@@ -125,6 +130,24 @@ def _unpack_model_call_captures(records: list[dict[str, Any]], work_dir: Path) -
         logger.info("Sandboxed Gym host returned no model-call captures; traces will carry no per-call timing.")
         return None
     return capture_dir
+
+
+def _write_records(records: list[dict[str, Any]], rollouts_path: Path) -> None:
+    """Write ``records`` to the files ``gym eval run`` would have, so the shared parser reads them alike.
+
+    Gym's collection loop puts a record carrying a failure class in the failures sidecar, out of the
+    scores. The host returns every record inline, so the routing happens here.
+
+    Unlike Gym, a kill-shaped failure is kept in the sidecar rather than dropped: Gym drops it to
+    retry it on resume, and nothing here retries, so dropping it would only lose its diagnosis.
+    """
+    successes = [record for record in records if record.get(NG_FAILURE_CLASS) is None]
+    failures = [record for record in records if record.get(NG_FAILURE_CLASS) is not None]
+    rollouts_path.write_text("".join(f"{json.dumps(record)}\n" for record in successes), encoding="utf-8")
+    if failures:
+        failures_path_for(rollouts_path).write_text(
+            "".join(f"{json.dumps(record)}\n" for record in failures), encoding="utf-8"
+        )
 
 
 def _host_error_message(rollout_url: str, error: object) -> str:
@@ -348,10 +371,7 @@ class SandboxedGymAgentTaskRunner:
 
         # Written where the parser expects it, so the records are read by exactly the code that
         # reads the CLI runner's output -- including its handling of records with no usable index.
-        rollouts_path.write_text(
-            "".join(f"{json.dumps(record)}\n" for record in records),
-            encoding="utf-8",
-        )
+        _write_records(records, rollouts_path)
 
         self._run_aggregations = read_run_aggregations(rollouts_path)
         trials = trials_from_rollouts(
