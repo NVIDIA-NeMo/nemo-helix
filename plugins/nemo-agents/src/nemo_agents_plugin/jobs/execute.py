@@ -295,6 +295,10 @@ class ResolvedAgentConfig(BaseModel):
 class ExecuteAgentStepConfig(BaseModel):
     request: ExecuteAgentJobConfig
     agent: ResolvedAgentConfig
+    # Fully qualified ``workspace/name`` of the Agent entity this job ran, so job
+    # listing can filter by agent with ``filter[spec.agent_ref]``. None for an
+    # inline agent, which is not an entity and so belongs to no agent's runs.
+    agent_ref: str | None = None
     workdir: AgentWorkdir | None = None
     # Immutable snapshot of the resolved AgentEnvironment, mirroring
     # AgentDeployment. ``agent.config`` already holds the merged config;
@@ -393,6 +397,7 @@ class ExecuteAgentJob(NemoJob):
                 config=merged.config,
                 config_format=source.config_format,
             ),
+            agent_ref=source.ref,
             workdir=workdir,
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
@@ -762,6 +767,8 @@ class _AgentSource(BaseModel):
     workspace: str
     config: dict[str, Any]
     config_format: str
+    ref: str | None = None
+    """``workspace/name`` of the Agent entity, or None for an inline agent."""
 
 
 async def _resolve_agent_source(
@@ -807,6 +814,7 @@ async def _resolve_agent_source(
         workspace=entity.workspace,
         config=entity.config,
         config_format=entity.config_format,
+        ref=f"{entity.workspace}/{entity.name}",
     )
 
 

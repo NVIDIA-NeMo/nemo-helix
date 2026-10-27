@@ -478,6 +478,114 @@ class TestListAgents:
 
         assert resp.status_code == 500
 
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            (
+                "filter[labels.helix-agents/managed-by]=insights",
+                {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
+            ),
+            (
+                "filter[labels][helix-agents/managed-by]=insights",
+                {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
+            ),
+            ("filter[labels.team][$in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
+            ("filter[config_format]=nemo-agents-spec-v1", {"data.config_format": {"$eq": "nemo-agents-spec-v1"}}),
+        ],
+    )
+    def test_list_translates_filters_to_entity_paths(
+        self, client: TestClient, mock_entity_client: AsyncMock, query: str, expected: dict[str, Any]
+    ) -> None:
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+
+        resp = client.get(f"/apis/agents/v2/workspaces/default/agents?{query}")
+
+        assert resp.status_code == 200
+        assert mock_entity_client.list.call_args.kwargs["filter_operation"].to_dict() == expected
+
+    def test_list_ands_multiple_label_filters(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents?filter[labels][a]=1&filter[labels][b]=2")
+
+        assert resp.status_code == 200
+        # Query parsing does not preserve parameter order, so compare the clauses as a set.
+        clauses = mock_entity_client.list.call_args.kwargs["filter_operation"].to_dict()["$and"]
+        assert sorted(clauses, key=str) == [{"data.labels.a": {"$eq": "1"}}, {"data.labels.b": {"$eq": "2"}}]
+
+    def test_list_rejects_unknown_filter_field(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+
+        resp = client.get("/apis/agents/v2/workspaces/default/agents?filter[colour]=red")
+
+        assert resp.status_code == 400
+        mock_entity_client.list.assert_not_awaited()
+
+
+class TestAgentLabels:
+    def test_register_stores_labels(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        labels = {"helix-compass/target-agent": "default/support-bot", "team": "search"}
+        saved = _make_agent("calc")
+        saved.labels = labels
+        mock_entity_client.create = AsyncMock(return_value=saved)
+
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "calc", "labels": labels})
+
+        assert resp.status_code == 201
+        assert mock_entity_client.create.call_args.args[0].labels == labels
+        assert resp.json()["labels"] == labels
+
+    def test_register_defaults_labels_to_empty(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.create = AsyncMock(return_value=_make_agent("calc"))
+
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "calc"})
+
+        assert resp.status_code == 201
+        assert mock_entity_client.create.call_args.args[0].labels == {}
+        assert resp.json()["labels"] == {}
+
+    @pytest.mark.parametrize(
+        "labels",
+        [
+            # Dots would split the ``labels.<key>`` filter path.
+            {"helix.agents.managed-by": "x"},
+            {"helix.agents/managed-by": "x"},
+            {"": "x"},
+            {"/name": "x"},
+            {"a/b/c": "x"},
+            {"-leading": "x"},
+            {"k" * 64: "x"},
+            {"key": "-leading"},
+            {"key": "v" * 254},
+            {"key": "has space"},
+        ],
+    )
+    def test_register_rejects_invalid_labels(
+        self, client: TestClient, mock_entity_client: AsyncMock, labels: dict[str, str]
+    ) -> None:
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "calc", "labels": labels})
+
+        assert resp.status_code == 422
+        mock_entity_client.create.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "labels",
+        [
+            {"k" * 63: "v" * 253},
+            {f"{'p' * 63}/{'n' * 63}": "x"},
+            {"key": ""},
+            {"Key_1": "v1.2_beta"},
+        ],
+    )
+    def test_register_accepts_boundary_labels(
+        self, client: TestClient, mock_entity_client: AsyncMock, labels: dict[str, str]
+    ) -> None:
+        mock_entity_client.create = AsyncMock(return_value=_make_agent("calc"))
+
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "calc", "labels": labels})
+
+        assert resp.status_code == 201
+
 
 # ---------------------------------------------------------------------------
 # GET /agents/{name} — get

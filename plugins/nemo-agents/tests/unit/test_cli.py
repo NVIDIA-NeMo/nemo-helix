@@ -305,6 +305,63 @@ def test_agents_cli_has_no_create_command() -> None:
     assert "No such command 'create'" in result.output
 
 
+def test_register_sends_labels() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert json.loads(req.content) == {
+            "name": "calc",
+            "labels": {"helix-agents/managed-by": "insights", "team": "search"},
+        }
+        return httpx.Response(201, json={"name": "calc"})
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            AgentsCLI().get_cli(),
+            ["register", "--name", "calc", "--label", "helix-agents/managed-by=insights", "-l", "team=search"],
+        )
+
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    ("label", "error"),
+    [("team", "must be KEY=VALUE"), ("helix.agents.managed-by=x", "invalid --label")],
+)
+def test_register_rejects_bad_label_before_post(label: str, error: str) -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST with an invalid label")
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(AgentsCLI().get_cli(), ["register", "--name", "calc", "--label", label])
+
+    assert result.exit_code == 2
+    assert error in result.stderr
+
+
+def test_list_filters_by_label() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert json.loads(req.url.params["filter"]) == {"labels.helix-compass/target-agent": "default/bot"}
+        return httpx.Response(
+            200,
+            json={
+                "data": [],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 20,
+                    "current_page_size": 0,
+                    "total_pages": 1,
+                    "total_results": 0,
+                },
+            },
+        )
+
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            AgentsCLI().get_cli(), ["list", "--label", "helix-compass/target-agent=default/bot", "-f", "json"]
+        )
+
+    assert result.exit_code == 0, result.output
+
+
 @pytest.mark.parametrize("config_text", [None, "{}", "name: calc\ndescription: Calculator\n"])
 def test_register_name_only(tmp_path: Path, config_text: str | None) -> None:
     args = ["register", "--name", "calc", "--workspace", "team-a"]

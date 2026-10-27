@@ -642,3 +642,98 @@ def test_redeploy_surfaces_real_delete_failure(tmp_path: Path, make_cli_state) -
     # It undeployed and attempted the delete, but did NOT proceed to recreate.
     assert rec.ordered_ops() == ["undeploy", "delete"]
     assert "already absent" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# Labels: kept unless --label replaces them
+# ---------------------------------------------------------------------------
+
+
+class _LabelsRecorder(_Recorder):
+    """Serves the existing agent's labels (or a 404) and captures the recreate body."""
+
+    def __init__(self, *, existing_labels: dict[str, str] | None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.existing_labels = existing_labels
+        self.created: dict[str, Any] | None = None
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if req.method == "GET" and re.search(r"/agents/[^/]+$", path):
+            self.calls.append((req.method, path))
+            if self.existing_labels is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(200, json={"name": "my-agent", "labels": self.existing_labels})
+        if req.method == "POST" and path.endswith("/agents"):
+            self.created = json.loads(req.content)
+        return super().__call__(req)
+
+
+def _redeploy(tmp_path: Path, make_cli_state, rec: _Recorder, *extra: str) -> Any:
+    with patch(f"{_PATCH_PREFIX}.sleep"):
+        return runner.invoke(
+            AgentsCLI().get_cli(),
+            [
+                "redeploy",
+                "--agent",
+                "my-agent",
+                "--agent-config",
+                str(_write_config(tmp_path)),
+                "--yes",
+                "--timeout",
+                "10",
+                *extra,
+            ],
+            obj=make_cli_state(rec),
+        )
+
+
+def test_redeploy_keeps_existing_labels_when_label_omitted(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support", "helix-agents/managed-by": "compass"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec)
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert rec.created["labels"] == {"team": "support", "helix-agents/managed-by": "compass"}
+
+
+def test_redeploy_label_replaces_existing_labels(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support", "tier": "1"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec, "--label", "team=billing")
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert rec.created["labels"] == {"team": "billing"}
+    # An explicit --label needs nothing from the old agent.
+    assert ("GET", "/apis/agents/v2/workspaces/default/agents/my-agent") not in rec.calls
+
+
+def test_redeploy_absent_agent_recreates_without_labels(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels=None, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec)
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert "labels" not in rec.created
+
+
+def test_redeploy_recovery_hint_carries_labels(tmp_path: Path, make_cli_state) -> None:
+    """After teardown a re-run can't read the old labels, so the hint must pass them explicitly."""
+    rec = _LabelsRecorder(existing_labels={"team": "support"}, deployments=[], create_agent_status=500)
+    result = _redeploy(tmp_path, make_cli_state, rec)
+    assert result.exit_code != 0
+    assert "--label team=support" in result.output
+
+
+def test_redeploy_clear_labels_recreates_without_labels(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec, "--clear-labels")
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert "labels" not in rec.created
+    assert ("GET", "/apis/agents/v2/workspaces/default/agents/my-agent") not in rec.calls
+
+
+def test_redeploy_clear_labels_conflicts_with_label(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec, "--clear-labels", "--label", "team=billing")
+    assert result.exit_code == 2
+    assert "--clear-labels cannot be combined with --label" in result.output
+    assert rec.calls == []

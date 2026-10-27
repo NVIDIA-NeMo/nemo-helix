@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Any, Literal, NotRequired, Self, TypeAlias, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
 from nemo_helix_plugin.images import normalize_reference
 from nemo_helix_plugin.jobs.schemas import (
@@ -18,7 +19,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 JsonMap: TypeAlias = dict[str, Any]
 JsonObject: TypeAlias = JsonMap
@@ -37,6 +38,38 @@ AgentJobCollection: TypeAlias = Literal[
 
 NAT_WORKFLOW_CONFIG_FORMAT = "nat-workflow-v1"
 NEMO_AGENTS_SPEC_CONFIG_FORMAT = "nemo-agents-spec-v1"
+
+# Label keys follow Kubernetes (an optional ``prefix/`` plus a name) except that
+# neither part may contain a dot: list filters address a label as
+# ``labels.<key>`` and the entity store splits that path on dots. Values may
+# hold a ``workspace/name`` ref, so they also allow ``/``.
+_LABEL_SEGMENT_PATTERN = re.compile(r"[A-Za-z0-9]([A-Za-z0-9_-]{0,61}[A-Za-z0-9])?")
+_LABEL_VALUE_PATTERN = re.compile(r"([A-Za-z0-9]([A-Za-z0-9_./-]{0,251}[A-Za-z0-9])?)?")
+
+
+def _validate_labels(labels: StringMap) -> StringMap:
+    for key, value in labels.items():
+        prefix, separator, name = key.rpartition("/")
+        if not _LABEL_SEGMENT_PATTERN.fullmatch(name) or (separator and not _LABEL_SEGMENT_PATTERN.fullmatch(prefix)):
+            raise ValueError(
+                f"Label key {key!r} must be '<name>' or '<prefix>/<name>', each part 1-63 characters of "
+                "letters, digits, '-' and '_', starting and ending with a letter or digit."
+            )
+        if not _LABEL_VALUE_PATTERN.fullmatch(value):
+            raise ValueError(
+                f"Label value {value!r} for key {key!r} must be empty or at most 253 characters of letters, "
+                "digits, '-', '_', '.' and '/', starting and ending with a letter or digit."
+            )
+    return labels
+
+
+Labels: TypeAlias = Annotated[StringMap, AfterValidator(_validate_labels)]
+
+LABELS_DESCRIPTION = (
+    "Key/value labels for filtering and display, never for authorization. Keys are '<name>' or "
+    "'<prefix>/<name>' with no dots. Keys NeMo Helix plugins define use the prefix 'helix-<plugin>', "
+    "e.g. 'helix-agents/managed-by'; that prefix is a convention the API does not enforce."
+)
 
 
 class EntityMetadata(BaseModel):
@@ -262,6 +295,7 @@ class Agent(EntityMetadata, AgentInline):
     """An agent definition stored in the Agents service."""
 
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
+    labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
 
 
 class AgentComputeSpec(EntityMetadata, ComputeSpecInline):
@@ -331,6 +365,7 @@ class RegisterAgentRequest(BaseModel):
     name: str = Field(description="Unique agent name within the workspace.")
     description: str = Field(default="", description="Human-readable description.")
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
+    labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
     config: JsonMap = Field(
         default_factory=dict, description="Agent config dict interpreted according to config_format."
     )

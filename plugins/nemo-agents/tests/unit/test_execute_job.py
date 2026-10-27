@@ -201,6 +201,7 @@ async def test_to_spec_resolves_bare_agent_against_route_workspace() -> None:
     step_config = ExecuteAgentStepConfig.model_validate(spec)
     assert step_config.agent.name == "calc"
     assert step_config.agent.workspace == "default"
+    assert step_config.agent_ref == "default/calc"
     assert step_config.request.input == "hello"
     assert step_config.request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
     assert step_config.workdir is None
@@ -216,7 +217,7 @@ async def test_to_spec_preserves_explicit_agent_workspace() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent(workspace="research")
 
-    await ExecuteAgentJob.to_spec(
+    spec = await ExecuteAgentJob.to_spec(
         ExecuteAgentJobConfig(agent="research/calc", input="hello"),
         workspace="default",
         entity_client=entity_client,
@@ -225,6 +226,8 @@ async def test_to_spec_preserves_explicit_agent_workspace() -> None:
     )
 
     entity_client.get.assert_awaited_once_with(Agent, name="calc", workspace="research")
+    # A job in one workspace that runs another workspace's agent is listed under that agent's ref.
+    assert ExecuteAgentStepConfig.model_validate(spec).agent_ref == "research/calc"
 
 
 @pytest.mark.asyncio
@@ -1422,6 +1425,8 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     assert body.spec["agent"]["name"] == "calc"
     assert body.spec["agent"]["workspace"] == "default"
     assert body.spec["agent"]["config_format"] == "nemo-agents-spec-v1"
+    # The stored job spec carries the qualified ref that ``filter[spec.agent_ref]`` matches.
+    assert body.spec["agent_ref"] == "default/calc"
     assert body.spec["agent"]["config"]["environment"] == {
         "provider": "local",
         "workspace": "./workspace",
@@ -1535,6 +1540,8 @@ async def test_to_spec_resolves_an_inline_agent_without_touching_the_entity_stor
     assert step_config.agent.name == "calc"
     assert step_config.agent.workspace == "research"
     assert step_config.agent.config_format == "nemo-agents-spec-v1"
+    # Not an entity, so the job belongs to no agent's runs.
+    assert step_config.agent_ref is None
     entity_client.get.assert_not_awaited()
 
 
