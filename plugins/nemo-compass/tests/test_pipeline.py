@@ -404,11 +404,20 @@ async def test_latest_compass_signals_skip_empty_snapshot_without_model_calls():
 
 
 @pytest.mark.asyncio
-async def test_ethos_signal_runs_with_helix_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("ethos_signal_enabled", [True, False])
+async def test_ethos_signal_runs_with_helix_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ethos_signal_enabled: bool
+) -> None:
     """A Compass upgrade must still run ethos analysis through Helix's real pipeline."""
     # An ambient ETHOS.md must not hide a broken hand-off of the supplied document.
     monkeypatch.chdir(tmp_path)
     ethos = "Never issue refunds."
+    config = pipeline.CompassSignalsConfig()
+    if not ethos_signal_enabled:
+        config.ethos_divergence = None
+    monkeypatch.setattr(pipeline, "CompassSignalsConfig", lambda: config)
+    registry_factory = MagicMock(wraps=pipeline.registered_builtin_signals)
+    monkeypatch.setattr(pipeline, "registered_builtin_signals", registry_factory)
     snapshot = TraceSnapshot([Trace(id="trace-1", root_spans=[], aggregate=TraceAggregate())])
     fast = FakeLLMClient.with_tool_call("execute_python", {"code": "return_result(result=[])"})
     default = FakeLLMClient()
@@ -421,8 +430,10 @@ async def test_ethos_signal_runs_with_helix_configuration(tmp_path: Path, monkey
     )
 
     # A successful run with no findings is different from silently skipping ethos.
-    assert fast.call_count == 1
-    assert ethos in str(fast.last_messages)
+    assert registry_factory.call_args.kwargs["ethos_path"] is not None
+    assert fast.call_count == int(ethos_signal_enabled)
+    if ethos_signal_enabled:
+        assert ethos in str(fast.last_messages)
     assert not any("ethos-divergence" in note for note in result.notes)
     assert result.new_insights == []
     assert result.updated_insights == []

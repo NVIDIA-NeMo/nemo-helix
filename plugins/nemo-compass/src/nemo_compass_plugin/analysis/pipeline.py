@@ -210,7 +210,7 @@ async def analyze_snapshot(
     with TemporaryDirectory(prefix="nemo-compass-") as directory:
         config = CompassSignalsConfig()
         ethos_path = None
-        if ethos and config.ethos_divergence is not None:
+        if ethos:
             ethos_path = Path(directory) / "ETHOS.md"
             ethos_path.write_text(ethos, encoding="utf-8")
         registry = registered_builtin_signals(
