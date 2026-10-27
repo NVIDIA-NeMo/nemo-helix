@@ -703,16 +703,18 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         entrypoint launched are up.
         """
         command = shlex.join(argv)
+        sandbox = self._require_sandbox()
         while True:
-            # As root from /, like a Compose healthcheck, whatever the task's default user and workdir.
+            # Docker runs a healthcheck as the image's user from its WORKDIR, so no user or directory is sent:
+            # not root, and not the task's default user or workdir, which `exec` would apply.
             remaining = max(1, int(deadline - time.monotonic()))
-            last = await self.exec(command, cwd="/", user="root", timeout_sec=min(30, remaining))
-            if last.return_code == 0:
+            last = await self._driver.run(sandbox, command, env=self._merge_env(None), timeout_sec=min(30, remaining))
+            if last.exit_code == 0:
                 return
             # Out of time: report the check's last output, which usually says what's missing.
             if time.monotonic() >= deadline:
                 output = ((last.stdout or "") + (last.stderr or ""))[-2000:]
-                raise RuntimeError(f"main was not ready: {command!r} last exited {last.return_code}: {output}")
+                raise RuntimeError(f"main was not ready: {command!r} last exited {last.exit_code}: {output}")
             await asyncio.sleep(COMPOSE_READY_POLL_SEC)
 
     async def _wait_for_services(self, deadline: float) -> None:

@@ -27,7 +27,7 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
-from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver
+from nhx_sandbox.harbor_opensandbox_driver import CommandResult, OpenSandboxDriver
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
@@ -304,19 +304,23 @@ async def test_start_waits_for_main_then_the_services(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     environment = _environment(_task(tmp_path), server)
-    results = [ExecResult(stdout="", stderr="refused", return_code=7), ExecResult(stdout="ok", return_code=0)]
+    results = [
+        CommandResult(stdout="", stderr="refused", exit_code=7),
+        CommandResult(stdout="ok", stderr="", exit_code=0),
+    ]
     commands: list[str] = []
 
-    async def exec_(command: str, **kwargs: Any) -> ExecResult:
-        # start() also opens up the log directories; only main's readiness check is scripted.
-        if command.startswith("chmod "):
-            return ExecResult(stdout="", stderr="", return_code=0)
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> CommandResult:
+        # start() also opens up the log directories, as root; only main's readiness check is scripted.
+        if command != "curl -sf http://localhost:8000/health":
+            return CommandResult(stdout="0", stderr="", exit_code=0)
         commands.append(command)
-        assert kwargs["user"] == "root"
-        assert kwargs["cwd"] == "/"
+        # Like a Docker healthcheck: the image's own user and WORKDIR, so neither is sent.
+        assert kwargs.get("uid") is None
+        assert kwargs.get("cwd") is None
         return results.pop(0)
 
-    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment._driver, "run", run)
     # The first status is read by the create's readiness wait, the rest by start's own wait.
     extension.statuses = [
         {"failure": None, "not_ready": ["db"]},
@@ -383,12 +387,12 @@ async def test_start_waits_as_long_as_the_spec_allows(
 async def test_main_readiness_timeout_reports_last_output(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    environment = _environment(_task(tmp_path), server)
+    environment = await _started(_environment(_task(tmp_path), server))
 
-    async def exec_(command: str, **kwargs: Any) -> ExecResult:
-        return ExecResult(stdout="", stderr="connection refused", return_code=7)
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> CommandResult:
+        return CommandResult(stdout="", stderr="connection refused", exit_code=7)
 
-    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment._driver, "run", run)
 
     with pytest.raises(RuntimeError, match="main was not ready.*connection refused"):
         await environment._wait_for_main(["false"], deadline=0)

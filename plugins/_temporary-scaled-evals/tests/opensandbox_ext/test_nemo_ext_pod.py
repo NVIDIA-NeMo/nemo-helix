@@ -92,6 +92,8 @@ def test_services_are_placed_by_role_after_egress() -> None:
     assert db["imagePullPolicy"] == "Always"
     assert db["startupProbe"]["exec"]["command"] == ["pg_isready"]
     assert db["readinessProbe"]["failureThreshold"] == 3
+    # Compose's default healthcheck timeout, so a check slower than a few seconds still passes.
+    assert db["startupProbe"]["timeoutSeconds"] == db["readinessProbe"]["timeoutSeconds"] == 30
     assert db["env"] == [{"name": "POSTGRES_PASSWORD", "value": "pw"}]
     assert db["volumeMounts"] == [
         {"name": "nemo-vol-shared", "mountPath": "/data", "readOnly": False},
