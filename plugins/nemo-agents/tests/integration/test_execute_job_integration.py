@@ -14,7 +14,7 @@ import pytest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.service import AgentsService
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -30,6 +30,32 @@ pytestmark = pytest.mark.integration
 class _TestAgentsService(NemoServiceAdapter):
     def __init__(self) -> None:
         super().__init__(AgentsService())
+
+
+class _BorrowedAsyncClient:
+    """Async context manager that yields the in-process client without closing it."""
+
+    def __init__(self, client: AsyncNemoClient) -> None:
+        self._client = client
+
+    async def __aenter__(self) -> AsyncNemoClient:
+        return self._client
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+def _stage_through_test_app(sdk: NemoClient, ctx: ClientContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point ``to_async`` at the in-process app.
+
+    ``NemoClient.to_async`` opens a new network transport, and this suite's
+    client is only reachable through the ASGI app already on ``ctx.async_client``.
+    """
+
+    def to_async() -> _BorrowedAsyncClient:
+        return _BorrowedAsyncClient(ctx.async_client)
+
+    monkeypatch.setattr(sdk, "to_async", to_async)
 
 
 def _extract_tar_members(content: bytes, target_dir: Path) -> dict[str, str]:
@@ -51,7 +77,7 @@ def _upload(client: NemoClient, *, fileset: str, path: str, content: str, create
     files_client.upload_file(name=fileset, path=path, content=content.encode(), workspace="default")
 
 
-def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> None:
+def test_execute_job_materializes_layered_input_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with create_test_client(
         _TestAgentsService,
         FilesService,
@@ -133,6 +159,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
             return FabricRuntimeResult(status="succeeded", response="done")
 
         with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+            _stage_through_test_app(ctx.client, ctx, monkeypatch)
             result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.client)
         assert result["status"] == "completed"
         assert result["input_workdir"]["name"] == "input_workdir"
@@ -177,7 +204,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
         )
 
 
-def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> None:
+def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with create_test_client(
         _TestAgentsService,
         FilesService,
@@ -245,6 +272,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
             patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
             pytest.raises(RuntimeError, match="fabric exploded"),
         ):
+            _stage_through_test_app(ctx.client, ctx, monkeypatch)
             ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.client)
 
         results_response = ctx.test_client.get(f"/apis/agents/v2/workspaces/default/jobs/execute/{job_name}/results")
