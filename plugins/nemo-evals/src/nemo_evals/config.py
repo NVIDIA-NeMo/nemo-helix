@@ -131,7 +131,11 @@ class RunControllerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    interval_seconds: float = Field(default=15.0, gt=0, description="Time between controller cycles.")
+    interval_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description="Time between controller cycles. The controller reports itself unhealthy after 3 intervals without one.",
+    )
     max_cluster_concurrent_jobs: int = Field(
         default=50, gt=0, description="Task Jobs at once across every run in every workspace."
     )
