@@ -3724,6 +3724,7 @@ sqlalchemy==2.0.51 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     #   alembic
     #   langchain-classic
     #   langchain-community
+    #   nemo-deployments-plugin
     #   nemo-helix
     #   nhx-common
     #   nhx-entities
