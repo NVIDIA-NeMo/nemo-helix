@@ -3,7 +3,6 @@
 
 """Compass scheduling and AnalysisRun CLI."""
 
-import logging
 from collections.abc import Callable
 from datetime import datetime
 from importlib.metadata import entry_points
@@ -41,12 +40,8 @@ from nemo_helix_plugin.cli_output import Column, check_output_columns_with_forma
 from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
 from nemo_helix_plugin.cli_state import CLIState, cli_state, resolve_cli_workspace, resolve_output_format
 from nemo_helix_plugin.cli_warnings import collect_warnings
-from nemo_helix_plugin.client.errors import NotFoundError
-from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.nooa_model_client import configured_fast_model, configured_model_refs
-
-logger = logging.getLogger(__name__)
 
 _RUN_COLUMNS = [Column("name"), Column("agent"), Column("evaluation_id"), Column("created_at")]
 _CONFIG_COLUMNS = [
@@ -236,7 +231,7 @@ class CompassCLI(NemoCLI):
             ethos: Path | None = typer.Option(
                 None,
                 "--ethos",
-                help="Override the agent fileset and local ETHOS.md with this Ethos Markdown file.",
+                help="Path to the agent's Ethos Markdown. Its contents are sent with the run.",
             ),
             evaluation_id: str | None = typer.Option(
                 None,
@@ -275,21 +270,14 @@ class CompassCLI(NemoCLI):
             _reject_wait_with_code(wait, resolved_output_format)
             workspace = resolve_cli_workspace(ctx, workspace)
             resolved_default, resolved_fast = _resolve_model_refs(default_model, fast_model)
-            parsed_since = _parse_since(since)
-            if resolved_output_format == "code":
-                ethos_content = _read_ethos_file(ethos)
-                if ethos is None:
-                    typer.echo("Code output skips ethos discovery; use --ethos to include a document.", err=True)
-            else:
-                ethos_content = _resolve_ethos(state, workspace=workspace, agent=agent, ethos_path=ethos)
             kwargs = {
                 "workspace": workspace,
                 "body": _build_create_body(
                     agent=agent,
                     default_model=resolved_default,
                     fast_model=resolved_fast,
-                    ethos=ethos_content,
-                    since=parsed_since,
+                    ethos=_read_ethos_file(ethos),
+                    since=_parse_since(since),
                     evaluation_id=evaluation_id,
                     timeout_seconds=timeout_seconds,
                 ),
@@ -505,60 +493,11 @@ def _read_ethos_file(ethos: Path | None) -> str | None:
         return None
     try:
         content = ethos.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
+    except OSError as exc:
         raise click.BadParameter(f"could not be read: {exc}", param_hint="'--ethos'") from None
     if not content.strip():
         raise click.BadParameter(f"is empty: {ethos}", param_hint="'--ethos'")
-    _report_ethos(f"Using ethos from local file: {ethos.resolve()}")
     return content
-
-
-def _report_ethos(message: str) -> None:
-    logger.info(message)
-    typer.echo(message, err=True)
-
-
-def _repository_root() -> Path | None:
-    current = Path.cwd()
-    return next((path for path in (current, *current.parents) if (path / ".git").exists()), None)
-
-
-def _resolve_ethos(state: CLIState, *, workspace: str, agent: str, ethos_path: Path | None) -> str | None:
-    """Resolve on the submitting machine; the analysis worker has no Files access."""
-    if ethos_path is not None:
-        return _read_ethos_file(ethos_path)
-
-    fileset = f"{agent}-ethos"
-    reference = f"{workspace}/{fileset}#ETHOS.md"
-    files_client = state.typed_client(FilesClient)
-    try:
-        content = files_client.download_file(workspace=workspace, name=fileset, path="ETHOS.md").read()
-    except NotFoundError:
-        logger.info("No ethos at fileset %s; checking the repository root", reference)
-    else:
-        try:
-            markdown = content.decode("utf-8")
-        except UnicodeError as exc:
-            raise click.ClickException(f"Could not decode ethos from {reference}: {exc}") from None
-        if markdown.strip():
-            _report_ethos(f"Using ethos from fileset: {reference}")
-            return markdown
-        logger.info("Ethos at fileset %s is empty; checking the repository root", reference)
-
-    root = _repository_root()
-    if root is None:
-        _report_ethos(
-            f"No ethos document found in fileset {reference}; outside a Git repository, use --ethos to supply one"
-        )
-        return None
-    for filename in ("ETHOS.md", "ethos.md"):
-        path = root / filename
-        if path.exists():
-            return _read_ethos_file(path)
-    _report_ethos(
-        f"No ethos document found in fileset {reference} or repository root {root}; ethos analysis will be skipped"
-    )
-    return None
 
 
 def _resolve_model_refs(default_model: str | None, fast_model: str | None) -> tuple[str, str]:

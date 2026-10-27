@@ -213,7 +213,6 @@ async def analyze_snapshot(
         if ethos and config.ethos_divergence is not None:
             ethos_path = Path(directory) / "ETHOS.md"
             ethos_path.write_text(ethos, encoding="utf-8")
-            logger.info("Using supplied ethos document staged at %s", ethos_path)
         registry = registered_builtin_signals(
             anomaly_and_patterns=config.anomaly_and_patterns,
             tool_issues=config.tool_issues,

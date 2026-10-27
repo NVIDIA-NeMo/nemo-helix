@@ -79,10 +79,7 @@ Replace the quoted placeholders below with the target agent and workspace.
 nemo compass analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
 ```
 
-The CLI first uses `ETHOS.md` in `<workspace>/<agent-name>-ethos`, then looks
-for `ETHOS.md` or `ethos.md` at the current Git repository root. It reports the selected
-source on stderr. Add `--ethos <path>` to override both; an invalid override
-fails submission. Use `--since` for
+Add `--ethos ETHOS.md` to supply the agent's intended behavior, `--since` for
 an ISO-8601 lower time bound, or `--evaluation-id` to select an evaluation.
 The command submits an AnalysisRun backed by an `agents.execute` job. Expect
 several minutes. `--wait` exits non-zero unless the job completes successfully.

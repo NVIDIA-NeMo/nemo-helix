@@ -49,25 +49,9 @@ resulting insights in NeMo Helix. `--wait` exits non-zero unless the job
 completes successfully. A run and its backing job share one name.
 
 `create` uses those configured models unless you pass `--default-model` and
-`--fast-model`. Add `--ethos ETHOS.md` to select a specific ethos document,
+`--fast-model`. Add `--ethos ETHOS.md` to supply the agent's intended behavior,
 `--since <ISO-8601 timestamp>` to set a lower time bound, or
 `--evaluation-id <id>` to select one evaluation.
-
-For CLI submissions, ethos is selected in this order:
-
-1. The file passed with `--ethos`. An unreadable or empty override fails the command.
-2. `ETHOS.md` in the agent's `<workspace>/<agent-name>-ethos` fileset.
-3. `ETHOS.md`, then `ethos.md`, in the current Git repository's root.
-
-The local lookup uses the nearest enclosing Git repository or worktree root.
-Outside a repository, supply `--ethos` or use the stored document.
-A missing or empty stored document allows the local fallback. Other download
-errors stop submission. The CLI logs the selected fileset reference or absolute
-local path and prints it to stderr without printing the document contents.
-If no document is found, it reports that ethos analysis will be skipped.
-`--output-format code` skips automatic discovery; pass `--ethos` to include a
-document in generated code. This discovery applies to CLI submissions; it does
-not change SDK requests or scheduled runs.
 
 Provide `--agent` and pass the workspace and Ethos explicitly when needed.
 `--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.

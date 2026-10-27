@@ -99,16 +99,11 @@ class FakeCompassAPI:
 
     routes: dict[tuple[str, str], list[httpx.Response]] = field(default_factory=dict)
     requests: list[RecordedRequest] = field(default_factory=list)
-    files_requests: list[httpx.Request] = field(default_factory=list)
-    ethos_response: httpx.Response = field(default_factory=lambda: httpx.Response(404))
 
     def on(self, method: str, path: str, *bodies: Any, status: int = 200) -> None:
         self.routes[(method, path)] = [httpx.Response(status, json=body) for body in bodies]
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        if request.url.path.startswith("/apis/files/v2/"):
-            self.files_requests.append(request)
-            return self.ethos_response
         match = _PATH.match(request.url.path)
         assert match, f"unexpected path {request.url.path}"
         body = json.loads(request.content) if request.content else None
