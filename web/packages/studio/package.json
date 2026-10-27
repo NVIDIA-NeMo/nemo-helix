@@ -35,6 +35,7 @@
     "bundle-visualize": "pnpm exec vite-bundle-visualizer -c vite.config.ts",
     "update-warning-count": "pnpm tsx ../common/scripts/update-max-warnings.ts",
     "screenshots": "tsx screenshots/capture.ts",
+    "screenshot": "tsx screenshots/screenshot.ts",
     "feature-flags": "tsx scripts/feature-flag-matrix.ts",
     "fetch-styles": "tsx scripts/fetch-styles.ts",
     "traces:bump": "tsx scripts/bump-trace-timestamps.ts",
