@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from importlib.metadata import EntryPoint
 
 import pytest
@@ -209,9 +209,11 @@ async def test_customization_task_service_principal_is_allowed(fake_store: _Fake
 def installed_middleware(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Install a ``nemo.inference_middleware`` entry point named ``test-middleware``."""
 
-    def _entry_points(*, group: str) -> list[EntryPoint]:
+    real_entry_points = plugin_discovery.entry_points
+
+    def _entry_points(*, group: str) -> Iterable[EntryPoint]:
         if group != "nemo.inference_middleware":
-            return []
+            return real_entry_points(group=group)
         return [EntryPoint(name="test-middleware", value="pkg.mod:Middleware", group=group)]
 
     monkeypatch.setattr(plugin_discovery, "entry_points", _entry_points)
