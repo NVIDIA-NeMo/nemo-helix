@@ -186,7 +186,9 @@ describe('model evaluation target', () => {
         HttpResponse.json({
           name: 'test-model',
           workspace: DEFAULT_WORKSPACE,
-          model_providers: [`${DEFAULT_WORKSPACE}/nim-test`],
+          // Deliberately no `model_providers`: an adapter rides whatever serves
+          // its base model, so the target must not depend on one being listed.
+          adapters: [{ name: 'my-lora', workspace: 'adapter-ws' }],
         })
       ),
       http.post('*/apis/evals/v2/workspaces/:workspace/evaluate/jobs', async ({ request }) => {
@@ -198,19 +200,20 @@ describe('model evaluation target', () => {
     return specs;
   };
 
-  it('targets an adapter through its parent model provider', async () => {
+  it('targets an adapter inline, routed on its base model', async () => {
     const specs = submitted();
     renderAt(adapterValue);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Run Evaluation' }));
 
     await vi.waitFor(() => expect(specs).toHaveLength(1));
-    // The adapter's own name, so the run is attributed to the adapter rather
-    // than to the model it was trained from.
+    // A ref cannot name an adapter, so this one target stays inline.
+    // Routed on the base model, with the composite in the model field -- the
+    // same addressing chat uses, so the adapter inherits the base VM's
+    // middleware and the run is attributed to the adapter, not to its base.
     expect(specs[0].target).toEqual({
-      url: expect.stringContaining(`/workspaces/${DEFAULT_WORKSPACE}/provider/nim-test/-/v1`),
-      name: 'my-lora',
+      url: expect.stringContaining(`/workspaces/${DEFAULT_WORKSPACE}/model/test-model/-/v1`),
+      name: 'test-model&adapters/adapter-ws/my-lora',
     });
   });
-
 });
