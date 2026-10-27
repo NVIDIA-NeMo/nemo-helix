@@ -359,29 +359,6 @@ def test_agent_eval_job_runs_gateway_judges_as_the_job_and_records_the_resolved_
     assert recorded.model.url == resolved
 
 
-def test_agent_eval_model_target_runs_as_the_job_and_records_its_stored_url(
-    tmp_path: Path, job_identity: str, serve_gateway_completion: Callable[[str, str], list[str | None]]
-) -> None:
-    """The real evaluator generates through the job's proxy, but the run's provenance names the stored endpoint.
-
-    The SDK records the URL it called in the run metadata; that would be a loopback address gone after the job.
-    """
-    route = "/apis/inference-gateway/v2/workspaces/default/model/target/-/v1"
-    stored_url = f"http://nemo-api.invalid{route}"  # nothing answers there
-    authorizations = serve_gateway_completion(route, "4")
-    ctx = _job_context(tmp_path)
-    spec = AgentEvalSpec(tasks=[_task_spec()], target=ModelTarget(model=Model(url=stored_url, name="target")))
-
-    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
-
-    assert authorizations and set(authorizations) == {f"Bearer {job_identity}"}
-    bundle = ctx.storage.persistent / AGENT_BUNDLE_DIR
-    metadata = json.loads((bundle / "metadata.json").read_text())
-    assert metadata["target"]["config"]["url"] == stored_url
-    saved = "".join(path.read_text(errors="ignore") for path in ctx.storage.persistent.rglob("*") if path.is_file())
-    assert "127.0.0.1" not in saved and job_identity not in saved
-
-
 def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)

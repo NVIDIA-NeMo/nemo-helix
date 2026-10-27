@@ -24,7 +24,6 @@ from nemo_evals.jobs.agent_spec import target_agent_identity
 from nemo_evals.jobs.metric_resolution import (
     caller_model_read_authorizer,
     gateway_models_as_job,
-    reject_inline_gateway_model,
     require_resolved_model_refs,
     resolve_metrics_to_inline,
     resolve_model_ref,
@@ -368,7 +367,6 @@ class _EvaluateJobBase(NemoJob):
         # the caller may not read. Ref-free specs need no platform client, so none is required here.
         authorize = caller_model_read_authorizer(async_sdk) if async_sdk is not None else None
         target = submit_spec.target
-        reject_inline_gateway_model(target, subject="target")
         try:
             metrics = await resolve_metrics_to_inline(
                 submit_spec.metrics,
@@ -376,7 +374,6 @@ class _EvaluateJobBase(NemoJob):
                 entity_client=entity_client,
                 async_client=async_sdk,
                 model_authorize=authorize,
-                reject_inline_gateway_models=True,
             )
             if isinstance(target, ModelRef):
                 target = await resolve_model_ref(target, async_client=async_sdk, authorize=authorize)

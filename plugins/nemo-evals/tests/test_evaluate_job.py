@@ -680,10 +680,7 @@ def test_platform_resolved_judge_calls_the_gateway_as_the_job(
 def test_platform_resolved_target_calls_the_gateway_as_the_job(
     tmp_path: Path, job_identity: str, serve_gateway_completion: Callable[[str, str], list[str | None]]
 ) -> None:
-    """A target resolved from a ``ModelRef`` is generated through the job's proxy, as itself; nothing transient is saved.
-
-    The stored spec is built directly: submit refuses an inline key-less gateway URL, so only resolution writes one.
-    """
+    """A target resolved from a ``ModelRef`` is generated through the job's proxy, as itself; nothing transient is saved."""
     route = "/apis/inference-gateway/v2/workspaces/default/model/target/-/v1"
     stored_url = f"http://nemo-api.invalid{route}"  # nothing answers there
     authorizations = serve_gateway_completion(route, "Paris")

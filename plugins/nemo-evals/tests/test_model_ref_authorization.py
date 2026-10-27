@@ -398,9 +398,13 @@ def test_a_target_ref_that_names_no_model_is_a_422(target: str, message: str) ->
     assert jobs.created == []
 
 
+@pytest.mark.parametrize(
+    "route", ["model/judge/-/v1", "provider/nim/-/v1", "openai/-/v1"], ids=["model", "provider", "openai"]
+)
 @pytest.mark.parametrize("field", ["target", "judge"])
-def test_an_inline_keyless_gateway_model_is_refused_at_submit(field: str) -> None:
-    gateway = {"url": f"{_PLATFORM}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1", "name": "judge"}
+def test_an_inline_keyless_gateway_model_is_kept_as_written(field: str, route: str) -> None:
+    """No ref names a LoRA adapter's provider route or the OpenAI route, so inline gateway URLs stay accepted."""
+    gateway = {"url": f"{_PLATFORM}/apis/inference-gateway/v2/workspaces/default/{route}", "name": "judge"}
     if field == "target":
         spec = _target_ref_spec() | {"target": gateway}
     else:
@@ -414,9 +418,8 @@ def test_an_inline_keyless_gateway_model_is_refused_at_submit(field: str) -> Non
 
     status, body, jobs = _submit(_Platform(), spec, method="POST")
 
-    assert status == 422, body
-    assert "workspace/name" in body and "api_key_secret" in body
-    assert jobs.created == []
+    assert status == 201, body
+    assert gateway["url"] in str(jobs.created[0])
 
 
 def test_an_inline_gateway_target_with_its_own_key_is_kept_as_written() -> None:

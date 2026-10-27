@@ -45,7 +45,6 @@ from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels
 from nhx_evals_sdk.metrics.resolution import model_ref_fields
-from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resolver_protocols import ModelResolver, SecretResolver
 from nhx_evals_sdk.values import Model, ModelRef
 from nhx_evals_sdk.values.common import SecretRef
@@ -114,44 +113,12 @@ def require_resolved_model_refs(metrics: list[Metric], *, subject: str) -> None:
         raise ValueError(f"{subject} metric models must be resolved before run: {', '.join(unresolved)}")
 
 
-def calls_gateway_unkeyed(model: Model) -> bool:
+def _calls_gateway_unkeyed(model: Model) -> bool:
     """Whether ``model`` calls an Inference Gateway route with no credential of its own.
 
     A model with ``api_key_secret`` is called as configured: its owner chose the credential.
     """
     return model.api_key_secret is None and urlsplit(model.url).path.startswith(_GATEWAY_PATH_PREFIX)
-
-
-def reject_inline_gateway_model(model: object, *, subject: str) -> None:
-    """Refuse an inline model that calls Inference Gateway with no credential of its own.
-
-    Such a model must be given as a ``workspace/name`` reference, so that every key-less gateway URL
-    in a stored spec was put there by the server's resolver. The job routes exactly those through its
-    auth proxy; an inline URL that only looks like a gateway route would otherwise be sent there too.
-
-    Raises:
-        ValueError: ``model`` is an inline key-less gateway model.
-    """
-    if isinstance(model, Model) and calls_gateway_unkeyed(model):
-        raise ValueError(
-            f"{subject} points at an Inference Gateway route without api_key_secret. "
-            "Give a 'workspace/name' model reference instead, or set api_key_secret."
-        )
-
-
-def reject_inline_gateway_metric_models(metrics: Sequence[Metric]) -> None:
-    """Apply :func:`reject_inline_gateway_model` to every model field of the metrics, before refs resolve.
-
-    A metric that is not a Pydantic model has no declared model fields to check, and the job proxy
-    cannot rebind it either, so it is left alone.
-    """
-    for metric in metrics:
-        if not isinstance(metric, MetricWithModels) or not isinstance(metric, BaseModel):
-            continue
-        for field in model_ref_fields(metric):
-            reject_inline_gateway_model(
-                getattr(metric, field, None), subject=f"Metric '{metric_type_name(metric)}' field '{field}'"
-            )
 
 
 def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> MetricBundle:
@@ -319,7 +286,6 @@ async def resolve_metrics_to_inline(
     async_client: AsyncHelixClient | None,
     authorize: SourceReadAuthorizer | None = None,
     model_authorize: SourceReadAuthorizer | None = None,
-    reject_inline_gateway_models: bool = False,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
@@ -333,8 +299,6 @@ async def resolve_metrics_to_inline(
     When ``authorize`` is set, each stored metric and model is checked as the caller before it is read.
     ``model_authorize`` checks model refs instead of ``authorize``, for a caller that has no check for
     stored metrics; when it is unset, ``authorize`` covers models too.
-    ``reject_inline_gateway_models`` refuses inline key-less gateway models, inline or stored (see
-    :func:`reject_inline_gateway_model`); it runs before resolution, after which refs look the same.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
     files_client = None
@@ -350,8 +314,6 @@ async def resolve_metrics_to_inline(
         authorize=authorize,
     )
     runtime_metrics = [unbundle_metric(bundle) for bundle in resolved_bundles]
-    if reject_inline_gateway_models:
-        reject_inline_gateway_metric_models(runtime_metrics)
     final_bundles = resolved_bundles
     unresolved = unresolved_model_refs(runtime_metrics)
     if unresolved:
@@ -388,7 +350,7 @@ def _gateway_models(metric: MetricWithModels) -> dict[str, Model]:
     return {
         field: model
         for field in model_ref_fields(metric)
-        if isinstance(model := getattr(metric, field, None), Model) and calls_gateway_unkeyed(model)
+        if isinstance(model := getattr(metric, field, None), Model) and _calls_gateway_unkeyed(model)
     }
 
 
@@ -425,8 +387,9 @@ def gateway_models_as_job(metrics: Sequence[Metric], target: Model | None = None
     the job's platform URL with its identity and refreshes workload tokens. Afterwards the metrics'
     original models are restored, so results record the resolved route.
 
-    Submit refuses inline key-less gateway models, so every model matched here was resolved by the
-    server to this platform.
+    Models are matched by path, so an inline key-less gateway URL is proxied too, as judges have been
+    since they were first proxied: the proxy calls as the job on behalf of its submitter, and the
+    gateway holds that to what the submitter may call.
 
     Yields:
         The target to call: a proxied copy of ``target`` when it calls the gateway with no key of its
@@ -440,7 +403,7 @@ def gateway_models_as_job(metrics: Sequence[Metric], target: Model | None = None
         for metric in metrics
         if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
     ]
-    gateway_target = target if target is not None and calls_gateway_unkeyed(target) else None
+    gateway_target = target if target is not None and _calls_gateway_unkeyed(target) else None
     if not bound and gateway_target is None:
         yield target
         return

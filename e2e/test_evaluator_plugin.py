@@ -647,7 +647,7 @@ def test_online_evaluate_job_uses_mock_provider(
         name=model_name,
         mock_response_body=_chat_completion("Paris"),
     )
-    # A ref the server resolves: submit refuses an inline key-less gateway URL.
+    # A ref the server resolves to the in-cluster gateway, as Studio now submits it.
     target = ModelRef(root=f"{evaluator_workspace}/{model_name}")
 
     job = _evaluator(evaluator_client).submit(

@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TypedDict, cast
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
 
@@ -14,25 +13,17 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from nemo_agents_plugin.jobs import gateway_proxy
-from nemo_evals.api.schemas import MetricInline
-from nemo_evals.jobs import metric_resolution
 from nemo_evals.jobs.metric_resolution import (
     HelixMetricModelResolver,
     HelixMetricSecretResolver,
     gateway_models_as_job,
-    reject_inline_gateway_metric_models,
-    resolve_metrics_to_inline,
 )
-from nemo_evals.metric_refs import MetricRef
-from nemo_evals.shared.metric_bundles.bundles import bundle_metric
-from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelError
 from nemo_helix_plugin.models.refs import ResolvedModelReference
 from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
-from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.metrics.ragas.metrics import TopicAdherenceMetric
 from nhx_evals_sdk.resolver_protocols import ModelResolver
 from nhx_evals_sdk.values import Model, ModelRef
@@ -331,87 +322,6 @@ async def test_only_a_caller_who_may_read_the_entity_gets_its_provider_address(
     assert model.url.endswith("/model/mm/-/v1")
     assert model.host_url == expected_host
     assert model.served_model_name == (None if expected_host is None else "org/mm")
-
-
-_GATEWAY_URL = f"http://localhost:9000{JUDGE_ROUTE}"
-
-
-def test_an_inline_keyless_gateway_judge_is_refused_with_a_pointer_to_the_ref_form() -> None:
-    """Only the server's resolver may put a key-less gateway URL in a spec, so the job proxy matches nothing else."""
-    with pytest.raises(ValueError, match=r"llm-judge.*model.*Inference Gateway.*'workspace/name'"):
-        reject_inline_gateway_metric_models([_judge(Model(url=_GATEWAY_URL, name="judge"))])
-
-
-@pytest.mark.parametrize(
-    "model",
-    [
-        Model(url=_GATEWAY_URL, name="judge", api_key_secret="judge-key"),
-        Model(url="https://judge.example.test/v1", name="judge"),
-        ModelRef("default/judge"),
-    ],
-    ids=["keyed-gateway", "external", "ref"],
-)
-def test_keyed_external_and_ref_judges_are_accepted(model: Model | ModelRef) -> None:
-    judge = LLMJudgeMetric(
-        model=model, scores=[RangeScore(name="q", minimum=0, maximum=1, parser=JSONScoreParser(json_path="q"))]
-    )
-    reject_inline_gateway_metric_models([judge])
-
-
-def test_a_custom_metric_that_is_not_a_pydantic_model_is_left_alone() -> None:
-    """``model_ref_fields`` needs a Pydantic model; a plain custom metric must not break the check."""
-
-    class _PlainMetric:
-        model = Model(url=_GATEWAY_URL, name="judge")
-
-        def model_refs(self) -> dict[str, ModelRef]:
-            return {}
-
-        async def resolve_models(self, model_resolver: ModelResolver) -> None:
-            del model_resolver
-
-    reject_inline_gateway_metric_models([cast(Metric, _PlainMetric())])
-
-
-class _InlineGatewayCheck(TypedDict, total=False):
-    reject_inline_gateway_models: bool
-
-
-@pytest.mark.parametrize(
-    ("kwargs", "refused"),
-    [({}, False), ({"reject_inline_gateway_models": True}, True)],
-    ids=["off-unless-asked-for", "asked-for"],
-)
-async def test_a_stored_metric_with_an_inline_keyless_gateway_judge_is_checked_only_when_asked(
-    kwargs: _InlineGatewayCheck, refused: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Stored metrics are checked as loaded, before any model ref is resolved (after which refs look the same).
-
-    Agent-eval and ``/live`` don't ask for the check: agent-eval has no ref form for its targets yet.
-    """
-    stored = bundle_metric(_judge(Model(url=_GATEWAY_URL, name="judge")), InlineMetricBundlePackager())
-
-    async def load(*args: object, **kwargs: object) -> list[object]:
-        del args, kwargs
-        return [stored]
-
-    monkeypatch.setattr(metric_resolution, "resolve_metric_specs", load)
-
-    async def resolve() -> list[MetricInline]:
-        return await resolve_metrics_to_inline(
-            [MetricRef("default/stored-judge")],
-            workspace="default",
-            entity_client=None,
-            async_client=AsyncNemoClient(base_url="http://platform.test", workspace="default"),
-            **kwargs,
-        )
-
-    if refused:
-        with pytest.raises(ValueError, match="Inference Gateway"):
-            await resolve()
-    else:
-        [resolved] = await resolve()
-        assert resolved.payload.model_dump()["metric"]["model"]["url"] == _GATEWAY_URL
 
 
 @pytest.mark.usefixtures("job_identity")

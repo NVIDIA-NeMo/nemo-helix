@@ -125,7 +125,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
-from nhx_evals_sdk.values import Model, RunConfigOnline, RunConfigOnlineModel
+from nhx_evals_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -621,9 +621,8 @@ class _AgentEvalJobBase(NemoJob):
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
-        model_target = target if isinstance(target, Model) else None
         with (
-            gateway_models_as_job([metric for task in tasks for metric in task.metrics], model_target) as called_target,
+            gateway_models_as_job([metric for task in tasks for metric in task.metrics]),
             capture_evaluator_request_logs() as request_logs,
         ):
             with capture_agent_evaluation_usage(
@@ -632,15 +631,8 @@ class _AgentEvalJobBase(NemoJob):
                 include_trial_measurements=include_trial_measurements,
             ) as usage_capture:
                 result = usage_capture.record(
-                    evaluator.run_sync(
-                        tasks=tasks,
-                        trials=spec.trials,
-                        target=called_target or target,
-                        config=run_config,
-                    )
+                    evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
                 )
-        if model_target is not None and called_target is not model_target and called_target is not None:
-            result = _with_target_url(result, called=called_target.url, stored=model_target.url)
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
@@ -716,19 +708,6 @@ class _AgentEvalJobBase(NemoJob):
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
         """Hook: adjust a Harbor runner's config before it runs. Returns it unchanged by default."""
         return config
-
-
-def _with_target_url(result: AgentEvalResult, *, called: str, stored: str) -> AgentEvalResult:
-    """The result with the stored target URL in its provenance, where the run recorded the URL it called.
-
-    The SDK records the endpoint it generated against; when that was the job's loopback auth proxy, the
-    address means nothing once the job ends. Only that URL is swapped back; the result is copied, not changed.
-    """
-    target_info = result.metadata.target
-    if target_info is None or target_info.config.get("url") != called:
-        return result
-    restored = target_info.model_copy(update={"config": {**target_info.config, "url": stored}})
-    return result.model_copy(update={"metadata": result.metadata.model_copy(update={"target": restored})})
 
 
 class AgentEvalJob(_AgentEvalJobBase):
