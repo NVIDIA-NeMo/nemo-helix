@@ -9,10 +9,9 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from nemo_fabric import Runtime
+from nemo_agents_plugin.fabric.runtime import StreamingMethod
+from nemo_fabric import Runtime
 
 
 @dataclass(slots=True)
@@ -23,6 +22,7 @@ class FabricRuntimeSession:
     runtime: Runtime
     created_at: float
     last_accessed_at: float
+    streaming_method: StreamingMethod = StreamingMethod.RELAY
     closing: bool = False
     invocation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
@@ -52,6 +52,7 @@ class FabricSessionRegistry:
         runtime: Runtime,
         *,
         session_id: str | None = None,
+        streaming_method: StreamingMethod = StreamingMethod.RELAY,
     ) -> FabricRuntimeSession:
         """Bind a new opaque Platform session ID to a Fabric runtime."""
         resolved_session_id = session_id or str(uuid.uuid4())
@@ -61,6 +62,7 @@ class FabricSessionRegistry:
             runtime=runtime,
             created_at=now,
             last_accessed_at=now,
+            streaming_method=streaming_method,
         )
 
         async with self._lock:
