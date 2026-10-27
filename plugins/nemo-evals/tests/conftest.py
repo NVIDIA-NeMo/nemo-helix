@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import pickle
+import re
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from collections.abc import Set as AbstractSet
@@ -17,6 +19,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
+from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
@@ -47,6 +50,7 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
 from nemo_helix_plugin.entities import (
@@ -65,6 +69,8 @@ from nemo_helix_plugin.intake.types import EvaluationCreateRequest, EvaluationPa
 from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from pytest_httpserver import HTTPServer
+from werkzeug import Request, Response
 
 
 @pytest.fixture
@@ -623,3 +629,51 @@ def store_task(entity_store, monkeypatch) -> StoreTask:
         return (await get_revision(entity_store, TaskRevisionEntity, head)).content_hash
 
     return store
+
+
+# ---- running as an authenticated job ---------------------------------------
+
+
+@pytest.fixture
+def job_identity(monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer) -> str:
+    """Run as a job with a workload identity whose platform is ``httpserver``; returns the job's access token."""
+    access_token = "job-access-token"
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setattr(
+        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken(access_token))
+    )
+    return access_token
+
+
+@pytest.fixture
+def serve_gateway_completion(httpserver: HTTPServer, job_identity: str) -> Callable[[str, str], list[str | None]]:
+    """Answer chat completions on a gateway route only for the job's identity.
+
+    Returns ``serve(route, content)``, which registers the route and returns the ``Authorization``
+    header of every request it receives.
+    """
+
+    def serve(route: str, content: str) -> list[str | None]:
+        authorizations: list[str | None] = []
+
+        def platform(request: Request) -> Response:
+            authorizations.append(request.headers.get("Authorization"))
+            if request.headers.get("Authorization") != f"Bearer {job_identity}":
+                return Response(status=401)
+            completion = {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "target",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+                ],
+            }
+            return Response(json.dumps(completion), content_type="application/json")
+
+        httpserver.expect_request(re.compile(re.escape(route) + ".*")).respond_with_handler(platform)
+        return authorizations
+
+    return serve

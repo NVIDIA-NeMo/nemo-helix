@@ -16,7 +16,7 @@ from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.jobs.metric_resolution import (
     HelixMetricModelResolver,
     HelixMetricSecretResolver,
-    gateway_metric_models_as_job,
+    gateway_models_as_job,
 )
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -151,7 +151,7 @@ def test_gateway_models_point_at_the_job_proxy_for_the_block_and_are_restored(
     keyed = _judge(Model(url=resolved, name="judge", api_key_secret="judge-key"))
     external = _judge(Model(url="https://judge.example.test/v1", name="judge"))
 
-    with gateway_metric_models_as_job([ragas, judge, keyed, external]):
+    with gateway_models_as_job([ragas, judge, keyed, external]):
         proxied = urlsplit(_url(judge.model))
         assert (proxied.hostname, proxied.path) == ("127.0.0.1", JUDGE_ROUTE)
         assert _url(ragas.judge_model) == _url(judge.model)
@@ -188,7 +188,7 @@ def test_a_failed_rebind_still_restores_the_metrics_already_moved(
     monkeypatch.setattr(LLMJudgeMetric, "resolve_models", resolve_models)
 
     with pytest.raises(RuntimeError, match="rebind failed"):
-        with gateway_metric_models_as_job([moved, failing]):
+        with gateway_models_as_job([moved, failing]):
             pass
 
     assert _url(moved.model) == resolved
@@ -201,7 +201,7 @@ def test_gateway_models_are_left_alone_when_the_job_has_no_identity(monkeypatch:
     resolved = f"http://nemo-api:8080{JUDGE_ROUTE}"
     judge = _judge(Model(url=resolved, name="judge"))
 
-    with gateway_metric_models_as_job([judge]):
+    with gateway_models_as_job([judge]):
         assert _url(judge.model) == resolved
 
 
@@ -322,3 +322,43 @@ async def test_only_a_caller_who_may_read_the_entity_gets_its_provider_address(
     assert model.url.endswith("/model/mm/-/v1")
     assert model.host_url == expected_host
     assert model.served_model_name == (None if expected_host is None else "org/mm")
+
+
+@pytest.mark.usefixtures("job_identity")
+def test_a_gateway_target_is_called_through_the_judges_proxy_and_never_changed() -> None:
+    target_route = "/apis/inference-gateway/v2/workspaces/default/model/target/-/v1"
+    target = Model(url=f"http://nemo-api:8080{target_route}", name="target")
+    judge = _judge(Model(url=f"http://nemo-api:8080{JUDGE_ROUTE}", name="judge"))
+
+    with gateway_models_as_job([judge], target) as called:
+        assert called is not None
+        proxied_target, proxied_judge = urlsplit(called.url), urlsplit(_url(judge.model))
+        assert (proxied_target.hostname, proxied_target.path) == ("127.0.0.1", target_route)
+        assert proxied_target.port == proxied_judge.port
+
+    assert target.url == f"http://nemo-api:8080{target_route}"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        Model(url=f"http://nemo-api:8080{JUDGE_ROUTE}", name="target", api_key_secret="target-key"),
+        Model(url="https://api.example.test/v1", name="target"),
+        None,
+    ],
+    ids=["keyed", "external", "none"],
+)
+@pytest.mark.usefixtures("job_identity")
+def test_keyed_external_and_absent_targets_are_called_as_written(target: Model | None) -> None:
+
+    with gateway_models_as_job([], target) as called:
+        assert called is target
+
+
+def test_a_gateway_target_is_left_alone_when_the_job_has_no_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    target = Model(url=f"http://nemo-api:8080{JUDGE_ROUTE}", name="target")
+
+    with gateway_models_as_job([], target) as called:
+        assert called is target

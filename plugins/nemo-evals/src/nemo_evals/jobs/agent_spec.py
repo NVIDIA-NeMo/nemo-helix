@@ -745,7 +745,7 @@ def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | Gym
     return source.files if source is not None else None
 
 
-def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
+def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) -> tuple[str | None, str | None]:
     """``(agent_name, model_name)`` derivable from a target, for publishing to Intake.
 
     Only targets that carry a real name yield one — nothing here invents an identity, because a
@@ -755,7 +755,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
 
     Accepts both unions: agent-eval passes its ``Target`` spec wrappers, while the dataset-driven
     eval's ``TargetSpec`` is the bare ``Model``/``Agent`` SDK value. Without the bare branches a row
-    target falls through to ``(None, None)`` and publishes under an empty agent name.
+    target falls through to ``(None, None)`` and publishes under an empty agent name. A submitted
+    ``ModelRef`` target is not resolved yet and names no agent, so it yields ``(None, None)`` too.
 
     Distinct from ``result_persistence._agent_target_fields``, which flattens the same targets to
     ``(kind, name, url)`` filter traits and folds runner *models* into its ``name`` slot.

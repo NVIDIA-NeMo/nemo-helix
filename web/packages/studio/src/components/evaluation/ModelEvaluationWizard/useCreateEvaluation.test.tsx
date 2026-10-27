@@ -84,3 +84,64 @@ describe('model evaluation submit errors', () => {
     );
   });
 });
+
+describe('model evaluation submit body', () => {
+  function SubmitWithJudge({ judgeModel }: { judgeModel: string }) {
+    const { createEvaluation } = useCreateEvaluation();
+    return (
+      <button
+        onClick={() =>
+          createEvaluation(
+            {
+              ...EVALUATION_FORM_DEFAULTS,
+              configSource: 'saved-config',
+              model: `${DEFAULT_WORKSPACE}/test-model`,
+              body: { ...EVALUATION_FORM_DEFAULTS.body, judgeModel },
+            },
+            bindings
+          )
+        }
+      >
+        Run Evaluation
+      </button>
+    );
+  }
+
+  it.each([`${DEFAULT_WORKSPACE}/judge-model`, 'other-workspace/judge-model'])(
+    'sends the target and the judge %s as workspace/name refs for the server to resolve',
+    async (judgeModel) => {
+      let body:
+        | { spec: { target: unknown; metrics: { payload: { metric: { model?: unknown } } }[] } }
+        | undefined;
+      server.use(
+        http.post('*/apis/evals/v2/workspaces/:workspace/evaluate/jobs', async ({ request }) => {
+          body = (await request.json()) as typeof body;
+          return HttpResponse.json(
+            { name: 'eval-job', workspace: DEFAULT_WORKSPACE },
+            { status: 201 }
+          );
+        })
+      );
+      renderRoute(undefined, {
+        history: `/studio/workspaces/${DEFAULT_WORKSPACE}/evaluation/new`,
+        routes: [
+          {
+            path: '/studio/workspaces/:workspace/evaluation/new',
+            element: <SubmitWithJudge judgeModel={judgeModel} />,
+          },
+          // Where a successful submit navigates.
+          { path: '*', element: <div /> },
+        ],
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Run Evaluation' }));
+
+      await vi.waitFor(() => expect(body).toBeDefined());
+      expect(body?.spec.target).toBe(`${DEFAULT_WORKSPACE}/test-model`);
+      const judges = body?.spec.metrics.filter(
+        (metric) => metric.payload.metric.model !== undefined
+      );
+      expect(judges?.map((metric) => metric.payload.metric.model)).toEqual([judgeModel]);
+    }
+  );
+});

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
@@ -79,7 +80,7 @@ from nhx_evals_sdk.values import (
 from nhx_evals_sdk.values.models import ModelRef
 from nhx_evals_sdk.values.results import RowScore
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from pytest_httpserver import HTTPServer
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -275,6 +276,8 @@ def _patch_async_model_reference_resolution(mocker: MockerFixture) -> None:
         "nemo_evals.jobs.metric_resolution.AsyncModelsClient.resolve_model_reference",
         resolve_model_reference,
     )
+    # Submit also reads the model as the caller before resolving it; this caller may.
+    mocker.patch.object(AsyncModelsClient, "get_model", AsyncMock())
 
 
 def _llm_judge_ref_metric() -> LLMJudgeMetric:
@@ -672,6 +675,36 @@ def test_platform_resolved_judge_calls_the_gateway_as_the_job(
     payload = _load_artifact_payload(run_result)
     assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
     assert authorizations and set(authorizations) == {"Bearer job-access-token"}
+
+
+def test_platform_resolved_target_calls_the_gateway_as_the_job(
+    tmp_path: Path, job_identity: str, serve_gateway_completion: Callable[[str, str], list[str | None]]
+) -> None:
+    """A target resolved from a ``ModelRef`` is generated through the job's proxy, as itself; nothing transient is saved."""
+    route = "/apis/inference-gateway/v2/workspaces/default/model/target/-/v1"
+    stored_url = f"http://nemo-api.invalid{route}"  # nothing answers there
+    authorizations = serve_gateway_completion(route, "Paris")
+    config = EvaluateSpec.model_validate(
+        {
+            "metrics": [
+                _bundle_payload(ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}"))
+            ],
+            "dataset": [{"question": "Capital of France?", "expected": "Paris"}],
+            "target": Model(url=stored_url, name="target"),
+            "params": RunConfigOnlineModel(),
+            "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
+        }
+    ).model_dump(mode="json")
+    ctx = _make_job_context(tmp_path)
+
+    run_result = _run_evaluate_job(config, tmp_path, ctx=ctx)
+
+    payload = _load_artifact_payload(run_result)
+    assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
+    assert authorizations and set(authorizations) == {f"Bearer {job_identity}"}
+    assert config["target"]["url"] == stored_url
+    saved = "".join(path.read_text(errors="ignore") for path in ctx.storage.persistent.rglob("*") if path.is_file())
+    assert "127.0.0.1" not in saved and job_identity not in saved
 
 
 async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
@@ -1202,7 +1235,8 @@ class TestEvaluateJobCompile:
         ],
     )
     async def test_rejects_wrong_online_param_type(self, target: Model | Agent, expected_message: str) -> None:
-        with pytest.raises(TypeError, match=expected_message):
+        # A validation error, so the submit route answers 422 rather than letting a TypeError escape as a 500.
+        with pytest.raises(ValidationError, match=expected_message):
             EvaluateSpec.model_validate(
                 {
                     **_exact_match_spec(),
@@ -1213,7 +1247,7 @@ class TestEvaluateJobCompile:
             )
 
     async def test_rejects_missing_online_params(self) -> None:
-        with pytest.raises(TypeError, match="model target requires RunConfigOnlineModel"):
+        with pytest.raises(ValidationError, match="model target requires RunConfigOnlineModel"):
             EvaluateSpec.model_validate(
                 {
                     **_exact_match_spec(),

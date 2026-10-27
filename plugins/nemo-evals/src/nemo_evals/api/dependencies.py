@@ -19,6 +19,7 @@ from nemo_evals.config import get_config
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import (
@@ -160,7 +161,7 @@ def get_taskset_service(
 
 
 @asynccontextmanager
-async def delegated_service_client(request_client: AsyncNemoClient) -> AsyncGenerator[AsyncNemoClient, None]:
+async def delegated_service_client(request_client: AsyncHelixClient) -> AsyncGenerator[AsyncHelixClient, None]:
     """Yield a client that calls the platform as the evals service, delegating the request's caller.
 
     Use it for calls only a service principal may make, such as reading a secret value; the target

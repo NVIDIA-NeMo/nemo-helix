@@ -4864,19 +4864,6 @@ components:
           - $ref: '#/components/schemas/RunConfigOnlineModel'
           title: Params
           description: Optional evals SDK execution parameters.
-        target:
-          anyOf:
-          - $ref: '#/components/schemas/Model'
-          - oneOf:
-            - $ref: '#/components/schemas/GenericAgent'
-            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
-            discriminator:
-              propertyName: format
-              mapping:
-                generic: '#/components/schemas/GenericAgent'
-                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
-          title: Target
-          description: Optional model or agent target for online evaluation.
         prompt_template:
           anyOf:
           - type: string
@@ -4904,6 +4891,22 @@ components:
           title: Metrics
           description: Metrics to evaluate, given as inline metrics and/or references
             to stored metrics.
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/Model'
+          - oneOf:
+            - $ref: '#/components/schemas/GenericAgent'
+            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
+            discriminator:
+              propertyName: format
+              mapping:
+                generic: '#/components/schemas/GenericAgent'
+                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
+          - $ref: '#/components/schemas/ModelRef'
+          title: Target
+          description: Optional model or agent target for online evaluation, or a
+            `workspace/model` reference to a platform model, resolved when the job
+            is submitted.
       additionalProperties: false
       type: object
       required:
@@ -5319,19 +5322,6 @@ components:
           - $ref: '#/components/schemas/RunConfigOnlineModel'
           title: Params
           description: Optional evals SDK execution parameters.
-        target:
-          anyOf:
-          - $ref: '#/components/schemas/Model'
-          - oneOf:
-            - $ref: '#/components/schemas/GenericAgent'
-            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
-            discriminator:
-              propertyName: format
-              mapping:
-                generic: '#/components/schemas/GenericAgent'
-                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
-          title: Target
-          description: Optional model or agent target for online evaluation.
         prompt_template:
           anyOf:
           - type: string
@@ -5356,6 +5346,19 @@ components:
           minItems: 1
           title: Metrics
           description: Inline metrics with all references resolved.
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/Model'
+          - oneOf:
+            - $ref: '#/components/schemas/GenericAgent'
+            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
+            discriminator:
+              propertyName: format
+              mapping:
+                generic: '#/components/schemas/GenericAgent'
+                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
+          title: Target
+          description: Optional model or agent target for online evaluation.
       additionalProperties: false
       type: object
       required:
@@ -6847,11 +6850,14 @@ components:
           description: Metrics to score the row with, given as inline definitions
             and/or references to stored metrics (`workspace/metric-name`).
         target:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/Model'
-          description: Optional model to generate the row's output before scoring.
-            Omit to score an output already present on the row. Agent targets are
-            not supported on this route.
+          - $ref: '#/components/schemas/ModelRef'
+          title: Target
+          description: Optional model to generate the row's output before scoring,
+            inline or as a `workspace/model` reference to a platform model. Omit to
+            score an output already present on the row. Agent targets are not supported
+            on this route.
         prompt_template:
           anyOf:
           - type: string

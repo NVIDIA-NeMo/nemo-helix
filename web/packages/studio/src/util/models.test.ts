@@ -2,13 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { buildModelConfig, getModelInferenceGatewayUrl, getModelTools } from '@studio/util/models';
-
-vi.mock('@nemo/sdk/generated/platform/inference-gateway', () => ({
-  getGatewayProxyGetQueryKey: (workspace: string, modelName: string, trailingUri: string) => [
-    `/v2/nemo/workspaces/${workspace}/gateway/${modelName}/${trailingUri}`,
-  ],
-}));
+import { buildModelConfig, getModelTools, toWorkspaceModelRef } from '@studio/util/models';
 
 vi.mock('@studio/constants/environment', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@studio/constants/environment')>();
@@ -41,29 +35,6 @@ describe('getModelTools', () => {
   });
 });
 
-describe('getModelInferenceGatewayUrl', () => {
-  it('should build chat completions URL', () => {
-    const url = getModelInferenceGatewayUrl('my-ws', 'my-model');
-    expect(url).toBe(
-      'https://test.example.com/v2/nemo/workspaces/my-ws/gateway/my-model/v1/chat/completions'
-    );
-  });
-
-  it('should build completions URL when isChat is false', () => {
-    const url = getModelInferenceGatewayUrl('my-ws', 'my-model', false);
-    expect(url).toBe(
-      'https://test.example.com/v2/nemo/workspaces/my-ws/gateway/my-model/v1/completions'
-    );
-  });
-
-  it('should strip workspace prefix from modelRef', () => {
-    const url = getModelInferenceGatewayUrl('my-ws', 'my-ws/my-model');
-    expect(url).toBe(
-      'https://test.example.com/v2/nemo/workspaces/my-ws/gateway/my-model/v1/chat/completions'
-    );
-  });
-});
-
 describe('buildModelConfig', () => {
   it('should build chat config by default', () => {
     const config = buildModelConfig('urn:test/model');
@@ -85,5 +56,16 @@ describe('buildModelConfig', () => {
         format: 'nim',
       },
     });
+  });
+});
+
+describe('toWorkspaceModelRef', () => {
+  it('qualifies a bare model name with the workspace', () => {
+    expect(toWorkspaceModelRef('ws', 'judge')).toBe('ws/judge');
+  });
+
+  it('keeps an already qualified ref, including one from another workspace', () => {
+    expect(toWorkspaceModelRef('ws', 'ws/judge')).toBe('ws/judge');
+    expect(toWorkspaceModelRef('ws', 'other/judge')).toBe('other/judge');
   });
 });
