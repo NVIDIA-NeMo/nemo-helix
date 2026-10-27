@@ -697,18 +697,6 @@ class AccessKeyRegistry:
         return None
 
 
-def _refuse_service_attributes_rotation(record: AccessKeyEntity) -> None:
-    """Refuse to replace a key that carries service attributes.
-
-    A successor would be a key its service never issued and so can't revoke, carrying that service's claims.
-    """
-    if record.service_attributes:
-        raise AccessKeyValidationError(
-            "A Scoped Access Key that carries service_attributes can't be rotated; the service that set them "
-            "creates a new key instead"
-        )
-
-
 async def get_access_key_registry(entity_client: EntityClient = Depends(get_entity_client)) -> AccessKeyRegistry:
     session_maker = await get_account_session_maker()
     adapter = AccessKeyCredentialAdapter(
@@ -789,12 +777,13 @@ class PersistentAccessKeyIssuer:
             # verified HelixAdmin status before setting this flag (see AdminOverride).
             if not await self.is_platform_admin():
                 raise AccessKeyValidationError("Service-bound Scoped Access Keys require HelixAdmin")
+        inherited_service_attributes = None
         if request.rotates is not None:
             # Fail fast on an invalid rotation target instead of minting an orphan key.
             old_record = await self._registry.get_for_rotation(
                 request.rotates, self.principal, admin_override=self._admin_override
             )
-            _refuse_service_attributes_rotation(old_record)
+            inherited_service_attributes = old_record.service_attributes
             if request.scope is None:
                 # No --scope given: inherit the predecessor's scope instead of widening to unscoped.
                 request = request.model_copy(update={"scope": old_record.scope or None})
@@ -807,7 +796,11 @@ class PersistentAccessKeyIssuer:
                     "omit --scope to inherit it automatically, or create a separate key instead"
                 )
         self._enforce_caller_scope(request)
-        key = await self._issuer.create_async(request, allow_service_account=allow_service_account)
+        key = await self._issuer.create_async(
+            request,
+            allow_service_account=allow_service_account,
+            inherited_service_attributes=inherited_service_attributes,
+        )
         try:
             await self._registry.add(
                 key,
@@ -1039,7 +1032,6 @@ class PersistentAccessKeyIssuer:
         # revoked/suspended/rotating/expired) instead of issuing a successor JWT we'd
         # then have to discard.
         old_record = await self._registry.get_rotatable(jti, self.principal, admin_override=self._admin_override)
-        _refuse_service_attributes_rotation(old_record)
         allow_service_account = old_record.entity_type == "SERVICE_ACCOUNT"
         if allow_service_account:
             # Mirrors create_async's defense-in-depth re-check: don't rely solely on
@@ -1075,7 +1067,11 @@ class PersistentAccessKeyIssuer:
         )
         # get_rotatable only checks ownership, not scope — enforce that separately.
         self._enforce_caller_scope(request)
-        new_key = await self._issuer.create_async(request, allow_service_account=allow_service_account)
+        new_key = await self._issuer.create_async(
+            request,
+            allow_service_account=allow_service_account,
+            inherited_service_attributes=old_record.service_attributes,
+        )
         try:
             await self._registry.add(
                 new_key,

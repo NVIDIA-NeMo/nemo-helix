@@ -2234,30 +2234,44 @@ def test_the_owner_lists_attributes_but_cannot_set_them(client):
     assert [key["service_attributes"] for key in listed if key["jti"] == created["jti"]] == [{"evals": _TRIAL}]
 
 
-@pytest.mark.parametrize("revoke_first", [False, True], ids=["active", "revoked"])
-def test_a_key_with_attributes_cannot_be_rotated(client, revoke_first):
-    """A successor would be a key its service never issued and can't revoke, so rotating it, by either path, would let
-    the owner keep the service's claims past the point the service ended them, or bring a revoked key back."""
+def test_rotating_a_key_keeps_its_attributes(client):
+    """The owner can rotate a key a service minted for them, and the successor still carries the service's claims."""
     with _acting_as(_for_alice("evals")):
         created = client.post(
             "/v2/access-keys", json={"name": "trial", "expires_in_seconds": 3600, "service_attributes": _TRIAL}
         ).json()
-    if revoke_first:
-        assert client.delete(f"/v2/access-keys/{created['jti']}").status_code in (200, 204)
 
     rotated = client.post(f"/v2/access-keys/{created['jti']}/rotate")
-    replaced = client.post("/v2/access-keys", json={"name": "trial", "rotates": created["jti"]})
 
-    assert rotated.status_code in (400, 409)
-    assert replaced.status_code == 400
-    registry = client.app.dependency_overrides[get_access_key_registry]()
-    assert [jti for jti in registry.keys if jti != created["jti"]] == []
+    assert rotated.status_code == 200, rotated.text
+    new_key = rotated.json()["new_key"]
+    assert new_key["service_attributes"] == {"evals": _TRIAL}
+    assert _claims(new_key["token"])["nhx_service_attributes"] == {"evals": _TRIAL}
 
 
-def test_a_key_without_attributes_can_still_be_rotated(client):
-    created = client.post("/v2/access-keys", json={"name": "plain", "expires_in_seconds": 3600}).json()
+def test_a_replacement_key_inherits_its_predecessors_attributes(client):
+    with _acting_as(_for_alice("evals")):
+        created = client.post("/v2/access-keys", json={"name": "trial", "service_attributes": _TRIAL}).json()
 
-    assert client.post(f"/v2/access-keys/{created['jti']}/rotate").status_code == 200
+    replacement = client.post("/v2/access-keys", json={"name": "trial", "rotates": created["jti"]})
+
+    assert replacement.status_code == 200, replacement.text
+    assert replacement.json()["service_attributes"] == {"evals": _TRIAL}
+
+
+@pytest.mark.parametrize("predecessor_attributes", [_TRIAL, None], ids=["with attributes", "without attributes"])
+def test_a_replacement_key_cannot_change_its_predecessors_attributes(client, predecessor_attributes):
+    """Rotation preserves what a service vouched for; changing it means minting a new key."""
+    with _acting_as(_for_alice("evals")):
+        created = client.post(
+            "/v2/access-keys", json={"name": "trial", "service_attributes": predecessor_attributes}
+        ).json()
+        replacement = client.post(
+            "/v2/access-keys",
+            json={"name": "trial", "rotates": created["jti"], "service_attributes": {"kind": "other"}},
+        )
+
+    assert replacement.status_code == 400
 
 
 @pytest.mark.parametrize(

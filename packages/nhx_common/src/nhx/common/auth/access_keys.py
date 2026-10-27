@@ -226,10 +226,14 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             raise AccessKeyFeatureDisabledError("Scoped Access Keys are not enabled")
 
     def create(
-        self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
+        self,
+        request: AccessKeyCreateRequest,
+        *,
+        allow_service_account: bool = False,
+        inherited_service_attributes: dict[str, dict[str, Any]] | None = None,
     ) -> AccessKeyCreateResponse:
         self._ensure_enabled()
-        service_attributes = self._service_attributes(request)
+        service_attributes = self._service_attributes(request, inherited_service_attributes)
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
         return _create_access_key_token(
@@ -245,10 +249,14 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         )
 
     async def create_async(
-        self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
+        self,
+        request: AccessKeyCreateRequest,
+        *,
+        allow_service_account: bool = False,
+        inherited_service_attributes: dict[str, dict[str, Any]] | None = None,
     ) -> AccessKeyCreateResponse:
         self._ensure_enabled()
-        service_attributes = self._service_attributes(request)
+        service_attributes = self._service_attributes(request, inherited_service_attributes)
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
         return await _create_access_key_token_async(
@@ -263,16 +271,27 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             now=self._now(),
         )
 
-    def _service_attributes(self, request: AccessKeyCreateRequest) -> dict[str, dict[str, Any]]:
-        """The key's attributes by service: the request's, under the acting service's name.
+    def _service_attributes(
+        self,
+        request: AccessKeyCreateRequest,
+        inherited: dict[str, dict[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The key's attributes by service: the acting service's from the request, or those a predecessor carried.
+
+        ``inherited`` is set, possibly empty, only when the key replaces a predecessor.
 
         Raises:
             AccessKeyServiceAttributesForbiddenError: The request sets attributes and no service is acting.
+            AccessKeyValidationError: The request sets attributes on a key that inherits them.
         """
         if request.service_attributes is None:
-            return {}
+            return dict(inherited or {})
         if self._acting_service is None:
             raise AccessKeyServiceAttributesForbiddenError("Only a platform service can set service_attributes")
+        if inherited is not None:
+            raise AccessKeyValidationError(
+                "A replacement Scoped Access Key keeps its predecessor's service_attributes; omit service_attributes"
+            )
         return {self._acting_service: dict(request.service_attributes)}
 
     def _target_principal(
