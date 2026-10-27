@@ -5,6 +5,7 @@ import datetime
 import logging
 import threading
 import time
+from collections.abc import Callable
 from typing import cast
 
 from nemo_helix_plugin.client.client import NemoClient
@@ -232,7 +233,8 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._last_retention_at = now
         try:
             steps = self._list_steps_with_status(
-                [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value]
+                [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value],
+                on_progress=self.emit_heartbeat,
             )
         except NemoClientError:
             logger.exception("Could not fetch paused and failed steps for storage retention")
@@ -463,7 +465,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         """
         Return the list of steps to reconcile.
         """
-        steps = self._list_steps_with_status(statuses)
+        steps = self._list_steps_with_status(statuses, on_progress=self.emit_heartbeat)
         cleanup_query = cast(
             ListStepsQueryParams,
             {
@@ -480,8 +482,14 @@ class JobReconciler(HeartbeatMixin, Controller):
             self._step_reconciliation_errors.add(1, attributes={"error_type": "task_cleanup_fetch"})
         return steps
 
-    def _list_steps_with_status(self, statuses: list[str]) -> list[HelixJobStepWithContext]:
-        """Return every step, across jobs and workspaces, in one of ``statuses``."""
+    def _list_steps_with_status(
+        self, statuses: list[str], on_progress: Callable[[], None] | None = None
+    ) -> list[HelixJobStepWithContext]:
+        """Return every step, across jobs and workspaces, in one of ``statuses``.
+
+        ``on_progress`` is called for each step received. Pages arrive one request at a time, so a
+        long listing keeps reporting progress instead of looking stalled.
+        """
         # Iterate through all pages to get all steps.
         # deepObject query param: sent as ``filter[status]=pending,active,...``
         # (comma form), which the steps-list route splits back into a list. The
@@ -493,13 +501,16 @@ class JobReconciler(HeartbeatMixin, Controller):
                 "sort": "updated_at",
             },
         )
-        return list(
-            self._jobs.list_steps(
-                name="-",  # Use "-" to indicate all jobs
-                workspace="-",  # Cross-workspace query
-                query_params=query,
-            ).items()
-        )
+        steps: list[HelixJobStepWithContext] = []
+        for step in self._jobs.list_steps(
+            name="-",  # Use "-" to indicate all jobs
+            workspace="-",  # Cross-workspace query
+            query_params=query,
+        ).items():
+            steps.append(step)
+            if on_progress is not None:
+                on_progress()
+        return steps
 
 
 def _storage_clock(step: HelixJobStepWithContext) -> datetime.datetime | None:

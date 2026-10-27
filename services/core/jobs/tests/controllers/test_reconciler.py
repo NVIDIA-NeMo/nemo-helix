@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import datetime
+import threading
+import time
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,9 +13,11 @@ import pytest
 from kubernetes import client as kubernetes_client
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nhx.common.controller import Loop, TimedLoopWaiter, TrackLastExecutionTime
 from nhx.common.entities import EntityConflictError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import STORAGE_SWEPT_AT
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nhx.core.jobs.config import JobsStorageConfig
@@ -698,3 +702,70 @@ def test_queued_storage_stays_queued_until_it_is_gone(
         reconciler.step()
 
     system_entities.delete_by_id.assert_not_called()
+
+
+def test_step_listing_reports_progress_for_each_step_received(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_active: HelixJobStepWithContext,
+):
+    reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
+    reconciler.emit_heartbeat = MagicMock()
+    mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active] * 3)]
+
+    steps = reconciler._list_steps_with_status([HelixJobStatus.ACTIVE.value], on_progress=reconciler.emit_heartbeat)
+
+    assert len(steps) == 3
+    assert reconciler.emit_heartbeat.call_count == 3
+
+
+def test_reconciler_loop_stays_healthy_during_a_slow_retention_scan(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_error: HelixJobStepWithContext,
+):
+    """A retention scan far longer than the liveness window must not flag the loop unhealthy.
+
+    The scan runs on the reconcile thread, so the heartbeat per received step is what keeps the
+    health check from reading the scan as a stall.
+    """
+    swept = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
+    swept.status_details = {**(swept.status_details or {}), STORAGE_SWEPT_AT: "2026-01-01T00:00:00+00:00"}
+    scan_started, scan_finished = threading.Event(), threading.Event()
+    scan_seconds, step_seconds = 1.0, 0.05
+
+    class SlowListing:
+        def items(self):
+            scan_started.set()
+            for _ in range(int(scan_seconds / step_seconds)):
+                time.sleep(step_seconds)
+                yield swept
+            scan_finished.set()
+
+    def list_steps(**kwargs):
+        statuses = kwargs["query_params"].get("filter[status]", "")
+        return SlowListing() if HelixJobStatus.PAUSED.value in statuses else paginated_response([])
+
+    mock_jobs_client.list_steps.side_effect = list_steps
+    reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
+    stop_signal = threading.Event()
+    interval = 0.1  # the loop is unhealthy after 3 intervals without progress
+    loop = Loop(
+        TimedLoopWaiter(interval, stop_signal=stop_signal), TrackLastExecutionTime(reconciler), stop_signal=stop_signal
+    )
+    unhealthy: list[str | None] = []
+    loop.start()
+    try:
+        assert scan_started.wait(timeout=5)
+        while not scan_finished.is_set():
+            if not loop.is_healthy:
+                unhealthy.append(loop.unhealthy_reason)
+            time.sleep(0.02)
+    finally:
+        stop_signal.set()
+        loop.join(timeout=5)
+
+    assert scan_seconds > 3 * interval
+    assert not unhealthy
