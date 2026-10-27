@@ -38,6 +38,36 @@ async function sendReleaseNotification({ env, fetchImpl }) {
     `Release: ${env.RELEASE_LABEL}`,
     `Commit: <${env.COMMIT_URL}|${env.SOURCE_SHA.slice(0, 7)}>`,
   ];
+  const buttons = [
+    {
+      type: "button",
+      text: { type: "plain_text", text: "View Run" },
+      url: env.RUN_URL,
+      action_id: "release_view_run",
+    },
+    {
+      type: "button",
+      text: { type: "plain_text", text: "Source Commit" },
+      url: env.COMMIT_URL,
+      action_id: "release_source_commit",
+    },
+  ];
+  const blocks = [
+    {
+      type: "header",
+      text: {
+        type: "plain_text",
+        text: `NeMo Helix · ${releaseType === "rc" ? "Release candidate" : "Release"}`,
+      },
+    },
+    {
+      type: "section",
+      fields: [{ type: "mrkdwn", text: `*Build*\n\`${env.RELEASE_LABEL}\`` }],
+    },
+    { type: "actions", elements: buttons },
+    { type: "divider" },
+  ];
+  const counts = [];
 
   if (published && releaseType === "rc") {
     const rcInstanceUrl = env.RC_INSTANCE_URL?.trim();
@@ -47,6 +77,13 @@ async function sendReleaseNotification({ env, fetchImpl }) {
       );
     }
     lines.push(`RC instance: <${rcInstanceUrl}>`);
+    buttons.unshift({
+      type: "button",
+      text: { type: "plain_text", text: "Open RC Instance" },
+      url: rcInstanceUrl,
+      action_id: "release_open_instance",
+      style: "primary",
+    });
   }
 
   if (published) {
@@ -55,6 +92,7 @@ async function sendReleaseNotification({ env, fetchImpl }) {
     }
     if (wheelIds.length > 0 && !stagesRcWheels) {
       lines.push("*:python: Wheels published:*");
+      const wheels = [];
       for (const wheelId of wheelIds) {
         const wheel = wheelCatalog.find(
           (candidate) => candidate.id === wheelId,
@@ -66,17 +104,65 @@ async function sendReleaseNotification({ env, fetchImpl }) {
             ? `${wheelIndex}/${wheel.package}/`
             : `${wheelIndex.replace(/\/simple$/, "/project")}/${wheel.package}/${env.WHEEL_VERSION}/`;
         lines.push(`• <${wheelUrl}|${wheel.package}: ${env.WHEEL_VERSION}>`);
+        wheels.push(`<${wheelUrl}|${wheel.package}>`);
       }
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `:python: *Python wheels* · \`${env.WHEEL_VERSION}\`\n${wheels.join("  ·  ")}`,
+        },
+      });
+      counts.push(
+        `${wheelIds.length} ${wheelIds.length === 1 ? "wheel" : "wheels"}`,
+      );
     }
     if (containerIds.length > 0) {
       lines.push("*:docker_: Containers published:*");
+      const containers = [];
       for (const containerId of containerIds) {
         const container =
           releaseType === "stable"
             ? `<${env.NGC_CATALOG_BASE}/containers/${containerId}|${containerId}>`
             : containerId;
         lines.push(`• ${container}: ${env.RELEASE_LABEL}`);
+        containers.push(container);
       }
+      lines.push(`Registry: ${env.CONTAINER_REGISTRY}`);
+      blocks.push({
+        type: "container",
+        title: {
+          type: "plain_text",
+          text: `:docker_: Containers · ${containerIds.length} ${containerIds.length === 1 ? "image" : "images"}`,
+          emoji: true,
+        },
+        subtitle: { type: "mrkdwn", text: `Tag: \`${env.RELEASE_LABEL}\`` },
+        is_collapsible: true,
+        default_collapsed: true,
+        child_blocks: [
+          {
+            type: "section",
+            fields: [0, 1]
+              .map((column) =>
+                containers.filter((_, index) => index % 2 === column),
+              )
+              .filter((column) => column.length > 0)
+              .map((column) => ({
+                type: releaseType === "stable" ? "mrkdwn" : "plain_text",
+                text: column.join("\n"),
+              })),
+          },
+          {
+            type: "context",
+            elements: [
+              { type: "mrkdwn", text: `Registry: ${env.CONTAINER_REGISTRY}` },
+            ],
+          },
+        ],
+      });
+      counts.push(
+        `${containerIds.length} ${containerIds.length === 1 ? "container" : "containers"}`,
+      );
     }
     if (env.INCLUDE_HELM === "true") {
       const chart =
@@ -85,15 +171,41 @@ async function sendReleaseNotification({ env, fetchImpl }) {
           : "nemo-helix";
       lines.push("*:helm: Helm chart published:*");
       lines.push(`• ${chart}: ${env.CHART_VERSION}`);
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `:helm: *Helm chart*\n${chart} · \`${env.CHART_VERSION}\``,
+        },
+      });
+      counts.push("1 chart");
     }
     if (stagesRcWheels) {
       lines.push("", "*:python: Wheel staging dispatched:*");
+      const wheels = [];
       for (const wheelId of wheelIds) {
         const wheel = wheelCatalog.find(
           (candidate) => candidate.id === wheelId,
         );
         lines.push(`• ${wheel.package}: ${env.WHEEL_VERSION}`);
+        wheels.push(wheel.package);
       }
+      blocks.push({
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `:python: *Wheel staging dispatched* · \`${env.WHEEL_VERSION}\`\n${wheels.join("  ·  ")}`,
+        },
+      });
+      counts.push(
+        `${wheelIds.length} wheel ${wheelIds.length === 1 ? "build" : "builds"} dispatched`,
+      );
+    }
+    if (counts.length > 0) {
+      blocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: counts.join(" · ") }],
+      });
     }
   } else {
     lines.push(
@@ -105,14 +217,14 @@ async function sendReleaseNotification({ env, fetchImpl }) {
     );
   }
 
-  if (published && env.SMOKE_CHECKS_PENDING === "true") {
-    lines.push("", "Smoke checks pending");
-  }
   lines.push("", `:link: <${env.RUN_URL}|Release run #${env.RUN_NUMBER}>`);
   return fetchImpl(webhook, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: lines.join("\n") }),
+    body: JSON.stringify({
+      text: lines.join("\n"),
+      ...(published ? { blocks } : {}),
+    }),
   });
 }
 

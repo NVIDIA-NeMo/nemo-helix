@@ -1223,6 +1223,10 @@ jobs:
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           CHART_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
+          CONTAINER_REGISTRY: >-
+            ${{ needs.plan-release.outputs.release_type == 'rc' &&
+            env.RELEASE_RC_CONTAINER_REGISTRY ||
+            env.RELEASE_STABLE_CONTAINER_REGISTRY }}
           RC_WHEEL_INDEX: ${{ env.RELEASE_RC_WHEEL_INDEX }}
           STABLE_WHEEL_INDEX: ${{ env.RELEASE_STABLE_WHEEL_INDEX }}
           PUBLISH_RC_WHEELS: ${{ env.RELEASE_PUBLISH_RC_WHEELS }}
@@ -1230,7 +1234,6 @@ jobs:
           POLL_RESULT: ${{ needs.poll-final-release.result }}
           GITHUB_RELEASE_RESULT: ${{ needs.create-github-release.result }}
           DEPLOYMENT_RESULT: ${{ needs.signal-deployment.result }}
-          SMOKE_CHECKS_PENDING: ${{ needs.schedule-smoke.outputs.scheduled }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
         with:
