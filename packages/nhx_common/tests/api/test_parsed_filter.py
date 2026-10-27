@@ -588,6 +588,19 @@ class TestNamespaceEndToEnd:
         resp = self._client().get("/items", params={"filter[name.foo]": "x"})
         assert resp.status_code == 400
 
+    def test_bracket_dict_form_translates_per_key(self):
+        # filter[labels][team]=x means "has team=x", not "labels equals {team: x}".
+        resp = self._client().get("/items", params={"filter[labels][team]": "eval"})
+        assert resp.status_code == 200
+        assert resp.json()["operation"] == {"data.labels.team": {"$eq": "eval"}}
+
+    def test_json_dict_form_translates_per_key(self):
+        resp = self._client().get("/items", params={"filter": '{"labels": {"team": "eval", "tier": {"$in": ["1"]}}}'})
+        assert resp.status_code == 200
+        assert resp.json()["operation"] == {
+            "$and": [{"data.labels.team": {"$eq": "eval"}}, {"data.labels.tier": {"$in": ["1"]}}]
+        }
+
 
 class TestStringFilterEndToEnd:
     """End-to-end tests through make_filter_dep with StringFilter operator brackets.
