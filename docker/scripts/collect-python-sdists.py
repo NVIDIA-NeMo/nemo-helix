@@ -250,10 +250,8 @@ def main() -> int:
         packages = {(normalized, version): (name, version) for normalized, (name, version) in frozen.items()}
         packages = {key: package for key, package in packages.items() if key[0] not in local}
     skipped = {normalize_name(package_name) for package_name in args.skip_package}
-    baseline = baseline_packages(args.baseline_freeze)
-    packages = {
-        key: package for key, package in packages.items() if key[0] not in skipped and baseline.get(key[0]) != package
-    }
+    baseline = {(normalized, version) for normalized, (_, version) in baseline_packages(args.baseline_freeze).items()}
+    packages = {key: package for key, package in packages.items() if key[0] not in skipped and key not in baseline}
 
     lock_sdists: dict[tuple[str, str], Sdist] = {}
     for lock_file in args.lock_file:

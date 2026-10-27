@@ -70,6 +70,32 @@ def test_collects_the_sdists_of_a_uv_caches_distributions(monkeypatch: pytest.Mo
     ]
 
 
+def test_a_uv_cache_skips_baseline_packages_however_their_names_are_spelled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = load_module()
+    cache = tmp_path / "cache"
+    unpack(cache, "AbC", "Jaraco.Text", "4.0.0")
+    unpack(cache, "dEf", "setuptools", "84.2.1")
+    baseline = tmp_path / "baseline.txt"
+    baseline.write_text("jaraco-text==4.0.0\nsetuptools==80.9.0\n")
+    downloads: list[str] = []
+    monkeypatch.setenv("NHX_COLLECT_SOURCES", "1")
+    monkeypatch.setattr(
+        module, "pypi_sdist", lambda name, version: module.Sdist(f"https://files.example/{name}-{version}.tar.gz")
+    )
+    monkeypatch.setattr(module, "download", lambda url, destination, *hashes: downloads.append(url))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--uv-cache", str(cache), "--output", str(tmp_path / "out"), "--baseline-freeze", str(baseline)],
+    )
+
+    assert module.main() == 0
+
+    assert downloads == ["https://files.example/setuptools-84.2.1.tar.gz"]
+
+
 @pytest.mark.parametrize("args", [[], ["--python", "python3", "--uv-cache", "cache"]])
 def test_exactly_one_of_an_environment_or_a_uv_cache_is_collected(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, args: list[str]
