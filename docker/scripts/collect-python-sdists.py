@@ -95,16 +95,19 @@ def parse_freeze(output: str) -> dict[str, tuple[str, str]]:
     return packages
 
 
-def uv_cache_packages(cache: Path) -> dict[str, tuple[str, str]]:
-    """Distributions unpacked in a uv cache, such as the build backends uv fetched to build sdists."""
-    packages: dict[str, tuple[str, str]] = {}
+def uv_cache_packages(cache: Path) -> dict[tuple[str, str], tuple[str, str]]:
+    """Distributions unpacked in a uv cache, such as the build backends uv fetched to build sdists.
+
+    Keyed by normalized name and version: a cache can hold several versions of one package.
+    """
+    packages: dict[tuple[str, str], tuple[str, str]] = {}
     for metadata in sorted(cache.glob("archive-v*/*/*.dist-info/METADATA")):
         headers = email.parser.Parser().parsestr(
             metadata.read_text(encoding="utf-8", errors="replace"), headersonly=True
         )
         name, version = headers.get("Name"), headers.get("Version")
         if name and version:
-            packages.setdefault(normalize_name(name), (name, version))
+            packages.setdefault((normalize_name(name), version), (name, version))
     return packages
 
 
@@ -236,21 +239,21 @@ def main() -> int:
     else:
         try:
             purelib = purelib_for(args.python)
-            packages = freeze_packages(args.python, purelib)
+            frozen = freeze_packages(args.python, purelib)
         except subprocess.CalledProcessError as error:
             (manifests / "missing-pypi-sdists.txt").write_text(
                 f"failed to inspect Python environment {args.python}: {error.output}\n",
                 encoding="utf-8",
             )
             return 0
-        for package_name in local_direct_url_packages(purelib):
-            packages.pop(package_name, None)
-    for package_name in args.skip_package:
-        packages.pop(normalize_name(package_name), None)
+        local = local_direct_url_packages(purelib)
+        packages = {(normalized, version): (name, version) for normalized, (name, version) in frozen.items()}
+        packages = {key: package for key, package in packages.items() if key[0] not in local}
+    skipped = {normalize_name(package_name) for package_name in args.skip_package}
     baseline = baseline_packages(args.baseline_freeze)
-    for package_name, package in list(packages.items()):
-        if baseline.get(package_name) == package:
-            packages.pop(package_name)
+    packages = {
+        key: package for key, package in packages.items() if key[0] not in skipped and baseline.get(key[0]) != package
+    }
 
     lock_sdists: dict[tuple[str, str], Sdist] = {}
     for lock_file in args.lock_file:
@@ -259,7 +262,7 @@ def main() -> int:
     downloaded: list[str] = []
     missing: list[str] = []
 
-    for normalized, (name, version) in sorted(packages.items()):
+    for (normalized, _), (name, version) in sorted(packages.items()):
         sdist = lock_sdists.get((normalized, version))
         source = "uv.lock"
         if sdist is None:
