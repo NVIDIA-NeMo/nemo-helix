@@ -17,6 +17,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -35,6 +36,14 @@ from nemo_fabric import (
 from nemo_helix_plugin.agents.execute_extensions import (
     FabricRuntimeResult as FabricRuntimeResult,
 )
+
+
+class StreamingMethod(StrEnum):
+    """How serving obtains output for an OpenAI streaming response."""
+
+    RELAY = "relay"
+    OPENAI = "openai"
+    BUFFERED = "buffered"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,12 +77,21 @@ class FabricOneShotRequest:
 class FabricRuntimeStream:
     """Platform-owned handle for one streaming Fabric runtime invocation."""
 
-    def __init__(self, stream: Any, timeout_seconds: float | None = None) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        timeout_seconds: float | None = None,
+        *,
+        streaming_method: StreamingMethod = StreamingMethod.RELAY,
+    ) -> None:
         self._stream = stream
         self._timeout_seconds = timeout_seconds
+        self.streaming_method = streaming_method
 
     async def records(self) -> AsyncIterator[dict[str, Any]]:
-        """Yield raw NeMo Relay ATOF records from Fabric."""
+        """Yield Relay records or native OpenAI chunks; buffered runs have neither."""
+        if self.streaming_method is StreamingMethod.BUFFERED:
+            return
         try:
             async for record in self._stream:
                 yield dict(record)
@@ -88,6 +106,8 @@ class FabricRuntimeStream:
 
     async def result(self) -> FabricRuntimeResult:
         """Return the authoritative terminal Fabric result for this stream."""
+        if self.streaming_method is StreamingMethod.BUFFERED:
+            return await asyncio.shield(self._stream)
         try:
             result = await asyncio.wait_for(
                 self._stream.result(),
@@ -106,7 +126,10 @@ class FabricRuntimeStream:
     async def aclose(self) -> None:
         """Finalize unread stream records without cancelling the harness turn."""
         try:
-            await self._stream.aclose()
+            if self.streaming_method is StreamingMethod.BUFFERED:
+                await asyncio.shield(self._stream)
+            else:
+                await self._stream.aclose()
         except FabricError as error:
             raise FabricRuntimeExecutionError(
                 f"Fabric runtime streaming cleanup failed: {error}",
@@ -189,15 +212,23 @@ async def invoke_fabric_runtime(
 def stream_fabric_runtime(
     runtime: Runtime,
     request: FabricInvocationRequest,
+    *,
+    streaming_method: StreamingMethod = StreamingMethod.RELAY,
 ) -> FabricRuntimeStream:
     """Start streaming one turn on an active Fabric runtime."""
     try:
-        stream = runtime.invoke_stream(request=_with_platform_invocation_context(request))
+        if streaming_method is StreamingMethod.RELAY:
+            stream = runtime.invoke_stream(request=_with_platform_invocation_context(request))
+        elif streaming_method is StreamingMethod.OPENAI:
+            stream = runtime.invoke_openai_stream(request=_with_platform_invocation_context(request))
+        else:
+            # Start once and keep the turn alive if the SSE consumer disconnects.
+            stream = asyncio.create_task(invoke_fabric_runtime(runtime, request))
     except FabricError as error:
         raise FabricRuntimeExecutionError(
             f"Fabric runtime streaming failed: {error}",
         ) from error
-    return FabricRuntimeStream(stream, request.timeout_seconds)
+    return FabricRuntimeStream(stream, request.timeout_seconds, streaming_method=streaming_method)
 
 
 async def run_fabric_agent_once(
@@ -230,10 +261,13 @@ async def stream_fabric_agent_once(
     request: FabricOneShotRequest,
     *,
     fabric: Any | None = None,
+    streaming_method: StreamingMethod = StreamingMethod.RELAY,
 ) -> AsyncGenerator[FabricRuntimeStream, None]:
     """Start an ephemeral Fabric runtime and keep it alive for one stream."""
     fabric_client = fabric or Fabric()
-    async with _one_shot_runtime(request, fabric=fabric_client, streaming=True) as runtime:
+    async with _one_shot_runtime(
+        request, fabric=fabric_client, streaming=streaming_method is StreamingMethod.RELAY
+    ) as runtime:
         yield stream_fabric_runtime(
             runtime,
             FabricInvocationRequest(
@@ -242,6 +276,7 @@ async def stream_fabric_agent_once(
                 caller_context=request.caller_context,
                 timeout_seconds=request.timeout_seconds,
             ),
+            streaming_method=streaming_method,
         )
 
 
