@@ -110,6 +110,23 @@ describe('createChatCompletion', () => {
     warn.mockRestore();
   });
 
+  it('routes a LoRA adapter through its base model and keeps the composite in the body', async () => {
+    mocks.create.mockResolvedValue({ choices: [] });
+    const model = 'base-model&adapters/adapter-ws/my-adapter';
+
+    await createChatCompletion({
+      workspace: 'route-ws',
+      accessToken: 'test-token',
+      model,
+      messages: [{ role: 'user', content: 'Tell me about bananas.' }],
+      stream: false,
+    });
+
+    const { baseURL } = mocks.openAIConstructor.mock.calls[0]?.[0] as { baseURL: string };
+    expect(baseURL).toMatch(/\/workspaces\/route-ws\/model\/base-model\/-\/v1\/?$/);
+    expect(mocks.create.mock.calls[0]?.[0]).toMatchObject({ model });
+  });
+
   it('constructs OpenAI clients with the shared platform fetch boundary', async () => {
     mocks.create.mockResolvedValue({ choices: [] });
 
