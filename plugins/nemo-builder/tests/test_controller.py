@@ -115,13 +115,17 @@ async def test_queue_starts_builds_in_order_within_the_cap() -> None:
     await controller.reconcile()
     assert set(jobs.jobs) == {"build-a"}
 
-    # a ends: its entry goes and b takes the slot. c's job is refused, so c fails rather than waiting forever.
+    # a publishes and ends: its entry goes and b takes the slot. c's job is refused, so c fails rather than waiting.
+    entities.entities["build-a.img"].status = "ready"
     jobs.jobs["build-a"].status = HelixJobStatus.COMPLETED
     jobs.refuse.add("build-c")
     await controller.reconcile()
     assert "build-a" not in entities.entities and set(jobs.jobs) == {"build-a", "build-b"}
+    assert status("build-a") == "ready"
+    # b's job errors before publishing: its image fails instead of staying pending.
     jobs.jobs["build-b"].status = HelixJobStatus.ERROR
     await controller.reconcile()
+    assert status("build-b") == "failed" and "build-b" not in entities.entities
     assert status("build-c") == "failed" and "build-c" not in entities.entities
 
     # A job already created for the same request (a pass that died before marking it started) is adopted.

@@ -4,7 +4,7 @@
 """``builder-queue``: start queued build jobs, oldest first, while fewer than ``max_concurrent_builds`` run.
 
 A submit with the cap set writes a :class:`QueuedBuild` instead of creating the job. Each pass this controller
-forgets the started builds whose jobs ended, then creates jobs for the oldest queued ones until the cap is met,
+forgets the started builds whose jobs ended (failing any image they left unpublished), then creates jobs for the oldest queued ones until the cap is met,
 each as the user who submitted it, and moves that build's images from ``queued`` to ``pending``.
 
 Every step is safe to repeat: a job that already exists for the same request is adopted, so a pass that dies
@@ -99,7 +99,7 @@ class BuildQueueController(NemoController):
             elif await self._still_running(build):
                 running += 1
             else:
-                await self._forget(build)
+                await self._end(build)
         for build in waiting:
             if cap is not None and running >= cap:
                 return
@@ -186,6 +186,12 @@ class BuildQueueController(NemoController):
         logger.warning("dropping queued build %s: %s", _label(build), sanitize_for_log(detail))
         assert self._entities is not None
         await fail_rows(self._entities, await self._rows(build), detail)
+        await self._forget(build)
+
+    async def _end(self, build: QueuedBuild) -> None:
+        """Forget ``build``, whose job ended; any image it did not publish by then never will be, so fail it."""
+        assert self._entities is not None
+        await fail_rows(self._entities, await self._rows(build), "not built: its build job ended without publishing it")
         await self._forget(build)
 
     async def _rows(self, build: QueuedBuild) -> list[ContainerImage]:
