@@ -173,7 +173,11 @@ describe('ModelDetailRoute', () => {
     mockLineage({ adapter });
     renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
 
-    expect(await screen.findByText('evaluations for my-adapter')).toBeInTheDocument();
+    // The composite the run actually stores in `spec.target.name` -- matching on
+    // the adapter's bare name would list nothing while looking correct.
+    expect(
+      await screen.findByText('evaluations for my-model&adapters/ws/my-adapter')
+    ).toBeInTheDocument();
   });
 
   it('pre-selects the adapter when running an evaluation from its page', async () => {

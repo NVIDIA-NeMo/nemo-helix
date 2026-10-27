@@ -5,6 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
+import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import {
   Badge,
@@ -92,10 +93,6 @@ export const ModelDetailRoute: FC = () => {
   const selectedTab = tabs.find((tab) => tab.value === tabFromUrl)?.value ?? ModelDetailTab.Details;
 
   const isJobTab = selectedTab === ModelDetailTab.Training || selectedTab === ModelDetailTab.Logs;
-  // An adapter is evaluated in its own right: `buildModelPayload` targets one by
-  // its bare name, so that is what its runs are listed under here.
-  const evaluatedName = adapterName ?? modelName;
-
   // An adapter is named with the `model::adapter` encoding the wizard's picker
   // round-trips, so the run opens pre-set to the entity whose page this is.
   const runEvaluationRoute = getEvaluationNewRoute(workspace, {
@@ -140,6 +137,13 @@ export const ModelDetailRoute: FC = () => {
       </AccessibleTitle>
     );
   }
+
+  // What a run of this entity stores in `spec.target.name`. For an adapter that
+  // is the composite the gateway resolves -- NOT its bare name, and not the
+  // `model::adapter` the wizard's picker puts in a URL. `toInferenceModelName`
+  // is the single definition of that value, shared with the submit path, so the
+  // two cannot drift apart into a tab that silently lists nothing.
+  const evaluatedName = toInferenceModelName(model, adapter);
 
   const finetuningType = adapter?.finetuning_type ?? model.finetuning_type;
   const tags = [

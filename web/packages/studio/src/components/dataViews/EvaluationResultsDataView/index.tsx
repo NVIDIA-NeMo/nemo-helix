@@ -16,6 +16,7 @@ import {
   type ApiFilter,
   useStudioDataViewState,
 } from '@nemo/common/src/hooks/useStudioDataViewState';
+import type { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
   getEvalsListEvaluateJobsQueryKey,
@@ -55,10 +56,9 @@ const buildFilter = (
   targetModelName?: string
 ): EvaluateJobsListFilter => {
   const conditions: FilterTree<EvaluateJobsListFilter>[] = [NOT_AGENT_TRIGGERED];
-  // Both submit paths write the bare entity name to `spec.target.name` -- the
-  // wizard for a model, `buildModelPayload` for an adapter -- so that is what a
-  // scoped list matches on. The gateway URL alongside it also carries the name,
-  // but only as one segment of a path.
+  // `spec.target.name` is the name the run put on the wire: a model's own name,
+  // or an adapter's `base&adapters/{workspace}/{adapter}` composite. Callers
+  // build it with `toInferenceModelName`, the same helper the submit path uses.
   if (targetModelName) {
     conditions.push({ 'spec.target.name': { $eq: targetModelName } });
   }
@@ -75,8 +75,8 @@ const buildFilter = (
 
 export interface EvaluationResultsDataViewProps {
   /**
-   * Narrows the list to runs that evaluated this model or adapter, named as the
-   * bare entity -- the form `spec.target.name` carries in both cases. Omitted
+   * Narrows the list to runs that evaluated this model or adapter, named as
+   * `spec.target.name` stores it -- see {@link toInferenceModelName}. Omitted
    * lists every model evaluation in the workspace.
    */
   targetModelName?: string;

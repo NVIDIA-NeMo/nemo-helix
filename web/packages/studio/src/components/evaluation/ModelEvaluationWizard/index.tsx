@@ -41,7 +41,7 @@ import {
 import { MODEL_EVAL_CONFIG_DESCRIPTION } from '@studio/components/evaluation/submitEvaluationJob';
 import { LINK_EVAL_DOCS } from '@studio/constants/links';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form';
 
 /** Radio value for the reuse branch. Not a config name, so it never collides
@@ -272,10 +272,16 @@ export const ModelEvaluationWizard: FC<ModelEvaluationWizardProps> = ({
   /** Wizard navigation, not part of the spec: known before a configuration is
    *  named, so it cannot live on `configSource`. */
   const [mode, setMode] = useState<string>(NEW_CONFIG);
+  // This form's defaults, not the module-level ones: a seeded model is the
+  // default for this run, so every reset that restores a default has to restore
+  // the seed. The resets in `StartStep` and `SavedConfigLoader` already carry
+  // `model` over from the current values, and `goBack` reads these.
+  const defaults = useMemo<EvaluationFormValues>(
+    () => ({ ...EVALUATION_FORM_DEFAULTS, model: initialModel ?? '' }),
+    [initialModel]
+  );
   const form = useForm<EvaluationFormValues>({
-    // A seeded model survives the resets in `StartStep` and `SavedConfigLoader`:
-    // both carry `model` over from the current values rather than defaulting it.
-    defaultValues: { ...EVALUATION_FORM_DEFAULTS, model: initialModel ?? '' },
+    defaultValues: defaults,
     resolver: zodResolver(evaluationSchema),
     mode: 'onChange',
   });
@@ -288,6 +294,7 @@ export const ModelEvaluationWizard: FC<ModelEvaluationWizardProps> = ({
         setStep={setStep}
         mode={mode}
         onModeChange={setMode}
+        defaults={defaults}
       />
     </FormProvider>
   );
@@ -296,12 +303,14 @@ export const ModelEvaluationWizard: FC<ModelEvaluationWizardProps> = ({
 /** Split out so the submit handler can read the bindings, which are derived from
  *  form state and therefore only available inside the provider. */
 const ModelEvaluationWizardInner: FC<{
+  /** This run's defaults, which `goBack` restores. See `defaults` above. */
+  defaults: EvaluationFormValues;
   workspace: string;
   step: WizardStep;
   setStep: (step: WizardStep) => void;
   mode: string;
   onModeChange: (mode: string) => void;
-}> = ({ workspace, step, setStep, mode, onModeChange }) => {
+}> = ({ defaults, workspace, step, setStep, mode, onModeChange }) => {
   const form = useFormContext<EvaluationFormValues>();
   const bindings = useDatasetBindings();
   const selectedModel = useWatch({ control: form.control, name: 'model' });
@@ -375,7 +384,7 @@ const ModelEvaluationWizardInner: FC<{
   const goBack = () => {
     const fields = FIELDS_BY_STEP[step];
     for (const field of fields) {
-      form.setValue(field, EVALUATION_FORM_DEFAULTS[field]);
+      form.setValue(field, defaults[field]);
     }
     if (reusing && fields.includes('configSource')) form.setValue('configSource', '');
     form.clearErrors(fields);
