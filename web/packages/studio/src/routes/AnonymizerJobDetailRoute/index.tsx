@@ -118,6 +118,7 @@ export const AnonymizerJobDetailRoute: FC | null = ANONYMIZER_ENABLED
                     <LogViewer
                       logs={logs?.data ?? []}
                       isLoading={isLoadingLogs}
+                      logStatus={job ? (isTerminal ? 'completed' : 'live') : undefined}
                       downloadFilename={`anonymizer-${anonymizerJobName}-logs.txt`}
                     />
                   )}

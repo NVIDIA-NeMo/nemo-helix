@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { LOGS_MAX_FETCH_ITERATIONS, LOGS_MAX_PAGES, LOGS_PAGE_SIZE } from '../../constants';
 import { CJobTerminalStatuses } from '../../constants/query';
-import type { LogLoadProgress } from '../../utils/logs';
+import type { LogLoadProgress, LogStatus } from '../../utils/logs';
 import { getJobRefetchInterval } from '../../utils/query';
 
 // After a job goes terminal, refetchInterval stops polling — but OTLP log
@@ -82,6 +82,7 @@ export interface UseJobLogsResult {
    *  resolves and again whenever a new walk starts. Meant for the initial load, which
    *  blocks on every page; refetches already have data on screen. */
   loadProgress: LogLoadProgress | null;
+  logStatus: LogStatus | undefined;
   refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<JobLogsQueryData>>;
 }
 
@@ -188,6 +189,7 @@ export const useJobLogs = ({
     error: query.error,
     total: query.data?.total ?? 0,
     loadProgress,
+    logStatus: jobStatus ? (isTerminal ? 'completed' : 'live') : undefined,
     refetch: query.refetch,
   };
 };

@@ -25,6 +25,9 @@ export const formatLogEntryForDisplay = (log: HelixJobLog): string =>
 export const formatLogsForDisplay = (logs: readonly HelixJobLog[]): string =>
   logs.map(formatLogEntryForDisplay).join('\n');
 
+/** Whether more lines may still arrive (`live`) or the log is complete (`completed`). */
+export type LogStatus = 'live' | 'completed';
+
 /**
  * Incremental state of a multi-page log fetch. `total` is the server-side line count
  * for the whole job, known once the first page resolves.

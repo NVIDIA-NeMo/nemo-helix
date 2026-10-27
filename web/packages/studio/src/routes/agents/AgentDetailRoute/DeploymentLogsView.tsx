@@ -188,6 +188,8 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
     <LogViewer
       logs={logs}
       isLoading={isLoading && logs.length === 0}
+      // The SSE stream stays open for as long as this view is mounted.
+      logStatus="live"
       downloadFilename={`${deploymentName}.log`}
       rows={40}
       emptyMessage="No log output yet — the deployment may not have started writing."
