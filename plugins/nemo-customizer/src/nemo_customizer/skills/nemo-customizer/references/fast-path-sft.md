@@ -77,7 +77,7 @@ Instead of steps 1 and 2, `--upload-model <local path or HF repo id>` and `--upl
 ```bash
 nemo customization automodel --job-json /tmp/job.json --workspace default > /tmp/automodel-submit.json
 JOB=$(python3 -c "import json;print(json.load(open('/tmp/automodel-submit.json'))['name'])")
-bash scripts/poll_customization_job.sh "$JOB"
+bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"
 ```
 
 Or poll manually: `nemo jobs get-status "$JOB"` every 30–60s.
@@ -126,7 +126,7 @@ If the model uses `messages` chat format (preferred when the tokenizer has a cha
 ```bash
 nemo customization unsloth --job-json /tmp/job.json --workspace default > /tmp/unsloth-submit.json
 JOB=$(python3 -c "import json;print(json.load(open('/tmp/unsloth-submit.json'))['name'])")
-bash scripts/poll_customization_job.sh "$JOB"
+bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"
 ```
 
 If submit fails on an unknown profile, re-list execution profiles and pass `--profile <name>` on submit (default is `gpu`).

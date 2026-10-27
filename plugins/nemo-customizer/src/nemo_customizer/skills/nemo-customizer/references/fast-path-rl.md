@@ -88,7 +88,7 @@ It runs one full epoch; `references/defaults.md` has the bounded-run alternative
 ```bash
 nemo customization rl --job-json /tmp/job.json --workspace default > /tmp/rl-submit.json
 JOB=$(python3 -c "import json;print(json.load(open('/tmp/rl-submit.json'))['name'])")
-bash scripts/poll_customization_job.sh "$JOB"
+bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"
 ```
 
 Report progress with `references/reporting.md` § **RL (GRPO) example**.
@@ -134,7 +134,7 @@ nemo files list "$DATASET" --workspace default
 ```bash
 nemo customization rl --job-json /tmp/job.json --workspace default > /tmp/rl-submit.json   # add --profile <name> if the default gpu profile is wrong
 JOB=$(python3 -c "import json;print(json.load(open('/tmp/rl-submit.json'))['name'])")
-bash scripts/poll_customization_job.sh "$JOB"
+bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"
 ```
 
 If submit fails on an unknown profile, re-list execution profiles and pass `--profile <name>`. `nemo customization rl explain` prints the live schema.

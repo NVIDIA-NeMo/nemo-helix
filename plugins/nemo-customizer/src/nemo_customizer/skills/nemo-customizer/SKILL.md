@@ -22,7 +22,6 @@ triggers:
   - lora
   - dpo
   - grpo
-  - run grpo
   - grpo job
   - rlhf
   - reinforcement learning
@@ -125,7 +124,7 @@ Commands and job JSON for each backend: `references/fast-path-sft.md` (automodel
    JOB=$(python3 -c "import json;print(json.load(open('/tmp/submit.json'))['name'])")
    ```
 
-6. **Poll to a terminal status.** The job is done only when its **top-level** `status` is `completed`, `error` or `cancelled`. Every step can show `completed` while the job is still `active`, and `status_details.phase` can sit at `training` with `progress_pct: 100` for a while. `scripts/poll_customization_job.sh "$JOB"` polls any backend's job every 15s (append seconds to change it) and exits 1 on `error`/`cancelled`.
+6. **Poll to a terminal status.** The job is done only when its **top-level** `status` is `completed`, `error` or `cancelled`. Every step can show `completed` while the job is still `active`, and `status_details.phase` can sit at `training` with `progress_pct: 100` for a while. `bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"` polls any backend's job every 15s (append seconds to change it) and exits 1 on `error`/`cancelled`.
 7. **Report** with `references/reporting.md`. Then, for inference or eval, `references/post-training-eval.md`: a LoRA adapter hot-reloads onto a READY `lora_enabled: true` deployment of its base, while full-weight and merged outputs are new model entities to deploy (vLLM by default).
 
 A job that fails on a missing training image, a gated download or a platform error: `references/troubleshooting.md`.
