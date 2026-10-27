@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Creator response projection survives service mounting and real auth middleware."""
+"""Auth-context response policy survives service mounting and real auth middleware."""
 
 from types import SimpleNamespace
 
 import pytest
-from fastapi import APIRouter
+from fastapi import APIRouter, FastAPI
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
-from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
-from nhx.common.api.creator_snapshot_projection import collect_creator_snapshot_routes
+from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, PolicyRoute
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nhx.common.auth.middleware import AuthorizationMiddleware
 from nhx.common.config import AuthConfig
 from nhx.common.service import RouterConfig, Service
@@ -27,17 +28,18 @@ class SnapshotService(Service):
         super().__init__(name="snapshot-test", module_name="test.snapshot")
 
     def get_routers(self) -> list[RouterConfig]:
-        router = APIRouter(
-            route_class=creator_snapshot_route_class(
-                response_paths={SnapshotItem: ("auth_context",)}, purpose="Test creator snapshot"
-            )
-        )
+        router = APIRouter()
+        items = ItemPolicyRoutes(router, AuthContextResponsePolicy(dto_type=SnapshotItem, field="auth_context"))
 
-        @router.get("/item", response_model=SnapshotItem)
+        @items.get("/item")
         async def get_item() -> SnapshotItem:
             return SnapshotItem(name="item", auth_context={"principal_id": "creator"})
 
         return [RouterConfig(router, tag="Snapshots", description="Snapshot tests", prefix="/v2")]
+
+
+def _registered_count(app: FastAPI) -> int:
+    return sum(isinstance(context.original_route, PolicyRoute) for context in iter_route_contexts(app.router.routes))
 
 
 @pytest.mark.parametrize(
@@ -65,9 +67,9 @@ def test_platform_projects_registered_response(monkeypatch, auth_enabled, header
 
     monkeypatch.setattr(AuthorizationMiddleware, "_call_pdp", allow_request)
     service = SnapshotService()
-    assert len(collect_creator_snapshot_routes(service.app)) == 1
+    assert _registered_count(service.app) == 1
     app = server.create_app(services=[service])
-    assert len(collect_creator_snapshot_routes(app)) == 1
+    assert _registered_count(app) == 1
 
     response = TestClient(app).get("/apis/snapshot-test/v2/item", headers=headers)
 

@@ -88,26 +88,34 @@ Wire format:
 }
 ```
 
-### Protected creator snapshots
+### Protected stored auth context
 
-If a service response model exposes a stored creator snapshot as `auth_context`, register the response shape on its router. The platform projects the field after serialization for callers who cannot read it; route handlers and the SDK should not redact it themselves.
+If a service response model exposes stored `auth_context`, register each response shape with a typed policy. The policy uses the trusted inbound request identity and omits the field from unauthorized HTTP responses without changing persisted data or the handler's DTO.
 
 ```python
 from fastapi import APIRouter
-from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
+from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, nemo_page_policy_routes
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 
-router = APIRouter(
-    route_class=creator_snapshot_route_class(
-        response_paths={
-            Widget: ("auth_context",),
-            WidgetPage: ("data[].auth_context",),
-        },
-        purpose="Widget creator identity",
-    )
-)
+router = APIRouter()
+policy = AuthContextResponsePolicy(dto_type=Widget, field="auth_context")
+items = ItemPolicyRoutes(router, policy)
+pages = nemo_page_policy_routes(router, policy, WidgetPage)
+
+@items.get("/widgets/{name}")
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[WidgetPerms.READ])
+async def get_widget(workspace: str, name: str) -> Widget:
+    return await entity_client.get(Widget, name=name, workspace=workspace)
+
+@pages.get("/widgets")
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[WidgetPerms.LIST])
+async def list_widgets(workspace: str) -> WidgetPage:
+    return await widget_service.list(workspace)
 ```
 
-Register each response model that carries the snapshot, including create, update, get, and list shapes. The path selectors describe the serialized JSON (`data[]` means each item in a page). The response property must be optional because unauthorized responses omit it. This is a field policy, not route authorization: keep the route's normal `@path_rule` and derive any persisted creator snapshot from the authenticated principal, never from a caller-supplied request body. For raw Entity Store `data._auth_context`, the request-bound repository policy handles both writes and reads automatically.
+Use `items.post` and `items.put` for create/update responses, `page_policy_routes` for core `Page[Widget]`, and `ListPolicyRoutes` for an existing bare-list response. Keep the usual `@path_rule` and scope decorators; response projection does not grant route access. The protected property must be optional because unauthorized responses omit it rather than returning `null`. The Entity Store's request-bound repository policy separately protects `data._auth_context` writes, reads, and queries. Do not redact in an SDK or service handler.
 
 ### NemoFilter
 

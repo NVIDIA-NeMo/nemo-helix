@@ -4,7 +4,8 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
+from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, page_policy_routes
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -28,20 +29,17 @@ from nhx.core.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    route_class=creator_snapshot_route_class(
-        response_paths={ModelProvider: ("auth_context",), Page[ModelProvider]: ("data[].auth_context",)},
-        purpose="Model provider creator identity",
-    )
-)
+router = APIRouter()
+provider_policy = AuthContextResponsePolicy(dto_type=ModelProvider, field="auth_context")
+provider_items = ItemPolicyRoutes(router, provider_policy)
+provider_pages = page_policy_routes(router, provider_policy, Page[ModelProvider])
 
 
-@router.get(
+@provider_pages.get(
     "/v2/workspaces/{workspace}/providers",
     summary="List ModelProviders By Workspace",
     response_description="Return model providers for a workspace",
     status_code=status.HTTP_200_OK,
-    response_model=Page[ModelProvider],
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=ModelProviderFilter,
@@ -83,7 +81,7 @@ async def list_providers(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post(
+@provider_items.post(
     "/v2/workspaces/{workspace}/providers",
     summary="Create ModelProvider",
     response_description="Create a new model provider",
@@ -135,7 +133,7 @@ async def create_provider(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.put(
+@provider_items.put(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Upsert ModelProvider",
     response_description="Create or update a model provider",
@@ -182,7 +180,7 @@ async def upsert_provider(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.put(
+@provider_items.put(
     "/v2/workspaces/{workspace}/providers/{name}/status",
     summary="Update ModelProvider Status Fields",
     response_description="Update status-related fields of a model provider",
@@ -228,7 +226,7 @@ async def update_provider_status(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get(
+@provider_items.get(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Get ModelProvider",
     response_description="Return model provider details",

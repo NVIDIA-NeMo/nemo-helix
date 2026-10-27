@@ -4,8 +4,8 @@
 """Repository policy preserves creator snapshots in the update transaction."""
 
 import pytest
-from nhx.common.auth.creator_snapshot import CreatorSnapshotCapabilities
-from nhx.core.entities.api.creator_snapshot_policy import CreatorSnapshotEntityPolicy
+from nemo_helix_plugin.auth.access import AuthContextAccessRule
+from nhx.core.entities.api.auth_context_policy import AuthContextEntityPolicy
 from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
 from nhx.core.entities.app.repository.exceptions import EntityVersionConflictError
 
@@ -19,9 +19,7 @@ async def test_repository_policy_preserves_snapshot_for_id_and_name_updates(
     created = await entity_repo.create_entity(
         workspace="workspace-1", entity_type="test", name="protected", data={"_auth_context": original, "value": 1}
     )
-    user_policy = CreatorSnapshotEntityPolicy(
-        CreatorSnapshotCapabilities(policy_enabled=True, can_read=False, can_write=False)
-    )
+    user_policy = AuthContextEntityPolicy(AuthContextAccessRule(policy_enabled=True, can_read=False, can_write=False))
     user_repo = SQLAlchemyEntityRepository(entity_repo.session_maker, user_policy)
     supplied = {"value": 2, "_auth_context": {"principal_id": "forged"}}
 
@@ -54,9 +52,7 @@ async def test_repository_policy_preserves_absent_key_and_allows_service_replace
     entity_repo: SQLAlchemyEntityRepository, setup_workspaces
 ) -> None:
     original = {"principal_id": "user@example.com"}
-    service_policy = CreatorSnapshotEntityPolicy(
-        CreatorSnapshotCapabilities(policy_enabled=True, can_read=True, can_write=True)
-    )
+    service_policy = AuthContextEntityPolicy(AuthContextAccessRule(policy_enabled=True, can_read=True, can_write=True))
     service_repo = SQLAlchemyEntityRepository(entity_repo.session_maker, service_policy)
     created = await service_repo.create_entity(
         workspace="workspace-1", entity_type="test", name="without-context", data={"value": 1}

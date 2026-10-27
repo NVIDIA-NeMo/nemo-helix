@@ -12,7 +12,8 @@ from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request, status
 from fastapi.openapi.models import Example
-from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
+from nemo_helix_plugin.api.response_policy import page_policy_routes
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
 from nemo_helix_plugin.jobs.types import JobControl
@@ -109,11 +110,11 @@ _CREATE_JOB_OPENAPI_EXAMPLES: dict[str, Example] = {
     }
 }
 
-router = APIRouter(
-    route_class=creator_snapshot_route_class(
-        response_paths={Page[HelixJobStepWithContext]: ("data[].auth_context",)},
-        purpose="Job step creator identity",
-    )
+router = APIRouter()
+step_pages = page_policy_routes(
+    router,
+    AuthContextResponsePolicy(dto_type=HelixJobStepWithContext, field="auth_context"),
+    Page[HelixJobStepWithContext],
 )
 
 platform_config = get_platform_config()
@@ -1052,9 +1053,8 @@ async def download_job_result(
 
 
 # Job Steps Endpoints
-@router.get(
+@step_pages.get(
     "/v2/workspaces/{workspace}/jobs/{name}/steps",
-    response_model=Page[HelixJobStepWithContext],
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=HelixJobStepsListFilter,
@@ -1195,9 +1195,8 @@ async def update_job_step_status(
         return step_entity
 
 
-@router.get(
+@step_pages.get(
     "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps",
-    response_model=Page[HelixJobStepWithContext],
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=HelixAttemptStepsListFilter,

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
+from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, ListPolicyRoutes, page_policy_routes
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -25,24 +25,18 @@ from nhx.core.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    route_class=creator_snapshot_route_class(
-        response_paths={
-            ModelDeployment: ("auth_context",),
-            Page[ModelDeployment]: ("data[].auth_context",),
-            List[ModelDeployment]: ("[].auth_context",),
-        },
-        purpose="Model deployment creator identity",
-    )
-)
+router = APIRouter()
+deployment_policy = AuthContextResponsePolicy(dto_type=ModelDeployment, field="auth_context")
+deployment_items = ItemPolicyRoutes(router, deployment_policy)
+deployment_pages = page_policy_routes(router, deployment_policy, Page[ModelDeployment])
+deployment_lists = ListPolicyRoutes(router, deployment_policy)
 
 
-@router.get(
+@deployment_pages.get(
     "/v2/workspaces/{workspace}/deployments",
     summary="List ModelDeployments",
     response_description="Return model deployments for a workspace",
     status_code=status.HTTP_200_OK,
-    response_model=Page[ModelDeployment],
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=ModelDeploymentFilter,
@@ -94,7 +88,7 @@ async def list_deployments(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployments")
 
 
-@router.post(
+@deployment_items.post(
     "/v2/workspaces/{workspace}/deployments",
     summary="Create ModelDeployment",
     response_description="Create a new model deployment",
@@ -143,7 +137,7 @@ async def create_deployment(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create deployment")
 
 
-@router.get(
+@deployment_items.get(
     "/v2/workspaces/{workspace}/deployments/{name}",
     summary="Get Latest ModelDeployment",
     response_description="Return the latest version of a model deployment",
@@ -214,7 +208,7 @@ async def get_deployment_models(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment models")
 
 
-@router.get(
+@deployment_lists.get(
     "/v2/workspaces/{workspace}/deployments/{name}/versions",
     summary="List ModelDeployment Versions",
     response_description="Return all versions of a model deployment",
@@ -224,7 +218,7 @@ async def list_deployment_versions(
     workspace: str,
     name: str,
     service: ModelDeploymentService = Depends(get_model_deployment_service),
-) -> List[ModelDeployment]:
+) -> list[ModelDeployment]:
     """
     List all versions of a ModelDeployment.
     """
@@ -241,7 +235,7 @@ async def list_deployment_versions(
         )
 
 
-@router.get(
+@deployment_items.get(
     "/v2/workspaces/{workspace}/deployments/{deployment}/versions/{name}",
     summary="Get Specific ModelDeployment Version",
     response_description="Return a specific version of a model deployment",
@@ -285,7 +279,7 @@ async def get_deployment_version(
         )
 
 
-@router.post(
+@deployment_items.post(
     "/v2/workspaces/{workspace}/deployments/{name}",
     summary="Update ModelDeployment",
     response_description="Update a model deployment (creates new version)",
@@ -330,7 +324,7 @@ async def update_deployment(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deployment")
 
 
-@router.post(
+@deployment_items.post(
     "/v2/workspaces/{workspace}/deployments/{name}/status",
     summary="Update ModelDeployment Status",
     response_description="Update ModelDeployment status and status_message",

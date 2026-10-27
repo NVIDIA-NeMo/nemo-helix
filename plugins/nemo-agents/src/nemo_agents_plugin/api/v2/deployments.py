@@ -58,9 +58,10 @@ from nemo_agents_plugin.schema import (
     DeploymentPage,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
-from nemo_helix_plugin.api.creator_snapshot import creator_snapshot_route_class
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.response_policy import ItemPolicyRoutes, nemo_page_policy_routes
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -74,18 +75,16 @@ from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    route_class=creator_snapshot_route_class(
-        response_paths={AgentDeployment: ("auth_context",), DeploymentPage: ("data[].auth_context",)},
-        purpose="Agent deployment creator identity",
-    )
-)
+router = APIRouter()
+deployment_policy = AuthContextResponsePolicy(dto_type=AgentDeployment, field="auth_context")
+deployment_items = ItemPolicyRoutes(router, deployment_policy)
+deployment_pages = nemo_page_policy_routes(router, deployment_policy, DeploymentPage)
 
 _deployment_filter_dep = make_filter_obj_dep(DeploymentFilter)
 _DELETE_MARK_ATTEMPTS = 3
 
 
-@router.post("/deployments", response_model=AgentDeployment, status_code=201, tags=["Agent Deployments"])
+@deployment_items.post("/deployments", status_code=201, tags=["Agent Deployments"])
 @scope.write
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -273,7 +272,7 @@ def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentM
     )
 
 
-@router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])
+@deployment_pages.get("/deployments", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -315,7 +314,7 @@ async def list_deployments(
     )
 
 
-@router.get("/deployments/{name}", response_model=AgentDeployment, tags=["Agent Deployments"])
+@deployment_items.get("/deployments/{name}", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
