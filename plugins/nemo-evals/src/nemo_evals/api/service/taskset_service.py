@@ -311,6 +311,8 @@ class TasksetService:
             created = await self.entity_client.create(entity)
         except NemoEntityConflictError as exc:
             raise TasksetExistsError(f"Taskset '{workspace}/{name}' already exists") from exc
+        # A contended publish adopts the other publisher's version on ``created``; keep our own for the rollback.
+        created_db_version = created.db_version
         try:
             revision, head, published = await self._publish(created, tags=set(taskset_input.tags))
         except Exception:
@@ -322,7 +324,7 @@ class TasksetService:
                 # Only the head as we created it: a publisher whose create lost to ours may have
                 # published onto it since, and deleting by name alone would remove their taskset.
                 await self.entity_client.delete(
-                    TasksetEntity, name=name, workspace=workspace, expected_db_version=created.db_version
+                    TasksetEntity, name=name, workspace=workspace, expected_db_version=created_db_version
                 )
             except Exception:
                 # Report the rollback failure, but re-raise the *original* error: replacing it

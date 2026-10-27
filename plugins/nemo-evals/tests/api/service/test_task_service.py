@@ -345,6 +345,35 @@ async def test_create_rollback_spares_a_head_another_publisher_wrote(
     assert await service.get_task("default", "task-1") is not None
 
 
+async def test_create_rollback_spares_a_head_whose_version_a_publish_retry_adopted(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """A contended revision create refreshes our head to the other publisher's version; the rollback
+    must still expect the version our create returned, not the one the retry adopted."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    real_create = type(entity_store).create
+    attempts = 0
+
+    async def _lose_then_fail(entity):
+        nonlocal attempts
+        if entity.__entity_type__ != "task_revision":
+            return await real_create(entity_store, entity)
+        attempts += 1
+        if attempts == 1:  # another publisher's pointer write lands, and our ordinal is taken
+            head = await entity_store.get(TaskEntity, "task-1", workspace="default")
+            await entity_store.update(head)
+            raise NemoEntityConflictError("ordinal taken")
+        raise RuntimeError("store unavailable")
+
+    entity_store.create = _lose_then_fail
+
+    with pytest.raises(RuntimeError):
+        await service.create_task("task-1", _task_input(), workspace="default")
+
+    entity_store.create = real_create.__get__(entity_store)
+    assert await service.get_task("default", "task-1") is not None
+
+
 async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:
     """Losing the optimistic lock on a real change is a client-retryable conflict, not a server
     fault — the route maps this to 409, so the service must let it through rather than swallowing it."""
