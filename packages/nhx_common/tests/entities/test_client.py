@@ -1423,6 +1423,15 @@ class TestAuthContextConversion:
         assert result.auth_context is not None
         assert result.auth_context.principal_id == "creator@example.com"
 
+    def test_redacted_response_keeps_auth_context_unset(self):
+        client = _entity_client_with_headers({"X-NHX-Principal-Id": "user@example.com"})
+        entity = _make_entity_with_auth_context(datetime.now()).model_copy(update={"data": {"source": "test-source"}})
+
+        result = client._convert_api_entity_to_model(entity, _EntityWithAuthContext)
+
+        assert result.source == "test-source"
+        assert result.auth_context is None
+
     def test_keeps_auth_context_for_service_principal(self):
         now = datetime.now()
         client = _entity_client_with_headers({"X-NHX-Principal-Id": "service:models-controller"})
