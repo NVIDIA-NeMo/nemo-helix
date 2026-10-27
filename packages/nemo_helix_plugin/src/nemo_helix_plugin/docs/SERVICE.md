@@ -88,33 +88,52 @@ Wire format:
 }
 ```
 
-### Protected stored auth context
+### Identity-dependent response fields
 
-If a service response model exposes stored `auth_context`, bind one typed policy to its routes. The policy uses the trusted inbound request identity and omits the field from unauthorized HTTP responses without changing persisted data or the handler's DTO.
+Use `PolicyRoutes` when the *visibility* of a response field depends on the authenticated caller. Define the decision in a `ResponsePolicy` outside the handler, then use the policy-backed route decorator in place of `@router.get`, `@router.post`, or `@router.put`. The handler returns the usual DTO; the HTTP response omits the protected key (rather than returning `null`) when `can_read` is false. This works for a single DTO, `Page[DTO]`, `NemoListResponse[DTO]`, or `list[DTO]`, including items in a page. It does not change the stored object.
+
+For a stored auth context, use the supplied `AuthContextResponsePolicy`:
 
 ```python
 from fastapi import APIRouter
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
+from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.schema import NemoListResponse
+from pydantic import BaseModel
 
+class WidgetResponse(BaseModel):
+    name: str
+    auth_context: AuthContext | None = None
+
+class WidgetPerms(PermissionSet, namespace="my-plugin.widgets"):
+    READ = perm("Read a widget")
+    LIST = perm("List widgets")
+
+scope = AuthzScope("my-plugin")
 router = APIRouter()
-policy = AuthContextResponsePolicy(dto_type=Widget, field="auth_context")
+policy = AuthContextResponsePolicy(dto_type=WidgetResponse, field="auth_context")
 routes = PolicyRoutes(router, policy)
 
 @routes.get("/widgets/{name}")
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[WidgetPerms.READ])
-async def get_widget(workspace: str, name: str) -> Widget:
-    return await entity_client.get(Widget, name=name, workspace=workspace)
+async def get_widget(name: str) -> WidgetResponse:
+    return await widget_service.get(name)
 
 @routes.get("/widgets")
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[WidgetPerms.LIST])
-async def list_widgets(workspace: str) -> WidgetPage:
-    return await widget_service.list(workspace)
+async def list_widgets() -> NemoListResponse[WidgetResponse]:
+    return await widget_service.list()
 ```
 
-Use the same `routes` registrar for item, `Page[Widget]`, `NemoListResponse[Widget]`, and `list[Widget]` responses. The endpoint's return annotation selects the response serializer at route installation; a mismatched DTO or unsupported response option fails at startup. The policy can be attached to any optional serializable DTO field. Keep the usual `@path_rule` and scope decorators; response projection does not grant route access. The Entity Store separately binds a reusable `ProtectedEntityField("_auth_context")` to the request's trusted access decision and protects writes, reads, and queries. Do not redact in an SDK or service handler.
+The protected field must be an optional, serializable field (or optional computed field) on the exact DTO named in the policy. The route's return annotation selects item, page, or list projection at registration; an unsupported shape or incompatible response option fails during route registration, not during a request. If the handler already injects an auth client through a non-default dependency, pass that same callable as `auth_dependency=` to `PolicyRoutes` so dependency overrides and the policy see the same identity.
+
+`AuthContextResponsePolicy` lets a direct service principal read the field, but omits it for users and delegated reads. With auth disabled, it imposes no restriction. For another field or access rule, subclass `ResponsePolicy[YourDTO]` and implement `can_read(auth_client)`; the route usage stays the same. Keep the normal `@path_rule` and scope decorators: response projection is not route authorization.
+
+`PolicyRoutes` protects **responses only**. It does not enforce protected-field rules on request bodies or block filtering, sorting, or grouping by a protected field. For persisted `data._auth_context`, the Entity Store's separate field policy ignores user-supplied values on create, preserves the stored value on user updates (including a redacted `None` sent back by an SDK), omits it from user reads, and prevents query leakage. Direct service principals can read and write it; delegated service writes are allowed but delegated reads remain redacted. With auth disabled, the Entity Store policy also imposes no restriction. Do not rely on SDK redaction or add auth decisions to entity DTOs or endpoint business logic.
 
 ### NemoFilter
 

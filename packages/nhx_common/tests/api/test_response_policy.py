@@ -7,7 +7,7 @@ import asyncio
 from typing import Any, cast
 
 import pytest
-from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import ResponseValidationError
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
@@ -19,6 +19,7 @@ from nemo_helix_plugin.api.response_policy import (
 from nemo_helix_plugin.auth import RuntimeAuthClient
 from nemo_helix_plugin.schema import NemoListResponse, Page
 from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import get_auth_client
 from nhx.common.auth.models import Principal
 from nhx.common.config import AuthConfig
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, field_serializer
@@ -125,17 +126,21 @@ def test_projection_uses_validated_serialization(monkeypatch: pytest.MonkeyPatch
     assert client.get("/apis/test/v2/default/unrelated").json() == {"secret": "unrelated"}
     assert client.get("/apis/test/v2/default/error").status_code == 400
     assert app.openapi()["paths"]["/apis/test/v2/{workspace}/item"]["get"]["tags"] == ["Items"]
-    assert app.openapi()["paths"]["/apis/test/v2/{workspace}/item"]["get"]["responses"]["200"]["content"][
+    openapi = app.openapi()
+    schema = openapi["paths"]["/apis/test/v2/{workspace}/item"]["get"]["responses"]["200"]["content"][
         "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/Item"}
+    ]["schema"]
+    assert schema == {"$ref": "#/components/schemas/Item"}
+    schema = openapi["components"]["schemas"]["Item"]
+    assert set(schema["properties"]) == {"n", "secret", "description"}
+    assert "secret" not in schema.get("required", [])
 
 
 def test_raw_response_cannot_bypass_validation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        response_policy,
-        "current_auth_client",
-        lambda request: AuthClient(principal=Principal(id="user@example.com"), config=AuthConfig(enabled=True)),
-    )
+    def caller(request: Request) -> AuthClient:
+        return AuthClient(principal=Principal(id="user@example.com"), config=AuthConfig(enabled=True))
+
+    monkeypatch.setattr(response_policy, "current_auth_client", caller)
     router = APIRouter()
     routes = PolicyRoutes(router, SecretPolicy(dto_type=Item, field="secret"))
 
@@ -149,7 +154,7 @@ def test_raw_response_cannot_bypass_validation(monkeypatch: pytest.MonkeyPatch) 
         TestClient(app).get("/broken")
 
 
-def test_computed_field_alias_is_projected_without_mutating_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_computed_field_is_projected_without_mutating_model(monkeypatch: pytest.MonkeyPatch) -> None:
     def caller(request: Request) -> AuthClient:
         principal = Principal(id=request.headers.get("x-principal", "user@example.com"))
         return AuthClient(principal=principal, config=AuthConfig(enabled=True))
@@ -163,6 +168,18 @@ def test_computed_field_alias_is_projected_without_mutating_model(monkeypatch: p
     def get_computed() -> ComputedItem:
         return item
 
+    @routes.get("/computed-page")
+    def get_computed_page() -> Page[ComputedItem]:
+        return Page(data=[item])
+
+    @routes.get("/computed-plugin-page")
+    def get_computed_plugin_page() -> NemoListResponse[ComputedItem]:
+        return NemoListResponse(data=[item])
+
+    @routes.get("/computed-list")
+    def get_computed_list() -> list[ComputedItem]:
+        return [item]
+
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
@@ -172,6 +189,84 @@ def test_computed_field_alias_is_projected_without_mutating_model(monkeypatch: p
         "wire_secret": "stored",
     }
     assert item.secret == "stored"
+
+    openapi = app.openapi()
+    schemas = openapi["components"]["schemas"]
+    assert "ComputedItem" in schemas
+    assert not any("View" in name for name in schemas)
+    for path in ("/computed", "/computed-page", "/computed-plugin-page", "/computed-list"):
+        response_schema = openapi["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        if "$ref" in response_schema:
+            response_schema = schemas[response_schema["$ref"].rsplit("/", 1)[-1]]
+        if "data" in response_schema.get("properties", {}):
+            response_schema = response_schema["properties"]["data"]["items"]
+        elif "items" in response_schema:
+            response_schema = response_schema["items"]
+        if "$ref" in response_schema:
+            response_schema = schemas[response_schema["$ref"].rsplit("/", 1)[-1]]
+        assert "wire_secret" in response_schema["properties"]
+        assert "wire_secret" not in response_schema.get("required", [])
+
+
+@pytest.mark.parametrize("shape", ["page", "plugin-page", "list"])
+def test_computed_collection_schema_without_item_route(monkeypatch: pytest.MonkeyPatch, shape: str) -> None:
+    def caller(request: Request) -> AuthClient:
+        return AuthClient(principal=Principal(id="user@example.com"), config=AuthConfig(enabled=True))
+
+    monkeypatch.setattr(response_policy, "current_auth_client", caller)
+    router = APIRouter()
+    routes = PolicyRoutes(router, ComputedPolicy(dto_type=ComputedItem, field="secret"))
+    item = ComputedItem(name="alpha")
+
+    if shape == "page":
+
+        @routes.get("/only")
+        def only_page() -> Page[ComputedItem]:
+            return Page(data=[item])
+
+    elif shape == "plugin-page":
+
+        @routes.get("/only")
+        def only_plugin_page() -> NemoListResponse[ComputedItem]:
+            return NemoListResponse(data=[item])
+
+    else:
+
+        @routes.get("/only")
+        def only_list() -> list[ComputedItem]:
+            return [item]
+
+    app = FastAPI()
+    app.include_router(router)
+    schemas = app.openapi()["components"]["schemas"]
+    assert "ComputedItem" in schemas
+    assert not any("View" in name for name in schemas)
+    assert "wire_secret" not in schemas["ComputedItem"].get("required", [])
+    response = TestClient(app).get("/only")
+    assert response.status_code == 200
+    assert _response_item(response.json()) == {"name": "alpha"}
+
+
+def test_policy_uses_auth_dependency_override() -> None:
+    router = APIRouter()
+    routes = PolicyRoutes(router, SecretPolicy(dto_type=Item, field="secret"), auth_dependency=get_auth_client)
+
+    @routes.get("/item")
+    def get_item(auth_client: AuthClient = Depends(get_auth_client)) -> Item:
+        return Item(n=auth_client.principal.id, secret="stored")
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_auth_client] = lambda: AuthClient(
+        principal=Principal(id="service:reader"), config=AuthConfig(enabled=True)
+    )
+    client = TestClient(app)
+    assert client.get("/item").json() == {"n": "serialized:service:reader", "secret": "stored", "description": None}
+
+    app.dependency_overrides[get_auth_client] = lambda: AuthClient(
+        principal=Principal(id="user@example.com"), config=AuthConfig(enabled=True)
+    )
+    assert client.get("/item").json() == {"n": "serialized:user@example.com", "description": None}
 
 
 @pytest.mark.asyncio

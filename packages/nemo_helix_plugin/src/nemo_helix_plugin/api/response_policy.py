@@ -4,19 +4,21 @@
 """Typed, request-bound field projection for HTTP response models."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import wraps
 from inspect import iscoroutinefunction
 from operator import getitem
-from typing import Annotated, Any, ClassVar, Coroutine, get_args, get_type_hints, overload
+from typing import Annotated, Any, ClassVar, get_args, get_type_hints, overload
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request
 from fastapi.routing import APIRoute
 from nemo_helix_plugin.auth import RuntimeAuthClient, current_auth_client
 from nemo_helix_plugin.schema import NemoListResponse, Page
-from pydantic import BaseModel, BeforeValidator, SerializerFunctionWrapHandler, WrapSerializer
+from pydantic import BaseModel, BeforeValidator, GetJsonSchemaHandler, SerializerFunctionWrapHandler, WrapSerializer
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 from starlette.responses import JSONResponse
 
 
@@ -64,6 +66,44 @@ def wire_field_for[DTO: BaseModel](policy: ResponsePolicy[DTO]) -> str:
     return wire_field
 
 
+@dataclass(frozen=True)
+class OptionalResponseFieldSchema:
+    field: str
+
+    def __get_pydantic_json_schema__(self, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+        schema = handler(core_schema)
+        required = handler.resolve_ref_schema(schema).get("required", [])
+        if self.field in required:
+            required.remove(self.field)
+        return schema
+
+
+@dataclass(frozen=True)
+class OptionalPageItemFieldSchema:
+    field: str
+
+    def __get_pydantic_json_schema__(self, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+        schema = handler(core_schema)
+        page = handler.resolve_ref_schema(schema)
+        item = page["properties"]["data"]["items"]
+        required = handler.resolve_ref_schema(item).get("required", [])
+        if self.field in required:
+            required.remove(self.field)
+        return schema
+
+
+@dataclass(frozen=True)
+class OptionalListItemFieldSchema:
+    field: str
+
+    def __get_pydantic_json_schema__(self, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
+        schema = handler(core_schema)
+        required = handler.resolve_ref_schema(schema["items"]).get("required", [])
+        if self.field in required:
+            required.remove(self.field)
+        return schema
+
+
 def item_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field: str) -> Any:
     def serialize_item(value: DTO, handler: SerializerFunctionWrapHandler):
         content: dict[str, Any] = handler(value)
@@ -71,18 +111,29 @@ def item_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field:
             content.pop(wire_field, None)
         return content
 
-    return getitem(Annotated, (policy.dto_type, BeforeValidator(unbox), WrapSerializer(serialize_item)))
+    return getitem(
+        Annotated,
+        (
+            policy.dto_type,
+            OptionalResponseFieldSchema(wire_field),
+            BeforeValidator(unbox),
+            WrapSerializer(serialize_item),
+        ),
+    )
 
 
-def page_response_model[PageT: BaseModel](page_type: type[PageT], wire_field: str) -> Any:
-    def serialize_page(value: PageT, handler: SerializerFunctionWrapHandler):
+def page_response_model(page_type: Any, wire_field: str) -> Any:
+    def serialize_page(value: BaseModel, handler: SerializerFunctionWrapHandler):
         content: dict[str, Any] = handler(value)
         if not read_allowed.get():
             for item in content["data"]:
                 item.pop(wire_field, None)
         return content
 
-    return getitem(Annotated, (page_type, BeforeValidator(unbox), WrapSerializer(serialize_page)))
+    return getitem(
+        Annotated,
+        (page_type, OptionalPageItemFieldSchema(wire_field), BeforeValidator(unbox), WrapSerializer(serialize_page)),
+    )
 
 
 def list_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field: str) -> Any:
@@ -94,24 +145,14 @@ def list_response_model[DTO: BaseModel](policy: ResponsePolicy[DTO], wire_field:
         return content
 
     list_type = list.__class_getitem__(policy.dto_type)
-    return getitem(Annotated, (list_type, BeforeValidator(unbox), WrapSerializer(serialize_list)))
+    return getitem(
+        Annotated,
+        (list_type, OptionalListItemFieldSchema(wire_field), BeforeValidator(unbox), WrapSerializer(serialize_list)),
+    )
 
 
 class PolicyRoute(APIRoute):
     response_policy: ClassVar[ResponsePolicy[Any]]
-
-    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-        ordinary_handler = super().get_route_handler()
-        policy = type(self).response_policy
-
-        async def handler(request: Request) -> Response:
-            token = read_allowed.set(policy.can_read(current_auth_client(request)))
-            try:
-                return await ordinary_handler(request)
-            finally:
-                read_allowed.reset(token)
-
-        return handler
 
 
 def bound_route_class[DTO: BaseModel](policy: ResponsePolicy[DTO]) -> type[PolicyRoute]:
@@ -119,6 +160,23 @@ def bound_route_class[DTO: BaseModel](policy: ResponsePolicy[DTO]) -> type[Polic
         response_policy = policy
 
     return BoundPolicyRoute
+
+
+def default_auth_dependency(request: Request) -> RuntimeAuthClient:
+    return current_auth_client(request)
+
+
+def bind_read_access[DTO: BaseModel](
+    policy: ResponsePolicy[DTO], auth_dependency: Callable[..., RuntimeAuthClient]
+) -> Callable[..., AsyncIterator[None]]:
+    async def dependency(auth_client: RuntimeAuthClient = Depends(auth_dependency)) -> AsyncIterator[None]:
+        token = read_allowed.set(policy.can_read(auth_client))
+        try:
+            yield
+        finally:
+            read_allowed.reset(token)
+
+    return dependency
 
 
 def boxed_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
@@ -142,12 +200,14 @@ class PolicyDecorator[DTO: BaseModel]:
         self,
         router: APIRouter,
         policy: ResponsePolicy[DTO],
+        read_access_dependency: Callable[..., AsyncIterator[None]],
         path: str,
         method: str,
         options: dict[str, Any],
     ) -> None:
         self.router = router
         self.policy = policy
+        self.read_access_dependency = read_access_dependency
         self.path = path
         self.method = method
         self.options = options
@@ -189,9 +249,10 @@ class PolicyDecorator[DTO: BaseModel]:
         wire_field = wire_field_for(self.policy)
         if result_type is self.policy.dto_type:
             response_model = item_response_model(self.policy, wire_field)
-        elif result_type is Page.__class_getitem__(
-            self.policy.dto_type
-        ) or result_type is NemoListResponse.__class_getitem__(self.policy.dto_type):
+        elif result_type in (
+            Page.__class_getitem__(self.policy.dto_type),
+            NemoListResponse.__class_getitem__(self.policy.dto_type),
+        ):
             response_model = page_response_model(result_type, wire_field)
         elif result_type == list.__class_getitem__(self.policy.dto_type):
             response_model = list_response_model(self.policy, wire_field)
@@ -212,27 +273,40 @@ class PolicyDecorator[DTO: BaseModel]:
             or "response_model" in self.options
         ):
             raise ValueError("Protected route requires a JSON response with aliased, complete model fields")
+        options: dict[str, Any] = {
+            **self.options,
+            "dependencies": [
+                Depends(self.read_access_dependency, scope="function"),
+                *self.options.get("dependencies", ()),
+            ],
+        }
         self.router.add_api_route(
             self.path,
             boxed_endpoint(endpoint),
             methods=[self.method],
             response_model=response_model,
             route_class_override=bound_route_class(self.policy),
-            **self.options,
+            **options,
         )
         return endpoint
 
 
 class PolicyRoutes[DTO: BaseModel]:
-    def __init__(self, router: APIRouter, policy: ResponsePolicy[DTO]) -> None:
+    def __init__(
+        self,
+        router: APIRouter,
+        policy: ResponsePolicy[DTO],
+        auth_dependency: Callable[..., RuntimeAuthClient] = default_auth_dependency,
+    ) -> None:
         self.router = router
         self.policy = policy
+        self.read_access_dependency = bind_read_access(policy, auth_dependency)
 
     def get(self, path: str, **options: Any) -> PolicyDecorator[DTO]:
-        return PolicyDecorator(self.router, self.policy, path, "GET", options)
+        return PolicyDecorator(self.router, self.policy, self.read_access_dependency, path, "GET", options)
 
     def post(self, path: str, **options: Any) -> PolicyDecorator[DTO]:
-        return PolicyDecorator(self.router, self.policy, path, "POST", options)
+        return PolicyDecorator(self.router, self.policy, self.read_access_dependency, path, "POST", options)
 
     def put(self, path: str, **options: Any) -> PolicyDecorator[DTO]:
-        return PolicyDecorator(self.router, self.policy, path, "PUT", options)
+        return PolicyDecorator(self.router, self.policy, self.read_access_dependency, path, "PUT", options)

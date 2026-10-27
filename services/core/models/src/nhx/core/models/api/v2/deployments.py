@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 deployment_policy = AuthContextResponsePolicy(dto_type=ModelDeployment, field="auth_context")
-deployment_routes = PolicyRoutes(router, deployment_policy)
+deployment_routes = PolicyRoutes(router, deployment_policy, auth_dependency=get_auth_client)
 
 
 @deployment_routes.get(

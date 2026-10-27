@@ -114,6 +114,7 @@ router = APIRouter()
 step_routes = PolicyRoutes(
     router,
     AuthContextResponsePolicy(dto_type=HelixJobStepWithContext, field="auth_context"),
+    auth_dependency=get_auth_client,
 )
 
 platform_config = get_platform_config()

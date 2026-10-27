@@ -8,6 +8,7 @@ from typing import Self
 
 from nemo_helix_plugin.api.response_policy import ResponsePolicy
 from nemo_helix_plugin.auth import RuntimeAuthClient
+from nemo_helix_plugin.authz import CallerKind
 from pydantic import BaseModel
 
 
@@ -23,7 +24,7 @@ class AuthContextAccessRule:
             return cls(policy_enabled=False, can_read=True, can_write=True)
 
         principal = auth_client.principal
-        service_caller = principal.caller_kind == "service_principal"
+        service_caller = principal.caller_kind == CallerKind.SERVICE_PRINCIPAL
         return cls(
             policy_enabled=True,
             can_read=service_caller and not principal.is_delegated,

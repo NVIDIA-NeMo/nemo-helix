@@ -3117,7 +3117,6 @@ components:
       - entity_id
       - parent
       - db_version
-      - auth_context
       title: AgentDeployment
       description: "A running (or pending) deployment of an Agent.\n\nEntity type:\
         \ ``agent_deployment``\nLifecycle: pending \u2192 starting \u2192 running\

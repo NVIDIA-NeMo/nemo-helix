@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 provider_policy = AuthContextResponsePolicy(dto_type=ModelProvider, field="auth_context")
-provider_routes = PolicyRoutes(router, provider_policy)
+provider_routes = PolicyRoutes(router, provider_policy, auth_dependency=get_auth_client)
 
 
 @provider_routes.get(
