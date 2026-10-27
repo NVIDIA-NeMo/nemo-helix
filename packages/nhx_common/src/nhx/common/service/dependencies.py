@@ -44,7 +44,7 @@ def service_instance_dependency(name: str, service_type: type[TService]) -> Serv
     """Get an equal, hash-stable dependency key for one name and concrete type.
 
     Use ``Annotated[MyService, Depends(service_instance_dependency("name", MyService))]``
-    in routes. ``Service.create_app`` binds the token to the running instance;
+    in routes. The owning service binds the token during ``_setup_dependencies``;
     an unbound token raises rather than selecting another service.
     """
     return ServiceInstanceDependency(name, service_type)

@@ -494,12 +494,7 @@ class Service(ABC, Generic[TConfig]):
 
     def _setup_dependencies(self, app: FastAPI) -> None:
         """Configure FastAPI dependency overrides for the service."""
-        from nhx.common.service.dependencies import service_instance_dependency
-
         self._dependency_provider.setup_dependencies(app, self)
-        for service_type in type(self).__mro__:
-            if issubclass(service_type, Service):
-                service_instance_dependency(self.name, service_type).bind(app, self)
 
     # =========================================================================
     # Core implementation - NOT intended to be overridden

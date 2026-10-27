@@ -74,6 +74,10 @@ class NamedService(Service):
     def __init__(self, name: str):
         super().__init__(name=name, module_name="test.named_service")
 
+    def _setup_dependencies(self, app: FastAPI) -> None:
+        super()._setup_dependencies(app)
+        service_instance_dependency(self.name, NamedService).bind(app, self)
+
     def get_routers(self) -> list[RouterConfig]:
         router = APIRouter()
         if self.name == "alpha":
@@ -99,7 +103,7 @@ class SpecializedNamedService(NamedService):
     pass
 
 
-def test_subclass_binds_declared_route_service_type() -> None:
+def test_subclass_inherits_declared_route_service_binding() -> None:
     service = SpecializedNamedService("alpha")
 
     assert TestClient(service.create_app()).get("/whoami").json() == id(service)

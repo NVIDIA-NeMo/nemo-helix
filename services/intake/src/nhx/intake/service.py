@@ -9,8 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, List
 
+from fastapi import FastAPI
 from nhx.common.entities.client import EntityClient
 from nhx.common.service import RouterConfig, Service
+from nhx.common.service.dependencies import service_instance_dependency
 from nhx.intake.background_worker import BackgroundWorker
 from nhx.intake.config import IntakeConfig, should_provision_local_clickhouse
 from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
@@ -134,6 +136,10 @@ class IntakeService(Service[IntakeConfig]):
         self._readiness_message = ""
         self._reconciler: _LocalClickHouseProvisioner | None = None
         self._denormalizer_entity_client: EntityClient | None = None
+
+    def _setup_dependencies(self, app: FastAPI) -> None:
+        super()._setup_dependencies(app)
+        service_instance_dependency(self.name, IntakeService).bind(app, self)
 
     @property
     def title(self) -> str:
