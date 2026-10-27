@@ -132,7 +132,7 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
         }
     )
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+    result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "workspace"}}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.SUCCEEDED
     assert result.output == {
@@ -158,6 +158,30 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
     assert clients[0].closed
 
 
+async def test_fabric_adapter_reads_job_workspace_only_from_nemo_helix_context(monkeypatch) -> None:
+    """The top level of the context belongs to the caller, so a key there must not set the workspace."""
+    seen: dict[str, Any] = {}
+
+    async def fake_run_compass_change_set(**kwargs: Any) -> tuple[CompassResult, object]:
+        seen.update(kwargs)
+        return CompassResult(summary="ok"), object()
+
+    monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fake_run_compass_change_set)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
+
+    runtime = fabric_adapter.CompassRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    await runtime.invoke(_request({"job_workspace": "caller"}), _runtime_context())
+    assert seen["workspace"] == "default"
+
+    await runtime.invoke(
+        _request({"job_workspace": "caller", "nemo_helix": {"job_workspace": "job"}}), _runtime_context()
+    )
+    assert seen["workspace"] == "job"
+
+
 async def test_fabric_adapter_does_not_leak_a_client_when_a_model_ref_is_invalid(monkeypatch) -> None:
     """A settings error must resolve before the ``async with`` opens a client at all."""
     clients: list[_StubClient] = []
@@ -171,7 +195,7 @@ async def test_fabric_adapter_does_not_leak_a_client_when_a_model_ref_is_invalid
     runtime = fabric_adapter.CompassRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent", "default_model": "   "})})
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+    result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "workspace"}}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -183,7 +207,7 @@ async def test_fabric_adapter_reports_configuration_failure() -> None:
     runtime = fabric_adapter.CompassRuntime()
     await runtime.start({"config": _agent_config({})})
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+    result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "workspace"}}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -207,7 +231,7 @@ async def test_fabric_adapter_logs_the_failure_with_its_traceback(monkeypatch, c
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
 
     with caplog.at_level("ERROR", logger="nemo_compass_plugin.fabric_adapter"):
-        result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+        result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "workspace"}}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -238,7 +262,7 @@ async def test_fabric_adapter_logs_the_whole_cause_chain(monkeypatch, caplog) ->
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
 
     with caplog.at_level("ERROR", logger="nemo_compass_plugin.fabric_adapter"):
-        await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
+        await runtime.invoke(_request({"nemo_helix": {"job_workspace": "workspace"}}), _runtime_context())
 
     assert originating in caplog.text, "root cause was dropped"
     assert raised in caplog.text
@@ -314,7 +338,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         env={"FABRIC_RELAY_CONFIG_PATH": str(relay_config)},
     )
 
-    result = await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(telemetry))
+    result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "w"}}), _runtime_context(telemetry))
 
     assert result.status is contract.AgentRunStatus.SUCCEEDED
     assert seen["relay_scope_name"] == fabric_adapter.COMPASS_RELAY_SCOPE
@@ -348,7 +372,7 @@ async def test_relay_refuses_an_ambient_user_plugin_file(
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
 
     result = await runtime.invoke(
-        _request({"job_workspace": "w"}), _runtime_context(_minimal_relay_telemetry(tmp_path))
+        _request({"nemo_helix": {"job_workspace": "w"}}), _runtime_context(_minimal_relay_telemetry(tmp_path))
     )
 
     assert result.status is contract.AgentRunStatus.FAILED
@@ -388,7 +412,7 @@ async def test_relay_refuses_plugin_config_inherited_during_activation(
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
 
     result = await runtime.invoke(
-        _request({"job_workspace": "w"}), _runtime_context(_minimal_relay_telemetry(tmp_path))
+        _request({"nemo_helix": {"job_workspace": "w"}}), _runtime_context(_minimal_relay_telemetry(tmp_path))
     )
 
     assert result.status is contract.AgentRunStatus.FAILED
@@ -410,6 +434,6 @@ async def test_without_relay_the_agent_runs_unscoped() -> None:
         mock.patch.object(fabric_adapter, "run_compass_change_set", fake_run_compass_change_set),
         mock.patch.object(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([])),
     ):
-        await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(None))
+        await runtime.invoke(_request({"nemo_helix": {"job_workspace": "w"}}), _runtime_context(None))
 
     assert seen["relay_scope_name"] is None

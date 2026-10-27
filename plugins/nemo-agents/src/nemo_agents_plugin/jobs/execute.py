@@ -112,6 +112,9 @@ FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
 FABRIC_ERROR_FILENAME = "fabric_error.json"
 SUCCESSFUL_FABRIC_STATUSES = {"succeeded"}
 DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS = 60 * 60
+# Key in the Fabric request context that holds the platform's own fields. The
+# rest of the context belongs to the caller, so this one name is reserved.
+NEMO_HELIX_CONTEXT_KEY = "nemo_helix"
 
 # Name Fabric gives the agent process's captured stderr. It lives under a
 # runtime/invocation directory Fabric names itself, so it is found by search
@@ -188,6 +191,14 @@ class ExecuteAgentJobConfig(BaseModel):
         ),
     )
     input: str = Field(description="Prompt to pass to the agent.")
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-run parameters handed to the agent as the top level of the Fabric request context. "
+            f"The {NEMO_HELIX_CONTEXT_KEY!r} key is reserved for platform fields. Stored on the job "
+            "spec in plaintext: pass parameters here, not secrets."
+        ),
+    )
     environment: str | AgentEnvironmentInline | None = Field(
         default=None,
         description=(
@@ -252,6 +263,13 @@ class ExecuteAgentJobConfig(BaseModel):
         _validate_agent_config_format(value.config_format)
         if not value.config:
             raise ValueError("Inline agent definitions require a non-empty config.")
+        return value
+
+    @field_validator("context")
+    @classmethod
+    def _validate_context(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if NEMO_HELIX_CONTEXT_KEY in value:
+            raise ValueError(f"Context key {NEMO_HELIX_CONTEXT_KEY!r} is reserved for platform fields.")
         return value
 
     @field_validator("image")
@@ -515,11 +533,7 @@ class ExecuteAgentJob(NemoJob):
                             input=step_config.request.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,
-                            caller_context={
-                                "job_id": ctx.job_id,
-                                "job_workspace": ctx.workspace,
-                                "agent": agent_ref,
-                            },
+                            caller_context=_caller_context(step_config.request.context, ctx=ctx, agent_ref=agent_ref),
                             timeout_seconds=step_config.request.timeout_seconds,
                             observe_progress=True,
                         )
@@ -684,6 +698,18 @@ def _log_agent_stderr(artifacts_dir: Path) -> None:
             )
         else:
             logger.error("Agent stderr (%s):\n%s", path, tail.text)
+
+
+def _caller_context(context: dict[str, Any], *, ctx: JobContext, agent_ref: str) -> dict[str, Any]:
+    """Build the Fabric request context: the caller's own keys, plus the platform's under a reserved key."""
+    return {
+        **context,
+        NEMO_HELIX_CONTEXT_KEY: {
+            "job_id": ctx.job_id,
+            "job_workspace": ctx.workspace,
+            "agent": agent_ref,
+        },
+    }
 
 
 class _StderrTail(NamedTuple):

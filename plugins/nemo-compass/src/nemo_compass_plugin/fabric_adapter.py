@@ -29,6 +29,8 @@ from nemo_relay import plugin as relay_plugin
 logger = logging.getLogger(__name__)
 
 COMPASS_RELAY_SCOPE = "compass"
+# Key under which an execute job puts its own fields in the request context.
+NEMO_HELIX_CONTEXT_KEY = "nemo_helix"
 
 
 class CompassAdapterConfigError(ValueError):
@@ -110,7 +112,7 @@ class CompassRuntime:
 
         workspace = (
             _string_setting(self._settings, "workspace")
-            or _string_context(request.context, "job_workspace")
+            or _nemo_helix_context(request.context, "job_workspace")
             or os.environ.get("NHX_WORKSPACE")
             or "default"
         )
@@ -191,8 +193,9 @@ def _string_setting(settings: dict[str, Any], key: str) -> str | None:
     return value
 
 
-def _string_context(context: dict[str, Any], key: str) -> str | None:
-    value = context.get(key)
+def _nemo_helix_context(context: dict[str, Any], key: str) -> str | None:
+    platform = context.get(NEMO_HELIX_CONTEXT_KEY)
+    value = platform.get(key) if isinstance(platform, dict) else None
     return value if isinstance(value, str) and value.strip() else None
 
 
