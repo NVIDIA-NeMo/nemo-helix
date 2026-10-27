@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import datetime
+import logging
 import threading
 import time
 from functools import partial
@@ -31,6 +32,10 @@ from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.reconciler import JobReconciler
 from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from services.core.jobs.tests.controllers.client_mocks import data_response, paginated_response
 
@@ -185,6 +190,87 @@ def test_job_reconciler_marks_itself_unhealthy_after_transport_failure(
     job_reconciler.step()
 
     assert not job_reconciler.is_healthy
+
+
+@pytest.mark.parametrize("has_steps", [False, True])
+@pytest.mark.parametrize("reclaim_fails", [False, True])
+def test_reconciler_tick_traces_work_and_correlates_summary_logs(
+    backend_registry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_active,
+    monkeypatch,
+    caplog,
+    has_steps,
+    reclaim_fails,
+):
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr("nhx.core.jobs.controllers.reconciler.tracer", provider.get_tracer(__name__))
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_active] if has_steps else [])
+    reconciler = JobReconciler(backend_registry, mock_nemo_client)
+    system_entities = MagicMock()
+    system_entities.list.return_value = SimpleNamespace(data=[])
+    if reclaim_fails:
+        system_entities.list.side_effect = RuntimeError("storage listing failed")
+    monkeypatch.setattr(reconciler, "_system_entities", system_entities)
+    log_contexts = {}
+
+    class CaptureContext(logging.Handler):
+        def emit(self, record):
+            log_contexts[record.getMessage()] = trace.get_current_span().get_span_context()
+
+    logger = logging.getLogger("nhx.core.jobs.controllers.reconciler")
+    handler = CaptureContext()
+    logger.addHandler(handler)
+    try:
+        with caplog.at_level(logging.DEBUG, logger=logger.name):
+            reconciler.step()
+        spans = exporter.get_finished_spans()
+        root = next(span for span in spans if span.name == "jobs_reconciler/step")
+        assert root.parent is None
+        children = [span for span in spans if span is not root]
+        assert any(span.name == "jobs_reconciler/fetch_steps_for_reconciliation" for span in children)
+        assert any(span.name == "jobs_reconciler/cleanup_backend_steps" for span in children)
+        assert any(span.name == "jobs_reconciler/reconcile_job_step" for span in children) == has_steps
+        assert all(span.context.trace_id == root.context.trace_id for span in children)
+        by_name = {span.name: span for span in children}
+        retention = by_name["jobs_reconciler/enforce_storage_retention"]
+        for span in children:
+            expected_parent = retention if span.name == "jobs_reconciler/reclaim_queued_storage" else root
+            assert span.parent is not None
+            assert span.parent.span_id == expected_parent.context.span_id
+        for message, span_name in [
+            ("Reconciler fetched job steps", "jobs_reconciler/fetch_summary"),
+            ("Running job cleanup for expired job steps", "jobs_reconciler/cleanup_summary"),
+        ]:
+            context = log_contexts[message]
+            assert context.is_valid
+            assert context.trace_id == root.context.trace_id
+            assert context.span_id == by_name[span_name].context.span_id
+        assert by_name["jobs_reconciler/fetch_summary"].attributes["count"] == int(has_steps)
+        assert "jobs_reconciler/reclaim_queued_storage" in by_name
+        if reclaim_fails:
+            context = log_contexts["Could not list job storage to reclaim"]
+            assert context.trace_id == root.context.trace_id
+            assert context.span_id == by_name["jobs_reconciler/reclaim_queued_storage"].context.span_id
+        assert not trace.get_current_span().get_span_context().is_valid
+    finally:
+        logger.removeHandler(handler)
+        provider.shutdown()
+
+
+def test_reconciler_stopped_tick_does_not_emit_spans(backend_registry, mock_nemo_client, monkeypatch):
+    tracer = MagicMock()
+    monkeypatch.setattr("nhx.core.jobs.controllers.reconciler.tracer", tracer)
+    stop_signal = threading.Event()
+    stop_signal.set()
+    reconciler = JobReconciler(backend_registry, mock_nemo_client, stop_signal=stop_signal)
+
+    reconciler.step()
+
+    tracer.start_as_current_span.assert_not_called()
 
 
 def _aged_step(
