@@ -40,10 +40,11 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from nemo_helix_plugin.auth import RuntimePrincipal
-from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, TokenProvider
+from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, EnvAccessToken, TokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+    get_env_access_token,
     is_workload_identity_token_file_set,
 )
 
@@ -331,6 +332,13 @@ class DefaultNemoClientProvider:
                 auth=_workload_identity_auth(base_url),
                 default_headers={_INTERNAL_REQUEST_HEADER: "true"},
             )
+        if get_env_access_token():
+            return NemoClient(
+                base_url=base_url,
+                workspace=workspace,
+                auth=EnvAccessToken(),
+                default_headers={_INTERNAL_REQUEST_HEADER: "true"},
+            )
         return NemoClient(
             base_url=base_url,
             workspace=workspace,
@@ -349,6 +357,13 @@ class DefaultNemoClientProvider:
                 base_url=base_url,
                 workspace=workspace,
                 auth=AsyncFromSyncTokenProvider(_workload_identity_auth(base_url)),
+                default_headers={_INTERNAL_REQUEST_HEADER: "true"},
+            )
+        if get_env_access_token():
+            return AsyncNemoClient(
+                base_url=base_url,
+                workspace=workspace,
+                auth=EnvAccessToken(),
                 default_headers={_INTERNAL_REQUEST_HEADER: "true"},
             )
         return AsyncNemoClient(

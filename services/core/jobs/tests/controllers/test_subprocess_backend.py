@@ -813,3 +813,86 @@ def test_cleanup_reads_step_from_registered_attempt(
         workspace=step.workspace,
         attempt_id=str(step.attempt_id),
     )
+
+
+def _auth_metadata(tmp_path, *, exited: bool = False, refreshed_ago: float = 0.0):
+    process = SimpleNamespace(poll=lambda: 0 if exited else None)
+    return SimpleNamespace(
+        process=process,
+        task_auth_env={"NHX_PRINCIPAL": '{"id": "creator"}'},
+        task_auth_token_file=tmp_path / ".nhx-access-token",
+        task_auth_refreshed_at=time.monotonic() - refreshed_ago,
+    )
+
+
+@pytest.mark.parametrize(
+    ("exited", "refreshed_ago", "expect_refresh"),
+    [
+        pytest.param(False, 10.0, False, id="token-still-fresh"),
+        pytest.param(False, 200.0, True, id="half-ttl-elapsed"),
+        pytest.param(True, 200.0, False, id="process-exited"),
+    ],
+)
+def test_refresh_task_auth_rotates_token_only_for_running_processes_past_half_ttl(
+    mock_nemo_client, tmp_path, mock_platform_config, exited, refreshed_ago, expect_refresh
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = _auth_metadata(tmp_path, exited=exited, refreshed_ago=refreshed_ago)
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess.task_access_token_refresh_interval", return_value=150),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess.refresh_subprocess_task_auth", return_value=True
+        ) as refresh,
+    ):
+        backend._refresh_task_auth(metadata)
+
+    assert refresh.called is expect_refresh
+    if expect_refresh:
+        refresh.assert_called_once_with(metadata.task_auth_env, metadata.task_auth_token_file)
+        assert time.monotonic() - metadata.task_auth_refreshed_at < 5
+
+
+def test_refresh_task_auth_keeps_old_token_and_retries_after_a_failure(
+    mock_nemo_client, tmp_path, mock_platform_config
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = _auth_metadata(tmp_path, refreshed_ago=200.0)
+    stale_marker = metadata.task_auth_refreshed_at
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess.task_access_token_refresh_interval", return_value=150),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess.refresh_subprocess_task_auth",
+            side_effect=RuntimeError("signing key unavailable"),
+        ),
+    ):
+        backend._refresh_task_auth(metadata)
+
+    assert metadata.task_auth_refreshed_at == stale_marker
+
+
+def test_refresh_task_auth_retries_when_no_token_could_be_minted(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = _auth_metadata(tmp_path, refreshed_ago=200.0)
+    stale_marker = metadata.task_auth_refreshed_at
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess.task_access_token_refresh_interval", return_value=150),
+        patch("nhx.core.jobs.controllers.backends.subprocess.refresh_subprocess_task_auth", return_value=False),
+    ):
+        backend._refresh_task_auth(metadata)
+
+    assert metadata.task_auth_refreshed_at == stale_marker
+
+
+def test_refresh_task_auth_is_a_no_op_without_a_token_file(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = SimpleNamespace(
+        process=SimpleNamespace(poll=lambda: None), task_auth_env=None, task_auth_token_file=None
+    )
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess.refresh_subprocess_task_auth") as refresh:
+        backend._refresh_task_auth(metadata)
+
+    refresh.assert_not_called()

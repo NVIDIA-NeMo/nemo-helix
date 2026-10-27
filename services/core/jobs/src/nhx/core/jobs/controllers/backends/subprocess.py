@@ -12,13 +12,16 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
+from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 from nhx.common.config import get_platform_config
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
@@ -50,7 +53,10 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
     create_otel_logger,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
+    refresh_subprocess_task_auth,
     start_log_capture,
+    task_access_token_refresh_interval,
 )
 from pydantic import Field
 
@@ -120,6 +126,10 @@ class SubprocessProcessMetadata:
     closed_logs: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     log_threads: list[threading.Thread] = field(default_factory=list)
+    # Set when the child holds a rotatable delegated token: its env (to re-derive the principal) and file.
+    task_auth_env: dict[str, str] | None = None
+    task_auth_token_file: Path | None = None
+    task_auth_refreshed_at: float = field(default_factory=time.monotonic)
 
 
 class SubprocessProcessRegistry:
@@ -249,6 +259,8 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             log_path=log_path,
             persistent_dir=persistent_dir,
             otel_logger=otel_logger,
+            task_auth_env={name: value for name, value in env.items() if name == NHX_PRINCIPAL_ENVVAR},
+            task_auth_token_file=Path(env[ACCESS_TOKEN_FILE_ENVVAR]) if ACCESS_TOKEN_FILE_ENVVAR in env else None,
         )
         self._process_registry.set(key, metadata)
 
@@ -334,6 +346,8 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 error_details={"message": message},
             )
 
+        self._refresh_task_auth(metadata)
+
         # The TTLs bound running and scheduling time. A pausing step is bounded by its pause
         # deadline, and a cancelling step was just terminated above, so neither is timed out here.
         if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
@@ -361,6 +375,24 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             )
 
         return self._create_step_update(step, metadata)
+
+    def _refresh_task_auth(self, metadata: SubprocessProcessMetadata) -> None:
+        if metadata.task_auth_token_file is None or metadata.task_auth_env is None:
+            return
+        if metadata.process.poll() is not None:
+            return
+        if time.monotonic() - metadata.task_auth_refreshed_at < task_access_token_refresh_interval():
+            return
+        try:
+            refreshed = refresh_subprocess_task_auth(metadata.task_auth_env, metadata.task_auth_token_file)
+        except Exception:
+            # Keep the stale token: the old one stays valid until it expires and the next tick retries.
+            logger.warning("Failed to refresh subprocess task access token", exc_info=True)
+            return
+        if refreshed:
+            metadata.task_auth_refreshed_at = time.monotonic()
+        else:
+            logger.warning("Subprocess task access token was not refreshed: no token could be minted")
 
     def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
         try:
@@ -527,6 +559,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             principal = auth_context.to_principal()
             env.update(principal.get_env_var())
 
+        inject_subprocess_task_auth(env, config_dir / ".nhx-access-token")
         inject_secret_env_vars(env)
         return env, task_id, work_dir, log_path, persistent_dir
 

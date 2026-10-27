@@ -8,12 +8,58 @@ by binding preparation explicitly so API validation needs no native Fabric or ex
 """
 
 import copy
+import os
 from collections.abc import Mapping
 from typing import Any
 
 from nhx_evals_sdk.agent_eval.runtimes.secrets import env_secret_vars
 from nhx_evals_sdk.resolver_protocols import EnvSecretSource
 from nhx_evals_sdk.values.common import SecretRef
+
+_HOST_TLS_ENV_NAMES = (
+    "NHX_CLIENT_SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+)
+
+
+def _forward_tls_to_stdio_servers(config: dict[str, Any], names: set[str]) -> None:
+    """Let stdio MCP children resolve the runtime's TLS trust variables.
+
+    The MCP SDK intentionally inherits only a small environment allowlist. A
+    Fabric adapter can therefore trust a private CA while an MCP subprocess it
+    starts cannot. Keep the values runtime-local: placeholders are expanded by
+    the adapter where the subprocess actually runs, including inside a sandbox.
+    """
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return
+    for server in servers.values():
+        if not isinstance(server, dict):
+            continue
+        transport = server.get("transport", "stdio")
+        if not isinstance(transport, str) or transport.strip().lower().replace("-", "_") not in {
+            "stdio",
+            "command",
+            "process",
+        }:
+            continue
+        server_env = server.get("env")
+        if server_env is not None and not isinstance(server_env, Mapping):
+            continue
+        merged = dict(server_env or {})
+        for name in names:
+            merged.setdefault(name, f"${{{name}}}")
+        server["env"] = merged
+
+
+def sandbox_fabric_config(config: Mapping[str, Any], *, model: str | None) -> dict[str, Any]:
+    """Prepare sandbox config while resolving TLS paths inside the sandbox."""
+    prepared = model_fabric_config(config, model=model)
+    names = {name for name in _HOST_TLS_ENV_NAMES if os.environ.get(name)}
+    _forward_tls_to_stdio_servers(prepared, names)
+    return prepared
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
@@ -139,6 +185,17 @@ def host_fabric_config(
     """
     prepared = model_fabric_config(config, model=model)
     validate_fabric_env(prepared, env_secrets)
+    inherited_tls = {name: os.environ[name] for name in _HOST_TLS_ENV_NAMES if os.environ.get(name)}
+    if inherited_tls:
+        environment = prepared.setdefault("environment", {})
+        if environment is None:
+            environment = prepared["environment"] = {}
+        environment = dict(_mapping(environment, "config.environment"))
+        configured_env = environment.get("env")
+        configured_env = {} if configured_env is None else dict(_mapping(configured_env, "config.environment.env"))
+        environment["env"] = {**inherited_tls, **configured_env}
+        prepared["environment"] = environment
+        _forward_tls_to_stdio_servers(prepared, set(inherited_tls))
     sources = env_secret_vars(env_secrets, source)
     models = _model_roles(prepared)
     env = _environment_vars(prepared)
