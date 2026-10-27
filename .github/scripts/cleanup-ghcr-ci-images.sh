@@ -30,9 +30,9 @@ date_utc() {
 cutoff="$(date_utc "${STALE_HOURS} hours ago")"
 
 # GitHub's package version API exposes updated_at, not a separate last-pulled timestamp.
-# Timestamped releases retain the same policy across channel renames.
-# Containers use <channel>-<timestamp>; charts prepend their SemVer core.
-release_tag_pattern='^([0-9]+[.][0-9]+[.][0-9]+-)?[a-z][a-z0-9]*-[0-9]{14}$'
+# Match RC artifacts and the exact historical release formats still in GHCR.
+# Other timestamped tags keep their existing CI retention policy.
+release_tag_pattern='^((rc|nightly)-[0-9]{14}|[0-9]+[.][0-9]+[.][0-9]+-(rc|night|nightly)-[0-9]{14})$'
 
 # NGC metadata is required for each released container and chart. Its filename
 # is also the corresponding GHCR package name.

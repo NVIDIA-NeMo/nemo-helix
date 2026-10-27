@@ -22,8 +22,10 @@ const selector =
     script.indexOf("find_tagged_versions()"),
   );
 
-function candidates(scope, cutoff) {
-  const tags = [
+function candidates(
+  scope,
+  cutoff,
+  tags = [
     "rc-20261021010203",
     "0.9.0-rc-20261021010203",
     "nightly-20261021010203",
@@ -31,7 +33,8 @@ function candidates(scope, cutoff) {
     "0.9.0-night-20261021010203",
     "a".repeat(40),
     "latest",
-  ];
+  ],
+) {
   const versions = tags.map((tag, i) => ({
     id: i,
     name: "sha256:" + i,
@@ -44,11 +47,12 @@ function candidates(scope, cutoff) {
     {
       encoding: "utf8",
       env: {
-        ...process.env,
+        PATH: process.env.PATH,
         CLEANUP_SCOPE: scope,
         cutoff,
         PACKAGE_VERSIONS: versions.map((v) => JSON.stringify(v)).join("\n"),
       },
+      timeout: 10_000,
     },
   );
   assert.equal(result.status, 0, result.stderr);
@@ -60,8 +64,34 @@ function candidates(scope, cutoff) {
     : [];
 }
 
-test("CI cleanup excludes timestamped releases regardless of channel spelling", () => {
+test("CI cleanup preserves RC and historical release artifacts", () => {
   assert.deepEqual(candidates("ci", "2026-10-23T00:00:00Z"), [5]);
+});
+
+test("other timestamped tags retain the CI cleanup policy", () => {
+  const tags = [
+    "main-20261021010203",
+    "cache-20261021010203",
+    "0.9.0-main-20261021010203",
+  ];
+  assert.deepEqual(candidates("ci", "2026-10-23T00:00:00Z", tags), [0, 1, 2]);
+  assert.deepEqual(candidates("release", "2027-01-23T00:00:00Z", tags), []);
+});
+
+test("release cleanup excludes cache tags and unrelated version formats", () => {
+  assert.deepEqual(
+    candidates("release", "2027-01-23T00:00:00Z", [
+      "cache-main-linux-amd64",
+      "cache-release-0-9-linux-arm64",
+      "cache-rc-20261021010203-linux-amd64",
+      "0.9.0",
+      "0.9.0-rc1",
+      "rc-20261021",
+      "rc-20261021010203-amd64",
+      "night-20261021010203",
+    ]),
+    [],
+  );
 });
 
 test("release cleanup preserves recent releases and selects expired releases", () => {
