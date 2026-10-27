@@ -157,10 +157,12 @@ async def test_snapshot_query_paths_are_rejected(policy_store: SQLAlchemyEntityR
         for query in forbidden_queries:
             response = await user.get(path, params=query)
             assert response.status_code == 400, (query, response.text)
+            assert "not queryable" in response.text, (query, response.text)
         cross_workspace = await user.get(
             "/apis/entities/v2/workspaces/-/entities/model", params={"sort": "data._auth_context"}
         )
         assert cross_workspace.status_code == 400, cross_workspace.text
+        assert "not queryable" in cross_workspace.text
         allowed = await service.get(path, params={"sort": "data._auth_context.id"})
         assert allowed.status_code == 200, allowed.text
 
