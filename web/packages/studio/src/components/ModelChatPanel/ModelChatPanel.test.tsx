@@ -113,6 +113,18 @@ describe('ModelChatPanel — URN routing', () => {
     );
   });
 
+  it('prefers a saved max_completion_tokens over max_tokens', () => {
+    renderPanel('nvidia/llama-70b', null, {
+      inference_params: { max_completion_tokens: 256, max_tokens: 64 },
+    });
+
+    expect(modelChatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptData: { inference_params: { temperature: 0.7, max_tokens: 256 } },
+      })
+    );
+  });
+
   it('falls back to the route workspace and disables chat when no model is assigned', () => {
     renderPanel(null);
     // ModelChat still renders, but disabled and showing an empty state; with no
