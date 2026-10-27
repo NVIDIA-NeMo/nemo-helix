@@ -70,7 +70,7 @@ Each of these invalidates the work if it turns out false:
 | Which Gym agent runs the environment | A `verifiers` env runs `verifiers_agent`; a resources server usually runs `simple_agent` | Decides the format and every row's `agent_ref.name` |
 | The training image's `nemo-gym`, `ray` and `openai` versions | `references/dependencies.md` § **Vendoring a wheel closure** | Needed only for a `wheels-v1` closure |
 
-**Get the converter.** Run `pi-to-gym-conversion --help`. It ships with the `nhx-rl` package that the `rl` plugin installs. If it is not on `PATH`, build it in a dedicated environment from a nemo-helix checkout, not the project `.venv`: the converter installs the hub wheel into the interpreter that runs it.
+**Get the converter.** `pi-to-gym-conversion` is an example script in the nemo-helix repository, not part of the installed `nemo` CLI or the `rl` plugin. Run it from a nemo-helix checkout, in a dedicated environment rather than the project `.venv`: the converter installs the hub wheel into the interpreter that runs it.
 
 ```bash
 UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
