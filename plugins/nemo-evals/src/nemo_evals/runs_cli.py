@@ -50,7 +50,7 @@ from nemo_helix_plugin.jobs.types import HelixJobResponse
 COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
 RETRY_ATTEMPTS = 5
 # The run POST alone: it answers once the run is accepted, which can take minutes while many submits share the API.
-SUBMIT_TIMEOUT_SECONDS = 600.0
+SUBMIT_TIMEOUT_SECONDS = 300.0
 _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
