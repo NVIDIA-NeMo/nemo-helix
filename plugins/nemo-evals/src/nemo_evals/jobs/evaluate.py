@@ -21,6 +21,7 @@ from nemo_evals.api.schemas import MetricInline
 from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
 from nemo_evals.jobs.agent_spec import target_agent_identity
 from nemo_evals.jobs.metric_resolution import (
+    HelixMetricModelResolver,
     gateway_metric_models_as_job,
     require_resolved_model_refs,
     resolve_metrics_to_inline,
@@ -36,13 +37,14 @@ from nemo_evals.jobs.utils import async_client_from_sync_client, job_evaluator, 
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evals.shared.metric_bundles.inline import INLINE_KIND
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nhx_evals_sdk.execution.config import resolve_params
 from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.metrics.utils import metric_type_name
@@ -51,6 +53,7 @@ from nhx_evals_sdk.values import (
     AgentBase,
     FieldMapping,
     Model,
+    ModelRef,
     RunConfig,
     RunConfigOnline,
     RunConfigOnlineModel,
@@ -158,6 +161,10 @@ class _EvaluateSpecCommon(BaseModel):
         default=None, description="Optional evals SDK execution parameters."
     )
     target: TargetSpec | None = Field(default=None, description="Optional model or agent target for online evaluation.")
+    target_model_ref: ModelRef | None = Field(
+        default=None,
+        description="Platform model reference resolved by the server, not the submitting client's URL origin.",
+    )
     prompt_template: str | dict[str, Any] | None = Field(
         default=None, description="Optional prompt template for online target generation."
     )
@@ -172,7 +179,11 @@ class _EvaluateSpecCommon(BaseModel):
 
     @model_validator(mode="after")
     def validate_params_for_target(self) -> Self:
-        self.params = resolve_params(self.params, self.target)
+        if self.target_model_ref is not None:
+            if not isinstance(self.params, RunConfigOnlineModel):
+                raise ValueError("ModelRef target requires RunConfigOnlineModel")
+        else:
+            self.params = resolve_params(self.params, self.target)
         return self
 
     @model_validator(mode="after")
@@ -182,6 +193,9 @@ class _EvaluateSpecCommon(BaseModel):
         # without it a target that names nothing publishes every trajectory under an empty name.
         intake = self.publication.intake if self.publication is not None else None
         if intake is None or intake.agent_name is not None:
+            return self
+        if self.target_model_ref is not None and self.target is None:
+            # The canonical spec checks the identity again after server-side resolution.
             return self
         if target_agent_identity(self.target)[0] is None:
             source = "an offline evaluation" if self.target is None else f"a {type(self.target).__name__} target"
@@ -199,6 +213,12 @@ class EvaluateInputSpec(_EvaluateSpecCommon):
         description="Metrics to evaluate, given as inline metrics and/or references to stored metrics.",
     )
 
+    @model_validator(mode="after")
+    def require_single_target(self) -> Self:
+        if self.target is not None and self.target_model_ref is not None:
+            raise ValueError("Supply either target or target_model_ref, not both")
+        return self
+
 
 class EvaluateSpec(_EvaluateSpecCommon):
     """Canonical SDK evaluation spec with platform model and metric references resolved."""
@@ -207,6 +227,8 @@ class EvaluateSpec(_EvaluateSpecCommon):
 
     @model_validator(mode="after")
     def reject_unresolved_metric_model_refs(self) -> Self:
+        if self.target_model_ref is not None and not isinstance(self.target, Model):
+            raise ValueError("A canonical target_model_ref requires a resolved model target")
         inline = [metric for metric in self.metrics if metric.payload.kind == INLINE_KIND]
         unresolved_refs = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in inline])
         if unresolved_refs:
@@ -320,11 +342,18 @@ class _EvaluateJobBase(NemoJob):
             entity_client=entity_client,
             async_client=async_sdk,
         )
+        target = submit_spec.target
+        if submit_spec.target_model_ref is not None:
+            if async_sdk is None:
+                raise ValueError("resolving a target model reference requires a platform client")
+            resolver = HelixMetricModelResolver(client_from_platform(async_sdk, AsyncModelsClient))
+            target = await resolver.resolve_model(submit_spec.target_model_ref)
         return EvaluateSpec(
             metrics=metrics,
             dataset=submit_spec.dataset,
-            params=resolve_params(submit_spec.params, submit_spec.target),
-            target=submit_spec.target,
+            params=resolve_params(submit_spec.params, target),
+            target=target,
+            target_model_ref=submit_spec.target_model_ref,
             prompt_template=submit_spec.prompt_template,
             field_mapping=submit_spec.field_mapping,
             publication=submit_spec.publication,
@@ -346,19 +375,24 @@ class _EvaluateJobBase(NemoJob):
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         require_resolved_model_refs(metrics, subject="EvaluateSpec")
-        with gateway_metric_models_as_job(metrics):
-            if isinstance(spec.target, Model):
+        with gateway_metric_models_as_job(
+            metrics,
+            target=spec.target if isinstance(spec.target, Model) else None,
+            target_model_ref=spec.target_model_ref,
+        ) as model_target:
+            target = model_target if isinstance(spec.target, Model) else spec.target
+            if isinstance(target, Model):
                 if not isinstance(params, RunConfigOnlineModel):
                     raise TypeError("model target requires RunConfigOnlineModel")
                 result = evaluator.run_sync(
                     metrics=metrics,
                     dataset=dataset,
                     config=params,
-                    target=spec.target,
+                    target=target,
                     field_mapping=spec.field_mapping,
                     prompt_template=spec.prompt_template,
                 )
-            elif isinstance(spec.target, AgentBase):
+            elif isinstance(target, AgentBase):
                 if type(params) is not RunConfigOnline:
                     raise TypeError("agent target requires RunConfigOnline")
                 if spec.prompt_template is None:
@@ -367,7 +401,7 @@ class _EvaluateJobBase(NemoJob):
                     metrics=metrics,
                     dataset=dataset,
                     config=params,
-                    target=spec.target,
+                    target=target,
                     field_mapping=spec.field_mapping,
                     prompt_template=spec.prompt_template,
                 )

@@ -4818,6 +4818,11 @@ components:
                 nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
           title: Target
           description: Optional model or agent target for online evaluation.
+        target_model_ref:
+          allOf:
+          - $ref: '#/components/schemas/ModelRef'
+          description: Platform model reference resolved by the server, not the submitting
+            client's URL origin.
         prompt_template:
           anyOf:
           - type: string
@@ -5273,6 +5278,11 @@ components:
                 nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
           title: Target
           description: Optional model or agent target for online evaluation.
+        target_model_ref:
+          allOf:
+          - $ref: '#/components/schemas/ModelRef'
+          description: Platform model reference resolved by the server, not the submitting
+            client's URL origin.
         prompt_template:
           anyOf:
           - type: string
