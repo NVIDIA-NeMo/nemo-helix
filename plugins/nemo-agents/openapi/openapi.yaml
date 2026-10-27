@@ -4354,6 +4354,14 @@ components:
           type: string
           title: Input
           description: Prompt to pass to the agent.
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
+          description: 'Per-run parameters handed to the agent as the top level of
+            the Fabric request context. The ''nemo_helix'' key is reserved for platform
+            fields. Stored on the job spec in plaintext: pass parameters here, not
+            secrets.'
         environment:
           anyOf:
           - type: string
