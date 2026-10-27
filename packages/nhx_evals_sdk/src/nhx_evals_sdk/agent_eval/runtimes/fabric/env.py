@@ -54,10 +54,22 @@ def _forward_tls_to_stdio_servers(config: dict[str, Any], names: set[str]) -> No
         server["env"] = merged
 
 
-def sandbox_fabric_config(config: Mapping[str, Any], *, model: str | None) -> dict[str, Any]:
-    """Prepare sandbox config while resolving TLS paths inside the sandbox."""
+def _configured_tls_names(config: Mapping[str, Any]) -> set[str]:
+    """Name the TLS variables with non-empty values in ``config.environment.env``."""
+    return {name for name in _HOST_TLS_ENV_NAMES if _environment_vars(config).get(name)}
+
+
+def sandbox_fabric_config(
+    config: Mapping[str, Any], *, model: str | None, sandbox_env: Mapping[str, str] | None = None
+) -> dict[str, Any]:
+    """Prepare sandbox config while resolving TLS paths inside the sandbox.
+
+    Placeholders are added only for TLS variables the sandbox actually defines, through
+    ``sandbox_env`` or ``config.environment.env``; host paths are not visible there, and an
+    unresolved placeholder would reach the MCP child verbatim.
+    """
     prepared = model_fabric_config(config, model=model)
-    names = {name for name in _HOST_TLS_ENV_NAMES if os.environ.get(name)}
+    names = _configured_tls_names(prepared) | {name for name in _HOST_TLS_ENV_NAMES if (sandbox_env or {}).get(name)}
     _forward_tls_to_stdio_servers(prepared, names)
     return prepared
 
@@ -195,7 +207,7 @@ def host_fabric_config(
         configured_env = {} if configured_env is None else dict(_mapping(configured_env, "config.environment.env"))
         environment["env"] = {**inherited_tls, **configured_env}
         prepared["environment"] = environment
-        _forward_tls_to_stdio_servers(prepared, set(inherited_tls))
+    _forward_tls_to_stdio_servers(prepared, _configured_tls_names(prepared))
     sources = env_secret_vars(env_secrets, source)
     models = _model_roles(prepared)
     env = _environment_vars(prepared)
