@@ -415,7 +415,11 @@ def test_get_code_prints_the_typed_client_call_without_sending(app: typer.Typer,
 @pytest.mark.parametrize(
     "model, warns",
     [
-        ("default/Nemotron-3.5-Lightning-30B", True),
+        ("default/NVIDIA-Nemotron-3.5-Lightning-30B", True),
+        ("default/nvidia-nvidia-nemotron-3-5-lightning-30b", True),
+        ("default/nvidia-nemotron-4-lightning-30b", False),
+        ("default/nvidia-nemotron-3-5-lightning-70b", False),
+        ("default/nvidia-nemotron-3-5-lightning-30b-custom", False),
         ("default/nemotron-3.5-super-vl", False),
         ("default/other-lightning", False),
     ],

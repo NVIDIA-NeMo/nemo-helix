@@ -7,8 +7,8 @@ import re
 
 
 def model_warning(model: str) -> str | None:
-    """Recognize Lightning in a model reference or resolved served-model name."""
-    if re.search(r"\bnemotron\b.*\blightning\b", model, re.IGNORECASE):
+    """Recognize the tested 3.5 Lightning 30B model, including Helix slug names."""
+    if re.search(r"(?:^|/)(?:nvidia/|(?:nvidia-){1,2})nemotron-3[.-]5-lightning-30b$", model, re.IGNORECASE):
         return (
             f"{model} has known tool-calling failures in Compass. "
             "Try NVIDIA Nemotron 3.5 Super VL instead. "

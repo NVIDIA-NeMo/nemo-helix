@@ -14,7 +14,7 @@ describe('Compass model guidance', () => {
   it.each(['default', 'fast'] as const)(
     'warns for the effective %s model and clears on override',
     (role) => {
-      const lightning = 'default/Nemotron-3.5-Lightning-30B';
+      const lightning = 'default/nvidia-nvidia-nemotron-3-5-lightning-30b';
       const props = {
         workspace: 'default',
         unresolved: false,
@@ -30,6 +30,13 @@ describe('Compass model guidance', () => {
         <InsightsModelPairFields
           {...props}
           {...{ [`${role}Model`]: 'default/nemotron-super-vl' }}
+        />
+      );
+      expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();
+      rerender(
+        <InsightsModelPairFields
+          {...props}
+          {...{ [`${role}Model`]: 'default/nvidia-nemotron-4-lightning-30b' }}
         />
       );
       expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();

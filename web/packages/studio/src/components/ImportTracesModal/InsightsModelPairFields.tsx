@@ -52,7 +52,9 @@ const fieldError = (label: string, value: string, storedRef?: string | null) => 
 const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
   const clearable = storedRef !== undefined;
   const error = fieldError(label, value, storedRef);
-  const lightning = /\bnemotron\b.*\blightning\b/i.test(value || storedRef || '');
+  const lightning = /(?:^|\/)(?:nvidia\/|(?:nvidia-){1,2})nemotron-3[.-]5-lightning-30b$/i.test(
+    value || storedRef || ''
+  );
   return (
     <FormField slotLabel={label} slotError={error} status={error ? 'error' : undefined}>
       <Flex gap="density-sm" align="center">
@@ -75,8 +77,8 @@ const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, st
       </Flex>
       {lightning ? (
         <Banner kind="inline" status="warning">
-          Nemotron Lightning has known tool-calling failures in Compass. Try NVIDIA Nemotron 3.5
-          Super VL instead. You can continue with your selected model.
+          Nemotron 3.5 Lightning 30B has known tool-calling failures in Compass. Try NVIDIA Nemotron
+          3.5 Super VL instead. You can continue with your selected model.
         </Banner>
       ) : null}
     </FormField>
