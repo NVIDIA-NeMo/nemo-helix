@@ -383,6 +383,8 @@ Create a customization job to fine-tune all model weights using the **Automodel*
 
 Adjust `num_gpus_per_node` based on your model size.
 
+`deployment_config` deploys the trained model with vLLM when training finishes, so you don't create the deployment yourself. Set `gpu` to the GPUs the deployment needs, or omit `deployment_config` to skip deployment.
+
 ```python
 import uuid
 from nemo_automodel_plugin.schema import AutomodelJobInput
@@ -410,6 +412,7 @@ spec = AutomodelJobInput(
         "pipeline_parallel_size": 1,
     },
     output={"name": OUTPUT_NAME},
+    deployment_config={"engine": "vllm", "gpu": 1},
 )
 
 job = customization.automodel.jobs.create(
@@ -453,9 +456,9 @@ Monitor the relationship between training and validation loss curves:
 
 **Note:** Training metrics measure optimization progress, not final model quality. Always evaluate the deployed model on your specific use case.
 
-### 8. Deploy Fine-Tuned Model
+### 8. Check the Model and Its Deployment
 
-After training completes, deploy using the Deployment Management Service:
+When training finished, the job registered the trained model and created a vLLM deployment for it from `deployment_config`. Check both:
 
 ```python
 # Validate model entity exists
@@ -464,49 +467,26 @@ print(model_entity.model_dump_json(indent=2))
 ```
 
 ```python
-# Create deployment config
-deploy_suffix = uuid.uuid4().hex[:4]
-DEPLOYMENT_CONFIG_NAME = f"sft-model-deployment-cfg-{deploy_suffix}"
-DEPLOYMENT_NAME = f"sft-model-deployment-{deploy_suffix}"
-
-from nemo_helix_plugin.models.types import (
-    ContainerExecutorConfig,
-    CreateModelDeploymentConfigRequest,
-    CreateModelDeploymentRequest,
-    Engine,
-    ModelDeploymentConfigModelSpec,
-)
-
-deployment_config = client.models.create_deployment_config(
-    body=CreateModelDeploymentConfigRequest(
-        name=DEPLOYMENT_CONFIG_NAME,
-        engine=Engine.VLLM,
-        model_spec=ModelDeploymentConfigModelSpec(
-            model_namespace="default",
-            model_name=OUTPUT_NAME,
-        ),
-        executor_config=ContainerExecutorConfig(
-            gpu=1,
-            image_name="docker.io/vllm/vllm-openai",
-            image_tag="v0.22.1",
-        ),
-    ),
-).data()
-
-# Deploy model using deployment_config created above
-deployment = client.models.create_deployment(
-    body=CreateModelDeploymentRequest(
-        name=DEPLOYMENT_NAME,
-        config=deployment_config.name,
-    ),
-).data()
+def find_deployment(model_entity: str):
+    """Return the newest active deployment that serves a model entity."""
+    configs = client.models.list_deployment_configs(
+        workspace="default",
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
+    ).items()
+    for config in configs:
+        deployments = client.models.list_deployments(
+            workspace="default",
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
+        ).items()
+        for deployment in deployments:
+            if deployment.status in ("CREATED", "PENDING", "READY"):
+                return deployment
+    raise RuntimeError(f"No active deployment serves default/{model_entity}")
 
 
-# Check deployment status
-deployment_status = client.models.get_deployment(name=deployment.name).data()
-
+deployment = find_deployment(OUTPUT_NAME)
 print(f"Deployment name: {deployment.name}")
-print(f"Deployment status: {deployment_status.status}")
+print(f"Deployment status: {deployment.status}")
 
 ```
 
@@ -517,77 +497,19 @@ The deployment service automatically:
 
 **Multi-GPU Deployment:**
 
-For larger models requiring multiple GPUs, increase `gpu` in `executor_config`. vLLM computes tensor parallelism from the GPU count and model architecture:
-
-```python
-from nemo_helix_plugin.models.types import (
-    ContainerExecutorConfig,
-    CreateModelDeploymentConfigRequest,
-    Engine,
-    ModelDeploymentConfigModelSpec,
-)
-
-client.models.create_deployment_config(
-    body=CreateModelDeploymentConfigRequest(
-        name="sft-model-config-multigpu",
-        engine=Engine.VLLM,
-        model_spec=ModelDeploymentConfigModelSpec(
-            model_namespace="default",
-            model_name=OUTPUT_NAME,
-        ),
-        executor_config=ContainerExecutorConfig(
-            gpu=2,
-            image_name="docker.io/vllm/vllm-openai",
-            image_tag="v0.22.1",
-        ),
-    ),
-).data()
-```
+For larger models requiring multiple GPUs, increase `gpu` in `deployment_config`. vLLM computes tensor parallelism from the GPU count and model architecture.
 
 **Single-Node Constraint:** Model deployments are limited to a single node. The maximum `gpu` value depends on the total GPUs available on a single node in your cluster. Multi-node deployments are not supported.
 
 ### Track Deployment Status
 
+The job completes once the deployment is created, not when it is ready. Wait for it before you send requests; image pull and weight loading often take 10–20 minutes.
+
 ```python
-import time
-from IPython.display import clear_output
-
-# Poll deployment status every 15 seconds until ready
-TIMEOUT_MINUTES = 30
-start_time = time.time()
-timeout_seconds = TIMEOUT_MINUTES * 60
-
-print(f"Monitoring deployment '{deployment.name}'...")
-print(f"Timeout: {TIMEOUT_MINUTES} minutes\n")
-
-while True:
-    deployment_status = client.models.get_deployment(name=deployment.name).data()
-
-    elapsed = time.time() - start_time
-    elapsed_min = int(elapsed // 60)
-    elapsed_sec = int(elapsed % 60)
-
-    clear_output(wait=True)
-    print(f"Deployment: {deployment.name}")
-    print(f"Status: {deployment_status.status}")
-    print(f"Elapsed time: {elapsed_min}m {elapsed_sec}s")
-
-    # Check if deployment is ready
-    if deployment_status.status == "READY":
-        print("\nDeployment is ready!")
-        if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
-            raise RuntimeError("Inference gateway did not become ready")
-        break
-
-    # Check for failure states
-    if deployment_status.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
-        raise RuntimeError(f"Deployment failed with status: {deployment_status.status}")
-
-    # Check timeout
-    if elapsed > timeout_seconds:
-        raise TimeoutError(f"Deployment timeout after {TIMEOUT_MINUTES} minutes")
-
-    time.sleep(15)
+if not client.models.wait_for_deployment_status(deployment.name, "READY", workspace="default", timeout=1800):
+    raise RuntimeError(f"Deployment {deployment.name} did not become ready")
+if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
+    raise RuntimeError("Inference gateway did not become ready")
 ```
 
 ### 9. Evaluate Your Model
@@ -597,7 +519,6 @@ After training, evaluate whether your model meets your requirements:
 #### Quick Manual Evaluation
 
 ```python
-# Wait for deployment to be ready, then test
 # Test the fine-tuned model with a question answering prompt
 context = "The Apollo 11 mission was the first manned mission to land on the Moon. It was launched on July 16, 1969, and Neil Armstrong became the first person to walk on the lunar surface on July 20, 1969. Buzz Aldrin joined him shortly after, while Michael Collins remained in lunar orbit."
 question = "Who was the first person to walk on the Moon?"
@@ -696,8 +617,8 @@ For detailed information on all available hyperparameters, recommended values, a
 - Verify output model exists: `client.models.get_model(name=OUTPUT_NAME)`
 - Check job logs: `client.jobs.list_job_logs(name=job.job.name).items()`
 - Check deployment status: `client.models.get_deployment(name=deployment.name)`
-- Ensure sufficient GPU resources for `executor_config={"gpu": 1, ...}`
-- Verify the deployment config matches this tutorial: `engine="vllm"` with `docker.io/vllm/vllm-openai:v0.22.1`
+- Ensure sufficient GPU resources for the job's `deployment_config={"engine": "vllm", "gpu": 1}`
+- Check the deployment config the job created: `client.models.get_deployment_config(name=deployment.config)`
 
 
 ## Next Steps

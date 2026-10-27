@@ -79,6 +79,23 @@ A deployment loads adapters up to a maximum rank and **refuses higher-rank adapt
 
 vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
 
+#### Base already deployed without LoRA: ask the user
+
+The one exception to "do not update the deployment". A LoRA job's `deployment_config` deploys the base when no active deployment of it has `lora_enabled: true`. If the base is already served by a deployment whose config has `lora_enabled: false`, the job creates a LoRA-enabled deployment of the base alongside it when it finishes, so the base runs twice. With inline parameters the new deployment is named `sft-deploy-<base>`; if the existing deployment already has that name (an earlier job created it), the job updates it to the LoRA-enabled config instead, which restarts it.
+
+Check **before submitting** a LoRA job:
+
+```bash
+nemo inference deployment-configs list --workspace default --filter.model-entity-id default/<model-entity> -f json  # configs that serve the base
+nemo inference deployments list --workspace default --filter.config <config-name> -f json                         # status and config_version per deployment
+nemo inference deployment-configs versions get <config_version> --config <config-name> --workspace default -f json  # the version the deployment runs
+```
+
+A deployment runs the config version it was created with (`config_version`), which is older than the listed config when the config was updated afterwards; read `model_spec.lora_enabled` from that version. If a deployment is `CREATED`, `PENDING` or `READY`, the version it runs has `lora_enabled: false`, and no active deployment runs a version with `lora_enabled: true`, **stop and ask the user** which they want. Never change the deployment without a yes.
+
+- **Enable LoRA on the existing deployment:** this restarts the base model, so anything using that deployment loses it until it is READY again. Read the config (`nemo inference deployment-configs get <config-name> --workspace default -f json`), set `model_spec.lora_enabled` to `true`, write back `engine`, `executor_config` and `model_spec` with `nemo inference deployment-configs update <config-name> --workspace default --input-file <file>`, then repoint the deployment at the new version: `nemo inference deployments update <deployment-name> --workspace default --config <config-name>`. Wait for READY, then submit; the adapter hot-loads when the job completes.
+- **Deploy alongside it:** submit as is. Tell the user the base model will run twice, on the GPUs of both deployments, until they delete one; or, if the existing deployment is named `sft-deploy-<base>` and the job uses inline parameters, that the job restarts it with LoRA instead.
+
 ### Full SFT / merged checkpoints: deploy the output model
 
 Applies when the job used **`finetuning_type: all_weights`** (full-weight SFT) or **`save_method: merged_16bit` / `merged_4bit`** (merged LoRA checkpoint). Output `type` is **`model`**, not `adapter`.

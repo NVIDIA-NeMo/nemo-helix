@@ -47,7 +47,6 @@ import re
 import time
 import uuid
 from pathlib import Path
-from IPython.display import clear_output
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
@@ -274,7 +273,7 @@ print(f"ModelSpec: {base_model.spec}")
 
 ### 6. Create LoRA Customization Job
 
-Submit to the **Automodel** backend using `AutomodelJobInput` with `finetuning_type: lora`. After training completes, deploy the base model with LoRA support manually (step 8).
+Submit to the **Automodel** backend using `AutomodelJobInput` with `finetuning_type: lora`. `deployment_config` deploys the base model with LoRA enabled when training finishes and serves the adapter from it. If the base model already has a LoRA-enabled deployment, the job loads the adapter onto that one instead of deploying again.
 
 The hyperparameters follow the Automodel reference recipes for this architecture, [`customizer_nemotron_nano_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_peft.yaml) and [`nemotron_nano_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_nano_v3_hellaswag_peft.yaml):
 
@@ -309,6 +308,7 @@ spec = AutomodelJobInput(
         "expert_parallel_size": 4,
     },
     output={"name": OUTPUT_NAME},
+    deployment_config={"engine": "vllm", "gpu": 2},
 )
 
 job = customization.automodel.jobs.create(
@@ -341,82 +341,51 @@ assert status.status.lower() == "completed"
 
 ### 8. Validate Output Model and Deployment
 
-With the base model entity and LoRA adapter from training, create a NIM deployment with `lora_enabled=True` so the adapter is served alongside the base weights. Check the model entity and deployment status.
+When training finished, the job registered the adapter on the base model entity and deployed the base model with LoRA enabled. Check the model entity, which now lists the adapter, and find the deployment that serves it. If the base model was already deployed without LoRA, the job created a LoRA-enabled deployment alongside it.
 
 ```python
-deploy_suffix = uuid.uuid4().hex[:4]
-DEPLOYMENT_CONFIG_NAME = f"lora-deploy-cfg-{deploy_suffix}"
-deployment_name = f"lora-deploy-{deploy_suffix}"
+def find_deployment(model_entity: str, *, lora_enabled: bool = False):
+    """Return the newest active deployment that serves a model entity."""
+    configs = client.models.list_deployment_configs(
+        workspace="default",
+        query_params={"filter": json.dumps({"model_entity_id": f"default/{model_entity}"}), "sort": "-created_at"},
+    ).items()
+    for config in configs:
+        deployments = client.models.list_deployments(
+            workspace="default",
+            query_params={"filter": json.dumps({"config": config.name}), "sort": "-created_at"},
+        ).items()
+        for deployment in deployments:
+            if deployment.status not in ("CREATED", "PENDING", "READY"):
+                continue
+            # A deployment runs the config version it was created with, not necessarily the latest.
+            running = client.models.get_deployment_config_version(
+                workspace="default", config=config.name, name=str(deployment.config_version)
+            ).data()
+            if not lora_enabled or running.model_spec.lora_enabled:
+                return deployment
+    raise RuntimeError(f"No active deployment serves default/{model_entity}")
 
-from nemo_helix_plugin.models.types import (
-    ContainerExecutorConfig,
-    CreateModelDeploymentConfigRequest,
-    CreateModelDeploymentRequest,
-    Engine,
-    ModelDeploymentConfigModelSpec,
-)
 
-deployment_config = client.models.create_deployment_config(
-    body=CreateModelDeploymentConfigRequest(
-        name=DEPLOYMENT_CONFIG_NAME,
-        engine=Engine.VLLM,
-        model_spec=ModelDeploymentConfigModelSpec(
-            model_namespace="default",
-            model_name=MODEL_NAME,
-            lora_enabled=True,
-        ),
-        executor_config=ContainerExecutorConfig(
-            gpu=2,
-            image_name="docker.io/vllm/vllm-openai",
-            image_tag="v0.22.1",
-            additional_args=["--max-lora-rank", "32"],
-        ),
-    ),
-).data()
-
-deployment = client.models.create_deployment(
-    body=CreateModelDeploymentRequest(
-        name=deployment_name,
-        config=deployment_config.name,
-    ),
-).data()
+deployment_name = find_deployment(MODEL_NAME, lora_enabled=True).name
 
 model_entity = client.models.get_model(name=MODEL_NAME).data()
 if model_entity.spec:
     model_entity.spec.linear_layers = None
 print(model_entity.model_dump_json(indent=2))
-print(f"Deployment status: {deployment.status}")
+print(f"Deployment name: {deployment_name}")
 
 ```
 
 ### 9. Monitor Deployment Until Ready
 
-Wait for the deployment to reach RUNNING/READY before sending inference requests. Image pull and weight load often take 10–20 minutes, and the status stays PENDING until the server is ready.
+The job completes once the deployment is created, not when it is ready. Wait for READY before sending inference requests. Image pull and weight load often take 10–20 minutes, and the status stays PENDING until the server is ready.
 
 ```python
-TIMEOUT_MINUTES = 30
-start_time = time.time()
-time_check = max_wait_time_checker(TIMEOUT_MINUTES * 60, "Deployment")
-print(f"Monitoring deployment '{deployment_name}'... (timeout {TIMEOUT_MINUTES} min)\n")
-
-while True:
-    time.sleep(15)
-    time_check()
-    deployment_status = client.models.get_deployment(name=deployment_name).data()
-    elapsed = time.time() - start_time
-    clear_output(wait=True)
-    print(f"Deployment: {deployment_name}")
-    print(f"Status: {deployment_status.status}")
-    print(f"Elapsed: {int(elapsed // 60)}m {int(elapsed % 60)}s")
-    if deployment_status.status in ("RUNNING", "READY"):
-        print("\nDeployment is ready!")
-        if not client.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
-            raise RuntimeError("Inference gateway did not become ready")
-        break
-    if deployment_status.status in ("FAILED", "ERROR", "TERMINATED"):
-        raise RuntimeError(f"Deployment failed with status: {deployment_status.status}")
-
-assert deployment_status.status in ("RUNNING", "READY")
+if not client.models.wait_for_deployment_status(deployment_name, "READY", workspace="default", timeout=1800):
+    raise RuntimeError(f"Deployment {deployment_name} did not become ready")
+if not client.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
+    raise RuntimeError("Inference gateway did not become ready")
 
 ```
 
