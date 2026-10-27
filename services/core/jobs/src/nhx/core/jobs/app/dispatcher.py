@@ -147,8 +147,9 @@ operations_counter = create_counter(
 )
 
 _DELETE_PAGE_SIZE = 1000
-# IDs per store query when fetching the attempts and jobs of a page of steps (the store caps a page at 1000).
-_ENRICHMENT_BATCH_SIZE = 500
+# IDs per store query when fetching the attempts and jobs of a page of steps. The IDs travel in the
+# query string of a GET, so the batch stays small enough for proxies and ingress URL limits.
+_ENRICHMENT_BATCH_SIZE = 100
 _JOB_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
 _JOB_RUN_TELEMETRY_TERMINAL_STATUSES = frozenset(
     {

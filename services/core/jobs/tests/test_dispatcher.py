@@ -2264,7 +2264,7 @@ async def test_list_steps_with_status_filter(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("batch_size", [500, 2])
+@pytest.mark.parametrize("batch_size", [100, 2])
 async def test_list_steps_looks_up_attempts_and_jobs_in_batches(
     sample_platform_job_request: CreateHelixJobRequest, batch_size: int
 ):
