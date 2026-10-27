@@ -158,6 +158,27 @@ PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.5.0"
 # Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.5.0 requires
 # ^1.0.0) so the explicitly-installed SDK matches what the adapter was built against.
 PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^1.0.0 @earendil-works/pi-coding-agent@^1.0.0 @earendil-works/pi-mcp@^1.0.0"
+
+
+def _pi_sdk_package_names(specs: str = PI_SDK_NPM_SPECS) -> list[str]:
+    """Package names (no version suffix) parsed from a space-separated npm spec list.
+
+    Each spec is ``<name>@<range>`` where ``<name>`` may itself be a scoped
+    ``@scope/pkg``. The version suffix is the LAST ``@`` that is not the scope's
+    leading ``@``, so split on ``rpartition('@')`` and keep the leading-``@`` case.
+    """
+    names: list[str] = []
+    for spec in specs.split():
+        head, sep, _version = spec.rpartition("@")
+        # ``head`` is empty only for a bare unscoped ``@`` at index 0 (no range) —
+        # then the whole token is the name; otherwise ``head`` is the name.
+        names.append(head if sep and head else spec)
+    return names
+
+
+# The build-time ESM resolution probe imports exactly these packages, derived from
+# PI_SDK_NPM_SPECS so the probe cannot drift from the installed set.
+_PI_SDK_IMPORT_PROBE = "; ".join(f'await import("{name}")' for name in _pi_sdk_package_names())
 # NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
 PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
 # The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the
@@ -374,7 +395,10 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     curl -fsSL https://deb.nodesource.com/setup_{{ pinned_node_major }}.x | bash - && \\
     apt-get install -y --no-install-recommends nodejs && \\
     rm -rf /var/lib/apt/lists/* && \\
-    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \\
+    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} && \\
+    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
+    npm install --prefix "${PI_ADAPTER_DIR}" --save-prod --omit=dev --no-audit --no-fund {{ pi_sdk_npm_specs }} && \\
+    (cd "${PI_ADAPTER_DIR}" && node --input-type=module -e '{{ pi_sdk_import_probe }}') && \\
     . /workspace/.venv/bin/activate && \\
     uv pip install --no-sources --prerelease=allow "{{ pi_relay_cli_spec }}" && \\
     git init --quiet /opt/pi-relay-src && \\
@@ -385,7 +409,6 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     cp -r "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" "{{ pi_relay_extension_path }}" && \\
     rm -rf /opt/pi-relay-src && \\
     chmod -R a+rX "{{ pi_relay_extension_path }}" && \\
-    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
     FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \\
     test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" && \\
     mkdir -p "${FABRIC_SHARE}" && \\
@@ -588,6 +611,7 @@ def _jinja_env() -> jinja2.Environment:
     template_globals["pinned_node_major"] = PINNED_NODE_MAJOR
     template_globals["pi_adapter_npm_spec"] = PI_ADAPTER_NPM_SPEC
     template_globals["pi_sdk_npm_specs"] = PI_SDK_NPM_SPECS
+    template_globals["pi_sdk_import_probe"] = _PI_SDK_IMPORT_PROBE
     template_globals["pi_relay_cli_spec"] = PI_RELAY_CLI_SPEC
     template_globals["pi_relay_extension_repo"] = PI_RELAY_EXTENSION_REPO
     template_globals["pi_relay_extension_ref"] = PI_RELAY_EXTENSION_REF
