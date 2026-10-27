@@ -14,7 +14,12 @@ from typing import Any, ClassVar, Dict, Optional, Self
 from nemo_helix_plugin.jobs.types import JobControl
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityBase
-from nhx.common.jobs.schemas import FileStorageType, HelixJobResultResponse, HelixJobStatus
+from nhx.common.jobs.schemas import (
+    FileStorageType,
+    HelixJobResultResponse,
+    HelixJobStatus,
+    JobGroupStatus,
+)
 from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
@@ -35,6 +40,55 @@ def is_final_platform_step(platform_spec: HelixJobSpec, step_spec_name: str | No
     if step_spec_name is None or not platform_spec.steps:
         return False
     return platform_spec.steps[-1].name == step_spec_name
+
+
+class JobGroup(EntityBase):
+    """A set of related jobs submitted and managed as one unit.
+
+    A JobGroup is a management/accounting unit, not an execution-ordering
+    construct: its member jobs are independent (no ordering, no DAG). Membership
+    is the Entity Store ``parent`` relationship -- each member :class:`HelixJob`
+    is parented to the group, so members are unique within
+    ``(workspace, platform_job, parent=group, name)`` and are found by querying
+    jobs whose ``parent`` is this group's ID.
+
+    The group ``status`` is a *denormalized* field persisted on the entity (like
+    ``HelixJob.status``), not recomputed on every read -- deriving it per GET
+    would fan out a read over every member, which does not scale to groups with
+    thousands of members. ``aggregate_job_group_status`` computes the value; it
+    is written at create time and kept current by the controller's group roll-up
+    as members change.
+    """
+
+    __entity_type__: ClassVar[str] = "platform_job_group"
+
+    source: str = Field(..., description="Source service that created this job group")
+    description: Optional[str] = Field(default=None, description="Job group description")
+    max_concurrent_jobs: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Caller-set ceiling on how many member jobs may run at once. Recorded on the group; "
+        "admission enforcement is handled separately and does not gate creation.",
+    )
+    fail_fast: bool = Field(
+        default=False,
+        description="When true, a single member failure should stop the rest of the group. Recorded on the group; "
+        "enforcement is handled separately.",
+    )
+    default_timeout_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Group-default per-step staleness timeout propagated into each member's step lifecycle "
+        "(staleness_timeout_seconds) unless the member overrides it. None leaves the template's value in place.",
+    )
+    status: JobGroupStatus = Field(
+        default=JobGroupStatus.PENDING,
+        description="Aggregate group status, denormalized onto the entity (like a HelixJob's status) rather than "
+        "recomputed on every read. Set from the members at create time; the controller's group roll-up keeps it "
+        "current as members change. aggregate_job_group_status computes the value that is written here.",
+    )
+    custom_fields: Optional[Dict[str, Any]] = Field(default=None, description="Custom fields")
+    ownership: Optional[Dict[str, Any]] = Field(default=None, description="Ownership info")
 
 
 class HelixJob(EntityBase):

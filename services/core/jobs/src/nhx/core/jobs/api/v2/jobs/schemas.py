@@ -36,6 +36,10 @@ from pydantic import Field
 
 CreateHelixJobRequest = _types.CreateHelixJobRequest
 UpdateHelixJobRequest = _types.UpdateHelixJobRequest
+CreateJobGroupRequest = _types.CreateJobGroupRequest
+UpdateJobGroupRequest = _types.UpdateJobGroupRequest
+JobGroupMember = _types.JobGroupMember
+JobGroupResponse = _types.JobGroupResponse
 HelixJobAttemptResponse = _types.HelixJobAttemptResponse
 HelixJobAttemptSortField = _types.HelixJobAttemptSortField
 HelixJobLogSortField = _types.HelixJobLogSortField

@@ -5767,6 +5767,200 @@ paths:
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
+  /apis/jobs/v2/workspaces/{workspace}/job-groups:
+    post:
+      tags:
+      - Job Groups
+      summary: Create Job Group
+      description: Create a job group and expand its members into parented jobs.
+      operationId: create_job_group_apis_jobs_v2_workspaces__workspace__job_groups_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobGroupRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '409':
+          description: A job group with this name already exists
+        '422':
+          description: Invalid job group request
+    get:
+      tags:
+      - Job Groups
+      summary: List Job Groups
+      description: List job groups with their aggregate derived status.
+      operationId: list_job_groups_apis_jobs_v2_workspaces__workspace__job_groups_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobListSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponsesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{name}:
+    get:
+      tags:
+      - Job Groups
+      summary: Get Job Group
+      description: Get a job group by name or ID, including its aggregate status.
+      operationId: get_job_group_apis_jobs_v2_workspaces__workspace__job_groups__name__get
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '404':
+          description: Job group not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Job Groups
+      summary: Update Job Group
+      description: Update a job group's mutable metadata.
+      operationId: update_job_group_apis_jobs_v2_workspaces__workspace__job_groups__name__patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateJobGroupRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '404':
+          description: Job group not found
+        '409':
+          description: Version conflict
+        '422':
+          description: Invalid job group update
+    delete:
+      tags:
+      - Job Groups
+      summary: Delete Job Group
+      description: Delete a job group and all of its member jobs.
+      operationId: delete_job_group_apis_jobs_v2_workspaces__workspace__job_groups__name__delete
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job group not found
+        '409':
+          description: A member job is not terminal; members must reach a terminal
+            state before deletion.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -11740,6 +11934,88 @@ components:
             name: run
         source: api-reference
         spec: {}
+    CreateJobGroupRequest:
+      properties:
+        name:
+          title: Name
+          description: Group name. Auto-generated when omitted.
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        source:
+          type: string
+          title: Source
+        template:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSpec'
+          description: Shared job specification expanded into every member job before
+            each member's config_patch is applied.
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+          description: Shared plugin-defined spec copied onto every member job (the
+            opaque per-plugin payload).
+        members:
+          items:
+            $ref: '#/components/schemas/JobGroupMember'
+          type: array
+          minItems: 1
+          title: Members
+          description: Per-member entries; each expands into one full job parented
+            to the group.
+        max_concurrent_jobs:
+          title: Max Concurrent Jobs
+          description: Caller-set ceiling on concurrently-running member jobs. Recorded
+            on the group; admission enforcement is handled separately and does not
+            gate creation.
+          type: integer
+          minimum: 1.0
+        fail_fast:
+          type: boolean
+          title: Fail Fast
+          description: When true, a single member failure should stop the rest of
+            the group (enforced separately).
+          default: false
+        default_timeout_seconds:
+          title: Default Timeout Seconds
+          description: Group-default per-step staleness timeout propagated into each
+            member unless the member overrides it. None leaves each template step's
+            own value in place.
+          type: integer
+          minimum: 0.0
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - source
+      - template
+      - members
+      title: CreateJobGroupRequest
+      description: 'Request model for creating a job group and expanding its members.
+
+
+        Carries one shared job-spec ``template`` plus a list of small ``members``.
+
+        The server expands template + each member entry into a full job parented to
+
+        the group. The group''s ``default_timeout_seconds`` propagates into each
+
+        member''s step lifecycle (``staleness_timeout_seconds``) unless the member
+
+        overrides it with its own ``timeout_seconds``.'
     CreateModelAdapterRequest:
       properties:
         name:
@@ -16673,6 +16949,158 @@ components:
             these variables.
       type: object
       title: JobExecutionProfileConfig
+    JobGroupMember:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: Job name. Name must start with a lowercase letter, be 2-63
+            characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
+            hyphens, cannot end with a hyphen). At most 51 characters when output_location
+            is not set. Auto-generated when omitted.
+        config_patch:
+          additionalProperties: true
+          type: object
+          title: Config Patch
+          description: Per-member overrides deep-merged into each template step's
+            config. Keys present here win over the template; nested dicts merge recursively,
+            other values replace.
+        timeout_seconds:
+          title: Timeout Seconds
+          description: Per-member per-step staleness timeout. Overrides the group's
+            default_timeout_seconds for this member's steps. None falls back to the
+            group default (and then the template's own value).
+          type: integer
+          minimum: 0.0
+      type: object
+      required:
+      - name
+      title: JobGroupMember
+      description: 'One member of a bulk job-group create: only what differs from
+        the template.
+
+
+        The server expands ``template`` + each member into a full job at create time
+
+        and parents it to the group. ``config_patch`` is deep-merged into *every*
+
+        step''s ``config`` of the template spec (members are independent full jobs
+
+        built from one shared spec), so a member specifies only the per-member
+
+        payload differences, not a whole spec.'
+    JobGroupResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: Project URN
+          type: string
+        description:
+          title: Description
+          type: string
+        source:
+          type: string
+          title: Source
+        max_concurrent_jobs:
+          title: Max Concurrent Jobs
+          type: integer
+        fail_fast:
+          type: boolean
+          title: Fail Fast
+          default: false
+        default_timeout_seconds:
+          title: Default Timeout Seconds
+          type: integer
+        status:
+          allOf:
+          - $ref: '#/components/schemas/JobGroupStatus'
+          description: Aggregate status derived from member job statuses.
+        member_count:
+          type: integer
+          title: Member Count
+          description: Number of member jobs parented to this group.
+          default: 0
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - id
+      - name
+      - workspace
+      - source
+      - status
+      title: JobGroupResponse
+      description: Response model for a job group, including its aggregate derived
+        status.
+    JobGroupResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/JobGroupResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: JobGroupResponsesPage
+    JobGroupStatus:
+      type: string
+      enum:
+      - pending
+      - running
+      - completed
+      - failed
+      - cancelling
+      - cancelled
+      title: JobGroupStatus
+      description: 'Derived status of a :class:`JobGroup`, rolled up from its member
+        jobs.
+
+
+        A group is terminal only once every member is terminal. The group ``status``
+
+        is never stored; it is computed on read from the member jobs'' statuses
+
+        (see :func:`aggregate_job_group_status`).'
     JsonValue:
       title: JsonValue
     JsonWebKey:
@@ -21871,6 +22299,39 @@ components:
       type: object
       title: UpdateHelixJobRequest
       description: Validated partial update for a job description or definition.
+    UpdateJobGroupRequest:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        max_concurrent_jobs:
+          title: Max Concurrent Jobs
+          nullable: true
+          type: integer
+          minimum: 1.0
+        fail_fast:
+          title: Fail Fast
+          type: boolean
+        default_timeout_seconds:
+          title: Default Timeout Seconds
+          nullable: true
+          type: integer
+          minimum: 0.0
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      additionalProperties: false
+      type: object
+      title: UpdateJobGroupRequest
+      description: 'Validated partial update for a job group''s mutable metadata.
+
+
+        Only the group''s own management fields are mutable. Members are not added
+        or
+
+        removed through this request, and the derived ``status`` is never writable.'
     UpdateModelDeploymentConfigRequest:
       properties:
         description:
