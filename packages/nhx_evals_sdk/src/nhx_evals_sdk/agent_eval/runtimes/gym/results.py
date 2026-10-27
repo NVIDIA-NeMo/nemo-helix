@@ -275,7 +275,7 @@ def require_full_coverage(tasks: Sequence[AgentEvalTask], *, covered_task_ids: s
         f"Gym produced no rollout for {len(missing)} of {len(tasks)} requested task(s), so the run is "
         f"incomplete and will not be scored (a partial run must not be reported as a whole one).\n"
         f"  rollouts:  {rollouts_path}\n"
-        f"  failures:  {_failures_path_for(rollouts_path)}\n"
+        f"  failures:  {failures_path_for(rollouts_path)}\n"
         f"  gym logs:  {rollouts_path.parent} (gym_env.log, gym_eval.stdout.log, gym_eval.stderr.log)\n"
         f"  unrepresented task id(s): {missing}"
     )
@@ -392,7 +392,7 @@ def _read_model_calls(capture_path: Path | None, *, trial_id: str) -> list[dict[
         return []
 
 
-def _failures_path_for(rollouts_path: Path) -> Path:
+def failures_path_for(rollouts_path: Path) -> Path:
     """Sidecar Gym writes failed rollouts to (mirrors Gym's own ``_failures_path_for``)."""
     return rollouts_path.with_name(rollouts_path.stem + "_failures.jsonl")
 
@@ -544,7 +544,7 @@ def ensure_fresh_output(rollouts_path: Path) -> None:
     into a directory that already holds Gym rollout output: rollouts, failures, or model-call
     captures.
     """
-    preexisting = [path for path in (rollouts_path, _failures_path_for(rollouts_path)) if path.is_file()]
+    preexisting = [path for path in (rollouts_path, failures_path_for(rollouts_path)) if path.is_file()]
     # Model-call captures count as output too, and the sandboxed runner writes them *before*
     # `rollouts.jsonl`, so a run that died in between leaves captures with no file above to catch
     # it. Their names -- `{task}-{rollout}` -- repeat across runs of one dataset, so the next run
@@ -735,7 +735,7 @@ def trials_from_rollouts(
             )
         )
 
-    failures_path = _failures_path_for(rollouts_path)
+    failures_path = failures_path_for(rollouts_path)
     unattributed_failures = 0
     if failures_path.exists():
         failures_file = EvidenceDescriptor(kind="filesystem", format="file", ref=str(failures_path))
