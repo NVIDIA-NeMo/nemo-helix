@@ -136,6 +136,15 @@ def test_wait_requests_once_then_only_reads_by_id():
     ]
 
 
+def test_a_task_whose_newest_build_is_ready_gets_no_request():
+    builds = FakeBuilds()
+    builds.attempts["a"] = [_build("a", "1", "ready")]
+    result, lines = wait(builds)
+    assert builds.posts == ["b"]  # only the task with no ready build
+    assert {ref: b.status for ref, b in result.items()} == dict.fromkeys(result, "ready")
+    assert lines[0] == "Image builds for 2 tasks: 1 ready, 1 building, 0 failed. Ctrl-C is safe; builds keep going."
+
+
 def test_a_failed_attempt_is_retried_once_then_the_task_settles_failed():
     builds = FakeBuilds({"a": ["fail", "fail"], "b": ["fail", "ok"]})
     result, lines = wait(builds)
