@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { LogLoadProgress, LogStatus } from '@nemo/common/src/utils/logs';
 import { getJobsPageJobLogsQueryKey, jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobLog,
@@ -18,7 +19,6 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { LOGS_MAX_FETCH_ITERATIONS, LOGS_MAX_PAGES, LOGS_PAGE_SIZE } from '../../constants';
 import { CJobTerminalStatuses } from '../../constants/query';
-import type { LogLoadProgress, LogStatus } from '../../utils/logs';
 import { getJobRefetchInterval } from '../../utils/query';
 
 // After a job goes terminal, refetchInterval stops polling — but OTLP log
