@@ -4,13 +4,14 @@
 """Safe Synthesizer job config shared by API handlers and task containers."""
 
 import logging
-from typing import Any
+from copy import deepcopy
+from typing import Any, Self, cast
 
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_safe_synthesizer.config.job import SafeSynthesizerJobConfig as SafeSynthesizerJobConfigInternal
 from nemo_safe_synthesizer.config.job import SafeSynthesizerParameters as SafeSynthesizerParametersInternal
 from nemo_safe_synthesizer.config.replace_pii import PiiReplacerConfig
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, ModelWrapValidatorHandler, SerializationInfo, field_serializer, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,27 @@ DEFAULT_PRETRAINED_MODEL = "HuggingFaceTB/SmolLM3-3B"
 
 class SafeSynthesizerParameters(SafeSynthesizerParametersInternal):
     """NHX-facing Safe Synthesizer parameters with SDK convenience flags."""
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _preserve_supplied_fields(cls, value: Any, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        # Upstream validators resolve defaults by assigning nested fields (for
+        # example data.max_sequences_per_example). Such assignments must not
+        # turn an omitted option into an explicit option during serialization.
+        supplied = deepcopy(value.model_dump(exclude_unset=True) if isinstance(value, BaseModel) else value)
+        result = handler(value)
+
+        def restore_fields_set(model: Any, source: Any) -> None:
+            if isinstance(model, BaseModel) and isinstance(source, dict):
+                model.model_fields_set.intersection_update(source)
+                for name in model.model_fields_set:
+                    restore_fields_set(getattr(model, name), source[name])
+            elif isinstance(model, list) and isinstance(source, list):
+                for item, original in zip(model, source, strict=False):
+                    restore_fields_set(item, original)
+
+        restore_fields_set(result, supplied)
+        return result
 
     enable_synthesis: bool = Field(
         default=True,
@@ -54,6 +76,21 @@ class SafeSynthesizerJobConfig(SafeSynthesizerJobConfigInternal):
         description="Whether to run LLM training and generation phases. "
         "When False the task only performs PII replacement and returns the processed data.",
     )
+
+    @field_serializer("config")
+    def _serialize_config(self, config: SafeSynthesizerParameters, info: SerializationInfo) -> dict[str, Any]:
+        # The spec is serialized by the Jobs API for storage, responses, PATCH,
+        # and task dispatch. Keep omissions at that boundary, not just at the
+        # final task dump: reloading a fully defaulted spec loses fields_set.
+        # Do not exclude defaults or nulls: those may be explicit user choices.
+        # Task-library defaults can differ from control-plane defaults.
+        return config.model_dump(
+            mode=info.mode,
+            include=cast(Any, info.include),
+            exclude=cast(Any, info.exclude),
+            by_alias=info.by_alias,
+            exclude_unset=True,
+        )
 
     @model_validator(mode="before")
     @classmethod

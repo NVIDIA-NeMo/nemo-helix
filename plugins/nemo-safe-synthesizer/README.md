@@ -36,6 +36,14 @@ Use the Safe Synthesizer plugin to create jobs through the platform Jobs service
 
    You can also use the SDK builder or Jobs API. See `docs/safe-synthesizer/sdk-resources.mdx`.
 
+## Configuration and task-library defaults
+
+Job configs retain explicitly supplied options, including nulls and values equal to defaults, across storage and task dispatch. Omitted options are resolved by the task library rather than expanded into control-plane defaults. Platform-generated settings, such as the default PII pipeline when requested, are retained.
+
+This does not guarantee compatibility between different library versions: defaults can differ, and explicitly requested options must be supported by the task library. Unknown-field rejection is not automatically disabled. Previously stored, fully expanded specs cannot distinguish user choices from injected defaults; submit a new sparse spec (or replace the spec with PATCH) to remove those defaults. PATCH with a spec replaces the definition, while description-only PATCH leaves it unchanged.
+
+New task builds publish configuration-validation failures in public job `status_details.message` when attempt-scoped reporting is available, in addition to the task error. Older task images do not gain this reporting change.
+
 ## Troubleshooting
 
 - If model downloads fail, confirm the Files API URL is reachable and the model filesets exist in the selected workspace.

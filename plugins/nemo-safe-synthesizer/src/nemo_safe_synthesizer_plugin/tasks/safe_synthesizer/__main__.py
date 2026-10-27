@@ -57,6 +57,7 @@ from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.adapter_resolution impo
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.jsonl_loader import load_jsonl_file
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.logging_setup import configure_logging
 from nemo_safe_synthesizer_plugin.tasks.safe_synthesizer.model_init import init_models_sync
+from pydantic import ValidationError
 
 configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
 
@@ -410,7 +411,36 @@ def run_from_env() -> None:
     with open(config_file_path, "r", encoding="utf-8") as f:
         raw_job_config: dict = json.load(f)
 
-    job_config = SafeSynthesizerJobConfig.model_validate(raw_job_config)
+    try:
+        job_config = SafeSynthesizerJobConfig.model_validate(raw_job_config)
+    except (ParameterError, ValidationError) as exc:
+        # Keep the original task failure, but also expose an actionable reason
+        # through public job status_details, scoped to this execution attempt.
+        reason = str(exc)
+        if isinstance(exc, ValidationError):
+            # ValidationError.__str__ includes the raw input config, which can
+            # contain sensitive values. Publish locations and messages only.
+            reason = "; ".join(
+                f"{'.'.join(map(str, error['loc']))}: {error['msg']}"
+                for error in exc.errors(include_input=False, include_url=False)
+            )
+        job_id = os.environ.get(NEMO_JOB_ID_ENVVAR)
+        attempt_id = os.environ.get(NEMO_JOB_ATTEMPT_ID_ENVVAR)
+        if job_id and attempt_id:
+            try:
+                JobsClient.from_client(client).update_attempt_status_details(
+                    job_id,
+                    attempt_id,
+                    workspace=workspace,
+                    body={
+                        "message": "Safe Synthesizer task configuration validation failed. "
+                        "Check that explicitly requested options are supported by the task library: "
+                        f"{reason}"
+                    },
+                )
+            except Exception:
+                logger.exception("Could not report Safe Synthesizer configuration validation failure")
+        raise
     save_path = Path(os.environ.get(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, DEFAULT_TASK_STORAGE_PATH))
     pretrained_model_tmp, adapter_path = _resolve_pretrained_model(job_config, workspace=workspace, client=client)
     try:
