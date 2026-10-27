@@ -9,6 +9,9 @@ imports this module lazily (see ``backend._ensure_openshell``).
 
 from __future__ import annotations
 
+from typing import Any
+
+from google.protobuf.message import Message
 from openshell import SandboxClient
 from openshell._proto import datamodel_pb2 as dm  # ty: ignore[unresolved-import]
 from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
@@ -29,3 +32,15 @@ class JobsSandboxClient(SandboxClient):
             timeout=self._timeout,
         )
         return response.sandbox
+
+    def provider_rpc(self, method: str, request: Message) -> Any:
+        if method not in {
+            "GetProviderProfile",
+            "GetProvider",
+            "CreateProvider",
+            "ListProviders",
+            "DeleteProvider",
+            "GetSandbox",
+        }:
+            raise ValueError("Unsupported provider operation.")
+        return getattr(self._stub, method)(request, timeout=self._timeout)

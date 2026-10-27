@@ -828,7 +828,7 @@ async def test_to_spec_mcp_secret_indirection_through_environment() -> None:
 
 
 @pytest.mark.asyncio
-async def test_to_spec_rejects_provider_credentials_before_workdir_access() -> None:
+async def test_to_spec_rejects_local_provider_credentials_before_workdir_access() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent()
     client = _sdk_with_files()
@@ -840,7 +840,7 @@ async def test_to_spec_rejects_provider_credentials_before_workdir_access() -> N
             },
         )
     )
-    with pytest.raises(ValueError, match="Provider fulfillments are not yet supported"):
+    with pytest.raises(ValueError, match="require remote OpenShell"):
         await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(
                 agent="calc",
@@ -851,9 +851,48 @@ async def test_to_spec_rejects_provider_credentials_before_workdir_access() -> N
             workspace="default",
             entity_client=entity_client,
             async_sdk=client,
-            is_local=False,
+            is_local=True,
         )
     client.files.list_files.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_bindings_survive_remote_compilation_without_env_secrets() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _agent()
+    environment = AgentEnvironmentInline(
+        environment_spec=EnvironmentSpecInline(
+            secrets={"SERVICE_SECRET": "default/service-token"},
+            providers={
+                "service": ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "SERVICE_SECRET"})
+            },
+        )
+    )
+    with patch("nemo_agents_plugin.jobs.execute.authorize_provider_references", new=AsyncMock()) as authorize:
+        spec = await ExecuteAgentJob.to_spec(
+            ExecuteAgentJobConfig(agent="calc", input="hello", environment=environment),
+            workspace="default",
+            entity_client=entity_client,
+            async_sdk=_sdk_with_files(),
+            is_local=False,
+        )
+    authorize.assert_awaited_once()
+    assert spec.secrets == {}
+    with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
+        get_config.return_value.jobs.default_image = "registry.example/tasks:test"
+        compiled = await ExecuteAgentJob.compile(
+            workspace="default",
+            spec=spec,
+            entity_client=MagicMock(),
+            job_name=None,
+            async_sdk=MagicMock(),
+            profile="sandbox",
+        )
+    step = compiled.steps[0]
+    assert step.gateway_providers["service"].credentials == {"API_TOKEN": "default/service-token"}
+    assert step.executor.profile == "sandbox"
+    assert not step.environment
+    assert "default/service-token" not in str(spec.agent.config)
 
 
 @pytest.mark.asyncio

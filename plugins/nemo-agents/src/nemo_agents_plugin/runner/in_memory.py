@@ -55,6 +55,7 @@ from nemo_agents_plugin.utils import get_base_url
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 
 # Match characters not safe for filesystem paths.  Deployment names are
 # normally URL-safe identifiers, but we sanitise defensively to ensure we
@@ -345,9 +346,12 @@ class InMemoryRunnerBackend(RunnerBackend):
         auth_context: AuthContext | None = None,
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
+        providers: dict[str, GatewayProviderBinding] | None = None,
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Start a local deployment for NAT workflows or Platform-owned agents."""
+        if providers:
+            return DeploymentInfo(name=name, status="failed", error="Gateway providers require OpenShell execution.")
         # created_by drives on-behalf-of delegation only for container modes (via
         # the auth-proxy sidecar). Subprocess deployments run in-process on the
         # platform host and do not use the sidecar, so it does not apply here.

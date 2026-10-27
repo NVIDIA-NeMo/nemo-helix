@@ -16,6 +16,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
@@ -208,7 +209,7 @@ class EnvironmentSpecInline(BaseModel):
         default_factory=dict,
         description=(
             "Named provider fulfillments. Consumed secret entries are reserved for external credential injection, "
-            "never process-env injection. Execution and deployment support is not yet available."
+            "never process-env injection. Requires an operator-enabled OpenShell execution backend."
         ),
     )
     model_provider_override: ModelProviderOverride | None = Field(
@@ -342,6 +343,9 @@ class AgentDeployment(EntityMetadata):
         description="Resolved compute snapshot from the referenced environment.",
     )
     secrets: StringMap = Field(default_factory=dict, description="Resolved secret env references.")
+    providers: dict[str, GatewayProviderBinding] = Field(
+        default_factory=dict, description="Resolved gateway credential bindings."
+    )
     status: DeploymentStatus = Field(default="pending", description="Deployment lifecycle status.")
     deployment_mode: DeploymentMode = Field(default="subprocess", description="Runtime backend.")
     endpoint: str = Field(default="", description="Subprocess loopback endpoint.")

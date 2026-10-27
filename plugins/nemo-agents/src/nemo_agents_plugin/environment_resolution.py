@@ -17,8 +17,8 @@ At create time the deployment route:
 
 Provider fulfillments are resolved separately and their secret entries are
 excluded from process-env injection. Launch consumers must call
-``require_runtime_support`` before using a merge result; provider execution is
-not yet supported.
+``require_runtime_support`` before using a merge result; only configured
+OpenShell execution can consume provider bindings.
 
 Secret references are never written into the config as plaintext. Unconsumed
 top-level ``secrets`` and each declared MCP server's ``secrets`` are
@@ -56,6 +56,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding as ResolvedProviderFulfillment
 
 
 class EnvironmentResolutionError(ValueError):
@@ -68,14 +69,6 @@ class ResolvedEnvironment:
 
     environment_spec: EnvironmentSpecInline | None = None
     compute_spec: ComputeSpecInline | None = None
-
-
-@dataclass(frozen=True)
-class ResolvedProviderFulfillment:
-    """An injection profile and credential-slot -> secret-ref bindings; no values."""
-
-    profile: str
-    credentials: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -97,12 +90,11 @@ class MergedEnvironment:
     secrets: dict[str, str]
     providers: dict[str, ResolvedProviderFulfillment] = field(default_factory=dict)
 
-    def require_runtime_support(self) -> None:
-        """Fail closed until provider provisioning and scoped resolution exist."""
-        if self.providers:
+    def require_runtime_support(self, backend: str = "") -> None:
+        """Reserve provider bindings for the gateway-aware execution backend."""
+        if self.providers and backend != "openshell":
             raise EnvironmentResolutionError(
-                "Provider fulfillments are not yet supported for agent execution or deployment. "
-                "They require gateway credential provisioning and scoped secret resolution; "
+                "Provider fulfillments require a configured OpenShell execution backend; "
                 "provider-bound secrets cannot fall back to process-environment injection."
             )
 

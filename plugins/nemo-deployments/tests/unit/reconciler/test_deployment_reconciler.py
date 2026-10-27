@@ -13,10 +13,44 @@ from nemo_deployments_plugin.entities import Deployment, Prerequisite, StatusEve
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.orphan_cleanup import reconcile_orphans
 from nemo_deployments_plugin.types import DeploymentStatus
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding, ProviderAccessRevoked
 from reconciler.conftest import MockDeploymentBackend
 
 NO_VOLUMES: dict[tuple[str, str], Volume] = {}
+
+
+@pytest.mark.parametrize("status", ["STARTING", "READY", "SUCCEEDED", "FAILED"])
+@pytest.mark.parametrize("error", [RuntimeError, ProviderAccessRevoked])
+async def test_provider_renewal_retries_without_recreating_workload(deployment_reconciler, mock_backend, status, error):
+    dep = make_deployment()
+    dep.status = "READY"
+    dep.with_auth_context(AuthContext(principal_id="user-1"))
+    cfg = make_deployment_config()
+    cfg.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})
+    }
+    deployment_reconciler.set_config_cache({("default", "cfg1"): cfg})
+    mock_backend.supports_gateway_providers = True
+    mock_backend.read_status_result = BackendStatusUpdate(status=status)
+    mock_backend.renew_gateway_credentials = AsyncMock(side_effect=error("sensitive RPC detail"))
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+    assert dep.status == status
+    assert not mock_backend.create_calls
+    if status in ("STARTING", "READY"):
+        args = mock_backend.renew_gateway_credentials.call_args.kwargs
+        assert args["workload"].id == dep.id
+        assert args["auth_context"].principal_id == "user-1"
+        assert ("access was removed" if error is ProviderAccessRevoked else "retrying") in dep.status_message
+        assert "sensitive" not in dep.status_message
+        mock_backend.renew_gateway_credentials.side_effect = None
+        mock_backend.read_status_result = BackendStatusUpdate(status="READY", status_message="running")
+        await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+        assert dep.status_message == "running"
+    else:
+        mock_backend.renew_gateway_credentials.assert_not_awaited()
+
 
 NOW = datetime(2026, 6, 30, 12, 0, 0, tzinfo=timezone.utc)
 STARTING_TIMEOUT_SECONDS = 60

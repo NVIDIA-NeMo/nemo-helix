@@ -132,7 +132,7 @@ class BindingRegistry:
         if (
             row.owner != owner
             or row.revoked
-            or int(self.clock()) >= claims.binding_expires_at
+            or (claims.workload is None and int(self.clock()) >= claims.binding_expires_at)
             or session.get(RevokedJob, claims.job_id) is not None
         ):
             raise RegistrationDenied("Credential binding is not active for this provider.")

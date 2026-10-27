@@ -20,6 +20,7 @@ from typing import Any, Literal
 from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint
 from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,7 @@ class RunnerBackend(ABC):
         auth_context: AuthContext | None = None,
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
+        providers: dict[str, GatewayProviderBinding] | None = None,
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Start the agent process; returns status="starting".

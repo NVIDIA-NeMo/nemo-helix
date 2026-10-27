@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import socket
 import tempfile
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,7 @@ from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import
     RegistrationDenied,
     RegistrationTickets,
 )
+from nemo_helix_plugin.openshell.types import GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
@@ -41,6 +43,7 @@ class Harness:
             secret_workspace="helix-team",
             secret_name="service-token",
             job_id="job-1",
+            principal_id="user-1",
         )
         self.owner = ProviderOwner(
             workspace="openshell-team", provider="job-provider", provider_id="provider-uuid", credential_key="API_TOKEN"
@@ -48,6 +51,10 @@ class Harness:
         self.calls: list[httpx.Request] = []
         self.secret = "real-secret-never-persist-this"
         self.status = 200
+        self.job_status = "active"
+        self.step_status = "active"
+        self.attempt = "attempt-1"
+        self.step_id = "step-1"
         self.client = AsyncSecretsClient(
             base_url="https://helix.example",
             http_client=httpx.AsyncClient(
@@ -60,9 +67,39 @@ class Harness:
         self.calls.append(request)
         if self.status != 200:
             return httpx.Response(self.status, json={"detail": self.secret})
+        if "/apis/jobs/" in request.url.path:
+            if request.url.path.endswith("/steps/run"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": self.step_id,
+                        "entity_id": self.step_id,
+                        "parent": self.attempt,
+                        "attempt_id": self.attempt,
+                        "name": "run",
+                        "workspace": "helix-team",
+                        "status": self.step_status,
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "id": "job-id",
+                    "attempt_id": self.attempt,
+                    "name": "job-1",
+                    "workspace": "helix-team",
+                    "source": "test",
+                    "platform_spec": {
+                        "steps": [{"name": "run", "executor": {"provider": "subprocess", "command": ["true"]}}]
+                    },
+                    "fileset": "results",
+                    "status": self.job_status,
+                },
+            )
         assert "/workspaces/helix-team/secrets/service-token" in request.url.path
-        payload = {"name": "service-token", "workspace": "helix-team"}
+        payload = {"id": "secret-id", "name": "service-token", "workspace": "helix-team"}
         if request.url.path.endswith("/access"):
+            assert request.headers.get("X-NHX-Principal-On-Behalf-Of") == self.scope.principal_id
             payload["value"] = self.secret
         return httpx.Response(200, json=payload)
 
@@ -71,8 +108,49 @@ class Harness:
 
 
 @pytest.fixture
-def harness(tmp_path: Path) -> Harness:
+def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
+    # Permission integration has its own tests; these exercise tickets and gRPC.
+    monkeypatch.setattr("nemo_helix_plugin.openshell.authorization._require_creator_permission", AsyncMock())
     return Harness(tmp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_enabled", [True, False])
+async def test_driver_rejects_mismatched_auth_mode_before_secret_access(harness: Harness, auth_enabled: bool) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+
+    harness.scope = harness.scope.model_copy(update={"principal_id": None if auth_enabled else "user-1"})
+    ticket = await harness.issue()
+    driver = CredentialDriver(harness.registry, harness.client, auth_enabled=auth_enabled, clock=harness.clock)
+    harness.calls.clear()
+    with pytest.raises(RegistrationDenied, match="authentication mode"):
+        await driver._dispatch("StoreCredential", {**harness.owner.model_dump(), "value": ticket.get_secret_value()})
+    # A persisted binding from before an operator changes modes is denied too.
+    handle = harness.registry.register(harness.owner, ticket)
+    with pytest.raises(RegistrationDenied, match="authentication mode"):
+        await driver._dispatch(
+            "ResolveCredentials",
+            {
+                "credentials": [
+                    {**harness.owner.model_dump(), "request_id": "read", "handle": {"driver": "nemo", "handle": handle}}
+                ]
+            },
+        )
+    assert not harness.calls
+
+
+def test_auth_disabled_sidecar_needs_only_signing_key(tmp_path: Path) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    destination = tmp_path / "private"
+    prepare_credentials(source, destination, auth_disabled=True)
+    assert (destination / "registration.key").read_bytes() == KEY
+    assert not (destination / "helix.token").exists()
+    with pytest.raises(FileNotFoundError):
+        prepare_credentials(source, destination)  # Missing token never selects disabled mode implicitly.
 
 
 @pytest.mark.asyncio
@@ -270,13 +348,103 @@ def socket_directory() -> Iterator[Path]:
 
 
 @pytest.mark.asyncio
-async def test_real_grpc_registration_resolution_and_delete(harness: Harness, socket_directory: Path) -> None:
+async def test_sidecar_recovers_stale_socket_and_rejects_second_driver(
+    harness: Harness, socket_directory: Path
+) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.server import running_server
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import check_ready
+
+    path = socket_directory / "driver.sock"
+    # SIGKILL leaves the same filesystem artifact: a socket with no listener.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+        stale.bind(str(path))
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    async with running_server(driver, path):
+        await check_ready(path)
+        with pytest.raises(ValueError, match="Another credential driver"):
+            async with running_server(driver, path):
+                pytest.fail("A second driver acquired the socket")
+        await check_ready(path)
+    assert not path.exists()
+    assert not harness.calls  # Readiness does not read secrets or require Helix.
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink", "listener"])
+def test_sidecar_does_not_remove_other_socket_owners(socket_directory: Path, kind: str) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.server import socket_lease
+
+    path = socket_directory / "driver.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        if kind == "file":
+            path.write_text("leave me alone")
+        elif kind == "symlink":
+            path.symlink_to(socket_directory / "missing")
+        else:
+            listener.bind(str(path))
+            listener.listen(1)
+        inode = path.lstat().st_ino
+        with pytest.raises(ValueError):
+            with socket_lease(path):
+                pytest.fail("Existing path was accepted")
+        assert path.lstat().st_ino == inode
+
+
+def test_sidecar_stages_private_files_and_rotates_only_token(tmp_path: Path) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
+
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    (source / "helix.token").write_text("token-one")
+    prepare_credentials(source, destination)
+    assert destination.stat().st_mode & 0o777 == 0o700
+    assert read_private_file(destination / "registration.key") == KEY
+    assert read_private_file(destination / "helix.token") == b"token-one"
+    inode = (destination / "helix.token").stat().st_ino
+    (source / "helix.token").write_text("token-two")
+    prepare_credentials(source, destination)
+    assert read_private_file(destination / "helix.token") == b"token-two"
+    assert (destination / "helix.token").stat().st_ino != inode
+    (source / "registration.key").write_bytes(b"replacement-signing-key-32-bytes!")
+    (source / "helix.token").write_text("token-three")
+    with pytest.raises(ValueError, match="explicit migration"):
+        prepare_credentials(source, destination)
+    assert read_private_file(destination / "registration.key") == KEY
+    assert read_private_file(destination / "helix.token") == b"token-two"
+
+
+@pytest.mark.parametrize("invalid", ["symlink", "empty", "oversize", "short-key"])
+def test_sidecar_rejects_invalid_mounted_credentials(tmp_path: Path, invalid: str) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
+
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY if invalid != "short-key" else b"short")
+    token = source / "helix.token"
+    if invalid == "symlink":
+        token.symlink_to(source / "registration.key")
+    else:
+        token.write_bytes(b"x" * (65537 if invalid == "oversize" else 0) if invalid != "short-key" else b"token")
+    with pytest.raises((OSError, ValueError)):
+        prepare_credentials(source, destination)
+    assert not destination.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_enabled", [True, False])
+async def test_real_grpc_registration_resolution_and_delete(
+    harness: Harness, socket_directory: Path, auth_enabled: bool
+) -> None:
     grpc = pytest.importorskip("grpc")
     from nemo_deployments_plugin.backends.openshell.credential_driver import wire
     from nemo_deployments_plugin.backends.openshell.credential_driver.server import running_server
     from nemo_deployments_plugin.backends.openshell.credential_driver.service import CAPABILITY, CredentialDriver
 
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    if not auth_enabled:
+        harness.scope = harness.scope.model_copy(update={"principal_id": None})
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock, auth_enabled=auth_enabled)
     socket = socket_directory / "driver.sock"
     async with running_server(driver, socket):
         async with grpc.aio.insecure_channel(f"unix:{socket}") as channel:
@@ -309,7 +477,7 @@ async def test_real_grpc_registration_resolution_and_delete(harness: Harness, so
             result = await call("ResolveCredentials", {"credentials": [lookup]})
             assert result["credentials"][0]["value"] == harness.secret
             assert result["credentials"][0]["request_id"] == "read-1"
-            assert datetime.fromisoformat(result["credentials"][0]["expiration_time"]).timestamp() == harness.now + 30
+            assert datetime.fromisoformat(result["credentials"][0]["expiration_time"]).timestamp() == harness.now + 300
             # Rotation is visible on the next driver resolution; no value cache.
             harness.secret = "rotated-secret"
             result = await call("ResolveCredentials", {"credentials": [lookup]})
@@ -379,20 +547,24 @@ async def test_driver_descriptor_can_coexist_with_pinned_sdk(harness: Harness) -
 
 
 @pytest.mark.asyncio
-async def test_revoke_during_secret_read_wins(harness: Harness) -> None:
+@pytest.mark.parametrize("change", ["revoke", "slow-read"])
+async def test_revoke_or_expiry_during_secret_read_wins(harness: Harness, change: str) -> None:
     pytest.importorskip("grpc")
     from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
 
     handle = harness.registry.register(harness.owner, await harness.issue())
-    original = harness.client.access_secret
+    original = harness.client.with_headers({"X-NHX-Principal-On-Behalf-Of": "user-1"}).access_secret
 
     async def access(**kwargs):
         response = await original(**kwargs)
-        harness.registry.revoke_job("job-1")
+        if change == "revoke":
+            harness.registry.revoke_job("job-1")
+        else:
+            harness.now += 31
         return response
 
     harness.client.access_secret = AsyncMock(side_effect=access)
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock, cache_lifetime=30)
     with pytest.raises(RegistrationDenied):
         await driver._dispatch(
             "ResolveCredentials",
@@ -406,3 +578,113 @@ async def test_revoke_during_secret_read_wins(harness: Harness) -> None:
                 ]
             },
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lifetime", [1, 300, 3600])
+async def test_configured_credential_lifetime_is_capped_by_binding(harness: Harness, lifetime: int) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver import wire
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+
+    handle = harness.registry.register(harness.owner, await harness.issue())
+    claims = harness.registry.resolve(harness.owner, handle).claims
+    harness.now = claims.binding_expires_at - 100
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock, cache_lifetime=lifetime)
+    response = await driver._dispatch(
+        "ResolveCredentials",
+        {
+            "credentials": [
+                {
+                    **harness.owner.model_dump(),
+                    "handle": {"driver": "nemo", "handle": handle},
+                    "request_id": "read",
+                }
+            ]
+        },
+    )
+    expires = datetime.fromisoformat(wire.data(response)["credentials"][0]["expiration_time"]).timestamp()
+    assert expires == min(harness.now + lifetime, claims.binding_expires_at)
+
+
+@pytest.mark.parametrize("lifetime", [0, -1, 3601])
+def test_invalid_credential_lifetime(harness: Harness, lifetime: int) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+
+    with pytest.raises(ValueError, match="cache lifetime"):
+        CredentialDriver(harness.registry, harness.client, cache_lifetime=lifetime)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change", ["completed", "cancelling", "paused", "step-error", "new-attempt", "new-step", "active"]
+)
+async def test_job_binding_tracks_live_execution_identity(harness: Harness, change: str) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+
+    harness.scope = harness.scope.model_copy(
+        update={
+            "workload": GatewayWorkload(
+                kind="job",
+                workspace="helix-team",
+                name="job-1",
+                id="step-1",
+                attempt_id="attempt-1",
+                step_name="run",
+            )
+        }
+    )
+    handle = harness.registry.register(harness.owner, await harness.issue())
+    harness.calls.clear()
+    harness.now += 7200  # A live workload is not limited to a one-hour registration lease.
+    if change in {"completed", "cancelling", "paused"}:
+        harness.job_status = change
+    elif change == "step-error":
+        harness.step_status = "error"
+    elif change == "new-attempt":
+        harness.attempt = "attempt-2"
+    elif change == "new-step":
+        harness.step_id = "step-2"
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    request = {
+        "credentials": [
+            {**harness.owner.model_dump(), "handle": {"driver": "nemo", "handle": handle}, "request_id": "read"}
+        ]
+    }
+    if change == "active":
+        from nemo_deployments_plugin.backends.openshell.credential_driver import wire
+
+        response = wire.data(await driver._dispatch("ResolveCredentials", request))
+        assert response["credentials"][0]["value"] == harness.secret
+        assert len([r for r in harness.calls if "/apis/jobs/" in r.url.path]) == 4
+    else:
+        with pytest.raises(RegistrationDenied):
+            await driver._dispatch("ResolveCredentials", request)
+        assert not any(r.url.path.endswith("/access") for r in harness.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["deleted", "recreated", "stopping", "failed", "active"])
+async def test_deployment_binding_tracks_live_entity(harness: Harness, change: str) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+    from nemo_deployments_plugin.entities import Deployment
+    from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    workload = GatewayWorkload(kind="deployment", workspace="helix-team", name="agent", id="dep-1")
+    entity = Deployment(
+        name="agent",
+        workspace="helix-team",
+        deployment_config="config",
+        status="FAILED" if change == "failed" else "READY",
+        desired_state="STOPPED" if change == "stopping" else "READY",
+    )
+    entity._id = "dep-2" if change == "recreated" else "dep-1"
+    with patch("nemo_deployments_plugin.backends.openshell.credential_driver.service.NemoEntitiesClient") as client:
+        client.return_value.get = AsyncMock(return_value=entity)
+        if change == "deleted":
+            client.return_value.get.side_effect = NemoEntityNotFoundError("gone")
+        if change == "active":
+            await driver._require_active_workload(workload)
+        else:
+            with pytest.raises(RegistrationDenied):
+                await driver._require_active_workload(workload)

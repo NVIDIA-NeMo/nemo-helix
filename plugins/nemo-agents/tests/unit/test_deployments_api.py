@@ -625,7 +625,7 @@ class TestCreateDeployment:
             },
         )
         assert resp.status_code == 422
-        assert "Provider fulfillments are not yet supported" in resp.json()["detail"]
+        assert "require a configured OpenShell execution backend" in resp.json()["detail"]
         entity_client.create.assert_not_awaited()
 
     def test_create_rejects_missing_environment_ref(self) -> None:

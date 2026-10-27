@@ -13,7 +13,12 @@ from typing import Any
 
 import grpc
 from google.protobuf.message import Message
+from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.openshell.types import GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -60,15 +65,60 @@ class CredentialDriver:
         registry: BindingRegistry,
         secrets_client: AsyncSecretsClient,
         *,
-        cache_lifetime: int = 30,
+        cache_lifetime: int = 300,
+        auth_enabled: bool = True,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        if not 1 <= cache_lifetime <= 60:
-            raise ValueError("Credential cache lifetime must be between 1 and 60 seconds.")
+        if not 1 <= cache_lifetime <= 3600:
+            raise ValueError("Credential cache lifetime must be between 1 and 3600 seconds.")
         self.registry = registry
         self.secrets_client = secrets_client
         self.cache_lifetime = cache_lifetime
+        self.auth_enabled = auth_enabled
         self.clock = clock
+
+    def _require_auth_mode(self, principal_id: str | None) -> None:
+        if self.auth_enabled != (principal_id is not None):
+            raise RegistrationDenied("Binding authentication mode does not match this driver.")
+
+    async def _require_active_workload(self, workload: GatewayWorkload | None) -> None:
+        if workload is None:
+            return  # Standalone tickets retain their bounded binding lifetime.
+        if workload.kind == "job":
+            if not workload.attempt_id or not workload.step_name:
+                raise RegistrationDenied("Missing job execution identity.")
+            jobs = AsyncJobsClient.from_client(self.secrets_client)
+            job = (await jobs.get_job(workspace=workload.workspace, name=workload.name)).data()
+            step = (
+                await jobs.get_job_step(workspace=workload.workspace, job=workload.name, name=workload.step_name)
+            ).data()
+            active = {"created", "pending", "active"}
+            if (
+                step.id != workload.id
+                or job.attempt_id != workload.attempt_id
+                or step.attempt_id != workload.attempt_id
+                or job.status not in active
+                or step.status not in active
+            ):
+                raise RegistrationDenied("Job execution is no longer active.")
+        else:
+            entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self.secrets_client))
+            try:
+                deployment = await entities.get(Deployment, workload.name, workspace=workload.workspace)
+            except NemoEntityNotFoundError:
+                raise RegistrationDenied("Deployment no longer exists.") from None
+            if (
+                deployment.id != workload.id
+                or deployment.desired_state != "READY"
+                or deployment.status
+                not in {
+                    "PENDING",
+                    "STARTING",
+                    "READY",
+                    "LOST",
+                }
+            ):
+                raise RegistrationDenied("Deployment is no longer active.")
 
     async def dispatch(self, method: str, request: Message, context: grpc.aio.ServicerContext) -> Message:
         try:
@@ -114,6 +164,7 @@ class CredentialDriver:
             )
         if method == "StoreCredential":
             request = StoreRequest.model_validate(raw)
+            self._require_auth_mode(self.registry.tickets.verify(request.value).principal_id)
             owner = ProviderOwner.model_validate(request.model_dump(include=ProviderOwner.model_fields.keys()))
             handle = self.registry.register(
                 owner,
@@ -141,9 +192,23 @@ class CredentialDriver:
                 for item in requests
             ]
             results = []
+            deadlines = []
+            for binding in bindings:
+                self._require_auth_mode(binding.claims.principal_id)
             for item, binding in zip(requests, bindings, strict=True):
+                # A slow later read must not extend the lease of an earlier
+                # value in the batch. Start its lifetime before remote access.
+                deadlines.append(int(self.clock()) + self.cache_lifetime)
+                # Re-evaluate the creator's current Secrets permission on every
+                # resolution, rather than using the driver's authority alone.
+                scoped_secrets = self.secrets_client
+                if binding.claims.principal_id is not None:
+                    scoped_secrets = scoped_secrets.with_headers(
+                        {"X-NHX-Principal-On-Behalf-Of": binding.claims.principal_id}
+                    )
                 async with asyncio.timeout(15):
-                    response = await self.secrets_client.access_secret(
+                    await self._require_active_workload(binding.claims.workload)
+                    response = await scoped_secrets.access_secret(
                         workspace=binding.claims.secret_workspace,
                         name=binding.claims.secret_name,
                     )
@@ -152,11 +217,15 @@ class CredentialDriver:
                     raise RegistrationDenied("Secret response scope mismatch.")
                 results.append({"request_id": item.request_id, "value": secret.value})
             # A revoke/expiry while the remote read was pending must win.
-            now = int(self.clock())
-            for result, binding in zip(results, bindings, strict=True):
+            for result, binding, deadline in zip(results, bindings, deadlines, strict=True):
                 self.registry.resolve(binding.owner, binding.handle)
-                deadline = min(now + self.cache_lifetime, binding.claims.binding_expires_at)
+                async with asyncio.timeout(15):
+                    await self._require_active_workload(binding.claims.workload)
+                if binding.claims.workload is None:
+                    deadline = min(deadline, binding.claims.binding_expires_at)
                 result["expiration_time"] = datetime.fromtimestamp(deadline, tz=timezone.utc).isoformat()
+            if any(deadline <= int(self.clock()) for deadline in deadlines):
+                raise RegistrationDenied("Credential resolution exceeded its cache lifetime.")
             return wire.message("ResolveCredentialsResponse", {"credentials": results})
         raise RegistrationDenied("Unsupported credential operation.")
 

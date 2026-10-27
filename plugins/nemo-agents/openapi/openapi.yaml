@@ -2904,6 +2904,11 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
+        providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Providers
         agent:
           type: string
           title: Agent
@@ -3248,8 +3253,8 @@ components:
           type: object
           title: Providers
           description: Named provider fulfillments. Consumed secret entries are reserved
-            for external credential injection, never process-env injection. Execution
-            and deployment support is not yet available.
+            for external credential injection, never process-env injection. Requires
+            an operator-enabled OpenShell execution backend.
           additionalProperties: true
         model_provider_override:
           allOf:
@@ -3756,8 +3761,8 @@ components:
           type: object
           title: Providers
           description: Named provider fulfillments. Consumed secret entries are reserved
-            for external credential injection, never process-env injection. Execution
-            and deployment support is not yet available.
+            for external credential injection, never process-env injection. Requires
+            an operator-enabled OpenShell execution backend.
           additionalProperties: true
         model_provider_override:
           allOf:
@@ -3985,8 +3990,8 @@ components:
           type: object
           title: Providers
           description: Named provider fulfillments. Consumed secret entries are reserved
-            for external credential injection, never process-env injection. Execution
-            and deployment support is not yet available.
+            for external credential injection, never process-env injection. Requires
+            an operator-enabled OpenShell execution backend.
           additionalProperties: true
         model_provider_override:
           allOf:
@@ -4471,6 +4476,11 @@ components:
             type: string
           type: object
           title: Secrets
+        providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Providers
         extension:
           $ref: '#/components/schemas/ExecuteAgentExtensionConfig'
       type: object
@@ -4735,6 +4745,24 @@ components:
       enum:
       - fileset
       title: FileStorageType
+    GatewayProviderBinding:
+      properties:
+        profile:
+          type: string
+          minLength: 1
+          title: Profile
+        credentials:
+          additionalProperties:
+            type: string
+          type: object
+          minProperties: 1
+          title: Credentials
+      additionalProperties: false
+      type: object
+      required:
+      - profile
+      - credentials
+      title: GatewayProviderBinding
     HTTPValidationError:
       properties:
         detail:
