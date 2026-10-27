@@ -161,7 +161,7 @@ const CreateExampleAgentModalInner: FC<CreateExampleAgentModalProps> = ({
         data: {
           name: buildSampleAgentName(example.namePrefix),
           // The config is the single source of truth for the blurb; the registry no
-          // longer carries a copy that could drift from the shipped agent.yml.
+          // longer carries a copy that could drift from the shipped agent.yaml.
           description: typeof config.description === 'string' ? config.description : '',
           config,
           // Omitted for NAT samples (API defaults to nat-workflow-v1); set for

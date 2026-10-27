@@ -6,7 +6,7 @@ import { z } from 'zod';
 // Registry of canned example agents. Each entry references curated static assets
 // under public/sample-agents/<dir>/ by path (fetched on demand, never bundled) —
 // mirroring src/constants/sampleDatasets.ts. Used by the Create Example Agent
-// modal (fetch + parse agent.yml, inject model, POST).
+// modal (fetch + parse agent.yaml, inject model, POST).
 //
 // Agent configs only. Eval configs and datasets are NOT seeded from here: Studio's
 // Run Evaluation flow takes a user-supplied config and dataset, so the sample eval
@@ -20,7 +20,7 @@ import { z } from 'zod';
 //   console script on PATH, since Fabric spawns it as a stdio MCP child. No
 //   shipped sample declares `mcp:` today, so nothing currently relies on this.
 //
-// Each public/sample-agents/<dir>/agent.yml is an independent copy of the
+// Each public/sample-agents/<dir>/agent.yaml is an independent copy of the
 // example's config; keep them in sync by hand.
 export interface SampleAgent {
   key: string;
@@ -40,7 +40,7 @@ export const SAMPLE_AGENTS: SampleAgent[] = [
     key: 'email_security_triage',
     displayName: 'Email Security Triage',
     namePrefix: 'email-security-triage',
-    agentConfigPath: 'sample-agents/email-security-triage/agent.yml',
+    agentConfigPath: 'sample-agents/email-security-triage/agent.yaml',
     configFormat: 'nemo-agents-spec-v1',
   },
 ];
