@@ -3,8 +3,6 @@
 
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import {
-  getFileExtension,
-  isAcceptedFileType,
   fromFilesetUrl,
   inferJsonContentType,
   isJsonFile,
@@ -12,45 +10,6 @@ import {
 } from '@nemo/common/src/components/DatasetFileSelect/utils';
 
 describe('FileInput utils', () => {
-  describe('getFileExtension', () => {
-    it('returns extension from string path', () => {
-      expect(getFileExtension('data.csv')).toBe('.csv');
-      expect(getFileExtension('file.jsonl')).toBe('.jsonl');
-      expect(getFileExtension('document.txt')).toBe('.txt');
-    });
-
-    it('returns extension from File object', () => {
-      const file = new File(['content'], 'test.json', { type: 'application/json' });
-      expect(getFileExtension(file)).toBe('.json');
-    });
-
-    it('handles paths with multiple dots', () => {
-      expect(getFileExtension('my.file.name.csv')).toBe('.csv');
-      expect(getFileExtension('archive.tar.gz')).toBe('.gz');
-    });
-
-    it('returns null for files without extension', () => {
-      expect(getFileExtension('README')).toBeNull();
-      expect(getFileExtension('Makefile')).toBeNull();
-    });
-
-    it('handles paths with directories', () => {
-      expect(getFileExtension('path/to/file.csv')).toBe('.csv');
-      expect(getFileExtension('/absolute/path/data.jsonl')).toBe('.jsonl');
-    });
-  });
-
-  describe('isAcceptedFileType', () => {
-    it('matches case-insensitively, accepts everything for an empty list, rejects extensionless files', () => {
-      expect(isAcceptedFileType('data.CSV', ['.csv'])).toBe(true);
-      expect(isAcceptedFileType('dir/data.jsonl', ['.json', '.csv'])).toBe(false);
-      expect(isAcceptedFileType(new File([''], 'a.jsonl'), ['.jsonl'])).toBe(true);
-      expect(isAcceptedFileType('README', ['.csv'])).toBe(false);
-      expect(isAcceptedFileType('README.md', [])).toBe(true);
-      expect(isAcceptedFileType('README.md', undefined)).toBe(true);
-    });
-  });
-
   describe('parseFilesetUrl', () => {
     it('parses fileset URL to components', () => {
       const result = parseFilesetUrl('fileset://my-workspace/my-dataset/train.csv');

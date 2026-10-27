@@ -9,7 +9,7 @@
  * without an express license agreement from NVIDIA CORPORATION or
  * its affiliates is strictly prohibited.
  */
-import { isAcceptedFileType } from '@nemo/common/src/components/DatasetFileSelect/utils';
+import { isAcceptedFileType } from '@nemo/common/src/utils/file';
 import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 
 /**

@@ -292,3 +292,27 @@ export function resolveKeyPath(row: Record<string, unknown>, path: string): unkn
   }
   return current;
 }
+
+/**
+ * Returns the extension of a file, including the leading dot.
+ * @param file - A browser File or a path/file name.
+ * @returns The extension, or null if there is none.
+ */
+export const getFileExtension = (file: File | string): string | null => {
+  const fileName = typeof file === 'string' ? file : file.name;
+  if (!fileName.includes('.')) return null;
+  return fileName.substring(fileName.lastIndexOf('.'));
+};
+
+/**
+ * Single source of truth for "is this file's extension accepted?".
+ * Case-insensitive; an empty or missing list accepts everything.
+ */
+export const isAcceptedFileType = (
+  file: File | string,
+  acceptedFileTypes: readonly string[] | undefined
+): boolean => {
+  if (!acceptedFileTypes || acceptedFileTypes.length === 0) return true;
+  const extension = getFileExtension(file)?.toLowerCase();
+  return !!extension && acceptedFileTypes.some((type) => type.toLowerCase() === extension);
+};
