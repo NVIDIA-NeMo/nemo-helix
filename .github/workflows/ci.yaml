@@ -312,8 +312,7 @@ jobs:
           path: ${{ runner.temp }}/fastembed-cache
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
-      - name: Install uv for fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+      - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
@@ -359,6 +358,22 @@ jobs:
         if: env.PUBLISH_IMAGES == 'true'
         shell: bash
         run: make docker-push TARGET=docker-cpu-ci
+
+      - name: Pull API image for credential-driver smoke test
+        if: env.PUBLISH_IMAGES == 'true'
+        run: docker pull "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"
+
+      - name: Test credential-driver sidecar
+        timeout-minutes: 10
+        env:
+          RUN_CREDENTIAL_DRIVER_COMPOSE_TEST: "1"
+          NEMO_HELIX_IMAGE: ${{ env.IMAGE_REGISTRY }}/nhx-api:${{ env.BAKE_TAG }}
+        # The host orchestrates Compose; Helix code runs inside the built image.
+        run: >-
+          uv run --no-project --python 3.13 --with 'pytest==9.0.3'
+          pytest -c /dev/null
+          --confcutdir=plugins/nemo-deployments/tests/integration/backends/openshell
+          plugins/nemo-deployments/tests/integration/backends/openshell/test_credential_driver_sidecar.py -q
 
       - name: Save fastembed model cache
         if: steps.fastembed-cache.outputs.cache-hit != 'true'
