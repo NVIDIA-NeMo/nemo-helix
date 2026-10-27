@@ -6556,7 +6556,8 @@ nemo agents redeploy [OPTIONS]
 * `--agent, -a`: Name of the deployed agent to rebuild.
 * `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
 * `--description`: Agent description (as on register). [default: ]
-* `--label, -l`: Agent label as KEY=VALUE (as on register). Repeatable. [default: ]
+* `--label, -l`: Agent label as KEY=VALUE. Repeatable. Replaces the agent's labels; omit to keep them. [default: ]
+* `--clear-labels`: Recreate the agent with no labels. Cannot be combined with --label.
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
 * `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
 * `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.

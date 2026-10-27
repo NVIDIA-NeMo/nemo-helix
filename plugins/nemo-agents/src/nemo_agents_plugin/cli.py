@@ -45,7 +45,7 @@ import re
 import shlex
 import sys
 import tempfile
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -1295,7 +1295,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         ),
         description: str = typer.Option("", "--description", help="Agent description (as on register)."),
         label: list[str] = typer.Option(
-            [], "--label", "-l", help="Agent label as KEY=VALUE (as on register). Repeatable."
+            [],
+            "--label",
+            "-l",
+            help="Agent label as KEY=VALUE. Repeatable. Replaces the agent's labels; omit to keep them.",
+        ),
+        clear_labels: bool = typer.Option(
+            False, "--clear-labels", help="Recreate the agent with no labels. Cannot be combined with --label."
         ),
         name: Optional[str] = typer.Option(
             None, "--name", "-n", help="Deployment name for the new deployment (auto-generated if omitted)."
@@ -1381,9 +1387,17 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 lambda: files_client.get_fileset(workspace=ref.workspace, name=ref.name).data(),
             )
             reference.fileset = FilesetRef(f"{ref.workspace}/{ref.name}")
+        if clear_labels and label:
+            typer.echo("Error: --clear-labels cannot be combined with --label.", err=True)
+            raise typer.Exit(code=2)
         labels = _parse_labels(label)
 
         client = _agents_client(base_url, workspace)
+
+        # Recreating the agent would otherwise drop its labels, so carry them over
+        # unless the caller passed --label, which replaces them, or --clear-labels.
+        if not label and not clear_labels:
+            labels = _run_sdk("GET agent API", lambda: _existing_agent_labels(client, agent, workspace))
 
         # 2. Auto-detect runtime args from the agent's existing deployment(s).
         #    Explicit flags always win; omitted flags are filled from the
@@ -1491,7 +1505,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             )
             typer.echo(f"Recreated agent '{agent}'.")
         except typer.Exit:
-            _redeploy_recovery_hint(agent, agent_config, stage="recreate", workspace=workspace)
+            _redeploy_recovery_hint(agent, agent_config, stage="recreate", workspace=workspace, labels=labels)
             raise
 
         # 7. Deploy the recreated agent.
@@ -1512,7 +1526,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 ),
             )
         except typer.Exit:
-            _redeploy_recovery_hint(agent, agent_config, stage="deploy", workspace=workspace)
+            _redeploy_recovery_hint(agent, agent_config, stage="deploy", workspace=workspace, labels=labels)
             raise
 
         if not wait:
@@ -3035,17 +3049,22 @@ _USE_IMAGE_ENTRYPOINT_MODE_ERROR = (
 )
 
 
-def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
+def _redeploy_recovery_hint(
+    agent: str, agent_config: Path, *, stage: str, workspace: str, labels: Mapping[str, str]
+) -> None:
     """Print an actionable recovery hint when redeploy fails after teardown.
 
     Once the old agent has been deleted, a failed recreate/deploy leaves the
     agent torn down. The config file is untouched, so the operation is safe to
     re-run — tell the user exactly how, preserving the non-default workspace so
-    the printed command targets the same place the failed run did.
+    the printed command targets the same place the failed run did, and the
+    labels, which a re-run can no longer read from the deleted agent.
     """
     args = ["nemo", "agents", "redeploy", "--agent", agent, "--agent-config", str(agent_config)]
     if workspace != _DEFAULT_WORKSPACE:
         args += ["--workspace", workspace]
+    for key, value in labels.items():
+        args += ["--label", f"{key}={value}"]
     rerun = shlex.join(args)
     typer.echo(
         f"Error: redeploy failed during {stage} for agent {agent!r} after the old "
@@ -3292,6 +3311,15 @@ def _delete_agent_entity_if_present(client: AgentsClient, *, agent_name: str, wo
     except PluginNotFoundError:
         return False
     return True
+
+
+def _existing_agent_labels(client: AgentsClient, agent_name: str, workspace: str) -> dict[str, str]:
+    """Return the agent entity's labels, or none if it is already absent (e.g. a re-run after teardown)."""
+    try:
+        agent = _json_from_response(client.get_agent(workspace=workspace, name=agent_name))
+    except PluginNotFoundError:
+        return {}
+    return dict(agent.get("labels") or {})
 
 
 def _load_yaml(path: Path) -> Any:

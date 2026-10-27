@@ -328,7 +328,9 @@ flags:
 nemo agents redeploy --agent calculator-agent --agent-config ./calculator-agent/agent.yaml
 ```
 
-An invalid config leaves everything untouched. If a later step fails, re-run the command to finish.
+The agent keeps its [labels](/documentation/agents/register-agents#label-agents) unless you pass `--label`,
+which replaces them, or `--clear-labels`, which removes them. An invalid config leaves everything untouched. If a later step fails, re-run the
+command it prints to finish.
 
 ## Clean Up
 
