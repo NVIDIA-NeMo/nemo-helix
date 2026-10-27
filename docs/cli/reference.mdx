@@ -4946,7 +4946,7 @@ nemo jobs steps update-status [OPTIONS] NAME
 * `--workspace`
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
-* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
+* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--error-details`: Optional error details related to the status update. (JSON string)
 * `--status-details`: Optional status details related to the status update. (JSON string)
 
@@ -5016,7 +5016,7 @@ nemo jobs tasks create-or-update [OPTIONS] NAME
 * `--step`: (required)
 * `--error-details`: JSON string
 * `--error-stack`
-* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: created, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
+* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--status-details`: JSON string
 
 **Help:**
