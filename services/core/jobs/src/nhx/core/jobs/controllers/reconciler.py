@@ -68,11 +68,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         self._stop_signal = stop_signal
         self._is_healthy = False
         self._logger = logger
-        # The retention sweeper runs on its own thread (see StorageRetentionSweeper) and writes the same
-        # steps and reclaim records this controller does. Reconciling a step, and the sweep's writes to
-        # one, hold the lock, so a step is never reconciled and swept at once, as when both ran on this
-        # thread. The sweep's reads do not, so a slow lookup never holds up reconciling.
-        self._step_lock = threading.Lock()
+        self._last_retention_at: float | None = None
         # Storage reclaim records outlive the jobs they describe, so they are read from the
         # entity store as the jobs service rather than through the jobs API.
         self._system_entities = system_entity_client or SyncEntityClient(
@@ -124,13 +120,10 @@ class JobReconciler(HeartbeatMixin, Controller):
             extra={"count": len(steps_to_reconcile), "duration_seconds": time.monotonic() - fetch_started_at},
         )
         for step in steps_to_reconcile:
-            with (
-                self._step_lock,
-                start_span_with_ctx(
-                    tracer,
-                    "jobs_reconciler/reconcile_job_step",
-                    JobContext(id=step.job, step_name=step.name),
-                ),
+            with start_span_with_ctx(
+                tracer,
+                "jobs_reconciler/reconcile_job_step",
+                JobContext(id=step.job, step_name=step.name),
             ):
                 try:
                     provider, profile = extract_provider_profile(step)
@@ -224,29 +217,30 @@ class JobReconciler(HeartbeatMixin, Controller):
                 finally:
                     self.emit_heartbeat()
 
+        self._enforce_storage_retention()
+
+    def _enforce_storage_retention(self) -> None:
+        """Reclaim queued storage every tick, and queue stopped jobs' storage on the retention interval."""
         if self._stop_signal and self._stop_signal.is_set():
             return
         self._reclaim_queued_storage()
 
-    def sweep_stopped_steps(self, on_progress: Callable[[], None] | None = None) -> None:
-        """Queue the storage of stopped jobs for reclaim. Runs on the retention interval, off the reconcile tick.
-
-        Listing every stopped step takes minutes on a platform with long job history, so this is not
-        part of ``step()``: it would hold up reconciling and make the controller look stalled.
-        ``on_progress`` reports each completed page of the listing and each swept step.
-        """
+        # Listing every stopped step is the expensive part, so it runs on a slower interval.
+        now = time.monotonic()
+        interval = self._storage_config.retention_interval_seconds
+        if self._last_retention_at is not None and now - self._last_retention_at < interval:
+            return
+        self._last_retention_at = now
         try:
             steps = self._list_steps_with_status(
                 [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value],
-                on_progress=on_progress,
+                on_progress=self.emit_heartbeat,
             )
         except NemoClientError:
             logger.exception("Could not fetch paused and failed steps for storage retention")
             return
 
         for step in steps:
-            if self._stop_signal and self._stop_signal.is_set():
-                return
             if (step.status_details or {}).get(STORAGE_SWEPT_AT):
                 continue
             try:
@@ -257,8 +251,7 @@ class JobReconciler(HeartbeatMixin, Controller):
                     extra={"job": step.job, "step": step.name, "workspace": step.workspace},
                 )
             finally:
-                if on_progress is not None:
-                    on_progress()
+                self.emit_heartbeat()
 
     def _reclaim_queued_storage(self) -> None:
         """Reclaim the storage of deleted and stopped jobs, and clear each record once it is gone.
@@ -275,10 +268,9 @@ class JobReconciler(HeartbeatMixin, Controller):
         for reclaim in reclaims:
             extra = {"job": reclaim.job_name, "workspace": reclaim.job_workspace}
             try:
-                with self._step_lock:
-                    if not self._reclaim_storage(reclaim):
-                        continue
-                    self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
+                if not self._reclaim_storage(reclaim):
+                    continue
+                self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
                 logger.info("Reclaimed job storage", extra=extra)
             except Exception:
                 logger.exception("Could not reclaim job storage", extra=extra)
@@ -323,12 +315,10 @@ class JobReconciler(HeartbeatMixin, Controller):
             return
         targets = storage_targets(job.platform_spec)
         if not targets:
-            with self._step_lock:
-                self._mark_step_swept(step)
+            self._mark_step_swept(step)
             return
         # A job already marked is queued again: an earlier pass may have marked it and stopped there.
-        already_marked = bool((job.status_details or {}).get(STORAGE_RECLAIMED_AT))
-        if not already_marked:
+        if not (job.status_details or {}).get(STORAGE_RECLAIMED_AT):
             if step.status == HelixJobStatus.CANCELLED:
                 pass
             elif step.status == HelixJobStatus.PAUSED:
@@ -341,18 +331,16 @@ class JobReconciler(HeartbeatMixin, Controller):
                     return
             else:
                 return
-
-        # Only the writes hold the lock. Each is guarded on the step id and status it was listed with.
-        with self._step_lock:
-            if not already_marked and not self._mark_storage_reclaimed(step):
+            if not self._mark_storage_reclaimed(step):
                 return
-            self._queue_storage_reclaim(job.id, step, targets)
-            swept_status = step.status
-            if step.status == HelixJobStatus.PAUSED:
-                self._jobs.cancel_job(name=step.job, workspace=step.workspace)
-                # Cancel moves the paused step to cancelling, and the sweep mark must not move it back.
-                swept_status = HelixJobStatus.CANCELLING
-            self._mark_step_swept(step, swept_status)
+
+        self._queue_storage_reclaim(job.id, step, targets)
+        swept_status = step.status
+        if step.status == HelixJobStatus.PAUSED:
+            self._jobs.cancel_job(name=step.job, workspace=step.workspace)
+            # Cancel moves the paused step to cancelling, and the sweep mark must not move it back.
+            swept_status = HelixJobStatus.CANCELLING
+        self._mark_step_swept(step, swept_status)
 
     def _mark_storage_reclaimed(self, step: HelixJobStepWithContext) -> bool:
         """Mark the job's storage reclaimed before reclaiming it. Return False if the job moved on.
@@ -499,7 +487,8 @@ class JobReconciler(HeartbeatMixin, Controller):
     ) -> list[HelixJobStepWithContext]:
         """Return every step, across jobs and workspaces, in one of ``statuses``.
 
-        ``on_progress`` is called for each step received, so each fetched page reports progress.
+        ``on_progress`` is called for each step received. Pages arrive one request at a time, so a
+        long listing keeps reporting progress instead of looking stalled.
         """
         # Iterate through all pages to get all steps.
         # deepObject query param: sent as ``filter[status]=pending,active,...``

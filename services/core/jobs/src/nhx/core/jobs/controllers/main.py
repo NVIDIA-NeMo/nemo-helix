@@ -15,7 +15,6 @@ from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.config import profiles
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.reconciler import JobReconciler
-from nhx.core.jobs.controllers.retention import StorageRetentionSweeper
 from nhx.core.jobs.controllers.scheduler import JobScheduler
 
 stop_signal = threading.Event()
@@ -86,24 +85,14 @@ def run(parent_stop_signal: threading.Event | None = None):
         stop_signal=local_stop_signal,
     )
 
-    # Storage retention sweep. Its own loop, so a long listing of stopped steps cannot hold up reconciling.
-    retention_sweeper_monitored = TrackLastExecutionTime(StorageRetentionSweeper(job_reconciler))
-    retention_sweeper_loop = Loop(
-        TimedLoopWaiter(jobs_config.storage.retention_interval_seconds, stop_signal=local_stop_signal),
-        retention_sweeper_monitored,
-        stop_signal=local_stop_signal,
-    )
-
     # Register loops with ControllerManager
     controller_manager = ControllerManager.get_instance()
     controller_manager.register("job_scheduler", job_scheduler_loop)
     controller_manager.register("job_reconciler", job_reconciler_loop)
-    controller_manager.register("job_retention_sweeper", retention_sweeper_loop)
 
     # Start control loops
     job_scheduler_loop.start()
     job_reconciler_loop.start()
-    retention_sweeper_loop.start()
     logger.info("Jobs controller started successfully")
 
     # Main loop
@@ -113,9 +102,8 @@ def run(parent_stop_signal: threading.Event | None = None):
     logger.info("Shutting down control loops...")
     job_scheduler_loop.stop()
     job_reconciler_loop.stop()
-    retention_sweeper_loop.stop()
 
-    for loop in [job_scheduler_loop, job_reconciler_loop, retention_sweeper_loop]:
+    for loop in [job_scheduler_loop, job_reconciler_loop]:
         loop.join()
 
     logger.info("All jobs control loops have been shut down.")

@@ -17,6 +17,7 @@ from nhx.common.controller import Loop, TimedLoopWaiter, TrackLastExecutionTime
 from nhx.common.entities import EntityConflictError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import STORAGE_SWEPT_AT
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nhx.core.jobs.config import JobsStorageConfig
@@ -29,7 +30,6 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
 from nhx.core.jobs.controllers.reconciler import JobReconciler
-from nhx.core.jobs.controllers.retention import StorageRetentionSweeper
 from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
 
 from services.core.jobs.tests.controllers.client_mocks import data_response, paginated_response
@@ -40,10 +40,11 @@ def test_job_reconciler_retries_terminal_child_cleanup_without_backend_sync(
     backend_registry, mock_nemo_client, mock_jobs_client, test_step_active, status
 ):
     step = test_step_active.model_copy(update={"status": status, "status_details": {"task_cleanup_pending": True}})
-    # Active steps, then terminal steps pending task cleanup.
+    # Active steps, terminal steps pending task cleanup, then stopped steps for storage retention.
     mock_jobs_client.list_steps.side_effect = [
         paginated_response([]),
         paginated_response([step]),
+        paginated_response([]),
     ]
     reconciler = JobReconciler(backend_registry, mock_nemo_client)
     backend = backend_registry.get_backend(provider="cpu", profile="default")
@@ -70,7 +71,7 @@ def test_terminal_cleanup_query_failure_does_not_block_active_reconciliation(
         error = NemoHTTPError(httpx.Response(status_code, request=request))
     else:
         error = NemoTransportError(httpx.ConnectError("cleanup query unavailable", request=request))
-    mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active]), error]
+    mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active]), error, paginated_response([])]
     reconciler = JobReconciler(backend_registry, mock_nemo_client)
     backend = backend_registry.get_backend(provider="cpu", profile="default")
 
@@ -120,8 +121,13 @@ def test_job_reconciler_syncs_active_job(
             "sort": "updated_at",
         },
     )
-    # Stopped steps are listed by the retention sweeper, not on the reconcile tick.
-    assert mock_jobs_client.list_steps.call_count == 2
+    # Storage retention lists stopped steps once, without the task cleanup query.
+    mock_jobs_client.list_steps.assert_any_call(
+        workspace="-",
+        name="-",
+        query_params={"filter[status]": "paused,error,cancelled", "sort": "updated_at"},
+    )
+    assert mock_jobs_client.list_steps.call_count == 3
 
     # Test backend should have received one sync call for our test job
     assert len(test_backend.mock.sync_calls) == 1
@@ -277,14 +283,20 @@ def test_storage_retention_uses_live_job_ttl(
 
     for step, job, storage, should_reclaim, should_cancel in cases:
         reconciler._storage_config = storage
-        mock_jobs_client.list_steps.side_effect = [paginated_response([step])]
+        reconciler._last_retention_at = None
+        # Active steps, terminal steps pending task cleanup, then stopped steps for storage retention.
+        mock_jobs_client.list_steps.side_effect = [
+            paginated_response([]),
+            paginated_response([]),
+            paginated_response([step]),
+        ]
         mock_jobs_client.get_job.return_value = data_response(job)
         mock_jobs_client.update_job_attempt_status_details.reset_mock()
         mock_jobs_client.update_job_step_status.reset_mock()
         mock_jobs_client.cancel_job.reset_mock()
         system_entities.create.reset_mock()
         with patch.object(backend, "reclaim_persistent_storage") as reclaim:
-            reconciler.sweep_stopped_steps()
+            reconciler.step()
         # The reclaim pass removes the storage on a later tick, from the queued record.
         reclaim.assert_not_called()
         if should_reclaim:
@@ -326,11 +338,17 @@ def test_storage_retention_marks_steps_with_nothing_to_reclaim(
         _job(uses_storage=False),
     ]
     for job in cases:
-        mock_jobs_client.list_steps.side_effect = [paginated_response([expired])]
+        reconciler._last_retention_at = None
+        # Active steps, terminal steps pending task cleanup, then stopped steps for storage retention.
+        mock_jobs_client.list_steps.side_effect = [
+            paginated_response([]),
+            paginated_response([]),
+            paginated_response([expired]),
+        ]
         mock_jobs_client.get_job.return_value = data_response(job)
         mock_jobs_client.update_job_step_status.reset_mock()
         with patch.object(backend, "reclaim_persistent_storage") as reclaim:
-            reconciler.sweep_stopped_steps()
+            reconciler.step()
         reclaim.assert_not_called()
         system_entities.create.assert_not_called()
         mock_jobs_client.update_job_step_status.assert_called_once()
@@ -339,18 +357,23 @@ def test_storage_retention_marks_steps_with_nothing_to_reclaim(
 
     swept = expired.model_copy(deep=True)
     swept.status_details = {**swept.status_details, "storage_swept_at": "2026-10-01T00:00:00+00:00"}
-    mock_jobs_client.list_steps.side_effect = [paginated_response([swept])]
+    reconciler._last_retention_at = None
+    mock_jobs_client.list_steps.side_effect = [
+        paginated_response([]),
+        paginated_response([]),
+        paginated_response([swept]),
+    ]
     mock_jobs_client.get_job.reset_mock()
-    reconciler.sweep_stopped_steps()
+    reconciler.step()
     mock_jobs_client.get_job.assert_not_called()
 
 
-def test_reconcile_tick_does_not_list_stopped_steps(
+def test_storage_retention_runs_on_its_own_interval(
     backend_registry: BackendRegistry,
     mock_nemo_client,
     mock_jobs_client,
 ):
-    """Listing every stopped step takes minutes, so it belongs to the retention sweeper, not the tick."""
+    """Stopped steps are listed once per retention interval, not on every reconcile tick."""
     reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
     mock_jobs_client.list_steps.side_effect = lambda **_: paginated_response([])
 
@@ -358,7 +381,7 @@ def test_reconcile_tick_does_not_list_stopped_steps(
     reconciler.step()
 
     statuses = [call.kwargs["query_params"]["filter[status]"] for call in mock_jobs_client.list_steps.call_args_list]
-    assert "paused,error,cancelled" not in statuses
+    assert statuses.count("paused,error,cancelled") == 1
     assert statuses.count("pending,active,cancelling,pausing") == 2
 
 
@@ -564,9 +587,15 @@ def test_reclaim_stops_if_completed_target_cannot_be_persisted(backend_registry,
 
 
 def _run_retention(reconciler, mock_jobs_client, step, job):
-    mock_jobs_client.list_steps.side_effect = [paginated_response([step])]
+    reconciler._last_retention_at = None
+    # Active steps, terminal steps pending task cleanup, then stopped steps for storage retention.
+    mock_jobs_client.list_steps.side_effect = [
+        paginated_response([]),
+        paginated_response([]),
+        paginated_response([step]),
+    ]
     mock_jobs_client.get_job.return_value = data_response(job)
-    reconciler.sweep_stopped_steps()
+    reconciler.step()
 
 
 def test_storage_retention_leaves_a_step_replaced_by_a_rerun_alone(
@@ -675,134 +704,68 @@ def test_queued_storage_stays_queued_until_it_is_gone(
     system_entities.delete_by_id.assert_not_called()
 
 
-def test_sweep_reports_progress_for_each_listed_step_and_each_swept_step(
-    backend_registry: BackendRegistry,
-    mock_nemo_client,
-    mock_jobs_client,
-    test_step_error: HelixJobStepWithContext,
-):
-    """A sweep that is working must keep reporting progress, or the loop looks stalled."""
-    reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
-    expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
-    swept = expired.model_copy(deep=True)
-    swept.status_details = {**swept.status_details, "storage_swept_at": "2026-10-01T00:00:00+00:00"}
-    mock_jobs_client.list_steps.side_effect = [paginated_response([expired, swept, swept])]
-    mock_jobs_client.get_job.return_value = data_response(_job(uses_storage=False))
-    on_progress = MagicMock()
-
-    reconciler.sweep_stopped_steps(on_progress=on_progress)
-
-    # Three steps listed, and the one that was not yet swept.
-    assert on_progress.call_count == 4
-
-
-def test_sweep_stops_when_the_controller_is_shutting_down(
-    backend_registry: BackendRegistry,
-    mock_nemo_client,
-    mock_jobs_client,
-    test_step_error: HelixJobStepWithContext,
-):
-    stop_signal = threading.Event()
-    stop_signal.set()
-    reconciler = JobReconciler(backend_registry, mock_nemo_client, stop_signal=stop_signal)
-    expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
-    mock_jobs_client.list_steps.side_effect = [paginated_response([expired])]
-
-    reconciler.sweep_stopped_steps()
-
-    mock_jobs_client.get_job.assert_not_called()
-
-
-def test_sweep_writes_hold_the_step_lock_but_its_reads_do_not(
+def test_step_listing_reports_progress_for_each_step_received(
     backend_registry: BackendRegistry,
     mock_nemo_client,
     mock_jobs_client,
     test_step_active: HelixJobStepWithContext,
-    test_step_error: HelixJobStepWithContext,
-):
-    """The sweep runs on its own thread: its writes are ordered against reconciling, its reads never block it."""
-    reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
-    held_during: list[str] = []
-
-    def lookup(**_):
-        held_during.append("locked lookup" if reconciler._step_lock.locked() else "lookup")
-        return MagicMock(data=lambda: MagicMock(attempt_id=None, platform_spec={}, status_details={}))
-
-    def mark(step, status=None):
-        held_during.append("mark" if reconciler._step_lock.locked() else "unlocked mark")
-
-    def sync(step):
-        held_during.append("reconcile" if reconciler._step_lock.locked() else "unlocked reconcile")
-        return JobUpdate(status=HelixJobStatus.ACTIVE)
-
-    active = _aged_step(test_step_active, HelixJobStatus.ACTIVE, datetime.timedelta(seconds=1))
-    expired = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
-    backend = reconciler._backend_registry.get_backend(provider="subprocess", profile="default")
-    mock_jobs_client.get_job.side_effect = lookup
-    with (
-        patch.object(reconciler, "_mark_step_swept", side_effect=mark),
-        patch("nhx.core.jobs.controllers.reconciler.storage_targets", return_value=[]),
-        patch.object(backend, "sync", sync),
-    ):
-        mock_jobs_client.list_steps.side_effect = [paginated_response([active]), paginated_response([])]
-        reconciler.step()
-        mock_jobs_client.list_steps.side_effect = [paginated_response([expired])]
-        reconciler.sweep_stopped_steps()
-
-    assert held_during == ["reconcile", "lookup", "mark"]
-
-
-def test_sweeper_runs_the_sweep_and_reports_progress_through_its_own_heartbeat(
-    backend_registry: BackendRegistry,
-    mock_nemo_client,
 ):
     reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
-    sweeper = StorageRetentionSweeper(reconciler)
-    sweeper.emit_heartbeat = MagicMock()
-    with patch.object(reconciler, "sweep_stopped_steps") as sweep:
-        sweeper.step()
+    reconciler.emit_heartbeat = MagicMock()
+    mock_jobs_client.list_steps.side_effect = [paginated_response([test_step_active] * 3)]
 
-    sweep.assert_called_once_with(on_progress=sweeper.emit_heartbeat)
-    assert sweeper.is_healthy
+    steps = reconciler._list_steps_with_status([HelixJobStatus.ACTIVE.value], on_progress=reconciler.emit_heartbeat)
+
+    assert len(steps) == 3
+    assert reconciler.emit_heartbeat.call_count == 3
 
 
-def test_reconciler_loop_stays_healthy_while_a_slow_sweep_runs(
+def test_reconciler_loop_stays_healthy_during_a_slow_retention_scan(
     backend_registry: BackendRegistry,
     mock_nemo_client,
     mock_jobs_client,
+    test_step_error: HelixJobStepWithContext,
 ):
-    """A sweep far longer than the liveness window must not stall the reconciler or flag it unhealthy."""
+    """A retention scan far longer than the liveness window must not flag the loop unhealthy.
+
+    The scan runs on the reconcile thread, so the heartbeat per received step is what keeps the
+    health check from reading the scan as a stall.
+    """
+    swept = _aged_step(test_step_error, HelixJobStatus.ERROR, datetime.timedelta(days=1))
+    swept.status_details = {**(swept.status_details or {}), STORAGE_SWEPT_AT: "2026-01-01T00:00:00+00:00"}
+    scan_started, scan_finished = threading.Event(), threading.Event()
+    scan_seconds, step_seconds = 1.0, 0.05
+
+    class SlowListing:
+        def items(self):
+            scan_started.set()
+            for _ in range(int(scan_seconds / step_seconds)):
+                time.sleep(step_seconds)
+                yield swept
+            scan_finished.set()
+
+    def list_steps(**kwargs):
+        statuses = kwargs["query_params"].get("filter[status]", "")
+        return SlowListing() if HelixJobStatus.PAUSED.value in statuses else paginated_response([])
+
+    mock_jobs_client.list_steps.side_effect = list_steps
     reconciler, _ = _reconciler(backend_registry, mock_nemo_client)
-    mock_jobs_client.list_steps.side_effect = lambda **_: paginated_response([])
     stop_signal = threading.Event()
-    sweep_started = threading.Event()
-    release_sweep = threading.Event()
-
-    def slow_sweep(on_progress=None):
-        sweep_started.set()
-        release_sweep.wait(timeout=10)
-
     interval = 0.1  # the loop is unhealthy after 3 intervals without progress
-    reconciler_loop = Loop(
+    loop = Loop(
         TimedLoopWaiter(interval, stop_signal=stop_signal), TrackLastExecutionTime(reconciler), stop_signal=stop_signal
     )
-    sweeper_loop = Loop(
-        TimedLoopWaiter(60, stop_signal=stop_signal),
-        TrackLastExecutionTime(StorageRetentionSweeper(reconciler)),
-        stop_signal=stop_signal,
-    )
-    with patch.object(reconciler, "sweep_stopped_steps", side_effect=slow_sweep):
-        reconciler_loop.start()
-        sweeper_loop.start()
-        try:
-            assert sweep_started.wait(timeout=5)
-            # Several liveness windows pass while the sweep is still running.
-            time.sleep(10 * 3 * interval)
-            assert not release_sweep.is_set()
-            assert reconciler_loop.is_healthy, reconciler_loop.unhealthy_reason
-            assert sweeper_loop.is_healthy, sweeper_loop.unhealthy_reason
-        finally:
-            release_sweep.set()
-            stop_signal.set()
-            reconciler_loop.join(timeout=5)
-            sweeper_loop.join(timeout=5)
+    unhealthy: list[str | None] = []
+    loop.start()
+    try:
+        assert scan_started.wait(timeout=5)
+        while not scan_finished.is_set():
+            if not loop.is_healthy:
+                unhealthy.append(loop.unhealthy_reason)
+            time.sleep(0.02)
+    finally:
+        stop_signal.set()
+        loop.join(timeout=5)
+
+    assert scan_seconds > 3 * interval
+    assert not unhealthy
