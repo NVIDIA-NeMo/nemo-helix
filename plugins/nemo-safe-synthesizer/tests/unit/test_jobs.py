@@ -235,7 +235,7 @@ async def test_plugin_job_config_allows_pretrained_model_job_runtime_config(mock
     step = next(iter(compiled["steps"]))
     reparsed = PluginJobConfig.model_validate(step["config"])
 
-    assert "pretrained_model" not in step["config"]["config"]["training"]
+    assert "pretrained_model" not in step["config"]["config"].get("training", {})
     assert reparsed.pretrained_model_job == "prior-safe-synth-job"
 
 
