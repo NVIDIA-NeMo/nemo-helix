@@ -65,6 +65,7 @@ from nhx.core.jobs.controllers.backends.kubernetes import (
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     JOB_DSHM_VOLUME_NAME,
     JOB_STORAGE_VOLUME_NAME,
+    UNSTARTED_PAUSE_MESSAGE,
     KubernetesConfigMapVolume,
     KubernetesEmptyDirVolume,
     KubernetesJobStorageConfig,
@@ -91,6 +92,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     last_task_exit_time,
     name_for_step,
     reclaim_job_persistent_storage,
+    task_never_started,
 )
 from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
@@ -1674,6 +1676,7 @@ def _cooperative_pausing_step(step, *, requested_ago_seconds: int = 0, deadline_
 def _running_pause_job():
     job = MagicMock()
     job.spec.suspend = False
+    job.status.active = 1
     job.status.failed = None
     job.status.succeeded = None
     job.status.completion_time = None
@@ -1899,6 +1902,120 @@ def test_sync_pausing_judges_an_exit_seen_late_by_its_exit_time(
         update = kubernetes_job.sync(step)
 
     assert update.status == expected
+    terminate.assert_called_once_with(job)
+
+
+def _task_status(
+    state: client.V1ContainerState | None = None,
+    *,
+    name: str = "nemo-job-task",
+    restart_count: int = 0,
+    last_state: client.V1ContainerState | None = None,
+) -> client.V1ContainerStatus:
+    return client.V1ContainerStatus(
+        image="test-image",
+        image_id="",
+        name=name,
+        ready=False,
+        restart_count=restart_count,
+        state=state,
+        last_state=last_state,
+    )
+
+
+_WAITING = client.V1ContainerState(waiting=client.V1ContainerStateWaiting(reason="ContainerCreating"))
+_RUNNING = client.V1ContainerState(running=client.V1ContainerStateRunning())
+_TERMINATED = client.V1ContainerState(terminated=client.V1ContainerStateTerminated(exit_code=1))
+
+
+def _pending_pod(uid: str, *statuses: client.V1ContainerStatus) -> client.V1Pod:
+    """A Pending pod: unscheduled when given no container statuses, otherwise still starting."""
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase="Pending", container_statuses=list(statuses) or None),
+    )
+
+
+@pytest.mark.parametrize(
+    "pods,workload_has_live_pods,expected",
+    [
+        pytest.param([], False, True, id="no-pods"),
+        pytest.param([], True, False, id="no-pods-listed-but-the-workload-has-one"),
+        pytest.param([_pending_pod("a")], True, True, id="unscheduled"),
+        pytest.param([_pending_pod("a", _task_status(_WAITING))], True, True, id="creating-the-task"),
+        pytest.param(
+            [_pending_pod("a", _task_status(_RUNNING, name="istio-proxy"), _task_status(_WAITING))],
+            True,
+            True,
+            id="only-a-sidecar-started",
+        ),
+        pytest.param([_pending_pod("a", _task_status(_RUNNING))], True, False, id="running"),
+        pytest.param([_pending_pod("a", _task_status(_TERMINATED))], False, False, id="exited"),
+        pytest.param(
+            [_pending_pod("a", _task_status(_WAITING, restart_count=1, last_state=_TERMINATED))],
+            True,
+            False,
+            id="restarting",
+        ),
+        pytest.param(
+            [_pending_pod("a"), _pending_pod("b", _task_status(_RUNNING))], True, False, id="one-of-several-started"
+        ),
+    ],
+)
+def test_task_never_started(pods, workload_has_live_pods, expected):
+    assert task_never_started(pods, workload_has_live_pods=workload_has_live_pods) is expected
+
+
+@pytest.mark.parametrize(
+    "pod",
+    [
+        pytest.param(_pending_pod("uid-1"), id="unscheduled"),
+        pytest.param(_pending_pod("uid-1", _task_status(_WAITING)), id="creating-the-task"),
+    ],
+)
+@pytest.mark.parametrize("requested_ago_seconds", [0, 120], ids=["before-the-deadline", "after-the-deadline"])
+def test_sync_pausing_a_task_that_never_started_is_paused(
+    kubernetes_job, mock_jobs_client, test_step_pausing, pod, requested_ago_seconds
+):
+    """A pod still waiting for GPUs has nothing to save, so the pause neither waits for an exit nor fails."""
+    step = _cooperative_pausing_step(
+        test_step_pausing, requested_ago_seconds=requested_ago_seconds, deadline_seconds=30
+    )
+    job = _running_pause_job()
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+    kubernetes_job._core_v1.read_namespaced_pod.return_value = pod
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    assert update.status_details == {"message": UNSTARTED_PAUSE_MESSAGE}
+    assert not update.error_details
+    terminate.assert_called_once_with(job)
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["body"].status == HelixJobStatus.PAUSED
+    assert task_update["body"].error_details == {}
+
+
+@pytest.mark.parametrize("active", [None, 0])
+def test_sync_pausing_a_job_without_pods_is_paused(kubernetes_job, test_step_pausing, active):
+    """A Job that has created no pod yet, for example one held by a quota, has not started its task."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    job = _running_pause_job()
+    job.status.active = active
+    kubernetes_job._batch_v1.read_namespaced_job.return_value = job
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pods_by_labels", return_value=[]),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+    ):
+        update = kubernetes_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
     terminate.assert_called_once_with(job)
 
 
