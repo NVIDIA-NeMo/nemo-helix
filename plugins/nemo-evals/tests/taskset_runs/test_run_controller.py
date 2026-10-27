@@ -987,6 +987,21 @@ async def test_a_failed_list_reads_the_runs_jobs_one_at_a_time_until_every_one_a
     assert jobs.calls == ["list"]
 
 
+async def test_a_list_skipped_by_another_runs_timeout_keeps_its_run_on_one_list(make_harness, harbor_plan, jobs):
+    harness = make_harness(phase1_concurrency=1)
+    for name in ("run-a", "run-b"):
+        await harness.submit(sized(harbor_plan, 1), name=name)
+    await harness.cycle()
+    jobs.script("list", timeout())  # the first run's list times out; the second run's is never sent
+    jobs.calls.clear()
+    await harness.cycle()
+    assert jobs.calls.count("list") == 1
+    jobs.calls.clear()
+    await harness.cycle()
+    # Only the run whose list timed out reads one at a time; the skipped run lists again.
+    assert sorted(call for call in jobs.calls if call in ("list", "get")) == ["get", "list"]
+
+
 async def test_the_guarded_list_sends_at_most_100_names_per_call_and_finds_every_job(harbor_plan, harbor_run, jobs):
     base = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
     requests = [base.model_copy(update={"name": f"run-a-task-{n}"}) for n in range(150)]
@@ -1038,7 +1053,9 @@ async def test_a_hanging_read_doesnt_starve_another_runs_finished_tasks(harness,
     jobs.finish(task(b, 2), "completed")
     jobs.broken[task(a, 2)] = timeout()  # every read of these two times out
     jobs.broken[task(b, 1)] = timeout()
-    for _ in range(6):  # each run's reads resume just past the one that tripped the cutoff
+    # A list another read's timeout skips doesn't demote its run; once b lists first, its own hanging list does.
+    # From then on each run's reads resume just past the one that tripped the cutoff: 3 rotations of [a, b, stuck].
+    for _ in range(9):
         await harness.cycle()
     assert await harness.phases(b) == ["succeeded", "registered", "succeeded"]
     assert await harness.phases(a) == ["registered"] * 3

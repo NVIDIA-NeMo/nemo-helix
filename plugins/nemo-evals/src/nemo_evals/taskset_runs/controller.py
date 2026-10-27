@@ -589,6 +589,8 @@ class TasksetRunReconciler:
         if run_id not in self._read_one_by_one:
             try:
                 listed = await jobs.list_named([m.task_job for m in named if m.task_job is not None])
+            except JobsUnavailableError:
+                pass  # not sent: another read's timeout tripped the breaker, and the loop below stops at once
             except Exception as exc:
                 logger.info("Run %s: listing its Jobs failed (%s); reading them one at a time", state.run.name, exc)
                 self._read_one_by_one.add(run_id)
