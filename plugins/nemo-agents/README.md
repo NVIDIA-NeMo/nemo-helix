@@ -9,6 +9,8 @@ as first-class managed resources.
 See [MIGRATION.md](MIGRATION.md) for SDK migration notes, including the
 `AgentsResource` move from the legacy `NeMoHelix` SDK object to `NemoClient`.
 
+See [service credentials in OpenShell sandboxes](docs/provider-fulfillments.md) for credential injection, operator setup and runtime limits.
+
 The plugin supports two agent flows:
 
 - **Platform-backed agents** use the Platform-managed `nemo-agents-spec-v1`

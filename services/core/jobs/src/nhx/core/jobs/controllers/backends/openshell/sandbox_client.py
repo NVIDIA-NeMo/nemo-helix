@@ -4,11 +4,13 @@
 """OpenShell SDK client for the jobs backend.
 
 Imports the optional ``openshell`` package at module load, so the backend
-imports this module lazily (see ``backend._ensure_openshell``).
+guards its module-level imports (see ``backend._ensure_openshell``).
 """
 
 from __future__ import annotations
 
+from nemo_helix_plugin.openshell.provisioning import ProviderProvisioner
+from nemo_helix_plugin.openshell.types import GatewayCredentialConfig
 from openshell import SandboxClient
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
@@ -29,3 +31,7 @@ class JobsSandboxClient(SandboxClient):
             timeout=self._timeout,
         )
         return response.sandbox
+
+    def provider_provisioner(self, config: GatewayCredentialConfig, *, workspace: str) -> ProviderProvisioner:
+        """Reuse the SDK's authenticated transport and timeout for provider management."""
+        return ProviderProvisioner(config, workspace, self._stub, timeout=self._timeout)

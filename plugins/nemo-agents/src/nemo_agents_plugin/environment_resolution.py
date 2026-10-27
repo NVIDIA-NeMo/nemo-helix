@@ -15,8 +15,13 @@ At create time the deployment route:
 3. snapshots the resolved ComputeSpec and the collected secrets onto the
    deployment for the container backend.
 
-Secret references are never written into the config as plaintext. Both the
-spec's top-level ``secrets`` and each declared MCP server's ``secrets`` are
+Provider fulfillments are resolved separately and their secret entries are
+excluded from process-env injection. Launch consumers must call
+``require_runtime_support`` before using a merge result; only configured
+OpenShell execution can consume provider bindings.
+
+Secret references are never written into the config as plaintext. Unconsumed
+top-level ``secrets`` and each declared MCP server's ``secrets`` are
 returned as an ENV_VAR_NAME -> ref map; the substrate injects the resolved value
 into the process env under that name, and MCP servers read their credentials
 from the process env by name (env-var-name indirection) rather than the config
@@ -37,7 +42,7 @@ higher-priority spec last, so each successive layer overrides the previous.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from nemo_agents_plugin.entities import (
@@ -51,6 +56,8 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.environment import OpenShellEnvironmentSettings
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding as ResolvedProviderFulfillment
 
 
 class EnvironmentResolutionError(ValueError):
@@ -71,15 +78,31 @@ class MergedEnvironment:
 
     ``config`` is the merged ``nemo-agents-spec-v1`` config. ``secrets`` maps
     ENV_VAR_NAME -> Secrets-service ref, collected from both the EnvironmentSpec's
-    top-level ``secrets`` and every declared MCP server's ``secrets``. The caller
-    snapshots ``secrets`` onto the deployment so the substrate injects the
+    unconsumed top-level ``secrets`` and every declared MCP server's ``secrets``.
+    The caller snapshots ``secrets`` onto the deployment so the substrate injects the
     resolved value into the process env (never plaintext); MCP servers read their
     credentials from that process env by name (env-var-name indirection), rather
     than the config embedding a raw secret reference as a literal value.
+    ``providers`` holds external-injection bindings separately. Callers must
+    check runtime support before launching; there is no env-injection fallback.
     """
 
     config: dict[str, Any]
     secrets: dict[str, str]
+    providers: dict[str, ResolvedProviderFulfillment] = field(default_factory=dict)
+
+    def require_runtime_support(self, backend: str = "") -> None:
+        """Reserve provider bindings for the gateway-aware execution backend."""
+        if backend == "openshell" and self.secrets:
+            raise EnvironmentResolutionError(
+                "OpenShell secrets require external injection bindings in settings.openshell.providers; "
+                "process-environment secret injection is not supported."
+            )
+        if self.providers and backend != "openshell":
+            raise EnvironmentResolutionError(
+                "Provider fulfillments require a configured OpenShell execution backend; "
+                "provider-bound secrets cannot fall back to process-environment injection."
+            )
 
 
 async def resolve_environment(
@@ -165,6 +188,8 @@ async def _resolve_compute_spec(
 def merge_environment_spec_into_agent_config(
     config: dict[str, Any],
     env_spec: EnvironmentSpecInline | None,
+    *,
+    workspace: str = "default",
 ) -> MergedEnvironment:
     """Merge a resolved EnvironmentSpec into a ``nemo-agents-spec-v1`` config.
 
@@ -179,6 +204,8 @@ def merge_environment_spec_into_agent_config(
     if env_spec is None:
         return MergedEnvironment(config=config, secrets={})
     if config.get("config_format") != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+        if _openshell_settings(env_spec).providers:
+            raise EnvironmentResolutionError("Provider fulfillments require a nemo-agents-spec-v1 agent config.")
         return MergedEnvironment(config=config, secrets=dict(env_spec.secrets))
 
     merged = copy.deepcopy(config)
@@ -186,7 +213,70 @@ def merge_environment_spec_into_agent_config(
     _merge_process_env(merged, env_spec)
     _merge_model_provider_override(merged, env_spec)
     secrets = _collect_secrets(merged, env_spec)
-    return MergedEnvironment(config=merged, secrets=secrets)
+    providers = _partition_provider_secrets(merged, env_spec, secrets, workspace=workspace)
+    return MergedEnvironment(config=merged, secrets=secrets, providers=providers)
+
+
+def _openshell_settings(env_spec: EnvironmentSpecInline) -> OpenShellEnvironmentSettings:
+    try:
+        settings = OpenShellEnvironmentSettings.model_validate(env_spec.settings.get("openshell", {}))
+        settings.validate_secrets(env_spec.secrets)
+    except ValueError as exc:
+        raise EnvironmentResolutionError(str(exc)) from exc
+    return settings
+
+
+def _partition_provider_secrets(
+    config: dict[str, Any],
+    env_spec: EnvironmentSpecInline,
+    secrets: dict[str, str],
+    *,
+    workspace: str,
+) -> dict[str, ResolvedProviderFulfillment]:
+    """Remove bound secrets from env injection and reject alternate exposure paths."""
+    settings = _openshell_settings(env_spec)
+    if not settings.providers:
+        return {}
+    consumed = {alias for provider in settings.providers.values() for alias in provider.credentials.values()}
+    providers = {
+        name: ResolvedProviderFulfillment(
+            profile=provider.profile,
+            credentials={slot: env_spec.secrets[alias] for slot, alias in provider.credentials.items()},
+        )
+        for name, provider in settings.providers.items()
+    }
+    slots = {slot: ref for provider in providers.values() for slot, ref in provider.credentials.items()}
+    _reject_plaintext_secret_collisions(config, slots)
+    protected_refs = {parse_qualified_name(env_spec.secrets[alias], default_workspace=workspace) for alias in consumed}
+
+    def _reject_exposure(env_name: str, ref: str) -> None:
+        if env_name in slots or parse_qualified_name(ref, default_workspace=workspace) in protected_refs:
+            raise EnvironmentResolutionError(
+                f"Secret env var {env_name!r} conflicts with a provider credential. "
+                "Provider credentials must not also be injected into the agent or an MCP process."
+            )
+
+    for env_name, ref in secrets.items():
+        if env_name not in consumed:
+            _reject_exposure(env_name, ref)
+
+    # _collect_secrets coalesces identical top-level and MCP entries. Check MCP
+    # bindings separately so a shared name cannot hide a second injection path.
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, dict) else None
+    if isinstance(servers, dict):
+        for name, fulfillment in env_spec.mcp.items():
+            if isinstance(servers.get(name), dict):
+                for env_name, ref in fulfillment.secrets.items():
+                    if env_name in consumed:
+                        raise EnvironmentResolutionError(
+                            f"MCP secret env var {env_name!r} is reserved for a provider credential."
+                        )
+                    _reject_exposure(env_name, ref)
+
+    for alias in consumed:
+        del secrets[alias]
+    return providers
 
 
 def _merge_environment_block(config: dict[str, Any], env_spec: EnvironmentSpecInline) -> None:
@@ -218,10 +308,15 @@ def _merge_environment_block(config: dict[str, Any], env_spec: EnvironmentSpecIn
             environment[config_key] = value
 
     # Dict mirror fields: Agent supplies the base, EnvironmentSpec keys win on collision.
-    for field in ("connection", "metadata", "settings"):
-        spec_value = getattr(env_spec, field)
+    for config_key in ("connection", "metadata", "settings"):
+        spec_value = getattr(env_spec, config_key)
+        if config_key == "settings":
+            spec_value = {key: value for key, value in spec_value.items() if key != "openshell"}
+            existing = environment.get("settings")
+            if isinstance(existing, dict):
+                existing.pop("openshell", None)
         if spec_value:
-            environment[field] = {**environment.get(field, {}), **spec_value}
+            environment[config_key] = {**environment.get(config_key, {}), **spec_value}
 
 
 def _merge_process_env(config: dict[str, Any], env_spec: EnvironmentSpecInline) -> None:

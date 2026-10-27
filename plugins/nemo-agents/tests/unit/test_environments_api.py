@@ -96,6 +96,18 @@ class TestComputeSpecRoutes:
 
 
 class TestEnvironmentSpecRoutes:
+    def test_create_rejects_unsupported_top_level_provider_field(self) -> None:
+        entity_client = AsyncMock()
+        resp = _test_client(entity_client).post(
+            "/apis/agents/v2/workspaces/default/environment-specs",
+            json={
+                "name": "service-access",
+                "providers": {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "MISSING"}}},
+            },
+        )
+        assert resp.status_code == 422
+        entity_client.create.assert_not_awaited()
+
     def test_create(self) -> None:
         client_mock = AsyncMock()
         client_mock.create = AsyncMock(side_effect=lambda e: _stamp(e))

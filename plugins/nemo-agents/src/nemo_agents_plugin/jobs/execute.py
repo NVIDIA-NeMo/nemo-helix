@@ -17,6 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast
 
+from filesets import parse_fileset_ref
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import resolve_agent_config_for_deployment
 from nemo_agents_plugin.config import AgentsConfig
@@ -95,7 +96,10 @@ from nemo_helix_plugin.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.openshell.authorization import authorize_provider_references
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
@@ -308,6 +312,7 @@ class ExecuteAgentStepConfig(BaseModel):
     # the job is not kept in sync with the underlying environment entities.
     compute: ComputeSpecInline | None = None
     secrets: dict[str, str] = Field(default_factory=dict)
+    providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
     extension: ExecuteAgentExtensionConfig = Field(default_factory=_make_noop_extension_config)
 
 
@@ -347,7 +352,6 @@ class ExecuteAgentJob(NemoJob):
         in the AgentWorkdir, which are validated here, but not materialized; the Job snapshots
         them as a named result before doing any work.
         """
-        del is_local
         request = cast(ExecuteAgentJobConfig, input_spec)
         typed_entity_client = cast(Any, entity_client)
         source = await _resolve_agent_source(request.agent, workspace=workspace, entity_client=typed_entity_client)
@@ -372,9 +376,21 @@ class ExecuteAgentJob(NemoJob):
             resolved_env = await resolve_environment(
                 request.environment, workspace=workspace, entity_client=typed_entity_client
             )
-            merged = merge_environment_spec_into_agent_config(resolved_agent_config, resolved_env.environment_spec)
+            merged = merge_environment_spec_into_agent_config(
+                resolved_agent_config, resolved_env.environment_spec, workspace=workspace
+            )
         except EnvironmentResolutionError as exc:
             raise ValueError(str(exc)) from exc
+
+        if merged.providers:
+            merged.require_runtime_support("openshell")
+            if is_local:
+                raise ValueError("Gateway provider bindings require remote OpenShell execution.")
+            await authorize_provider_references(
+                merged.providers,
+                workspace=workspace,
+                secrets_client=AsyncSecretsClient.from_client(cast(AsyncNemoClient, async_sdk)),
+            )
 
         # Validate the merged config: an EnvironmentSpec can override the harness
         # provider, so validation must run after the merge to reject e.g. a spec
@@ -401,6 +417,7 @@ class ExecuteAgentJob(NemoJob):
             workdir=workdir,
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
+            providers=merged.providers,
             extension=extension,
         )
 
@@ -458,6 +475,18 @@ class ExecuteAgentJob(NemoJob):
                     executor=executor,
                     config=step_config.model_dump(mode="json"),
                     environment=environment,
+                    gateway_providers=step_config.providers,
+                    gateway_read_filesets=sorted(
+                        {
+                            "/".join(parse_fileset_ref(ref, workspace_fallback=step_config.agent.workspace)[:2])
+                            for ref in (
+                                ([step_config.workdir.base_workdir] if step_config.workdir.base_workdir else [])
+                                + [mount.ref for mount in step_config.workdir.artifact_mounts]
+                            )
+                        }
+                    )
+                    if step_config.providers and step_config.workdir
+                    else [],
                 )
             ],
         )
