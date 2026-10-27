@@ -42,35 +42,34 @@ export const SimpleFilesTable = () => {
     invalidFileMode,
   } = state;
 
-  const hasTypeRestriction = acceptableFileTypes.length > 0;
+  // An empty `acceptableFileTypes` accepts every file, so no separate "is restricted" flag is needed.
+  const visibleFiles = useMemo(
+    () =>
+      invalidFileMode === 'hide'
+        ? files.filter((file) => isFileTypeAllowed(file, acceptableFileTypes))
+        : files,
+    [files, acceptableFileTypes, invalidFileMode]
+  );
 
-  const isFileAllowed = (uploadFile: UploadFile): boolean =>
-    isFileTypeAllowed(uploadFile, acceptableFileTypes);
-
-  const visibleFiles = useMemo(() => {
-    if (invalidFileMode !== 'hide' || !hasTypeRestriction) return files;
-    return files.filter(isFileAllowed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, acceptableFileTypes, invalidFileMode]);
-
-  const hasValidSelection = selectedFiles.some((file) => isFileAllowed(file));
+  const hasValidSelection = selectedFiles.some((file) =>
+    isFileTypeAllowed(file, acceptableFileTypes)
+  );
   const disabledFilesMessage =
     invalidFileMode === 'disable' &&
-    hasTypeRestriction &&
     !hasValidSelection &&
-    visibleFiles.some((file) => !isFileAllowed(file))
+    visibleFiles.some((file) => !isFileTypeAllowed(file, acceptableFileTypes))
       ? `Only ${acceptableFileTypes.join(', ')} files can be selected. Upload a supported file or choose a different fileset.`
       : null;
 
   const fileRows = useMemo<FileRow[]>(
     () =>
       visibleFiles.map((uploadFile) => {
-        const isDisabled = invalidFileMode === 'disable' && !isFileAllowed(uploadFile);
+        const isDisabled =
+          invalidFileMode === 'disable' && !isFileTypeAllowed(uploadFile, acceptableFileTypes);
         const name = uploadFile.type === 'existing' ? uploadFile.file.path : uploadFile.file.name;
         const size = uploadFile.type === 'existing' ? uploadFile.file.size : uploadFile.file.size;
         return { id: uploadFile.id, name, size, isDisabled, uploadFile };
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [visibleFiles, invalidFileMode, acceptableFileTypes]
   );
 
