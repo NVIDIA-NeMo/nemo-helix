@@ -9702,6 +9702,8 @@ interface Props$4<DataType> {
 export declare const StudioDataView: <DataType>({ attributes, children, makeColumns, dataViewState, onRowClick, maxTwoLines, renderBulkActions, scrollContainerRef, searchField, toolbarSlotStart, toolbarSlotEnd }: Props$4<DataType>) => import("react/jsx-runtime").JSX.Element;
 //#endregion
 //#region src/utils/logs.d.ts
+/** Whether more lines may still arrive (`live`) or the log is complete (`completed`). */
+type LogStatus = 'live' | 'completed';
 /**
  * Incremental state of a multi-page log fetch. `total` is the server-side line count
  * for the whole job, known once the first page resolves.
@@ -9723,6 +9725,8 @@ interface LogViewerProps {
   /** Progress of the initial multi-page fetch, shown beneath the loading spinner.
    *  Ignored once logs are on screen. Callers that fetch in one shot can omit it. */
   loadProgress?: LogLoadProgress | null;
+  /** Badges the header as Live or Completed. Omit when the caller can't tell. */
+  logStatus?: LogStatus;
   /** Where the copy confirmation goes. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
 }
