@@ -399,13 +399,13 @@ question = "Who was the first person to walk on the Moon?"
 messages = [
     {"role": "user", "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}"}
 ]
-INFERENCE_MODEL_NAME = f"default--{OUTPUT_NAME}"
+# An adapter's entity ID names its base model; the gateway routes it through that deployment.
+INFERENCE_MODEL_NAME = f"default/{MODEL_NAME}&adapters/default/{OUTPUT_NAME}"
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 
 gateway = InferenceGatewayClient.from_client(client)
-response = gateway.provider_post(
-    name=deployment_name,
+response = gateway.openai_post(
     workspace="default",
     trailing_uri="v1/chat/completions",
     body=JsonBody(

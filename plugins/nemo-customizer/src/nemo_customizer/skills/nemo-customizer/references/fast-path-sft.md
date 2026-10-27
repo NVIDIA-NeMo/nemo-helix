@@ -17,6 +17,10 @@ nemo files filesets create "$DATASET" --workspace default --purpose dataset
 nemo files upload /tmp/train-data/train.jsonl "$DATASET" --workspace default --remote-path train.jsonl
 # validation.jsonl if present
 nemo files list "$DATASET" --workspace default
+
+# The frozen test split, in its own fileset (post-training-eval.md)
+nemo files filesets create "$DATASET-test" --workspace default --purpose dataset
+nemo files upload /tmp/test-data/test.jsonl "$DATASET-test" --workspace default --remote-path test.jsonl
 ```
 
 **2. Model** — skip if entity exists (`nemo models list --workspace default`).

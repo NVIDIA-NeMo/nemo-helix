@@ -213,7 +213,7 @@ The last two default to `true` on this platform, where the underlying library de
 
 ### Using a GRPO adapter
 
-The job registers an HF PEFT adapter entity whose base model is the entity you trained from, with `rank` and `alpha` recorded on it. It behaves like any other platform LoRA adapter: it hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true` and a max LoRA rank ≥ the adapter's `rank`, so there is no deployment to create before evaluating it. Default deployments stop at rank 16, so the skill's rank-128 GRPO default needs `--max-lora-rank 128` on the deployment (`post-training-eval.md` § **LoRA rank limit**). Route inference through the **provider** gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`) — the model-entity path always hits the base model. See `post-training-eval.md` § **Request routing (base vs LoRA)**.
+The job registers an HF PEFT adapter entity whose base model is the entity you trained from, with `rank` and `alpha` recorded on it. It behaves like any other platform LoRA adapter: it hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true` and a max LoRA rank ≥ the adapter's `rank`, so there is no deployment to create before evaluating it. Default deployments stop at rank 16, so the skill's rank-128 GRPO default needs `--max-lora-rank 128` on the deployment (`post-training-eval.md` § **LoRA rank limit**). Call it on the gateway's OpenAI-compatible route by its entity ID, `default/<base>&adapters/default/<adapter>` (`post-training-eval.md` § **Hand-off to nemo-evals**).
 
 Full-weight GRPO instead registers a new **model** entity, which does need its own deployment before inference.
 

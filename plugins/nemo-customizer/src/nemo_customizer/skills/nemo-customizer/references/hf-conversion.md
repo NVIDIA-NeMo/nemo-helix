@@ -33,6 +33,7 @@ If the model entity already exists: `nemo models get <entity> --workspace defaul
 ```python
 from datasets import load_dataset
 import json
+import random
 from pathlib import Path
 
 HF_REPO = "<hf-repo>"
@@ -56,16 +57,25 @@ def to_sft(ex):
 convert = to_chat if has_chat else to_sft
 
 ds = load_dataset(HF_DATASET)
-out = Path("/tmp/train-data")
-out.mkdir(exist_ok=True)
-for split in ("train", "validation"):
-    if split in ds:
-        with (out / f"{split}.jsonl").open("w") as f:
-            for ex in ds[split]:
-                f.write(json.dumps(convert(ex)) + "\n")
+
+# Freeze a test split: about 10% of the training rows, at most 500, never trained on.
+train = [convert(ex) for ex in ds["train"]]
+random.Random(42).shuffle(train)
+n_test = min(500, len(train) // 10)
+splits = {
+    Path("/tmp/train-data/train.jsonl"): train[n_test:],
+    Path("/tmp/test-data/test.jsonl"): train[:n_test],   # its own directory and fileset
+}
+if "validation" in ds:
+    splits[Path("/tmp/train-data/validation.jsonl")] = [convert(ex) for ex in ds["validation"]]
+for path, rows in splits.items():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
 ```
 
-Then upload it (`SKILL.md` § **Workflow** step 2). Validate with `nemo files list <DATASET_NAME> --workspace default`.
+Then upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/test.jsonl` to `<DATASET_NAME>-test` (`SKILL.md` § **Workflow** step 2). Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
 ## Mapping to job JSON
 
