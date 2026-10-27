@@ -710,10 +710,7 @@ def test_platform_resolved_target_calls_the_gateway_as_the_job(
 async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Embedded auth resolves over loopback; the spec must carry the service URL, inline judges as written.
-
-    The inline judge carries its own key: a key-less inline gateway URL is refused at submit.
-    """
+    """Embedded auth resolves over loopback; the spec must carry the service URL, inline judges as written."""
     route = "/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api:8080")
@@ -728,7 +725,7 @@ async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
         AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=passthrough))),
     )
     inline_judge = LLMJudgeMetric(
-        model=Model(url=f"http://localhost:9000{route}", name="sidecar", api_key_secret="sidecar-key"),
+        model=Model(url=f"http://localhost:9000{route}", name="sidecar"),
         scores=[RangeScore(name="fluency", minimum=0, maximum=1, parser=JSONScoreParser(json_path="fluency"))],
     )
 
