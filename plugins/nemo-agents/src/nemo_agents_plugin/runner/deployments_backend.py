@@ -959,7 +959,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
         deployment_present = False
         try:
             deployment = await entities.get(Deployment, name=name, workspace=workspace)
-            if deployment.status != "DELETING":
+            if deployment.desired_state != "STOPPED":
                 deployment.status = "DELETING"
                 deployment.desired_state = "STOPPED"
                 await entities.update(deployment)

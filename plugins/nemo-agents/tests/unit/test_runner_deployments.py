@@ -1817,6 +1817,31 @@ async def test_delete_returns_false_when_deployment_still_present() -> None:
     entities.delete.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_delete_does_not_reset_plugin_deleting_timeout_failure() -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    deployment = Deployment(
+        name="hello-dep",
+        workspace="default",
+        deployment_config="hello-dep",
+        status="FAILED",
+        desired_state="STOPPED",
+    )
+    entities.get = AsyncMock(return_value=deployment)
+    entities.update = AsyncMock()
+    entities.delete = AsyncMock()
+    backend._entities = entities
+
+    with patch("nemo_agents_plugin.runner.deployments_backend.async_sleep", new_callable=AsyncMock):
+        with patch("nemo_agents_plugin.runner.deployments_backend.monotonic", side_effect=[0.0, 0.0, 6.0]):
+            cleaned = await backend.delete_deployment("default", "hello-dep")
+
+    assert not cleaned
+    assert deployment.status == "FAILED"
+    entities.update.assert_not_called()
+
+
 def test_agent_deployment_defaults_are_subprocess() -> None:
     from nemo_agents_plugin.entities import AgentDeployment
 
