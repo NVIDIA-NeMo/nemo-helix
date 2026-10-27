@@ -174,6 +174,12 @@ def _local_write_mode(path: Path) -> int:
     return int(format(stat.S_IMODE(path.stat().st_mode), "o"))
 
 
+def _literal(text: str) -> str:
+    """``text`` as Kubernetes passes it on unchanged: a container's command and env expand ``$(VAR)``
+    and turn ``$$`` into ``$``, which Docker never does, so every ``$`` is doubled."""
+    return text.replace("$", "$$")
+
+
 class NemoOpenSandboxEnvironment(BaseEnvironment):
     """One OpenSandbox sandbox per Harbor environment, with trusted egress, applied-policy verification, cleanup, and compose services.
 
@@ -442,12 +448,14 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             await self._require_extension()
 
         egress_policy = self.egress_policy()
+        entrypoint = self._sandbox_entrypoint()
         sandbox = await self._driver.create(
             CreateRequest(
                 # _validate_definition guarantees the task names a prebuilt image.
                 image=str(self.task_env_config.docker_image),
-                # Applied at create so the entrypoint sees it too, not only exec'd commands.
-                env=dict(self._persistent_env),
+                # Applied at create so the entrypoint sees it too, not only exec'd commands. Escaped
+                # here only: commands run in the sandbox later get the env as is, unexpanded.
+                env={name: _literal(value) for name, value in self._persistent_env.items()},
                 metadata={
                     **self._metadata,
                     "session_id": self.session_id,
@@ -460,7 +468,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 expires_at=self._sandbox_expires_at,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
-                entrypoint=self._sandbox_entrypoint(),
+                entrypoint=[_literal(argument) for argument in entrypoint] if entrypoint is not None else None,
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its

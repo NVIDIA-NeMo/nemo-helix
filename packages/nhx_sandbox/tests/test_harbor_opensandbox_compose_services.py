@@ -289,6 +289,20 @@ async def test_a_plain_sandbox_starts_with_its_image_s_own_entrypoint(tmp_path: 
     assert server.creates[-1]["entrypoint"] == ["/bin/bash", "-l", "-c", "sh", "-c", "sleep infinity"]
 
 
+async def test_main_s_entrypoint_and_env_reach_the_container_as_written(tmp_path: Path, server: Server) -> None:
+    """Kubernetes expands ``$(VAR)`` and ``$$`` at create, so both are escaped there; later commands get the env as is."""
+    entrypoints = {"registry.example/task:1": ["/bin/sh", "-c", 'echo "$(HOME)" a$$b']}
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints)
+    environment._persistent_env["PASSWORD"] = "pa$$word"
+
+    await environment._create_sandbox()
+
+    sent = server.creates[-1]
+    assert sent["entrypoint"][:3] == ["/bin/sh", "-c", 'echo "$$(HOME)" a$$$$b']
+    assert sent["env"]["PASSWORD"] == "pa$$$$word"
+    assert (environment._merge_env(None) or {})["PASSWORD"] == "pa$$word"
+
+
 @pytest.mark.parametrize(
     "entrypoints",
     [{"registry.example/task:1": []}, {"registry.example/verifier:1": ["/verify"]}],
