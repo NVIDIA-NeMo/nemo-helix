@@ -19,7 +19,7 @@ spec:
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
-  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $api.extraIngress .Values.builder.enabled }}
+  {{- if or $api.sameReleasePods.enabled $api.managedJobs.enabled $api.modelPullers.enabled $api.extraIngress .Values.builder.enabled }}
   ingress:
     {{- if $api.sameReleasePods.enabled }}
     - from:
@@ -34,6 +34,18 @@ spec:
     - from:
         - podSelector:
             {{- toYaml $api.managedJobs.podSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ default .Values.api.service.port $api.port }}
+    {{- end }}
+    {{- if $api.modelPullers.enabled }}
+    # Models-controller weight pullers need the Files API but lack Helm release labels.
+    # A podSelector alone restricts this allowance to the API policy's namespace.
+    - from:
+        - podSelector:
+            matchLabels:
+              nhx.nvidia.com/managed-by: models-controller
+              nhx.nvidia.com/models-role: puller
       ports:
         - protocol: TCP
           port: {{ default .Values.api.service.port $api.port }}
