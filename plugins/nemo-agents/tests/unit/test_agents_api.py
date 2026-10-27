@@ -157,6 +157,7 @@ class TestRegisterAgent:
             {"name": "calc", "reference": {"fileset": "ws/source/extra"}},
             {"name": "calc", "reference": {"fileset": "ws/source#agent.yaml"}},
             {"name": "calc", "reference": {"fileset": "source name"}},
+            {"name": "calc", "reference": {"fileset": "source", "container": "alpine"}},
             {"name": "calc", "reference": {"container_image": ""}},
             {"name": "calc", "reference": {"container_image": " agent:1"}},
             {"name": "calc", "reference": {"container_image": "https://nvcr.io/org/agent:1"}},

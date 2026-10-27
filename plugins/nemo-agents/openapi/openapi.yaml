@@ -5666,6 +5666,7 @@ components:
           description: Container image reference; accepts Docker shorthand, tags,
             and SHA-256 digests.
           type: string
+      additionalProperties: false
       type: object
       title: ReferenceConfigInput
       description: Optional source and container references associated with an agent.
@@ -5682,6 +5683,7 @@ components:
           description: Container image reference; accepts Docker shorthand, tags,
             and SHA-256 digests.
           type: string
+      additionalProperties: false
       type: object
       title: ReferenceConfigOutput
       description: Optional source and container references associated with an agent.

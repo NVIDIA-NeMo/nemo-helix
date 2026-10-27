@@ -235,6 +235,8 @@ class AgentInline(BaseModel):
 class ReferenceConfig(BaseModel):
     """Optional source and container references associated with an agent."""
 
+    model_config = ConfigDict(extra="forbid")
+
     fileset: FilesetRef | None = Field(
         default=None,
         pattern=ENTITY_REF_PATTERN,
