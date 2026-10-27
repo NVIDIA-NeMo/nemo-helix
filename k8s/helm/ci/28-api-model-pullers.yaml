@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Exercise the model-puller rule as the only API ingress allowance, with a custom port.
+builder:
+  enabled: false
+
+networkPolicies:
+  enabled: true
+  api:
+    port: 8443
+    sameReleasePods:
+      enabled: false
+    managedJobs:
+      enabled: false
+    modelPullers:
+      enabled: true
