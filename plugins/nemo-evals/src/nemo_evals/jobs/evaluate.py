@@ -17,13 +17,17 @@ from typing import Annotated, Any, ClassVar, Self, TypeAlias
 # payload kind in the bundle registry so MetricBundle payloads validate.
 import nemo_evals.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evals.shared.metric_bundles.inline  # noqa: F401
+from fastapi import HTTPException, status
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.filesets import FilesetRef, download_dataset, download_dataset_sync
 from nemo_evals.jobs.agent_spec import target_agent_identity
 from nemo_evals.jobs.metric_resolution import (
-    gateway_metric_models_as_job,
+    caller_model_read_authorizer,
+    gateway_models_as_job,
+    reject_inline_gateway_model,
     require_resolved_model_refs,
     resolve_metrics_to_inline,
+    resolve_model_ref,
     to_runtime_bundle,
     unresolved_model_refs,
 )
@@ -51,6 +55,7 @@ from nhx_evals_sdk.values import (
     AgentBase,
     FieldMapping,
     Model,
+    ModelRef,
     RunConfig,
     RunConfigOnline,
     RunConfigOnlineModel,
@@ -62,6 +67,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 logger = logging.getLogger(__name__)
 
 TargetSpec = Model | Agent
+# A bare ``workspace/name`` string parses only as ``ModelRef``; ``to_spec`` resolves it to a ``Model``.
+SubmitTargetSpec = Model | Agent | ModelRef
 MetricSpec: TypeAlias = Annotated[list[MetricRefOrInline], Field(min_length=1)]
 # Canonical spec carries inline metrics only (refs resolved) — still the wire DTO,
 # so the runtime MetricBundle never surfaces as a public schema.
@@ -140,13 +147,60 @@ def _resolve_run_dataset_async(
     )
 
 
+def resolve_submit_params(
+    params: RunConfig | RunConfigOnline | RunConfigOnlineModel | None, target: SubmitTargetSpec | None
+) -> RunConfig | RunConfigOnline | RunConfigOnlineModel:
+    """``resolve_params`` for a submitted target, which may be a ``ModelRef`` resolved later by this service.
+
+    A ref names a model, so it takes the model target's rules. The SDK's ``resolve_params`` takes only
+    resolved targets: resolving a ref is the calling service's job, not the SDK's.
+    """
+    if not isinstance(target, ModelRef):
+        return resolve_params(params, target)
+    if params is None or type(params) is RunConfig:
+        raise TypeError("model target requires RunConfigOnlineModel")
+    if type(params) is RunConfigOnline:
+        return RunConfigOnlineModel.model_validate(params.model_dump())
+    if not isinstance(params, RunConfigOnlineModel):
+        raise TypeError("model target requires RunConfigOnlineModel")
+    return params
+
+
+def _validated_params(
+    params: RunConfig | RunConfigOnline | RunConfigOnlineModel | None, target: SubmitTargetSpec | None
+) -> RunConfig | RunConfigOnline | RunConfigOnlineModel:
+    """Params resolved for the target, as a validation error rather than a 500 when they don't fit."""
+    try:
+        return resolve_submit_params(params, target)
+    except TypeError as exc:
+        # Pydantic turns only ValueError and AssertionError into a 422; a TypeError escapes as a 500.
+        raise ValueError(str(exc)) from exc
+
+
+def _require_resolvable_publication_identity(
+    publication: RowPublicationSpec | None, target: SubmitTargetSpec | None
+) -> None:
+    # Publishing needs an agent name and only some targets carry one. Rejecting here makes it a
+    # 422 on submit rather than a failure discovered after the evaluation has already run — and
+    # without it a target that names nothing publishes every trajectory under an empty name.
+    intake = publication.intake if publication is not None else None
+    if intake is None or intake.agent_name is not None:
+        return
+    if target_agent_identity(target)[0] is None:
+        source = "an offline evaluation" if target is None else f"a {type(target).__name__} target"
+        raise ValueError(
+            f"`publication.intake.agent_name` is required: it cannot be derived from {source}. "
+            "Supply the name the published trajectories should be recorded under."
+        )
+
+
 class _EvaluateSpecCommon(BaseModel):
     """Fields shared by the submitter input and the canonical (resolved) spec.
 
     ``EvaluateInputSpec`` and ``EvaluateSpec`` are siblings rather than a
-    subtype pair: they differ only in their ``metrics`` field (refs allowed vs.
-    fully resolved), and a mutable field can't be narrowed across inheritance
-    without violating invariance.
+    subtype pair: they differ in their ``metrics`` and ``target`` fields (refs
+    allowed vs. fully resolved), and a mutable field can't be narrowed across
+    inheritance without violating invariance. Each validates its own target.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -157,7 +211,6 @@ class _EvaluateSpecCommon(BaseModel):
     params: RunConfig | RunConfigOnline | RunConfigOnlineModel | None = Field(
         default=None, description="Optional evals SDK execution parameters."
     )
-    target: TargetSpec | None = Field(default=None, description="Optional model or agent target for online evaluation.")
     prompt_template: str | dict[str, Any] | None = Field(
         default=None, description="Optional prompt template for online target generation."
     )
@@ -170,27 +223,6 @@ class _EvaluateSpecCommon(BaseModel):
         "Omit to publish nowhere.",
     )
 
-    @model_validator(mode="after")
-    def validate_params_for_target(self) -> Self:
-        self.params = resolve_params(self.params, self.target)
-        return self
-
-    @model_validator(mode="after")
-    def _require_resolvable_publication_identity(self) -> Self:
-        # Publishing needs an agent name and only some targets carry one. Rejecting here makes it a
-        # 422 on submit rather than a failure discovered after the evaluation has already run — and
-        # without it a target that names nothing publishes every trajectory under an empty name.
-        intake = self.publication.intake if self.publication is not None else None
-        if intake is None or intake.agent_name is not None:
-            return self
-        if target_agent_identity(self.target)[0] is None:
-            source = "an offline evaluation" if self.target is None else f"a {type(self.target).__name__} target"
-            raise ValueError(
-                f"`publication.intake.agent_name` is required: it cannot be derived from {source}. "
-                "Supply the name the published trajectories should be recorded under."
-            )
-        return self
-
 
 class EvaluateInputSpec(_EvaluateSpecCommon):
     """Submitter-facing SDK evaluation input for the evals plugin job."""
@@ -198,12 +230,30 @@ class EvaluateInputSpec(_EvaluateSpecCommon):
     metrics: MetricSpec = Field(
         description="Metrics to evaluate, given as inline metrics and/or references to stored metrics.",
     )
+    target: SubmitTargetSpec | None = Field(
+        default=None,
+        description="Optional model or agent target for online evaluation, or a `workspace/model` reference "
+        "to a platform model, resolved when the job is submitted.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> Self:
+        self.params = _validated_params(self.params, self.target)
+        _require_resolvable_publication_identity(self.publication, self.target)
+        return self
 
 
 class EvaluateSpec(_EvaluateSpecCommon):
     """Canonical SDK evaluation spec with platform model and metric references resolved."""
 
     metrics: ResolvedMetricSpec = Field(description="Inline metrics with all references resolved.")
+    target: TargetSpec | None = Field(default=None, description="Optional model or agent target for online evaluation.")
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> Self:
+        self.params = _validated_params(self.params, self.target)
+        _require_resolvable_publication_identity(self.publication, self.target)
+        return self
 
     @model_validator(mode="after")
     def reject_unresolved_metric_model_refs(self) -> Self:
@@ -314,17 +364,32 @@ class _EvaluateJobBase(NemoJob):
             else EvaluateInputSpec.model_validate_json(input_spec.model_dump_json())
         )
         entity_client = entity_client if isinstance(entity_client, EntityClient) else None
-        metrics = await resolve_metrics_to_inline(
-            submit_spec.metrics,
-            workspace=workspace,
-            entity_client=entity_client,
-            async_client=async_sdk,
-        )
+        # Each model ref is checked as the caller: resolution alone routes a ref to a VirtualModel
+        # the caller may not read. Ref-free specs need no platform client, so none is required here.
+        authorize = caller_model_read_authorizer(async_sdk) if async_sdk is not None else None
+        target = submit_spec.target
+        reject_inline_gateway_model(target, subject="target")
+        try:
+            metrics = await resolve_metrics_to_inline(
+                submit_spec.metrics,
+                workspace=workspace,
+                entity_client=entity_client,
+                async_client=async_sdk,
+                model_authorize=authorize,
+                reject_inline_gateway_models=True,
+            )
+            if isinstance(target, ModelRef):
+                target = await resolve_model_ref(target, async_client=async_sdk, authorize=authorize)
+        except HTTPException as exc:
+            # The job routes answer 403 only for a PermissionError; any other exception becomes a 422.
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                raise PermissionError(exc.detail) from exc
+            raise
         return EvaluateSpec(
             metrics=metrics,
             dataset=submit_spec.dataset,
-            params=resolve_params(submit_spec.params, submit_spec.target),
-            target=submit_spec.target,
+            params=submit_spec.params,
+            target=target,
             prompt_template=submit_spec.prompt_template,
             field_mapping=submit_spec.field_mapping,
             publication=submit_spec.publication,
@@ -346,15 +411,18 @@ class _EvaluateJobBase(NemoJob):
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         require_resolved_model_refs(metrics, subject="EvaluateSpec")
-        with gateway_metric_models_as_job(metrics):
+        model_target = spec.target if isinstance(spec.target, Model) else None
+        with gateway_models_as_job(metrics, model_target) as called_target:
             if isinstance(spec.target, Model):
                 if not isinstance(params, RunConfigOnlineModel):
                     raise TypeError("model target requires RunConfigOnlineModel")
+                # Generation goes to the proxied copy when there is one; the spec's target stays as
+                # resolved, so results and publication record that rather than the proxy.
                 result = evaluator.run_sync(
                     metrics=metrics,
                     dataset=dataset,
                     config=params,
-                    target=spec.target,
+                    target=called_target or spec.target,
                     field_mapping=spec.field_mapping,
                     prompt_template=spec.prompt_template,
                 )

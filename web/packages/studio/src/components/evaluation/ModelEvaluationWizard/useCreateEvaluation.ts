@@ -21,12 +21,8 @@ import {
 } from '@studio/components/evaluation/submitEvaluationJob';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
-import { getModelInferenceGatewayUrl } from '@studio/util/models';
+import { toWorkspaceModelRef } from '@studio/util/models';
 import { useNavigate } from 'react-router';
-
-/** The bare model id the endpoint expects, without its workspace prefix. */
-const modelName = (modelRef: string): string =>
-  modelRef.includes('/') ? modelRef.split('/').slice(1).join('/') : modelRef;
 
 export function useCreateEvaluation() {
   const workspace = useWorkspaceFromPath();
@@ -87,14 +83,9 @@ export function useCreateEvaluation() {
           // starts returning 503 "ResourceExhausted: Worker local total request
           // limit reached".
           params: { ignore_request_failure: false, parallelism: 4 },
-          // TargetSpec is `Model | Agent` -- unlike the judge's `model` field, a
-          // bare ModelRef string is not accepted, so the ref is resolved to its
-          // gateway URL here. The SDK strips a trailing /chat/completions before
-          // using this as an OpenAI base_url, so the full chat URL is correct.
-          target: {
-            url: getModelInferenceGatewayUrl(workspace, values.model),
-            name: modelName(values.model),
-          },
+          // A `workspace/name` ref: the server resolves it to a gateway route the
+          // job can reach. A URL built here would carry the browser's origin.
+          target: toWorkspaceModelRef(workspace, values.model),
           prompt_template: spec.prompt_template,
           ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
         },

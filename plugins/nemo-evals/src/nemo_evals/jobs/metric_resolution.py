@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from fastapi import HTTPException, status
 from nemo_agents_plugin.jobs.gateway_proxy import platform_auth_proxy
@@ -30,9 +31,9 @@ from nemo_evals.shared.metric_bundles.bundles import (
     metric_bundle_packager_for_payload,
     unbundle_metric,
 )
-from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read
+from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read, remember_allowed
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -40,9 +41,11 @@ from nemo_helix_plugin.models.client import AsyncModelsClient, UnroutableModelEr
 from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels
 from nhx_evals_sdk.metrics.resolution import model_ref_fields
+from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resolver_protocols import ModelResolver, SecretResolver
 from nhx_evals_sdk.values import Model, ModelRef
 from nhx_evals_sdk.values.common import SecretRef
@@ -52,6 +55,13 @@ from pydantic import BaseModel
 _GATEWAY_PATH_PREFIX = "/apis/inference-gateway/"
 #: Workspace segment of the placeholder refs `_rebind_models` routes a metric's models through.
 _REBIND_REF_WORKSPACE = "job-auth-proxy"
+#: The read paths ``authorize_source_read`` checks for a model and a VirtualModel.
+_MODEL_READ_PATHS = {
+    "model": re.compile(r"/apis/models/v2/workspaces/(?P<workspace>[^/]+)/models/(?P<name>[^/]+)"),
+    "virtual_model": re.compile(
+        r"/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/virtual-models/(?P<name>[^/]+)"
+    ),
+}
 
 
 def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
@@ -102,6 +112,46 @@ def require_resolved_model_refs(metrics: list[Metric], *, subject: str) -> None:
     """
     if unresolved := unresolved_model_refs(metrics):
         raise ValueError(f"{subject} metric models must be resolved before run: {', '.join(unresolved)}")
+
+
+def calls_gateway_unkeyed(model: Model) -> bool:
+    """Whether ``model`` calls an Inference Gateway route with no credential of its own.
+
+    A model with ``api_key_secret`` is called as configured: its owner chose the credential.
+    """
+    return model.api_key_secret is None and urlsplit(model.url).path.startswith(_GATEWAY_PATH_PREFIX)
+
+
+def reject_inline_gateway_model(model: object, *, subject: str) -> None:
+    """Refuse an inline model that calls Inference Gateway with no credential of its own.
+
+    Such a model must be given as a ``workspace/name`` reference, so that every key-less gateway URL
+    in a stored spec was put there by the server's resolver. The job routes exactly those through its
+    auth proxy; an inline URL that only looks like a gateway route would otherwise be sent there too.
+
+    Raises:
+        ValueError: ``model`` is an inline key-less gateway model.
+    """
+    if isinstance(model, Model) and calls_gateway_unkeyed(model):
+        raise ValueError(
+            f"{subject} points at an Inference Gateway route without api_key_secret. "
+            "Give a 'workspace/name' model reference instead, or set api_key_secret."
+        )
+
+
+def reject_inline_gateway_metric_models(metrics: Sequence[Metric]) -> None:
+    """Apply :func:`reject_inline_gateway_model` to every model field of the metrics, before refs resolve.
+
+    A metric that is not a Pydantic model has no declared model fields to check, and the job proxy
+    cannot rebind it either, so it is left alone.
+    """
+    for metric in metrics:
+        if not isinstance(metric, MetricWithModels) or not isinstance(metric, BaseModel):
+            continue
+        for field in model_ref_fields(metric):
+            reject_inline_gateway_model(
+                getattr(metric, field, None), subject=f"Metric '{metric_type_name(metric)}' field '{field}'"
+            )
 
 
 def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> MetricBundle:
@@ -176,6 +226,10 @@ class HelixMetricModelResolver(ModelResolver):
             raise ValueError(str(exc.detail)) from exc
         except NotFoundError as exc:
             raise _model_not_found_error(model_ref, workspace, name) from exc
+        except PermissionDeniedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=f"Not allowed to read model '{model_ref.root}'."
+            ) from exc
         if resolved.virtual_model and readable == "model":
             await authorize_source_read(self.authorize, "virtual_model", workspace, name)
         entity_readable = readable == "model"
@@ -185,6 +239,52 @@ class HelixMetricModelResolver(ModelResolver):
             host_url=resolved.host_url if entity_readable else None,
             served_model_name=resolved.served_model_name if entity_readable else None,
         )
+
+
+def caller_model_read_authorizer(async_client: AsyncHelixClient) -> SourceReadAuthorizer:
+    """Check model and VirtualModel reads as the caller, by reading them with the caller's own client.
+
+    The Models client resolves a ref to a VirtualModel's route even when the caller can read only the
+    model entity of that name, so resolution alone does not show the caller may use what the ref routes
+    to. ``HelixMetricModelResolver`` closes that gap when it has an authorizer; this one needs no
+    platform policy hook, only the request-scoped client. A missing source counts as allowed: whether
+    it exists is resolution's question, answered with its own error.
+    """
+    models_client = client_from_platform(async_client, AsyncModelsClient)
+    virtual_models_client = client_from_platform(async_client, AsyncVirtualModelsClient)
+
+    async def check(method: str, path: str) -> None:
+        del method
+        for kind, pattern in _MODEL_READ_PATHS.items():
+            if match := pattern.fullmatch(path):
+                break
+        else:
+            raise ValueError(f"caller model read checks cover a model or VirtualModel read, not {path!r}")
+        workspace, name = unquote(match["workspace"]), unquote(match["name"])
+        read = models_client.get_model if kind == "model" else virtual_models_client.get_virtual_model
+        try:
+            await read(name=name, workspace=workspace)
+        except NotFoundError:
+            return
+        except PermissionDeniedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=f"Not allowed to read {workspace}/{name}."
+            ) from exc
+
+    return remember_allowed(check)
+
+
+async def resolve_model_ref(
+    model_ref: ModelRef,
+    *,
+    async_client: AsyncHelixClient | None,
+    authorize: SourceReadAuthorizer | None = None,
+) -> Model:
+    """Resolve one ``ModelRef`` the way metric model refs are resolved, for an evaluation target."""
+    if async_client is None:
+        raise ValueError("resolving a model reference requires a platform client")
+    models_client = client_from_platform(async_client, AsyncModelsClient)
+    return await HelixMetricModelResolver(models_client, authorize=authorize).resolve_model(model_ref)
 
 
 @dataclass(frozen=True)
@@ -218,6 +318,8 @@ async def resolve_metrics_to_inline(
     entity_client: EntityClient | None,
     async_client: AsyncHelixClient | None,
     authorize: SourceReadAuthorizer | None = None,
+    model_authorize: SourceReadAuthorizer | None = None,
+    reject_inline_gateway_models: bool = False,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
@@ -229,6 +331,10 @@ async def resolve_metrics_to_inline(
     Both need ``async_client``; it is only optional so callers can pass through the
     job context's handle, and it must be set when any reference needs resolving.
     When ``authorize`` is set, each stored metric and model is checked as the caller before it is read.
+    ``model_authorize`` checks model refs instead of ``authorize``, for a caller that has no check for
+    stored metrics; when it is unset, ``authorize`` covers models too.
+    ``reject_inline_gateway_models`` refuses inline key-less gateway models, inline or stored (see
+    :func:`reject_inline_gateway_model`); it runs before resolution, after which refs look the same.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
     files_client = None
@@ -244,13 +350,17 @@ async def resolve_metrics_to_inline(
         authorize=authorize,
     )
     runtime_metrics = [unbundle_metric(bundle) for bundle in resolved_bundles]
+    if reject_inline_gateway_models:
+        reject_inline_gateway_metric_models(runtime_metrics)
     final_bundles = resolved_bundles
     unresolved = unresolved_model_refs(runtime_metrics)
     if unresolved:
         if async_client is None:
             raise ValueError("resolving metric model references requires a platform client")
         models_client = client_from_platform(async_client, AsyncModelsClient)
-        resolver: ModelResolver = HelixMetricModelResolver(models_client, authorize=authorize)
+        resolver: ModelResolver = HelixMetricModelResolver(
+            models_client, authorize=model_authorize if model_authorize is not None else authorize
+        )
         await asyncio.gather(
             *(metric.resolve_models(resolver) for metric in runtime_metrics if isinstance(metric, MetricWithModels))
         )
@@ -272,18 +382,13 @@ class _BoundModels(ModelResolver):
 
 
 def _gateway_models(metric: MetricWithModels) -> dict[str, Model]:
-    """The metric's model fields that call Inference Gateway with no credential of their own.
-
-    A model with ``api_key_secret`` is called as configured: its owner chose the credential.
-    """
+    """The metric's model fields that call Inference Gateway with no credential of their own."""
     if not isinstance(metric, BaseModel):
         return {}
     return {
         field: model
         for field in model_ref_fields(metric)
-        if isinstance(model := getattr(metric, field, None), Model)
-        and model.api_key_secret is None
-        and urlsplit(model.url).path.startswith(_GATEWAY_PATH_PREFIX)
+        if isinstance(model := getattr(metric, field, None), Model) and calls_gateway_unkeyed(model)
     }
 
 
@@ -302,17 +407,32 @@ def _rebind_models(metric: MetricWithModels, models: dict[str, Model]) -> None:
     run_sync(lambda: metric.resolve_models(_BoundModels(parked)))
 
 
+def _via_proxy(model: Model, origin: str) -> Model:
+    """A copy of ``model`` that calls the same gateway path on the proxy ``origin``."""
+    proxy = urlsplit(origin)
+    return model.model_copy(
+        update={"url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()}
+    )
+
+
 @contextmanager
-def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
-    """Call Inference Gateway from the metrics' models as this job, for the duration of the block.
+def gateway_models_as_job(metrics: Sequence[Metric], target: Model | None = None) -> Generator[Model | None]:
+    """Call Inference Gateway from the metrics' models and the target as this job, for the duration of the block.
 
-    A stored metric's ``ModelRef`` is resolved at submit to a gateway route on the API's own
-    platform URL, with no credential: the job's identity is not known yet, and the job may reach
-    the platform at a different address. Inside the block those models point at the job's loopback
-    auth proxy, which forwards to the job's platform URL with its identity and refreshes workload
-    tokens. Afterwards the original models are restored, so results record the resolved route.
+    A ``ModelRef`` is resolved at submit to a gateway route on the API's own platform URL, with no
+    credential: the job's identity is not known yet, and the job may reach the platform at a different
+    address. Inside the block those models point at the job's loopback auth proxy, which forwards to
+    the job's platform URL with its identity and refreshes workload tokens. Afterwards the metrics'
+    original models are restored, so results record the resolved route.
 
-    Does nothing when no metric calls the gateway, or when the job has no identity to forward
+    Submit refuses inline key-less gateway models, so every model matched here was resolved by the
+    server to this platform.
+
+    Yields:
+        The target to call: a proxied copy of ``target`` when it calls the gateway with no key of its
+        own, else ``target`` itself, which is never changed.
+
+    Does nothing when no model calls the gateway, or when the job has no identity to forward
     (an auth-disabled platform), which is how those models were called before.
     """
     bound = [
@@ -320,28 +440,18 @@ def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
         for metric in metrics
         if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
     ]
-    if not bound:
-        yield
+    gateway_target = target if target is not None and calls_gateway_unkeyed(target) else None
+    if not bound and gateway_target is None:
+        yield target
         return
     with platform_auth_proxy() as origin:
         if origin is None:
-            yield
+            yield target
             return
-        proxy = urlsplit(origin)
         try:
             for metric, models in bound:
-                _rebind_models(
-                    metric,
-                    {
-                        field: model.model_copy(
-                            update={
-                                "url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
-                            }
-                        )
-                        for field, model in models.items()
-                    },
-                )
-            yield
+                _rebind_models(metric, {field: _via_proxy(model, origin) for field, model in models.items()})
+            yield _via_proxy(gateway_target, origin) if gateway_target is not None else target
         finally:
             for metric, models in bound:
                 _rebind_models(metric, models)

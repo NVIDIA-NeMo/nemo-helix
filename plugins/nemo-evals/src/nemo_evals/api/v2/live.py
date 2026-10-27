@@ -29,10 +29,13 @@ from nemo_evals.api.schemas import MetricRefOrInline
 from nemo_evals.authz import scope
 from nemo_evals.jobs.metric_resolution import (
     HelixMetricSecretResolver,
+    caller_model_read_authorizer,
     resolve_metrics_to_inline,
+    resolve_model_ref,
     to_runtime_bundle,
 )
 from nemo_evals.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evals.source_authorization import SourceReadAuthorizer
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -47,7 +50,7 @@ from nhx_evals_sdk.execution.utils import unique_metric_keys
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels
 from nhx_evals_sdk.metrics.utils import metric_type_name
 from nhx_evals_sdk.resolver_protocols import SecretResolver
-from nhx_evals_sdk.values import FieldMapping, Model
+from nhx_evals_sdk.values import FieldMapping, Model, ModelRef
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nhx_evals_sdk.values.params import RunConfig, RunConfigOnlineModel
 from nhx_evals_sdk.values.results import AggregateScore
@@ -109,10 +112,11 @@ class LiveScoreRequest(BaseModel):
         description="Metrics to score the row with, given as inline definitions and/or references "
         "to stored metrics (`workspace/metric-name`).",
     )
-    target: Model | None = Field(
+    target: Model | ModelRef | None = Field(
         default=None,
-        description="Optional model to generate the row's output before scoring. Omit to score an "
-        "output already present on the row. Agent targets are not supported on this route.",
+        description="Optional model to generate the row's output before scoring, inline or as a "
+        "`workspace/model` reference to a platform model. Omit to score an output already present on "
+        "the row. Agent targets are not supported on this route.",
     )
     prompt_template: str | dict[str, Any] | None = Field(
         default=None, description="Optional prompt template applied to online target generation."
@@ -225,11 +229,23 @@ async def run_live_evaluation(
             # Reference resolution reaches the entity store, Files and Models, so it is bounded by
             # the same timeout as scoring; outside it a slow lookup would hold a slot indefinitely.
             async with asyncio.timeout(LIVE_TIMEOUT_S):
-                _reject_target_secret(request.target)
+                # Each model ref is checked as the caller: resolution alone routes a ref to a
+                # VirtualModel the caller may not read.
+                authorize = caller_model_read_authorizer(async_client)
+                target = request.target
+                if isinstance(target, ModelRef):
+                    target = await resolve_model_ref(target, async_client=async_client, authorize=authorize)
+                    # Scoring reads the target from the request.
+                    request = request.model_copy(update={"target": target})
+                _reject_target_secret(target)
                 metrics = await _resolve_metrics(
-                    request.metrics, workspace=workspace, entity_client=entity_client, async_client=async_client
+                    request.metrics,
+                    workspace=workspace,
+                    entity_client=entity_client,
+                    async_client=async_client,
+                    authorize=authorize,
                 )
-                params = _live_params(request.params, request.target)
+                params = _live_params(request.params, target)
                 async with delegated_service_client(async_client) as secrets_access_client:
                     secret_resolver = HelixMetricSecretResolver(
                         client_from_platform(secrets_access_client, AsyncSecretsClient), workspace=workspace
@@ -283,6 +299,7 @@ async def _resolve_metrics(
     workspace: str,
     entity_client: EntityClient,
     async_client: AsyncNemoClient,
+    authorize: SourceReadAuthorizer,
 ) -> list[Metric]:
     """Resolve any judge model references and return executable runtime metrics.
 
@@ -295,6 +312,7 @@ async def _resolve_metrics(
         workspace=workspace,
         entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
         async_client=async_client,
+        model_authorize=authorize,
     )
     runtime = [unbundle_metric(to_runtime_bundle(metric)) for metric in resolved]
     model_backed = [metric for metric in runtime if isinstance(metric, MetricWithModels)]

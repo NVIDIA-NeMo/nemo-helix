@@ -9537,7 +9537,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the EvaluateInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `dataset`, `params`, `target`, `prompt_template (other union forms)`, `field_mapping.input`, `field_mapping.output`, `field_mapping.context`, `field_mapping.reference`, `field_mapping.trajectory`, `field_mapping.messages`, `field_mapping.tool_calls`, `field_mapping.tools`, `field_mapping.custom`, `metrics`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `dataset`, `params`, `prompt_template (other union forms)`, `field_mapping.input`, `field_mapping.output`, `field_mapping.context`, `field_mapping.reference`, `field_mapping.trajectory`, `field_mapping.messages`, `field_mapping.tool_calls`, `field_mapping.tools`, `field_mapping.custom`, `metrics`, `target`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

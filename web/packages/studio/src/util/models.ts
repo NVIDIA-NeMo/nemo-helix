@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceRef } from '@nemo/common/src/types';
-import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ChatCompletionTool } from 'openai/resources/index.mjs';
@@ -20,24 +19,15 @@ export const getModelTools = (model: ModelEntity): ChatCompletionTool[] => {
 };
 
 /**
- * Build an inference gateway URL for a model entity.
- * Uses the SDK's gateway proxy path to route through the inference gateway.
+ * A `workspace/name` model reference, as the evaluator API takes one for a target or judge.
+ * The server resolves it to an address its jobs can reach; a URL built here would carry the
+ * browser's origin instead. A bare name is qualified with `workspace`.
  *
- * @param workspace - The workspace the model belongs to
- * @param modelName - The model entity name (without workspace prefix)
- * @param isChat - Whether to use chat completions (default true)
+ * @param workspace - The workspace a bare model name belongs to
+ * @param modelRef - A model name, bare or already `workspace/name`
  */
-export const getModelInferenceGatewayUrl = (
-  workspace: string,
-  modelRef: string,
-  isChat: boolean = true
-): string => {
-  // Strip workspace prefix if model ref is in "workspace/modelName" format
-  const modelName = modelRef.includes('/') ? modelRef.split('/').slice(1).join('/') : modelRef;
-  const trailingUri = isChat ? 'v1/chat/completions' : 'v1/completions';
-  const [path] = getGatewayProxyGetQueryKey(workspace, modelName, trailingUri);
-  return `${PLATFORM_BASE_URL}${path}`;
-};
+export const toWorkspaceModelRef = (workspace: string, modelRef: string): string =>
+  modelRef.includes('/') ? modelRef : `${workspace}/${modelRef}`;
 
 /**
  * Build a model config for evaluation related types like targets and metrics

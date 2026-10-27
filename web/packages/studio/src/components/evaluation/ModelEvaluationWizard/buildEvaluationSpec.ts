@@ -16,11 +16,7 @@ import type {
   DatasetEvalSpec,
   InlineMetricBundle,
 } from '@studio/components/evaluation/submitEvaluationJob';
-import { getModelInferenceGatewayUrl } from '@studio/util/models';
-
-/** The bare model id the endpoint expects, without its workspace prefix. */
-const bareModelName = (modelRef: string): string =>
-  modelRef.includes('/') ? modelRef.split('/').slice(1).join('/') : modelRef;
+import { toWorkspaceModelRef } from '@studio/util/models';
 
 /** ``MetricOutputSpec.continuous_score`` / ``.label`` as the API serializes them.
  *  Mirrored rather than derived: the wire contract requires a non-empty
@@ -192,14 +188,9 @@ const buildMetricBundle = (
       return bundle(
         metric,
         {
-          // A concrete Model, NOT a bare ModelRef string. A name-only ref
-          // resolves to an unreachable native endpoint and the judge call fails
-          // at runtime (verified live: the job errors making a completions
-          // request to the model). Same gateway resolution as the target.
-          model: {
-            url: getModelInferenceGatewayUrl(workspace, values.body.judgeModel),
-            name: bareModelName(values.body.judgeModel),
-          },
+          // A `workspace/name` ref, as for the target: the server resolves it to
+          // a gateway route the job can reach. A bare name would not resolve.
+          model: toWorkspaceModelRef(workspace, values.body.judgeModel),
           // system_prompt is a TOP-LEVEL field; the API rejects it inside
           // prompt_template. It is injected verbatim, so it carries rendered
           // prose rather than the SDK's Jinja template.

@@ -12,7 +12,7 @@ import {
   toFieldMapping,
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getModelInferenceGatewayUrl } from '@studio/util/models';
+import { toWorkspaceModelRef } from '@studio/util/models';
 import { useCallback, useRef, useState } from 'react';
 
 export interface LiveTestResult {
@@ -62,9 +62,6 @@ const describeFailure = (error: unknown): string => {
   if (status) return `The live test failed (${status}).${detail ? ` ${detail}` : ''}`;
   return `Could not reach the evaluator.${detail ? ` ${detail}` : ''}`;
 };
-
-const bareModelName = (modelRef: string): string =>
-  modelRef.includes('/') ? modelRef.split('/').slice(1).join('/') : modelRef;
 
 /** Over a single row the aggregate mean IS that row's score, so it lands exactly
  *  on a rubric value or on NaN. */
@@ -126,10 +123,7 @@ export function useLiveTest() {
       const request: LiveScoreRequest = {
         dataset: [row],
         metrics: buildMetricBundles(values, bindings, workspace) as unknown as MetricInline[],
-        target: {
-          url: getModelInferenceGatewayUrl(workspace, values.model),
-          name: bareModelName(values.model),
-        },
+        target: toWorkspaceModelRef(workspace, values.model),
         prompt_template: composeGenerationPrompt(bindings),
         ...(fieldMapping ? { field_mapping: fieldMapping } : {}),
       };

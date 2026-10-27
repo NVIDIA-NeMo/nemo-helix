@@ -51,13 +51,11 @@ from nhx.testing.utils import ensure_passthrough_virtual_model
 from nhx_evals_sdk import (
     ExactMatchMetric,
     InferenceParams,
-    Model,
     ModelRef,
     RunConfig,
     RunConfigOnlineModel,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
-from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
@@ -649,11 +647,8 @@ def test_online_evaluate_job_uses_mock_provider(
         name=model_name,
         mock_response_body=_chat_completion("Paris"),
     )
-    target = Model(
-        url=_internal_model_route(evaluator_workspace, model_name),
-        name=model_name,
-        format=ModelFormat.OPEN_AI,
-    )
+    # A ref the server resolves: submit refuses an inline key-less gateway URL.
+    target = ModelRef(root=f"{evaluator_workspace}/{model_name}")
 
     job = _evaluator(evaluator_client).submit(
         metric=_exact_match_metric(candidate=None),
