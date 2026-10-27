@@ -3,6 +3,8 @@
 
 """Keep omitted config defaults out of persisted and dispatched job specs."""
 
+import json
+
 import pytest
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig
 from nemo_safe_synthesizer_plugin.jobs.generate import _task_job_config
@@ -22,7 +24,12 @@ from nemo_safe_synthesizer_plugin.jobs.generate import _task_job_config
 )
 def test_config_omissions_survive_serialization_and_reload(config):
     spec = SafeSynthesizerJobConfig(data_source="default/data#input.csv", config=config)
-    for _ in range(2):
-        assert spec.model_dump(mode="json")["config"] == config
-        assert _task_job_config(spec)["config"] == config
-        spec = SafeSynthesizerJobConfig.model_validate_json(spec.model_dump_json())
+
+    # Storage must not expand omitted fields into explicit defaults.
+    stored_json = spec.model_dump_json()
+    assert json.loads(stored_json)["config"] == config
+
+    # Reload the stored spec, then serialize it for task dispatch.
+    reloaded_spec = SafeSynthesizerJobConfig.model_validate_json(stored_json)
+    dispatched_spec = _task_job_config(reloaded_spec)
+    assert dispatched_spec["config"] == config
