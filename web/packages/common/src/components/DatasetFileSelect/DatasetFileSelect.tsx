@@ -4,7 +4,10 @@
 import { DatasetFileSelectButton } from '@nemo/common/src/components/DatasetFileSelect/DatasetFileSelectButton';
 import { useFilePreview } from '@nemo/common/src/components/DatasetFileSelect/hooks/useFilePreview';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { getFileExtension } from '@nemo/common/src/components/DatasetFileSelect/utils';
+import {
+  getFileExtension,
+  isAcceptedFileType,
+} from '@nemo/common/src/components/DatasetFileSelect/utils';
 import { FileContentPreview } from '@nemo/common/src/components/FileContentPreview';
 import { FileList, FileListItem } from '@nemo/common/src/components/FileList';
 import { UploadModal } from '@nemo/common/src/components/UploadModal/index';
@@ -134,16 +137,8 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
     ? (parseFilesetLocation(files[0].url)?.name ?? files[0].url)
     : '';
 
-  const validateFiles = (filesToValidate: FileListItem[]): FileListItem[] => {
-    if (!acceptedFileTypes || acceptedFileTypes.length === 0) {
-      return [];
-    }
-
-    return filesToValidate.filter((file) => {
-      const extension = getFileExtension(file.path);
-      return !acceptedFileTypes.includes(extension as AcceptedFileType);
-    });
-  };
+  const validateFiles = (filesToValidate: FileListItem[]): FileListItem[] =>
+    filesToValidate.filter((file) => !isAcceptedFileType(file.path, acceptedFileTypes));
 
   const handleModalSubmit = async (data: SubmitUploadType) => {
     let newFiles: FileListItem[] = [];

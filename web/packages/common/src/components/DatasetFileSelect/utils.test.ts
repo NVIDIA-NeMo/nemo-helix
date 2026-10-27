@@ -4,6 +4,7 @@
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import {
   getFileExtension,
+  isAcceptedFileType,
   fromFilesetUrl,
   inferJsonContentType,
   isJsonFile,
@@ -36,6 +37,17 @@ describe('FileInput utils', () => {
     it('handles paths with directories', () => {
       expect(getFileExtension('path/to/file.csv')).toBe('.csv');
       expect(getFileExtension('/absolute/path/data.jsonl')).toBe('.jsonl');
+    });
+  });
+
+  describe('isAcceptedFileType', () => {
+    it('matches case-insensitively, accepts everything for an empty list, rejects extensionless files', () => {
+      expect(isAcceptedFileType('data.CSV', ['.csv'])).toBe(true);
+      expect(isAcceptedFileType('dir/data.jsonl', ['.json', '.csv'])).toBe(false);
+      expect(isAcceptedFileType(new File([''], 'a.jsonl'), ['.jsonl'])).toBe(true);
+      expect(isAcceptedFileType('README', ['.csv'])).toBe(false);
+      expect(isAcceptedFileType('README.md', [])).toBe(true);
+      expect(isAcceptedFileType('README.md', undefined)).toBe(true);
     });
   });
 
