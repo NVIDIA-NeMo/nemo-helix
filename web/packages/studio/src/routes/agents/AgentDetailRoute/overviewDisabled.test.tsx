@@ -27,7 +27,7 @@ describe('AgentDetailRoute with the overview flag off', () => {
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent(agentName);
     expect(screen.queryByRole('tab', { name: 'Overview' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Deployments' })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: 'Deployment' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -36,7 +36,7 @@ describe('AgentDetailRoute with the overview flag off', () => {
   it('falls back to deployments for a stale ?tab=overview link', async () => {
     renderDetail('?tab=overview');
 
-    expect(await screen.findByRole('tab', { name: 'Deployments' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Deployment' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
