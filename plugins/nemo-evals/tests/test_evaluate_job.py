@@ -623,6 +623,7 @@ async def test_target_model_ref_resolves_on_server_before_compile(
                 is_local=False,
             )
     assert requested == [f"{server_base}/apis/models/v2/workspaces/default/models/base"]
+    assert isinstance(canonical, EvaluateSpec)
     assert canonical.target_model_ref == ModelRef("default/base")
     assert isinstance(canonical.target, Model)
     assert canonical.target.url == (
@@ -652,6 +653,7 @@ async def test_inline_target_url_and_credentials_are_not_reinterpreted(url: str)
         async_sdk=None,
         is_local=False,
     )
+    assert isinstance(canonical, EvaluateSpec)
     assert canonical.target == target
     assert canonical.target_model_ref is None
 
