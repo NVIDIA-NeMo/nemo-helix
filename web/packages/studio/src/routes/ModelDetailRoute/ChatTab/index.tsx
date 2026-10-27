@@ -23,7 +23,12 @@ export const ChatTab: FC<ChatTabProps> = ({ model, adapter }) => {
     adapter,
   });
   const { models, addModel, removeModel, setModel } = useCompareModels([
-    { modelURN: `${model.workspace}/${model.name}`, adapter: adapter?.name ?? null, locked: true },
+    {
+      modelURN: `${model.workspace}/${model.name}`,
+      adapter: adapter?.name ?? null,
+      locked: true,
+      promptData: model.prompt,
+    },
   ]);
 
   if (isLoading) {

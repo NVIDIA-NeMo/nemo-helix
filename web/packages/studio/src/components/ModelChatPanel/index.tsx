@@ -52,7 +52,10 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
   const selectedModel: ModelSelection | null = panel.modelURN
     ? { model: panel.modelURN, adapter: panel.adapter ?? undefined }
     : null;
-  const [inferenceParams, setInferenceParams] = useState<InferenceParams>(DEFAULT_INFERENCE_PARAMS);
+  const [inferenceParams, setInferenceParams] = useState<InferenceParams>({
+    ...DEFAULT_INFERENCE_PARAMS,
+    ...panel.promptData?.inference_params,
+  });
 
   const handleModelChange = useCallback(
     (selection: ModelSelection) => {
@@ -174,7 +177,7 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
                   }
                 : undefined
           }
-          promptData={{ inference_params: inferenceParams }}
+          promptData={{ ...panel.promptData, inference_params: inferenceParams }}
           composerMode={composerMode}
           slotComposerEnd={slotComposerEnd}
           composerSeed={composerSeed}

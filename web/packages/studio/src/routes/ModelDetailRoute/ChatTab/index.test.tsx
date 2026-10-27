@@ -14,7 +14,7 @@ vi.mock('@studio/components/ModelCompareChat/ComparePlayground', () => ({
     <ul>
       {models.map((m) => (
         <li key={m.id}>
-          {m.modelURN} {m.adapter} {m.locked ? 'locked' : ''}
+          {m.modelURN} {m.adapter} {m.locked ? 'locked' : ''} {m.promptData?.system_prompt}
         </li>
       ))}
     </ul>
@@ -38,6 +38,18 @@ describe('ChatTab', () => {
     render(<ChatTab model={model} adapter={null} />);
 
     expect(screen.getByRole('listitem')).toHaveTextContent('ws/my-model locked');
+  });
+
+  it('hands the saved prompt of the model to the baseline panel', () => {
+    mockAvailability({});
+    render(
+      <ChatTab
+        model={{ ...model, prompt: { system_prompt: 'Be terse.' } } as ModelEntity}
+        adapter={null}
+      />
+    );
+
+    expect(screen.getByRole('listitem')).toHaveTextContent('locked Be terse.');
   });
 
   it('locks in the adapter on an adapter page', () => {
