@@ -3,7 +3,14 @@
 
 import pytest
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_helix_plugin.jobs.execution_profiles import JOB_LOGS_ENDPOINT_ENVVAR, JobExecutionProfileConfig
+from nemo_helix_plugin.jobs.execution_profiles import (
+    JOB_LOGS_ENDPOINT_ENVVAR,
+    DockerJobExecutionProfileConfig,
+    JobExecutionProfileConfig,
+    KubernetesJobExecutionProfileConfig,
+    SubprocessJobExecutionProfileConfig,
+    VolcanoJobExecutionProfileConfig,
+)
 from pydantic import ValidationError
 
 
@@ -75,3 +82,33 @@ def test_a_kubernetes_profile_with_secret_and_config_map_volumes_parses():
         "optional": False,
         "items": [{"key": "settings.yaml", "path": "config/settings.yaml", "mode": 0o600}],
     }
+
+
+@pytest.mark.parametrize(
+    ("config_cls", "expected"),
+    [
+        (DockerJobExecutionProfileConfig, 8),
+        (SubprocessJobExecutionProfileConfig, 8),
+        (KubernetesJobExecutionProfileConfig, 500),
+        (VolcanoJobExecutionProfileConfig, 500),
+    ],
+)
+def test_execution_profile_max_active_jobs_defaults(config_cls: type[JobExecutionProfileConfig], expected: int) -> None:
+    assert config_cls().max_active_jobs == expected  # ty: ignore[unresolved-attribute]
+
+
+@pytest.mark.parametrize(
+    "config_cls",
+    [
+        DockerJobExecutionProfileConfig,
+        SubprocessJobExecutionProfileConfig,
+        KubernetesJobExecutionProfileConfig,
+        VolcanoJobExecutionProfileConfig,
+    ],
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_execution_profile_max_active_jobs_must_be_positive(
+    config_cls: type[JobExecutionProfileConfig], value: int
+) -> None:
+    with pytest.raises(ValidationError, match="max_active_jobs"):
+        config_cls(max_active_jobs=value)  # ty: ignore[unknown-argument]

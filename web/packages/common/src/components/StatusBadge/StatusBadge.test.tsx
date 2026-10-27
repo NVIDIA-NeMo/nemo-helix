@@ -26,6 +26,12 @@ describe('StatusBadge component', () => {
     expect(badge).toHaveTextContent('Completed');
   });
 
+  it('renders a queued job status', () => {
+    render(<StatusBadge status="queued" />);
+
+    expect(screen.getByTestId('nv-badge')).toHaveTextContent('Queued');
+  });
+
   it('normalizes uppercase statuses (e.g. ModelProvider API)', () => {
     render(<StatusBadge status={'READY' as BadgeStatus} />);
 
