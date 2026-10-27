@@ -299,10 +299,28 @@ def prepare_type_check_file(
 
     # IPython executes cells with this flag. Detect notebook-level async code
     # without running it, then give ty the async scope it requires. Keep the
-    # entire page in one scope so values remain available across cells.
+    # entire page in one scope so values remain available across cells. This
+    # approximates notebook scope: function-local/global and class-body name
+    # resolution can differ from actual module-level cell execution.
     column_offsets: list[int] = []
     try:
-        code = compile("\n".join(source_lines), str(doc_path), "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+        # Exclude module-only imports before detecting page-wide async code.
+        # A future import can start a valid later cell even after an earlier
+        # cell's executable code, which compile() rejects in a combined module.
+        module_lines: set[int] = set()
+        for statement in ast.parse("\n".join(source_lines)).body:
+            if isinstance(statement, ast.ImportFrom) and (
+                statement.module == "__future__" or any(alias.name == "*" for alias in statement.names)
+            ):
+                module_lines.update(range(statement.lineno - 1, statement.end_lineno or statement.lineno))
+        imports = [index for index in range(len(source_lines)) if index in module_lines]
+        body = [index for index in range(len(source_lines)) if index not in module_lines]
+        code = compile(
+            "\n".join(source_lines[index] for index in body),
+            str(doc_path),
+            "exec",
+            flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+        )
     except SyntaxError:
         # Let ty report invalid Python with the original source mapping.
         pass
@@ -311,14 +329,6 @@ def prepare_type_check_file(
             # Future and wildcard imports are only valid at module scope.
             # Hoist their complete statements (including multiline imports),
             # retaining their original locations independently of the body.
-            module_lines: set[int] = set()
-            for statement in ast.parse("\n".join(source_lines)).body:
-                if isinstance(statement, ast.ImportFrom) and (
-                    statement.module == "__future__" or any(alias.name == "*" for alias in statement.names)
-                ):
-                    module_lines.update(range(statement.lineno - 1, statement.end_lineno or statement.lineno))
-            imports = [index for index in range(len(source_lines)) if index in module_lines]
-            body = [index for index in range(len(source_lines)) if index not in module_lines]
             source_lines = [
                 *(source_lines[index] for index in imports),
                 "async def _notebook_cells():",

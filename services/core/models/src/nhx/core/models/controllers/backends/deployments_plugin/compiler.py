@@ -335,7 +335,7 @@ def compile_model_deployment(
         image_name, image_tag = resolve_vllm_image(
             resolved.view, config.default_vllm_image, config.default_vllm_image_tag
         )
-        args = compile_vllm_args(resolved.view, resolved.model_entity)
+        args = compile_vllm_args(resolved.view, resolved.model_entity, tool_call_plugin_path=tool_call_plugin_path)
         env = compile_vllm_env_vars(resolved.view)
     elif engine == ENGINE_NIM:
         image_name, image_tag = (

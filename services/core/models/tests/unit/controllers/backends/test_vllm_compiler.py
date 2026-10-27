@@ -223,6 +223,79 @@ def test_compile_vllm_args_raw_tool_flags_override_config(
     assert args == ["/model-store", *raw_args]
 
 
+@pytest.mark.parametrize("from_deployment", [False, True])
+def test_auto_tool_choice_without_parser_warns_and_is_not_inferred(from_deployment: bool, caplog):
+    config = ToolCallConfig(auto_tool_choice=True)
+    model = None if from_deployment else _tool_model(config)
+    view = _view(tool_call_config=config if from_deployment else None)
+    assert vllm_compiler.compile_vllm_args(view, model) == ["/model-store"]
+    assert "auto tool choice" in caplog.text and "parser" in caplog.text
+
+
+@pytest.mark.parametrize("parser_args", [["--tool-call-parser", "hermes"], ["--tool-call-parser=hermes"]])
+def test_raw_parser_satisfies_inferred_auto_tool_choice(parser_args: list[str]):
+    model = _tool_model(ToolCallConfig(auto_tool_choice=True))
+    args = vllm_compiler.compile_vllm_args(_view(additional_args=parser_args), model)
+    assert args == ["/model-store", "--enable-auto-tool-choice", *parser_args]
+
+
+def test_raw_auto_choice_without_parser_is_not_silently_removed():
+    raw = ["--enable-auto-tool-choice"]
+    assert vllm_compiler.compile_vllm_args(_view(additional_args=raw), None) == ["/model-store", *raw]
+
+
+def test_custom_plugin_without_mounted_path_skips_inferred_parser_and_auto(caplog):
+    model = _tool_model(
+        ToolCallConfig(
+            tool_call_parser="custom",
+            tool_call_plugin="default/parser-plugin",
+            auto_tool_choice=True,
+        )
+    )
+    assert vllm_compiler.compile_vllm_args(_view(), model) == ["/model-store"]
+    assert "plugin" in caplog.text and "mounted" in caplog.text
+
+
+def test_custom_plugin_uses_backend_supplied_mount_path():
+    model = _tool_model(
+        ToolCallConfig(
+            tool_call_parser="custom",
+            tool_call_plugin="default/parser-plugin",
+            auto_tool_choice=True,
+        )
+    )
+    args = vllm_compiler.compile_vllm_args(_view(), model, tool_call_plugin_path="/scratch/plugin/plugin.py")
+    assert args == [
+        "/model-store",
+        "--tool-parser-plugin",
+        "/scratch/plugin/plugin.py",
+        "--tool-call-parser",
+        "custom",
+        "--enable-auto-tool-choice",
+    ]
+    assert "default/parser-plugin" not in args
+
+
+@pytest.mark.parametrize(
+    "plugin_args", [["--tool-parser-plugin", "/user/parser.py"], ["--tool-parser-plugin=/user/parser.py"]]
+)
+@pytest.mark.parametrize("mounted_path", [None, "/scratch/plugin/plugin.py"])
+def test_raw_plugin_path_overrides_backend_mount(plugin_args: list[str], mounted_path: str | None):
+    model = _tool_model(
+        ToolCallConfig(
+            tool_call_parser="custom",
+            tool_call_plugin="default/parser-plugin",
+            auto_tool_choice=True,
+        )
+    )
+    args = vllm_compiler.compile_vllm_args(
+        _view(additional_args=plugin_args),
+        model,
+        tool_call_plugin_path=mounted_path,
+    )
+    assert args == ["/model-store", "--tool-call-parser", "custom", "--enable-auto-tool-choice", *plugin_args]
+
+
 def test_compile_vllm_args_no_tool_config_unchanged():
     assert vllm_compiler.compile_vllm_args(_view(), _tool_model(None)) == ["/model-store"]
     assert vllm_compiler.compile_vllm_args(_view(tool_call_config=ToolCallConfig()), None) == ["/model-store"]

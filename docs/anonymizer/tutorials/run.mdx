@@ -122,12 +122,12 @@ The run path rejects local file paths in `data.source` — use a fileset referen
 For the SDK job created in Step 3, wait for completion and download its artifacts before loading them. The job is ready for artifact download when its status is `completed`:
 
 ```python
-job.wait_until_done()
-results = job.download_artifacts()
+from pathlib import Path
+from tempfile import mkdtemp
 
-dataset = results.load_dataset()
-trace   = results.load_trace()
-failed  = results.load_failed_records()
+output_dir = Path(mkdtemp(prefix="anonymizer-artifacts-"))
+job.wait_until_done()
+job.download_artifacts(path=output_dir)
 ```
 
 `get_job_status()` reads the current status, `check_if_complete()` tests whether artifacts are ready, `wait_until_done()` blocks until a terminal state, and `download_artifacts()` downloads and extracts the result.
@@ -154,7 +154,22 @@ tar -xzf /tmp/anonymizer-artifacts.tar.gz -C /tmp/anonymizer-artifacts
 ls /tmp/anonymizer-artifacts/artifacts
 ```
 
-After running these shell commands, you can also load the extracted files with `AnonymizerJobResults(Path("/tmp/anonymizer-artifacts/artifacts"))` (import `Path` from `pathlib` and `AnonymizerJobResults` from `nemo_anonymizer_plugin.sdk.job_results`). This path exists only after downloading and extracting the CLI result; the SDK flow above downloads to its own job directory automatically.
+### Load the Downloaded Results
+
+Both download methods produce an `artifacts` directory under the extraction root. The SDK flow above sets `output_dir` to a fresh directory. If you used only the CLI, set `output_dir` to the directory you extracted into, as shown in the comment below, before running this block:
+
+```python
+from pathlib import Path
+from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
+
+# CLI-only, after the shell download and extraction above:
+# output_dir = Path("/tmp/anonymizer-artifacts")
+results = AnonymizerJobResults(output_dir / "artifacts")
+
+dataset = results.load_dataset()
+trace   = results.load_trace()
+failed  = results.load_failed_records()
+```
 
 `AnonymizerJobResults` exposes `load_dataset()`, `load_trace()`, `load_failed_records()`, and `display_record()` over the same underlying files. See [SDK Resources](/documentation/anonymize-data/sdk-resources#anonymizerjobresults).
 

@@ -177,12 +177,13 @@ value = 1
 
 @pytest.mark.parametrize("annotation", ["int", "str"])
 @pytest.mark.parametrize("imports", ["", "from __future__ import annotations\nfrom math import *\n"])
+@pytest.mark.parametrize("earlier_cell", ["", "```python\ninitial = 1\n```\n\n"])
 def test_run_type_check_handles_notebook_await_without_hiding_type_errors(
-    tmp_path: Path, annotation: str, imports: str
+    tmp_path: Path, annotation: str, imports: str, earlier_cell: str
 ) -> None:
     doc = tmp_path / "notebook.mdx"
     doc.write_text(
-        f"# Notebook\n\n```python\n{imports}async def read() -> int:\n    return 1\n```\n\n"
+        f"# Notebook\n\n{earlier_cell}```python\n{imports}async def read() -> int:\n    return 1\n```\n\n"
         f"```python\nvalue: {annotation} = await read()\n```\n",
         encoding="utf-8",
     )
@@ -195,7 +196,7 @@ def test_run_type_check_handles_notebook_await_without_hiding_type_errors(
         assert results[doc] == ()
     else:
         assert len(results[doc]) == 1
-        line = 9 + imports.count("\n")
+        line = 9 + imports.count("\n") + earlier_cell.count("\n")
         assert f"{doc}:{line}:14: error[invalid-assignment]" in results[doc][0]
 
 
