@@ -49,9 +49,15 @@ async def get_taskset_run_service(
     Yields:
         A service using raw acceptance clients and the existing entity resolver.
         The dependency exits the client's context when the request finishes.
+
+    With auth on, the client delegates the caller's full principal (id, email, account id, groups, aliases):
+    the Entity Store finds a caller's workspaces through all of them, so a member only through a group would
+    otherwise be refused. The normalized ``caller`` id stays the idempotency scope and ``created_by``.
     """
     caller = normalize_run_caller(caller)
-    async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=caller) as async_client:
+    principal = current_auth_context()
+    on_behalf_of = principal.to_principal() if principal is not None else caller
+    async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=on_behalf_of) as async_client:
         entities_client = AsyncEntitiesClient.from_client(async_client)
         files_client = AsyncFilesClient.from_client(async_client)
         yield TasksetRunService(
@@ -60,6 +66,7 @@ async def get_taskset_run_service(
             async_client,
             authorize,
             get_config(),
+            auth_context=principal,
         )
 
 

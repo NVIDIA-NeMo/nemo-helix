@@ -5,11 +5,12 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import ClassVar
+from typing import ClassVar, Self
 
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 
 class TasksetRunPhase(StrEnum):
@@ -130,6 +131,21 @@ class TasksetRunEntity(EntityBase):
         description="When a caller requested cancellation; None if never requested.",
     )
     error: str | None = Field(default=None, description="Why the run failed or expired; None otherwise.")
+
+    # The submitter's full principal (id, email, account id, groups, aliases), for the run controller to create
+    # task Jobs on the creator's behalf: the platform can't look a user's groups up later. Stored with the
+    # record; EntityClient gives it back only to a service-principal client, so a delegated read sees None and
+    # must never write the run back. None with auth off.
+    _auth_context: AuthContext | None = PrivateAttr(default=None)
+
+    @property
+    def auth_context(self) -> AuthContext | None:
+        return self._auth_context
+
+    def with_auth_context(self, auth_context: AuthContext | None) -> Self:
+        """Set the creator's principal snapshot (in place); submit calls it once, before the run's create."""
+        self._auth_context = auth_context
+        return self
 
 
 class MemberPhase(StrEnum):

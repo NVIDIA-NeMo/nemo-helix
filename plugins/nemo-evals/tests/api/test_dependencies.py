@@ -15,6 +15,7 @@ from nemo_evals.api.dependencies import get_taskset_run_service, get_taskset_ser
 from nemo_evals.api.service.taskset_run_service import TasksetRunService, normalize_run_caller
 from nemo_evals.entities import TasksetEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.dependencies import get_effective_principal_id, get_request_authorizer
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -109,6 +110,43 @@ async def test_taskset_run_delegation_matches_stamped_creator(monkeypatch, calle
             assert created.created_by is not None
             assert sent[0].headers["X-NHX-Principal-On-Behalf-Of"] == expected
             assert derive_run_id("default", created.created_by, "key") == derive_run_id("default", expected, "key")
+        finally:
+            await dependency.aclose()
+            await service._async_client._http.aclose()
+
+
+async def test_taskset_run_dependency_delegates_the_callers_full_principal(monkeypatch):
+    principal = AuthContext(
+        principal_id="user:bob",
+        principal_email="bob@ac9.test",
+        principal_groups=["ac9-users"],
+        principal_account_id="a1",
+    )
+    sent: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(404, json={"detail": "absent"})
+
+    factory = dependencies.get_async_nemo_client
+    async with httpx.MockTransport(answer) as transport:
+
+        def provide(**kwargs):
+            client = factory(**kwargs)
+            monkeypatch.setattr(client._http, "_transport_for_url", lambda url: transport)
+            return client
+
+        monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
+        monkeypatch.setattr(dependencies, "current_auth_context", lambda: principal)
+        dependency = get_taskset_run_service("user:bob", AsyncMock())
+        service = await anext(dependency)
+        try:
+            assert service._auth_context == principal  # stored on each new run for the controller
+            assert await service._store.find("default", "run-x") is None
+            headers = sent[0].headers
+            assert headers["X-NHX-Principal-On-Behalf-Of"] == "user:bob"
+            assert headers["X-NHX-Principal-On-Behalf-Of-Email"] == "bob@ac9.test"
+            assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "ac9-users"
         finally:
             await dependency.aclose()
             await service._async_client._http.aclose()

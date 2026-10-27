@@ -1502,3 +1502,47 @@ async def test_the_controllers_clients_never_retry_a_jobs_call(harbor_plan, harb
         await JobsServiceRunJobs(client, client, "default").create(request)
     assert posts == ["POST"]  # one attempt: a retry's refusal could be mistaken for the first POST's
     await http_client.aclose()
+
+
+async def test_creates_and_the_intake_stamp_act_for_the_creator_and_reads_as_the_service(harbor_plan, harbor_run):
+    seen: list[tuple[str, str]] = []
+
+    def client(who: str) -> AsyncNemoClient:
+        def handle(request: httpx.Request) -> httpx.Response:
+            seen.append((who, f"{request.method} {request.url.path.removeprefix(JOBS_PATH)}"))
+            if request.method == "POST":
+                return httpx.Response(201, json=job.model_dump(mode="json"))
+            return httpx.Response(200, json=job.model_dump(mode="json"))
+
+        return AsyncNemoClient(
+            base_url="http://platform.test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        )
+
+    request = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
+    job = FakeRunJobs().put(request, "created")
+    adapter = JobsServiceRunJobs(client("service"), client("creator"), "default")
+    await adapter.create(request)
+    await adapter.get(job.name)
+    await adapter.cancel(job.name)
+    with pytest.raises(Exception):
+        await adapter.evaluations.get("default", "run-a")  # the fake answers a Job, not an Evaluation
+    assert [who for who, _ in seen] == ["creator", "service", "service", "creator"]
+    assert [call for _, call in seen[:3]] == [
+        "POST /apis/jobs/v2/workspaces/default/jobs",
+        f"GET {job.name}",
+        f"POST {job.name}/cancel",
+    ]
+    assert "/apis/intake/" in seen[3][1]
+
+
+def test_the_controller_creates_on_behalf_of_the_stored_principal(harbor_run):
+    from nemo_evals.taskset_runs.controller import on_behalf_of
+    from nemo_helix_plugin.auth import AuthContext
+
+    assert on_behalf_of(harbor_run) == "user:development"  # auth off: no creator, no snapshot
+    harbor_run._created_by = "user:alice"
+    assert on_behalf_of(harbor_run) == "user:alice"
+    snapshot = AuthContext(principal_id="user:bob", principal_email="bob@ac9.test", principal_groups=["ac9-users"])
+    principal = on_behalf_of(harbor_run.with_auth_context(snapshot))
+    assert not isinstance(principal, str)
+    assert (principal.id, principal.email, list(principal.groups or [])) == ("user:bob", "bob@ac9.test", ["ac9-users"])
