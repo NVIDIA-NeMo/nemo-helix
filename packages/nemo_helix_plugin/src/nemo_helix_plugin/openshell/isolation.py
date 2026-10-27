@@ -1,0 +1,132 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Restrict a provider-bearing sandbox's access back to the Helix control plane."""
+
+import re
+
+from google.protobuf import json_format
+from google.protobuf.message import Message
+from nemo_helix_plugin.entities.base import parse_qualified_name
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
+
+
+def _segment(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+@:-]*", value):
+        raise ValueError("Invalid workload path segment.")
+    return value
+
+
+def validate_provider_environment(
+    bindings: dict[str, GatewayProviderBinding], *, workspace: str, secret_env: dict[str, str], env_names: set[str]
+) -> None:
+    if secret_env:
+        raise ValueError("OpenShell secrets require gateway provider bindings; process-env injection is not supported.")
+    keys = [key for binding in bindings.values() for key in binding.credentials]
+    if len(keys) != len(set(keys)):
+        raise ValueError("Gateway credential slots must be unique across providers.")
+    for key in keys:
+        if (
+            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+            or key.startswith(("NHX_", "NEMO_", "OPENAI_"))
+            and key != "OPENAI_API_KEY"
+            or key in {"PATH", "HOME", "PYTHONPATH", "VIRTUAL_ENV", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+            or key in env_names
+        ):
+            raise ValueError("Gateway credential slot conflicts with the workload environment.")
+
+
+def restricted_platform_policy[Policy: Message](
+    policy: Policy,
+    *,
+    host: str,
+    port: int,
+    workspace: str,
+    binaries: list[str],
+    job: str | None = None,
+    step: str | None = None,
+    fileset: str | None = None,
+    secret_env: dict[str, str] | None = None,
+    read_filesets: list[str] | None = None,
+) -> Policy:
+    """Replace broad egress with the workload's required platform operations.
+
+    Approved service profiles are composed by OpenShell. No entity, credential,
+    token-minting, job-submission or deployment-management endpoint is allowed.
+    The enforcement lives outside the sandbox, including its auth proxy.
+    """
+    workspace = _segment(workspace)
+    rules = [
+        {"allow": {"method": "POST", "path": path}}
+        for path in (
+            f"/apis/intake/v2/workspaces/{workspace}/ingest/atif",
+            f"/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces",
+            f"/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/logs",
+            f"/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/metrics",
+        )
+    ]
+    for surface in ("openai", "model/*", "provider/*"):
+        for operation in ("chat/completions", "completions", "responses", "embeddings", "messages"):
+            rules.append(
+                {
+                    "allow": {
+                        "method": "POST",
+                        "path": f"/apis/inference-gateway/v2/workspaces/{workspace}/{surface}/-/v1/{operation}",
+                    }
+                }
+            )
+    if job is not None and step is not None:
+        prefix = f"/apis/jobs/v2/workspaces/{workspace}/jobs/{_segment(job)}"
+        step_path = f"{prefix}/steps/{_segment(step)}"
+        rules.extend(
+            {"allow": {"method": method, "path": path}}
+            for method, path in (
+                ("GET", step_path),
+                ("GET", f"{prefix}/status"),
+                ("PATCH", f"{prefix}/status-details"),
+                ("PATCH", f"{step_path}/status"),
+                ("PUT", f"{step_path}/tasks/*"),
+                ("GET", f"{step_path}/tasks/*"),
+                ("POST", f"{prefix}/results/*"),
+            )
+        )
+    if fileset:
+        prefix = f"/apis/files/v2/workspaces/{workspace}/filesets/{_segment(fileset)}"
+        rules.extend(
+            {"allow": {"method": method, "path": path}}
+            for method, path in (
+                ("GET", prefix),
+                ("GET", f"{prefix}/files"),
+                ("GET", f"{prefix}/-/**"),
+                ("PUT", f"{prefix}/-/**"),
+                ("POST", f"{prefix}/otlp/v1/logs"),
+            )
+        )
+    for ref in read_filesets or []:
+        input_workspace, name = parse_qualified_name(ref, default_workspace=workspace)
+        prefix = f"/apis/files/v2/workspaces/{_segment(input_workspace)}/filesets/{_segment(name)}"
+        rules.extend(
+            {"allow": {"method": "GET", "path": path}} for path in (prefix, f"{prefix}/files", f"{prefix}/-/**")
+        )
+    if secret_env:
+        raise ValueError("OpenShell sandboxes cannot fetch secret values from the platform.")
+    data = json_format.MessageToDict(policy, preserving_proto_field_name=True)
+    data["network_policies"] = {
+        "nemo_workload": {
+            "name": "nemo-workload-access",
+            "endpoints": [
+                {
+                    "host": host,
+                    "port": port,
+                    "protocol": "rest",
+                    "enforcement": "NETWORK_ENFORCEMENT_MODE_ENFORCE",
+                    "rules": rules,
+                }
+            ],
+            "binaries": [{"path": path} for path in binaries],
+        }
+    }
+    data["landlock"] = {"compatibility": "hard_requirement"}
+    restricted = type(policy)()
+    json_format.ParseDict(data, restricted)
+    return restricted
