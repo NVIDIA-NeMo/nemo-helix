@@ -37,6 +37,12 @@ Use a running NeMo Helix with Intake, Compass, Jobs, and a configured
 Run `nemo setup` to select default and fast Platform models, or supply
 `--default-model` and `--fast-model` when submitting analysis.
 
+For Compass analysis, use **NVIDIA Nemotron 3.5 Super VL** instead of Nemotron
+Lightning, which has known tool-calling failures. Lightning selections produce a
+nonblocking warning; Helix keeps your selected model. The CLI and Studio recognize
+Lightning in model references. Jobs also check the resolved served-model names,
+so aliases are checked at runtime, with warnings in job logs and completed analysis reports.
+
 ## Install from the monorepo
 
 ```bash

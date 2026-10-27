@@ -3,7 +3,7 @@
 
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import type { FC } from 'react';
 
@@ -52,6 +52,7 @@ const fieldError = (label: string, value: string, storedRef?: string | null) => 
 const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
   const clearable = storedRef !== undefined;
   const error = fieldError(label, value, storedRef);
+  const lightning = /\bnemotron\b.*\blightning\b/i.test(value || storedRef || '');
   return (
     <FormField slotLabel={label} slotError={error} status={error ? 'error' : undefined}>
       <Flex gap="density-sm" align="center">
@@ -72,6 +73,12 @@ const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, st
           </Button>
         ) : null}
       </Flex>
+      {lightning ? (
+        <Banner kind="inline" status="warning">
+          Nemotron Lightning has known tool-calling failures in Compass. Try NVIDIA Nemotron 3.5
+          Super VL instead. You can continue with your selected model.
+        </Banner>
+      ) : null}
     </FormField>
   );
 };
