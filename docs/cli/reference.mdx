@@ -9333,7 +9333,7 @@ nemo evals runs submit [OPTIONS]
 * `--cpus <INTEGER RANGE>`: CPUs for every task's agent sandbox, over task.toml (without --spec-file).
 * `--memory-mb <INTEGER RANGE>`: Memory in MB for every task's agent sandbox (without --spec-file).
 * `--storage-mb <INTEGER RANGE>`: Disk in MB for every task's agent sandbox (without --spec-file).
-* `--no-build-images`: Don't request or wait for image builds here; submit starts a first build for a task that has none.
+* `--no-build-images`: Don't request or wait for image builds here; submit rejects a task whose image isn't built yet.
 * `--idempotency-key`: Key that makes a resubmit return the same run; default: a new one. A failed submit prints its key.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for tasks, taskset and run; default: the configured workspace.
