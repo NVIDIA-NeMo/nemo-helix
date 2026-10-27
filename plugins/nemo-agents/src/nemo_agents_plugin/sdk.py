@@ -89,6 +89,7 @@ from nemo_helix_plugin.agents.types import (
     CreateEnvironmentSpecRequest,
     InvokeAgentRequest,
     JsonMap,
+    ReferenceConfig,
     RegisterAgentRequest,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -194,6 +195,7 @@ class AgentsResource:
         config: Mapping[str, object] | None = None,
         description: str = "",
         config_format: str | None = None,
+        reference: ReferenceConfig | Mapping[str, object] | None = None,
         workspace: str | None = None,
     ) -> JsonMap:
         """Register an agent.
@@ -205,6 +207,7 @@ class AgentsResource:
             config_format: Config format identifier. Uses the config's format
                 when present; otherwise defaults to Fabric for an empty config
                 or NAT for a nonempty config. Conflicting formats are rejected.
+            reference: Optional fileset and container image references.
             workspace: Target workspace. Defaults to the workspace configured
                 on the platform client, or ``"default"`` when the client has no
                 workspace.
@@ -228,6 +231,8 @@ class AgentsResource:
             payload["config"] = resolved_config
         if config_format is not None:
             payload["config_format"] = config_format
+        if reference is not None:
+            payload["reference"] = _spec_to_dict(reference)
         response = self._client.register_agent(
             workspace=workspace,
             body=RegisterAgentRequest.model_validate(payload),

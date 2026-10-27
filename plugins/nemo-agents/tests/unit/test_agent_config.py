@@ -294,14 +294,18 @@ def _write_agent_yaml(path: Path, payload: dict) -> None:
 
 
 class TestLoadAgentConfig:
-    def test_load_agent_config_reads_yaml_file(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("with_reference", [False, True])
+    def test_load_agent_config_reads_yaml_file(self, tmp_path: Path, with_reference: bool) -> None:
         config_path = tmp_path / "custom-agent.yaml"
-        _write_agent_yaml(config_path, _example_yaml_config())
+        payload = _example_yaml_config()
+        expected = AgentConfig.model_validate(payload)
+        if with_reference:
+            payload["reference"] = {"fileset": "default/source", "container_image": "agent:1"}
+        _write_agent_yaml(config_path, payload)
 
         config = load_agent_config(config_path)
 
-        assert config.name == "test-agent"
-        assert config.default_harness == "hermes"
+        assert config == expected
 
     def test_load_agent_config_from_dir_uses_canonical_filename(self, tmp_path: Path) -> None:
         config_path = tmp_path / "agent.yaml"
@@ -329,10 +333,15 @@ class TestLoadAgentConfig:
         with pytest.raises(AgentConfigLoadError, match="root must be a YAML mapping"):
             load_agent_config(config_path)
 
-    def test_validation_error_reports_load_error(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("field", ["default_harness", "unknown"])
+    def test_validation_error_reports_load_error(self, tmp_path: Path, field: str) -> None:
         config_path = tmp_path / "agent.yaml"
         payload = _example_yaml_config()
-        del payload["default_harness"]
+        payload["reference"] = {"fileset": "default/source"}
+        if field == "default_harness":
+            del payload[field]
+        else:
+            payload[field] = "invalid"
         _write_agent_yaml(config_path, payload)
 
         with pytest.raises(AgentConfigLoadError, match="Invalid agent config"):

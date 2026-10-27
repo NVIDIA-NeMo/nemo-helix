@@ -16,11 +16,12 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import agents as agents_router_module
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.entities import (
     NAT_WORKFLOW_CONFIG_FORMAT,
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -28,12 +29,14 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     DeploymentStatus,
 )
+from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
     NemoPaginationInfo,
 )
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 NOW = datetime.now(timezone.utc)
 
@@ -109,7 +112,14 @@ def mock_entity_client() -> AsyncMock:
 
 
 @pytest.fixture
-def test_app(mock_entity_client: AsyncMock) -> FastAPI:
+def mock_files_client() -> AsyncMock:
+    client = AsyncMock(spec=AsyncFilesClient)
+    client.get_fileset.return_value = MagicMock()
+    return client
+
+
+@pytest.fixture
+def test_app(mock_entity_client: AsyncMock, mock_files_client: AsyncMock) -> FastAPI:
     """FastAPI app with the agents router mounted to match the production path.
 
     Production: platform mounts at /apis/agents, RouterSpec.prefix adds
@@ -121,6 +131,7 @@ def test_app(mock_entity_client: AsyncMock) -> FastAPI:
         prefix="/apis/agents/v2/workspaces/{workspace}",
     )
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
+    app.dependency_overrides[get_files_client] = lambda: mock_files_client
     return app
 
 
@@ -142,6 +153,16 @@ class TestRegisterAgent:
             {"name": "calc", "config": None},
             {"name": "calc", "config": []},
             {"name": "calc", "config": {"config_format": None}},
+            {"name": "calc", "reference": {"fileset": ""}},
+            {"name": "calc", "reference": {"fileset": "ws/source/extra"}},
+            {"name": "calc", "reference": {"fileset": "ws/source#agent.yaml"}},
+            {"name": "calc", "reference": {"fileset": "source name"}},
+            {"name": "calc", "reference": {"fileset": "source", "container": "alpine"}},
+            {"name": "calc", "reference": {"container_image": ""}},
+            {"name": "calc", "reference": {"container_image": " agent:1"}},
+            {"name": "calc", "reference": {"container_image": "https://nvcr.io/org/agent:1"}},
+            {"name": "calc", "reference": {"container_image": "org/Agent:1"}},
+            {"name": "calc", "reference": {"container_image": "agent@sha256:abc"}},
             {
                 "name": "calc",
                 "config": {"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT},
@@ -150,12 +171,13 @@ class TestRegisterAgent:
         ],
     )
     def test_register_invalid_request_returns_422(
-        self, client: TestClient, mock_entity_client: AsyncMock, body: dict[str, Any]
+        self, client: TestClient, mock_entity_client: AsyncMock, mock_files_client: AsyncMock, body: dict[str, Any]
     ) -> None:
         resp = client.post("/apis/agents/v2/workspaces/default/agents", json=body)
 
         assert resp.status_code == 422
         mock_entity_client.create.assert_not_called()
+        mock_files_client.get_fileset.assert_not_called()
 
     def test_register_returns_201(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         saved = _make_agent("calc", description="calculator", config={"llms": {}})
@@ -204,6 +226,62 @@ class TestRegisterAgent:
         created_entity: Agent = mock_entity_client.create.call_args[0][0]
         assert created_entity.name == "calc"
         assert created_entity.workspace == "default"
+
+    @pytest.mark.parametrize("config", [None, {"llms": {}}, _fabric_agent_config()])
+    @pytest.mark.parametrize("fileset", ["agent-source", "other/agent-source"])
+    def test_register_stores_references(
+        self,
+        client: TestClient,
+        mock_entity_client: AsyncMock,
+        mock_files_client: AsyncMock,
+        config: dict[str, Any] | None,
+        fileset: str,
+    ) -> None:
+        mock_entity_client.create.side_effect = lambda agent: agent
+        reference = {"fileset": fileset, "container_image": "nvcr.io/my-org/agent:1.0"}
+        body: dict[str, Any] = {"name": "calc", "reference": reference}
+        if config is not None:
+            body["config"] = config
+
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json=body)
+
+        assert resp.status_code == 201
+        fileset_workspace = "other" if "/" in fileset else "default"
+        mock_files_client.get_fileset.assert_awaited_once_with(workspace=fileset_workspace, name="agent-source")
+        expected = {**reference, "fileset": f"{fileset_workspace}/agent-source"}
+        agent = mock_entity_client.create.call_args[0][0]
+        assert agent.reference.model_dump() == expected
+        assert "reference" not in agent.config
+        assert resp.json()["reference"] == expected
+        if config is None:
+            assert agent.config == {}
+            assert agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT
+
+    @pytest.mark.parametrize(
+        ("error", "status_code"),
+        [
+            (NotFoundError(httpx.Response(404)), 400),
+            (PermissionDeniedError(httpx.Response(403)), 403),
+            (InternalServerError(httpx.Response(500)), 500),
+        ],
+    )
+    def test_register_rejects_unavailable_fileset(
+        self,
+        client: TestClient,
+        mock_entity_client: AsyncMock,
+        mock_files_client: AsyncMock,
+        error: Exception,
+        status_code: int,
+    ) -> None:
+        mock_files_client.get_fileset.side_effect = error
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "calc", "reference": {"fileset": "source"}},
+        )
+
+        assert resp.status_code == status_code
+        mock_entity_client.create.assert_not_called()
 
     @pytest.mark.parametrize("explicit_format", [False, True])
     def test_register_validates_platform_agent_config(
@@ -298,10 +376,15 @@ class TestRegisterAgent:
 
     @pytest.mark.parametrize(
         "fields",
-        [{}, {"config": {}}, {"config": {}, "config_format": NAT_WORKFLOW_CONFIG_FORMAT}],
+        [
+            {},
+            {"config": {}},
+            {"config": {}, "config_format": NAT_WORKFLOW_CONFIG_FORMAT},
+            {"reference": {"container_image": "alpine"}},
+        ],
     )
     def test_register_name_only_returns_201(
-        self, client: TestClient, mock_entity_client: AsyncMock, fields: dict[str, Any]
+        self, client: TestClient, mock_entity_client: AsyncMock, mock_files_client: AsyncMock, fields: dict[str, Any]
     ) -> None:
         config_format = fields.get("config_format", NEMO_AGENTS_SPEC_CONFIG_FORMAT)
         mock_entity_client.create.return_value = _make_agent("calc", config_format=config_format)
@@ -316,6 +399,7 @@ class TestRegisterAgent:
         assert agent.config_format == config_format
         assert resp.json()["config"] == {}
         assert resp.json()["config_format"] == config_format
+        mock_files_client.get_fileset.assert_not_called()
 
     def test_register_preserves_workspace_from_path(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         saved = _make_agent("calc", workspace="prod")
