@@ -24,6 +24,8 @@ def create_async_engine_for_entities(
 
     For PostgreSQL (asyncpg), this configures:
     - timeout from database_config.connect_timeout_seconds: Connection timeout (default 30s).
+    - pool_size from database_config.connections_limit: connections kept open and reused. SQLAlchemy's
+      default of 5 forces a burst of concurrent requests to open (and then close) overflow connections.
 
     Args:
         config: Entities service configuration
@@ -46,6 +48,7 @@ def create_async_engine_for_entities(
     elif "postgresql" in database_url:
         # PostgreSQL (asyncpg): connection timeout in seconds
         engine_kwargs["connect_args"] = {"timeout": connect_timeout}
+        engine_kwargs.setdefault("pool_size", config.database_config.connections_limit)
 
     engine = create_async_engine(database_url, **engine_kwargs)
 
