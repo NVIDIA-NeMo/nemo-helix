@@ -283,6 +283,16 @@ class OptimizerSpec(UnslothSchema):
     )
 
 
+FULL_WEIGHTS_LEARNING_RATE = 2e-5
+
+
+def resolve_learning_rate(training: TrainingSpec, optimizer: OptimizerSpec) -> OptimizerSpec:
+    """Lower an unset learning rate for a full-weight run, following Unsloth's guidance."""
+    if training.finetuning_type == "all_weights" and "learning_rate" not in optimizer.model_fields_set:
+        return optimizer.model_copy(update={"learning_rate": FULL_WEIGHTS_LEARNING_RATE})
+    return optimizer
+
+
 class HardwareSpec(UnslothSchema):
     gpus: str | None = Field(
         default=None,
@@ -340,3 +350,8 @@ class UnslothJobOutput(UnslothSchema):
         default=None,
         description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
+
+    @model_validator(mode="after")
+    def _resolve_learning_rate(self) -> Self:
+        self.optimizer = resolve_learning_rate(self.training, self.optimizer)
+        return self

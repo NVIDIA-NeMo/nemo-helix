@@ -52,6 +52,7 @@ def test_automodel_sft_uplift(
 
     job_name, final = jobs.submit_and_wait_customization_job(client, "automodel", spec, ws)
     assert final.status == "completed", jobs.get_job_failure_details(client, job_name, ws)
+    assert final.spec["optimizer"]["learning_rate"] == {"lora": 5e-5, "all_weights": 5e-6}[finetuning_type]
 
     if finetuning_type == "lora":
         deployment, config = jobs.deploy_vllm_model(client, ws, base_entity, lora_enabled=True)

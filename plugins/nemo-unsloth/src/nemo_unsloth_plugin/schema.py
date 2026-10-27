@@ -41,6 +41,7 @@ from nhx.unsloth.schemas import (
     TrainingSpec,
     UnslothJobOutput,
     UnslothSchema,
+    resolve_learning_rate,
 )
 from pydantic import Field, model_validator
 
@@ -109,8 +110,7 @@ class UnslothJobInput(UnslothSchema):
                     "set model.load_in_4bit=false and model.load_in_8bit=false"
                 )
             # Unsloth recommends 2e-4 for LoRA, the field default, and a lower rate for full fine-tuning.
-            if "learning_rate" not in self.optimizer.model_fields_set:
-                self.optimizer = self.optimizer.model_copy(update={"learning_rate": 2e-5})
+            self.optimizer = resolve_learning_rate(self.training, self.optimizer)
         # warmup_steps and warmup_ratio mutex (transformers also enforces this
         # at runtime; we surface it earlier with a clearer message)
         if self.schedule.warmup_steps and self.schedule.warmup_ratio is not None:

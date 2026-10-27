@@ -146,6 +146,7 @@ Run it with the converter from SKILL.md § **Before you start**, on a host with 
 pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
+  --nemo-rl-root ~/workspace/RL \
   --out-dir ./ascii-tree-pkg \
   --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
@@ -182,7 +183,7 @@ ascii-tree-data/
   .huggingface/                   ← HF cache from conversion; Gym host copies to `/job/work/.huggingface`
 ```
 
-**`pi-to-gym-conversion` vendors `x86_64` wheels today.** On an `arm64` cluster, build the closure separately and pass `--wheels-dir`.
+**`pi-to-gym-conversion` supports `x86_64` only today.** It also rejects `aarch64` wheels passed with `--wheels-dir`. On an `arm64` cluster, hand-build a `wheels-v1` package (Path C) with an `aarch64` closure (`references/dependencies.md` § **Vendoring a wheel closure**).
 
 **`adapter.agent` must be on the image allowlist.** The package ships config and wheels; the agent harness itself comes from the training image. Today the allowlist is exactly one entry — `verifiers_agent` (`IMAGE_ADAPTER_ALLOWLIST`). Anything else is rejected at validation, so a user who wants a different harness needs `wheels-v1` or `native-v1`.
 

@@ -163,6 +163,23 @@ def test_sft_learning_rate_defaults_follow_finetuning_type(
     assert spec.optimizer.learning_rate == expected
 
 
+def test_forwarded_spec_keeps_the_learning_rate_unset_only_without_defaults() -> None:
+    """A client that forwards a parsed spec must drop unset fields, or the LoRA default arrives as a choice."""
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "base",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "all_weights"},
+        }
+    )
+
+    forwarded = AutomodelJobInput.model_validate(spec.model_dump(mode="json", exclude_unset=True))
+    with_defaults = AutomodelJobInput.model_validate(spec.model_dump(mode="json"))
+
+    assert forwarded.with_resolved_recipe("causal_lm").optimizer.learning_rate == 5e-6
+    assert with_defaults.with_resolved_recipe("causal_lm").optimizer.learning_rate == 5e-5
+
+
 def test_encoder_recipe_defaults_do_not_override_explicit_hparams() -> None:
     spec = AutomodelJobInput.model_validate(
         {
