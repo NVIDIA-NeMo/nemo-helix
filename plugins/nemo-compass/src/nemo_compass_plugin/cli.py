@@ -518,6 +518,11 @@ def _report_ethos(message: str) -> None:
     typer.echo(message, err=True)
 
 
+def _repository_root() -> Path | None:
+    current = Path.cwd()
+    return next((path for path in (current, *current.parents) if (path / ".git").exists()), None)
+
+
 def _resolve_ethos(state: CLIState, *, workspace: str, agent: str, ethos_path: Path | None) -> str | None:
     """Resolve on the submitting machine; the analysis worker has no Files access."""
     if ethos_path is not None:
@@ -529,7 +534,7 @@ def _resolve_ethos(state: CLIState, *, workspace: str, agent: str, ethos_path: P
     try:
         content = files_client.download_file(workspace=workspace, name=fileset, path="ETHOS.md").read()
     except NotFoundError:
-        logger.info("No ethos at fileset %s; checking the current directory", reference)
+        logger.info("No ethos at fileset %s; checking the repository root", reference)
     else:
         try:
             markdown = content.decode("utf-8")
@@ -538,14 +543,20 @@ def _resolve_ethos(state: CLIState, *, workspace: str, agent: str, ethos_path: P
         if markdown.strip():
             _report_ethos(f"Using ethos from fileset: {reference}")
             return markdown
-        logger.info("Ethos at fileset %s is empty; checking the current directory", reference)
+        logger.info("Ethos at fileset %s is empty; checking the repository root", reference)
 
+    root = _repository_root()
+    if root is None:
+        _report_ethos(
+            f"No ethos document found in fileset {reference}; outside a Git repository, use --ethos to supply one"
+        )
+        return None
     for filename in ("ETHOS.md", "ethos.md"):
-        path = Path.cwd() / filename
+        path = root / filename
         if path.exists():
             return _read_ethos_file(path)
     _report_ethos(
-        f"No ethos document found in fileset {reference} or directory {Path.cwd()}; ethos analysis will be skipped"
+        f"No ethos document found in fileset {reference} or repository root {root}; ethos analysis will be skipped"
     )
     return None
 

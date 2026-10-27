@@ -36,6 +36,7 @@ pytestmark = pytest.mark.usefixtures("configured_models")
 
 @pytest.fixture(autouse=True)
 def _isolated_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
 
 
@@ -147,12 +148,21 @@ def test_create_reads_the_ethos_file_and_sends_its_contents(
 
 
 @pytest.mark.parametrize("stored", [True, False])
-def test_ethos_discovery_prefers_fileset_then_current_directory(
-    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path, caplog: pytest.LogCaptureFixture, stored: bool
+def test_ethos_discovery_prefers_fileset_then_repository_root(
+    app: typer.Typer,
+    api: FakeCompassAPI,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    stored: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     api.on("POST", RUNS, run_response_json())
     local = tmp_path / "ETHOS.md"
     local.write_text("Local ethos", encoding="utf-8")
+    nested = tmp_path / "src"
+    nested.mkdir()
+    (nested / "ETHOS.md").write_text("Wrong nested ethos", encoding="utf-8")
+    monkeypatch.chdir(nested)
     if stored:
         api.ethos_response = httpx.Response(200, content=b"Stored ethos")
     with caplog.at_level(logging.INFO):
@@ -470,3 +480,15 @@ def test_get_code_prints_the_typed_client_call_without_sending(app: typer.Typer,
     assert api.requests == []
     assert "client.get_analysis_run(" in result.stdout
     assert f'name="{RUN_NAME}"' in result.stdout
+
+
+def test_outside_a_repository_does_not_discover_local_ethos(
+    app: typer.Typer, api: FakeCompassAPI, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").rmdir()
+    (tmp_path / "ETHOS.md").write_text("Not in a repository", encoding="utf-8")
+    api.on("POST", RUNS, run_response_json())
+    result = _create(app)
+    assert result.exit_code == 0, result.output
+    assert "ethos" not in api.requests[0].body
+    assert "outside a Git repository" in result.stderr

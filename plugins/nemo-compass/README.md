@@ -57,8 +57,10 @@ For CLI submissions, ethos is selected in this order:
 
 1. The file passed with `--ethos`. An unreadable or empty override fails the command.
 2. `ETHOS.md` in the agent's `<workspace>/<agent-name>-ethos` fileset.
-3. `ETHOS.md`, then `ethos.md`, in the CLI's current working directory.
+3. `ETHOS.md`, then `ethos.md`, in the current Git repository's root.
 
+The local lookup uses the nearest enclosing Git repository or worktree root.
+Outside a repository, supply `--ethos` or use the stored document.
 A missing or empty stored document allows the local fallback. Other download
 errors stop submission. The CLI logs the selected fileset reference or absolute
 local path and prints it to stderr without printing the document contents.

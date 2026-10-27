@@ -80,7 +80,7 @@ nemo compass analysis-runs create --agent "<agent-name>" --workspace "<workspace
 ```
 
 The CLI first uses `ETHOS.md` in `<workspace>/<agent-name>-ethos`, then looks
-for `ETHOS.md` or `ethos.md` in the current directory. It reports the selected
+for `ETHOS.md` or `ethos.md` at the current Git repository root. It reports the selected
 source on stderr. Add `--ethos <path>` to override both; an invalid override
 fails submission. Use `--since` for
 an ISO-8601 lower time bound, or `--evaluation-id` to select an evaluation.
