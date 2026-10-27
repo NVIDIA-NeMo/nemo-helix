@@ -197,7 +197,7 @@ entities:
     user:
     # Optional database password
     password:
-    # Maximum number of connections in the database connection pool | default: 10
+    # Number of connections kept open in the PostgreSQL connection pool. Bursts beyond this open short-lived overflow connections (up to SQLAlchemy's default of 10 more). | default: 10
     connections_limit: 10
     # Connection timeout in seconds. For PostgreSQL (asyncpg) and SQLite, how long to wait when connecting or acquiring a lock. | default: 30
     connect_timeout_seconds: 30
