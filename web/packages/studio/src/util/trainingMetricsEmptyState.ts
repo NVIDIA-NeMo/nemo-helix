@@ -10,6 +10,7 @@ export function getTrainingMetricsEmptyState(
 ): { title: string; description: string } {
   switch (status) {
     case HelixJobStatus.created:
+    case HelixJobStatus.queued:
     case HelixJobStatus.pending:
     case HelixJobStatus.active:
     case HelixJobStatus.resuming:
