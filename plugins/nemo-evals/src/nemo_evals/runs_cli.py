@@ -47,7 +47,6 @@ from nemo_helix_plugin.jobs.archive import safe_extract_tar
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 
-COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
 RETRY_ATTEMPTS = 5
 # The run POST alone: it answers once the run is accepted, which can take minutes while many submits share the API.
 SUBMIT_TIMEOUT_SECONDS = 300.0
@@ -113,10 +112,6 @@ def entity_name(text: str) -> str:
 def selection_suffix(refs: Sequence[str]) -> str:
     """Eight hex characters identifying a set of pinned task refs, independent of their order."""
     return hashlib.sha256("\n".join(sorted(refs)).encode()).hexdigest()[:8]
-
-
-def is_compose_task(task_dir: Path) -> bool:
-    return any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES)
 
 
 def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, str | None, list[Path]]:
@@ -222,8 +217,6 @@ def publish_tasks(
 
     refs: list[str] = []
     for task_dir in task_dirs:
-        if is_compose_task(task_dir):
-            raise SelectionError(f"{task_dir.name} is a compose task; Kubernetes runs don't support them yet")
         (source,) = discover_harbor_tasks(task_dir)
         name = entity_name(f"{prefix}-{task_dir.name}")
         stored = _unchanged_revision(evaluator, workspace, name, describe_harbor_task(source, workspace=workspace))
