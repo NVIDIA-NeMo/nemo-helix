@@ -29,11 +29,11 @@ import {
   COMPLETE_STATUS,
   RUNNING_STATUS,
 } from '@nemo/common/src/components/AssistantChat/constants';
-import { humanizeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import {
   appendMessageToThreadMessage,
   createTextMessage,
   getEditedMessageIndex,
+  getFailedReply,
   getOpenAIMessages,
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
@@ -285,17 +285,8 @@ export const useAssistantChatRuntime = ({
         }
 
         const errorMessage = error instanceof Error ? error.message : 'Unknown Error';
-        const status: MessageStatus = {
-          type: 'incomplete',
-          reason: 'error',
-          error: errorMessage,
-        };
-        updateAssistantMessage(
-          assistantMessage.id!,
-          [{ type: 'text', text: humanizeChatError(errorMessage, describeError) }],
-          responseImages,
-          status
-        );
+        const { parts, status } = getFailedReply(errorMessage, describeError);
+        updateAssistantMessage(assistantMessage.id!, parts, responseImages, status);
         onError?.(error instanceof Error ? error : new Error(errorMessage));
       } finally {
         if (abortControllerRef.current === runController) {

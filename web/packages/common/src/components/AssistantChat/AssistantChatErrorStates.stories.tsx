@@ -3,241 +3,146 @@
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import { AssistantChat } from '@nemo/common/src/components/AssistantChat';
-import {
-  describeChatError,
-  humanizeChatError,
-} from '@nemo/common/src/components/AssistantChat/describeChatError';
-import { createChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
+import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
+import { getFailedReply } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import { TooltipProvider } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
-import { http, HttpResponse } from 'msw';
-import { useEffect, useState } from 'react';
 
-// Walk through what a user sees when an agent chat fails. Each option replays the HTTP response
-// the platform returns for that failure through the same OpenAI client and chat runtime Studio
-// uses, so the wording comes from `describeChatError.ts` — edit the wording there and
-// reload to review it. The code in each label is the model provider's status; the platform
-// itself answers HTTP 502 for all of them (the gateway flattens every agent failure).
-
-const STORY_INFERENCE_BASE_PATH = '/storybook-inference/v1';
-const STORY_COMPLETIONS_API = `${STORY_INFERENCE_BASE_PATH}/chat/completions`;
-const STORY_MODEL = 'story-agent';
+// Review how an agent chat failure is explained to the user. Pick a failure in the Controls panel
+// (or choose "Custom" and paste any error text) to see the reply the chat renders for it: the
+// explanation in the red-barred message, the raw error in the red box. The wording comes from
+// `describeChatError.ts`, so edit it there and the story updates.
+//
+// Each option is the error text the OpenAI client surfaces to the chat for that failure. The
+// platform answers HTTP 502 for all of them, and the code in each label is the model provider's
+// status, which only survives inside the text. The 410, 424 and 503 provider details are captured
+// from real failures; 404, 401 and 429 are representative.
 
 const LOREM_IPSUM =
   'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.';
 
-const STORY_BASE_URL = `${window.location.origin}${STORY_INFERENCE_BASE_PATH}`;
+const CUSTOM = 'custom';
 
-interface ErrorScenario {
-  readonly key: string;
-  readonly label: string;
-  readonly status: number;
-  /** Undefined means an empty body, as an ingress or proxy error page would return. */
-  readonly body?: unknown;
-}
-
-// The shape the agents gateway returns: an OpenAI `error` envelope beside FastAPI's `detail`.
-const gatewayError = (message: string, type = 'upstream_error') => ({
-  error: { message, type, code: null, param: null },
-  detail: `Agent returned 502: ${JSON.stringify({ detail: message })}`,
-});
-
-// The openai SDK inside the Fabric runtime flattens the model's failure into this text.
 const modelError = (providerStatus: number, providerDetail: string) =>
-  gatewayError(
-    `RuntimeError: internal error: APIStatusError: Error code: ${providerStatus} - ${providerDetail}`
-  );
+  `502 RuntimeError: internal error: APIStatusError: Error code: ${providerStatus} - ${providerDetail}`;
 
-// 410, 424 and 503 provider details are captured from real failures; 404, 401 and 429 are
-// representative of the provider's response.
-const SCENARIOS: readonly ErrorScenario[] = [
-  {
-    key: 'model-retired',
+const SCENARIOS = {
+  'model-retired': {
     label: '410: model retired',
-    status: 502,
-    body: modelError(
+    error: modelError(
       410,
       '{\'detail\': \'{"type":"about:blank","title":"Gone","status":410,"detail":"The model \\\'nvidia/nemotron-3-nano-30b-a3b\\\' has reached its end of life on 2026-09-01T09:00:00Z and is no longer available."}\\n\'}'
     ),
   },
-  {
-    key: 'model-not-found',
+  'model-not-found': {
     label: '404: model not found',
-    status: 502,
-    body: modelError(
+    error: modelError(
       404,
       "{'detail': \"No VirtualModel named 'default/missing-model' was found. Inference requests must resolve to a VirtualModel.\"}"
     ),
   },
-  {
-    key: 'credentials-rejected',
+  'credentials-rejected': {
     label: '401: provider rejected credentials',
-    status: 502,
-    body: modelError(401, "{'detail': 'Incorrect API key provided.'}"),
+    error: modelError(401, "{'detail': 'Incorrect API key provided.'}"),
   },
-  {
-    key: 'request-rejected',
+  'request-rejected': {
     label: '424: provider rejected request',
-    status: 502,
-    body: modelError(
+    error: modelError(
       424,
       "{'detail': \"Model provider 'nvidia-build' at upstream 'https://integrate.api.nvidia.com' rejected the request for model 'default/nvidia-neva-22b' with HTTP status 404 while proxying 'v1/chat/completions'. This is a client-side error and will not resolve by retrying.\"}"
     ),
   },
-  {
-    key: 'rate-limited',
+  'rate-limited': {
     label: '429: provider rate limited',
-    status: 502,
-    body: modelError(429, "{'detail': 'Rate limit exceeded. Try again later.'}"),
+    error: modelError(429, "{'detail': 'Rate limit exceeded. Try again later.'}"),
   },
-  {
-    key: 'provider-unavailable',
+  'provider-unavailable': {
     label: '503: provider unavailable',
-    status: 502,
-    body: modelError(
+    error: modelError(
       503,
       "{'detail': 'ResourceExhausted: Worker local total request limit reached (16/16)'}"
     ),
   },
-  {
-    key: 'runtime-start-failed',
+  'runtime-start-failed': {
     label: '502: agent runtime failed to start',
-    status: 502,
-    body: gatewayError(
-      'Fabric runtime startup failed: adapter nvidia.fabric.example does not support telemetry.providers value relay'
-    ),
+    error:
+      '502 Fabric runtime startup failed: adapter nvidia.fabric.example does not support telemetry.providers value relay',
   },
-  {
-    key: 'agent-unresponsive',
+  'agent-unresponsive': {
     label: '502: agent did not respond',
-    status: 502,
-    body: gatewayError('Could not connect to agent: ', 'server_error'),
+    error: '502 Could not connect to agent: ',
   },
-  {
-    key: 'no-body',
+  'no-body': {
     label: '502: no response body',
-    status: 502,
-    body: undefined,
+    error: '502 status code (no body)',
   },
-  {
-    key: 'unrecognised',
+  unrecognised: {
     label: '502: unrecognised error',
-    status: 502,
-    body: gatewayError('Something no rule knows about.'),
+    error: '502 Something no rule knows about.',
   },
-];
+} as const;
 
-// The MSW handler below is registered once per story; it replies with whichever scenario the
-// dropdown last selected.
-let activeScenario: ErrorScenario = SCENARIOS[0];
+type ScenarioKey = keyof typeof SCENARIOS;
 
-const ErrorStatesStory = () => {
-  const [scenarioKey, setScenarioKey] = useState(SCENARIOS[0].key);
-  const [messages, setMessages] = useState<readonly ThreadMessageLike[]>();
-  const scenario = SCENARIOS.find((candidate) => candidate.key === scenarioKey) ?? SCENARIOS[0];
-
-  useEffect(() => {
-    let cancelled = false;
-    activeScenario = scenario;
-    setMessages(undefined);
-
-    const userMessage: ThreadMessageLike = {
-      role: 'user',
-      content: [{ type: 'text', text: LOREM_IPSUM }],
-    };
-
-    // Mirrors the runtime's own failure handling (useAssistantChatRuntime): the human-readable
-    // copy becomes the assistant message text and the client's error message its error status.
-    createChatCompletion({
-      model: STORY_MODEL,
-      baseURL: STORY_BASE_URL,
-      stream: true,
-      messages: [{ role: 'user', content: LOREM_IPSUM }],
-    })
-      .then(() => 'The mocked endpoint unexpectedly succeeded.')
-      .catch((error: unknown) => (error instanceof Error ? error.message : 'Unknown Error'))
-      .then((errorMessage) => {
-        if (cancelled) return;
-        setMessages([
-          userMessage,
-          {
-            role: 'assistant',
-            content: [{ type: 'text', text: humanizeChatError(errorMessage, describeChatError) }],
-            status: { type: 'incomplete', reason: 'error', error: errorMessage },
-          },
-        ]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [scenario]);
-
-  return (
-    <div className="flex flex-col gap-density-md">
-      <label className="flex items-center gap-density-sm text-sm">
-        Error state
-        <select
-          className="rounded border border-base bg-surface-raised px-2 py-1"
-          value={scenarioKey}
-          onChange={(event) => setScenarioKey(event.target.value)}
-        >
-          {SCENARIOS.map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <details className="text-xs text-secondary">
-        <summary>API response (HTTP {scenario.status})</summary>
-        <pre className="mt-density-xs overflow-auto whitespace-pre-wrap">
-          {scenario.body === undefined ? '(empty body)' : JSON.stringify(scenario.body, null, 2)}
-        </pre>
-      </details>
-      <div className="h-[520px]">
-        {messages ? (
-          <AssistantChat
-            key={scenario.key}
-            model={STORY_MODEL}
-            baseURL={STORY_BASE_URL}
-            assistantName="Agent"
-            initialMessages={messages}
-            describeError={describeChatError}
-          />
-        ) : null}
-      </div>
-    </div>
-  );
+const scenarioLabels = {
+  ...Object.fromEntries(Object.entries(SCENARIOS).map(([key, { label }]) => [key, label])),
+  [CUSTOM]: 'Custom error text',
 };
+
+interface ErrorStatesArgs {
+  scenario: ScenarioKey | typeof CUSTOM;
+  /** Used when the scenario is "Custom": paste the text the chat received. */
+  customError: string;
+}
 
 const meta = {
   title: 'UI/AssistantChat/Error states',
   decorators: [
     (Story) => (
       <TooltipProvider>
-        <div className="max-w-[760px]">
+        <div className="h-[520px] max-w-[760px]">
           <Story />
         </div>
       </TooltipProvider>
     ),
   ],
-  parameters: {
-    msw: {
-      handlers: [
-        http.post(STORY_COMPLETIONS_API, () =>
-          activeScenario.body === undefined
-            ? new HttpResponse(null, { status: activeScenario.status })
-            : HttpResponse.json(activeScenario.body, { status: activeScenario.status })
-        ),
-      ],
+  args: {
+    scenario: 'model-retired',
+    customError: '502 RuntimeError: internal error: APIStatusError: Error code: 410 - ...',
+  },
+  argTypes: {
+    scenario: {
+      control: { type: 'select', labels: scenarioLabels },
+      options: [...Object.keys(SCENARIOS), CUSTOM],
+    },
+    customError: {
+      control: 'text',
+      if: { arg: 'scenario', eq: CUSTOM },
     },
   },
-} satisfies Meta;
+  render: ({ scenario, customError }) => {
+    const error = scenario === CUSTOM ? customError : SCENARIOS[scenario].error;
+    const { parts, status } = getFailedReply(error, describeChatError);
+    const messages: readonly ThreadMessageLike[] = [
+      { role: 'user', content: [{ type: 'text', text: LOREM_IPSUM }] },
+      { role: 'assistant', content: parts, status },
+    ];
+
+    return (
+      <AssistantChat
+        // initialMessages only seeds the thread, so remount when the error changes.
+        key={error}
+        model="story-agent"
+        assistantName="Agent"
+        initialMessages={messages}
+        describeError={describeChatError}
+        disabled
+      />
+    );
+  },
+} satisfies Meta<ErrorStatesArgs>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const AgentChatFailures: Story = {
-  render: () => <ErrorStatesStory />,
-};
+export const AgentChatFailures: Story = {};

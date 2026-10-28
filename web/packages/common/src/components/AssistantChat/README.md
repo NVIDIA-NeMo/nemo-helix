@@ -71,7 +71,7 @@ Related documentation:
 
 - [assistant-ui documentation](https://www.assistant-ui.com/docs)
 - [AssistantChat stories](./AssistantChat.stories.tsx)
-- [Error states story](./AssistantChatErrorStates.stories.tsx): a dropdown of failure states, each replayed through the real client and chat UI. Use it to review and reword the messages in `describeChatError.ts`.
+- [Error states story](./AssistantChatErrorStates.stories.tsx): pick a failure in the Controls panel (or paste custom error text) to see the reply the chat renders for it. Use it to review and reword the messages in `describeChatError.ts`.
 
 ## Common Patterns
 
@@ -104,9 +104,9 @@ Related documentation:
 - `UserEditComposer.tsx` — the inline composer shown when editing a user message.
 - `AssistantChatMessageContent.tsx` — shared message-parts renderer (text, image, tool-call fallback, error banner with the raw error) used by both message renderers.
 - `messageActions.tsx` — shared message-action styles, the copy-message button, and the copy-error button shown on failed replies.
-- `describeChatError.ts` — rules that explain agent chat failures (`describeChatError`), `humanizeChatError`, and the generic error line.
+- `describeChatError.ts` — rules that explain agent chat failures (`describeChatError`), `humanizeChatError`, and the generic error line. `messageUtils.ts` `getFailedReply` builds the failed reply from them.
 - `useMessageError.ts` — hook returning the raw error of a failed message, shared by the red bar, banner, and copy action.
-- `AssistantChatErrorStates.stories.tsx` — error-state story with a dropdown of failure responses.
+- `AssistantChatErrorStates.stories.tsx` — error-state story driven by Storybook Controls.
 - `AssistantComposer.tsx` — the prompt composer, send/stop/reset controls, and image-attachment chips.
 - `types.ts` — shared prop and config types. `messageUtils.ts` / `completionUtils.ts` — message and completion helpers.
 
