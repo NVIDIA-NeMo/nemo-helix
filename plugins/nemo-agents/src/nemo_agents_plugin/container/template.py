@@ -103,6 +103,7 @@ def resolve_fabric_harness_install(
         platform_extra = _FABRIC_WORKFLOW_INSTALLS.get(target_id, "nemo-agents-plugin")
         install_hermes = False
         install_pi = False
+        uses_generic_nooa = False
     else:
         harnesses = payload.get("harnesses")
         default_harness = payload.get("default_harness")
@@ -119,7 +120,8 @@ def resolve_fabric_harness_install(
         platform_extra = _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin")
         install_hermes = kind in _HERMES_HARNESS_KINDS
         install_pi = kind in _PI_HARNESS_KINDS
-    if python_version is not None and platform_extra == "nemo-agents-plugin-nooa":
+        uses_generic_nooa = kind in _GENERIC_NOOA_HARNESS_KINDS
+    if python_version is not None and (platform_extra == "nemo-agents-plugin-nooa" or uses_generic_nooa):
         if re.fullmatch(r"3\.(12|13)(?:\.\d+)?", python_version) is None:
             raise ValueError(f"NOOA requires Python 3.12 or 3.13; got {python_version!r}. Set --python-version 3.13.")
     return platform_extra, install_hermes, install_pi
@@ -265,6 +267,8 @@ _FABRIC_WORKFLOW_INSTALLS = {
 }
 _HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
 _PI_HARNESS_KINDS = {"pi", "nvidia.fabric.pi"}
+# The generic NOOA adapter selects no extra, but nemo-agents-plugin installs it only on Python 3.12 and 3.13.
+_GENERIC_NOOA_HARNESS_KINDS = {"nvidia.fabric.nooa"}
 # Adapters an image installs without a project of the agent's own: the stock
 # adapters plus the generic NOOA adapter, all shipped by the nemo-fabric-adapters-*
 # wheels nemo-agents-plugin depends on. Other installed adapters come from plugin

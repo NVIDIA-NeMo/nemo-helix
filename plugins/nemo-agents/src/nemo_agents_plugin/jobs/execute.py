@@ -384,7 +384,8 @@ class ExecuteAgentJob(NemoJob):
         # install adapters this server can't see, so the job checks harness
         # kinds inside that image instead.
         try:
-            _validate_agent_config(merged.config, check_adapters=not request.image)
+            # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
+            await asyncio.to_thread(_validate_agent_config, merged.config, check_adapters=not request.image)
         except UnknownAdapterError as error:
             raise UnknownAdapterError(f"{error} {CUSTOM_IMAGE_HINT}") from error
 

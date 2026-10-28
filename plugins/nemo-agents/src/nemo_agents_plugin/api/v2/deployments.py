@@ -155,7 +155,8 @@ async def create_deployment(
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
         body.image.strip() and is_container_deployment_mode(body.deployment_mode)
     ):
-        _validate_harness_kinds(merged.config)
+        # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
+        await asyncio.to_thread(_validate_harness_kinds, merged.config)
 
     # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
     spec = SpecRevision()

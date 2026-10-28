@@ -700,6 +700,20 @@ class TestRenderFabricDockerfile:
             render_fabric_dockerfile(config)
         assert "ARG PYTHON_VERSION=3.13" in render_fabric_dockerfile(config, python_version="3.13")
 
+    @pytest.mark.parametrize("version", ["3.12", "3.13", "3.14"])
+    def test_generic_nooa_kind_requires_a_python_that_installs_it(self, tmp_path: Path, version: str) -> None:
+        """nemo-agents-plugin installs the generic NOOA adapter only on Python 3.12 and 3.13."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: selected\nharnesses:\n  selected:\n    kind: nvidia.fabric.nooa\n")
+
+        if version == "3.14":
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version)
+        else:
+            assert f"ARG PYTHON_VERSION={version}" in render_fabric_dockerfile(config, python_version=version)
+
     def test_unused_nooa_does_not_restrict_container_python(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
 
