@@ -647,7 +647,7 @@ A deployment loads adapters up to a maximum rank and refuses adapters of a highe
 | ---------------- | -------------------- | ----------- |
 | vLLM | 16 | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
 | Model-free NIM, vLLM | 16 | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
-| Model-free NIM, SGLang | The highest rank among the adapters present when the server starts | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Model-free NIM, SGLang | 16 if the server starts with no adapters; otherwise the highest rank among the adapters present when it starts | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM | 32 | `executor_config.additional_envs`: `{"NIM_MAX_LORA_RANK": "<rank>"}` |
 
 vLLM accepts `--max-lora-rank` values of 1, 8, 16, 32, 64, 128, 256, 320, and 512.
