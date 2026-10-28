@@ -29,6 +29,8 @@ class FakeClient:
 
 
 class FakeModelClient:
+    model = "openai/test-model"
+
     def __init__(self) -> None:
         self.closed = False
 
@@ -309,3 +311,29 @@ async def test_ethos_reaches_the_compass_through_the_change_set_entry_point(
 
     build_kwargs = cast(dict[str, object], seen["build_kwargs"])
     assert build_kwargs["ethos"] == "# Ethos\n\nBe careful."
+
+
+@pytest.mark.parametrize("model", ["nvidia/nemotron-3.5-lightning-30b", "nvidia/nemotron_3_5_lightning_30b"])
+async def test_resolved_lightning_model_warns_before_analysis_and_in_report(monkeypatch, caplog, model):
+    from nemo_compass_plugin.analysis.result import CompassResult
+
+    seen = {}
+    _stub_pipeline(monkeypatch, seen)
+    monkeypatch.setattr(FakeModelClient, "model", model)
+
+    async def analyze(*args, **kwargs):
+        assert "NVIDIA Nemotron 3.5 Super VL" in caplog.text
+        return CompassResult(summary="Done", notes=["Existing note"])
+
+    monkeypatch.setattr(pipeline, "analyze_snapshot", analyze)
+    result, _ = await run_module.run_compass_change_set(
+        agent="agent",
+        workspace="workspace",
+        base_url="http://localhost:8080",
+        client=cast(Any, FakeClient()),
+        enable_observability=False,
+    )
+    assert result.notes[0] == "Existing note"
+    assert len(result.notes) == 2
+    assert "known tool-calling failures" in result.notes[1]
+    assert caplog.text.count("known tool-calling failures") == 1

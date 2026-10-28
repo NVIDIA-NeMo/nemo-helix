@@ -143,12 +143,13 @@ class DiscoveredModel(TypedDict, total=False):
 
     ``id`` is always present (we filter out entries missing it in :meth:`_discover_models`).
     ``root`` and ``parent`` come from OpenAI-compatible LoRA/prompt-tuned metadata and may
-    be missing or None.
+    be missing or None. ``owned_by`` names the serving engine (e.g. ``sglang``).
     """
 
     id: str
     root: str | None
     parent: str | None
+    owned_by: str | None
 
 
 class ApiEndpointDict(TypedDict):
@@ -933,10 +934,12 @@ class ModelProviderReconciler:
                     continue
                 root = model.get("root")
                 parent = model.get("parent")
+                owned_by = model.get("owned_by")
                 discovered_model: DiscoveredModel = {
                     "id": model_id,
                     "root": root if isinstance(root, str) else None,
                     "parent": parent if isinstance(parent, str) else None,
+                    "owned_by": owned_by if isinstance(owned_by, str) else None,
                 }
                 models.append(discovered_model)
 
@@ -1206,7 +1209,10 @@ class ModelProviderReconciler:
                 # the prefix (not parsed): _resolve_base_backend_model_id may return an
                 # unqualified id, and parsing would raise mid-loop.
                 model_entity_id = format_adapter_composite(base_id, adapter_ws, adapter_name)
-                served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
+                # SGLang lists an adapter by its bare name but applies it only when the request
+                # names ``<base>:<adapter>``; the bare name silently gets the base model.
+                served_model_name = f"{parent}:{mid}" if obj.get("owned_by") == "sglang" else mid
+                served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=served_model_name))
                 continue
 
             # Prompt-tuned: parent is null, root equals base, id != base (the

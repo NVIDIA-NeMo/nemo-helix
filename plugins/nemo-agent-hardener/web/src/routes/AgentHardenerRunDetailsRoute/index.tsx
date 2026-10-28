@@ -86,14 +86,14 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
 
   // The platform job behind this run drives the interview/review HITL over its status_details.
   const jobName = run?.job_id ?? '';
-  const { useJobsGetJob, useJobsUpdateJobStatusDetails } = useHelixSdk();
+  const { useJobsGetJob, useJobsUpdateJobAttemptStatusDetails } = useHelixSdk();
   const { data: job } = useJobsGetJob(workspace, jobName, {
     query: {
       enabled: Boolean(jobName),
       refetchInterval: (query) => getJobRefetchInterval(query.state.data?.status),
     },
   });
-  const patch = useJobsUpdateJobStatusDetails();
+  const patch = useJobsUpdateJobAttemptStatusDetails();
   const details = job?.status_details as Record<string, unknown> | undefined;
   const interview = pendingInterview(details);
   const review = pendingReview(details);
@@ -116,7 +116,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
   });
 
   const respond = (data: Record<string, unknown>) =>
-    patch.mutate({ workspace, name: jobName, data });
+    job && patch.mutate({ workspace, job: jobName, attempt: job.attempt_id, data });
   const onInterview = (answers: InterviewAnswer[]) =>
     interview && respond({ interview_response: { round: interview.round, answers } });
   const onReview = (suite: SuiteRow[]) =>

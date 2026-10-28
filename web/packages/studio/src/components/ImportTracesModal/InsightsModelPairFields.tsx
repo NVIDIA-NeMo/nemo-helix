@@ -5,6 +5,8 @@ import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2'
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
+import { InsightsModelWarning } from '@studio/components/ImportTracesModal/InsightsModelWarning';
+import { isLightningModel } from '@studio/components/ImportTracesModal/modelGuidance';
 import type { FC } from 'react';
 
 export interface InsightsModelPairFieldsProps {
@@ -72,6 +74,7 @@ const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, st
           </Button>
         ) : null}
       </Flex>
+      {isLightningModel(value || storedRef || '') ? <InsightsModelWarning /> : null}
     </FormField>
   );
 };

@@ -236,6 +236,30 @@ async def test_discover_models_passes_configured_timeout(mock_client):
     )
 
 
+@pytest.mark.asyncio
+async def test_discover_models_keeps_the_serving_engine(mock_client):
+    mock_client.gateway_provider_client.get_provider_models = AsyncMock(
+        return_value={
+            "object": "list",
+            "data": [
+                {"id": "ws/base", "root": "ws/base", "parent": None, "owned_by": "sglang"},
+                {"id": "ws--lora", "root": "/scratch/loras/ws--lora", "parent": "ws/base", "owned_by": 7},
+            ],
+        }
+    )
+    reconciler = ModelProviderReconciler(
+        client=mock_client,
+        controller_config=ControllerConfig(),
+        entity_cache=ModelEntityCache(client=mock_client, emit_heartbeat=lambda: None),
+        emit_heartbeat=lambda: None,
+    )
+
+    result = await reconciler._discover_models(_make_discoverable_provider())
+
+    assert isinstance(result, DiscoverySuccess)
+    assert [m["owned_by"] for m in result.models] == ["sglang", None]
+
+
 @pytest.mark.parametrize(
     ("max_retries", "expect_get_call_kwargs"),
     [
@@ -343,7 +367,7 @@ async def test_get_available_models_from_provider_parses_json_string_response(re
     result = await reconciler._discover_models(model_provider)
 
     assert isinstance(result, DiscoverySuccess)
-    assert result.models == [{"id": "llama3:latest", "root": None, "parent": None}]
+    assert result.models == [{"id": "llama3:latest", "root": None, "parent": None, "owned_by": "library"}]
 
 
 @pytest.mark.asyncio
@@ -2969,6 +2993,33 @@ def test_handle_model_deployment_provider_uses_nim_when_no_model_entity_id(recon
     out = reconciler._generate_deployment_served_model_mappings(provider, "ws/p", result, ctx)
     assert len(out) == 2
     assert {m.model_entity_id for m in out} == {"ws/base", "ws/base&adapters/ws/adapter-x"}
+
+
+@pytest.mark.parametrize(
+    ("owned_by", "expected_served_name"),
+    [
+        # SGLang applies an adapter only for ``<base>:<adapter>``; the bare name gets the base model.
+        ("sglang", "ws/base:ws--adapter-x"),
+        ("vllm", "ws--adapter-x"),
+        (None, "ws--adapter-x"),
+    ],
+)
+def test_deployment_lora_served_name_follows_the_engine(reconciler, owned_by, expected_served_name):
+    config = MagicMock()
+    config.model_entity_id = "ws/base"
+    provider = MagicMock(workspace="ws", enabled_models=None)
+    result = DiscoverySuccess(
+        [
+            {"id": "ws/base", "root": "ws/base", "parent": None, "owned_by": owned_by},
+            {"id": "ws--adapter-x", "root": "/scratch/loras/ws--adapter-x", "parent": "ws/base", "owned_by": owned_by},
+        ]
+    )
+    ctx = ModelContext(
+        model_provider=provider, model_deployment=None, model_deployment_config=config, model_entity=None
+    )
+    out = reconciler._generate_deployment_served_model_mappings(provider, "ws/p", result, ctx)
+    by_entity_id = {m.model_entity_id: m.served_model_name for m in out}
+    assert by_entity_id == {"ws/base": "ws/base", "ws/base&adapters/ws/adapter-x": expected_served_name}
 
 
 def test_discovery_success_model_ids_property():

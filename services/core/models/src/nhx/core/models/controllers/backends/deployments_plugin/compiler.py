@@ -79,6 +79,9 @@ _LORA_MOUNT = "/scratch/loras"
 # scratch volume, outside the /scratch/loras subtree the adapters controller GCs.
 _LORA_SIDECAR_XDG_HOME = f"{_SCRATCH_MOUNT}/.local"
 _SCRATCH_VOLUME_SIZE = "1Gi"
+# SGLang's health check waits a second before it answers, so the 1s probe default
+# never sees the SGLang model-free NIM become ready.
+_READINESS_PROBE_TIMEOUT_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -375,7 +378,10 @@ def compile_model_deployment(
     if chat_template_init is not None:
         init_containers.append(chat_template_init)
     server_config_containers: list[Container]
-    readiness_probe = Probe(httpGet=HTTPGetAction(path=resolve_health_path(engine, resolved.view), port=8000))
+    readiness_probe = Probe(
+        httpGet=HTTPGetAction(path=resolve_health_path(engine, resolved.view), port=8000),
+        timeoutSeconds=_READINESS_PROBE_TIMEOUT_SECONDS,
+    )
     vllm_command = ["vllm", "serve"] if engine == ENGINE_VLLM else None
     if needs_scratch:
         scratch_volume = Volume(
