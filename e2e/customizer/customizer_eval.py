@@ -5,6 +5,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,26 +41,37 @@ def load_chat_jsonl(path: str | Path) -> list[dict[str, Any]]:
     return rows
 
 
-def provider_route_url(base_url: str, workspace: str, deployment_name: str) -> str:
-    return f"{base_url.rstrip('/')}/apis/inference-gateway/v2/workspaces/{workspace}/provider/{deployment_name}/-/v1"
+def openai_route_url(base_url: str, workspace: str) -> str:
+    """The gateway route users call: it routes on the entity ID in the request's ``model``."""
+    return f"{base_url.rstrip('/')}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1"
 
 
 def base_model_field(workspace: str, entity: str) -> str:
+    """A model entity's ID, which is also the name vLLM serves a full model under."""
     return f"{workspace}/{entity}"
 
 
+def adapter_model_id(workspace: str, base_entity: str, adapter: str) -> str:
+    """A LoRA adapter's entity ID; the gateway serves it through its base model's route."""
+    return f"{workspace}/{base_entity}&adapters/{workspace}/{adapter}"
+
+
 def lora_model_field(workspace: str, adapter: str) -> str:
+    """The name vLLM serves a LoRA adapter under, for requests on a deployment's provider route."""
     return f"{workspace}--{adapter}"
 
 
-def _build_target(base_url: str, workspace: str, deployment_name: str, model_field: str):
+def _build_target(base_url: str, workspace: str, model_id: str):
     from nhx_evals_sdk.enums import ModelFormat
     from nhx_evals_sdk.values.models import Model
 
+    # The evaluator builds its own client. On an auth-enabled cluster it sends the e2e
+    # access token, read from the environment variable that api_key_secret names.
     return Model(
-        url=provider_route_url(base_url, workspace, deployment_name),
-        name=model_field,
+        url=openai_route_url(base_url, workspace),
+        name=model_id,
         format=ModelFormat.OPEN_AI,
+        api_key_secret="NHX_ACCESS_TOKEN" if os.environ.get("NHX_ACCESS_TOKEN") else None,
     )
 
 
@@ -96,8 +108,7 @@ def score_rows(
     rows: Sequence[dict[str, Any]],
     base_url: str,
     workspace: str,
-    deployment_name: str,
-    model_field: str,
+    model_id: str,
     *,
     metric: MetricKind = "f1",
     max_tokens: int = 64,
@@ -110,7 +121,7 @@ def score_rows(
     for index, row in enumerate(rows):
         assert_chat_row(row, index=index)
 
-    target = _build_target(base_url, workspace, deployment_name, model_field)
+    target = _build_target(base_url, workspace, model_id)
     config = _build_config(max_tokens, parallelism, limit_samples, enable_thinking)
     result = Evaluator().run_sync(
         metrics=[_metric(metric)],
@@ -122,18 +133,16 @@ def score_rows(
     score = result.aggregate_scores.scores[0]
     if score.mean is None:
         raise RuntimeError(
-            f"eval {model_field}: metric {metric} returned no mean score (n={len(rows)}) via "
-            f"{deployment_name}. All rows likely failed inference — treating as an eval-pipeline "
-            "failure rather than a 0.0 score."
+            f"eval {model_id}: metric {metric} returned no mean score (n={len(rows)}). All rows "
+            "likely failed inference — treating as an eval-pipeline failure rather than a 0.0 score."
         )
     mean = score.mean
     logger.info(
-        "eval %s: metric=%s mean=%.4f (n=%d) via %s",
-        model_field,
+        "eval %s: metric=%s mean=%.4f (n=%d)",
+        model_id,
         metric,
         mean,
         len(rows),
-        deployment_name,
     )
     return round(float(mean), 4)
 

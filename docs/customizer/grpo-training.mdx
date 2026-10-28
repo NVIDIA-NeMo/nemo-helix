@@ -396,7 +396,7 @@ Omitting the `lora` block while setting `finetuning_type: "lora"` is fine — de
 
 ### Using the adapter
 
-The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`); the model-entity path always resolves to the base model.
+The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Send inference to the gateway's OpenAI-compatible route with the adapter's entity ID, `model: default/<base model>&adapters/default/<adapter>`; the gateway routes it through the base model's deployment.
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 

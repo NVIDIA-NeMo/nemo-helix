@@ -239,6 +239,19 @@ Set `jobs.executors.docker.launcher_tool_path` in `~/.nemo/config.yaml` to the *
 | Job stuck in `active` after training step completes | Upload / model-entity steps still running | Keep polling (`SKILL.md` § **Workflow** step 6) |
 
 
+## Runtime failures
+
+For a job that starts but fails or misbehaves while training. The poll script's `ALERT:` and `WARN:` lines point here; for a failed job, read `nemo jobs get-logs <job>` for the first error before acting.
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `CUDA out of memory` in the logs, or a training step exits with code 137 | Batch, sequence length or model too large for the GPU | Halve `micro_batch_size` (raise accumulation to keep the global batch), then turn on activation checkpointing (`activation_checkpointing: true`; unsloth `use_gradient_checkpointing`), then shorten `max_seq_length`. GRPO: also lower `num_generations_per_prompt`, keeping the batch divisible. Sizing tables: `batch-sizing.md` |
+| NCCL timeout or a collective-operation watchdog error | One rank stalled or died, so the others waited; usually that rank ran out of memory first | Find the first error across all ranks' logs and fix that. If none, retry on one node to rule out the interconnect |
+| `ALERT: train_loss is nan`, or loss that spikes then turns NaN | Learning rate too high, fp16 overflow, or broken rows | Cancel. Lower the learning rate 2–5×, train in `bf16`, and check the data for empty labels |
+| Submit or compile rejects the batch: `global_batch_size (…) must be divisible by …`, `batch_size (…) must be divisible by micro_batch_size (…) * …`, or `Total GPUs (…) must be divisible by …` | The batch or parallel layout does not split evenly over the GPUs | Fix the numbers per the constraint in `batch-sizing.md`; for GRPO, `hyperparameters-rl.md` § **GRPO-specific** |
+| `ALERT: every prompt group got the same reward …` (GRPO) | Every rollout in a group scores the same: the task is too hard or too easy for the model, the reward is broken, or sampling is near-greedy | Cancel. Check the environment's reward on a few rows by hand, keep `temperature` near 1.0, and adjust the data's difficulty |
+| `WARN: train_loss is …, below 0.2` or `WARN: val_loss rose …` | The model is memorizing a small dataset | Fewer epochs, a lower learning rate or more data. The base-vs-tuned score on the test split decides whether it hurt |
+
 ## Older jobs missing from a backend's job list
 
 `GET /apis/customization/v2/workspaces/{workspace}/automodel/jobs` (and `/unsloth/jobs`, `/rl/jobs`) returns jobs whose spec stores `backend`. Jobs submitted before that field existed appear only in `nemo jobs list` (`GET /apis/jobs/v2/workspaces/{workspace}/jobs`).

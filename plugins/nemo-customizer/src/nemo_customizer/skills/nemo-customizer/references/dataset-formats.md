@@ -66,18 +66,12 @@ Optional fields on the unsloth `dataset` block:
 
 EMBEDDING and CUSTOM (automodel-only schemas) are not supported by unsloth today.
 
-## Post-training evaluation
+## Evaluation data
 
-CHAT SFT eval rows must use the **same CHAT `messages` shape** as training. Do not flatten to `prompt`/`expected` for the evaluator.
-
-| Training JSONL | Eval dataset | Eval `prompt_template` | Metric reference |
-|----------------|--------------|------------------------|------------------|
-| `messages` (single- or multi-turn) | Same fileset split (`validation.jsonl`) | `messages[:-1]` — exclude final assistant label — see `post-training-eval.md` | `{{ item.messages[-1].content }}` |
-| EMBEDDING (`query` / `pos_doc` / `neg_doc`) | Frozen Stage 1 `eval_beir` fileset (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`) | N/A — `nemo evals retrieve-eval` | nDCG@k / Recall@k in `eval_results.json` |
-
-LoRA inference and eval use the **provider** gateway on the **base** entity (`/provider/<name>/-/v1`, `model: default--<adapter>`). Base model uses the model-entity path. Full SFT / merged checkpoints use the **output** model entity's model-entity URL — deploy first. See `post-training-eval.md` and the **Using the adapter** / **Using the fine-tuned model** sections in `reporting.md`.
-
-Shared helpers and compare CLI: `references/eval_helpers.py`. Full workflow: `references/post-training-eval.md`.
+| Training JSONL | Eval rows | How it is scored |
+|----------------|-----------|------------------|
+| `messages` (single- or multi-turn) | A frozen `test.jsonl` in the same shape, in its own fileset | `post-training-eval.md` |
+| EMBEDDING (`query` / `pos_doc` / `neg_doc`) | Frozen Stage 1 `eval_beir` fileset (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`) | `nemo evals retrieve-eval`: nDCG@k / Recall@k in `eval_results.json` |
 
 ## NeMo-RL (DPO) — preference data
 
