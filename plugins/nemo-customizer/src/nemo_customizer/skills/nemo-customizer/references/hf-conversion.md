@@ -89,21 +89,24 @@ Automodel does not convert the Hugging Face dataset. Upload a directory that is 
 uv run --no-project --with datasets --with pillow \
   plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
   --output /tmp/cord-v2
-nemo files upload /tmp/cord-v2/train <dataset-fileset> --workspace default
+nemo files filesets create cord-v2 --workspace default --purpose dataset
+nemo files upload /tmp/cord-v2/train cord-v2 --workspace default
+nemo files filesets create cord-v2-eval --workspace default --purpose dataset
+nemo files upload /tmp/cord-v2/eval cord-v2-eval --workspace default
 ```
 
-`nemo customization automodel --upload-dataset /tmp/cord-v2/train` uploads that same directory. The fileset root is `train.jsonl` plus `images/`.
+`train/` holds `train.jsonl` plus `images/`. `eval/` holds `validation.jsonl` and is the frozen eval fileset. Point training validation and Evaluator at `cord-v2-eval`. `nemo customization automodel --upload-dataset` takes one directory, so it does not create the eval fileset.
 
 Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit.
 
 Unsloth stays on string `content` or pre-rendered `text`. Do not give it image parts.
 
 ```python
-def example_image(ex):
+def example_images(ex):
     image = ex.get("image")
-    if image is None and ex.get("images"):
-        image = ex["images"][0]
-    return image
+    if image is not None:
+        return [image]
+    return list(ex.get("images") or [])
 
 def user_text(ex):
     return ex["question"]  # same text to_chat would put on the user turn
@@ -111,16 +114,12 @@ def user_text(ex):
 def assistant_text(ex):
     return ex["answer"]  # one text part
 
-def to_multimodal_chat(image_url: str, user: str, assistant: str):
+def to_multimodal_chat(image_urls, user, assistant):
+    parts = [{"type": "image_url", "image_url": {"url": url}} for url in image_urls]
+    parts.append({"type": "text", "text": user})
     return {
         "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                    {"type": "text", "text": user},
-                ],
-            },
+            {"role": "user", "content": parts},
             {"role": "assistant", "content": assistant},
         ]
     }
@@ -133,20 +132,23 @@ for split in ("train", "validation"):
         continue
     with (out / f"{split}.jsonl").open("w") as f:
         for index, ex in enumerate(ds[split]):
-            image = example_image(ex)
-            if image is None:
+            found = example_images(ex)
+            if not found:
                 f.write(json.dumps(to_chat(ex)) + "\n")
                 continue
-            relative = f"images/{split}_{index}.png"
-            image.save(images / f"{split}_{index}.png")
+            urls = []
+            for image_index, image in enumerate(found):
+                relative = f"images/{split}_{index}_{image_index}.png"
+                image.save(images / f"{split}_{index}_{image_index}.png")
+                urls.append(relative)
             # user / assistant come from the dataset, the same way to_chat builds them.
-            row = to_multimodal_chat(relative, user_text(ex), assistant_text(ex))
+            row = to_multimodal_chat(urls, user_text(ex), assistant_text(ex))
             f.write(json.dumps(row) + "\n")
 ```
 
-`image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. Upload the directory, not only the JSONL, so `images/` lands beside `train.jsonl` in the fileset.
+Each `image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. A row with several images gets one `image_url` part per image, then the text part. Upload the directory, not only the JSONL, so `images/` lands beside `train.jsonl` in the fileset.
 
-A Gym row that needs an image uses this same part list on `responses_create_params.input[].content`. A string `content` stays one text part. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
+A Gym row that needs an image uses Responses API parts on `responses_create_params.input[].content`: `{type: input_image, image_url: "<string>"}` followed by `{type: input_text, text}`. A string `content` stays one text part. The automodel fileset stays `{type: image_url, image_url: {url}}`. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
 
 Then upload (see main skill). Validate with `nemo files list <DATASET_NAME> --workspace default`.
 

@@ -82,7 +82,7 @@ with open("training.jsonl", "w", encoding="utf-8") as f:
 
 Multi-turn context goes in `input` as additional messages, in order — the same `role`/`content` dicts, ending with the turn the model must respond to.
 
-An image prompt uses that same `content` field. Put the automodel MULTIMODAL part list there: an `image_url` part followed by a text part. A string `content` stays one text part.
+An image prompt uses that same `content` field. Put a Responses API part list there: an `input_image` part with a string `image_url`, followed by an `input_text` part. A string `content` stays one text part.
 
 ## Find out which fields YOUR environment scores — do this first
 

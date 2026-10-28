@@ -25,6 +25,8 @@ Automodel detects schema from the **first JSONL line**.
 
 **Conversion preference:** CHAT if the model has a chat template (`hf-conversion.md` § **Chat-template check**, or model `spec.is_chat` / `spec.chat_template`) → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it. String `content` stays CHAT. A row with an image saves that file next to the JSONL and sets the user message to an `image_url` part followed by a text part; that part list is MULTIMODAL (`hf-conversion.md` § Image rows). `scripts/import_cord.py` and `scripts/import_finance.py` are examples of that conversion (CORD-v2, and finance OCR, reasoning, and code). Upload the directory that is already this shape; Automodel does not convert the Hugging Face dataset.
 
+MULTIMODAL rows are the fileset to upload. Automodel detects a `messages` row as CHAT, and `ChatDataset` requires string `content`, so an image row fails validation until the schema in #3264 and the `image_url` mapping on AALGO-1099.
+
 ```json
 {"messages": [
   {"role": "user", "content": [

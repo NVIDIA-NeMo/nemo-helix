@@ -4441,6 +4441,7 @@ version = "0.0.0"
 source = { editable = "plugins/nemo-customizer" }
 dependencies = [
     { name = "nemo-helix-plugin" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "typer" },
 ]
@@ -4456,6 +4457,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "typer", specifier = ">=0.12.5" },
 ]
