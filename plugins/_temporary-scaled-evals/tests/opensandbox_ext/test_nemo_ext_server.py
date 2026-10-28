@@ -34,11 +34,14 @@ from kubernetes.client import (
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_POD_ANNOTATION,
+    EGRESS_API_PORT_ANNOTATION,
     EXTENSION_KEY,
     POD_ANNOTATION,
 )
 from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from opensandbox_server.extensions import apply_extensions_to_annotations
+from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
+from opensandbox_server.services.endpoint_auth import build_egress_auth_headers
 from opensandbox_server.services.k8s import provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
@@ -92,8 +95,17 @@ def provider(k8s: FakeK8sClient, monkeypatch: pytest.MonkeyPatch) -> ext.NemoCom
     return ext.NemoComposeProvider(k8s)
 
 
-def _create(provider: BatchSandboxProvider, annotations: dict[str, str] | None, **kwargs: Any) -> None:
-    """The stock create path for the test sandbox, with an egress policy."""
+# The egress policy every test sandbox gets unless a test passes its own.
+EGRESS_POLICY = NetworkPolicy(defaultAction="deny", egress=[NetworkRule(action="allow", target="pypi.org")])
+
+
+def _create(
+    provider: BatchSandboxProvider,
+    annotations: dict[str, str] | None,
+    network_policy: NetworkPolicy | None = EGRESS_POLICY,
+    **kwargs: Any,
+) -> None:
+    """The stock create path for the test sandbox, with an egress policy unless ``network_policy`` is None."""
     provider.create_workload(
         sandbox_id=SANDBOX_ID,
         namespace="nemo",
@@ -104,7 +116,7 @@ def _create(provider: BatchSandboxProvider, annotations: dict[str, str] | None, 
         labels={"opensandbox.io/id": SANDBOX_ID},
         expires_at=None,
         execd_image="registry.example.com/execd:1",
-        network_policy=NetworkPolicy(defaultAction="deny", egress=[NetworkRule(action="allow", target="pypi.org")]),
+        network_policy=network_policy,
         egress_image="registry.example.com/egress:1",
         annotations=annotations,
         **kwargs,
@@ -137,8 +149,8 @@ def test_requests_without_services_are_untouched(provider: ext.NemoComposeProvid
 def test_invalid_spec_is_a_value_error_and_creates_nothing(
     provider: ext.NemoComposeProvider, k8s: FakeK8sClient
 ) -> None:
-    with pytest.raises(ValueError, match=r"ports \[18080\] are used"):
-        _create(provider, {POD_ANNOTATION: SPEC.replace("5432", "18080")})
+    with pytest.raises(ValueError, match=r"ports \[44772\] are used"):
+        _create(provider, {POD_ANNOTATION: SPEC.replace("5432", "44772")})
     assert k8s.created == []
 
 
@@ -245,7 +257,7 @@ def test_health(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     assert api.get("/v1/nemo-ext/health").json() == {
         "status": "ok",
         "extension": "nemo-compose-services",
-        "features": ["compose-services", "agent-bundle", "compose-main"],
+        "features": ["compose-services", "agent-bundle", "compose-main", "egress-port"],
     }
     monkeypatch.setattr(ext, "_provider", None)
     assert api.get("/v1/nemo-ext/health").status_code == 503
@@ -489,3 +501,55 @@ def test_loader_stops_the_server_when_the_extension_cant_load(tmp_path: Path) ->
     assert "served" not in result.stdout
     assert "nemo-ext: not starting without the compose services extension" in result.stderr
     assert "--reload" in result.stderr
+
+
+# A service on 18080, where the egress policy API listens, as the spec builder writes it.
+SPEC_ON_18080 = SPEC.replace('"ports":[5432]', '"ports":[18080]').replace('"main":', '"egress_api_port":18081,"main":')
+
+
+def test_a_service_on_18080_moves_the_egress_api(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+    _create(provider, {POD_ANNOTATION: SPEC_ON_18080}, egress_auth_token="egress-token")
+
+    manifest = k8s.created[0]
+    egress = next(c for c in manifest["spec"]["template"]["spec"]["initContainers"] if c["name"] == "egress")
+    assert {"name": "OPENSANDBOX_EGRESS_HTTP_ADDR", "value": ":18081"} in egress["env"]
+    assert [p["containerPort"] for p in egress["ports"]] == [18081]
+    # The server's own probe would otherwise reach the service and never see the sidecar ready.
+    assert egress["readinessProbe"]["httpGet"]["port"] == 18081
+    assert egress["startupProbe"]["httpGet"]["port"] == 18081
+    assert manifest["metadata"]["annotations"][EGRESS_API_PORT_ANNOTATION] == "18081"
+
+
+def test_a_stock_sandbox_keeps_the_egress_api_on_18080(provider: ext.NemoComposeProvider, k8s: FakeK8sClient) -> None:
+    _create(provider, {POD_ANNOTATION: SPEC}, egress_auth_token="egress-token")
+
+    manifest = k8s.created[0]
+    egress = next(c for c in manifest["spec"]["template"]["spec"]["initContainers"] if c["name"] == "egress")
+    assert all(e["name"] != "OPENSANDBOX_EGRESS_HTTP_ADDR" for e in egress["env"])
+    assert egress["readinessProbe"]["httpGet"]["port"] == 18080
+    assert EGRESS_API_PORT_ANNOTATION not in manifest["metadata"].get("annotations", {})
+
+
+@pytest.mark.parametrize(("port", "authorized"), [(18081, True), (18080, False), (5432, False)])
+def test_the_egress_token_goes_only_to_the_moved_api(
+    provider: ext.NemoComposeProvider, port: int, authorized: bool
+) -> None:
+    workload = _workload({POD_ANNOTATION: SPEC_ON_18080}, "Running", "10.0.0.5")
+    workload["metadata"]["annotations"].update(
+        {SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token", EGRESS_API_PORT_ANNOTATION: "18081"}
+    )
+
+    endpoint = provider.get_endpoint_info(workload, port, SANDBOX_ID)
+
+    assert endpoint is not None
+    token_headers = build_egress_auth_headers("egress-token")
+    assert (token_headers.items() <= (endpoint.headers or {}).items()) is authorized
+
+
+def test_a_sandbox_without_an_egress_sidecar_records_no_moved_port(
+    provider: ext.NemoComposeProvider, k8s: FakeK8sClient
+) -> None:
+    # Without a network policy the server adds no egress sidecar, so there's no API to move.
+    _create(provider, {POD_ANNOTATION: SPEC_ON_18080}, network_policy=None)
+
+    assert EGRESS_API_PORT_ANNOTATION not in k8s.created[0]["metadata"].get("annotations", {})

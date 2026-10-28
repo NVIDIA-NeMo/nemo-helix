@@ -34,6 +34,9 @@ from nhx_sandbox.harbor_opensandbox_services import (
 
 SANDBOX_CONTAINER = "sandbox"
 EGRESS_CONTAINER = "egress"
+# The env var the egress sidecar reads its policy API address from. OpenSandbox's server doesn't set it, so the
+# sidecar falls back to :18080.
+EGRESS_HTTP_ADDR_ENV = "OPENSANDBOX_EGRESS_HTTP_ADDR"
 # The volume the bundle is installed into when the template doesn't already mount /installed-agent.
 INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
 
@@ -202,6 +205,35 @@ def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
     if term.exit_code != 0:
         return f"exited with code {term.exit_code} ({term.reason})", False
     return None, True
+
+
+def move_egress_api(pod_spec: dict[str, Any], port: int) -> bool:
+    """Move the egress sidecar's policy API to ``port``. Returns False if the pod has no egress sidecar.
+
+    A sandbox without a network policy has no sidecar, so there's nothing to move. Otherwise the listen address, the
+    container port and the health probes all have to change together: a probe left on 18080 would reach the compose
+    service there instead, and the sidecar would never report ready.
+    """
+    # The sidecar starts out as a regular container, and _egress_first may already have made it an init container.
+    all_containers = [*pod_spec["containers"], *pod_spec.get("initContainers", [])]
+    egress = next((container for container in all_containers if container.get("name") == EGRESS_CONTAINER), None)
+    if egress is None:
+        return False
+
+    # Tell the sidecar where to listen.
+    env = [variable for variable in egress.get("env") or [] if variable.get("name") != EGRESS_HTTP_ADDR_ENV]
+    env.append({"name": EGRESS_HTTP_ADDR_ENV, "value": f":{port}"})
+    egress["env"] = env
+
+    # Point the declared port and every HTTP probe at the new port.
+    for container_port in egress.get("ports") or []:
+        container_port["containerPort"] = port
+    for probe_name in ("readinessProbe", "startupProbe", "livenessProbe"):
+        http_get = (egress.get(probe_name) or {}).get("httpGet")
+        if http_get is not None:
+            http_get["port"] = port
+
+    return True
 
 
 def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull_policy: str) -> None:
