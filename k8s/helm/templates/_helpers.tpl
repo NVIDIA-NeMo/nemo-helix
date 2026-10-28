@@ -179,6 +179,18 @@ Effective platform API URL for pods and managed workloads.
 {{- end -}}
 
 {{/*
+Client-facing platform origin: platform.advertised_base_url when set, otherwise
+platform.base_url. Pods whose NHX_BASE_URL differs (the API pod under embedded
+PDP) must advertise this value so every pod derives the same public URLs and
+workload token issuer.
+*/}}
+{{- define "nemo-helix.advertisedBaseUrl" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $platform := default (dict) $config.platform -}}
+{{- default (get $platform "base_url") (get $platform "advertised_base_url") | trimSuffix "/" -}}
+{{- end -}}
+
+{{/*
 Loopback API URL for the API pod itself when embedded auth must call back into the
 local process instead of the cluster Service.
 */}}
