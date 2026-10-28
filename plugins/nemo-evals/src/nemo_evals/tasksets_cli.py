@@ -57,8 +57,8 @@ def add_tasksets_commands(app: typer.Typer, client_factory: Callable[[], NemoCli
         harbor_git: str | None = typer.Option(
             None,
             "--harbor-git",
-            help="Public git repo of Harbor tasks, pinned to a tag or commit: <url>@<ref> reads tasks/ at that ref. "
-            "For another directory, use a GitHub tree URL: https://github.com/<org>/<repo>/tree/<ref>/<dir>.",
+            help="Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. "
+            "For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.",
         ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         list_tasks: bool = typer.Option(False, "--list-tasks", help="Print the selectable tasks and exit."),
