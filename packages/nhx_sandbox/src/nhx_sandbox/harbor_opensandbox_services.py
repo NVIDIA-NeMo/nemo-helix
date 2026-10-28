@@ -230,8 +230,9 @@ class ComposeServices(_Strict):
             if mount.name not in self.volumes:
                 raise ValueError(f"{owner}: volume {mount.name!r} is not declared in volumes")
 
-        # Kubernetes requires a container's mount paths to be unique; separate containers may share one.
-        seen: set[tuple[str, str]] = set()
+        # Kubernetes requires a container's mount paths to be unique; separate containers may share one. A service
+        # with `shm_size` already has a mount at /dev/shm, which the server adds for it.
+        seen = {(s.name, "/dev/shm") for s in self.services if s.shm_size is not None}
         for owner, mount in mounts:
             if (owner, mount.mount_path) in seen:
                 raise ValueError(f"{owner}: mount_path {mount.mount_path!r} is used by more than one volume mount")

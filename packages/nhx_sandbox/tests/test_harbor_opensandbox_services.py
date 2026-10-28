@@ -89,6 +89,15 @@ def test_rejects_duplicate_mount_paths_within_a_container() -> None:
         parse_compose_services(_spec(service, volumes=["a", "b"]))
     with pytest.raises(ValidationError, match="main: mount_path '/data' is used by more than one"):
         parse_compose_services(_spec(volumes=["a", "b"], main={"volume_mounts": _mounts("a", "b")}))
+    # The server mounts /dev/shm for a service with `shm_size`, so a volume there would be a second mount.
+    service = {
+        "name": "db",
+        "image": "docker.io/x:1",
+        "shm_size": "1Gi",
+        "volume_mounts": _mounts("a", path="/dev/shm"),
+    }
+    with pytest.raises(ValidationError, match="db: mount_path '/dev/shm' is used by more than one"):
+        parse_compose_services(_spec(service, volumes=["a"]))
 
 
 def test_allows_the_same_mount_path_in_different_containers() -> None:
