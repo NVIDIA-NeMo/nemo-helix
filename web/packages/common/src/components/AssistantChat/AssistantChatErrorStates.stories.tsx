@@ -24,7 +24,7 @@ const LOREM_IPSUM =
 const CUSTOM = 'custom';
 
 const modelError = (providerStatus: number, providerDetail: string) =>
-  `502 RuntimeError: internal error: APIStatusError: Error code: ${providerStatus} - ${providerDetail}`;
+  `RuntimeError: internal error: APIStatusError: Error code: ${providerStatus} - ${providerDetail}`;
 
 const SCENARIOS = {
   'model-retired': {
@@ -66,11 +66,11 @@ const SCENARIOS = {
   'runtime-start-failed': {
     label: '502: agent runtime failed to start',
     error:
-      '502 Fabric runtime startup failed: adapter nvidia.fabric.example does not support telemetry.providers value relay',
+      'Fabric runtime startup failed: adapter nvidia.fabric.example does not support telemetry.providers value relay',
   },
   'agent-unresponsive': {
     label: '502: agent did not respond',
-    error: '502 Could not connect to agent: ',
+    error: 'Could not connect to agent: ',
   },
   'no-body': {
     label: '502: no response body',
@@ -78,7 +78,7 @@ const SCENARIOS = {
   },
   unrecognised: {
     label: '502: unrecognised error',
-    error: '502 Something no rule knows about.',
+    error: 'Something no rule knows about.',
   },
 } as const;
 
@@ -108,7 +108,7 @@ const meta = {
   ],
   args: {
     scenario: 'model-retired',
-    customError: '502 RuntimeError: internal error: APIStatusError: Error code: 410 - ...',
+    customError: 'RuntimeError: internal error: APIStatusError: Error code: 410 - ...',
   },
   argTypes: {
     scenario: {
