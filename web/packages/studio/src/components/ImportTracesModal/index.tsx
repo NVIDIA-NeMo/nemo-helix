@@ -40,7 +40,6 @@ import {
   type SelectedTraceFile,
 } from '@studio/components/ImportTracesModal/ingestTraceFiles';
 import { InsightsModelPairFields } from '@studio/components/ImportTracesModal/InsightsModelPairFields';
-import { InsightsModelWarning } from '@studio/components/ImportTracesModal/InsightsModelWarning';
 import { isLightningModel } from '@studio/components/ImportTracesModal/modelGuidance';
 import { SelectedTraceFileTags } from '@studio/components/ImportTracesModal/SelectedTraceFileTags';
 import type { ImportMethod, ImportTraceResult } from '@studio/components/ImportTracesModal/types';
@@ -364,7 +363,6 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                       enabled with <code>nemo compass analysis enable</code>.
                     </Text>
                   </Stack>
-                  {showModelWarning && <InsightsModelWarning />}
                   {runInsights && (
                     <AccordionRoot
                       collapsible
@@ -378,7 +376,6 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                         <AccordionContent>
                           <Stack gap="density-xs" className="pt-density-md">
                             <InsightsModelPairFields
-                              hideModelWarnings
                               workspace={workspace}
                               agent={agent}
                               unresolved={configFailed}

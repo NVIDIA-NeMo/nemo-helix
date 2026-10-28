@@ -169,7 +169,7 @@ describe('ImportTracesModal', () => {
   });
 
   it.each(['default_model', 'fast_model'] as const)(
-    'opens options for %s Lightning and keeps its warning visible when collapsed',
+    'opens options for %s Lightning and shows its warning with the model fields',
     async (role) => {
       server.use(
         http.get('*/analysis-configs/:agent', () =>
@@ -189,7 +189,7 @@ describe('ImportTracesModal', () => {
       await waitFor(() => expect(screen.getByText('Default model')).toBeVisible());
       await user.click(screen.getByText('Insights options'));
       await waitFor(() => expect(screen.queryByText('Default model')).not.toBeVisible());
-      expect(screen.getByText(/known tool-calling failures/)).toBeVisible();
+      expect(screen.queryByText(/known tool-calling failures/)).not.toBeVisible();
       expect(checkbox).toBeVisible();
       await user.click(checkbox);
       expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();

@@ -12,8 +12,6 @@ import type { FC } from 'react';
 export interface InsightsModelPairFieldsProps {
   /** Workspace whose model catalogue the dropdowns search. */
   workspace: string;
-  /** Hide inline warnings when the caller displays a warning above the fields. */
-  hideModelWarnings?: boolean;
   /** The agent whose stored config prefilled the pair, when exactly one is known. */
   agent?: string;
   /** True once the stored config lookup settled without producing a config. */
@@ -44,7 +42,6 @@ interface ModelFieldProps {
   value: string;
   onChange: (value: string) => void;
   storedRef?: string | null;
-  hideWarning?: boolean;
 }
 
 const fieldError = (label: string, value: string, storedRef?: string | null) => {
@@ -54,14 +51,7 @@ const fieldError = (label: string, value: string, storedRef?: string | null) => 
     : `The analysis config has no stored ${label.toLowerCase()}. Pick one for this run.`;
 };
 
-const ModelField: FC<ModelFieldProps> = ({
-  workspace,
-  label,
-  value,
-  onChange,
-  storedRef,
-  hideWarning,
-}) => {
+const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
   const clearable = storedRef !== undefined;
   const error = fieldError(label, value, storedRef);
   return (
@@ -84,7 +74,7 @@ const ModelField: FC<ModelFieldProps> = ({
           </Button>
         ) : null}
       </Flex>
-      {!hideWarning && isLightningModel(value || storedRef || '') ? <InsightsModelWarning /> : null}
+      {isLightningModel(value || storedRef || '') ? <InsightsModelWarning /> : null}
     </FormField>
   );
 };
@@ -102,7 +92,6 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   onDefaultModelChange,
   onFastModelChange,
   stored,
-  hideModelWarnings,
 }) => (
   <Stack gap="density-md">
     <Text className="text-secondary" kind="body/regular/xs">
@@ -117,7 +106,6 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
 
     <ModelField
       workspace={workspace}
-      hideWarning={hideModelWarnings}
       label="Default model"
       value={defaultModel}
       onChange={onDefaultModelChange}
@@ -125,7 +113,6 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
     />
     <ModelField
       workspace={workspace}
-      hideWarning={hideModelWarnings}
       label="Fast model"
       value={fastModel}
       onChange={onFastModelChange}
