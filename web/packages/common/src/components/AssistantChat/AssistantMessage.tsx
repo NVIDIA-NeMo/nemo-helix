@@ -15,6 +15,7 @@ import {
   MESSAGE_ACTIONS_CLASS,
 } from '@nemo/common/src/components/AssistantChat/messageActions';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
+import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { Refresh } from '@nemo/icons/icons';
 import { Skeleton, Tooltip } from '@nvidia/foundations-react-core';
 
@@ -39,10 +40,7 @@ export const AssistantMessage = ({
     state.message.parts.some((part) => part.type !== 'text' || part.text.trim().length > 0)
   );
   const completed = useAuiState((state) => state.message.status?.type === 'complete');
-  const failed = useAuiState(
-    (state) =>
-      state.message.status?.type === 'incomplete' && state.message.status.reason === 'error'
-  );
+  const failed = useMessageError() !== undefined;
   const messageContent = (
     <AssistantChatMessageContent
       contentSurfaceClassName={`${ASSISTANT_MESSAGE_SURFACE_CLASS} ${failed ? ASSISTANT_ERROR_BAR_CLASS : ASSISTANT_MESSAGE_BAR_CLASS}`}

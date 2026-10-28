@@ -849,4 +849,22 @@ describe('AssistantChat', () => {
     },
     interactionTimeoutMs
   );
+
+  it(
+    'copies the raw error, not the explanation, from a failed reply',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      const raw = 'RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited';
+      mocks.createChatCompletion.mockRejectedValueOnce(new Error(raw));
+
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      await user.click(await screen.findByRole('button', { name: 'Copy error' }));
+
+      await expect(navigator.clipboard.readText()).resolves.toBe(raw);
+    },
+    interactionTimeoutMs
+  );
 });

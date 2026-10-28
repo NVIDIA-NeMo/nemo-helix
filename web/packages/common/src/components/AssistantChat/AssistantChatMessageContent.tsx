@@ -1,22 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MessagePrimitive, useAuiState } from '@assistant-ui/react';
+import { MessagePrimitive } from '@assistant-ui/react';
 import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
+import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
 import { Banner } from '@nvidia/foundations-react-core';
 
 // The message body above carries the human-readable explanation; the banner shows the raw error
 // (status and provider detail) for anyone who needs to look closer.
 const ChatErrorBanner = () => {
-  const error = useAuiState((s) => {
-    const status = s.message.status;
-    return status?.type === 'incomplete' && status.reason === 'error'
-      ? String(status.error ?? '')
-      : '';
-  });
+  const error = useMessageError();
 
   return (
     <Banner kind="inline" status="error" className="mt-density-sm">
