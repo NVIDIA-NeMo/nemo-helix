@@ -66,6 +66,9 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 "agents.execute" = "nemo_agents_plugin.jobs.execute:ExecuteAgentJob"
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
 
+[project.entry-points."nemo.agents.post_run_actions"]
+"agents.noop" = "nemo_agents_plugin.jobs.post_run_actions:NoopPostRunAction"
+
 [project.entry-points."nemo.controllers"]
 "agents-deployment" = "nemo_agents_plugin.runner.controller:AgentDeploymentController"
 

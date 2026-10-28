@@ -165,7 +165,7 @@ resubmitted.
 
 ### 4. Download the report
 
-The `analysis-report` result, saved by the Compass execute extension, is the
+The `analysis-report` result, saved by the Compass post-run action, is the
 durable record of what the run did:
 
 ```bash

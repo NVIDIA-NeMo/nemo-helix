@@ -6235,6 +6235,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `environment-specs`: Manage agent environment specs.
 * `environments`: Manage agent environments.
 * `compute-specs`: Manage agent compute specs.
+* `post-run-actions`: Discover the post-run actions an execute-agent job can...
 
 *Deployed agent interaction:*
 
@@ -7135,6 +7136,46 @@ nemo agents compute-specs delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
+#### nemo agents post-run-actions
+
+Discover the post-run actions an execute-agent job can run after the agent.
+
+**Usage:**
+
+```shell
+nemo agents post-run-actions [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list`: List the post-run actions installed on the platform.
+
+##### nemo agents post-run-actions list
+
+List the post-run actions installed on the platform.
+
+Set one on `nemo agents execute` with `--post-run-action.kind`.
+
+**Usage:**
+
+```shell
+nemo agents post-run-actions list [OPTIONS]
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
 #### nemo agents chat
 
 Chat interactively with a new or existing deployed-agent session.
@@ -7339,7 +7380,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 * `--timeout-seconds <FLOAT>`: Maximum time to wait for Fabric to return an execution result.
 * `--auto-telemetry`: Let the server fill in the agent's telemetry export -- an Intake destination for a config that asks for one and does not say where. False submits the agent config as written, which still exports if the config says to; an agent config is the place to say a run should not be traced.
 * `--image`: Container image to execute the agent in. Mirrors CreateDeploymentRequest.image. Typically the output of `nemo agents package`, which contains both the agent's Fabric adapter and the execute task module. Empty falls back to agents.jobs.default_image, then to the jobs substrate's chain (the execution profile's default_task_image, then the platform CPU tasks image).
-* `--extension.kind`: Trusted extension kind registered by an installed NeMo plugin.
+* `--post-run-action.kind`: Post-run action kind registered by an installed NeMo plugin. List installed kinds with `nemo agents post-run-actions list`.
 
 **Spec Source:**
 
@@ -7355,7 +7396,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the ExecuteAgentJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `agent (other union forms)`, `context`, `environment (other union forms)`, `workdir.artifact_mounts`, `extension.config`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `agent (other union forms)`, `context`, `environment (other union forms)`, `workdir.artifact_mounts`, `post_run_action.config`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

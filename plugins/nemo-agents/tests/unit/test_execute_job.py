@@ -40,10 +40,10 @@ from nemo_agents_plugin.jobs.execute import (
     INPUT_WORKDIR_RESULT_NAME,
     OUTPUT_ARTIFACTS_RESULT_NAME,
     OUTPUT_WORKDIR_RESULT_NAME,
-    ExecuteAgentExtensionConfig,
     ExecuteAgentJob,
     ExecuteAgentJobConfig,
     ExecuteAgentStepConfig,
+    PostRunActionConfig,
     ResolvedAgentConfig,
     _configure_intake_telemetry,
     _log_agent_stderr,
@@ -406,17 +406,17 @@ async def test_to_spec_validates_and_canonicalizes_base_workdir() -> None:
 
 
 @pytest.mark.asyncio
-async def test_to_spec_rejects_a_bad_extension_config_at_create_time() -> None:
-    """The noop extension takes no config, so this is a create-time 422, not a mid-job failure."""
+async def test_to_spec_rejects_a_bad_post_run_action_config_at_create_time() -> None:
+    """The noop action takes no config, so this is a create-time 422, not a mid-job failure."""
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent()
 
-    with pytest.raises(ValueError, match="noop"):
+    with pytest.raises(ValueError, match="agents.noop"):
         await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(
                 agent="calc",
                 input="hello",
-                extension=ExecuteAgentExtensionConfig(kind="noop", config={"agent": "research-agent"}),
+                post_run_action=PostRunActionConfig(kind="agents.noop", config={"agent": "research-agent"}),
             ),
             workspace="default",
             entity_client=entity_client,
@@ -426,18 +426,18 @@ async def test_to_spec_rejects_a_bad_extension_config_at_create_time() -> None:
 
 
 @pytest.mark.asyncio
-async def test_to_spec_resolves_trusted_extension() -> None:
+async def test_to_spec_resolves_post_run_action() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent()
 
     with patch(
-        "nemo_agents_plugin.jobs.execute.validate_execute_agent_extension_config",
+        "nemo_agents_plugin.jobs.execute.validate_post_run_action_config",
     ) as resolve:
         spec = await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(
                 agent="calc",
                 input="hello",
-                extension=ExecuteAgentExtensionConfig(kind="example.extension", config={"raw": True}),
+                post_run_action=PostRunActionConfig(kind="example.action", config={"raw": True}),
             ),
             workspace="default",
             entity_client=entity_client,
@@ -446,12 +446,53 @@ async def test_to_spec_resolves_trusted_extension() -> None:
         )
 
     step_config = ExecuteAgentStepConfig.model_validate(spec)
-    assert step_config.extension == ExecuteAgentExtensionConfig(
-        kind="example.extension",
+    assert step_config.post_run_action == PostRunActionConfig(
+        kind="example.action",
         config={"raw": True},
     )
-    assert step_config.request.extension == step_config.extension
-    resolve.assert_called_once_with("example.extension", {"raw": True})
+    assert step_config.request.post_run_action == step_config.post_run_action
+    resolve.assert_called_once_with("example.action", {"raw": True})
+
+
+@pytest.mark.asyncio
+async def test_to_spec_defaults_the_post_run_action_to_noop() -> None:
+    spec = await ExecuteAgentJob.to_spec(
+        ExecuteAgentJobConfig(
+            agent=AgentInline(config=_agent_config(), config_format="nemo-agents-spec-v1"), input="hello"
+        ),
+        workspace="default",
+        entity_client=AsyncMock(),
+        async_sdk=_sdk_with_files(),
+        is_local=False,
+    )
+
+    step_config = ExecuteAgentStepConfig.model_validate(spec)
+    assert step_config.post_run_action == PostRunActionConfig(kind="agents.noop")
+
+
+def test_job_config_rejects_the_removed_extension_field() -> None:
+    """Ignoring it would silently run the job with no action at all."""
+    with pytest.raises(ValueError, match="'extension' was renamed to 'post_run_action'"):
+        ExecuteAgentJobConfig.model_validate(
+            {"agent": "calc", "input": "hello", "extension": {"kind": "insights.analysis"}}
+        )
+
+
+@pytest.mark.asyncio
+async def test_to_spec_rejects_the_unprefixed_noop_kind() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _agent()
+
+    with pytest.raises(
+        ValueError, match=r"Unknown post-run action 'noop'\. Installed post-run actions: .*agents\.noop"
+    ):
+        await ExecuteAgentJob.to_spec(
+            ExecuteAgentJobConfig(agent="calc", input="hello", post_run_action=PostRunActionConfig(kind="noop")),
+            workspace="default",
+            entity_client=entity_client,
+            async_sdk=_sdk_with_files(),
+            is_local=False,
+        )
 
 
 @pytest.mark.asyncio
@@ -1138,11 +1179,11 @@ def test_run_threads_custom_timeout_to_fabric(ctx: JobContext) -> None:
     assert result["status"] == "completed"
 
 
-def test_run_invokes_success_extension(ctx: JobContext) -> None:
+def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
-        extension=ExecuteAgentExtensionConfig(kind="example.extension", config={"agent": "research-agent"}),
+        post_run_action=PostRunActionConfig(kind="example.action", config={"agent": "research-agent"}),
     )
     sdk = MagicMock()
 
@@ -1150,26 +1191,27 @@ def test_run_invokes_success_extension(ctx: JobContext) -> None:
         return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
 
     def _after_invoke(kind: str, context: Any) -> None:
-        assert kind == "example.extension"
+        assert kind == "example.action"
         assert context.config == {"agent": "research-agent"}
         assert context.agent_name == "calc"
+        assert context.agent_config == spec.agent.config
         assert context.fabric_result.output == {"answer": "done"}
 
     with (
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
-        patch("nemo_agents_plugin.jobs.execute.run_execute_agent_after_invoke_extension", _after_invoke),
+        patch("nemo_agents_plugin.jobs.execute.run_post_run_action", _after_invoke),
     ):
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert result["status"] == "completed"
-    assert "extension" not in result
+    assert "post_run_action" not in result
 
 
-def test_run_skips_extension_for_failed_fabric_result(ctx: JobContext) -> None:
+def test_run_skips_post_run_action_for_failed_fabric_result(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
-        extension=ExecuteAgentExtensionConfig(kind="example.extension"),
+        post_run_action=PostRunActionConfig(kind="example.action"),
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1177,7 +1219,7 @@ def test_run_skips_extension_for_failed_fabric_result(ctx: JobContext) -> None:
 
     with (
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
-        patch("nemo_agents_plugin.jobs.execute.run_execute_agent_after_invoke_extension") as after_invoke,
+        patch("nemo_agents_plugin.jobs.execute.run_post_run_action") as after_invoke,
     ):
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
 
@@ -1185,28 +1227,28 @@ def test_run_skips_extension_for_failed_fabric_result(ctx: JobContext) -> None:
     after_invoke.assert_not_called()
 
 
-def test_run_extension_exception_is_logged(ctx: JobContext, caplog: pytest.LogCaptureFixture) -> None:
+def test_run_post_run_action_exception_is_logged(ctx: JobContext, caplog: pytest.LogCaptureFixture) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
-        extension=ExecuteAgentExtensionConfig(kind="example.extension"),
+        post_run_action=PostRunActionConfig(kind="example.action"),
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
 
     def _after_invoke(kind: str, context: Any) -> None:
-        raise RuntimeError("extension exploded")
+        raise RuntimeError("action exploded")
 
     with (
         caplog.at_level(logging.ERROR, logger="nemo_agents_plugin.jobs.execute"),
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
-        patch("nemo_agents_plugin.jobs.execute.run_execute_agent_after_invoke_extension", _after_invoke),
-        pytest.raises(RuntimeError, match="extension exploded"),
+        patch("nemo_agents_plugin.jobs.execute.run_post_run_action", _after_invoke),
+        pytest.raises(RuntimeError, match="action exploded"),
     ):
         ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
 
-    assert "Execute-agent extension failed." in caplog.text
+    assert "Post-run action 'example.action' failed." in caplog.text
 
 
 def test_run_rejects_non_fabric_step_config(ctx: JobContext) -> None:
@@ -1522,7 +1564,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         "timeout_seconds": DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
         "auto_telemetry": True,
         "image": "",
-        "extension": None,
+        "post_run_action": None,
     }
     assert body.spec["workdir"] == {"base_workdir": "default/source#project/", "artifact_mounts": []}
     assert body.platform_spec.steps[0].name == "execute-agent"
@@ -2629,3 +2671,99 @@ def test_run_keeps_workdir_when_workspace_is_the_fabric_base(ctx: JobContext, mo
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert result["status"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# Jobs stored before the ``extension`` -> ``post_run_action`` rename
+# ---------------------------------------------------------------------------
+
+
+def _legacy_step_spec(kind: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    extension: dict[str, Any] = {"kind": kind, "config": config or {}}
+    return {
+        "request": {"agent": "calc", "input": "hello", "extension": extension},
+        "agent": _resolved_agent().model_dump(mode="json"),
+        "extension": extension,
+    }
+
+
+def test_a_stored_pre_rename_step_config_reads_back_as_its_post_run_action() -> None:
+    step_config = ExecuteAgentStepConfig.model_validate(
+        _legacy_step_spec("insights.analysis", {"agent": "demo", "workspace": "default"})
+    )
+
+    expected = PostRunActionConfig(kind="insights.analysis", config={"agent": "demo", "workspace": "default"})
+    assert step_config.post_run_action == expected
+    assert step_config.request.post_run_action == expected
+
+
+def test_a_stored_pre_rename_noop_reads_back_as_agents_noop() -> None:
+    step_config = ExecuteAgentStepConfig.model_validate(_legacy_step_spec("noop"))
+
+    assert step_config.post_run_action == PostRunActionConfig(kind="agents.noop")
+    assert step_config.request.post_run_action == PostRunActionConfig(kind="agents.noop")
+
+
+def test_translating_a_stored_record_leaves_the_record_untouched() -> None:
+    legacy = _legacy_step_spec("noop")
+    snapshot = json.loads(json.dumps(legacy))
+
+    ExecuteAgentStepConfig.model_validate(legacy)
+
+    assert legacy == snapshot
+
+
+def test_a_pre_rename_job_is_still_readable_through_the_job_route() -> None:
+    """Every read renders the stored spec through ``ExecuteAgentStepConfig``; an old
+    job, or the Compass analysis run backed by it, must not become a 500.
+    """
+    app = FastAPI()
+    app.include_router(add_job_routes(ExecuteAgentJob), prefix="/apis/agents/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
+
+    async def _get_job(*, name: str, workspace: str) -> MagicMock:
+        response = MagicMock()
+        response.data.return_value = SimpleNamespace(
+            id="job-1",
+            attempt_id="attempt-1",
+            name=name,
+            description=None,
+            project=None,
+            workspace=workspace,
+            created_at=None,
+            updated_at=None,
+            spec=_legacy_step_spec("insights.analysis", {"agent": "demo"}),
+            source="nemo-agents-plugin",
+            status="completed",
+            status_details=None,
+            error_details=None,
+            ownership=None,
+            custom_fields=None,
+            control=None,
+        )
+        return response
+
+    fake_jobs = SimpleNamespace(get_job=_get_job)
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=fake_jobs):
+        response = TestClient(app).get("/apis/agents/v2/workspaces/default/jobs/execute/old-run")
+
+    assert response.status_code == 200, response.text
+    spec = response.json()["spec"]
+    assert spec["post_run_action"] == {"kind": "insights.analysis", "config": {"agent": "demo"}}
+    assert spec["request"]["post_run_action"] == spec["post_run_action"]
+    assert "extension" not in spec
+
+
+def test_a_new_request_setting_extension_is_still_rejected_by_the_create_route() -> None:
+    app = FastAPI()
+    app.include_router(add_job_routes(ExecuteAgentJob), prefix="/apis/agents/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_entity_client] = lambda: AsyncMock()
+    app.dependency_overrides[get_nemo_client] = lambda: _sdk_with_files()
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/apis/agents/v2/workspaces/default/jobs/execute",
+        json={"spec": {"agent": "calc", "input": "hello", "extension": {"kind": "agents.noop"}}},
+    )
+
+    assert response.status_code == 422
+    assert "'extension' was renamed to 'post_run_action'" in response.text

@@ -261,18 +261,18 @@ def test_execute_job_config_validates_against_the_real_job_schema() -> None:
 
     config = ExecuteAgentJobConfig.model_validate(spec)
 
-    assert config.extension is not None
-    assert config.extension.kind == "insights.analysis"
+    assert config.post_run_action is not None
+    assert config.post_run_action.kind == "insights.analysis"
 
 
-def test_the_extension_is_scoped_to_the_agent_and_workspace() -> None:
-    """The extension needs no run identity: nothing it writes is stamped with one."""
+def test_the_post_run_action_is_scoped_to_the_agent_and_workspace() -> None:
+    """The post-run action needs no run identity: nothing it writes is stamped with one."""
     spec = build_execute_agent_job_config(_request(), workspace="team-a", run_name=RUN_NAME)
 
     config = ExecuteAgentJobConfig.model_validate(spec)
 
-    assert config.extension is not None
-    assert config.extension.config == {
+    assert config.post_run_action is not None
+    assert config.post_run_action.config == {
         "agent": "demo-agent",
         "workspace": "team-a",
     }
@@ -346,8 +346,8 @@ def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_inline_compass(
     assert settings["agent"] == "demo-agent"
     assert settings["evaluation_id"] == "eval-123"
     assert settings["ethos"] == "# Ethos"
-    assert config.extension is not None
-    assert config.extension.config["agent"] == "demo-agent"
+    assert config.post_run_action is not None
+    assert config.post_run_action.config["agent"] == "demo-agent"
 
 
 def test_execute_job_config_omits_timeout_when_unset() -> None:

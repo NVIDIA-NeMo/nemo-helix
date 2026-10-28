@@ -38,12 +38,6 @@ from nemo_agents_plugin.fabric.invocation import (
     invoke_agent_config_request_once,
 )
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeTimeoutError
-from nemo_agents_plugin.jobs.execute_extensions import (
-    NOOP_EXECUTE_AGENT_EXTENSION_KIND,
-    ExecuteAgentAfterInvokeContext,
-    run_execute_agent_after_invoke_extension,
-    validate_execute_agent_extension_config,
-)
 from nemo_agents_plugin.jobs.gateway_proxy import (
     exports_otlp_to_intake,
     job_has_platform_identity,
@@ -54,6 +48,11 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     routes_inference_through_gateway,
 )
 from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
+from nemo_agents_plugin.jobs.post_run_actions import (
+    NOOP_POST_RUN_ACTION_KIND,
+    run_post_run_action,
+    validate_post_run_action_config,
+)
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
@@ -65,6 +64,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
     wants_intake_atif_export,
 )
+from nemo_helix_plugin.agents.post_run_actions import PostRunActionContext
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
@@ -97,7 +97,7 @@ from nemo_helix_plugin.jobs.constants import (
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -173,13 +173,40 @@ _RESERVED_ENV_VAR_NAMES = frozenset(
 )
 
 
-class ExecuteAgentExtensionConfig(BaseModel):
-    kind: str = Field(description="Trusted extension kind registered by an installed NeMo plugin.")
-    config: dict[str, Any] = Field(default_factory=dict, description="Extension-owned configuration.")
+class PostRunActionConfig(BaseModel):
+    kind: str = Field(
+        description=(
+            "Post-run action kind registered by an installed NeMo plugin. "
+            "List installed kinds with `nemo agents post-run-actions list`."
+        )
+    )
+    config: dict[str, Any] = Field(default_factory=dict, description="Action-owned configuration.")
 
 
-def _make_noop_extension_config() -> ExecuteAgentExtensionConfig:
-    return ExecuteAgentExtensionConfig(kind=NOOP_EXECUTE_AGENT_EXTENSION_KIND)
+def _make_noop_post_run_action_config() -> PostRunActionConfig:
+    return PostRunActionConfig(kind=NOOP_POST_RUN_ACTION_KIND)
+
+
+# Kinds renamed along with ``extension`` -> ``post_run_action``.
+_LEGACY_POST_RUN_ACTION_KINDS = {"noop": NOOP_POST_RUN_ACTION_KIND}
+
+
+def _translate_legacy_extension(spec: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite a stored pre-rename ``extension`` as ``post_run_action``.
+
+    Only for records read back from the Jobs service: a new request that sets
+    ``extension`` is still rejected by ``ExecuteAgentJobConfig``.
+    """
+    if "extension" not in spec:
+        return spec
+    spec = dict(spec)
+    extension = spec.pop("extension")
+    if isinstance(extension, dict) and "post_run_action" not in spec:
+        kind = extension.get("kind")
+        if isinstance(kind, str):
+            extension = {**extension, "kind": _LEGACY_POST_RUN_ACTION_KINDS.get(kind, kind)}
+        spec["post_run_action"] = extension
+    return spec
 
 
 class ExecuteAgentJobConfig(BaseModel):
@@ -239,10 +266,22 @@ class ExecuteAgentJobConfig(BaseModel):
             "CPU tasks image)."
         ),
     )
-    extension: ExecuteAgentExtensionConfig | None = Field(
+    post_run_action: PostRunActionConfig | None = Field(
         default=None,
-        description="Optional trusted plugin extension to run during the execute-agent lifecycle.",
+        description=(
+            "Plugin-provided action to run after a successful agent invocation, inside the execute "
+            f"step; its failure fails the job. Defaults to {NOOP_POST_RUN_ACTION_KIND!r}."
+        ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_extension(cls, data: Any) -> Any:
+        # Without this, the renamed field would be silently ignored and the job
+        # would run with no action at all.
+        if isinstance(data, dict) and "extension" in data:
+            raise ValueError("'extension' was renamed to 'post_run_action'.")
+        return data
 
     @field_validator("agent")
     @classmethod
@@ -309,7 +348,23 @@ class ExecuteAgentStepConfig(BaseModel):
     # the job is not kept in sync with the underlying environment entities.
     compute: ComputeSpecInline | None = None
     secrets: dict[str, str] = Field(default_factory=dict)
-    extension: ExecuteAgentExtensionConfig = Field(default_factory=_make_noop_extension_config)
+    post_run_action: PostRunActionConfig = Field(default_factory=_make_noop_post_run_action_config)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _translate_legacy_records(cls, data: Any) -> Any:
+        # Jobs created before the rename store ``extension`` at both levels.
+        # Every read of such a job validates it against this model, so
+        # rejecting it would make old jobs (and the Compass analysis runs
+        # backed by them) unreadable; translating keeps what they ran, and
+        # what a rerun would run.
+        if not isinstance(data, dict):
+            return data
+        data = _translate_legacy_extension(data)
+        request = data.get("request")
+        if isinstance(request, dict) and "extension" in request:
+            data = {**data, "request": _translate_legacy_extension(request)}
+        return data
 
 
 class ExecuteAgentJob(NemoJob):
@@ -387,8 +442,8 @@ class ExecuteAgentJob(NemoJob):
             files_client = AsyncFilesClient.from_client(cast(AsyncNemoClient, async_sdk))
             workdir = await validate_agent_workdir(request.workdir, files_client, default_workspace=workspace)
 
-        extension = request.extension or _make_noop_extension_config()
-        validate_execute_agent_extension_config(extension.kind, extension.config)
+        post_run_action = request.post_run_action or _make_noop_post_run_action_config()
+        validate_post_run_action_config(post_run_action.kind, post_run_action.config)
 
         return ExecuteAgentStepConfig(
             request=request,
@@ -402,7 +457,7 @@ class ExecuteAgentJob(NemoJob):
             workdir=workdir,
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
-            extension=extension,
+            post_run_action=post_run_action,
         )
 
     @classmethod
@@ -588,17 +643,18 @@ class ExecuteAgentJob(NemoJob):
             status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
             if status == "completed":
                 try:
-                    run_execute_agent_after_invoke_extension(
-                        step_config.extension.kind,
-                        ExecuteAgentAfterInvokeContext(
+                    run_post_run_action(
+                        step_config.post_run_action.kind,
+                        PostRunActionContext(
                             ctx=ctx,
-                            config=step_config.extension.config,
+                            config=step_config.post_run_action.config,
                             agent_name=step_config.agent.name,
+                            agent_config=step_config.agent.config,
                             fabric_result=result,
                         ),
                     )
                 except Exception:
-                    logger.exception("Execute-agent extension failed.")
+                    logger.exception("Post-run action %r failed.", step_config.post_run_action.kind)
                     raise
             else:
                 # A Fabric result that *reports* failure is not an exception here,
