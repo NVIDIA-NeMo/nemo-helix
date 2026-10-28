@@ -82,27 +82,6 @@ export const collectFolderPathsFromDatasetFiles = (
   return Array.from(folders).sort((a, b) => a.localeCompare(b));
 };
 
-/**
- * Returns the extension of a file.
- * @param file - The file to get the extension of.
- * @returns The extension of the file, or null if there is none.
- */
-export const getFileExtension = (file: File | string) => {
-  let fileName: string;
-
-  if (typeof file !== 'string') {
-    fileName = file.name;
-  } else {
-    fileName = file;
-  }
-
-  const hasFileExtension = fileName.includes('.');
-
-  if (!hasFileExtension) return null;
-
-  return fileName.substring(fileName.lastIndexOf('.'));
-};
-
 export const renameFile = (file: File, newName: string): File => {
   const blob = file.slice(0, file.size, file.type);
   return new File([blob], newName, {

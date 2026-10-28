@@ -7,7 +7,7 @@ import { LeftOverflow } from '@nemo/common/src/components/LeftOverflow';
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { useInlinePickerSlot } from '@nemo/common/src/components/UploadModal/InlinePickerSlot';
 import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
-import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
+import { formatFileSize, isFileTypeAllowed } from '@nemo/common/src/components/UploadModal/utils';
 import { IconError } from '@nemo/icons/icons';
 import {
   Button,
@@ -42,47 +42,35 @@ export const SimpleFilesTable = () => {
     invalidFileMode,
   } = state;
 
-  const fileExtension = (uploadFile: UploadFile): string => {
-    const name = uploadFile.type === 'existing' ? uploadFile.file.path : uploadFile.file.name;
-    const dot = name.lastIndexOf('.');
-    return dot >= 0 ? name.slice(dot).toLowerCase() : '';
-  };
-
-  const allowedExtensions = useMemo(
-    () => new Set((acceptableFileTypes ?? []).map((ext) => ext.toLowerCase())),
-    [acceptableFileTypes]
+  // An empty `acceptableFileTypes` accepts every file, so no separate "is restricted" flag is needed.
+  const visibleFiles = useMemo(
+    () =>
+      invalidFileMode === 'hide'
+        ? files.filter((file) => isFileTypeAllowed(file, acceptableFileTypes))
+        : files,
+    [files, acceptableFileTypes, invalidFileMode]
   );
 
-  const isFileAllowed = (uploadFile: UploadFile): boolean => {
-    if (allowedExtensions.size === 0) return true;
-    return allowedExtensions.has(fileExtension(uploadFile));
-  };
-
-  const visibleFiles = useMemo(() => {
-    if (invalidFileMode !== 'hide' || allowedExtensions.size === 0) return files;
-    return files.filter(isFileAllowed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, allowedExtensions, invalidFileMode]);
-
-  const hasValidSelection = selectedFiles.some((file) => isFileAllowed(file));
+  const hasValidSelection = selectedFiles.some((file) =>
+    isFileTypeAllowed(file, acceptableFileTypes)
+  );
   const disabledFilesMessage =
     invalidFileMode === 'disable' &&
-    allowedExtensions.size > 0 &&
     !hasValidSelection &&
-    visibleFiles.some((file) => !isFileAllowed(file))
+    visibleFiles.some((file) => !isFileTypeAllowed(file, acceptableFileTypes))
       ? `Only ${acceptableFileTypes.join(', ')} files can be selected. Upload a supported file or choose a different fileset.`
       : null;
 
   const fileRows = useMemo<FileRow[]>(
     () =>
       visibleFiles.map((uploadFile) => {
-        const isDisabled = invalidFileMode === 'disable' && !isFileAllowed(uploadFile);
+        const isDisabled =
+          invalidFileMode === 'disable' && !isFileTypeAllowed(uploadFile, acceptableFileTypes);
         const name = uploadFile.type === 'existing' ? uploadFile.file.path : uploadFile.file.name;
         const size = uploadFile.type === 'existing' ? uploadFile.file.size : uploadFile.file.size;
         return { id: uploadFile.id, name, size, isDisabled, uploadFile };
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleFiles, invalidFileMode, allowedExtensions]
+    [visibleFiles, invalidFileMode, acceptableFileTypes]
   );
 
   const dataViewState = DataView.useDataViewState({ pagination: { pageSize: 10 } });
