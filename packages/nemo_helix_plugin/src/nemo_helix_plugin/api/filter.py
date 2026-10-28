@@ -237,12 +237,18 @@ def reject_object_values(operation: FilterOperation) -> None:
     """Reject comparisons against an object, other than ``$elemMatch`` criteria.
 
     ``{"name": {"first": "x"}}`` parses to ``name $eq {"first": "x"}``. The entity store can't
-    compare a field to an object: it matches nothing, or errors on a typed column. Run this after
-    ``expand_namespace_filters``, which turns such filters on namespace fields into per-key ones.
+    compare a field to an object: it matches nothing, or errors on a typed column. The same goes
+    for an object inside a list operand, as in ``{"name": {"$in": [{"first": "x"}]}}``. Run this
+    after ``expand_namespace_filters``, which turns such filters on namespace fields into per-key
+    ones.
     """
     if isinstance(operation, ComparisonOperation):
         value = operation.value
-        if isinstance(value, dict) and operation.operator != FilterOperator.ELEM_MATCH:
+        if operation.operator == FilterOperator.ELEM_MATCH:
+            return
+        if isinstance(value, list) and any(isinstance(item, dict) for item in value):
+            raise ValueError(f"'{operation.field}' filters take a list of values, not objects")
+        if isinstance(value, dict):
             unprefixed = sorted(key for key in value if key in _BRACKET_OPERATOR_ALIASES)
             if unprefixed:
                 raise ValueError(

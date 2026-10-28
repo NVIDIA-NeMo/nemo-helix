@@ -339,6 +339,8 @@ class TestObjectValues:
             ({"filter": '{"name": {"$eq": {"first": "x"}}}'}, "not an object"),
             ({"filter": '{"$or": [{"name": {"first": "x"}}, {"status": "a"}]}'}, "not an object"),
             ({"filter": '{"created_at": {"gte": "2024-01-01"}}'}, "without '$'"),
+            ({"filter": '{"name": {"$in": [{"first": "x"}]}}'}, "not objects"),
+            ({"filter": '{"name": {"$nin": ["a", {"first": "x"}]}}'}, "not objects"),
             ({"filter": '{"name": {"$eq": "x", "tier": "gold"}}'}, "mixes operators with sub-keys"),
             (
                 {"filter[created_at][gte]": "2024-01-01", "filter[created_at][foo]": "x"},
@@ -363,6 +365,11 @@ class TestObjectValues:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["operation"] == {"name": {"$elemMatch": {"key": "a", "value": "b"}}}
+
+    def test_scalar_list_still_works(self):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params={"filter": '{"name": {"$in": ["a", "b"]}}'})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"name": {"$in": ["a", "b"]}}
 
     def test_bracket_operator_alias_still_works(self):
         resp = TestClient(_make_app(SampleFilter)).get("/items", params={"filter[created_at][gte]": "2024-01-01"})
