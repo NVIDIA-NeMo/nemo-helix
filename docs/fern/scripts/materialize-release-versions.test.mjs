@@ -89,6 +89,44 @@ test("discovers and sorts branch lines, not tag snapshots or local-only branches
   assert.match(readFileSync(join(f.checkout, "docs/fern/versions/v0.9.yml"), "utf8"), /generated\/release-versions\/v0.9\/overview.mdx/);
 });
 
+test("keeps the development announcement only on Latest across repeated materialization", (t) => {
+  const f = fixture(t);
+  const config = join(f.checkout, "docs/fern/docs.yml");
+  // Exercise the real authored notice, including its released-version link.
+  const latest = parse(readFileSync(join(fernDir, "docs.yml"), "utf8")).versions[0];
+  assert.equal(latest["display-name"], "Latest");
+  assert.match(latest.announcement.message, /unreleased development docs/);
+  assert.match(latest.announcement.message, /\/nemo-helix\/v0\.8\/documentation\/home/);
+  writeFileSync(config, readFileSync(config, "utf8")
+    + `    announcement:\n      message: ${JSON.stringify(latest.announcement.message)}\n`);
+  f.branch("release/0.8"); // The fixture's reachable 0.8.0 tag marks this line released.
+  f.commit("0.9 development");
+  f.branch("release/0.9");
+
+  const check = () => {
+    const versions = f.versions();
+    assert.deepEqual(versions[0], latest);
+    assert.deepEqual(versions.map((v) => v.slug), ["latest", "v0.9", "v0.8"]);
+    assert.ok(versions.every((v) => !("default" in v)));
+    assert.ok(versions.slice(1).every((v) => !("announcement" in v)));
+    assert.equal(versions[0].availability, undefined);
+    assert.equal(versions[1].availability, "preview");
+    assert.equal(versions[2].availability, undefined);
+  };
+  f.run();
+  check();
+  const first = f.versions();
+  f.run();
+  check();
+  assert.deepEqual(f.versions(), first);
+
+  git(f.seed, "tag", "0.9.0");
+  git(f.seed, "push", "origin", "--tags");
+  f.run();
+  assert.deepEqual(f.versions()[0], latest);
+  assert.ok(f.versions().slice(1).every((v) => !("announcement" in v) && !("availability" in v)));
+});
+
 test("only reachable stable tags from the branch's own release line remove preview", (t) => {
   const f = fixture(t);
   f.commit("0.9 release work");
