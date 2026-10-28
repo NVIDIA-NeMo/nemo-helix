@@ -61,6 +61,8 @@ COPY --chown=1000:1000 --from=builder /opt/agent-hardener/.source-distributions/
 COPY --from=builder /usr/local/bin/openshell /usr/local/bin/openshell
 ENV NEMO_AGENT_HARDENER_VENV_PATH=/opt/agent-hardener/venv \
     NEMO_AGENT_HARDENER_GARAK_VENV_PATH=/opt/agent-hardener/garak-venv
+# The base image's root build steps leave root-owned dirs under HOME; garak writes ~/.cache/garak on import.
+RUN mkdir -p /home/nvs/.cache && chown -R 1000:1000 /home/nvs
 # agent-hardener keeps per-run state under <cwd>/.agent-hardener; /app is the root-owned venv.
 WORKDIR /home/nvs
 
