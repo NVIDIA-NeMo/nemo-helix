@@ -807,4 +807,45 @@ describe('AssistantChat', () => {
     },
     interactionTimeoutMs
   );
+
+  it(
+    'keeps the raw failure as the message and explains a recognised one in the banner',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      const retired =
+        "RuntimeError: internal error: APIStatusError: Error code: 410 - {'detail': 'The model \\'acme/old-model\\' has reached its end of life on 2026-09-01T09:00:00Z'}";
+      mocks.createChatCompletion.mockRejectedValueOnce(new Error(retired));
+
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      expect(
+        await screen.findByText(/The model "acme\/old-model" has been retired\./)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText('There was an error generating a response.')
+      ).not.toBeInTheDocument();
+    },
+    interactionTimeoutMs
+  );
+
+  it(
+    'falls back to the generic banner for a failure no rule recognises',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      mocks.createChatCompletion.mockRejectedValueOnce(new Error('Something nobody mapped'));
+
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      expect(await screen.findByText('Something nobody mapped')).toBeInTheDocument();
+      expect(
+        await screen.findByText('There was an error generating a response.')
+      ).toBeInTheDocument();
+    },
+    interactionTimeoutMs
+  );
 });
