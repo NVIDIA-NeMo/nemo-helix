@@ -53,6 +53,13 @@ describe('collectAgentEntries', () => {
     expect(validateAgentEntries(entries)).toBeUndefined();
   });
 
+  it('keeps agent.yml as is when agent.yaml is also present', () => {
+    const entries = collectAgentEntries([makeFile('calc/agent.yaml'), makeFile('calc/agent.yml')]);
+
+    expect(entries.map((item) => item.path)).toEqual(['agent.yaml', 'agent.yml']);
+    expect(validateAgentEntries(entries)).toBeUndefined();
+  });
+
   it('drops build artifacts that the container path cannot stage', () => {
     const entries = collectAgentEntries([
       makeFile('agent/agent.yaml'),
