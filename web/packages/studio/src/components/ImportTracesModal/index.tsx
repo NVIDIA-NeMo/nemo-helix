@@ -353,11 +353,17 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
               {insightsAvailable && (
                 <Stack gap="density-md">
-                  <Checkbox
-                    checked={runInsights}
-                    onChange={(event) => setRunInsights(event.target.checked)}
-                    slotLabel="Run insights analysis after import"
-                  />
+                  <Stack gap="density-xs">
+                    <Checkbox
+                      checked={runInsights}
+                      onChange={(event) => setRunInsights(event.target.checked)}
+                      slotLabel="Run insights analysis after import"
+                    />
+                    <Text className="text-secondary" kind="body/regular/xs">
+                      Queues a Compass run for <strong>{agent}</strong>, which must already be
+                      enabled with <code>nemo compass analysis enable</code>.
+                    </Text>
+                  </Stack>
                   {showModelWarning && <InsightsModelWarning />}
                   {runInsights && (
                     <AccordionRoot
@@ -371,11 +377,6 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                         </AccordionTrigger>
                         <AccordionContent>
                           <Stack gap="density-xs" className="pt-density-md">
-                            <Text className="text-secondary" kind="body/regular/xs">
-                              Queues a Compass run for <strong>{agent}</strong>, which must already
-                              be enabled with <code>nemo compass analysis enable</code>.
-                            </Text>
-
                             <InsightsModelPairFields
                               hideModelWarnings
                               workspace={workspace}
