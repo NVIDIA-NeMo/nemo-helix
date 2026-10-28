@@ -13,8 +13,8 @@
  * module on `host.sdk`, running on its own axios + QueryClient.
  */
 export interface PluginSdk {
-  platform: typeof import('@nemo/sdk/generated/platform/api');
-  agents: typeof import('@nemo/sdk/generated/agents/api');
+  platform: typeof import('@nemo/sdk/generated/platform/index');
+  agents: typeof import('@nemo/sdk/generated/agents/index');
 }
 
 export interface PluginNavigation {

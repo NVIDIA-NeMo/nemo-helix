@@ -105,7 +105,7 @@ export const useGenerateBenignSuite = (
     },
   });
 
-  const { useJobsGetJob, useJobsUpdateJobStatusDetails } = useHelixSdk();
+  const { useJobsGetJob, useJobsUpdateJobAttemptStatusDetails } = useHelixSdk();
   const { data: job } = useJobsGetJob(workspace, jobName, {
     query: {
       enabled: Boolean(jobName),
@@ -116,9 +116,9 @@ export const useGenerateBenignSuite = (
   const interview = pendingInterview(details);
   const review = pendingReview(details);
 
-  const patch = useJobsUpdateJobStatusDetails();
+  const patch = useJobsUpdateJobAttemptStatusDetails();
   const respond = (data: Record<string, unknown>) =>
-    patch.mutate({ workspace, name: jobName, data });
+    job && patch.mutate({ workspace, job: jobName, attempt: job.attempt_id, data });
 
   const status = job?.status;
   const terminal = Boolean(status && CJobTerminalStatuses.includes(status));

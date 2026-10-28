@@ -12,6 +12,8 @@ from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 def test_garak_authz_derivation_has_no_problems() -> None:
     contrib, problems, _warnings = _derive_service_contribution(GarakPluginService())
     assert problems == []
+    # A route-level description must match the one the job factory stamps on the same permission.
+    assert [w for w in _warnings if "conflicting descriptions" in w] == []
 
     # healthz: authenticated, no permission required.
     healthz = contrib.endpoints["/apis/garak/v1/healthz"]["get"]

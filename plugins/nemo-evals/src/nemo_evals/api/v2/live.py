@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 #: Deliberately the same permission the ``evaluate/jobs`` submit route derives. Scoring one row
 #: in-process is a weaker capability than submitting a job, so a caller who can do the latter
 #: needs no separate grant for this.
-_CREATE_EVALUATION = scope.permission("create", description="Create an evaluation")
+_CREATE_EVALUATION = scope.permission("create", description="Create evaluator jobs")
 
 #: Ceiling on the whole handler, matching what the Live Test panel allows.
 LIVE_TIMEOUT_S = 120

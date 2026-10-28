@@ -5,9 +5,11 @@ import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import { ingestTraceFiles } from '@studio/components/ImportTracesModal/ingestTraceFiles';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { mockAnalysisConfig } from '@studio/mocks/handlers/insights';
+import { server } from '@studio/mocks/node';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import { fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 
 vi.mock('@studio/components/ImportTracesModal/ingestTraceFiles', async (importOriginal) => ({
@@ -166,6 +168,37 @@ describe('ImportTracesModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each(['default_model', 'fast_model'] as const)(
+    'opens options for %s Lightning and shows its warning with the model fields',
+    async (role) => {
+      server.use(
+        http.get('*/analysis-configs/:agent', () =>
+          HttpResponse.json({
+            ...mockAnalysisConfig,
+            [role]: 'default/nvidia_nemotron_3_5_lightning_30b',
+          })
+        )
+      );
+      const user = userEvent.setup();
+      renderModal();
+      await user.click(await screen.findByRole('tab', { name: 'Select files' }));
+      const checkbox = screen.getByRole('checkbox', { name: /Run insights analysis/ });
+      expect(checkbox).toBeChecked();
+      expect(await screen.findByText(/known tool-calling failures/)).toBeVisible();
+      expect(screen.getAllByText(/known tool-calling failures/)).toHaveLength(1);
+      await waitFor(() => expect(screen.getByText('Default model')).toBeVisible());
+      await user.click(screen.getByText('Insights options'));
+      await waitFor(() => expect(screen.queryByText('Default model')).not.toBeVisible());
+      expect(screen.queryByText(/known tool-calling failures/)).not.toBeVisible();
+      expect(checkbox).toBeVisible();
+      await user.click(checkbox);
+      expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();
+      expect(screen.queryByText('Insights options')).not.toBeInTheDocument();
+      await user.click(checkbox);
+      await waitFor(() => expect(screen.getByText('Default model')).toBeVisible());
+    }
+  );
+
   it('keeps the stored model pair after the modal is closed and reopened', async () => {
     const user = userEvent.setup();
 
@@ -189,7 +222,7 @@ describe('ImportTracesModal', () => {
     /** The model pair lives behind the accordion, so it has to be opened to be read. */
     const showModels = async () => {
       await user.click(await screen.findByRole('tab', { name: 'Select files' }));
-      await user.click(await screen.findByText('Advanced Options'));
+      await user.click(await screen.findByText('Insights options'));
     };
 
     await showModels();
@@ -216,7 +249,7 @@ describe('ImportTracesModal', () => {
       await user.click(await screen.findByRole('tab', { name: 'Select files' }));
 
       expect(await screen.findByRole('button', { name: 'Upload files' })).toBeInTheDocument();
-      expect(screen.queryByText('Advanced Options')).not.toBeInTheDocument();
+      expect(screen.queryByText('Insights options')).not.toBeInTheDocument();
       expect(
         screen.queryByRole('checkbox', { name: /Run insights analysis/ })
       ).not.toBeInTheDocument();
