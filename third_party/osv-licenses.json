@@ -13848,7 +13848,7 @@
         {
           "package": {
             "name": "yara-python",
-            "version": "4.5.1",
+            "version": "4.5.4",
             "ecosystem": "PyPI"
           },
           "licenses": [
