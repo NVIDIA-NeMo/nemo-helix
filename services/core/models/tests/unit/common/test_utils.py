@@ -26,7 +26,10 @@ from nhx.core.models.app.utils import (
     get_deployment_secret_name,
     get_model_weights_type,
     get_nimcache_resource_name,
+    is_generic_nim_image,
+    is_model_free_nim_image,
     is_multi_llm_image,
+    is_sglang_model_free_nim_image,
     parse_model_name_revision,
 )
 
@@ -392,7 +395,17 @@ def test_get_model_weights_type_baked_container_with_model_name():
     assert location == ModelWeightsType.BAKED_CONTAINER
 
 
-def test_get_model_weights_type_multi_llm_files_service():
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        None,
+        "nvcr.io/nim/nvidia/llm-nim",
+        "nvcr.io/nim/nvidia/model-free-nim",
+        "nvcr.io/nim/nvidia/vllm-model-free-nim",
+    ],
+)
+def test_get_model_weights_type_multi_llm_files_service(image_name):
+    """The multi-LLM NIM and its successor, the model-free NIM, load the weights the platform downloads."""
     provider = ModelProvider(
         workspace="test-ns",
         name="multi-llm-provider",
@@ -408,7 +421,7 @@ def test_get_model_weights_type_multi_llm_files_service():
         entity_version=1,
         engine="nim",
         model_spec=ModelDeploymentConfigModelSpec(model_name="test-ns/my-model"),
-        executor_config=ContainerExecutorConfig(gpu=1, image_name=None),
+        executor_config=ContainerExecutorConfig(gpu=1, image_name=image_name),
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
@@ -465,7 +478,7 @@ def test_get_model_weights_type_missing_deployment_config():
 
 
 def test_get_model_weights_type_no_provider_with_hf_token():
-    """Test that multi-LLM without model_provider is detected as FILES_SERVICE.
+    """Test that the default NIM without model_provider is detected as FILES_SERVICE.
 
     Bug #3716: multi-LLM deployment without provider should not return UNKNOWN.
     """
@@ -475,7 +488,7 @@ def test_get_model_weights_type_no_provider_with_hf_token():
         entity_version=1,
         engine="nim",
         model_spec=ModelDeploymentConfigModelSpec(model_name="Qwen/Qwen2.5-1.5B-Instruct"),
-        executor_config=ContainerExecutorConfig(gpu=1, image_name=None),  # Multi-LLM (no image specified)
+        executor_config=ContainerExecutorConfig(gpu=1, image_name=None),  # Platform default: the model-free NIM
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
@@ -501,14 +514,14 @@ def test_get_model_weights_type_no_provider_with_hf_token():
 
 
 def test_get_model_weights_type_no_provider_multi_llm_files_service():
-    """Test that FILES_SERVICE is detected without model_provider for multi-LLM without hf_token."""
+    """Test that FILES_SERVICE is detected without model_provider for the default NIM without hf_token."""
     config = ModelDeploymentConfig(
         workspace="default",
         name="fs-config",
         entity_version=1,
         engine="nim",
         model_spec=ModelDeploymentConfigModelSpec(model_name="workspace/my-model"),
-        executor_config=ContainerExecutorConfig(gpu=1, image_name=None),  # Multi-LLM
+        executor_config=ContainerExecutorConfig(gpu=1, image_name=None),  # Platform default: the model-free NIM
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
@@ -627,9 +640,9 @@ def test_get_model_weights_type_no_provider_baked_container():
 
 
 def test_get_model_weights_type_no_provider_image_tag_only_is_multi_llm():
-    """Test that image_tag without image_name is still treated as multi-LLM.
+    """Test that image_tag without image_name is still treated as a generic NIM.
 
-    When only image_tag is specified (no image_name), the default multi-LLM image
+    When only image_tag is specified (no image_name), the default model-free NIM image
     should be used. The weights type detection should still work correctly.
     """
     config = ModelDeploymentConfig(
@@ -640,7 +653,7 @@ def test_get_model_weights_type_no_provider_image_tag_only_is_multi_llm():
         model_spec=ModelDeploymentConfigModelSpec(model_name="Qwen/Qwen2.5-1.5B-Instruct"),
         executor_config=ContainerExecutorConfig(
             gpu=1,
-            image_name=None,  # No image_name = multi-LLM
+            image_name=None,  # No image_name = default model-free NIM
             image_tag="1.8.6",  # But image_tag IS specified
         ),
         created_at=datetime.now(),
@@ -677,7 +690,7 @@ def test_get_model_weights_type_no_provider_image_tag_only_files_service():
         model_spec=ModelDeploymentConfigModelSpec(model_name="workspace/my-model"),
         executor_config=ContainerExecutorConfig(
             gpu=1,
-            image_name=None,  # No image_name = multi-LLM
+            image_name=None,  # No image_name = default model-free NIM
             image_tag="latest",  # But image_tag IS specified
         ),
         created_at=datetime.now(),
@@ -701,7 +714,7 @@ def test_get_model_weights_type_no_provider_image_tag_only_files_service():
         model_entity=None,
     )
 
-    # Should detect as FILES_SERVICE since image_name is None (multi-LLM) and no hf_token
+    # Should detect as FILES_SERVICE since image_name is None (default model-free NIM) and no hf_token
     assert location == ModelWeightsType.FILES_SERVICE
 
 
@@ -710,14 +723,10 @@ def test_get_model_weights_type_no_provider_image_tag_only_files_service():
 # ============================================================================
 
 
-def test_is_multi_llm_image_none_returns_true():
-    """Test that None image_name returns True (default multi-LLM)."""
-    assert is_multi_llm_image(None) is True
-
-
-def test_is_multi_llm_image_empty_string_returns_true():
-    """Test that empty string image_name returns True (default multi-LLM)."""
-    assert is_multi_llm_image("") is True
+@pytest.mark.parametrize("image_name", [None, ""])
+def test_is_multi_llm_image_unset_returns_false(image_name):
+    """An unset image is not an image name; callers resolve it to the platform default first."""
+    assert is_multi_llm_image(image_name) is False
 
 
 def test_is_multi_llm_image_default_nim_returns_true():
@@ -754,6 +763,75 @@ def test_is_multi_llm_image_random_image_returns_false():
     assert is_multi_llm_image("my-model-image") is False
     assert is_multi_llm_image("ubuntu:latest") is False
     assert is_multi_llm_image("docker.io/library/python:3.11") is False
+
+
+def test_is_multi_llm_image_ignores_tag_and_digest():
+    assert is_multi_llm_image("nvcr.io/nim/nvidia/llm-nim:1.15.5") is True
+    assert is_multi_llm_image("registry:5000/llm-nim@sha256:abc") is True
+
+
+# ============================================================================
+# Tests for is_model_free_nim_image and is_generic_nim_image
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        "nvcr.io/nim/nvidia/model-free-nim",
+        "nvcr.io/nim/nvidia/model-free-nim:2.0.13",
+        "nvcr.io/nim/nvidia/vllm-model-free-nim",
+        "nvcr.io/nim/nvidia/vllm-model-free-nim:2.1.4",
+        "nvcr.io/nim/nvidia/sglang-model-free-nim:2.1.4",
+        "registry:5000/mirror/model-free-nim",
+        "model-free-nim",
+    ],
+)
+def test_is_model_free_nim_image_matches_any_registry_and_tag(image_name):
+    assert is_model_free_nim_image(image_name) is True
+
+
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        None,
+        "",
+        "nvcr.io/nim/nvidia/llm-nim",
+        "nvcr.io/nim/nvidia/model-free-nim-v2",
+        "nvcr.io/nim/meta/llama-3_1-8b-instruct",
+    ],
+)
+def test_is_model_free_nim_image_rejects_other_images(image_name):
+    assert is_model_free_nim_image(image_name) is False
+
+
+@pytest.mark.parametrize(
+    ("image_name", "expected"),
+    [
+        (None, True),
+        ("", True),
+        ("nvcr.io/nim/nvidia/llm-nim", True),
+        ("nvcr.io/nim/nvidia/model-free-nim", True),
+        ("nvcr.io/nim/nvidia/vllm-model-free-nim", True),
+        ("nvcr.io/nim/nvidia/sglang-model-free-nim", True),
+        ("nvcr.io/nim/meta/llama-3_1-8b-instruct", False),
+    ],
+)
+def test_is_generic_nim_image(image_name, expected):
+    assert is_generic_nim_image(image_name) is expected
+
+
+@pytest.mark.parametrize(
+    ("image_name", "expected"),
+    [
+        ("nvcr.io/nim/nvidia/sglang-model-free-nim:2.1.4", True),
+        ("nvcr.io/nim/nvidia/vllm-model-free-nim", False),
+        ("nvcr.io/nim/nvidia/model-free-nim", False),
+        (None, False),
+    ],
+)
+def test_is_sglang_model_free_nim_image(image_name, expected):
+    assert is_sglang_model_free_nim_image(image_name) is expected
 
 
 # ============================================================================

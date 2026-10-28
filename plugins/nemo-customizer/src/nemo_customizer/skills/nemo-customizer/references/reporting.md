@@ -189,7 +189,7 @@ After **Training configuration**, branch on output type:
 **Automodel / unsloth LoRA only** — DPO (rl) never produces an adapter; for rl output use **Using the fine-tuned model** below. Run these discovery commands (parse stdout only; do not pipe `2>&1` into JSON parsers):
 
 1. `nemo models get <model-entity> --workspace default` — confirm `<output.name>` appears under `adapters` with `enabled: true`.
-2. `nemo inference providers list --workspace default -f json` — pick a **READY** provider whose `served_models` includes `default/<model-entity>` (base entity). Record its `name` as `<provider>` (often matches the deployment name).
+2. `nemo inference providers list --workspace default -f json` — pick a **READY** provider whose `served_models` includes `default/<model-entity>&adapters/default/<output.name>`. Record its `name` as `<provider>` (often matches the deployment name) and that entry's `served_model_name` as `<adapter-served-name>`: `default--<output.name>` on vLLM, `default/<model-entity>:default--<output.name>` on the SGLang model-free NIM. If no provider lists the adapter yet, wait for the hot-reload and retry.
 
 On a deployment with `lora_enabled: true`, the adapter is **hot-reloaded automatically** — no new deployment, deployment update, or provider reconfiguration before inference or post-training eval. Append this section with **concrete URLs and provider name** from discovery:
 
@@ -203,7 +203,7 @@ The adapter `<output.name>` is registered on `default/<model-entity>`. Weights a
 | Target | Gateway path | OpenAI base URL | Request `"model"` field |
 |--------|--------------|-----------------|-------------------------|
 | **Base** weights | model-entity | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| **LoRA adapter** | **provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>` |
+| **LoRA adapter** | **provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>`; on the SGLang model-free NIM, `default/<model-entity>:default--<output.name>` |
 
 **Common mistake:** posting to the model-entity URL with `"model": "default--<output.name>"` still runs the **base** model. Base-vs-adapter eval will look identical until LoRA requests use the **provider** URL above. See `references/post-training-eval.md` § **Request routing (base vs LoRA)**.
 
@@ -224,7 +224,7 @@ Match training context at inference — send **`messages[:-1]`** (all turns exce
 export NHX_BASE_URL=<platform-url>   # omit when using default localhost
 nemo inference gateway provider post v1/chat/completions <provider> --workspace default \\
   --body '{
-    "model": "default--<output.name>",
+    "model": "<adapter-served-name>",
     "messages": [<all turns except final assistant label from the eval row>],
     "max_tokens": 64,
     "temperature": 0,
