@@ -44,6 +44,8 @@ import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
   buildAgentEvaluationSpec,
   configFitIssues,
+  defaultAgentPrompt,
+  defaultJudgePrompt,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
 import {
   DATASET_FILE_TYPES,
@@ -73,22 +75,12 @@ import {
   evaluationFilesetName,
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
+import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
+import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import { DatasetPanel } from '@studio/components/evaluation/ModelEvaluationWizard/DatasetPanel';
-import {
-  classifyJudgePromptVariables,
-  hasMalformedBraces,
-} from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
-import { MetricPanel } from '@studio/components/evaluation/ModelEvaluationWizard/MetricPanel';
-import {
-  composeJudgeUserPrompt,
-  datasetConfigShape,
-  EMPTY_FIELD_MAPPING,
-  EVALUATION_FORM_DEFAULTS,
-  refineDatasetConfig,
-  toFieldMapping,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
-import { toDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
+import { hasMalformedBraces } from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
+import { EVALUATION_FORM_DEFAULTS } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useDatasetPreview } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
 import {
   entityNameField,
@@ -170,22 +162,18 @@ const startItems = (rerunDisabled: boolean) => [
   },
 ];
 
-const FILE_SOURCE_UPLOAD = 'upload';
-const FILE_SOURCE_FILESET = 'fileset';
-
-type FileSource = typeof FILE_SOURCE_UPLOAD | typeof FILE_SOURCE_FILESET;
-
-const FILE_SOURCE_ITEMS = [
-  { value: FILE_SOURCE_UPLOAD, children: 'Upload a file' },
-  { value: FILE_SOURCE_FILESET, children: 'Choose from a fileset' },
-];
-
 const CONFIG_KIND_FORM = 'form';
-const CONFIG_KIND_EXISTING = 'existing';
+const CONFIG_KIND_FILESET = 'fileset';
+const CONFIG_KIND_UPLOAD = 'upload';
+
+const CONFIG_KINDS = [CONFIG_KIND_FORM, CONFIG_KIND_FILESET, CONFIG_KIND_UPLOAD] as const;
+
+type ConfigKind = (typeof CONFIG_KINDS)[number];
 
 const CONFIG_KIND_ITEMS = [
-  { value: CONFIG_KIND_FORM, children: 'Build with form' },
-  { value: CONFIG_KIND_EXISTING, children: 'Use existing config' },
+  { value: CONFIG_KIND_FORM, children: 'Build with Form' },
+  { value: CONFIG_KIND_FILESET, children: 'Choose from Fileset' },
+  { value: CONFIG_KIND_UPLOAD, children: 'Upload' },
 ];
 
 const MAX_PARALLELISM = 16;
@@ -208,11 +196,17 @@ const submitEvaluationBaseSchema = z.object({
   evaluationName: z.string(),
   /** Read every Parquet file beside the picked one as one dataset. */
   useAllShards: z.boolean(),
-  /** Whether the eval config is built here or brought as a file. */
-  configKind: z.enum([CONFIG_KIND_FORM, CONFIG_KIND_EXISTING]),
-  /** The edited user message sent to the agent; ``null`` while it follows the Input mapping. */
+  /** Whether the eval config is built here, picked from a fileset, or uploaded. */
+  configKind: z.enum(CONFIG_KINDS),
+  /** The prompt sent to the agent; ``null`` while it is still the generated one. */
   promptTemplate: z.string().nullable(),
-  ...datasetConfigShape,
+  dataset: z.string().nullable(),
+  /** The guided form's LLM judge. */
+  body: z.object({
+    judgeModel: z.string(),
+    judgePrompt: z.string().nullable(),
+    scores: z.array(z.custom<PanelScoreFormData>()),
+  }),
   configFileset: z.string(),
   configFile: z.string(),
   parallelism: z.coerce
@@ -224,6 +218,9 @@ const submitEvaluationBaseSchema = z.object({
 });
 
 type SubmitEvaluationFormData = z.infer<typeof submitEvaluationBaseSchema>;
+
+const isUnusablePrompt = (prompt: string | null) =>
+  prompt !== null && (!prompt.trim() || hasMalformedBraces(prompt));
 
 const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
   submitEvaluationBaseSchema.superRefine((data, ctx) => {
@@ -245,24 +242,42 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
       if (nameError) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: nameError, path: ['newName'] });
       }
-      if (data.configKind === CONFIG_KIND_FORM) {
-        refineDatasetConfig(data, ctx);
-        if (
-          data.promptTemplate !== null &&
-          (!data.promptTemplate.trim() || hasMalformedBraces(data.promptTemplate))
-        ) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Write a prompt with matched {{ }} braces, or reset it to the Input field.',
-            path: ['promptTemplate'],
-          });
-        }
-      } else if (!data.dataset) {
+      if (!data.dataset) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: 'Select an input file.',
           path: ['dataset'],
         });
+      }
+      if (data.configKind === CONFIG_KIND_FORM) {
+        if (isUnusablePrompt(data.promptTemplate)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Write a prompt.',
+            path: ['promptTemplate'],
+          });
+        }
+        if (isUnusablePrompt(data.body.judgePrompt)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Write a prompt.',
+            path: ['body', 'judgePrompt'],
+          });
+        }
+        if (!data.body.judgeModel) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Select a judge model.',
+            path: ['body', 'judgeModel'],
+          });
+        }
+        if (data.body.scores.length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Add at least one score for the judge to extract.',
+            path: ['body', 'scores'],
+          });
+        }
       }
     }
     if (data.mode === MODE_EXPERIMENT && !data.evaluationName) {
@@ -297,8 +312,7 @@ const makeDefaultValues = (
   configKind: CONFIG_KIND_FORM,
   promptTemplate: null,
   dataset: null,
-  fieldMapping: EMPTY_FIELD_MAPPING,
-  body: EVALUATION_FORM_DEFAULTS.body,
+  body: { judgeModel: '', judgePrompt: null, scores: EVALUATION_FORM_DEFAULTS.body.scores },
   configFileset: '',
   configFile: '',
   parallelism: DEFAULT_PARALLELISM,
@@ -480,7 +494,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const [step, setStep] = useState<WizardStep>(sourceEvaluation ? 'evaluation' : 'start');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [configPick, setConfigPick] = useState<ConfigPick | null>(null);
-  const [configSource, setConfigSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
 
   // Bumped whenever a pick is replaced, removed, or reset, so an async validation that is
   // still running when that happens knows to drop its result instead of committing it.
@@ -540,18 +553,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
-  const [dataset, fieldMapping, promptTemplate, useAllShards, judgePrompt, judgeSelected] =
-    useWatch({
-      control,
-      name: [
-        'dataset',
-        'fieldMapping',
-        'promptTemplate',
-        'useAllShards',
-        'body.judgePrompt',
-        'body.metrics.llm-judge',
-      ],
-    });
+  const [dataset, promptTemplate, useAllShards, judgePrompt] = useWatch({
+    control,
+    name: ['dataset', 'promptTemplate', 'useAllShards', 'body.judgePrompt'],
+  });
   const datasetLocation = dataset ? parseFilesetLocation(dataset) : null;
   // Reading the sibling shards is opted into per file: another pick may share a folder with
   // files that are not part of it, such as a test split beside a train split.
@@ -604,7 +609,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const configFileset = useWatch({ control, name: 'configFileset' });
   const configFilePath = useWatch({ control, name: 'configFile' });
-  const isConfigFromFileset = configSource === FILE_SOURCE_FILESET;
+  const isConfigFromFileset = configKind === CONFIG_KIND_FILESET;
   const configFilesetFile = useFilesetFile({
     workspace,
     fileset: configFileset,
@@ -631,27 +636,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // Checked against the row the preview read, so nothing is reported before the columns are known.
   const configIssues =
     !isFormConfig && pickedSpec && preview.row ? configFitIssues(pickedSpec, columns) : [];
-  const promptIssues =
-    isFormConfig && promptTemplate && preview.row
-      ? configFitIssues(
-          {
-            dataset: '',
-            metrics: [],
-            prompt_template: promptTemplate,
-            field_mapping: toFieldMapping(fieldMapping) ?? null,
-          },
-          columns
-        )
+  const generatedAgentPrompt = defaultAgentPrompt(columns);
+  const generatedJudgePrompt = defaultJudgePrompt(columns);
+  const promptFitIssues = (prompt: string) =>
+    isFormConfig && preview.row
+      ? configFitIssues({ dataset: '', metrics: [], prompt_template: prompt }, columns)
       : [];
-  const judgePromptReport = classifyJudgePromptVariables(
-    judgePrompt ?? composeJudgeUserPrompt(toDatasetBindings(fieldMapping)),
-    columns,
-    fieldMapping
-  );
-  const judgePromptInvalid =
-    isFormConfig &&
-    judgeSelected &&
-    (judgePromptReport.invalid.length > 0 || judgePromptReport.malformed);
+  const promptIssues = promptFitIssues(promptTemplate ?? generatedAgentPrompt);
+  const judgePromptIssues = promptFitIssues(judgePrompt ?? generatedJudgePrompt);
 
   const rawExperimentName = useWatch({ control, name: 'newName' });
   const rawRecordName = useWatch({ control, name: 'evaluationRecordName' });
@@ -808,19 +800,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     setConfigPick(pick);
   };
 
-  // The override belongs to a picked config; a built one chose its judge on the Metrics step.
+  // The override belongs to a picked config; a built one picks its own judge.
   const handleConfigKindChanged = (value: string) => {
     setValue('judgeModel', '');
     clearErrors();
-    setValue('configKind', value as typeof CONFIG_KIND_FORM | typeof CONFIG_KIND_EXISTING);
-  };
-
-  const handleConfigSourceChanged = (value: string) => {
-    setValue('judgeModel', '');
     clearConfigPick();
     setValue('configFileset', '');
     setValue('configFile', '');
-    setConfigSource(value as FileSource);
+    setValue('configKind', value as ConfigKind);
   };
 
   const {
@@ -832,7 +819,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       const configInputs =
         formData.configKind === CONFIG_KIND_FORM
           ? {
-              spec: buildAgentEvaluationSpec(formData, workspace, formData.promptTemplate),
+              spec: buildAgentEvaluationSpec(
+                formData.dataset ?? '',
+                formData.promptTemplate ?? generatedAgentPrompt,
+                {
+                  ...formData.body,
+                  judgePrompt: formData.body.judgePrompt ?? generatedJudgePrompt,
+                },
+                workspace
+              ),
               configFormat: 'json' as const,
             }
           : pickedSpec && { spec: pickedSpec, configFormat: activeConfigPick?.format ?? 'json' };
@@ -934,12 +929,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       if (datasetError) return datasetError;
       if (configIssues.length > 0)
         return 'This eval config reads fields the dataset does not have.';
+      if (isLlmJudge && isJudgeModelsLoading) return 'Loading judge models...';
       if (promptIssues.length > 0)
         return 'The agent prompt reads fields the dataset does not have.';
-    }
-    if (step === 'metrics') {
-      if (isLlmJudge && isJudgeModelsLoading) return 'Loading judge models...';
-      if (judgePromptInvalid) return 'Fix the judge prompt to continue.';
+      if (judgePromptIssues.length > 0)
+        return 'The judge prompt reads fields the dataset does not have.';
     }
     // The re-run path picks its source on this step too, so the source's own problems are
     // reported here rather than swallowed by a Submit that quietly does nothing.
@@ -958,14 +952,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       setSubmitAttempted(true);
       const valid = await trigger(
         isFormConfig
-          ? ['parallelism', 'dataset', 'fieldMapping', 'promptTemplate']
-          : ['parallelism', 'dataset']
+          ? ['parallelism', 'dataset', 'promptTemplate', 'body']
+          : ['parallelism', 'dataset', 'judgeModel']
       );
       if (!valid || (!isFormConfig && !pickedSpec)) return;
-    }
-    if (step === 'metrics') {
-      const valid = await trigger(isFormConfig ? ['body'] : ['judgeModel']);
-      if (!valid || (isLlmJudge && isJudgeModelsLoading)) return;
     }
     setStep(nextStep(steps, step));
   };
@@ -982,7 +972,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (hasNameConflict) return;
     if (
       mode === MODE_DEFAULT &&
-      ((!isFormConfig && !pickedSpec) || configIssues.length > 0 || promptIssues.length > 0)
+      ((!isFormConfig && !pickedSpec) ||
+        configIssues.length > 0 ||
+        promptIssues.length > 0 ||
+        judgePromptIssues.length > 0)
     ) {
       setStep('configuration');
       return;
@@ -1004,11 +997,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     const failed = (fields: string[]) => fields.some((field) => field in invalid);
     if (
       steps.includes('configuration') &&
-      failed(['parallelism', 'dataset', 'fieldMapping', 'promptTemplate'])
+      failed(['parallelism', 'dataset', 'promptTemplate', 'body', 'judgeModel'])
     ) {
       setStep('configuration');
-    } else if (steps.includes('metrics') && failed(['body', 'judgeModel'])) {
-      setStep('metrics');
     }
   };
 
@@ -1030,7 +1021,8 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     <ControlledTextInput
       useControllerProps={{ control, name: 'parallelism' }}
       name="parallelism"
-      label="Parallel requests"
+      label={<Text kind="label/bold/xl">Parallel Requests</Text>}
+      aria-label="Parallel Requests"
       type="number"
       formFieldProps={{
         slotInfo:
@@ -1148,15 +1140,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           {step === 'configuration' && (
             <>
               <DatasetPanel
+                slotLabel={<Text kind="label/bold/xl">Dataset File</Text>}
                 acceptedFileTypes={DATASET_FILE_TYPES}
-                filesetPurpose={null}
                 allowMultipleUpload
-                showMapping={isFormConfig}
+                showMapping={false}
               >
                 {shards ? (
                   <ControlledCheckbox
                     useControllerProps={{ control, name: 'useAllShards' }}
-                    slotLabel={`Use all ${shards.count} Parquet files in ${shards.dir || 'the fileset root'}`}
+                    slotLabel={`Use All ${shards.count} Parquet Files in ${shards.dir || 'the Fileset Root'}`}
                   />
                 ) : null}
 
@@ -1176,15 +1168,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
                 {dataset && !isFormConfig ? (
                   <Stack gap="density-md">
-                    <SegmentedControl
-                      aria-label="Evaluator config source"
-                      size="tiny"
-                      className="w-full"
-                      value={configSource}
-                      onValueChange={handleConfigSourceChanged}
-                      items={FILE_SOURCE_ITEMS}
-                    />
-
                     {isConfigFromFileset ? (
                       <FilesetConfigPicker<SubmitEvaluationFormData>
                         workspace={workspace}
@@ -1228,58 +1211,97 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               </DatasetPanel>
 
               {dataset && isFormConfig ? (
-                <PromptTemplateSection columns={columns} issues={promptIssues} />
+                <>
+                  <PromptTemplateSection
+                    name="promptTemplate"
+                    title="Agent Prompt"
+                    titleKind="label/bold/lg"
+                    description="Sent to the agent for every row. It starts with every field: remove the ones the agent shouldn't see, such as expected answers."
+                    generated={generatedAgentPrompt}
+                    columns={columns}
+                    issues={promptIssues}
+                  />
+                  <Stack gap="density-lg">
+                    <Text kind="label/bold/lg">LLM-as-a-Judge</Text>
+                    <JudgeModelSelect<SubmitEvaluationFormData>
+                      formFieldName="body.judgeModel"
+                      slotLabel={<Text kind="label/bold/md">Judge Model</Text>}
+                      placeholder="Select a judge model"
+                    />
+                    <PromptTemplateSection
+                      name="body.judgePrompt"
+                      title="Judge Prompt"
+                      titleKind="label/bold/md"
+                      description="Sent to the judge with the agent's response for every row. It starts with every field, so the judge can check the response against the expected values."
+                      generated={generatedJudgePrompt}
+                      columns={columns}
+                      issues={judgePromptIssues}
+                      withResponse
+                    />
+                    <Stack gap="density-sm" className="min-w-0">
+                      <Text kind="label/bold/md">Score Definitions</Text>
+                      <Text kind="body/regular/md" className="text-secondary">
+                        Scores extracted from the judge&apos;s output. These also tell the judge
+                        what to grade.
+                      </Text>
+                      <ScoreDefinitions />
+                    </Stack>
+                  </Stack>
+                </>
+              ) : null}
+
+              {dataset && !isFormConfig && pickedSpec ? (
+                <Stack gap="density-md">
+                  <Text kind="label/bold/lg">Metrics</Text>
+                  <Text className="text-secondary" kind="body/regular/md">
+                    Scored as the eval config defines them, against agent{' '}
+                    <code>{bareName(selectedAgent)}</code>. Any target in the config is replaced by
+                    this agent.
+                  </Text>
+                  <Stack gap="density-sm">
+                    {pickedSpec?.metrics.map((metric, index) => {
+                      const model = metric.payload.metric.model;
+                      const judge =
+                        typeof model === 'string'
+                          ? model
+                          : isConcreteModel(model)
+                            ? model.name
+                            : '';
+                      const description = metric.metadata?.description;
+                      return (
+                        <Stack key={index} gap="density-xs">
+                          <Text kind="label/bold/md">
+                            {metric.metric_type}
+                            {judge ? ` · judge ${judge}` : ''}
+                          </Text>
+                          {typeof description === 'string' ? (
+                            <Text className="text-secondary" kind="body/regular/sm">
+                              {description}
+                            </Text>
+                          ) : null}
+                        </Stack>
+                      );
+                    })}
+                  </Stack>
+                  {isLlmJudge && (
+                    <JudgeModelSelect<SubmitEvaluationFormData>
+                      formFieldName="judgeModel"
+                      slotLabel={
+                        <Text kind="label/bold/md">
+                          {judgeRequired
+                            ? 'Override All LLM Models'
+                            : 'Override All LLM Models (Optional)'}
+                        </Text>
+                      }
+                      slotError={invalidModelsError}
+                    />
+                  )}
+                </Stack>
               ) : null}
 
               {parallelismField}
             </>
           )}
-
-          {step === 'metrics' &&
-            (isFormConfig ? (
-              <MetricPanel />
-            ) : (
-              <>
-                <Text kind="label/bold/xl">Metrics</Text>
-                <Text className="text-secondary" kind="body/regular/md">
-                  Scored as the eval config defines them, against agent{' '}
-                  <code>{bareName(selectedAgent)}</code>. Any target in the config is replaced by
-                  this agent.
-                </Text>
-                <Stack gap="density-sm">
-                  {pickedSpec?.metrics.map((metric, index) => {
-                    const model = metric.payload.metric.model;
-                    const judge =
-                      typeof model === 'string' ? model : isConcreteModel(model) ? model.name : '';
-                    const description = metric.metadata?.description;
-                    return (
-                      <Stack key={index} gap="density-xs">
-                        <Text kind="label/bold/md">
-                          {metric.metric_type}
-                          {judge ? ` · judge ${judge}` : ''}
-                        </Text>
-                        {typeof description === 'string' ? (
-                          <Text className="text-secondary" kind="body/regular/sm">
-                            {description}
-                          </Text>
-                        ) : null}
-                      </Stack>
-                    );
-                  })}
-                </Stack>
-                {isLlmJudge && (
-                  <JudgeModelSelect<SubmitEvaluationFormData>
-                    formFieldName="judgeModel"
-                    slotLabel={
-                      judgeRequired
-                        ? 'Override All LLM Models'
-                        : 'Override All LLM Models (Optional)'
-                    }
-                    slotError={invalidModelsError}
-                  />
-                )}
-              </>
-            ))}
 
           {step === 'evaluation' && (
             <>

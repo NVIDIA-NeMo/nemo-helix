@@ -4,14 +4,11 @@
 import {
   buildAgentEvaluationSpec,
   configFitIssues,
+  defaultAgentPrompt,
+  defaultJudgePrompt,
   templateFields,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
-import { buildEvaluationSpec } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
-import {
-  EVALUATION_FORM_DEFAULTS,
-  EMPTY_FIELD_MAPPING,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
-import { toDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
+import { EVALUATION_FORM_DEFAULTS } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import {
   type DatasetEvalSpec,
   parseUploadedDatasetConfig,
@@ -32,21 +29,15 @@ const triageColumns = Object.keys(
 
 /** What the model wizard saves for an OpenAI messages dataset: input and reference bound by
  *  role into the ``messages`` column. */
-const modelConfig = buildAgentEvaluationSpec(
-  {
-    ...EVALUATION_FORM_DEFAULTS,
-    dataset: 'ws/chats#chats.jsonl',
-    fieldMapping: {
-      ...EMPTY_FIELD_MAPPING,
-      messages: 'messages',
-      input: 'messages[role=user].content',
-      reference: 'messages[role=assistant].content',
-    },
-    body: { ...EVALUATION_FORM_DEFAULTS.body, judgeModel: 'ws/judge' },
+const modelConfig: DatasetEvalSpec = {
+  dataset: 'ws/chats#chats.jsonl',
+  prompt_template: { messages: [{ role: 'user', content: '{{input}}' }] },
+  field_mapping: {
+    input: 'messages[role=user].content',
+    reference: 'messages[role=assistant].content',
   },
-  'ws',
-  null
-);
+  metrics: [],
+};
 
 const withPrompt = (prompt_template: DatasetEvalSpec['prompt_template']): DatasetEvalSpec => ({
   dataset: '',
@@ -96,23 +87,45 @@ describe('templateFields', () => {
   });
 });
 
-describe('buildAgentEvaluationSpec', () => {
-  const values = {
-    ...EVALUATION_FORM_DEFAULTS,
-    dataset: 'ws/data#rows.jsonl',
-    fieldMapping: { ...EMPTY_FIELD_MAPPING, input: 'question', reference: 'answer' },
-    body: { ...EVALUATION_FORM_DEFAULTS.body, judgeModel: 'ws/judge' },
-  };
-
-  it('writes the model wizard config unchanged when the prompt is not edited', () => {
-    expect(buildAgentEvaluationSpec(values, 'ws', null)).toEqual(
-      buildEvaluationSpec(values, toDatasetBindings(values.fieldMapping), 'ws')
+describe('default prompts', () => {
+  it('render every column under its name, and the judge also reads the response', () => {
+    expect(defaultAgentPrompt(['user_message', 'emails'])).toBe(
+      'user_message:\n{{ item.user_message }}\n\nemails:\n{{ item.emails }}'
+    );
+    expect(defaultJudgePrompt(['expected'])).toBe(
+      'expected:\n{{ item.expected }}\n\nResponse to evaluate:\n{{ sample.output_text }}'
     );
   });
 
-  it('sends an edited prompt as the user message', () => {
-    expect(buildAgentEvaluationSpec(values, 'ws', '{{ item.question }}!').prompt_template).toEqual({
-      messages: [{ role: 'user', content: '{{ item.question }}!' }],
+  it('index a column whose name is not an identifier', () => {
+    expect(defaultAgentPrompt(['my field'])).toBe("my field:\n{{ item['my field'] }}");
+  });
+
+  it('fit the dataset they were generated from', () => {
+    for (const prompt of [defaultAgentPrompt, defaultJudgePrompt]) {
+      expect(configFitIssues(withPrompt(prompt(triageColumns)), triageColumns)).toEqual([]);
+    }
+  });
+});
+
+describe('buildAgentEvaluationSpec', () => {
+  const judge = {
+    judgeModel: 'ws/judge',
+    judgePrompt: defaultJudgePrompt(['answer']),
+    scores: EVALUATION_FORM_DEFAULTS.body.scores,
+  };
+
+  it('writes a text prompt, no field mapping and one LLM judge with the given prompt', () => {
+    const spec = buildAgentEvaluationSpec('ws/data#rows.jsonl', '{{ item.question }}', judge, 'ws');
+
+    expect(spec).toEqual({
+      dataset: 'ws/data#rows.jsonl',
+      prompt_template: '{{ item.question }}',
+      metrics: [expect.objectContaining({ metric_type: 'llm-judge' })],
+    });
+    expect(spec.metrics[0].payload.metric).toMatchObject({
+      model: { name: 'judge' },
+      prompt_template: { messages: [{ role: 'user', content: judge.judgePrompt }] },
     });
   });
 });

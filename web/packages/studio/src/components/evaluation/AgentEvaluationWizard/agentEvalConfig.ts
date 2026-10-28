@@ -1,28 +1,59 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { buildEvaluationSpec } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
+import { buildMetricBundles } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
 import { ALWAYS_AVAILABLE } from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
 import {
-  composeGenerationPrompt,
-  type DatasetConfigValues,
+  type DatasetBindings,
+  EVALUATION_FORM_DEFAULTS,
+  type EvaluationFormValues,
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
-import { toDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
 import type { DatasetEvalSpec } from '@studio/components/evaluation/submitEvaluationJob';
 
-/** The config the guided form writes: the same file the model wizard writes, with the user's
- *  edited prompt, when there is one, sent as the user message in place of ``{{input}}``. */
-export const buildAgentEvaluationSpec = (
-  values: DatasetConfigValues,
-  workspace: string,
-  promptTemplate: string | null
-): DatasetEvalSpec => {
-  const bindings = toDatasetBindings(values.fieldMapping);
-  return {
-    ...buildEvaluationSpec(values, bindings, workspace),
-    prompt_template: composeGenerationPrompt(bindings, promptTemplate),
-  };
+const IDENTIFIER = /^[A-Za-z_]\w*$/;
+
+const fieldBlocks = (columns: string[]) =>
+  columns.map(
+    (column) =>
+      `${column}:\n{{ ${IDENTIFIER.test(column) ? `item.${column}` : `item['${column}']`} }}`
+  );
+
+/** The agent's prompt until the user edits it: every column, under its name. */
+export const defaultAgentPrompt = (columns: string[]): string => fieldBlocks(columns).join('\n\n');
+
+/** The judge's prompt until the user edits it: every column, then the agent's response. */
+export const defaultJudgePrompt = (columns: string[]): string =>
+  [...fieldBlocks(columns), 'Response to evaluate:\n{{ sample.output_text }}'].join('\n\n');
+
+/** A judge given its prompt reads no bindings, and the judge is the only metric built here. */
+const NO_BINDINGS: DatasetBindings = {
+  messagesColumn: null,
+  input: '',
+  reference: null,
+  context: null,
+  inputPath: null,
+  referencePath: null,
 };
+
+export type AgentJudgeValues = Pick<EvaluationFormValues['body'], 'judgeModel' | 'scores'> & {
+  judgePrompt: string;
+};
+
+/** The config the guided form writes: a text prompt over the row, scored by one LLM judge. */
+export const buildAgentEvaluationSpec = (
+  dataset: string,
+  prompt: string,
+  judge: AgentJudgeValues,
+  workspace: string
+): DatasetEvalSpec => ({
+  dataset,
+  prompt_template: prompt,
+  metrics: buildMetricBundles(
+    { ...EVALUATION_FORM_DEFAULTS, body: { ...EVALUATION_FORM_DEFAULTS.body, ...judge } },
+    NO_BINDINGS,
+    workspace
+  ),
+});
 
 const BLOCK_RE = /\{\{([\s\S]*?)\}\}|\{%-?([\s\S]*?)-?%\}/g;
 const COMMENT_RE = /\{#[\s\S]*?#\}/g;

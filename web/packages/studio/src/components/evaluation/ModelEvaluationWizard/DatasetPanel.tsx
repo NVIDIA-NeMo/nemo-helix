@@ -44,20 +44,19 @@ const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
 );
 
 interface DatasetPanelProps {
+  slotLabel?: ReactNode;
   acceptedFileTypes?: AcceptedFileType[];
-  /** ``null`` lists filesets of every purpose. */
-  filesetPurpose?: FilesetPurpose | null;
   /** Let one upload carry several files, e.g. the shards of a Parquet dataset. */
   allowMultipleUpload?: boolean;
-  /** Off when an existing config supplies its own mapping. */
+  /** Off where the row is rendered into a prompt rather than mapped. */
   showMapping?: boolean;
   /** Rendered between the file checks and the field mapping. */
   children?: ReactNode;
 }
 
 export const DatasetPanel: FC<DatasetPanelProps> = ({
+  slotLabel,
   acceptedFileTypes = [...MAPPABLE_FILE_TYPES],
-  filesetPurpose = FilesetPurpose.dataset,
   allowMultipleUpload,
   showMapping = true,
   children,
@@ -140,9 +139,10 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
           clearError={() => clearErrors('dataset')}
           acceptedFileTypes={acceptedFileTypes}
           invalidFileMode="disable"
-          filesetPurpose={filesetPurpose}
+          filesetPurpose={FilesetPurpose.dataset}
           allowMultipleUpload={allowMultipleUpload}
           autoSelectFirstAcceptable
+          formFieldProps={slotLabel ? { slotLabel } : undefined}
           onFileSelected={() => setValue('fieldMapping', EMPTY_FIELD_MAPPING)}
         />
 
