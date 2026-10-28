@@ -25,8 +25,7 @@ versions:
   announcement:
     message: >-
       These are unreleased development docs from main and may differ from the
-      released product. For NeMo Helix 0.8.1, see the
-      [0.8 docs](/nemo-helix/v0.8/documentation/home).
+      released product.
 
 redirects:
   # Sources are site-relative: Fern adds the instance basepath when matching.
