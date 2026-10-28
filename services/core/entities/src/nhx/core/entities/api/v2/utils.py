@@ -202,11 +202,9 @@ async def get_accessible_workspaces(
     Returns:
         Set of workspace names, or None if all workspaces are accessible
         (auth disabled, or service principal with no on-behalf-of, or platform admin).
-        When the caller is a service principal (``X-NHX-Principal-Id``) with
-        ``X-NHX-Principal-On-Behalf-Of`` set — the pattern used by downstream
-        services to call the entity store — access is computed for the **on-behalf-of**
-        user (id, email, groups), not the service id. This matches the embedded PDP
-        and avoids treating every OBO call as unscoped ``service:*`` access.
+        For any delegated caller, access is computed for the **on-behalf-of** user
+        (id, email, groups), not the actor. This matches the embedded PDP and avoids
+        treating delegated calls as unscoped service access.
     """
     auth_client = auth_client_context.get()
 
@@ -214,17 +212,13 @@ async def get_accessible_workspaces(
     if auth_client is None or not auth_client.auth_enabled:
         return None
 
-    # Act as the end user when the platform calls us as service:… with on-behalf-of
-    # (e.g. EntityClient from a microservice). Otherwise the raw principal id is
-    # "service:platform" and compute_accessible_workspaces would return all workspaces.
+    # Only undelegated internal services bypass workspace restrictions. All delegated
+    # callers use the end user's identity and groups.
     principal = auth_client.principal
-    if principal.is_privileged():
-        if not principal.is_delegated:
-            return None
+    if principal.is_privileged() and not principal.is_delegated:
+        return None
 
-        effective_principal = principal.effective_principal
-    else:
-        effective_principal = principal
+    effective_principal = principal.effective_principal
 
     principal_id = effective_principal.id
 
