@@ -7,96 +7,86 @@ import {
   VariableTextArea,
   type VariableTextAreaHandle,
 } from '@nemo/common/src/components/form/VariableTextArea';
-import { Pencil } from '@nemo/icons/icons';
-import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { templateFields } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
 import { hasMalformedBraces } from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
-import {
-  CANONICAL_FIELD_LABELS,
-  type EvaluationFormValues,
-  toFieldMapping,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
-import { toDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
-import { FC, useMemo, useRef, useState } from 'react';
+import { ComponentProps, FC, useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 interface PromptTemplateFormValues {
   promptTemplate: string | null;
-  fieldMapping: EvaluationFormValues['fieldMapping'];
+  body: { judgePrompt: string | null };
 }
 
 interface PromptTemplateSectionProps {
-  /** The dataset's columns, offered as ``item.<column>``. */
+  name: 'promptTemplate' | 'body.judgePrompt';
+  title: string;
+  titleKind: ComponentProps<typeof Text>['kind'];
+  description: string;
+  /** The prompt while the user has not edited it. */
+  generated: string;
   columns: string[];
-  /** Fit-check findings for the edited prompt. */
+  /** Fit-check findings for the prompt. */
   issues: string[];
+  /** Offer the agent's response, which only the judge can read. */
+  withResponse?: boolean;
 }
 
 /**
- * The user message sent to the agent for every row.
+ * A prompt rendered against each dataset row.
  *
- * Follows the Input mapping until the user edits it: ``promptTemplate`` holds ``null`` while it
- * still does, the same convention as the judge prompt. Editing is how a prompt combines several
- * fields, which a single Input mapping cannot.
+ * The field holds ``null`` while the prompt is still ``generated``, so picking another dataset
+ * regenerates it. Once edited it is left alone.
  */
-export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({ columns, issues }) => {
-  const { control, setValue } = useFormContext<PromptTemplateFormValues>();
-  const [edited, fieldMapping] = useWatch({ control, name: ['promptTemplate', 'fieldMapping'] });
-  const [open, setOpen] = useState(false);
+export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({
+  name,
+  title,
+  titleKind,
+  description,
+  generated,
+  columns,
+  issues,
+  withResponse = false,
+}) => {
+  const { control, setValue, getFieldState, formState } =
+    useFormContext<PromptTemplateFormValues>();
+  const edited = useWatch({ control, name });
   const editorRef = useRef<VariableTextAreaHandle>(null);
 
-  const bindings = toDatasetBindings(fieldMapping);
-  const generated = bindings.input;
-  const mapping = useMemo(() => toFieldMapping(fieldMapping) ?? {}, [fieldMapping]);
+  const value = edited ?? generated;
+  const malformed = hasMalformedBraces(value);
+  const error = getFieldState(name, formState).error?.message;
 
-  const available = useMemo<VariableDef[]>(
+  const variables = useMemo<VariableDef[]>(
     () => [
-      ...(['input', 'reference', 'context'] as const)
-        .filter((field) => mapping[field])
-        .map((field) => ({
-          name: field,
-          description: `The ${CANONICAL_FIELD_LABELS[field]} field (mapped to \`${mapping[field]}\`)`,
-        })),
       ...columns.map((column) => ({ name: `item.${column}`, description: 'Dataset field' })),
+      ...(withResponse
+        ? [{ name: 'sample.output_text', description: "The agent's response" }]
+        : []),
     ],
-    [columns, mapping]
+    [columns, withResponse]
   );
 
   const isKnown = (token: string) =>
-    templateFields(`{{${token}}}`).every((name) => columns.includes(name) || name in mapping);
+    templateFields(`{{${token}}}`).every((field) => columns.includes(field));
 
   return (
-    <Stack gap="density-xs" className="border border-base rounded-lg p-4 bg-surface-raised">
+    <Stack gap="density-xs">
       <Flex gap="density-sm" align="center" justify="between">
-        <Text kind="body/bold/md" className="shrink-0">
-          Agent Prompt
+        <Text kind={titleKind} className="shrink-0">
+          {title}
         </Text>
-        <Flex gap="density-xs" align="center" className="shrink-0">
-          {open ? (
-            <VariableButton
-              variables={available}
-              onSelect={(variable) => editorRef.current?.insertVariable(variable.name)}
-            />
-          ) : null}
-          <Button
-            type="button"
-            kind="tertiary"
-            size="small"
-            aria-label={open ? 'Hide agent prompt' : 'Edit agent prompt'}
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            <Pencil className="size-3.5" aria-hidden />
-          </Button>
-        </Flex>
+        <VariableButton
+          variables={variables}
+          onSelect={(variable) => editorRef.current?.insertVariable(variable.name)}
+        />
       </Flex>
 
       <Text kind="body/regular/sm" className="text-secondary">
-        Sent to the agent as the user message for every row. It is the Input field unless you edit
-        it, for example to combine several fields.
+        {description}
       </Text>
 
-      {edited && hasMalformedBraces(edited) ? (
+      {malformed ? (
         <Banner kind="inline" status="error">
           The prompt has nested or unclosed <code>{'{{ }}'}</code> braces, so the evaluation would
           fail to parse it.
@@ -109,19 +99,23 @@ export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({ columns,
         </Banner>
       ))}
 
-      {open ? (
-        <VariableTextArea
-          ref={editorRef}
-          attributes={{ TextAreaElement: { 'aria-label': 'Agent prompt' } }}
-          className="font-mono text-xs"
-          variables={available}
-          isKnown={isKnown}
-          value={edited ?? generated}
-          onChange={(next) => {
-            setValue('promptTemplate', next === generated ? null : next, { shouldValidate: true });
-          }}
-        />
+      {error && !malformed ? (
+        <Banner kind="inline" status="error">
+          {error}
+        </Banner>
       ) : null}
+
+      <VariableTextArea
+        ref={editorRef}
+        attributes={{ TextAreaElement: { 'aria-label': title } }}
+        className="font-mono text-xs border border-base rounded-lg p-4 bg-surface-raised"
+        variables={variables}
+        isKnown={isKnown}
+        value={value}
+        onChange={(next) => {
+          setValue(name, next === generated ? null : next, { shouldValidate: true });
+        }}
+      />
     </Stack>
   );
 };

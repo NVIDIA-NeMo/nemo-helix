@@ -50,8 +50,8 @@ interface DatasetFileSelectProps {
    *  selects a file. Also hides the post-commit file list since the parent
    *  form already reflects the selection. */
   autoCommit?: boolean;
-  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``; ``null`` lists every purpose. */
-  filesetPurpose?: FilesetPurpose | null;
+  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``. */
+  filesetPurpose?: FilesetPurpose;
   /** Let one upload carry several files while the selection stays a single file. */
   allowMultipleUpload?: boolean;
   /** Label for the fileset picker. Defaults to ``'Dataset'``. */
@@ -282,7 +282,6 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
           acceptableFileTypes={acceptedFileTypes}
           invalidFileMode={invalidFileMode}
           allowMultipleFileSelection={allowMultiple || allowMultipleUpload}
-          filesetPurpose={filesetPurpose}
           // Default modal width is too narrow for the files table; widen the
           // surface so file paths and sizes don't get truncated. Stays
           // responsive with ``max-w-[90vw]``.

@@ -33,8 +33,8 @@ interface ControlledDatasetFileSelectProps extends UseControllerComponentProps {
   /** Inline-only: skip the "Add" button and commit on selection; also hides
    *  the file list rendered below the picker. */
   autoCommit?: boolean;
-  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``; ``null`` lists every purpose. */
-  filesetPurpose?: FilesetPurpose | null;
+  /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``. */
+  filesetPurpose?: FilesetPurpose;
   /** Let one upload carry several files; the field still holds the first. */
   allowMultipleUpload?: boolean;
   /** Label for the fileset picker. Defaults to ``'Dataset'``. */

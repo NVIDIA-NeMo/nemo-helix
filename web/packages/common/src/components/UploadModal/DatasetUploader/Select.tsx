@@ -40,7 +40,7 @@ export const DatasetSelect: FC<Props> = ({ project, disabled, error }) => {
     autoSelectFirstAcceptable,
     showUpdatedAt,
   } = state;
-  const purpose = state.filesetPurpose === null ? undefined : (state.filesetPurpose ?? 'dataset');
+  const purpose = state.filesetPurpose ?? 'dataset';
   const label = state.datasetLabel ?? 'Dataset';
 
   const workspace = project.includes('/') ? project.split('/')[0] : project;

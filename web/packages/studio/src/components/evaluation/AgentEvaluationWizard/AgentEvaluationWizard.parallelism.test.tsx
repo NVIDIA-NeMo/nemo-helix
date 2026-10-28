@@ -148,7 +148,7 @@ const renderWizard = () =>
   });
 
 const setParallelism = async (user: ReturnType<typeof userEvent.setup>, value: string) => {
-  const field = await screen.findByRole('spinbutton', { name: 'Parallel requests' });
+  const field = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
   await user.clear(field);
   await user.type(field, value);
 };
@@ -189,7 +189,7 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await user.click(
       within(
         await screen.findByRole('radiogroup', { name: 'Eval configuration source' })
-      ).getByRole('radio', { name: 'Use existing config' })
+      ).getByRole('radio', { name: 'Upload' })
     );
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
@@ -198,8 +198,6 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await setParallelism(user, '2');
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('string-check');
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
