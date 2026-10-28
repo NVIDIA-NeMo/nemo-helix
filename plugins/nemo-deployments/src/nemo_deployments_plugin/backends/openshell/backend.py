@@ -27,7 +27,8 @@ import hashlib
 import logging
 import posixpath
 import shlex
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import urlsplit
 
@@ -313,18 +314,20 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         target = self._executor_config.grpc_target()
         if self._executor_config.use_insecure():
             return grpc.insecure_channel(target)
+        return grpc.secure_channel(target, self._channel_credentials())
+
+    def _channel_credentials(self) -> grpc.ChannelCredentials:
         tls = self._executor_config.tls
         ca = client_cert = client_key = None
         if tls is not None:
             ca = _read_bytes(tls.ca_cert_path)
             client_cert = _read_bytes(tls.client_cert_path)
             client_key = _read_bytes(tls.client_key_path)
-        credentials = grpc.ssl_channel_credentials(
+        return grpc.ssl_channel_credentials(
             root_certificates=ca,
             private_key=client_key,
             certificate_chain=client_cert,
         )
-        return grpc.secure_channel(target, credentials)
 
     def _workspace_scope(self) -> dm.WorkspaceSelector:
         return dm.WorkspaceSelector(workspace=self._executor_config.workspace)
@@ -496,16 +499,19 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                     internal=True,
                     on_behalf_of=auth_context.to_principal() if platform_auth_enabled() and auth_context else None,
                 ) as requester:
-                    provider_names = await self._provider_provisioner().prepare(
-                        provider_bindings,
-                        workload_workspace=workspace,
-                        workload_id=sandbox_name,
-                        workload=GatewayWorkload(kind="deployment", workspace=workspace, name=name, id=deployment.id),
-                        auth_context=auth_context,
-                        auth_enabled=platform_auth_enabled(),
-                        secrets_client=AsyncSecretsClient.from_client(requester),
-                        platform_host=egress.host,
-                    )
+                    async with self._provider_provisioner() as provisioner:
+                        provider_names = await provisioner.prepare(
+                            provider_bindings,
+                            workload_workspace=workspace,
+                            workload_id=sandbox_name,
+                            workload=GatewayWorkload(
+                                kind="deployment", workspace=workspace, name=name, id=deployment.id
+                            ),
+                            auth_context=auth_context,
+                            auth_enabled=platform_auth_enabled(),
+                            secrets_client=AsyncSecretsClient.from_client(requester),
+                            platform_host=egress.host,
+                        )
             except Exception:
                 logger.warning("Provider provisioning failed for deployment %s/%s", workspace, name)
                 return BackendStatusUpdate(status="FAILED", status_message="Gateway provider provisioning failed.")
@@ -554,17 +560,18 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             internal=True,
             on_behalf_of=auth_context.to_principal() if platform_auth_enabled() and auth_context else None,
         ) as requester:
-            await self._provider_provisioner().prepare(
-                bindings,
-                workload_workspace=workload.workspace,
-                workload_id=_sandbox_name(workload.workspace, workload.name),
-                workload=workload,
-                auth_context=auth_context,
-                auth_enabled=platform_auth_enabled(),
-                secrets_client=AsyncSecretsClient.from_client(requester),
-                platform_host=egress.host,
-                renew=True,
-            )
+            async with self._provider_provisioner() as provisioner:
+                await provisioner.prepare(
+                    bindings,
+                    workload_workspace=workload.workspace,
+                    workload_id=_sandbox_name(workload.workspace, workload.name),
+                    workload=workload,
+                    auth_context=auth_context,
+                    auth_enabled=platform_auth_enabled(),
+                    secrets_client=AsyncSecretsClient.from_client(requester),
+                    platform_host=egress.host,
+                    renew=True,
+                )
 
     async def read_status(self, *, workspace: str, name: str) -> BackendStatusUpdate:
         sandbox_name = _sandbox_name(workspace, name)
@@ -618,26 +625,36 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 return BackendStatusUpdate(status="FAILED", status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}")
         if self._executor_config.gateway_credentials is not None:
             try:
-                await self._provider_provisioner().cleanup(workload_workspace=workspace, workload_id=sandbox_name)
+                async with self._provider_provisioner() as provisioner:
+                    await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
             except Exception:
                 return BackendStatusUpdate(status="DELETING", status_message="Retrying gateway provider cleanup.")
         return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Sandbox {sandbox_name} deleted")
 
-    def _provider_provisioner(self) -> ProviderProvisioner:
+    @asynccontextmanager
+    async def _provider_provisioner(self) -> AsyncGenerator[ProviderProvisioner]:
         config = self._executor_config.gateway_credentials
         if config is None:
             raise ValueError("Gateway credentials are not configured.")
-        return ProviderProvisioner(
-            config,
-            self._executor_config.workspace,
-            self._stub,
-            timeout=self._executor_config.request_timeout_seconds,
+        target = self._executor_config.grpc_target()
+        channel = (
+            grpc.aio.insecure_channel(target)
+            if self._executor_config.use_insecure()
+            else grpc.aio.secure_channel(target, self._channel_credentials())
         )
+        async with channel:
+            yield ProviderProvisioner(
+                config,
+                self._executor_config.workspace,
+                channel,
+                timeout=self._executor_config.request_timeout_seconds,
+            )
 
     async def list_managed_deployment_names(self) -> list[str]:
         if self._executor_config.gateway_credentials is not None:
             try:
-                await self._provider_provisioner().cleanup_unused()
+                async with self._provider_provisioner() as provisioner:
+                    await provisioner.cleanup_unused()
             except Exception:
                 logger.warning("Gateway provider cleanup will be retried.")
         try:

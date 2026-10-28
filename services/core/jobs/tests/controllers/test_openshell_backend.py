@@ -8,6 +8,8 @@ from __future__ import annotations
 import datetime
 import subprocess
 import sys
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -34,10 +36,14 @@ from nhx.core.jobs.controllers.backends.openshell.backend import (
     _ensure_openshell,
     _sandbox_name,
 )
-from nhx.core.jobs.controllers.backends.openshell.sandbox_client import JobsSandboxClient
 from nhx.core.jobs.controllers.backends.registry import BackendKey, backend_registry
 from openshell import SandboxRef, SandboxStatusRef, TlsConfig
 from openshell._proto import openshell_pb2 as pb
+
+
+@asynccontextmanager
+async def _provisioner_context[T](provisioner: T) -> AsyncGenerator[T]:
+    yield provisioner
 
 
 def _backend(mock_nemo_client, mock_platform_config, **config_overrides) -> OpenShellJobBackend:
@@ -203,7 +209,7 @@ class TestSchedule:
         requester = MagicMock(__aenter__=AsyncMock(return_value=MagicMock()), __aexit__=AsyncMock(return_value=False))
         with (
             patch.object(backend_module, "platform_auth_enabled", return_value=auth_enabled),
-            patch.object(backend, "_provider_provisioner", return_value=provisioner),
+            patch.object(backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)),
             patch.object(backend_module, "get_async_nemo_client", return_value=requester) as client,
             patch.object(backend_module.AsyncSecretsClient, "from_client"),
         ):
@@ -475,7 +481,7 @@ class TestSync:
         }
         backend._client.get_sandbox.side_effect = _rpc_error(grpc.StatusCode.NOT_FOUND)
         provisioner = SimpleNamespace(cleanup=AsyncMock(side_effect=[RuntimeError("offline"), None]))
-        with patch.object(backend, "_provider_provisioner", return_value=provisioner):
+        with patch.object(backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)):
             assert backend.sync(step).status == HelixJobStatus.CANCELLING
             assert backend.sync(step).status == HelixJobStatus.CANCELLED
         assert provisioner.cleanup.await_count == 2
@@ -947,43 +953,74 @@ else:
     assert result.returncode == 0, result.stderr
 
 
-async def test_provider_revocation_uses_jobs_sdk_transport_and_timeout(
-    mock_nemo_client, mock_platform_config, tmp_path
+@pytest.mark.parametrize("transport", ["plaintext", "system-roots", "mtls"])
+async def test_provider_revocation_uses_async_transport_and_timeout(
+    mock_nemo_client, mock_platform_config, tmp_path, transport
 ):
     key = tmp_path / "key"
     key.touch(mode=0o600)
     key.write_bytes(b"k" * 32)
-    backend = _backend(mock_nemo_client, mock_platform_config)
+    for name in ("ca", "cert", "tls-key"):
+        (tmp_path / name).write_bytes(name.encode())
+    backend = _backend(
+        mock_nemo_client,
+        mock_platform_config,
+        gateway_endpoint="http://localhost:17670" if transport == "plaintext" else "https://localhost:17670",
+        request_timeout_seconds=7,
+        tls=OpenShellJobTLSConfig(
+            ca_cert_path=str(tmp_path / "ca"),
+            client_cert_path=str(tmp_path / "cert"),
+            client_key_path=str(tmp_path / "tls-key"),
+        )
+        if transport == "mtls"
+        else None,
+    )
     backend._executor_config.gateway_credentials = GatewayCredentialConfig(
         gateway_id="gateway",
         registration_key_file=key,
         profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
     )
-    with patch("grpc.insecure_channel"):
-        client = JobsSandboxClient("localhost:17670", timeout=7.5)
-    stub = MagicMock()
+    stub = MagicMock(GetSandbox=AsyncMock(), DetachSandboxProvider=AsyncMock(), DeleteProvider=AsyncMock())
     stub.GetSandbox.return_value = pb.SandboxResponse(
         sandbox=pb.Sandbox(
             metadata={"resource_version": 12},
             spec={"providers": ["provider-1"]},
         )
     )
-    client._stub = stub
-    backend._client = client
-    provisioner = backend._provider_provisioner()
-    await provisioner._finish_revocation("provider-1", "sandbox-1")
-    stub.DetachSandboxProvider.assert_called_once_with(
+    channel = MagicMock()
+    channel.__aenter__.return_value = channel
+    with (
+        patch("grpc.aio.insecure_channel", return_value=channel) as insecure,
+        patch("grpc.aio.secure_channel", return_value=channel) as secure,
+        patch("grpc.ssl_channel_credentials") as credentials,
+        patch("nemo_helix_plugin.openshell.provider_client.OpenShellStub", return_value=stub),
+    ):
+        async with backend._provider_provisioner() as provisioner:
+            await provisioner._finish_revocation("provider-1", "sandbox-1")
+    channel.__aexit__.assert_awaited_once()
+    if transport == "plaintext":
+        insecure.assert_called_once_with("localhost:17670")
+        secure.assert_not_called()
+    else:
+        insecure.assert_not_called()
+        secure.assert_called_once_with("localhost:17670", credentials.return_value)
+        credentials.assert_called_once_with(
+            root_certificates=b"ca" if transport == "mtls" else None,
+            private_key=b"tls-key" if transport == "mtls" else None,
+            certificate_chain=b"cert" if transport == "mtls" else None,
+        )
+    stub.DetachSandboxProvider.assert_awaited_once_with(
         pb.DetachSandboxProviderRequest(
             workspace_scope={"workspace": backend._workspace},
             sandbox="sandbox-1",
             provider="provider-1",
             expected_resource_version=12,
         ),
-        timeout=7.5,
+        timeout=7,
     )
-    stub.DeleteProvider.assert_called_once_with(
+    stub.DeleteProvider.assert_awaited_once_with(
         pb.DeleteProviderRequest(
             workspace_scope={"workspace": backend._workspace}, name="provider-1", allow_missing=True
         ),
-        timeout=7.5,
+        timeout=7,
     )

@@ -22,6 +22,8 @@ import hashlib
 import logging
 import os
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -608,7 +610,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
     def cleanup_steps(self) -> None:
         if self._executor_config.gateway_credentials is not None:
             try:
-                asyncio.run(self._provider_provisioner().cleanup_unused())
+                asyncio.run(self._cleanup_unused_providers())
             except Exception:
                 logger.warning("Gateway provider cleanup will retry on the next sweep.")
         try:
@@ -676,19 +678,42 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         if step.step_spec is None or not step.step_spec.gateway_providers:
             return True
         try:
-            asyncio.run(
-                self._provider_provisioner().cleanup(workload_workspace=step.workspace, workload_id=sandbox_name)
-            )
+            asyncio.run(self._cleanup_providers(step.workspace, sandbox_name))
         except Exception:
             logger.warning("Provider cleanup failed for job step %s; retrying.", step.id)
             return False
         return True
 
-    def _provider_provisioner(self) -> ProviderProvisioner:
+    async def _cleanup_providers(self, workspace: str, sandbox_name: str) -> None:
+        async with self._provider_provisioner() as provisioner:
+            await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
+
+    async def _cleanup_unused_providers(self) -> None:
+        async with self._provider_provisioner() as provisioner:
+            await provisioner.cleanup_unused()
+
+    @asynccontextmanager
+    async def _provider_provisioner(self) -> AsyncGenerator[ProviderProvisioner]:
         config = self._executor_config.gateway_credentials
         if config is None:
             raise ValueError("Gateway credentials are not configured.")
-        return self._client.provider_provisioner(config, workspace=self._workspace)
+        target = self._executor_config.grpc_target()
+        if self._executor_config.use_insecure():
+            channel = grpc.aio.insecure_channel(target)
+        else:
+            tls = self._executor_config.tls
+            credentials = grpc.ssl_channel_credentials(
+                root_certificates=Path(tls.ca_cert_path).read_bytes() if tls and tls.ca_cert_path else None,
+                private_key=Path(tls.client_key_path).read_bytes() if tls and tls.client_key_path else None,
+                certificate_chain=Path(tls.client_cert_path).read_bytes() if tls and tls.client_cert_path else None,
+            )
+            channel = grpc.aio.secure_channel(target, credentials)
+        # Jobs invokes provider operations with asyncio.run; never retain a
+        # channel across those event loops or create it on the controller thread.
+        async with channel:
+            yield ProviderProvisioner(
+                config, self._workspace, channel, timeout=self._executor_config.request_timeout_seconds
+            )
 
     async def _prepare_providers(
         self, step: HelixJobStepWithContext, sandbox_name: str, *, renew: bool = False
@@ -700,12 +725,15 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         ):
             raise ValueError("Incomplete provider workload context.")
         context = PluginAuthContext.model_validate(step.auth_context.model_dump()) if step.auth_context else None
-        async with get_async_nemo_client(
-            as_service="jobs",
-            internal=True,
-            on_behalf_of=context.to_principal() if platform_auth_enabled() and context else None,
-        ) as client:
-            return await self._provider_provisioner().prepare(
+        async with (
+            get_async_nemo_client(
+                as_service="jobs",
+                internal=True,
+                on_behalf_of=context.to_principal() if platform_auth_enabled() and context else None,
+            ) as client,
+            self._provider_provisioner() as provisioner,
+        ):
+            return await provisioner.prepare(
                 step.step_spec.gateway_providers,
                 workload_workspace=step.workspace,
                 workload_id=sandbox_name,

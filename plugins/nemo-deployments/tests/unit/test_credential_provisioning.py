@@ -41,7 +41,6 @@ from nemo_helix_plugin.openshell.types import (
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
-from openshell._proto.openshell_pb2_grpc import OpenShellStub
 
 
 class Missing(grpc.RpcError):
@@ -69,9 +68,10 @@ class Gateway:
             credentials=[{"env_vars": ["API_TOKEN"]}],
         )
 
-    def stub(self, call: Callable[[str, Message], Coroutine[object, object, Message]] | None = None) -> OpenShellStub:
-        """Real SDK stub with an in-process transport to the simulated gateway."""
-        loop = asyncio.get_running_loop()
+    def channel(
+        self, call: Callable[[str, Message], Coroutine[object, object, Message]] | None = None
+    ) -> grpc.aio.Channel:
+        """In-process async channel for the SDK stub and simulated gateway."""
         dispatch = call or self.call
 
         def unary_unary(
@@ -80,24 +80,20 @@ class Gateway:
             request_serializer: Callable[[Message], bytes],
             response_deserializer: Callable[[bytes], Message],
             _registered_method: bool,
-        ) -> Callable[..., Message]:
+        ) -> Callable[..., Coroutine[object, object, Message]]:
             method = path.rsplit("/", 1)[-1]
 
-            def invoke(request: Message, *, timeout: float) -> Message:
+            async def invoke(request: Message, *, timeout: float) -> Message:
                 assert timeout == 30.0
-                # Match the SDK's blocking transport while running driver coroutines
-                # on the test event loop (also preserves concurrency fault injection).
                 decoded_request = type(request).FromString(request_serializer(request))
-                response = asyncio.run_coroutine_threadsafe(dispatch(method, decoded_request), loop).result(
-                    timeout=timeout
-                )
+                response = await dispatch(method, decoded_request)
                 return response_deserializer(response.SerializeToString())
 
             return invoke
 
-        channel = MagicMock()
+        channel = MagicMock(spec=grpc.aio.Channel)
         channel.unary_unary.side_effect = unary_unary
-        return OpenShellStub(channel)
+        return channel
 
     async def call(self, method: str, request: Message) -> Message:
         if method == "GetProviderProfile":
@@ -235,7 +231,7 @@ async def setup(tmp_path: Path, monkeypatch):
             credential_refresh_verified=True,
             profiles={"service-read": {"workspaces": {"team"}, "credential_keys": {"API_TOKEN"}}},
         )
-        provisioner = ProviderProvisioner(config, "gateway-team", gateway.stub(), tickets=tickets)
+        provisioner = ProviderProvisioner(config, "gateway-team", gateway.channel(), tickets=tickets)
         kwargs = dict(
             workload_workspace="team",
             workload_id="sandbox-1",
@@ -357,7 +353,7 @@ async def test_renewal_survives_controller_restart_without_fetching_values(setup
         restarted = ProviderProvisioner(
             provisioner.config,
             provisioner.workspace,
-            setup.gateway.stub(),
+            setup.gateway.channel(),
             tickets=provisioner.tickets,
             clock=lambda: now[0],
         )
@@ -398,7 +394,7 @@ async def test_concurrent_renewal_uses_gateway_version_and_retry_observes_winner
         return response
 
     provisioner.clock = lambda: 1010
-    provisioner.client = ProviderGatewayClient(setup.gateway.stub(concurrent_call))
+    provisioner.client = ProviderGatewayClient(setup.gateway.channel(concurrent_call))
     results = await asyncio.gather(
         provisioner.prepare(binding(), **setup.kwargs, renew=True),
         provisioner.prepare(binding(), **setup.kwargs, renew=True),
@@ -406,7 +402,7 @@ async def test_concurrent_renewal_uses_gateway_version_and_retry_observes_winner
     )
     assert sum(isinstance(result, Conflict) for result in results) == 1
     assert len(setup.gateway.updates) == 1
-    provisioner.client = ProviderGatewayClient(setup.gateway.stub())
+    provisioner.client = ProviderGatewayClient(setup.gateway.channel())
     await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert len(setup.gateway.updates) == 1
 
@@ -431,7 +427,11 @@ async def test_renewal_prefers_config_timestamp_and_preserves_unrelated_config(s
     assert updated.config["service-option"] == "preserved"
     assert updated.metadata.labels[marker] == "1000"  # Gateway leaves labels untouched.
     restarted = ProviderProvisioner(
-        provisioner.config, provisioner.workspace, setup.gateway.stub(), tickets=provisioner.tickets, clock=lambda: 1012
+        provisioner.config,
+        provisioner.workspace,
+        setup.gateway.channel(),
+        tickets=provisioner.tickets,
+        clock=lambda: 1012,
     )
     await restarted.prepare(binding(), **setup.kwargs, renew=True)
     assert len(setup.gateway.updates) == 1
@@ -463,7 +463,7 @@ async def test_failed_renewal_never_recreates_or_advances_committed_state(setup,
                 raise grpc.RpcError("transient gateway failure")
             return await setup.gateway.call(method, request)
 
-        provisioner.client = ProviderGatewayClient(setup.gateway.stub(fail_update))
+        provisioner.client = ProviderGatewayClient(setup.gateway.channel(fail_update))
     with pytest.raises((ProviderProvisioningError, ProviderAccessRevoked, grpc.RpcError)):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert provider.config["nemo-helix/renewed"] == "1000"
@@ -472,7 +472,7 @@ async def test_failed_renewal_never_recreates_or_advances_committed_state(setup,
     if condition == "missing":
         assert not setup.gateway.providers
     if condition == "update":
-        provisioner.client = ProviderGatewayClient(setup.gateway.stub())
+        provisioner.client = ProviderGatewayClient(setup.gateway.channel())
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
         assert len(setup.gateway.updates) == 1
 
@@ -521,7 +521,7 @@ async def test_revocation_retries_after_restart(setup, failure):
             raise Conflict()
         return await setup.gateway.call(method, request)
 
-    provisioner.client = ProviderGatewayClient(setup.gateway.stub(failing_call))
+    provisioner.client = ProviderGatewayClient(setup.gateway.channel(failing_call))
     with pytest.raises(Conflict):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert names[0] in setup.gateway.providers
@@ -529,7 +529,11 @@ async def test_revocation_retries_after_restart(setup, failure):
     if failure != "UpdateProvider":
         provisioner.tickets.issue = AsyncMock(side_effect=AssertionError("must not authorize a revoked provider"))
     restarted = ProviderProvisioner(
-        provisioner.config, provisioner.workspace, setup.gateway.stub(), tickets=provisioner.tickets, clock=lambda: 1011
+        provisioner.config,
+        provisioner.workspace,
+        setup.gateway.channel(),
+        tickets=provisioner.tickets,
+        clock=lambda: 1011,
     )
     with pytest.raises(ProviderAccessRevoked):
         await restarted.prepare(binding(), **setup.kwargs, renew=True)
