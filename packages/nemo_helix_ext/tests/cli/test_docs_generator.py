@@ -206,3 +206,15 @@ def test_write_docs_files_matches_individual_generators(tmp_path):
     assert summary_path.read_text(encoding="utf-8") == with_trailing_newline(
         generate_index_snippet(docs_app, name="nemo")
     )
+
+
+def test_committed_cli_reference_has_no_bare_placeholder_urls() -> None:
+    """A URL template in help text must be a code span, not an autolinked dead URL.
+
+    Fern autolinks a bare ``https://`` URL in prose, so an escaped placeholder such as
+    ``https://github.com/&lt;org>/...`` becomes a live link whose href GitHub cannot resolve.
+    """
+    reference = Path(_docs_generator._REFERENCE_DOCS_PATH).read_text(encoding="utf-8")
+    prose = re.sub(r"(`+)(?:(?!\1).)+?\1", "", reference)
+    offenders = [line for line in prose.splitlines() if re.search(r"https?://\S*&lt;", line)]
+    assert offenders == []
