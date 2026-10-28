@@ -54,7 +54,7 @@ describe('bareName', () => {
 
 describe('buildAgentTarget', () => {
   it('targets the non-streaming chat-completions endpoint of the agent', () => {
-    const target = buildAgentTarget('ws-a', 'support-bot');
+    const target = buildAgentTarget({ workspace: 'ws-a', agent: 'support-bot' });
     expect(target.kind).toBe('agent');
     expect(target.agent.format).toBe('generic');
     expect(target.agent.stream).toBe(false);
@@ -68,16 +68,29 @@ describe('buildAgentTarget', () => {
   });
 
   it('strips a workspace prefix from the agent name', () => {
-    const target = buildAgentTarget('ws-a', 'ws-a/support-bot');
+    const target = buildAgentTarget({ workspace: 'ws-a', agent: 'ws-a/support-bot' });
     expect(target.agent.name).toBe('support-bot');
     expect(target.agent.body.model).toBe('support-bot');
     expect(target.agent.url).toContain('/agents/support-bot/-/');
+  });
+
+  it('calls the chosen deployment while still naming the agent', () => {
+    const target = buildAgentTarget({
+      workspace: 'ws-a',
+      agent: 'support-bot',
+      deployment: 'support-bot-k8s',
+    });
+    expect(target.agent.url).toContain(
+      '/workspaces/ws-a/deployments/support-bot-k8s/-/v1/chat/completions'
+    );
+    expect(target.agent.url).not.toContain('/agents/support-bot/');
+    expect(target.agent.name).toBe('support-bot');
   });
 });
 
 describe('buildDatasetAgentTarget', () => {
   it('renders the row prompt into the chat message', () => {
-    const target = buildDatasetAgentTarget('ws-a', 'support-bot');
+    const target = buildDatasetAgentTarget({ workspace: 'ws-a', agent: 'support-bot' });
     expect(target.format).toBe('generic');
     expect(target.response_path).toBe('$.choices[0].message.content');
     expect(target.body).toEqual({
@@ -86,6 +99,15 @@ describe('buildDatasetAgentTarget', () => {
       stream: false,
     });
     expect(target.url).toContain('/agents/support-bot/-/v1/chat/completions');
+  });
+
+  it('calls the chosen deployment', () => {
+    const target = buildDatasetAgentTarget({
+      workspace: 'ws-a',
+      agent: 'support-bot',
+      deployment: 'support-bot-k8s',
+    });
+    expect(target.url).toContain('/deployments/support-bot-k8s/-/v1/chat/completions');
   });
 });
 

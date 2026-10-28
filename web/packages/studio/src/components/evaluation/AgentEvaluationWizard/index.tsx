@@ -3,6 +3,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { isConflictError } from '@nemo/common/src/api/common/utils';
+import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
@@ -51,6 +52,7 @@ import {
   type StoredDatasetFile,
 } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
 import { useEvaluationSources } from '@studio/components/evaluation/AgentEvaluationWizard/useEvaluationSources';
+import { useRunningDeployments } from '@studio/components/evaluation/AgentEvaluationWizard/useRunningDeployments';
 import {
   type EvaluationMode,
   isLastStep,
@@ -101,6 +103,7 @@ import {
 import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityNameCheck';
 import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
+import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
@@ -175,6 +178,7 @@ const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
 
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
+  deployment: z.string(),
   judgeModel: z.string(),
   mode: z.enum([MODE_DEFAULT, MODE_EXPERIMENT]),
   /** Name of the experiment created on the "new experiment" path. The fileset holding this run's
@@ -244,6 +248,7 @@ const makeDefaultValues = (
   sourceEvaluation?: string
 ): SubmitEvaluationFormData => ({
   agent: agent ?? '',
+  deployment: '',
   judgeModel: '',
   // Provisional: the preselect effect corrects this once the evaluation list resolves.
   mode: MODE_EXPERIMENT,
@@ -480,6 +485,36 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     modeDefaultApplied.current = true;
     if (sources.isEmpty) setValue('mode', MODE_DEFAULT);
   }, [selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
+
+  const deployment = useWatch({ control, name: 'deployment' });
+  const runningDeployments = useRunningDeployments({
+    workspace,
+    agent: selectedAgent || undefined,
+  });
+  const firstRunningDeployment = runningDeployments.deployments[0]?.name;
+
+  // Filled only while empty: a pick that later stops running is reported below, never swapped
+  // for another deployment behind the user's back.
+  useEffect(() => {
+    if (!deployment && firstRunningDeployment) setValue('deployment', firstRunningDeployment);
+  }, [deployment, firstRunningDeployment, setValue]);
+
+  const deploymentIssue = (() => {
+    if (!selectedAgent || runningDeployments.isLoading) return undefined;
+    if (runningDeployments.deployments.length === 0) {
+      return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
+    }
+    if (!runningDeployments.deployments.some((d) => d.name === deployment)) {
+      return deployment
+        ? `Deployment ${deployment} is no longer running. Pick another.`
+        : 'Pick a deployment to evaluate.';
+    }
+    return undefined;
+  })();
+  const deploymentItems = runningDeployments.deployments.map((d) => ({
+    value: d.name ?? '',
+    children: `${d.name} · ${deploymentModeLabel(d.deployment_mode)}`,
+  }));
 
   // Nothing is preselected here. A step whose whole job is "choose the run to re-run" should not
   // answer itself — Next stays disabled until the user picks, and stepBlocker says why. (A run
@@ -793,6 +828,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         const selections = {
           workspace,
           agent: formData.agent,
+          deployment: formData.deployment,
           filesetName,
           experimentName: nameStem,
           evaluationId,
@@ -827,7 +863,17 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // fields — otherwise step one would refuse to advance over a field two steps away.
   const stepBlocker = (): StepBlocker | undefined => {
     if (step === 'start') {
-      return selectedAgent ? undefined : blockedWith('Pick an agent to evaluate.');
+      if (!selectedAgent) {
+        return blockedWith('Pick an agent to evaluate.');
+      }
+      // Caught here, not at submit, so nobody fills in a whole run for an agent nothing can answer.
+      if (runningDeployments.isLoading) {
+        return blockedWith('Loading deployments...');
+      }
+      if (runningDeployments.deployments.length === 0 && deploymentIssue) {
+        return blockedWith(deploymentIssue);
+      }
+      return undefined;
     }
     if (step === 'experiment') {
       if (!experimentPreview) {
@@ -849,6 +895,13 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
     // click. Schema errors stay out: those only show once a submit is tried.
     if (step === 'evaluation') {
+      if (runningDeployments.isLoading) {
+        return blockedWith('Loading deployments...');
+      }
+      // The picker shows the reason on the field itself.
+      if (deploymentIssue) {
+        return SHOWN_ON_FIELD;
+      }
       if (mode === MODE_EXPERIMENT) {
         if (hasNoEvaluations) {
           return SHOWN_ON_FIELD;
@@ -1187,6 +1240,22 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                     disabled={isPending}
                   />
                 ))}
+
+              <ControlledSelect
+                useControllerProps={{ control, name: 'deployment' }}
+                items={deploymentItems}
+                loading={runningDeployments.isLoading}
+                disabled={isPending}
+                placeholder="Select a deployment"
+                formFieldProps={{
+                  slotLabel: 'Deployment',
+                  slotHelp:
+                    'The running deployment this evaluation calls. It is recorded on the job, so results can be traced back to it.',
+                  slotError: deploymentIssue,
+                  status: deploymentIssue ? 'error' : undefined,
+                }}
+                hideError
+              />
 
               <ControlledTextInput
                 useControllerProps={{ control, name: 'evaluationRecordName' }}

@@ -62,6 +62,7 @@ describe('EvaluationsTable Job column', () => {
       created_at: '2024-12-17T16:08:56.880768',
       kind: 'dataset',
       agentName: 'my-agent',
+      deployment: null,
       configLabel: null,
       evaluationName: null,
       outcome: null,
@@ -79,6 +80,41 @@ describe('EvaluationsTable Job column', () => {
     for (const link of links) {
       expect(link).toHaveAttribute('href', '/workspaces/default/jobs/my-eval-job');
     }
+  });
+});
+
+describe('EvaluationsTable Deployment column', () => {
+  const jobCalling = (name: string, deployment: EvalJobRow['deployment']): EvalJobRow => ({
+    id: name,
+    name,
+    status: 'completed',
+    created_at: '2024-12-17T16:08:56.880768',
+    kind: 'task',
+    agentName: 'my-agent',
+    deployment,
+    configLabel: null,
+    evaluationName: null,
+    outcome: null,
+  });
+
+  it('links a run to the deployment it called, and marks a by-agent run as automatic', async () => {
+    renderTable(
+      [],
+      [
+        jobCalling('pinned-run', { kind: 'deployment', name: 'my-agent-k8s' }),
+        jobCalling('routed-run', { kind: 'automatic' }),
+      ]
+    );
+
+    const links = await screen.findAllByRole(
+      'link',
+      { name: 'my-agent-k8s' },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', '/workspaces/default/agent-deployments/my-agent-k8s');
+    }
+    expect(screen.getAllByText('Automatic').length).toBeGreaterThan(0);
   });
 });
 

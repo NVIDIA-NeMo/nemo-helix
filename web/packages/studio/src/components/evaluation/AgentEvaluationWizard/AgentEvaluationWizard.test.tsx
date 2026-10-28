@@ -11,6 +11,7 @@ import {
   evaluationConfigError,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
+import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
@@ -135,6 +136,7 @@ const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluation
 
 describe('AgentEvaluationWizard', () => {
   beforeEach(() => {
+    server.use(agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-subprocess`)]));
     vi.mocked(evaluationConfigError).mockResolvedValue(null);
   });
 
