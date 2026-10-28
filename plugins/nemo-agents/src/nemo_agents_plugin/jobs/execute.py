@@ -50,7 +50,7 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
 from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
 from nemo_agents_plugin.jobs.post_run_actions import (
     NOOP_POST_RUN_ACTION_KIND,
-    run_post_run_action,
+    resolve_post_run_action,
     validate_post_run_action_config,
 )
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
@@ -187,24 +187,18 @@ def _make_noop_post_run_action_config() -> PostRunActionConfig:
     return PostRunActionConfig(kind=NOOP_POST_RUN_ACTION_KIND)
 
 
-# Kinds renamed along with ``extension`` -> ``post_run_action``.
-_LEGACY_POST_RUN_ACTION_KINDS = {"noop": NOOP_POST_RUN_ACTION_KIND}
-
-
 def _translate_legacy_extension(spec: dict[str, Any]) -> dict[str, Any]:
     """Rewrite a stored pre-rename ``extension`` as ``post_run_action``.
 
     Only for records read back from the Jobs service: a new request that sets
-    ``extension`` is still rejected by ``ExecuteAgentJobConfig``.
+    ``extension`` is still rejected by ``ExecuteAgentJobConfig``. The kind is
+    kept as written; a stored kind need not be installed to be read.
     """
     if "extension" not in spec:
         return spec
     spec = dict(spec)
     extension = spec.pop("extension")
     if isinstance(extension, dict) and "post_run_action" not in spec:
-        kind = extension.get("kind")
-        if isinstance(kind, str):
-            extension = {**extension, "kind": _LEGACY_POST_RUN_ACTION_KINDS.get(kind, kind)}
         spec["post_run_action"] = extension
     return spec
 
@@ -356,8 +350,7 @@ class ExecuteAgentStepConfig(BaseModel):
         # Jobs created before the rename store ``extension`` at both levels.
         # Every read of such a job validates it against this model, so
         # rejecting it would make old jobs (and the Compass analysis runs
-        # backed by them) unreadable; translating keeps what they ran, and
-        # what a rerun would run.
+        # backed by them) unreadable; translating keeps what they ran.
         if not isinstance(data, dict):
             return data
         data = _translate_legacy_extension(data)
@@ -526,6 +519,13 @@ class ExecuteAgentJob(NemoJob):
 
         _validate_agent_config_format(step_config.agent.config_format)
         agent_config = _validate_agent_config(step_config.agent.config)
+        # Checked at create time, but against the API server's plugins: the task
+        # image can differ, and a stored job can outlive the plugin that provided
+        # its action. Resolve it before the agent spends any time or tokens.
+        try:
+            post_run_action = resolve_post_run_action(step_config.post_run_action.kind)
+        except ValueError as exc:
+            raise ValueError(f"Cannot run this job's post-run action, so the agent was not invoked: {exc}") from exc
 
         fabric_dirs = FabricDirectories.create(agent_config, ctx.storage.ephemeral)
 
@@ -643,15 +643,14 @@ class ExecuteAgentJob(NemoJob):
             status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
             if status == "completed":
                 try:
-                    run_post_run_action(
-                        step_config.post_run_action.kind,
+                    post_run_action().after_invoke(
                         PostRunActionContext(
                             ctx=ctx,
                             config=step_config.post_run_action.config,
                             agent_name=step_config.agent.name,
                             agent_config=step_config.agent.config,
                             fabric_result=result,
-                        ),
+                        )
                     )
                 except Exception:
                     logger.exception("Post-run action %r failed.", step_config.post_run_action.kind)

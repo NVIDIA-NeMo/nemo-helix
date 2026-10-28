@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+from collections.abc import Callable
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -1179,6 +1180,22 @@ def test_run_threads_custom_timeout_to_fabric(ctx: JobContext) -> None:
     assert result["status"] == "completed"
 
 
+def _patch_post_run_action(after_invoke: Callable[[Any], None] | None = None, *, resolved: list[str] | None = None):
+    """Install a fake action for any kind, recording which kinds were resolved."""
+
+    class _Action:
+        def after_invoke(self, context: Any) -> None:
+            if after_invoke is not None:
+                after_invoke(context)
+
+    def _resolve(kind: str) -> type[_Action]:
+        if resolved is not None:
+            resolved.append(kind)
+        return _Action
+
+    return patch("nemo_agents_plugin.jobs.execute.resolve_post_run_action", _resolve)
+
+
 def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
@@ -1190,8 +1207,11 @@ def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
     async def _invoke(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
 
-    def _after_invoke(kind: str, context: Any) -> None:
-        assert kind == "example.action"
+    resolved: list[str] = []
+    contexts: list[Any] = []
+
+    def _after_invoke(context: Any) -> None:
+        contexts.append(context)
         assert context.config == {"agent": "research-agent"}
         assert context.agent_name == "calc"
         assert context.agent_config == spec.agent.config
@@ -1199,12 +1219,14 @@ def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
 
     with (
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
-        patch("nemo_agents_plugin.jobs.execute.run_post_run_action", _after_invoke),
+        _patch_post_run_action(_after_invoke, resolved=resolved),
     ):
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert result["status"] == "completed"
     assert "post_run_action" not in result
+    assert resolved == ["example.action"]
+    assert len(contexts) == 1
 
 
 def test_run_skips_post_run_action_for_failed_fabric_result(ctx: JobContext) -> None:
@@ -1217,9 +1239,10 @@ def test_run_skips_post_run_action_for_failed_fabric_result(ctx: JobContext) -> 
     async def _invoke(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="failed", error={"message": "adapter failed"})
 
+    after_invoke = MagicMock()
     with (
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
-        patch("nemo_agents_plugin.jobs.execute.run_post_run_action") as after_invoke,
+        _patch_post_run_action(after_invoke),
     ):
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
 
@@ -1237,18 +1260,38 @@ def test_run_post_run_action_exception_is_logged(ctx: JobContext, caplog: pytest
     async def _invoke(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
 
-    def _after_invoke(kind: str, context: Any) -> None:
+    def _after_invoke(context: Any) -> None:
         raise RuntimeError("action exploded")
 
     with (
         caplog.at_level(logging.ERROR, logger="nemo_agents_plugin.jobs.execute"),
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
-        patch("nemo_agents_plugin.jobs.execute.run_post_run_action", _after_invoke),
+        _patch_post_run_action(_after_invoke),
         pytest.raises(RuntimeError, match="action exploded"),
     ):
         ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
 
     assert "Post-run action 'example.action' failed." in caplog.text
+
+
+def test_run_fails_before_invoking_the_agent_when_its_post_run_action_is_not_installed(ctx: JobContext) -> None:
+    """The task image can lack a plugin the API server had at create time, and a
+    stored job can outlive its plugin; neither should cost a full agent run.
+    """
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+        post_run_action=PostRunActionConfig(kind="uninstalled.action"),
+    )
+    invoke = AsyncMock()
+
+    with (
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", invoke),
+        pytest.raises(ValueError, match=r"agent was not invoked: Unknown post-run action 'uninstalled\.action'"),
+    ):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    invoke.assert_not_awaited()
 
 
 def test_run_rejects_non_fabric_step_config(ctx: JobContext) -> None:
@@ -2697,11 +2740,12 @@ def test_a_stored_pre_rename_step_config_reads_back_as_its_post_run_action() -> 
     assert step_config.request.post_run_action == expected
 
 
-def test_a_stored_pre_rename_noop_reads_back_as_agents_noop() -> None:
+def test_a_stored_pre_rename_kind_reads_back_as_written() -> None:
+    """``noop`` is not rewritten to ``agents.noop``: a stored kind need not be installed to be read."""
     step_config = ExecuteAgentStepConfig.model_validate(_legacy_step_spec("noop"))
 
-    assert step_config.post_run_action == PostRunActionConfig(kind="agents.noop")
-    assert step_config.request.post_run_action == PostRunActionConfig(kind="agents.noop")
+    assert step_config.post_run_action == PostRunActionConfig(kind="noop")
+    assert step_config.request.post_run_action == PostRunActionConfig(kind="noop")
 
 
 def test_translating_a_stored_record_leaves_the_record_untouched() -> None:
@@ -2713,10 +2757,8 @@ def test_translating_a_stored_record_leaves_the_record_untouched() -> None:
     assert legacy == snapshot
 
 
-def test_a_pre_rename_job_is_still_readable_through_the_job_route() -> None:
-    """Every read renders the stored spec through ``ExecuteAgentStepConfig``; an old
-    job, or the Compass analysis run backed by it, must not become a 500.
-    """
+def _read_stored_job_through_the_route(stored_spec: dict[str, Any]) -> Any:
+    """GET one stored execute job through the generated job route."""
     app = FastAPI()
     app.include_router(add_job_routes(ExecuteAgentJob), prefix="/apis/agents/v2/workspaces/{workspace}")
     app.dependency_overrides[get_nemo_client] = lambda: MagicMock()
@@ -2732,7 +2774,7 @@ def test_a_pre_rename_job_is_still_readable_through_the_job_route() -> None:
             workspace=workspace,
             created_at=None,
             updated_at=None,
-            spec=_legacy_step_spec("insights.analysis", {"agent": "demo"}),
+            spec=stored_spec,
             source="nemo-agents-plugin",
             status="completed",
             status_details=None,
@@ -2745,13 +2787,37 @@ def test_a_pre_rename_job_is_still_readable_through_the_job_route() -> None:
 
     fake_jobs = SimpleNamespace(get_job=_get_job)
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=fake_jobs):
-        response = TestClient(app).get("/apis/agents/v2/workspaces/default/jobs/execute/old-run")
+        return TestClient(app).get("/apis/agents/v2/workspaces/default/jobs/execute/old-run")
+
+
+def test_a_pre_rename_job_is_still_readable_through_the_job_route() -> None:
+    """Every read renders the stored spec through ``ExecuteAgentStepConfig``; an old
+    job, or the Compass analysis run backed by it, must not become a 500.
+    """
+    response = _read_stored_job_through_the_route(_legacy_step_spec("insights.analysis", {"agent": "demo"}))
 
     assert response.status_code == 200, response.text
     spec = response.json()["spec"]
     assert spec["post_run_action"] == {"kind": "insights.analysis", "config": {"agent": "demo"}}
     assert spec["request"]["post_run_action"] == spec["post_run_action"]
     assert "extension" not in spec
+
+
+def test_a_job_whose_post_run_action_is_no_longer_installed_is_still_readable() -> None:
+    """Only creating a job checks that its action is installed; a plugin that was
+    since renamed or removed must not make its jobs unreadable.
+    """
+    action = {"kind": "removed-plugin.action", "config": {"anything": "goes"}}
+    stored = {
+        "request": {"agent": "calc", "input": "hello", "post_run_action": action},
+        "agent": _resolved_agent().model_dump(mode="json"),
+        "post_run_action": action,
+    }
+
+    response = _read_stored_job_through_the_route(stored)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["spec"]["post_run_action"] == action
 
 
 def test_a_new_request_setting_extension_is_still_rejected_by_the_create_route() -> None:

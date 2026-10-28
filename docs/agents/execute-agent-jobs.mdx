@@ -401,8 +401,11 @@ An action is named by `post_run_action.kind` and configured by
 `post_run_action.config`. Omitting `post_run_action` runs `agents.noop`, which
 does nothing. Only kinds installed on the platform are accepted, and the config
 is validated against the action's own schema; an unknown kind or a malformed
-config fails the create request rather than the run. If you are using a feature
-built on execute jobs, its own commands set this for you.
+config fails the create request rather than the run. The plugin that provides
+the action must also be installed in the job's [execution image](#execution-image);
+the job checks this when it starts and fails before invoking the agent if the
+action is missing. If you are using a feature built on execute jobs, its own
+commands set this for you.
 
 List the actions installed on the platform:
 

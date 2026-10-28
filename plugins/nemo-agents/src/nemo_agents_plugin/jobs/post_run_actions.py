@@ -6,7 +6,7 @@
 The *contract* an action implements lives in
 :mod:`nemo_helix_plugin.agents.post_run_actions`, so a plugin can write one
 without depending on this package. This module is the host half: resolving an
-installed action kind, listing what is installed, and running one.
+installed action kind and listing what is installed.
 """
 
 from __future__ import annotations
@@ -90,12 +90,6 @@ def validate_post_run_action_config(kind: str, config: dict[str, Any]) -> None:
     except ValidationError as exc:
         # The caller supplied a `kind`, not a model name; lead with the kind.
         raise ValueError(f"Invalid config for post-run action {kind!r}: {exc}") from exc
-
-
-def run_post_run_action(kind: str, context: PostRunActionContext) -> None:
-    """Run the ``after_invoke`` lifecycle method for an installed action kind."""
-    action_cls = _load_post_run_action(kind)
-    action_cls().after_invoke(context)
 
 
 def _registered_entry_points() -> dict[str, list[EntryPoint]]:
