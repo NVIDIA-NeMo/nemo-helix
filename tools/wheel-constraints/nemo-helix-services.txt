@@ -124,4 +124,4 @@ urllib3==2.8.0
 uvicorn==0.54.0
 wasmtime==50.0.1
 xdg-base-dirs==6.0.3
-yara-python==4.5.1
+yara-python==4.5.4
