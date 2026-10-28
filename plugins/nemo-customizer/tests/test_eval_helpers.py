@@ -64,6 +64,7 @@ def test_adapter_composite_entity_name() -> None:
             ],
             "default/qwen3-1.7b:default--my-lora",
         ),
+        # A provider that publishes no served_models (e.g. a manual endpoint) gets the vLLM name.
         ([], "default--my-lora"),
     ],
 )
@@ -87,6 +88,67 @@ def test_build_platform_model_target_routes_lora_via_provider(
     assert "/provider/my-provider/-/v1" in target.url
     assert "/model/qwen3-1.7b/-/v1" not in target.url
     assert target.name == expected_name
+
+
+def test_build_platform_model_target_rejects_a_provider_that_does_not_serve_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Falling back to the bare name here would score the base model on SGLang.
+    monkeypatch.setattr(
+        eval_helpers,
+        "_platform_get_json",
+        lambda url: {
+            "served_models": [{"model_entity_id": "default/qwen3-1.7b", "served_model_name": "default/qwen3-1.7b"}]
+        },
+    )
+    with pytest.raises(ValueError, match="does not serve adapter default/qwen3-1.7b&adapters/default/my-lora"):
+        eval_helpers.build_platform_model_target(
+            base_url="http://localhost:8080",
+            workspace="default",
+            model_entity="qwen3-1.7b",
+            adapter_name="my-lora",
+            provider_name="my-provider",
+        )
+
+
+def _providers_page(*providers: tuple[str, list[str]]) -> dict:
+    return {
+        "data": [
+            {
+                "name": name,
+                "status": "READY",
+                "served_models": [{"model_entity_id": e, "served_model_name": e} for e in entity_ids],
+            }
+            for name, entity_ids in providers
+        ]
+    }
+
+
+def test_find_ready_provider_for_an_adapter_needs_its_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = _providers_page(
+        ("a-base-only", ["default/qwen3-1.7b"]),
+        ("b-lora", ["default/qwen3-1.7b", "default/qwen3-1.7b&adapters/default/my-lora"]),
+    )
+    monkeypatch.setattr(eval_helpers, "_platform_get_json", lambda url: page)
+    find = eval_helpers.find_ready_provider_for_model_entity
+    assert find(base_url="http://x", workspace="default", model_entity="qwen3-1.7b") == "a-base-only"
+    assert find(base_url="http://x", workspace="default", model_entity="qwen3-1.7b", adapter_name="my-lora") == "b-lora"
+    assert find(base_url="http://x", workspace="default", model_entity="qwen3-1.7b", adapter_name="other") is None
+
+
+def test_build_platform_model_target_fails_when_no_provider_serves_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        eval_helpers, "_platform_get_json", lambda url: _providers_page(("a-base-only", ["default/qwen3-1.7b"]))
+    )
+    with pytest.raises(ValueError, match="No READY inference provider serves adapter default/my-lora"):
+        eval_helpers.build_platform_model_target(
+            base_url="http://localhost:8080",
+            workspace="default",
+            model_entity="qwen3-1.7b",
+            adapter_name="my-lora",
+        )
 
 
 def test_build_platform_model_target_routes_base_via_model_entity() -> None:
