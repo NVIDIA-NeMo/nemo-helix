@@ -334,8 +334,13 @@ export const getEvaluationResultsRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.evaluationResults, { workspace });
 };
 
-export const getEvaluationNewRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.evaluationNew, { workspace });
+/** The Run Model Evaluation wizard, optionally opened with `model` already chosen. */
+export const getEvaluationNewRoute = (workspace: string, options?: { model?: string }) => {
+  const basePath = generatePath(ROUTES.workspace.evaluationNew, { workspace });
+  if (options?.model) {
+    return `${basePath}?${QUERY_PARAMETERS.model}=${encodeURIComponent(options.model)}`;
+  }
+  return basePath;
 };
 
 export const getEvaluationResultDetailsRoute = (workspace: string, jobName: string) => {

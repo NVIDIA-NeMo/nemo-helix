@@ -27,6 +27,11 @@ vi.mock('@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions', () =>
   DeploymentActions: () => <button type="button">deployment actions</button>,
 }));
 vi.mock('@studio/routes/ModelDetailRoute/ChatTab', () => ({ ChatTab: () => <div /> }));
+vi.mock('@studio/components/dataViews/EvaluationResultsDataView', () => ({
+  EvaluationResultsDataView: ({ targetModelName }: { targetModelName?: string }) => (
+    <div>evaluations for {targetModelName}</div>
+  ),
+}));
 vi.mock('@studio/components/CustomizationOverview', () => ({
   CustomizationOverview: () => <div>training content</div>,
 }));
@@ -76,10 +81,18 @@ describe('ModelDetailRoute', () => {
     renderPage('/workspaces/ws/fine-tune/models/my-model');
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent('my-model');
-    for (const name of ['Details', 'Chat', 'Files', 'Deployment', 'Training', 'Logs']) {
+    for (const name of [
+      'Details',
+      'Chat',
+      'Evaluations',
+      'Files',
+      'Deployment',
+      'Training',
+      'Logs',
+    ]) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument();
     }
-    expect(screen.getAllByRole('tab')).toHaveLength(6);
+    expect(screen.getAllByRole('tab')).toHaveLength(7);
     expect(screen.getByText('details content')).toBeInTheDocument();
   });
 
@@ -143,6 +156,38 @@ describe('ModelDetailRoute', () => {
 
     expect(await screen.findByText('details content')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Training' })).not.toBeInTheDocument();
+  });
+
+  it("lists only this model's evaluations, with a run action that pre-selects it", async () => {
+    mockLineage();
+    renderPage('/workspaces/ws/fine-tune/models/my-model?tab=evaluations');
+
+    expect(await screen.findByText('evaluations for my-model')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
+      'href',
+      '/workspaces/ws/evaluation/new?model=ws%2Fmy-model'
+    );
+  });
+
+  it("lists an adapter's own evaluations, not its base model's", async () => {
+    mockLineage({ adapter });
+    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
+
+    // The composite the run actually stores in `spec.target.name` -- matching on
+    // the adapter's bare name would list nothing while looking correct.
+    expect(
+      await screen.findByText('evaluations for my-model&adapters/ws/my-adapter')
+    ).toBeInTheDocument();
+  });
+
+  it('pre-selects the adapter when running an evaluation from its page', async () => {
+    mockLineage({ adapter });
+    renderPage('/workspaces/ws/fine-tune/models/my-model/adapters/my-adapter?tab=evaluations');
+
+    expect(await screen.findByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
+      'href',
+      '/workspaces/ws/evaluation/new?model=ws%2Fmy-model%3A%3Amy-adapter'
+    );
   });
 
   it('shows an adapter under its own name', async () => {

@@ -16,6 +16,7 @@ import {
   type ApiFilter,
   useStudioDataViewState,
 } from '@nemo/common/src/hooks/useStudioDataViewState';
+import type { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
   getEvalsListEvaluateJobsQueryKey,
@@ -50,8 +51,17 @@ const NOT_AGENT_TRIGGERED: FilterTree<EvaluateJobsListFilter> = {
   ],
 };
 
-const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobsListFilter => {
+const buildFilter = (
+  apiFilter: ApiFilter<EvaluateJobsListFilter>,
+  targetModelName?: string
+): EvaluateJobsListFilter => {
   const conditions: FilterTree<EvaluateJobsListFilter>[] = [NOT_AGENT_TRIGGERED];
+  // `spec.target.name` is the name the run put on the wire: a model's own name,
+  // or an adapter's `base&adapters/{workspace}/{adapter}` composite. Callers
+  // build it with `toInferenceModelName`, the same helper the submit path uses.
+  if (targetModelName) {
+    conditions.push({ 'spec.target.name': { $eq: targetModelName } });
+  }
   if (apiFilter.filter && Object.keys(apiFilter.filter).length > 0) {
     conditions.push(apiFilter.filter);
   }
@@ -63,7 +73,24 @@ const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobs
   );
 };
 
-export const EvaluationResultsDataView = () => {
+export interface EvaluationResultsDataViewProps {
+  /**
+   * Narrows the list to runs that evaluated this model or adapter, named as
+   * `spec.target.name` stores it -- see {@link toInferenceModelName}. Omitted
+   * lists every model evaluation in the workspace.
+   */
+  targetModelName?: string;
+  /**
+   * Create action offered by the first-use empty state. Omitted renders the
+   * state without one, which is what the workspace-wide list does today.
+   */
+  onCreate?: () => void;
+}
+
+export const EvaluationResultsDataView = ({
+  targetModelName,
+  onCreate,
+}: EvaluationResultsDataViewProps = {}) => {
   const workspace = useWorkspaceFromPath();
   const openRow = useRowNavigation();
   const queryClient = useQueryClient();
@@ -82,7 +109,7 @@ export const EvaluationResultsDataView = () => {
       page: dataViewState.pagination.state.pageIndex + 1,
       page_size: dataViewState.pagination.state.pageSize,
       sort: getSortParamWithWhitelist(dataViewState.sorting.state, SORTABLE_FIELDS, DEFAULT_SORT),
-      filter: buildFilter(dataViewState.apiFilter),
+      filter: buildFilter(dataViewState.apiFilter, targetModelName),
     },
     {
       query: {
@@ -190,7 +217,11 @@ export const EvaluationResultsDataView = () => {
         DataViewTableContent: {
           renderEmptyState: () =>
             isInitialEmpty ? (
-              <EntityEmptyState entity="evaluationResults" variant="first-use" />
+              <EntityEmptyState
+                entity="evaluationResults"
+                variant="first-use"
+                onCreate={onCreate}
+              />
             ) : (
               <EntityEmptyState
                 entity="evaluationResults"
