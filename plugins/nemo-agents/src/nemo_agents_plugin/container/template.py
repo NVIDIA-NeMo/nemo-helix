@@ -41,7 +41,7 @@ from nemo_agents_plugin.container.sandbox import (
     render_workdir_setup,
     resolve_sandbox_profile,
 )
-from nemo_agents_plugin.fabric.adapters import HARNESS_ADAPTER_IDS, UnknownAdapterError, resolve_adapter_id
+from nemo_agents_plugin.fabric.adapters import HARNESS_ADAPTER_IDS
 
 # Marker written as the first line of every plugin-generated ``.dockerignore``
 # / ``Dockerfile``.  ``render_dockerignore`` and the CLI no-build path only
@@ -130,17 +130,14 @@ def _reject_unpackageable_adapters(harnesses: Mapping[Any, Any]) -> None:
     Only called when the image installs no project of the agent's own, so its
     adapters come solely from the Platform extras. Every harness is checked, not
     just the default, since a deployment may select any of them. A kind naming no
-    known adapter is left to config translation, which reports it with the full
-    list of accepted kinds.
+    known adapter is rejected here too: ``--no-build`` and ``--skip-validation``
+    skip the config translation that would otherwise report it.
     """
     for name, harness in harnesses.items():
         kind = harness.get("kind") if isinstance(harness, Mapping) else None
         if not isinstance(kind, str):
             continue
-        try:
-            adapter_id = resolve_adapter_id(kind)
-        except UnknownAdapterError:
-            continue
+        adapter_id = HARNESS_ADAPTER_IDS.get(kind, kind)
         if adapter_id not in _IMAGE_ADAPTER_IDS:
             raise ValueError(
                 f"Harness {name!r} uses Fabric adapter {adapter_id!r}, which an image packaged without "

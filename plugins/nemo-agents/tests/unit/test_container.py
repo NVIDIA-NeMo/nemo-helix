@@ -628,6 +628,17 @@ class TestRenderFabricDockerfile:
             render_fabric_dockerfile(config)
 
     @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_unknown_adapter_is_rejected_without_config_translation(self, tmp_path: Path) -> None:
+        """``--no-build`` renders without translating the config, so packaging must catch a typo itself."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: main\nharnesses:\n  main:\n    kind: nvidia.fabric.claud\n")
+
+        with pytest.raises(ValueError, match=r"Harness 'main' uses Fabric adapter 'nvidia.fabric.claud'"):
+            render_fabric_dockerfile(config)
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
     def test_project_mode_may_supply_its_own_adapter(self, tmp_path: Path) -> None:
         """A --pyproject image installs the user's project, which may ship the adapter (Bring Your Own Harness)."""
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
@@ -652,12 +663,11 @@ class TestRenderFabricDockerfile:
 
         assert platform_extra in {"nemo-agents-plugin", "nemo-agents-plugin-nooa"}
 
-    @pytest.mark.parametrize("kind", ["nooa", "nvidia.fabric.nooa"])
-    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path, kind: str) -> None:
+    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import resolve_fabric_harness_install
 
         config = tmp_path / "agent.yaml"
-        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+        config.write_text("default_harness: selected\nharnesses:\n  selected:\n    kind: nvidia.fabric.nooa\n")
 
         assert resolve_fabric_harness_install(config) == ("nemo-agents-plugin", False, False)
 
