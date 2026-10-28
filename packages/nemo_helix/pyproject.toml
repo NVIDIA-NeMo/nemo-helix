@@ -376,6 +376,7 @@ nemo-compass-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-customizer-plugin = [
   "nemo-helix-plugin",
+  "pillow>=12.3.0",
   "pydantic>=2.10.6",
   "typer>=0.12.5",
 ]
