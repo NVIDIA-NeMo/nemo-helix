@@ -207,6 +207,8 @@ def compile_dpo_config(
         "max_total_sequence_length": customizer_config.model.max_seq_length,
         "precision": precision,
         "offload_optimizer_for_logprob": False,
+        "offload_policy_before_refit": False,
+        "offload_optimizer_for_refit": True,
         # Training runs on Automodel. We propagate tensor / sequence /
         # context parallelism from the parallelism config; the remaining keys are
         # NeMo-RL defaults (LoRA disabled — DPO is full-weight here).

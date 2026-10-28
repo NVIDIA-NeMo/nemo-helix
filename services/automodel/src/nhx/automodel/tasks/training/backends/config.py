@@ -366,8 +366,11 @@ def _build_distributed(
     # 2. Passing an explicit value ensures consistency rather than relying on Automodel's derivation
     dp = total_gpus // (p.tensor_parallel_size * p.pipeline_parallel_size * p.context_parallel_size)
 
+    # Recipes read ``strategy`` and the size keys, then build FSDP2Config.
+    # ``_target_: FSDP2Manager`` is the old constructor; that class now takes a
+    # config object and a device mesh, not these sizes.
     cfg["distributed"] = {
-        "_target_": "nemo_automodel.components.distributed.fsdp2.FSDP2Manager",
+        "strategy": "fsdp2",
         "dp_size": dp,
         "tp_size": p.tensor_parallel_size,
         "pp_size": p.pipeline_parallel_size,

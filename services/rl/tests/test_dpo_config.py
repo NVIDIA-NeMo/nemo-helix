@@ -314,6 +314,8 @@ def test_dtensor_checkpoint_requests_consolidated_safetensors(tmp_path: Path) ->
     """The DTensor policy worker fails with ``KeyError: 'checkpoint'`` without this block."""
     cfg = _compile(tmp_path, _make_step_config())
 
+    assert cfg["policy"]["offload_policy_before_refit"] is False
+    assert cfg["policy"]["offload_optimizer_for_refit"] is True
     assert cfg["policy"]["automodel_cfg"]["checkpoint"] == {
         "model_save_format": "safetensors",
         "save_consolidated": "every",

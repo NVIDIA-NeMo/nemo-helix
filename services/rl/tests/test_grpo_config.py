@@ -335,6 +335,8 @@ def test_compiled_config_selects_only_prefetched_actors(
     assert "_v2" not in cfg["policy"]["automodel_cfg"]
     # megatron_cfg would select MegatronPolicyWorker -> `mcore`.
     assert cfg["policy"]["megatron_cfg"]["enabled"] is False
+    assert cfg["policy"]["offload_policy_before_refit"] is False
+    assert cfg["policy"]["offload_optimizer_for_refit"] is True
     # vLLM is the only prefetched generation backend (`vllm`); sglang/trtllm are not.
     assert cfg["policy"]["generation"]["backend"] == "vllm"
 
