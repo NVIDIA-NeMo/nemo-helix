@@ -46,6 +46,7 @@ from nemo_helix_plugin.jobs.api_factory import ContainerSpec, CPUExecutionProvid
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
+from nhx_sandbox.compose_env import externalize_env
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,8 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
     discard_agent_files: ClassVar[bool] = False
     record_publication_durations: ClassVar[bool] = False
     _task_spec: HarborTaskJobSpec
-    # The task's ``compose_services``, set by ``_prepared_tasks`` for ``_configure_harbor_runtime``.
+    # The task's ``compose_services`` with its env values as templates, set by ``_prepared_tasks`` for
+    # ``_configure_harbor_runtime``.
     _compose_services: dict[str, Any] | None = None
 
     def run(self, config: dict, *, ctx: JobContext, async_client: AsyncNemoClient) -> dict:
@@ -154,7 +156,10 @@ class HarborTaskAgentEvalJob(AsyncAgentEvalJob):
             task_dir = Path(str(task.metadata[HARBOR_TASK_DIR_KEY]))
             # Derive the services before binding: binding sets docker_image, which would make the parser drop
             # main's ENTRYPOINT.
-            self._compose_services = prepared_compose_services(task_dir, environment)
+            services = prepared_compose_services(task_dir, environment)
+            # The services' variables go into this process's environment and the config keeps templates: Harbor
+            # persists the config, and the values are the task's own, not credentials the caller passed.
+            self._compose_services = externalize_env(services, os.environ) if services is not None else None
             bind_task_image(task_dir, environment.agent.image_ref, verifier_image_ref=verifier)
 
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:

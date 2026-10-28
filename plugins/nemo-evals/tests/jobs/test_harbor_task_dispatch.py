@@ -57,7 +57,10 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.values import ModelRef
+from pydantic import ValidationError
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
 AGENT = PreparedImage(image_ref="registry.invalid/agent@sha256:" + "a" * 64, preparation_key="ka")
@@ -498,6 +501,39 @@ def test_compose_services_are_derived_before_the_image_is_bound(tmp_path):
     bind_task_image(task, AGENT.image_ref)
     spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
     assert spec is not None and "main" not in spec
+
+
+def test_a_compose_tasks_env_values_stay_out_of_the_config_harbor_persists(task_spec, tmp_path, monkeypatch):
+    """Harbor writes ``environment.kwargs`` to ``config.json`` and every trial's ``result.json``; the values are the task's own."""
+    task = write_compose_task(tmp_path / "t")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: pg-pass\n      PGDATA: /data\n"
+        "  api:\n    build: ./api\n    environment:\n      VERIFIER_TOKEN: api-tok-value\n"
+        "  main:\n    environment:\n      MYSQL_PASSWORD: my-pass\n"
+    )
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    runtime = HarborRuntimeConfig(jobs_dir=tmp_path)
+    raw = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+    assert raw is not None
+    # The same spec, with its values in it, is what the credential guard refuses.
+    with pytest.raises(ValidationError, match="look like plaintext credentials"):
+        configure_runtime(runtime, ctx, task_spec, raw)
+
+    monkeypatch.setattr(os, "environ", {})
+    job = HarborTaskAgentEvalJob()
+    job._task_spec = task_spec.model_copy(update={"environment": COMPOSE_ENVIRONMENT})
+    job._prepared_tasks([MagicMock(spec=AgentEvalTask, metadata={HARBOR_TASK_DIR_KEY: str(task)})])
+
+    configured = configure_runtime(runtime, ctx, job._task_spec, job._compose_services)
+
+    assert configured.environment is not None
+    persisted = json.dumps(configured.environment.kwargs)
+    values = ("pg-pass", "/data", "api-tok-value", "my-pass")
+    assert not [value for value in values if value in persisted]
+    assert persisted.count("${NEMO_COMPOSE_ENV_") == len(values)
+    assert sorted(os.environ.values()) == sorted(values)
 
 
 def test_a_single_container_task_has_no_compose_services(tmp_path):
