@@ -261,7 +261,7 @@ EOF
 # prefetch_venvs.py names them. This layer does not run that script: importing
 # it needs the rest of the tree, and the full source COPY is below so a
 # source-only bump reuses these syncs.
-#   DTensorPolicyWorkerV2 -> automodel
+#   AutomodelPolicyWorker -> automodel
 #   MegatronPolicyWorker  -> mcore + nemo_gym (not the quant worker)
 #   VllmGenerationWorker, VllmAsyncGenerationWorker -> vllm + nemo_gym
 #   SyncRolloutActor      -> vllm
@@ -324,7 +324,7 @@ sync_venv() {
     uv pip install --directory /tmp --python "${venv}/bin/python" --no-deps /mnt/wheels/*.whl
     write_wrapper "${venv}"
 }
-sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2 --extra automodel
+sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker --extra automodel
 sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker --extra mcore --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker --extra vllm --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker --extra vllm --extra nemo_gym
@@ -338,14 +338,13 @@ EOF
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
 
-# Pin verifiers to the package version of the v0.3.1 tag. The wrapper-dir patch
-# stays so a later run of prefetch_venvs.py writes into the driver bin; this
-# image already wrote those wrappers above.
+# Upstream's tokenizer assert already allows the 5.17.0 override (<5.20). The
+# verifiers pin and wrapper-dir patch stay so a later run of prefetch_venvs.py
+# writes into the driver bin; this image already wrote those wrappers above.
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     git -C /opt/nemo-rl apply --verbose \
     /tmp/patches/nemo-rl-verifiers-pin.patch \
     /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch \
-    /tmp/patches/nemo-rl-transformers-5.17-tokenizer.patch \
     /tmp/patches/nemo-rl-vllm-reserved-port-range.patch
 
 # Editable root only. Dependencies were installed by the syncs above.

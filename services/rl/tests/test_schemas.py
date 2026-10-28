@@ -543,6 +543,20 @@ def test_expert_parallel_size_defaults_to_one() -> None:
     assert ParallelismParams().expert_parallel_size == 1
 
 
+def test_vllm_expert_parallel_size_cannot_span_nodes() -> None:
+    job = _grpo_job(
+        GRPOTraining(
+            type="grpo",
+            parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=4),
+            vllm_expert_parallel_size=8,
+            batch_size=8,
+            num_generations_per_prompt=8,
+        ),
+    )
+    with pytest.raises(ValueError, match="vllm_expert_parallel_size"):
+        job.validate_for_training()
+
+
 def test_vllm_tensor_parallel_size_cannot_span_nodes() -> None:
     """One vLLM engine lives inside a node; TP above the node size is unsatisfiable."""
     job = _grpo_job(
@@ -576,6 +590,7 @@ def test_backend_settings_default_to_unset() -> None:
     """Unset means the compiler picks, so a plain job compiles without any of these."""
     t = GRPOTraining(type="grpo")
     assert t.vllm_tensor_parallel_size is None  # falls back to min(training tp, gpus per node)
+    assert t.vllm_expert_parallel_size == 1
     assert t.vllm_gpu_memory_utilization == 0.5
     assert t.automodel_kwargs is None
     assert t.router_aux_loss_coef is None

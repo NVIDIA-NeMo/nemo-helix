@@ -171,13 +171,13 @@ def test_moe_knobs_land_on_the_keys_nemo_rl_reads(tmp_path, monkeypatch, lora):
     """Each of these keys is optional in NeMo-RL, so a wrong name or nesting level passes
     every schema check and does nothing. ``expert_parallel_size`` is read only by
     ``nemo_rl/models/automodel/setup.py``, ``automodel_kwargs`` only by the v2 worker, and
-    ``hf_config_overrides`` sits on ``policy``, not on ``dtensor_cfg``.
+    ``hf_config_overrides`` sits on ``policy``, not on ``automodel_cfg``.
     """
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     policy = _compile(tmp_path, lora=lora, moe=True)["policy"]
-    dtensor_cfg = policy["dtensor_cfg"]
+    dtensor_cfg = policy["automodel_cfg"]
 
-    assert dtensor_cfg["_v2"] is True
+    assert "_v2" not in dtensor_cfg
     assert dtensor_cfg["automodel_kwargs"]
     assert policy["hf_config_overrides"] == {"router_aux_loss_coef": 0.0}
     # Generation shards for capacity; training does not shard tensors at all here.
@@ -193,16 +193,16 @@ def test_moe_knobs_land_on_the_keys_nemo_rl_reads(tmp_path, monkeypatch, lora):
         assert dtensor_cfg["expert_parallel_size"] == 8
 
 
-def test_dtensor_cfg_keys_are_known_to_nemo_rl(tmp_path, monkeypatch):
-    """DTensorConfig is a TypedDict, so an invented key is accepted and ignored, never
+def test_automodel_cfg_keys_are_known_to_nemo_rl(tmp_path, monkeypatch):
+    """AutomodelConfig is a TypedDict, so an invented key is accepted and ignored, never
     rejected."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    from nemo_rl.models.policy import DTensorConfig
+    from nemo_rl.models.policy import AutomodelConfig
 
-    known = set(DTensorConfig.__required_keys__) | set(DTensorConfig.__optional_keys__)
+    known = set(AutomodelConfig.__required_keys__) | set(AutomodelConfig.__optional_keys__)
     for lora in (False, True):
-        emitted = set(_compile(tmp_path, lora=lora, moe=True)["policy"]["dtensor_cfg"])
-        assert not emitted - known, f"unknown dtensor_cfg keys: {sorted(emitted - known)}"
+        emitted = set(_compile(tmp_path, lora=lora, moe=True)["policy"]["automodel_cfg"])
+        assert not emitted - known, f"unknown automodel_cfg keys: {sorted(emitted - known)}"
 
 
 @pytest.mark.parametrize("lora", [False, True], ids=["full_weight", "lora"])
@@ -226,14 +226,10 @@ def test_compiled_vllm_cfg_has_required_typeddict_keys(tmp_path, monkeypatch, lo
     assert not missing, f"vllm_cfg missing required keys: {sorted(missing)}"
 
 
-def test_lora_selects_the_v2_dtensor_worker(tmp_path, monkeypatch):
-    """LoRA is implemented only in DTensorPolicyWorkerV2.
-
-    lm_policy.py asserts "LoRA is not supported for DTensorPolicyWorker V1" when it
-    sees an enabled lora_cfg without _v2, so the two must be emitted together.
-    """
+def test_lora_enables_automodel_lora_cfg(tmp_path, monkeypatch):
+    """LoRA is a flag on automodel_cfg. Upstream no longer pairs it with ``_v2``."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    dtensor_cfg = _compile(tmp_path, lora=True)["policy"]["dtensor_cfg"]
+    dtensor_cfg = _compile(tmp_path, lora=True)["policy"]["automodel_cfg"]
 
     assert dtensor_cfg["lora_cfg"]["enabled"] is True
-    assert dtensor_cfg["_v2"] is True
+    assert "_v2" not in dtensor_cfg

@@ -314,7 +314,7 @@ def test_dtensor_checkpoint_requests_consolidated_safetensors(tmp_path: Path) ->
     """The DTensor policy worker fails with ``KeyError: 'checkpoint'`` without this block."""
     cfg = _compile(tmp_path, _make_step_config())
 
-    assert cfg["policy"]["dtensor_cfg"]["checkpoint"] == {
+    assert cfg["policy"]["automodel_cfg"]["checkpoint"] == {
         "model_save_format": "safetensors",
         "save_consolidated": "every",
         "v4_compatible": True,
@@ -327,7 +327,7 @@ def test_dtensor_checkpoint_follows_v4_compatible(tmp_path: Path) -> None:
     step_config = _make_step_config()
     step_config.model.v4_compatible = False
 
-    assert _compile(tmp_path, step_config)["policy"]["dtensor_cfg"]["checkpoint"]["v4_compatible"] is False
+    assert _compile(tmp_path, step_config)["policy"]["automodel_cfg"]["checkpoint"]["v4_compatible"] is False
 
 
 def test_tokenizer_config_omits_chat_template_when_none() -> None:
