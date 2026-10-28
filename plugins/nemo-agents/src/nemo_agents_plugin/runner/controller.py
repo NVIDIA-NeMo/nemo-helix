@@ -765,9 +765,9 @@ class AgentDeploymentController(NemoController):
         if not cleaned:
             # Container teardown still in progress — keep AgentDeployment so the
             # next reconcile can finish DeploymentConfig cleanup.
+            info = await self._backend_for(dep).get_deployment_status(dep.workspace, dep.name)
             dep.status = "deleting"
-            if not dep.error:
-                dep.error = "Waiting for deployments plugin teardown to finish."
+            dep.error = (info.error if info else "") or "Waiting for deployments plugin teardown to finish."
             await self._save(dep)
             logger.info("Deployment '%s' teardown still in progress; will retry.", dep.name)
             return

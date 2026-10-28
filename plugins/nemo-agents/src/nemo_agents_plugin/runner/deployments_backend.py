@@ -524,6 +524,8 @@ def _info_from_deployment(deployment: Deployment) -> DeploymentInfo:
     )
     if info.status == "failed":
         info.error = deployment.status_message or "Deployment failed."
+    elif info.status == "deleting":
+        info.error = deployment.status_message
     return info
 
 
@@ -959,7 +961,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
         deployment_present = False
         try:
             deployment = await entities.get(Deployment, name=name, workspace=workspace)
-            if deployment.desired_state != "STOPPED":
+            if deployment.status != "DELETING":
                 deployment.status = "DELETING"
                 deployment.desired_state = "STOPPED"
                 await entities.update(deployment)
