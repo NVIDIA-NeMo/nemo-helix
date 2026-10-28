@@ -43,6 +43,7 @@ ENV VIRTUAL_ENV=/opt/venv \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1
+
 ENV PATH="/opt/venv/bin:/root/.local/bin:$PATH"
 
 RUN uv venv ${UV_PROJECT_ENVIRONMENT} --system-site-packages
@@ -92,7 +93,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     git submodule update --init --recursive && \
     mkdir -p /source-distributions/nhx-automodel-base/git && \
     tar --exclude-vcs --create --gzip \
-      --file /source-distributions/nhx-automodel-base/git/grouped_gemm-v1.1.4.tar.gz . && \
+    --file /source-distributions/nhx-automodel-base/git/grouped_gemm-v1.1.4.tar.gz . && \
     uv pip install --no-build-isolation --no-deps . && \
     rm -rf /tmp/grouped_gemm
 
@@ -158,10 +159,10 @@ RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonl
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python /usr/local/bin/collect-python-sdists.py \
-        --python /opt/venv/bin/python \
-        --output /source-distributions/nhx-automodel-base \
-        --lock-file /opt/Automodel/uv.lock \
-        --label base-venv
+    --python /opt/venv/bin/python \
+    --output /source-distributions/nhx-automodel-base \
+    --lock-file /opt/Automodel/uv.lock \
+    --label base-venv
 
 # Published base image (same filesystem as builder).
 FROM ${PYTORCH_BASE} AS nhx-automodel-base
