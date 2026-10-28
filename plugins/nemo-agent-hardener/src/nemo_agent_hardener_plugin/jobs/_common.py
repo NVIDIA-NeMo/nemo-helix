@@ -269,8 +269,11 @@ def _apply_group(
             env[name] = choice.base_url
     if choice.api_key_secret:
         value = _resolve_secret(sdk, choice.api_key_secret, workspace)
-        if value:
-            env[key_envvar] = value
+        if not value:
+            raise AgentHardenerRunError(
+                CATEGORY_MISSING_CREDENTIAL, f"secret {workspace}/{choice.api_key_secret} is missing or empty."
+            )
+        env[key_envvar] = value
 
 
 def materialize_victim_env_file(manifest: str, env: dict[str, str], dest_dir: Path) -> str | None:
