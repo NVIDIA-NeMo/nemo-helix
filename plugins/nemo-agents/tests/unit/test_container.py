@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -626,20 +625,6 @@ class TestRenderFabricDockerfile:
             r"which an image packaged without --pyproject doesn't install\. Run it with `nemo agents execute`, "
             r"or package with --pyproject",
         ):
-            render_fabric_dockerfile(config)
-
-    @pytest.mark.usefixtures("installed_adapter_manifests")
-    def test_operator_allowed_adapter_still_needs_a_project(
-        self, tmp_path: Path, extra_adapter_ids: Callable[[list[str]], None]
-    ) -> None:
-        """The allowlist says some image may carry the adapter, not that config-only images do."""
-        from nemo_agents_plugin.container.template import render_fabric_dockerfile
-
-        extra_adapter_ids(["acme.*"])
-        config = tmp_path / "agent.yaml"
-        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: acme.custom.native\n")
-
-        with pytest.raises(ValueError, match="Harness 'acme' uses Fabric adapter 'acme.custom.native'"):
             render_fabric_dockerfile(config)
 
     @pytest.mark.usefixtures("installed_adapter_manifests")

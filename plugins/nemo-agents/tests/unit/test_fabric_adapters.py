@@ -6,12 +6,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.config import AgentFabricConfig, AgentsConfig
 from nemo_agents_plugin.fabric.adapters import (
     HARNESS_ADAPTER_IDS,
     UnknownAdapterError,
@@ -20,7 +18,6 @@ from nemo_agents_plugin.fabric.adapters import (
     resolve_adapter_id,
     validate_harness_kinds,
 )
-from pydantic import ValidationError
 
 
 def _write(path: Path, content: str) -> None:
@@ -112,47 +109,3 @@ def test_validate_harness_kinds_names_the_bad_harness() -> None:
 
     with pytest.raises(UnknownAdapterError, match="Harness 'spare': Unsupported harness kind 'cladue'"):
         validate_harness_kinds(config)
-
-
-@pytest.mark.parametrize(
-    ("patterns", "kind"),
-    [
-        (["acme.custom.native"], "acme.custom.native"),
-        (["acme.*"], "acme.custom.native"),
-        (["other.adapter", "acme.custom.*"], "acme.custom.native"),
-    ],
-)
-def test_operator_allowed_adapter_ids_are_accepted(
-    tmp_path: Path, extra_adapter_ids: Callable[[list[str]], None], patterns: list[str], kind: str
-) -> None:
-    extra_adapter_ids(patterns)
-
-    assert resolve_adapter_id(kind, tmp_path) == kind
-
-
-@pytest.mark.parametrize(
-    ("patterns", "kind"),
-    [
-        ([], "acme.custom.native"),
-        (["acme.custom.nativ"], "acme.custom.native"),
-        (["acme.custom.native"], "acme.custom.nativ"),
-        (["acme.custom.*"], "acme.other"),
-    ],
-)
-def test_operator_allowlist_still_rejects_typos(
-    tmp_path: Path, extra_adapter_ids: Callable[[list[str]], None], patterns: list[str], kind: str
-) -> None:
-    extra_adapter_ids(patterns)
-
-    with pytest.raises(UnknownAdapterError, match="must be listed in agents.fabric.extra_adapter_ids"):
-        resolve_adapter_id(kind, tmp_path)
-
-
-@pytest.mark.parametrize("entry", ["", " ", "*", "acme.*.native", "acme.**"])
-def test_extra_adapter_ids_reject_malformed_entries(entry: str) -> None:
-    with pytest.raises(ValidationError, match="Invalid adapter ID"):
-        AgentFabricConfig(extra_adapter_ids=[entry])
-
-
-def test_extra_adapter_ids_default_to_empty() -> None:
-    assert AgentsConfig().fabric.extra_adapter_ids == []

@@ -9,7 +9,6 @@ from typing import Any, Protocol
 
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_agents_plugin.fabric.adapters import UnknownAdapterError, validate_harness_kinds
 from nemo_agents_plugin.utils import (
     inject_default_model,
     inject_fabric_gateway_url,
@@ -80,11 +79,9 @@ class _NemoAgentsSpecConfigHandler:
     @staticmethod
     def _normalize(config: dict[str, Any]) -> dict[str, Any]:
         try:
-            agent_config = AgentConfig.model_validate(config)
-            validate_harness_kinds(agent_config)
-        except (ValidationError, UnknownAdapterError) as error:
+            return AgentConfig.model_validate(config).model_dump(exclude_none=True)
+        except ValidationError as error:
             raise InvalidAgentConfigError(f"Invalid agent config: {error}") from error
-        return agent_config.model_dump(exclude_none=True)
 
 
 _AGENT_CONFIG_FORMAT_HANDLERS: dict[str, AgentConfigFormatHandler] = {

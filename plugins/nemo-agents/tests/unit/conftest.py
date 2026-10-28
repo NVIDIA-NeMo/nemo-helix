@@ -6,19 +6,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
 
 import httpx
 import pytest
-from nemo_agents_plugin.config import AgentFabricConfig, AgentsConfig
 from nemo_agents_plugin.fabric import adapters
 from nemo_helix_plugin import cli_state as cli_state_module
 from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetFileOutput, FilesetOutput
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -284,14 +282,3 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         manifest.write_text(json.dumps({"adapter_id": adapter_id}), encoding="utf-8")
     monkeypatch.setattr(adapters, "ADAPTER_MANIFEST_ROOT", root)
     return root
-
-
-@pytest.fixture
-def extra_adapter_ids() -> Iterator[Callable[[list[str]], None]]:
-    """Set ``agents.fabric.extra_adapter_ids`` for the test."""
-
-    def configure(ids: list[str]) -> None:
-        set_nemo_config_override(AgentsConfig(fabric=AgentFabricConfig(extra_adapter_ids=ids)))
-
-    yield configure
-    clear_nemo_config_override(AgentsConfig)

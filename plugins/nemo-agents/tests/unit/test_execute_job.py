@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Callable
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -417,11 +416,8 @@ async def test_to_spec_accepts_a_plugin_installed_adapter_id() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("installed_adapter_manifests")
-async def test_to_spec_accepts_an_operator_allowed_adapter_in_a_custom_image(
-    extra_adapter_ids: Callable[[list[str]], None],
-) -> None:
-    """The API can't see a custom image's adapters, so the operator allowlist vouches for them."""
-    extra_adapter_ids(["acme.*"])
+async def test_to_spec_leaves_adapter_ids_to_a_requested_image() -> None:
+    """The API can't see a custom image's adapters, so the job checks harness kinds inside that image."""
     config = _agent_config()
     config["harnesses"]["hermes"]["kind"] = "acme.custom.native"
 

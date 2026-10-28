@@ -380,8 +380,10 @@ class ExecuteAgentJob(NemoJob):
 
         # Validate the merged config: an EnvironmentSpec can override the harness
         # provider, so validation must run after the merge to reject e.g. a spec
-        # that selects a non-local Fabric environment.
-        _validate_agent_config(merged.config)
+        # that selects a non-local Fabric environment. A requested image may
+        # install adapters this server can't see, so the job checks harness
+        # kinds inside that image instead.
+        _validate_agent_config(merged.config, check_adapters=not request.image)
 
         workdir = None
         if request.workdir is not None:
@@ -964,11 +966,12 @@ def _configure_intake_telemetry(
     configure_intake_atif_export(agent_config, workspace=workspace, base_url=base_url)
 
 
-def _validate_agent_config(config: dict) -> AgentConfig:
+def _validate_agent_config(config: dict, *, check_adapters: bool = True) -> AgentConfig:
     agent_config = AgentConfig.model_validate(config)
     if agent_config.environment.provider != "local":
         raise ValueError("agents.execute jobs only support local Fabric environments.")
-    validate_harness_kinds(agent_config)
+    if check_adapters:
+        validate_harness_kinds(agent_config)
 
     return agent_config
 

@@ -9,8 +9,9 @@ declared by an adapter manifest installed anywhere below the Python environment'
 installs ``adapters/compass/compass.fabric-adapter.json``), and Fabric discovers
 installed adapters from the same tree, so an ID accepted here is one Fabric can load.
 
-An adapter installed only in a custom agent image is invisible here, so an
-operator lists it in ``agents.fabric.extra_adapter_ids`` instead.
+An adapter installed only in a custom agent image is invisible to the API
+server, so a deploy or job that names its own image skips this check at create.
+The check still runs inside the image, whose manifests are the ones Fabric loads.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import sysconfig
 from pathlib import Path
 
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.config import AgentsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -87,39 +87,24 @@ def resolve_adapter_id(kind: str, root: Path | None = None) -> str:
     """Return the Fabric adapter ID for a harness ``kind``.
 
     Raises:
-        UnknownAdapterError: ``kind`` is neither a stock short name, an accepted
-            adapter ID, nor an ID the operator allows in ``agents.fabric.extra_adapter_ids``.
+        UnknownAdapterError: ``kind`` is neither a stock short name nor an accepted adapter ID.
     """
     if kind in HARNESS_ADAPTER_IDS:
         return HARNESS_ADAPTER_IDS[kind]
     accepted = accepted_adapter_ids(root)
-    extra_adapter_ids = AgentsConfig.get().fabric.extra_adapter_ids
-    if kind in accepted or _matches_any(kind, extra_adapter_ids):
+    if kind in accepted:
         return kind
     raise UnknownAdapterError(
         f"Unsupported harness kind {kind!r}. Supported harness kinds: {', '.join(sorted(HARNESS_ADAPTER_IDS))}; "
-        f"or an installed Fabric adapter ID: {', '.join(sorted(accepted))}"
-        + (
-            f"; or an ID matching agents.fabric.extra_adapter_ids: {', '.join(extra_adapter_ids)}"
-            if extra_adapter_ids
-            else ""
-        )
-        + ". An adapter installed only in a custom agent image must be listed in agents.fabric.extra_adapter_ids "
-        "by a platform operator."
-    )
-
-
-def _matches_any(adapter_id: str, patterns: list[str]) -> bool:
-    """Whether ``adapter_id`` equals a pattern, or starts with one ending in ``*``."""
-    return any(
-        adapter_id.startswith(pattern[:-1]) if pattern.endswith("*") else adapter_id == pattern for pattern in patterns
+        f"or an installed Fabric adapter ID: {', '.join(sorted(accepted))}. An adapter installed only in a "
+        "custom agent image is accepted when the deployment or job names that image."
     )
 
 
 def validate_harness_kinds(config: AgentConfig) -> None:
     """Check that every configured harness names an accepted adapter.
 
-    Run at agent and job create so a typo fails the request, not the pod that
+    Run at deploy and job create so a typo fails the request, not the pod that
     later runs the agent. Every harness is checked, not just the default, since a
     deployment or invocation may select any of them.
 
