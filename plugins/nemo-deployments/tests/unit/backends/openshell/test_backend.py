@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -67,6 +69,11 @@ pytest.importorskip("openshell")  # platform-restricted extra; skip where not in
 from openshell._proto import openshell_pb2 as pb
 
 
+@asynccontextmanager
+async def _provisioner_context[T](provisioner: T) -> AsyncGenerator[T]:
+    yield provisioner
+
+
 @pytest.mark.parametrize("mode,auth_enabled", [("helix", True), ("helix", False), ("gateway", True)])
 async def test_renewal_delegates_creator_and_current_workload(openshell_backend, mode, auth_enabled):
     openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
@@ -84,7 +91,7 @@ async def test_renewal_delegates_creator_and_current_workload(openshell_backend,
     requester_context.__aenter__ = AsyncMock(return_value=MagicMock())
     requester_context.__aexit__ = AsyncMock(return_value=False)
     with (
-        patch.object(openshell_backend, "_provider_provisioner", return_value=provisioner),
+        patch.object(openshell_backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)),
         patch(
             "nemo_deployments_plugin.backends.openshell.backend.get_async_nemo_client", return_value=requester_context
         ) as client,
@@ -276,7 +283,7 @@ async def test_provider_created_before_sandbox_and_attached(openshell_backend, m
     provisioner = AsyncMock()
     provisioner.prepare.return_value = ["owned-provider"]
     with (
-        patch.object(openshell_backend, "_provider_provisioner", return_value=provisioner),
+        patch.object(openshell_backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)),
         patch("nemo_deployments_plugin.backends.openshell.backend.get_async_nemo_client") as client,
         patch("nemo_deployments_plugin.backends.openshell.backend.platform_auth_enabled", return_value=auth_enabled),
     ):
@@ -1704,3 +1711,24 @@ else:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_provider_channel_closes_when_operation_fails(openshell_backend, tmp_path):
+    key = tmp_path / "registration.key"
+    key.touch(mode=0o600)
+    key.write_bytes(b"k" * 32)
+    openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file=key,
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    channel = MagicMock()
+    channel.__aenter__.return_value = channel
+    with patch("grpc.aio.insecure_channel", return_value=channel) as connect:
+        with pytest.raises(RuntimeError, match="operation failed"):
+            async with openshell_backend._provider_provisioner():
+                raise RuntimeError("operation failed")
+    connect.assert_called_once_with(openshell_backend._executor_config.grpc_target())
+    channel.__aexit__.assert_awaited_once()
+    assert channel.__aexit__.await_args.args[0] is RuntimeError
