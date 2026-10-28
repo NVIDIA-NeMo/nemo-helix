@@ -610,8 +610,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         harbor_git: str | None = typer.Option(
             None,
             "--harbor-git",
-            help="Public git repo of Harbor tasks, pinned to a tag or commit: <url>@<ref> reads tasks/ at that ref. "
-            "For another directory, use a GitHub tree URL: https://github.com/<org>/<repo>/tree/<ref>/<dir>.",
+            help="Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. "
+            "For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.",
         ),
         taskset: str | None = typer.Option(
             None,
