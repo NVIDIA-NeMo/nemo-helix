@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.entities.types import EntityWriteValidationErrorResponse
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -61,6 +63,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_ENTITY_WRITE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    422: {
+        "description": "Request validation error, or a referenced resource such as the workspace does not exist",
+        "model": EntityWriteValidationErrorResponse,
+    },
+}
+
 
 async def _check_tool_call_plugin_permission(
     request,
@@ -90,6 +99,7 @@ async def _check_tool_call_plugin_permission(
 
 @router.post(
     "/v2/workspaces/{workspace}/models",
+    responses=_ENTITY_WRITE_ERROR_RESPONSES,
     summary="Create Model",
     response_description="Create a new model entity",
     status_code=status.HTTP_201_CREATED,
@@ -135,11 +145,10 @@ async def create_model(
         logger.warning(f"Fileset validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except EntityValidationError as e:
+        # Re-raised so the shared handler returns the 422 with the entity store's
+        # ``code`` intact (for example workspace_not_found).
         logger.warning(f"Entity store validation error during model creation: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(e),
-        )
+        raise
     except ValueError as e:
         if "already exists" in str(e).lower():
             logger.warning(f"Model already exists: {workspace}/{model_input.name}")
@@ -336,6 +345,7 @@ async def start_update_model_spec_job(model_entity: ModelEntity):
 
 @router.patch(
     "/v2/workspaces/{workspace}/models/{name}",
+    responses=_ENTITY_WRITE_ERROR_RESPONSES,
     summary="Update Model",
     response_description="Update model metadata",
     status_code=status.HTTP_200_OK,
@@ -404,11 +414,10 @@ async def update_model(
                 detail=f"Model with workspace '{workspace}' and name '{model_name}' not found",
             )
     except EntityValidationError as e:
+        # Re-raised so the shared handler returns the 422 with the entity store's
+        # ``code`` intact (for example workspace_not_found).
         logger.warning(f"Entity store validation error during model update: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(e),
-        )
+        raise
     except PermissionError as e:
         logger.warning(f"Permission denied during model update: {e}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
@@ -475,6 +484,7 @@ async def delete_model(
 
 @router.post(
     "/v2/workspaces/{workspace}/models/{model_name}/adapters",
+    responses=_ENTITY_WRITE_ERROR_RESPONSES,
     summary="Add Model Adapter",
     response_description="Register a new adapter to the model",
     status_code=status.HTTP_201_CREATED,
@@ -508,11 +518,10 @@ async def create_model_adapter(
                 detail=f"Model with workspace '{workspace}' and name '{model_name}' not found",
             )
     except EntityValidationError as e:
+        # Re-raised so the shared handler returns the 422 with the entity store's
+        # ``code`` intact (for example workspace_not_found).
         logger.warning(f"Entity store validation error during adapter creation: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(e),
-        )
+        raise
     except PermissionError as e:
         logger.warning(f"Permission denied during adapter creation: {e}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
@@ -589,6 +598,7 @@ async def delete_model_adapter(
 
 @router.patch(
     "/v2/workspaces/{workspace}/models/{model_name}/adapters/{adapter}",
+    responses=_ENTITY_WRITE_ERROR_RESPONSES,
     summary="Update Adapter",
     response_description="Update adapter metadata",
     status_code=status.HTTP_200_OK,
@@ -630,11 +640,10 @@ async def update_model_adapter(
         return updated_adapter
 
     except EntityValidationError as e:
+        # Re-raised so the shared handler returns the 422 with the entity store's
+        # ``code`` intact (for example workspace_not_found).
         logger.warning(f"Entity store validation error during adapter update: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(e),
-        )
+        raise
     except PermissionError as e:
         logger.warning(f"Permission denied during adapter update: {e}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))

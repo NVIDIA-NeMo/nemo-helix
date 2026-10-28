@@ -20,12 +20,14 @@ Cross-Workspace Queries:
 
 import logging
 import textwrap
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
+from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
+from nhx.common.entities.client import EntityValidationError
 from nhx.core.entities.api.dependencies import (
     AuthClientDep,
     EntityRepository,
@@ -54,6 +56,13 @@ class EntitiesPage(Page[Entity]):
 router = APIRouter()
 API_TAG = "Entity Store"
 logger = logging.getLogger(__name__)
+
+_ENTITY_WRITE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    422: {
+        "description": "Request validation error, or a referenced resource such as the workspace does not exist",
+        "model": EntityWriteValidationErrorResponse,
+    },
+}
 
 PROJECT_ENTITY_TYPE = "project"
 
@@ -130,6 +139,19 @@ async def _validate_parent_access(
         )
 
 
+def _workspace_does_not_exist(workspace: str) -> EntityValidationError:
+    """Build the 422 for a write into a workspace that does not exist.
+
+    The shared entity-store error handler renders it with ``code`` set, so
+    callers can tell this case from other validation failures without parsing
+    the message.
+    """
+    return EntityValidationError(
+        f"Workspace '{workspace}' does not exist. Please create the workspace first.",
+        code=WORKSPACE_NOT_FOUND_CODE,
+    )
+
+
 async def validate_workspace_not_deleting(
     workspace_repository: WorkspaceRepositoryInterface,
     auth_client: AuthClient,
@@ -152,10 +174,8 @@ async def validate_workspace_not_deleting(
     ws = await workspace_repository.get_workspace_by_name(name=workspace)
     if ws is None:
         if missing_workspace_status == status.HTTP_422_UNPROCESSABLE_CONTENT:
-            detail = f"Workspace '{workspace}' does not exist. Please create the workspace first."
-        else:
-            detail = f"Workspace '{workspace}' not found"
-        raise HTTPException(status_code=missing_workspace_status, detail=detail)
+            raise _workspace_does_not_exist(workspace)
+        raise HTTPException(status_code=missing_workspace_status, detail=f"Workspace '{workspace}' not found")
 
     # Service principals can access workspaces being deleted (for cleanup)
     if ws._deletion_stage is not None and auth_client.principal.caller_kind != "service_principal":
@@ -201,7 +221,10 @@ async def _invalidate_role_binding_cache_if_present(
     tags=[API_TAG],
     status_code=201,
     summary="Create a new entity",
-    responses={403: {"description": "Not allowed to create entities in the requested workspace."}},
+    responses={
+        403: {"description": "Not allowed to create entities in the requested workspace."},
+        **_ENTITY_WRITE_ERROR_RESPONSES,
+    },
     description=textwrap.dedent("""
         Create a new entity of the specified type in the given workspace.
 
@@ -299,17 +322,11 @@ async def create_entity(
 
         if "foreign key" in error_msg_lower:
             if "fk_entities_workspace" in error_msg or "workspace" in error_msg:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail=f"Workspace '{workspace}' does not exist. Please create the workspace first.",
-                ) from e
+                raise _workspace_does_not_exist(workspace) from e
             # SQLite FK errors don't include constraint names — check workspace explicitly
             ws = await workspace_repository.get_workspace_by_name(name=workspace)
             if ws is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail=f"Workspace '{workspace}' does not exist. Please create the workspace first.",
-                ) from e
+                raise _workspace_does_not_exist(workspace) from e
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Referenced resource does not exist.",
@@ -486,7 +503,10 @@ async def get_entity_by_name(
     response_model=Entity,
     tags=[API_TAG],
     summary="Update entity by name",
-    responses={403: {"description": "Not allowed to update entities in the requested workspace."}},
+    responses={
+        403: {"description": "Not allowed to update entities in the requested workspace."},
+        **_ENTITY_WRITE_ERROR_RESPONSES,
+    },
     description=textwrap.dedent("""
         Update an entity by its name. Optionally change the entity's name.
 
@@ -587,17 +607,11 @@ async def update_entity_by_name(
 
         if "foreign key" in error_msg_lower:
             if "fk_entities_workspace" in error_msg or "workspace" in error_msg:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail=f"Workspace '{workspace}' does not exist. Please create the workspace first.",
-                ) from e
+                raise _workspace_does_not_exist(workspace) from e
             # SQLite FK errors don't include constraint names — check workspace explicitly
             ws = await workspace_repository.get_workspace_by_name(name=workspace)
             if ws is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail=f"Workspace '{workspace}' does not exist. Please create the workspace first.",
-                ) from e
+                raise _workspace_does_not_exist(workspace) from e
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Referenced resource does not exist.",

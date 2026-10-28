@@ -21,6 +21,7 @@ from typing import Callable
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.entities import is_workspace_not_found
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest, ModelEntity, UpdateModelEntityRequest
 
@@ -28,6 +29,15 @@ logger = getLogger(__name__)
 
 # Entity lists are read whole, so prefer few large pages over many small ones.
 _PAGE_SIZE = 1000
+
+
+def _unwritable_reason(error: Exception) -> str | None:
+    """Why a failed entity write can never succeed, or ``None`` if a retry might."""
+    if is_workspace_not_found(error):
+        return "workspace no longer exists"
+    if isinstance(error, NotFoundError):
+        return "entity no longer exists"
+    return None
 
 
 @dataclass
@@ -186,6 +196,11 @@ class ModelEntityCache:
         provider that is about to be deleted is derived from that provider, which
         will be gone -- so dropping a failure would leave the entity permanently
         inconsistent.
+
+        The exceptions are writes that can never succeed: the entity's workspace
+        no longer exists, or the entity itself is gone. Workspace cleanup removes
+        the entities in a deleted workspace, so nothing is left to keep consistent,
+        and every retry would fail the same way.
         """
         for (workspace, name), staged in list(self._pending.items()):
             staged.attempts += 1
@@ -195,7 +210,12 @@ class ModelEntityCache:
                     await self._create(workspace, name, staged)
                 else:
                     await self._update(workspace, name, staged, existing)
-            except Exception:
+            except Exception as exc:
+                reason = _unwritable_reason(exc)
+                if reason is not None:
+                    logger.info("Dropping Model Entity changes for %s/%s: %s", workspace, name, reason)
+                    del self._pending[(workspace, name)]
+                    continue
                 # One entity must not stop the rest, and the change is kept for a
                 # later attempt rather than discarded.
                 logger.warning(
