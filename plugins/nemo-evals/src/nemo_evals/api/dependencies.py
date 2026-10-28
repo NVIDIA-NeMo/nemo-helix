@@ -19,6 +19,7 @@ from nemo_evals.config import get_config
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.taskset_runs.store import TasksetRunStore
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import (
@@ -49,9 +50,15 @@ async def get_taskset_run_service(
     Yields:
         A service using raw acceptance clients and the existing entity resolver.
         The dependency exits the client's context when the request finishes.
+
+    With auth on, the client delegates the caller's full principal (id, email, account id, groups, aliases):
+    the Entity Store finds a caller's workspaces through all of them, so a member only through a group would
+    otherwise be refused. The normalized ``caller`` id stays the idempotency scope and ``created_by``.
     """
     caller = normalize_run_caller(caller)
-    async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=caller) as async_client:
+    principal = current_auth_context()
+    on_behalf_of = principal.to_principal() if principal is not None else caller
+    async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=on_behalf_of) as async_client:
         entities_client = AsyncEntitiesClient.from_client(async_client)
         files_client = AsyncFilesClient.from_client(async_client)
         yield TasksetRunService(
@@ -60,7 +67,19 @@ async def get_taskset_run_service(
             async_client,
             authorize,
             get_config(),
+            auth_context=principal,
         )
+
+
+async def get_service_run_store() -> AsyncGenerator[TasksetRunStore, None]:
+    """A run store acting as the evals service, for a route that rewrites a run after checking the caller.
+
+    A run may hold fields only a service-principal client reads back (the creator's principal, once runs store it),
+    so only it can rewrite the run without erasing them. The route's permission check, as the caller, scopes it to
+    one workspace.
+    """
+    async with get_async_nemo_client(as_service="evals", internal=True) as async_client:
+        yield TasksetRunStore(AsyncEntitiesClient.from_client(async_client), AsyncFilesClient.from_client(async_client))
 
 
 def get_metric_service(
@@ -142,7 +161,7 @@ def get_taskset_service(
 
 
 @asynccontextmanager
-async def delegated_service_client(request_client: AsyncNemoClient) -> AsyncGenerator[AsyncNemoClient, None]:
+async def delegated_service_client(request_client: AsyncHelixClient) -> AsyncGenerator[AsyncHelixClient, None]:
     """Yield a client that calls the platform as the evals service, delegating the request's caller.
 
     Use it for calls only a service principal may make, such as reading a secret value; the target

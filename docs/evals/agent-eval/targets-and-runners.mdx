@@ -41,10 +41,15 @@ bare model do before you wrap it in an agent?). The evaluator prompts it with ea
 | `default_headers` | no | non-auth headers applied to every request; authentication goes through `api_key_secret` |
 | `host_url` | no | direct NIM endpoint (`http://host:port`), populated when the target resolves from a `ModelRef` |
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from nhx_evals_sdk.values import Model, SecretRef
 
-target = Model(url="https://integrate.api.nvidia.com/v1/chat/completions", name="nvidia/nemotron-3.5-lightning-30b-a3b",
+target = Model(url=os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/") + "/chat/completions", name="nvidia/nemotron-3.5-lightning-30b-a3b",
                api_key_secret=SecretRef(root="NVIDIA_API_KEY"))
 ```
 
@@ -174,9 +179,15 @@ covers several agent frontends:
 | `nvidia.fabric.hermes` | Hermes SDK (`transport="library"`) |
 | `nvidia.fabric.langchain.deepagents` | LangChain deepagents — **not** installed by this SDK's `fabric` extra (see below) |
 
-Fabric 0.5 also ships Cline, Droid, Kilo, Nooa, OpenClaw, OpenCode, OpenHands, Qwen Code, and Pi
-adapters. NeMo Helix does not install those; add the matching `nemo-fabric-adapters-*` package
-yourself to use one.
+Fabric 0.5 also has Cline, Droid, Kilo, NOOA, OpenClaw, OpenCode, OpenHands,
+Qwen Code, Pi and Mini-SWE adapters. This upstream inventory is not the
+installation set of the SDK's `fabric` extra or a NeMo Helix release-support
+matrix. The Agents plugin supplies additional contracts and optional harness
+extras, including Mini-SWE; Pi ships a host-side descriptor and generated-image
+integration but requires Node/npm runtime components and is not end-to-end
+release-gated in Helix 0.9. See
+[adapter availability and installation boundaries](/documentation/agents/fabric-upgrade#adapter-availability-is-not-runtime-installation)
+before choosing a harness.
 
 `FabricAgentRuntime` runs that config on the host by default, capturing an ATIF trajectory. Pass
 `sandbox=<SandboxProvider>` to run the same configuration inside a sandbox instead; `image` and
@@ -229,6 +240,53 @@ class EchoRunner:
 `AgentEvalResult.metadata.target`, so a stored run can be understood after the fact. Return a stable
 short `name` (`"gym"`, `"harbor"`) rather than a class name, and keep secrets out of `config` — it is
 persisted with the run bundle.
+
+## Closed-book evaluations
+
+A closed-book evaluation answers only from what the task provides. Blocking the agent's network is
+not enough, because the model provider can still search the web: hosted tools such as Codex's
+default `web_search` run on the provider's side, and some models, such as Perplexity Sonar, search on
+every call. To close that path, send the target's model calls through a virtual model that runs the
+`nemo-evals-closed-book` middleware. Create one as shown in
+[Keep Evaluations Closed-Book](/documentation/models-and-inference/virtual-models#keep-evaluations-closed-book),
+then point the target at it:
+
+| Target | Point it at the closed-book virtual model |
+|---|---|
+| `Model` | Use an inline `Model` whose `url` is the gateway's route for the virtual model. |
+| Registered agent (`source.agent`) | Register the agent with the virtual model as its model and the gateway's OpenAI route as that model's `base_url`. |
+| Harbor built-in agent | Name the virtual model with the source's `model`; see [Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation). |
+
+A taskset run with no-network tasks requires the Harbor built-in agent form and refuses the others;
+see [Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation).
+
+For a `Model` target:
+
+```python
+from nhx_evals_sdk import Model
+
+target = Model(
+    url="<gateway-base-url>/apis/inference-gateway/v2/workspaces/my-workspace/model/closed-book-model/-/v1",
+    name="closed-book-model",
+)
+```
+
+For a registered agent, in its `agent.yaml`:
+
+```yaml
+models:
+  default:
+    provider: openai
+    model: my-workspace/closed-book-model
+    base_url: <gateway-base-url>/apis/inference-gateway/v2/workspaces/my-workspace/openai/-/v1
+    api_key_env: NEMO_AGENTS_IGW_API_KEY
+```
+
+`<gateway-base-url>` is the platform's address as seen by whatever makes the model call: the
+evaluation job for a `Model` target or an agent run on the host, and the task container for an agent
+run inside one. Row evaluations and LLM judges can name the virtual model with a `ModelRef` instead;
+see [Model Configuration](/documentation/evaluate-models/metrics/model-configuration). A model or provider that cannot be served closed-book fails the call with `403`,
+which fails the trial or the job, and the gateway logs each refusal with its reason.
 
 ## Choosing a target
 

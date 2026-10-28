@@ -208,6 +208,32 @@ class KubernetesEmptyDirVolume(BaseModel):
     size_limit: str | None = Field(default=None, description="The size limit of the emptyDir volume (e.g., '1Gi')")
 
 
+class KubernetesKeyToPath(BaseModel):
+    """Kubernetes volume key-to-path mapping."""
+
+    key: str = Field(description="Source key to project from the volume source")
+    path: str = Field(description="Relative file path to write the key to")
+    mode: int | None = Field(default=None, description="Optional file mode for this key")
+
+
+class KubernetesSecretVolume(BaseModel):
+    """Kubernetes Secret volume definition."""
+
+    secret_name: str = Field(description="Secret name to mount")
+    default_mode: int | None = Field(default=None, description="Optional default file mode")
+    optional: bool | None = Field(default=None, description="Whether the Secret is optional")
+    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional Secret keys to project")
+
+
+class KubernetesConfigMapVolume(BaseModel):
+    """Kubernetes ConfigMap volume definition."""
+
+    name: str = Field(description="ConfigMap name to mount")
+    default_mode: int | None = Field(default=None, description="Optional default file mode")
+    optional: bool | None = Field(default=None, description="Whether the ConfigMap is optional")
+    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional ConfigMap keys to project")
+
+
 class KubernetesVolume(BaseModel):
     """Kubernetes Volume definition.
 
@@ -220,12 +246,17 @@ class KubernetesVolume(BaseModel):
         default=None, description="Persistent Volume Claim configuration"
     )
     empty_dir: KubernetesEmptyDirVolume | None = Field(default=None, description="EmptyDir Volume configuration")
+    secret: KubernetesSecretVolume | None = Field(default=None, description="Secret Volume configuration")
+    config_map: KubernetesConfigMapVolume | None = Field(default=None, description="ConfigMap Volume configuration")
 
     @model_validator(mode="after")
     def validate_self(self) -> KubernetesVolume:
         """Ensure that exactly one volume source is specified."""
-        if sum(source is not None for source in [self.persistent_volume_claim, self.empty_dir]) != 1:
-            raise ValueError("Exactly one of 'persistent_volume_claim' or 'empty_dir' must be specified.")
+        sources = [self.persistent_volume_claim, self.empty_dir, self.secret, self.config_map]
+        if sum(source is not None for source in sources) != 1:
+            raise ValueError(
+                "Exactly one of 'persistent_volume_claim', 'empty_dir', 'secret', or 'config_map' must be specified."
+            )
         return self
 
 
@@ -310,6 +341,12 @@ class BaseKubernetesExecutionProfileConfig(JobExecutionProfileConfig):
     )
     pod_security_context: dict[str, Any] = Field(
         default_factory=dict, description="Pod security context for the Kubernetes job pods."
+    )
+
+    step_network_policies_enabled: bool = Field(
+        default=False,
+        description="Create an ingress NetworkPolicy for each step that declares `network`. Requires a "
+        "NetworkPolicy-enforcing CNI and controller RBAC on networking.k8s.io/networkpolicies.",
     )
 
     # Image pull secrets
@@ -548,8 +585,9 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
     policy_path: str | None = Field(
         default=None,
         description=(
-            "Path to a hand-written OpenShell SandboxPolicy YAML applied to created sandboxes. When unset, "
-            "a default-deny policy is generated from platform_egress plus the sandbox filesystem defaults."
+            "Path to a hand-written OpenShell SandboxPolicy YAML layered over the generated default-deny "
+            "policy. Mappings merge recursively, lists and scalars replace, and null keeps the generated "
+            "value."
         ),
     )
     image: str | None = Field(
@@ -564,7 +602,7 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
         description=(
             "Entrypoint for job steps that do not declare one. The OpenShell supervisor ignores "
             "the image ENTRYPOINT, so the sandbox command must name the binary explicitly. "
-            "When unset, defaults to the nhx-tasks entrypoint (/app/.venv/bin/nemo-helix)."
+            "When unset, defaults to `nemo-helix`, resolved on the PATH from the image ENV."
         ),
     )
     egress_proxy: str | None = Field(

@@ -26,6 +26,7 @@ from nemo_scaled_evals_plugin.jobs.specs import TaskImageBuildSpec
 from pydantic import BaseModel
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
+from scaled_evals.dispatch.credentials import credential_env_var
 
 
 def _task_build_worker_cls() -> type[Any]:
@@ -35,7 +36,7 @@ def _task_build_worker_cls() -> type[Any]:
 
 
 def _backend_task_build_job_cls() -> type[Any]:
-    from scaled_evals.api.repositories.build_repository import TaskBuildJob
+    from scaled_evals.api.task_store import TaskBuildJob
 
     return TaskBuildJob
 
@@ -142,8 +143,6 @@ def resolve_executor(
 def _shared_secret_refs() -> dict[str, str]:
     """Map each environment variable every Platform Job needs to the Platform Secret that holds it."""
     return {
-        "PGPASSWORD": settings.platform_jobs_postgres_password_secret,
-        "CREDENTIALS_ENCRYPTION_KEY": settings.platform_jobs_credentials_encryption_key_secret,
         "TASK_IMAGE_REGISTRY_AUTH_JSON": settings.platform_jobs_registry_auth_secret,
     }
 
@@ -153,11 +152,14 @@ def resolve_secret_environment() -> list[EnvironmentVariable] | None:
     return _secret_environment(_shared_secret_refs())
 
 
-def resolve_evaluation_secret_environment(runtime: str) -> list[EnvironmentVariable] | None:
-    """Secrets for evaluation Jobs: the shared set plus credentials only ``runtime`` needs."""
+def resolve_evaluation_secret_environment(
+    runtime: str, credentials: Mapping[str, str] | None = None
+) -> list[EnvironmentVariable] | None:
+    """Secrets for evaluation Jobs: the shared set, what ``runtime`` needs, and the user's credential secrets."""
     refs = _shared_secret_refs()
     if runtime == HARBOR_OPENSANDBOX_RUNTIME:
         refs["OPENSANDBOX_API_KEY"] = settings.platform_jobs_opensandbox_api_key_secret
+    refs.update({credential_env_var(provider): ref for provider, ref in (credentials or {}).items()})
 
     return _secret_environment(refs)
 

@@ -207,7 +207,7 @@ class WarGameSpec(BaseModel):
     stop_after_synth: bool = False
     replay_hitlog_fileset: str | None = None
     benign_suite_fileset: str | None = None
-    port: int | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
     defenders: list[str] | None = None
     attack_intensity: str | None = None
     rounds: int | None = None
@@ -384,7 +384,7 @@ class ManifestInit(BaseModel):
         description="The author confirms NeMo Relay is attached (middleware + plugin.initialize()). Not "
         "knowable from the project; without Relay the victim emits no telemetry and cannot be scored.",
     )
-    port: int | None = Field(default=None, description="Victim port (defaults to 8000).")
+    port: int | None = Field(default=None, ge=1, le=65535, description="Victim port (defaults to 8000).")
     secrets: list[str] | None = Field(
         default=None,
         description="Secrets the victim requires, each `NAME` or `NAME=[workspace/]secret`. A `NAME` takes its "
@@ -449,7 +449,7 @@ class ManifestUpdate(BaseModel):
     benign_suite: list[BenignSuiteRow] | None = Field(
         default=None, description="Replace the cached benign suite (tool,payload,label,rationale,persona rows)."
     )
-    port: int | None = Field(default=None, description="Victim port the war-game will target.")
+    port: int | None = Field(default=None, ge=1, le=65535, description="Victim port the war-game will target.")
     egress: list[str] | None = Field(
         default=None, description="Allow-listed egress host[:port] entries the victim may reach."
     )

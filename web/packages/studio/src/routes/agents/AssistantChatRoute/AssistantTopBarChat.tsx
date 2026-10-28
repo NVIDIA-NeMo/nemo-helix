@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Expand, Add, WindowTerminal, Close } from '@nemo/icons/icons';
 import { Button, Flex, Popover, Spinner, Stack, Tooltip } from '@nvidia/foundations-react-core';
 import { ASSISTANT_STUDIO_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
@@ -8,7 +9,6 @@ import { ChatThreadErrorBoundary } from '@studio/routes/agents/AssistantChatRout
 import { useAssistantChatContext } from '@studio/routes/agents/AssistantChatRoute/context/useAssistantChatContext';
 import { getAssistantChatRouteForSession } from '@studio/routes/agents/AssistantChatRoute/util';
 import { getAssistantChatRoute } from '@studio/routes/utils';
-import { Maximize2, Plus, Terminal, X } from 'lucide-react';
 import {
   lazy,
   Suspense,
@@ -36,7 +36,7 @@ const preloadChatThread = () => void importChatThread().catch(() => undefined);
 const OPEN_LABEL = 'Open NeMo Assistant chat';
 const CLOSE_LABEL = 'Close NeMo Assistant chat';
 
-const TopBarChatIcon = () => <Terminal size={16} />;
+const TopBarChatIcon = () => <WindowTerminal size="16" />;
 
 const chatThreadFallback = (
   <Flex align="center" justify="center" className="h-full">
@@ -155,7 +155,7 @@ const AssistantTopBarChatPopout: FC<{ workspace: string }> = ({ workspace }) => 
           >
             <Flex align="center" justify="between" gap="density-md">
               <Button kind="tertiary" size="small" onClick={startNewChat}>
-                <Plus size={14} />
+                <Add size="14" />
                 New
               </Button>
               <Flex align="center" gap="density-xs">
@@ -166,7 +166,7 @@ const AssistantTopBarChatPopout: FC<{ workspace: string }> = ({ workspace }) => 
                     aria-label="Open in main chat"
                     onClick={handleOpenFullChat}
                   >
-                    <Maximize2 size={16} />
+                    <Expand size="16" />
                   </Button>
                 </Tooltip>
                 <Button
@@ -175,7 +175,7 @@ const AssistantTopBarChatPopout: FC<{ workspace: string }> = ({ workspace }) => 
                   aria-label="Close chat window"
                   onClick={() => setIsOpen(false)}
                 >
-                  <X size={16} />
+                  <Close size="16" />
                 </Button>
               </Flex>
             </Flex>

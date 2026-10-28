@@ -9,6 +9,7 @@
 import type { DatetimeFilter } from './DatetimeFilter.ts';
 import type { HelixJobStatus } from './HelixJobStatus.ts';
 import type { StringFilter } from './StringFilter.ts';
+import type { WarGameJobsListFilterSpec } from './WarGameJobsListFilterSpec.ts';
 
 export interface WarGameJobsListFilter {
   /** Jobs created at 'gte' datetime or 'lte' datetime. */
@@ -21,6 +22,8 @@ export interface WarGameJobsListFilter {
   project?: string;
   /** The current status. */
   status?: HelixJobStatus;
+  /** Filter on a path within the job's spec, e.g. `spec.target.format`. */
+  spec?: WarGameJobsListFilterSpec;
   /** Jobs updated at 'gte' datetime or 'lte' datetime. */
   updated_at?: DatetimeFilter;
 }

@@ -7,12 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal, Self
 
-from nemo_evals.harbor.remote.profile import (
-    PINNED_IMAGE_REF_PATTERN,
-    OpenSandboxClientSettings,
-    ResourceClass,
-    ResourceClassPolicy,
-)
+from nemo_evals.harbor.remote.profile import PINNED_IMAGE_REF_PATTERN, OpenSandboxClientSettings
 from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -21,16 +16,13 @@ class HarborSandboxProfileConfig(BaseModel):
     """One named OpenSandbox profile for Harbor task Jobs (M2 story 3, trimmed for M2 story 0).
 
     The server address and API key come from the platform's ``sandbox_*`` settings, not from here:
-    a profile only tunes the client and sets templates, egress and lifetimes.
+    a profile only tunes the client and sets egress, resource ceilings and lifetimes. The sandbox template
+    is the OpenSandbox server's own: v0.2.1 can't select one per sandbox.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     connection: OpenSandboxClientSettings = Field(default_factory=OpenSandboxClientSettings)
-    resource_classes: dict[ResourceClass, ResourceClassPolicy] = Field(
-        description="Sandbox template and task-Job profile per resource class; `cpu` is required."
-    )
-    root_template: str | None = Field(default=None, description="Template for images that must run as root.")
     egress_allow: tuple[str, ...] = Field(
         default=(),
         description="Hostnames, IPs or CIDRs every sandbox may reach; no port. Everything else is denied.",
@@ -42,6 +34,15 @@ class HarborSandboxProfileConfig(BaseModel):
             "running in the sandbox can call its model. Empty keeps no-network tasks fully closed."
         ),
     )
+    agent_setup_egress: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Hosts the sandbox may also reach while the agent's setup() runs (package registries, release "
+            "downloads), on top of the task's own policy in any network mode. They are removed before anything "
+            "else runs, and processes started during setup that still hold a connection outside the sandbox are "
+            "killed. Empty adds nothing to the task's policy during setup."
+        ),
+    )
     egress_verification: Literal["default_action", "strict"] = "strict"
     max_sandbox_lifetime_s: int = Field(
         default=8 * 3600 + 30 * 60, ge=1, description="OpenSandbox TTL backstop: longest trial plus margin."
@@ -50,12 +51,38 @@ class HarborSandboxProfileConfig(BaseModel):
     unschedulable_after_s: int = Field(default=600, ge=1)
     stale_attempt_cleanup_timeout_s: int = Field(default=300, ge=1)
     image_reference_mode: Literal["digest", "tag"] = "digest"
-
-    @model_validator(mode="after")
-    def _cpu_class_required(self) -> Self:
-        if "cpu" not in self.resource_classes:
-            raise ValueError("resource_classes must include 'cpu'")
-        return self
+    max_cpus: int | None = Field(
+        default=None, gt=0, description="Largest execution.sandbox.cpus a request may ask for; None means no ceiling."
+    )
+    max_memory_mb: int | None = Field(
+        default=None,
+        gt=0,
+        description="Largest execution.sandbox.memory_mb a request may ask for; None means no ceiling.",
+    )
+    max_storage_mb: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Largest execution.sandbox.storage_mb a request may ask for; None means no ceiling. "
+            "While enforce_disk_limit is on, max_disk_mb caps requests too."
+        ),
+    )
+    enforce_disk_limit: bool = Field(
+        default=True,
+        description=(
+            "Cap each sandbox's ephemeral storage at its task's storage_mb; Kubernetes evicts a pod that "
+            "exceeds it. Turn off only where the sandbox runtime doesn't enforce the limit."
+        ),
+    )
+    max_disk_mb: int | None = Field(
+        default=131_072,
+        gt=0,
+        description=(
+            "Ceiling on that limit, in MB, so a task asking for more than any node holds can't leave its pod "
+            "unschedulable: a larger task.toml storage_mb is clamped, a larger request override is rejected. "
+            "None applies each task's value as given."
+        ),
+    )
 
 
 class HarborTaskJobsConfig(BaseModel):
@@ -63,16 +90,106 @@ class HarborTaskJobsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dispatcher_image: str = Field(
+    dispatcher_image: str | None = Field(
+        default=None,
         pattern=PINNED_IMAGE_REF_PATTERN,
-        description="Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment.",
+        description=(
+            "Task Job image, pinned by digest: nemo-evals plus the Harbor OpenSandbox environment. "
+            "Unset uses the platform's nhx-tasks image, the same release as the API: the run plan stores "
+            "nhx-tasks:<platform.image_tag> by tag, so image_tag must be immutable (a release tag, never re-pushed)."
+        ),
     )
     dispatcher_profiles: tuple[str, ...] = Field(
         min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."
     )
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
-        min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox_policy."
+        min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox.profile."
     )
+    default_sandbox_profile: str = Field(
+        default="harbor-standard",
+        min_length=1,
+        description="The sandbox_profiles key a request gets when execution.sandbox.profile is omitted.",
+    )
+
+    @model_validator(mode="after")
+    def _default_profile_exists(self) -> Self:
+        if self.default_sandbox_profile not in self.sandbox_profiles:
+            names = ", ".join(sorted(self.sandbox_profiles))
+            raise ValueError(
+                f"default_sandbox_profile {self.default_sandbox_profile!r} isn't a sandbox_profiles key ({names})"
+            )
+        return self
+
+
+class RunControllerConfig(BaseModel):
+    """The run controller's caps and timing, under evals.runs.controller.
+
+    Read when the controller starts (config is cached per process): a change takes effect after the
+    core-controller pod restarts, and runs already going pick it up. Lowering a cap cancels nothing; new
+    task Jobs wait until the count is below it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    interval_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description="Time between controller cycles. The controller reports itself unhealthy after 3 intervals without one.",
+    )
+    max_cluster_concurrent_jobs: int = Field(
+        default=50, gt=0, description="Task Jobs at once across every run in every workspace."
+    )
+    max_concurrent_task_jobs_per_creator: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Task Jobs at once across all of one creator's runs; None for no per-creator cap. With auth off every "
+            "run belongs to user:development, so any value acts as a second, smaller cluster cap."
+        ),
+    )
+    default_max_concurrent_task_jobs: int | None = Field(
+        default=20,
+        gt=0,
+        description=(
+            "Task Jobs at once for one run. Takes precedence over the request's max_concurrent_task_jobs: "
+            "a request may ask for fewer, never more. None leaves only the request's value."
+        ),
+    )
+    create_grace_seconds: int = Field(
+        default=600,
+        ge=60,
+        description=(
+            "How long after a task Job create with an unknown outcome a 404 or stepless read of the Job is "
+            "conclusive: Jobs keeps saving after the controller's client times out. At least 60 s, twice the "
+            "controller's 30 s create timeout."
+        ),
+    )
+    settle_concurrency: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Open runs settled at once in a cycle's settle phase (reads, settles, stops, bundles). It takes no slot, "
+            "so the caps don't depend on it; 1 settles them one after another."
+        ),
+    )
+    max_creates_per_cycle: int = Field(
+        default=10,
+        ge=2,
+        description=(
+            "Task Job creates a cycle attempts, new grants and retries of creates whose Job wasn't found alike. "
+            "Retries get up to half while grants are due, and the rest when none are. At least 2, so retries "
+            "always get one."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _creator_cap_within_cluster_cap(self) -> Self:
+        cap = self.max_concurrent_task_jobs_per_creator
+        if cap is not None and cap > self.max_cluster_concurrent_jobs:
+            raise ValueError(
+                "runs.controller.max_concurrent_task_jobs_per_creator must be ≤ runs.controller.max_cluster_concurrent_jobs"
+            )
+        return self
 
 
 class TasksetRunsConfig(BaseModel):
@@ -96,13 +213,24 @@ class TasksetRunsConfig(BaseModel):
     max_timeout_seconds: int = Field(
         default=259_200, gt=0, description="Largest timeout_seconds a request may ask for (72 h)."
     )
-    finalization_grace_seconds: int = Field(
-        default=600,
+    queue_timeout_seconds: int = Field(
+        default=172_800,
         gt=0,
-        description="Time after the execution deadline to finish scoring and bundling (10 min).",
+        description="How long an accepted run may wait for its first task slot (48 h); past it, the run expires.",
+    )
+    finalization_grace_seconds: int = Field(
+        default=1_800,
+        gt=0,
+        description=(
+            "Time after the execution deadline to finish scoring and bundling (30 min): an expired run's Jobs "
+            "must end and the tasks that finished must be bundled by then."
+        ),
     )
     harbor: HarborTaskJobsConfig | None = Field(
         default=None, description="Kubernetes taskset runs; None leaves them off in this deployment."
+    )
+    controller: RunControllerConfig = Field(
+        default_factory=RunControllerConfig, description="The run controller's task Job caps and timing."
     )
 
     @model_validator(mode="after")

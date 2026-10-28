@@ -38,6 +38,8 @@ from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import
     apply_k8s_nim_operator_container_overrides,
     apply_nim_override_config,
     build_k8s_deployment_backend_config,
+    chat_template_init_container,
+    chat_template_install_path,
     compile_nim_server_env,
     tool_call_plugin_init_containers,
     tool_call_plugin_install_path,
@@ -328,14 +330,17 @@ def compile_model_deployment(
         names_scratch=names.scratch,
         weighted=weighted,
     )
-    needs_scratch = lora_enabled or tool_call_inits is not None
+    chat_template_init = (
+        chat_template_init_container(resolved, config, names_scratch=names.scratch) if engine == ENGINE_NIM else None
+    )
+    needs_scratch = lora_enabled or tool_call_inits is not None or chat_template_init is not None
     tool_call_plugin_path = tool_call_plugin_install_path(weighted=weighted) if tool_call_inits is not None else None
 
     if engine == ENGINE_VLLM:
         image_name, image_tag = resolve_vllm_image(
             resolved.view, config.default_vllm_image, config.default_vllm_image_tag
         )
-        args = compile_vllm_args(resolved.view, resolved.model_entity)
+        args = compile_vllm_args(resolved.view, resolved.model_entity, tool_call_plugin_path=tool_call_plugin_path)
         env = compile_vllm_env_vars(resolved.view)
     elif engine == ENGINE_NIM:
         image_name, image_tag = (
@@ -348,6 +353,7 @@ def compile_model_deployment(
             config,
             weighted=weighted,
             tool_call_plugin_path=tool_call_plugin_path,
+            chat_template_path=chat_template_install_path() if chat_template_init is not None else None,
         )
         if lora_enabled:
             env["NIM_PEFT_SOURCE"] = _LORA_MOUNT
@@ -366,6 +372,8 @@ def compile_model_deployment(
     if weighted and (security_context is None or security_context.run_as_user is None):
         init_containers.append(_weights_permissions_init_container(config, names.volume))
     init_containers.extend(tool_call_inits or [])
+    if chat_template_init is not None:
+        init_containers.append(chat_template_init)
     server_config_containers: list[Container]
     readiness_probe = Probe(httpGet=HTTPGetAction(path=resolve_health_path(engine, resolved.view), port=8000))
     vllm_command = ["vllm", "serve"] if engine == ENGINE_VLLM else None

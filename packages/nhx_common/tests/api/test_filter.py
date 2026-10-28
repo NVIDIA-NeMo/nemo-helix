@@ -94,3 +94,25 @@ class TestParseJsonFilterRoundtrip:
     def test_invalid_json_raises(self):
         with pytest.raises(ValueError, match="Invalid JSON"):
             parse_json_filter("not-valid-json")
+
+
+class TestMixedOperatorAndPlainKeys:
+    """A plain key beside operators on one field used to be dropped silently, broadening results."""
+
+    @pytest.mark.parametrize(
+        "filter_json",
+        [
+            '{"name": {"$eq": "a", "tier": "gold"}}',
+            '{"name": {"$or": [{"$eq": "a"}, {"$eq": "b", "tier": "gold"}]}}',
+            '{"$and": [{"name": {"$like": "a", "tier": "gold"}}]}',
+        ],
+    )
+    def test_rejected(self, filter_json):
+        with pytest.raises(ValueError, match="mixes operators with sub-keys"):
+            parse_json_filter(filter_json)
+
+    def test_operators_alone_still_parse(self):
+        op = parse_json_filter('{"created_at": {"$gte": "2024-01-01", "$lte": "2024-12-31"}}')
+        assert op.to_dict() == {
+            "$and": [{"created_at": {"$gte": "2024-01-01"}}, {"created_at": {"$lte": "2024-12-31"}}]
+        }

@@ -3,11 +3,12 @@
 
 """Tests for model cache functionality."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from fastapi import HTTPException
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.models.types import ServedModelMapping
 from nhx.core.inference_gateway.api import model_cache as model_cache_module
@@ -1028,3 +1029,145 @@ async def test_refresh_rebuilds_when_served_models_reordered(mocker, model_cache
     assert spy.call_count == 1  # reorder changed the signature -> rebuild ran
     first_after = model_cache.model_entity_info_map[("test-ns", "claude-sonnet")].model_providers[0][0]
     assert first_after == "backend-b"  # routing now reflects the new order
+
+
+def _provider_with_secret(secret_name: str = "missing-key") -> ModelProvider:
+    return ModelProvider(
+        workspace="test",
+        name="provider1",
+        host_url="http://test.com",
+        api_key_secret_name=secret_name,
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_secret_backs_off_after_failure(mock_client, caplog):
+    """A provider whose secret is missing is not re-fetched on every refresh cycle, and logs no traceback."""
+    cache = ModelCache()  # secret_value_ttl == 0: would otherwise refetch every cycle
+    provider = _provider_with_secret()
+
+    async def provider_getter():
+        return [provider]
+
+    missing = AsyncMock(side_effect=HTTPException(status_code=500, detail="API key secret not found: test/missing-key"))
+    with patch.object(model_cache_module, "retrieve_secret_value", missing):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    assert missing.await_count == 1
+    assert cache.get_from_provider("test", "provider1").secret_refresh_failed_at is not None
+    warnings = [r for r in caplog.records if "Failed to update secret cache" in r.getMessage()]
+    assert len(warnings) == 1
+    assert warnings[0].exc_info is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_secret_retries_after_backoff_and_clears_failure(mock_client):
+    cache = ModelCache()
+    provider = _provider_with_secret()
+
+    async def provider_getter():
+        return [provider]
+
+    failing = AsyncMock(side_effect=HTTPException(status_code=500, detail="API key secret not found"))
+    with patch.object(model_cache_module, "retrieve_secret_value", failing):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    info = cache.get_from_provider("test", "provider1")
+    info.secret_refresh_failed_at = datetime.now() - timedelta(
+        seconds=model_cache_module.SECRET_REFRESH_FAILURE_BACKOFF_SEC + 1
+    )
+
+    with patch.object(model_cache_module, "retrieve_secret_value", AsyncMock(return_value="sk-new")):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    info = cache.get_from_provider("test", "provider1")
+    assert info.secret_value == "sk-new"
+    assert info.secret_refresh_failed_at is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_secret_keeps_cached_value_on_failure(mock_client):
+    cache = ModelCache()
+    provider = _provider_with_secret()
+
+    async def provider_getter():
+        return [provider]
+
+    with patch.object(model_cache_module, "retrieve_secret_value", AsyncMock(return_value="sk-old")):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    info = cache.get_from_provider("test", "provider1")
+    info.secret_refresh_failed_at = None
+    boom = AsyncMock(side_effect=HTTPException(status_code=500, detail="Failed to retrieve API key"))
+    with patch.object(model_cache_module, "retrieve_secret_value", boom):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    assert cache.get_from_provider("test", "provider1").secret_value == "sk-old"
+
+
+@pytest.mark.asyncio
+async def test_refresh_secret_retries_immediately_when_secret_name_changes(mock_client):
+    """Pointing a failing provider at a corrected secret is picked up without waiting out the backoff."""
+    cache = ModelCache()
+    providers = [_provider_with_secret("missing-key")]
+
+    async def provider_getter():
+        return providers
+
+    failing = AsyncMock(side_effect=HTTPException(status_code=500, detail="API key secret not found"))
+    with patch.object(model_cache_module, "retrieve_secret_value", failing):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    providers[:] = [_provider_with_secret("fixed-key")]
+    fixed = AsyncMock(return_value="sk-fixed")
+    with patch.object(model_cache_module, "retrieve_secret_value", fixed):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    info = cache.get_from_provider("test", "provider1")
+    assert fixed.await_args.kwargs["secret_name"] == "fixed-key"
+    assert info.secret_value == "sk-fixed"
+    assert info.secret_refresh_failed_at is None
+    assert info.secret_refresh_failed_name is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_secret_failure_retry_is_not_blocked_by_longer_ttl(mock_client):
+    """secret_value_ttl limits successful fetches only; a failed fetch retries once the backoff expires."""
+    cache = ModelCache(secret_value_ttl=3600)
+    provider = _provider_with_secret()
+
+    async def provider_getter():
+        return [provider]
+
+    failing = AsyncMock(side_effect=HTTPException(status_code=500, detail="API key secret not found"))
+    with patch.object(model_cache_module, "retrieve_secret_value", failing):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+        assert failing.await_count == 1
+
+        info = cache.get_from_provider("test", "provider1")
+        info.secret_refresh_failed_at = datetime.now() - timedelta(
+            seconds=model_cache_module.SECRET_REFRESH_FAILURE_BACKOFF_SEC + 1
+        )
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    assert failing.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_secret_success_honors_ttl(mock_client):
+    cache = ModelCache(secret_value_ttl=3600)
+    provider = _provider_with_secret()
+
+    async def provider_getter():
+        return [provider]
+
+    ok = AsyncMock(return_value="sk-ok")
+    with patch.object(model_cache_module, "retrieve_secret_value", ok):
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+        await refresh_model_cache(cache, provider_getter, client=mock_client)
+
+    assert ok.await_count == 1

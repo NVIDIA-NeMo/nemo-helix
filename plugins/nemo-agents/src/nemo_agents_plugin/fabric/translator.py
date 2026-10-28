@@ -17,6 +17,7 @@ from nemo_agents_plugin.fabric.gateway_credentials import (
     bind_platform_gateway_model_credential,
     platform_gateway_credential_env,
 )
+from nemo_helix_plugin.config import PLATFORM_BASE_URL_ENV_VARS
 
 HARNESS_ADAPTER_IDS = {
     "claude": "nvidia.fabric.claude",
@@ -37,7 +38,12 @@ HARNESS_ADAPTER_IDS = {
 # than a translation error here.
 FABRIC_ADAPTER_ID_PREFIX = "nvidia.fabric."
 
-PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NHX_BASE_URL", "NHX_WORKSPACE")
+# Platform location forwarded into the agent process for SDK-backed child tools:
+# the platform base-URL vars (owned by nemo_helix_plugin as
+# PLATFORM_BASE_URL_ENV_VARS, in resolution order) plus the workspace. Importing
+# them keeps the base-URL names in the platform package's canonical contract
+# rather than hardcoded here.
+PLATFORM_RUNTIME_ENV_VARS = (*PLATFORM_BASE_URL_ENV_VARS, "NHX_WORKSPACE")
 
 # In-image path where the Fabric Dockerfile stages the NeMo Relay Pi extension
 # (see container/template.py PI_RELAY_EXTENSION_PATH). The Pi adapter hard-requires
@@ -70,8 +76,18 @@ def upgrade_relay_observability_version(config: dict[str, Any]) -> dict[str, Any
     return upgraded
 
 
-def translate_agent_config(config: AgentConfig, harness_name: str | None = None) -> fabric.FabricConfig:
-    """Translate Platform-owned agent config into a typed in-memory FabricConfig."""
+def translate_agent_config(
+    config: AgentConfig, harness_name: str | None = None, *, proxy_origin: str | None = None
+) -> fabric.FabricConfig:
+    """Translate Platform-owned agent config into a typed in-memory FabricConfig.
+
+    When *proxy_origin* is set, the agent's platform base URL (``NEMO_BASE_URL``
+    / ``NHX_BASE_URL``) resolves to it instead of the task process's direct URL,
+    so the agent's SDK reaches the platform through the per-job auth proxy. This
+    is injected via ``runtime_env`` -- the platform-override layer that wins the
+    environment merge -- so it is not clobbered by the direct URL the task
+    process carries in its own ``os.environ``.
+    """
     harness_config = None
     workflow_config = None
     runtime_payload = config.runtime.model_dump(exclude_none=True)
@@ -93,7 +109,7 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
         )
     model_payloads = _model_payloads(config, model)
     runtime_env = {
-        **_platform_runtime_env(),
+        **_platform_runtime_env(proxy_origin=proxy_origin),
         **_gateway_credential_env(model_payloads),
     }
     _validate_untranslated_shared_fields(config)
@@ -115,9 +131,20 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
     return fabric_config
 
 
-def _platform_runtime_env() -> dict[str, str]:
-    """Forward the Platform location needed by SDK-backed child tools."""
-    return {name: value for name in PLATFORM_RUNTIME_ENV_VARS if (value := os.environ.get(name))}
+def _platform_runtime_env(*, proxy_origin: str | None = None) -> dict[str, str]:
+    """Forward the Platform location needed by SDK-backed child tools.
+
+    When *proxy_origin* is set, the platform base-URL vars resolve to it rather
+    than the task process's direct URL, so the agent's SDK reaches the platform
+    through the per-job auth proxy. These belong in the runtime-override layer
+    (this dict wins the environment merge), so the proxy origin is honored
+    instead of being overwritten by the direct URL in ``os.environ``.
+    """
+    env = {name: value for name in PLATFORM_RUNTIME_ENV_VARS if (value := os.environ.get(name))}
+    if proxy_origin is not None:
+        for name in PLATFORM_BASE_URL_ENV_VARS:
+            env[name] = proxy_origin
+    return env
 
 
 def _environment_config(config: AgentConfig, runtime_env: dict[str, str]) -> Any:
@@ -193,7 +220,7 @@ def _model_payloads(config: AgentConfig, selected: ModelConfig) -> dict[str, dic
 
     ``FabricConfig.models`` and the adapter contract's ``AgentConfig.models`` are
     both keyed maps, so the whole map is forwarded rather than just the harness's
-    primary model. An adapter that reads a secondary key (the Insights analyst
+    primary model. An adapter that reads a secondary key (Compass
     reads ``fast`` for context summarization) would otherwise see it silently
     missing and fall back to ``default``.
 

@@ -7,6 +7,7 @@ These entities use EntityBase and are stored via EntityClient.
 Jobs are identified by ID rather than by a unique name within a namespace.
 """
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
@@ -15,7 +16,7 @@ from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityBase
 from nhx.common.jobs.schemas import FileStorageType, HelixJobResultResponse, HelixJobStatus
 from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
-from pydantic import Field, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 STEP_SPEC_NAME_CONFIG_KEY = "_step_spec_name"
 
@@ -54,6 +55,7 @@ class HelixJob(EntityBase):
         description="Mutable job behavior. This is not part of the execution spec.",
     )
     current_attempt_id: Optional[str] = Field(default=None, description="Current Attempt ID")
+    status: Optional[HelixJobStatus] = Field(default=None, description="Current attempt status")
     fileset: str = Field(..., description="Fileset ID for storing job artifacts (logs, results)")
     output_location: Optional[str] = Field(
         default=None,
@@ -176,18 +178,21 @@ class HelixJobTask(EntityBase):
 class HelixJobResult(EntityBase):
     """Result/artifact from a completed job.
 
-    Parent-scoped: unique within (workspace, entity_type, parent=job).
+    Results remain parented to the job so names are unique across all attempts.
+    ``attempt_id`` records the attempt that produced newer results; existing
+    records without it remain valid.
     """
 
     __entity_type__: ClassVar[str] = "platform_job_result"
 
     job: str = Field(..., description="Parent job ID")
+    attempt_id: Optional[str] = Field(default=None, description="ID of the attempt that produced the result")
     artifact_url: str = Field(..., description="URL to the artifact")
     artifact_storage_type: FileStorageType = Field(..., description="Type of artifact storage")
 
     @model_validator(mode="after")
-    def set_parent_from_job(self):
-        """Set _parent to the job ID for parent-scoped uniqueness."""
+    def set_result_parent(self):
+        """Set the job parent for job-wide result-name uniqueness."""
         self._parent = self.job
         return self
 
@@ -197,8 +202,38 @@ class HelixJobResult(EntityBase):
             name=self.name,
             job=self.job,
             workspace=self.workspace,
+            attempt_id=self.attempt_id,
             created_at=self.created_at,  # type: ignore
             updated_at=self.updated_at,  # type: ignore
             artifact_url=self.artifact_url,
             artifact_storage_type=self.artifact_storage_type,
         )
+
+
+class JobStorageTarget(BaseModel):
+    """A backend that holds a job's persistent storage."""
+
+    provider: str = Field(..., description="Execution provider of a step that mounts job storage")
+    profile: str = Field(..., description="Execution profile of a step that mounts job storage")
+
+
+class HelixJobStorageReclaim(EntityBase):
+    """Job storage waiting for the jobs controller to reclaim it, from a deleted job or one stopped too long.
+
+    Job storage is keyed by the job name, and deleting the job removes the entities the
+    storage sweep reads. This record outlives the job, so the controller can still reach
+    the backends that hold the storage, and it holds the name until the storage is gone.
+    It lives in the system workspace, so deleting the job's workspace does not drop it.
+    """
+
+    __entity_type__: ClassVar[str] = "platform_job_storage_reclaim"
+
+    job_id: str = Field(..., description="ID of the job")
+    job_workspace: str = Field(..., description="Workspace the job belongs to")
+    job_name: str = Field(..., description="Name of the job. Job storage is keyed by it.")
+    targets: list[JobStorageTarget] = Field(default_factory=list, description="Backends that hold the storage")
+
+    @staticmethod
+    def name_for_job(job_id: str) -> str:
+        """Return a stable record name for a job. Job IDs have upper case, which entity names do not allow."""
+        return f"reclaim-{hashlib.sha256(job_id.encode()).hexdigest()[:40]}"

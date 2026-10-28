@@ -318,7 +318,7 @@ class RulesLoader:
                 handler = cls._make_default_handler(exc_class, error_details, default_handler)
 
             # Build the matcher from the rule
-            matcher = cls._build_matcher(rule, exception_registry, fallback_modules)
+            matcher = cls.build_matcher(rule, exception_registry, fallback_modules)
             converter.add_rule(matcher, handler)
 
         if converter.rule_count == 0:
@@ -327,7 +327,7 @@ class RulesLoader:
         return converter
 
     @classmethod
-    def _build_matcher(
+    def build_matcher(
         cls,
         rule: dict[str, Any],
         exception_registry: ExceptionRegistry,
@@ -381,21 +381,21 @@ class RulesLoader:
             sub_rules = rule["or"]
             if not isinstance(sub_rules, list):
                 raise ValueError(f"'or' must be a list of matchers: {rule}")
-            sub_matchers = [cls._build_matcher(r, exception_registry, fallback_modules) for r in sub_rules]
+            sub_matchers = [cls.build_matcher(r, exception_registry, fallback_modules) for r in sub_rules]
             return OrMatcher(sub_matchers)
 
         if "and" in rule:
             sub_rules = rule["and"]
             if not isinstance(sub_rules, list):
                 raise ValueError(f"'and' must be a list of matchers: {rule}")
-            sub_matchers = [cls._build_matcher(r, exception_registry, fallback_modules) for r in sub_rules]
+            sub_matchers = [cls.build_matcher(r, exception_registry, fallback_modules) for r in sub_rules]
             return CompositeMatcher(sub_matchers)
 
         if "not" in rule:
             sub_rule = rule["not"]
             if not isinstance(sub_rule, dict):
                 raise ValueError(f"'not' must be a matcher dict: {rule}")
-            sub_matcher = cls._build_matcher(sub_rule, exception_registry, fallback_modules)
+            sub_matcher = cls.build_matcher(sub_rule, exception_registry, fallback_modules)
             return NotMatcher(sub_matcher)
 
         # Special matchers
@@ -416,7 +416,7 @@ class RulesLoader:
                 # Filter out 'recursive' to get the matcher fields
                 sub_rule = {k: v for k, v in cause_config.items() if k != "recursive"}
 
-            cause_matcher = cls._build_matcher(sub_rule, exception_registry, fallback_modules)
+            cause_matcher = cls.build_matcher(sub_rule, exception_registry, fallback_modules)
             return CauseMatcher(cause_matcher, recursive=recursive)
 
         if "attribute" in rule:

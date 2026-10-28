@@ -165,6 +165,7 @@ def test_compile_grpo_config_sandboxed_paths(
     assert nemo_gym["sandboxed"] is True
     assert nemo_gym["environment_path"] == "/job/environment"
     assert nemo_gym["environment_offline"] is True
+    assert nemo_gym["episode_broker"] == {"port": 51234}
     # The master reads the dataset itself, so the dataloader path stays on job storage
     # even though the sandbox sees the same file at /job/dataset.
     assert cfg["data"]["train"]["data_path"] == str(dataset_pvc / "training.jsonl")

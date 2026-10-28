@@ -4,6 +4,7 @@
 import importlib
 import sys
 from types import ModuleType, SimpleNamespace
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -139,6 +140,48 @@ def test_run_from_env_reports_missing_config_path(monkeypatch):
 
     with pytest.raises(ValueError, match=f"{task_main.NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR} is not set"):
         task_main.run_from_env()
+
+
+def test_resolve_pretrained_model_uses_current_attempt_selector(tmp_path, monkeypatch):
+    task_main = import_task_main_without_heavy_runtime(monkeypatch)
+    job_config = task_main.SafeSynthesizerJobConfig.model_validate(
+        {
+            "data_source": "default/data#input.csv",
+            "pretrained_model_job": "prior-safe-synth-job",
+            "config": {},
+        }
+    )
+    client = MagicMock()
+    jobs = MagicMock()
+    result_response = MagicMock()
+    result_response.data.return_value = SimpleNamespace(
+        artifact_url="default/job-results-prior#results/attempt-1/adapter"
+    )
+    jobs.get_job_result.return_value = result_response
+    monkeypatch.setattr(task_main.JobsClient, "from_client", classmethod(lambda _cls, _client: jobs))
+
+    files = MagicMock()
+    monkeypatch.setattr(task_main.FilesClient, "from_client", classmethod(lambda _cls, _client: files))
+    downloaded = SimpleNamespace(path=tmp_path / "adapter")
+    file_manager = MagicMock()
+    file_manager.download_from_url.return_value = downloaded
+    file_manager_cls = MagicMock(return_value=file_manager)
+    monkeypatch.setattr(task_main, "FilesetFileManager", file_manager_cls)
+
+    tmp_dir_path, adapter_path = task_main._resolve_pretrained_model(
+        job_config,
+        workspace="default",
+        client=client,
+    )
+
+    jobs.get_job_attempt.assert_not_called()
+    jobs.get_job_result.assert_called_once_with(
+        name="adapter",
+        job="prior-safe-synth-job",
+        workspace="default",
+    )
+    assert tmp_dir_path is downloaded
+    assert adapter_path == downloaded.path
 
 
 def test_setup_classify_endpoint_sets_upstream_safe_synthesizer_env(monkeypatch):

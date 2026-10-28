@@ -104,8 +104,9 @@ class TestTrainingProgressCallback:
         }
         callback, reporter = self._make_callback(prior_metrics=prior)
 
-        assert len(callback._metrics["train_loss"]) == 2
-        assert len(callback._metrics["val_loss"]) == 1
+        train_loss, val_loss = callback._metrics["train_loss"], callback._metrics["val_loss"]
+        assert isinstance(train_loss, list) and len(train_loss) == 2
+        assert isinstance(val_loss, list) and len(val_loss) == 1
         reporter.fetch_current_metrics.assert_called_once()
 
     def test_seeded_metrics_included_in_first_report(self):

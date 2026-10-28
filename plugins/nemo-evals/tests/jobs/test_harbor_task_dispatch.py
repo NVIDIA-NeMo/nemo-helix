@@ -4,15 +4,34 @@
 """A task Job's input, its compiled Job, and what the dispatcher changes inside it."""
 
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from harbor.agents.base import BaseAgent
+from harbor.agents.factory import AgentFactory
+from harbor.environments.factory import EnvironmentFactory
+from harbor.models.task.config import EnvironmentConfig, TaskConfig
+from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
+from harbor.models.trial.config import AgentConfig, ResourceMode
+from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
+from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
+from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
+    HarborBuiltinAgentSource,
+    HarborGatewayModel,
+    HarborRunnerTarget,
+    RegisteredAgentSource,
+)
+from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.harbor_task_dispatch import (
     DISPATCH_COMMAND,
     OPENSANDBOX_ENVIRONMENT,
@@ -32,9 +51,11 @@ from nemo_evals.jobs.harbor_task_spec import (
     build_task_job_input,
 )
 from nemo_evals.tasks import harbor_task_dispatch as entrypoint
+from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.values import ModelRef
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
 AGENT = PreparedImage(image_ref="registry.invalid/agent@sha256:" + "a" * 64, preparation_key="ka")
@@ -54,6 +75,39 @@ def test_input_runs_only_its_task_and_leaves_the_plan_alone(harbor_plan, task_sp
     assert task_spec.execution_deadline_at == NOW + timedelta(hours=1)
     assert task_spec.sandbox_policy == harbor_plan.sandbox_policy
     assert HarborTaskJobSpec.model_validate_json(task_spec.model_dump_json()) == task_spec
+
+
+def test_a_run_without_publication_gives_its_task_jobs_none(task_spec):
+    assert task_spec.spec.publication is None
+
+
+def test_a_publishing_run_gives_each_task_job_the_runs_evaluation_never_required(harbor_plan, harbor_run):
+    intake = RunIntakePublication(
+        experiment="swe",
+        experiment_id="exp-1",
+        agent_name="codex",
+        dataset_name="d",
+        dataset_version="1",
+    )
+    plan = harbor_plan.model_copy(update={"intake": intake})
+    publication = build_task_job_input(plan, harbor_run, 1, ENVIRONMENT).spec.publication
+    assert publication is not None and publication.intake is not None
+    # Named after the run record, not the plan: a keyless run's id can change during acceptance.
+    assert publication.intake.evaluation_id == harbor_run.name
+    # The version is left to each trial's own trajectory (codex records its release).
+    assert (publication.intake.agent_name, publication.intake.agent_version) == ("codex", "unknown")
+    # A failed publish must not fail the task Job and drop its scored result from the run's bundle.
+    assert publication.intake.required is False
+
+
+def test_a_task_job_publishes_under_its_own_name_and_leaves_the_evaluation_to_the_controller(task_spec):
+    job = HarborTaskAgentEvalJob()
+    job._task_spec = task_spec
+    # Stable sessions (<run>-task-<i>:<trial>): a re-publish replaces them instead of adding a random run.
+    assert job._run_id() == f"{task_spec.run_id}-task-1"
+    assert HarborTaskAgentEvalJob.record_publication_durations is False
+    assert AsyncAgentEvalJob.record_publication_durations is True
+    assert AsyncAgentEvalJob()._run_id() is None
 
 
 def test_only_task_rejects_an_out_of_range_index(harbor_spec):
@@ -139,6 +193,8 @@ def test_runtime_selects_opensandbox_with_frozen_policy_and_no_key(task_spec, tm
     assert kwargs["trusted_allowed_hosts"] == ["igw.svc.cluster.local"]
     assert kwargs["agent_channel_hosts"] == []
     assert kwargs["sandbox_timeout_sec"] == 30_600 and kwargs["use_server_proxy"] is True
+    assert kwargs["enforce_disk_limit"] is True and kwargs["max_disk_mb"] == 131_072
+    assert not any(key.startswith("override_") for key in kwargs)
     assert kwargs["metadata"] == {"nemo-run": "run-0123456789abcdef", "nemo-task-index": "1", "nemo-job": ctx.job_id}
     assert configured.n_concurrent_trials == 1
     assert "private-worker-value" not in json.dumps(configured.model_dump(mode="json"))
@@ -152,6 +208,172 @@ def test_runtime_passes_the_frozen_agent_channel(task_spec, tmp_path):
     configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_channel_hosts"] == ["igw.svc.cluster.local"]
+
+
+def test_runtime_passes_agent_overrides_and_capped_defaults(task_spec, tmp_path):
+    overrides = ResourceOverrides(cpus=4, storage_mb=20_480)
+    policy = task_spec.sandbox_policy.model_copy(update={"resource_overrides": overrides, "max_memory_mb": 1024})
+    spec = task_spec.model_copy(update={"sandbox_policy": policy})
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, spec)
+    assert configured.environment is not None
+    kwargs = configured.environment.kwargs
+    assert kwargs["agent_resource_overrides"] == {"cpus": 4, "storage_mb": 20_480}
+    assert kwargs["sandbox_resource_defaults"] == resource_defaults(policy) == {"cpus": 1, "memory_mb": 1024}
+    assert not [key for key in kwargs if key.startswith("override_")]
+    harbor = TrialEnvironmentConfig.model_validate(configured.environment.model_dump())  # as the runtime hands it over
+    assert harbor.cpu_enforcement_policy == harbor.memory_enforcement_policy == ResourceMode.AUTO
+
+
+def _sandbox(configured, tmp_path: Path, session_id: str, task_env_config: EnvironmentConfig) -> Any:
+    """The sandbox environment Harbor's factory builds for ``session_id`` from the dispatcher's config."""
+    (tmp_path / "env").mkdir(exist_ok=True)
+    (tmp_path / "trial-x").mkdir(exist_ok=True)
+    return EnvironmentFactory.create_environment_from_config(
+        TrialEnvironmentConfig.model_validate(configured.environment.model_dump()),
+        environment_dir=tmp_path / "env",
+        environment_name="t",
+        session_id=session_id,
+        trial_paths=TrialPaths(trial_dir=tmp_path / "trial-x"),
+        task_env_config=task_env_config,
+    )
+
+
+@pytest.mark.parametrize("verifier", ["explicit", "inherited"])
+def test_overrides_size_the_agent_sandbox_only(task_spec, tmp_path, monkeypatch, verifier):
+    monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "")
+    overrides = ResourceOverrides(cpus=4, memory_mb=8192)
+    policy = task_spec.sandbox_policy.model_copy(update={"resource_overrides": overrides, "max_memory_mb": 1024})
+    configured = configure_runtime(
+        HarborRuntimeConfig(jobs_dir=tmp_path),
+        MagicMock(spec=JobContext, job_id="j"),
+        task_spec.model_copy(update={"sandbox_policy": policy}),
+    )
+    task = TaskConfig.model_validate(
+        {
+            "environment": {"docker_image": AGENT.image_ref, "cpus": 2, "storage_mb": 1024},
+            "verifier": {"environment_mode": "separate"}
+            | ({"environment": {"docker_image": VERIFIER.image_ref, "cpus": 1}} if verifier == "explicit" else {}),
+        }
+    )
+    agent = _sandbox(configured, tmp_path, "trial-x__env", task.environment)
+    verifier_config = resolve_effective_verifier_env_config(task, None)  # Harbor copies it after the agent's
+    assert verifier_config is not None
+    verifier_sandbox = _sandbox(configured, tmp_path, "trial-x__verifier__main", verifier_config)
+    assert agent._resource()["cpu"] == "4" and agent._resource()["memory"] == "8192Mi"
+    expected_cpus = "1" if verifier == "explicit" else "2"  # task.toml's, never the override
+    assert verifier_sandbox._resource()["cpu"] == expected_cpus
+    assert verifier_sandbox._resource()["memory"] == "1024Mi"  # the capped default
+    assert task.environment.cpus == 2 and task.environment.memory_mb is None  # the task's own config is untouched
+
+
+def test_a_storage_only_task_still_gets_cpu_and_memory_limits(task_spec, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPEN_SANDBOX_API_KEY", "")
+    policy = task_spec.sandbox_policy.model_copy(update={"enforce_disk_limit": True, "max_disk_mb": None})
+    configured = configure_runtime(
+        HarborRuntimeConfig(jobs_dir=tmp_path),
+        MagicMock(spec=JobContext, job_id="j"),
+        task_spec.model_copy(update={"sandbox_policy": policy}),
+    )
+    config = EnvironmentConfig(docker_image=AGENT.image_ref, storage_mb=4096)
+    resource = _sandbox(configured, tmp_path, "trial-x", config)._resource()
+    assert resource == {"cpu": "1", "memory": "2048Mi", "ephemeral-storage": "4096Mi"}
+
+
+def _configured_with_setup_hosts(task_spec, tmp_path, hosts: tuple[str, ...], **runtime: Any) -> HarborRuntimeConfig:
+    policy = task_spec.sandbox_policy.model_copy(update={"agent_setup_egress": hosts})
+    spec = task_spec.model_copy(update={"sandbox_policy": policy})
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    return configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, **runtime), ctx, spec)
+
+
+@pytest.mark.parametrize("agent", ["claude-code", "codex"])
+def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path, agent):
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, agent_kwargs={"version": "2.1.0"}
+    )
+    assert configured.environment is not None
+    assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
+    assert configured.agent_import_path == SETUP_EGRESS_AGENT
+    assert configured.agent_kwargs == {
+        "version": "2.1.0",
+        INNER_AGENT_KWARG: agent,
+        SETUP_HOSTS_KWARG: ["registry.npmjs.org"],
+    }
+
+
+def _harbor_setup_timeout_sec(configured: HarborRuntimeConfig) -> float:
+    """The setup timeout Harbor gives the trial: its agent class's default times the setup multiplier."""
+    agent_class = AgentFactory.get_agent_class_from_config(AgentConfig(import_path=configured.agent_import_path))
+    assert configured.agent_setup_timeout_multiplier is not None
+    return agent_class.DEFAULT_SETUP_TIMEOUT_SEC * configured.agent_setup_timeout_multiplier
+
+
+@pytest.mark.skipif(
+    not hasattr(BaseAgent, "DEFAULT_SETUP_TIMEOUT_SEC"), reason="Harbor 0.23 uses one setup timeout for every agent"
+)
+@pytest.mark.parametrize(
+    ("agent", "multipliers", "timeout_sec"),
+    [
+        ("codex", {}, 360.0),
+        ("hermes", {}, 1200.0),
+        ("hermes", {"agent_setup_timeout_multiplier": 2.0}, 2400.0),
+        ("hermes", {"timeout_multiplier": 0.5}, 600.0),
+        ("hermes", {"timeout_multiplier": 0.5, "agent_setup_timeout_multiplier": 3.0}, 3600.0),
+    ],
+)
+def test_a_wrapped_agent_keeps_its_own_setup_timeout(task_spec, tmp_path, agent, multipliers, timeout_sec):
+    """Harbor reads the setup timeout from the wrapper's class, so the dispatcher scales it to the inner agent's."""
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, **multipliers
+    )
+    assert _harbor_setup_timeout_sec(configured) == pytest.approx(timeout_sec)
+
+
+def test_an_unwrapped_agent_keeps_the_callers_setup_multiplier(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(task_spec, tmp_path, (), agent_name="hermes")
+    assert configured.agent_setup_timeout_multiplier is None
+
+
+def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="harbor.agents.installed.codex:Codex"
+    )
+    assert configured.agent_import_path == SETUP_EGRESS_AGENT
+    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "harbor.agents.installed.codex:Codex"
+
+
+@pytest.mark.parametrize("agent", ["oracle", "nop"])
+def test_agents_that_install_nothing_are_not_wrapped(task_spec, tmp_path, agent, caplog):
+    """Harbor constructs and scores oracle and nop by name, so wrapping them would break them."""
+    with caplog.at_level(logging.INFO, logger="nemo_evals.jobs.harbor_task_dispatch"):
+        configured = _configured_with_setup_hosts(task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent)
+    assert configured.agent_import_path is None and configured.agent_name == agent
+    assert f"Agent {agent} runs setup without the agent setup egress window: it installs nothing" in caplog.text
+
+
+def test_without_setup_hosts_the_agent_is_not_wrapped(task_spec, tmp_path, caplog):
+    with caplog.at_level(logging.INFO, logger="nemo_evals.jobs.harbor_task_dispatch"):
+        configured = _configured_with_setup_hosts(task_spec, tmp_path, (), agent_name="claude-code")
+    assert "agent setup egress window" not in caplog.text
+    assert configured.agent_import_path is None and configured.agent_name == "claude-code"
+    assert INNER_AGENT_KWARG not in configured.agent_kwargs
+
+
+def test_a_loose_agent_file_runs_unwrapped(task_spec, tmp_path, caplog):
+    """The runtime picks a loose file's import path at run time, so it can't be named for the wrapper.
+
+    Its install then fails on the task's own policy, so the log says why, for whoever debugs it.
+    """
+    with caplog.at_level(logging.INFO, logger="nemo_evals.jobs.harbor_task_dispatch"):
+        configured = _configured_with_setup_hosts(
+            task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="wrapper:Agent", agent_dir=tmp_path
+        )
+    assert "Agent wrapper:Agent runs setup without the agent setup egress window: a loose agent file" in caplog.text
+    assert configured.agent_import_path == "wrapper:Agent"
+    assert INNER_AGENT_KWARG not in configured.agent_kwargs
 
 
 def write_task(root: Path, toml: str, *, compose: bool = False) -> Path:
@@ -188,3 +410,50 @@ def test_bind_rejects_compose_tasks(tmp_path):
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
     with pytest.raises(ValueError, match="compose tasks"):
         bind_task_image(task, AGENT.image_ref)
+
+
+def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_spec, harbor_resolved_task, monkeypatch):
+    """Its sandbox would deny every call the agent makes to its gateway model, so no trial is worth starting."""
+    monkeypatch.setenv("OPEN_SANDBOX_DOMAIN", task_spec.sandbox_policy.connection.domain)
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+    spec = task_spec.spec.model_copy(
+        update={
+            "tasks": [harbor_resolved_task("offline", config={"environment": {"allow_internet": False}})],
+            "target": HarborRunnerTarget(
+                source=HarborBuiltinAgentSource(name="codex", model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+            ),
+        }
+    )
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    blocked = task_spec.model_copy(update={"spec": spec, "execution_deadline_at": future})
+
+    with pytest.raises(ValueError, match="gateway_unreachable"):
+        HarborTaskAgentEvalJob().run(blocked.model_dump(mode="json"), ctx=MagicMock(), async_client=MagicMock())
+
+
+async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_spec):
+    """The agent reads it like any other key; the gateway checks none with platform auth off."""
+    target = HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="claude-code", model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+    )
+    spec = task_spec.model_copy(update={"spec": task_spec.spec.model_copy(update={"target": target})})
+
+    compiled = await HarborTaskDispatchJob.compile(spec=spec, profile="k8s-cpu")
+
+    (step,) = compiled.steps
+    variables = {variable.name: variable for variable in step.environment or []}
+    assert variables["ANTHROPIC_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
+    assert variables["ANTHROPIC_API_KEY"].from_secret is None
+
+
+def test_every_sandbox_ends_at_the_runs_execution_deadline(task_spec, tmp_path):
+    """The deadline goes to the environment as an absolute time, so each create (a retry, a separate verifier)
+    gets the time left then, not a lifetime measured once when the dispatcher started."""
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec)
+    assert configured.environment is not None
+    kwargs = configured.environment.kwargs
+    assert kwargs["sandbox_timeout_sec"] == task_spec.sandbox_policy.max_sandbox_lifetime_s
+    expires_at = kwargs["sandbox_expires_at"]
+    assert isinstance(expires_at, str) and datetime.fromisoformat(expires_at) == task_spec.execution_deadline_at

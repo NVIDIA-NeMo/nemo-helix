@@ -1270,6 +1270,7 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     assert "helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update" in run_sh
     assert "helm repo add authentik https://charts.goauthentik.io --force-update" in run_sh
     assert 'args+=(--set-string "nemo-helix.existingSecret=${K8S_NGC_EXISTING_SECRET}")' in run_sh
+    assert "authentik-server authentik-worker nemo-helix-api nemo-helix-core-controller nemo-helix-envoy" in run_sh
     assert "--timeout" in run_sh
     assert "NHX_AUTHENTIK_K8S_KUSTOMIZATION" not in run_sh
     assert "auth_idp_k8s" in live_test
@@ -1601,6 +1602,21 @@ def test_authentik_kubernetes_test_action_runs_host_contracts() -> None:
     assert "--auth-idp-context" in output
 
 
+def test_authentik_kubernetes_test_action_collects_pod_logs_before_deleting_the_cluster() -> None:
+    output = _run_authentik_script(
+        "test",
+        "k8s",
+        "--dry-run",
+        env={"NHX_AUTHENTIK_K8S_RUNTIME": "kind", "NHX_AUTHENTIK_K8S_KEEP_CLUSTER": "0"},
+    )
+
+    collect = output.find("logs --all-containers --prefix --timestamps")
+    delete = output.find("kind delete cluster")
+    assert collect != -1, output
+    assert delete != -1, output
+    assert collect < delete
+
+
 def test_authentik_down_cleans_reused_compose_and_kubernetes_resources(tmp_path: Path) -> None:
     output = _run_authentik_script("down", "--dry-run", env={"NEMO_AUTHENTIK_STATE_DIR": str(tmp_path)})
 
@@ -1924,21 +1940,21 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     )
 
 
-def test_nemo_helix_seed_hook_uses_internal_api_service_url() -> None:
+def test_nemo_helix_seed_hook_uses_platform_base_url() -> None:
     template = Path("k8s/helm/templates/platform-seed-job.yaml").read_text(encoding="utf-8")
 
     assert "- name: NHX_BASE_URL" in template
-    assert 'include "nemo-helix.internalBaseUrl"' in template
+    assert 'include "nemo-helix.platformBaseUrl"' in template
 
 
-def test_nemo_helix_controller_uses_internal_api_service_url_for_embedded_pdp() -> None:
+def test_nemo_helix_controller_uses_platform_base_url_for_embedded_pdp() -> None:
     template = Path("k8s/helm/templates/core/controller-deployment.yaml").read_text(encoding="utf-8")
 
     assert "- name: NHX_BASE_URL" in template
     assert "- name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL" in template
     assert (
         "name: NHX_AUTH_POLICY_DECISION_POINT_BASE_URL\n"
-        '              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}'
+        '              value: {{ include "nemo-helix.platformBaseUrl" . | quote }}'
     ) in template
 
 

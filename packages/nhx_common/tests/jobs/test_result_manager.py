@@ -43,6 +43,7 @@ def test_result_remote_path_nests_under_base():
     mgr = rm.ResultManager(
         job_name="my-job",
         workspace="ws",
+        attempt_id="att-1",
         files_client=FilesClient.from_client(sdk),
         jobs_client=JobsClient.from_client(sdk),
     )
@@ -62,6 +63,7 @@ def test_create_result_nests_under_job_when_output_location_set(tmp_path, mock_s
     mgr = rm.ResultManager(
         job_name="test-job",
         workspace="test-ws",
+        attempt_id="att-1",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -78,6 +80,7 @@ def test_create_result_nests_under_job_when_output_location_set(tmp_path, mock_s
         ):
             mgr.create_result("summary", test_file)
         assert mock_sync_file_manager.upload.call_args.kwargs["remote_path"] == expected
+        assert mock_jobs.create_job_result.call_args.kwargs["body"].attempt_id == "att-1"
 
 
 def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_file_manager):
@@ -99,6 +102,7 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
     mgr = rm.ResultManager(
         job_name="test-job",
         workspace="test-ws",
+        attempt_id="att-123",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -125,6 +129,7 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
     mgr = rm.ResultManager(
         job_name="test-job",
         workspace="test-ws",
+        attempt_id="att-123",
         files_client=FilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -156,6 +161,7 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
     mgr = rm.AsyncResultManager(
         job_name="test-job",
         workspace="test-ws",
+        attempt_id="att-123",
         files_client=AsyncFilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )
@@ -163,7 +169,7 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
     with patch.object(mgr, "_create_file_manager", return_value=mock_async_file_manager):
         result = await mgr.create_result("my-result", test_file)
 
-    mock_jobs.get_job_result.assert_called_once_with(name="my-result", job="test-job", workspace="test-ws")
+    mock_jobs.get_job_result.assert_awaited_once_with(name="my-result", job="test-job", workspace="test-ws")
     assert result is existing_result
 
 
@@ -183,6 +189,7 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
     mgr = rm.AsyncResultManager(
         job_name="test-job",
         workspace="test-ws",
+        attempt_id="att-123",
         files_client=AsyncFilesClient.from_client(sdk),
         jobs_client=mock_jobs,
     )

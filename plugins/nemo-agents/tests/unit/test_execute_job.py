@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -46,6 +47,12 @@ from nemo_agents_plugin.jobs.execute import (
     ResolvedAgentConfig,
     _configure_intake_telemetry,
     _log_agent_stderr,
+    _stage_stored_agent_ethos,
+)
+from nemo_agents_plugin.runner.fabric_artifact_staging import (
+    FabricArtifactStagingError,
+    FabricEthosFilesetNotFound,
+    stage_fabric_ethos_dir,
 )
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
@@ -69,6 +76,72 @@ requires_hermes_adapter = pytest.mark.skipif(
     find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
     reason="needs the hermes harness adapter, which is not installed on Python 3.14",
 )
+
+
+class _OpenedAsyncClient:
+    async def __aenter__(self) -> "_OpenedAsyncClient":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+def _sdk_opening_async_client() -> MagicMock:
+    sdk = MagicMock()
+    sdk.to_async.return_value = _OpenedAsyncClient()
+    return sdk
+
+
+@pytest.fixture(autouse=True)
+def _ethos_fileset_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing ``run()`` tests pass a ``MagicMock`` SDK and declare no skills.
+
+    They should keep seeing a missing ethos fileset: the real stager runs, the
+    download is not found, and validation passes. Tests that need a fileset
+    restore ``_stage_stored_agent_ethos`` and replace this download.
+    """
+
+    async def _missing(*_args: object, **_kwargs: object) -> None:
+        raise FabricEthosFilesetNotFound("missing fileset")
+
+    monkeypatch.setattr(
+        "nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset",
+        _missing,
+    )
+
+    def _stage(
+        sdk: object,
+        *,
+        workspace: str,
+        agent_name: str,
+        agent_config: AgentConfig,
+        base_dir: Path,
+    ) -> None:
+        del sdk
+
+        async def _run() -> None:
+            await stage_fabric_ethos_dir(
+                workspace=workspace,
+                agent_name=agent_name,
+                agent_config=agent_config.model_dump(mode="json"),
+                base_dir=base_dir,
+                files_client=AsyncMock(),
+            )
+
+        asyncio.run(_run())
+
+    monkeypatch.setattr("nemo_agents_plugin.jobs.execute._stage_stored_agent_ethos", _stage)
+
+
+def _use_real_ethos_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nemo_agents_plugin.jobs.execute._stage_stored_agent_ethos",
+        _stage_stored_agent_ethos,
+    )
+    monkeypatch.setattr(
+        "nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client",
+        lambda _client: AsyncMock(),
+    )
 
 
 class _TypedFilesResponse:
@@ -95,6 +168,68 @@ def _agent_config(**environment: str) -> dict[str, Any]:
 def _agent(name: str = "calc", workspace: str = "default", config_format: str = "nemo-agents-spec-v1") -> Agent:
     config = _agent_config() if config_format == "nemo-agents-spec-v1" else {"workflow": {}}
     return Agent(name=name, workspace=workspace, config=config, config_format=config_format)
+
+
+def test_run_passes_caller_context_with_platform_fields_under_reserved_key(ctx: JobContext) -> None:
+    caller_context = {"run_scope": {"since": "2026-10-01"}, "evaluation_id": "eval-1"}
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello", context=caller_context),
+        agent=_resolved_agent(workspace="research"),
+    )
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["context"] = request.caller_context
+        return FabricRuntimeResult(status="succeeded")
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert seen["context"] == {
+        **caller_context,
+        "nemo_helix": {"job_id": ctx.job_id, "job_workspace": ctx.workspace, "agent": "research/calc"},
+    }
+
+
+def test_run_without_caller_context_sends_only_platform_fields(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+    )
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["context"] = request.caller_context
+        return FabricRuntimeResult(status="succeeded")
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert seen["context"] == {
+        "nemo_helix": {"job_id": ctx.job_id, "job_workspace": ctx.workspace, "agent": "default/calc"},
+    }
+
+
+def test_job_config_rejects_reserved_context_key() -> None:
+    with pytest.raises(ValidationError, match="'nemo_helix' is reserved"):
+        ExecuteAgentJobConfig(agent="calc", input="hello", context={"nemo_helix": {"job_id": "spoofed"}})
+
+
+@pytest.mark.asyncio
+async def test_to_spec_keeps_caller_context_on_the_step_config() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _agent()
+
+    spec = await ExecuteAgentJob.to_spec(
+        ExecuteAgentJobConfig(agent="calc", input="hello", context={"evaluation_id": "eval-1"}),
+        workspace="default",
+        entity_client=entity_client,
+        async_sdk=_sdk_with_files(),
+        is_local=False,
+    )
+
+    step_config = ExecuteAgentStepConfig.model_validate(spec)
+    assert step_config.request.context == {"evaluation_id": "eval-1"}
 
 
 def _sdk_with_files(data: list[object] | None = None) -> MagicMock:
@@ -139,6 +274,7 @@ async def test_to_spec_resolves_bare_agent_against_route_workspace() -> None:
     step_config = ExecuteAgentStepConfig.model_validate(spec)
     assert step_config.agent.name == "calc"
     assert step_config.agent.workspace == "default"
+    assert step_config.agent_ref == "default/calc"
     assert step_config.request.input == "hello"
     assert step_config.request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
     assert step_config.workdir is None
@@ -154,7 +290,7 @@ async def test_to_spec_preserves_explicit_agent_workspace() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent(workspace="research")
 
-    await ExecuteAgentJob.to_spec(
+    spec = await ExecuteAgentJob.to_spec(
         ExecuteAgentJobConfig(agent="research/calc", input="hello"),
         workspace="default",
         entity_client=entity_client,
@@ -163,6 +299,8 @@ async def test_to_spec_preserves_explicit_agent_workspace() -> None:
     )
 
     entity_client.get.assert_awaited_once_with(Agent, name="calc", workspace="research")
+    # A job in one workspace that runs another workspace's agent is listed under that agent's ref.
+    assert ExecuteAgentStepConfig.model_validate(spec).agent_ref == "research/calc"
 
 
 @pytest.mark.asyncio
@@ -196,16 +334,23 @@ async def test_to_spec_rejects_non_fabric_agent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_to_spec_rejects_malformed_fabric_agent_config() -> None:
+@pytest.mark.parametrize(
+    ("config", "error"),
+    [
+        ({}, "Agent 'default/calc' has no configuration"),
+        ({"config_format": "nemo-agents-spec-v1", "name": "calc"}, "default_harness"),
+    ],
+)
+async def test_to_spec_rejects_malformed_fabric_agent_config(config: dict, error: str) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = Agent(
         name="calc",
         workspace="default",
-        config={"config_format": "nemo-agents-spec-v1", "name": "calc"},
+        config=config,
         config_format="nemo-agents-spec-v1",
     )
 
-    with pytest.raises(ValueError, match="default_harness"):
+    with pytest.raises(ValueError, match=error):
         await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent="calc", input="hello"),
             workspace="default",
@@ -927,6 +1072,7 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
         assert request.input == "hello"
         assert request.base_dir == ctx.storage.ephemeral / "fabric"
         assert request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
+        assert request.observe_progress is True
         (request.base_dir / "workspace" / "answer.txt").write_text("done\n")
         (request.base_dir / "artifacts" / "trace.json").write_text("{}\n")
         return FabricRuntimeResult(
@@ -1316,8 +1462,10 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         response = MagicMock()
         response.data.return_value = SimpleNamespace(
             id="job-1",
+            attempt_id="attempt-1",
             name="execute-1",
             description=None,
+            project=None,
             workspace="default",
             created_at=None,
             updated_at=None,
@@ -1350,6 +1498,8 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     assert body.spec["agent"]["name"] == "calc"
     assert body.spec["agent"]["workspace"] == "default"
     assert body.spec["agent"]["config_format"] == "nemo-agents-spec-v1"
+    # The stored job spec carries the qualified ref that ``filter[spec.agent_ref]`` matches.
+    assert body.spec["agent_ref"] == "default/calc"
     assert body.spec["agent"]["config"]["environment"] == {
         "provider": "local",
         "workspace": "./workspace",
@@ -1366,6 +1516,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     assert body.spec["request"] == {
         "agent": "calc",
         "input": "hello",
+        "context": {},
         "environment": None,
         "workdir": {"base_workdir": "source#project", "artifact_mounts": []},
         "timeout_seconds": DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
@@ -1462,6 +1613,8 @@ async def test_to_spec_resolves_an_inline_agent_without_touching_the_entity_stor
     assert step_config.agent.name == "calc"
     assert step_config.agent.workspace == "research"
     assert step_config.agent.config_format == "nemo-agents-spec-v1"
+    # Not an entity, so the job belongs to no agent's runs.
+    assert step_config.agent_ref is None
     entity_client.get.assert_not_awaited()
 
 
@@ -2335,3 +2488,144 @@ def test_wants_intake_atif_export_agrees_with_the_wiring_it_guards() -> None:
         config["telemetry"] = telemetry
         wired = intake_export.configure_intake_atif_export(config, workspace="default", base_url="http://platform:8080")
         assert wants_intake_atif_export({**config, "telemetry": telemetry}) is wired
+
+
+def _agent_with_probe_skill(*, name: str = "calc", workspace_dir: str | None = None) -> ResolvedAgentConfig:
+    agent = _resolved_agent(name=name)
+    agent.config["skills"] = {"paths": ["skills/probe-skill"]}
+    if workspace_dir is not None:
+        agent.config["environment"] = {"provider": "local", "workspace": workspace_dir}
+    return agent
+
+
+def _write_probe_skill(local_path: Path) -> None:
+    skill = local_path / "skills" / "probe-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# probe\n", encoding="utf-8")
+
+
+def test_run_stages_ethos_skills_before_invoke_and_keeps_workdir(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_real_ethos_stage(monkeypatch)
+    requested: list[str] = []
+
+    async def _download(
+        _files_client: object,
+        *,
+        workspace: str,
+        fileset_name: str,
+        local_path: Path,
+    ) -> None:
+        assert workspace == "default"
+        requested.append(fileset_name)
+        _write_probe_skill(local_path)
+
+    monkeypatch.setattr("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download)
+
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(
+            agent="calc",
+            input="hello",
+            workdir=AgentWorkdir(base_workdir="source#project/"),
+        ),
+        agent=_agent_with_probe_skill(),
+        workdir=AgentWorkdir(base_workdir="default/source#notes.txt"),
+    )
+
+    def _download_workdir(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client
+        assert ref == "default/source#notes.txt"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "notes.txt").write_text("from the workdir\n", encoding="utf-8")
+        return SimpleNamespace(path=local_dir / "notes.txt", tmp_dir=local_dir)
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        assert (request.base_dir / "skills" / "probe-skill" / "SKILL.md").read_text(encoding="utf-8") == "# probe\n"
+        assert (request.base_dir / "workspace" / "notes.txt").read_text(encoding="utf-8") == "from the workdir\n"
+        return FabricRuntimeResult(status="succeeded", response="done")
+
+    sdk = _sdk_opening_async_client()
+    with (
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
+        patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download_workdir),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+    ):
+        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
+
+    assert result["status"] == "completed"
+    assert requested == ["calc-ethos"]
+    assert (ctx.storage.persistent / "results" / "input_workdir" / "notes.txt").read_text(encoding="utf-8") == (
+        "from the workdir\n"
+    )
+    assert not (ctx.storage.persistent / "results" / "input_workdir" / "skills").exists()
+
+
+@pytest.mark.parametrize("sdk", ["client", None], ids=["missing-fileset", "no-sdk"])
+def test_run_rejects_declared_skills_when_ethos_cannot_be_staged(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch, sdk: str | None
+) -> None:
+    _use_real_ethos_stage(monkeypatch)
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_agent_with_probe_skill(),
+    )
+
+    with (
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", AsyncMock()) as invoke,
+        pytest.raises(FabricArtifactStagingError, match="skills/probe-skill"),
+    ):
+        ExecuteAgentJob().run(
+            spec.model_dump(mode="json"),
+            ctx=ctx,
+            sdk=None if sdk is None else _sdk_opening_async_client(),
+        )
+
+    invoke.assert_not_called()
+
+
+def test_run_keeps_workdir_when_workspace_is_the_fabric_base(ctx: JobContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_real_ethos_stage(monkeypatch)
+
+    async def _download(
+        _files_client: object,
+        *,
+        workspace: str,
+        fileset_name: str,
+        local_path: Path,
+    ) -> None:
+        del workspace, fileset_name
+        _write_probe_skill(local_path)
+
+    monkeypatch.setattr("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download)
+
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(
+            agent="calc",
+            input="hello",
+            workdir=AgentWorkdir(base_workdir="source#project/"),
+        ),
+        agent=_agent_with_probe_skill(workspace_dir="."),
+        workdir=AgentWorkdir(base_workdir="default/source#notes.txt"),
+    )
+
+    def _download_workdir(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client, ref
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "notes.txt").write_text("from the workdir\n", encoding="utf-8")
+        return SimpleNamespace(path=local_dir / "notes.txt", tmp_dir=local_dir)
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        assert (request.base_dir / "skills" / "probe-skill" / "SKILL.md").is_file()
+        assert (request.base_dir / "notes.txt").read_text(encoding="utf-8") == "from the workdir\n"
+        return FabricRuntimeResult(status="succeeded", response="done")
+
+    sdk = _sdk_opening_async_client()
+    with (
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
+        patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download_workdir),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+    ):
+        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
+
+    assert result["status"] == "completed"

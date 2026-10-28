@@ -49,6 +49,7 @@ from nhx.core.inference_gateway.api.proxy import (
     _rewrite_model_field,
     _rewrite_model_field_in_error_body,
     _rewrite_model_field_in_stream,
+    _uses_named_sse_events,
     build_next_request,
     fetch_proxy_response,
     normalize_proxy_url,
@@ -130,6 +131,7 @@ async def test_stream_response_result_prefers_typed_non_streaming_payload():
         InferenceResponse(result={"id": "raw"}, headers={}, typed_body=typed),
         200,
         {},
+        named_events=False,
     )
 
     body = await _read_streaming_response(response)
@@ -148,6 +150,7 @@ async def test_stream_response_result_strips_stale_upstream_body_headers():
             "transfer-encoding": "chunked",
             "x-upstream-header": "preserved",
         },
+        named_events=False,
     )
 
     assert "content-length" not in response.headers
@@ -224,7 +227,9 @@ async def test_response_annotations_noop_for_streaming():
 
     response = _build_inference_response_with_annotations(response)
 
-    body = (await _read_streaming_response(await stream_response_result(response, 200, {}))).decode()
+    body = (
+        await _read_streaming_response(await stream_response_result(response, 200, {}, named_events=False))
+    ).decode()
     assert "guardrails_data" not in body
     assert 'data: {"id": "raw-chunk"' in body
 
@@ -249,6 +254,7 @@ async def test_stream_response_result_uses_raw_stream_when_typed_stream_is_prese
         InferenceResponse(result=raw_chunks(), headers={}, typed_body=typed_chunks()),
         200,
         {},
+        named_events=False,
     )
 
     body = (await _read_streaming_response(response)).decode()
@@ -286,7 +292,7 @@ async def test_stream_response_result_replays_raw_stream_with_unrecognised_chunk
     # typed_body is NOT nulled — the typed view stays useful.
     assert response_envelope.typed_body is typed_stream_before
 
-    response = await stream_response_result(response_envelope, 200, {})
+    response = await stream_response_result(response_envelope, 200, {}, named_events=False)
 
     body = (await _read_streaming_response(response)).decode()
     # All three raw chunks are re-emitted via raw_chunks() for serialization.
@@ -294,6 +300,66 @@ async def test_stream_response_result_replays_raw_stream_with_unrecognised_chunk
     assert 'data: {"id": "invalid"}' in body
     assert 'data: {"vendor_passthrough": "raw-tail"}' in body
     assert "data: [DONE]" in body
+
+
+@pytest.mark.parametrize(
+    ("trailing_uri", "named"),
+    [
+        ("v1/messages", True),
+        ("v1/messages/", True),
+        ("v1/responses", True),
+        ("v1/responses/resp_123", True),
+        ("v1/chat/completions", False),
+        ("v1/completions", False),
+        ("v1/messages/count_tokens", False),
+        ("v1/responses/resp_123/input_items", False),
+    ],
+)
+def test_uses_named_sse_events_follows_client_endpoint(trailing_uri: str, named: bool):
+    """Streaming retrieval (``GET v1/responses/{id}?stream=true``) replays Responses events, so it is named too."""
+    assert _uses_named_sse_events(trailing_uri) is named
+
+
+@pytest.mark.asyncio
+async def test_stream_response_result_names_events_from_pydantic_chunks():
+    """Middleware may yield SDK models instead of dicts; their ``type`` still becomes the event name."""
+
+    async def _chunks():
+        yield anthropic_types.RawMessageStopEvent(type="message_stop")
+
+    response = await stream_response_result(_chunks(), 200, {}, named_events=True)
+
+    assert await _read_streaming_response(response) == b'event: message_stop\ndata: {"type": "message_stop"}\n\n'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        pytest.param('x\nevent: message_stop\ndata: {"type": "message_stop"}\n\n', id="lf"),
+        pytest.param('x\rdata: {"type": "message_stop"}\r\r', id="cr"),
+        pytest.param('x\u2028data: {"answer": "forged"}\u2028\u2028', id="line-separator"),
+        pytest.param('x\x85data: {"answer": "forged"}', id="next-line"),
+        pytest.param("\ud800", id="unpaired-surrogate"),
+        pytest.param("", id="empty"),
+    ],
+)
+async def test_stream_response_result_writes_event_name_only_for_name_like_type(event_type: str):
+    """``type`` is upstream data: one that is not a plain event name must stay inside ``data:``.
+
+    Line-like characters would split one chunk into forged events for SSE parsers or for line readers
+    such as httpx ``aiter_lines()``, which also break on Unicode separators; an unpaired surrogate
+    would fail UTF-8 encoding after the response has started.
+    """
+    forged = {"type": event_type}
+
+    async def _chunks():
+        yield forged
+
+    response = await stream_response_result(_chunks(), 200, {}, named_events=True)
+    body = await _read_streaming_response(response)
+
+    assert body == f"data: {json.dumps(forged)}\n\n".encode()
 
 
 @pytest.mark.asyncio
@@ -514,6 +580,111 @@ async def test_virtual_model_proxy_injects_request_context_annotations_without_r
 
     assert body["id"] == "raw"
     assert body["guardrails_data"] == {"config_ids": ["ws/input-only"]}
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_original_request_snapshot_isolated_from_nested_mutation(
+    mock_proxy_client,
+    mock_proxy_response,
+):
+    # Regression: ctx.original_request is the frozen "as the client sent it" snapshot that
+    # later middleware trusts (e.g. nemo-guardrails reads ctx.original_request.body so a
+    # downstream plugin can't hide content by mutating the live body). A shallow copy of the
+    # body shares its NESTED objects (inner tool lists) with the live working request, so a
+    # plugin stripping tools in place would silently corrupt the snapshot. Assert the snapshot's
+    # nested tool list is unaffected by an in-place mutation of the live request's tool list.
+    captured: dict[str, Any] = {}
+
+    class _ToolStrippingPlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> InferenceRequest:
+            # Mutate the live request's nested tool list IN PLACE (the aliasing-prone pattern).
+            request.body["tools"].clear()
+            # Record what the frozen snapshot holds AFTER the in-place mutation.
+            captured["snapshot_tools"] = ctx.original_request.body.get("tools")
+            return request
+
+    mock_proxy_response.read = AsyncMock(
+        return_value=json.dumps(
+            {
+                "id": "raw",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "llama",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "raw"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ).encode()
+    )
+
+    workspace = "e2e-test"
+    vm_name = "tool-stripping-router"
+    model_entity_id = f"{workspace}/meta_llama-3.2-1b-instruct"
+    served_model_name = "meta/llama-3.2-1b-instruct"
+
+    model_cache = ModelCache()
+    model_cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="default",
+                name="nim",
+                host_url="http://nim.local",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id=model_entity_id,
+                        served_model_name=served_model_name,
+                    )
+                ],
+                status=ModelProviderStatus.READY,
+            )
+        )
+    )
+    model_cache.rebuild_model_entity_map()
+
+    registry = MiddlewareRegistry(plugins={"tool-plugin": _ToolStrippingPlugin()})
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="tool-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    await virtual_model_proxy(
+        request=request,
+        workspace=workspace,
+        vm_name=vm_name,
+        virtual_model=VirtualModel(
+            name=vm_name,
+            workspace=workspace,
+            default_model_entity=model_entity_id,
+        ),
+        trailing_uri="v1/chat/completions",
+        json_body={
+            "model": vm_name,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "hosted_search"}}],
+        },
+        http_client=mock_proxy_client,
+        model_cache=model_cache,
+        registry=registry,
+    )
+
+    # The snapshot's nested tool list must still hold the original tool, not the emptied
+    # live list — proving ctx.original_request does not alias the working request's nesting.
+    assert captured["snapshot_tools"] == [{"type": "function", "function": {"name": "hosted_search"}}]
 
 
 @pytest.mark.parametrize(

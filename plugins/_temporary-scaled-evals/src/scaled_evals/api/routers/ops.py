@@ -4,17 +4,19 @@
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from time import perf_counter
+from time import monotonic, perf_counter
 
 from fastapi import APIRouter, Request, Response
+from nemo_scaled_evals_plugin.entities import ScaledEvalsBenchmarkRun
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from scaled_evals.api import artifacts, dispatch_health
+from scaled_evals.api import artifacts, dispatch_health, entity_store
+from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.build import buildkit, registry
-from scaled_evals.api.db import pooled_connection
-from scaled_evals.api.repositories.ops_repository import OperationsRepository
+from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.schemas.common import HealthStatus, ReadyzResponse
 from scaled_evals.api.settings import settings
+from scaled_evals.api.task_store import TaskStore
 
 router = APIRouter(tags=["operations"])
 
@@ -98,28 +100,27 @@ def readyz(response: Response) -> ReadyzResponse:
     return ReadyzResponse(status="ok" if required_ok else "degraded", checks=checks)
 
 
-def _postgres_probe() -> None:
-    with pooled_connection(timeout=3) as conn:
-        OperationsRepository(conn).ping()
+# ponytail: the evaluation aggregates scan every evaluation in Entity Store, so
+# scrapes inside this window reuse the last result. Each refresh still costs
+# O(evaluations). Upgrade path: range filters in the store, or counters kept
+# on write.
+_EVALUATION_METRICS_TTL_SECONDS = 30.0
+_evaluation_metrics_cache: tuple[float, tuple[dict[str, int], dict[str, int], dict]] | None = None
 
 
-def _schema_probe() -> None:
-    with pooled_connection(timeout=3) as conn:
-        OperationsRepository(conn).assert_schema_compatible()
-
-
-def _platform_jobs_controller_probe() -> None:
-    with pooled_connection(timeout=3) as conn:
-        if not OperationsRepository(conn).has_fresh_service_heartbeat(
-            "platform_jobs_controller", stale_seconds=settings.platform_jobs_controller_stale_seconds
-        ):
-            raise RuntimeError("no fresh Platform Jobs controller heartbeat")
+def _evaluation_metrics() -> tuple[dict[str, int], dict[str, int], dict]:
+    global _evaluation_metrics_cache  # noqa: PLW0603 - process-wide scrape cache
+    now = monotonic()
+    if _evaluation_metrics_cache is None or now - _evaluation_metrics_cache[0] >= _EVALUATION_METRICS_TTL_SECONDS:
+        _evaluation_metrics_cache = (
+            now,
+            (_evaluation_status_counts(), _fleet_totals(), _dispatch_observability_snapshot()),
+        )
+    return _evaluation_metrics_cache[1]
 
 
 def render_prometheus_metrics() -> str:
-    evaluation_counts = _evaluation_status_counts()
-    fleet_totals = _fleet_totals()
-    dispatch_snapshot = _dispatch_observability_snapshot()
+    evaluation_counts, fleet_totals, dispatch_snapshot = _evaluation_metrics()
     task_pack_snapshot = _task_pack_observability_snapshot()
     checks = dict(_READINESS_SNAPSHOT.checks)
 
@@ -343,13 +344,17 @@ def _route_template(request: Request) -> str | None:
     return path
 
 
+def _entity_store_probe() -> None:
+    entity_store.entity_client().list(
+        ScaledEvalsBenchmarkRun, workspace=entity_store.private_workspace(), page=1, page_size=1
+    )
+
+
 def _run_dependency_checks() -> tuple[dict[str, str], bool]:
     checks: dict[str, str] = {}
     required_ok = True
-    required_ok &= _required_check(checks, "postgres", lambda: _postgres_probe())
-    required_ok &= _required_check(checks, "schema", _schema_probe)
+    required_ok &= _required_check(checks, "entity_store", _entity_store_probe)
     required_ok &= _required_check(checks, "object_store", artifacts.check_bucket)
-    required_ok &= _required_check(checks, "platform_jobs_controller", _platform_jobs_controller_probe)
     required_ok &= _enabled_required_check(checks, "buildkit", settings.buildkit_enabled, buildkit.check_buildkit)
     required_ok &= _enabled_required_check(checks, "registry", settings.registry_enabled, registry.check_registry)
     checks["gym_dispatch"] = dispatch_health.check_gym_dispatch()
@@ -362,7 +367,7 @@ def _dependency_is_required(name: str) -> bool:
         return settings.buildkit_enabled
     if name == "registry":
         return settings.registry_enabled
-    return name in {"postgres", "schema", "object_store", "platform_jobs_controller"}
+    return name in {"entity_store", "object_store"}
 
 
 def _dependency_state(status: str) -> str:
@@ -380,18 +385,20 @@ def _dependency_state(status: str) -> str:
 def _evaluation_status_counts() -> dict[str, int]:
     counts = dict.fromkeys(_KNOWN_EVALUATION_STATUSES, 0)
     try:
-        with pooled_connection(timeout=3) as conn:
-            counts.update(OperationsRepository(conn).evaluation_status_counts())
-    except Exception:  # noqa: BLE001 — keep metrics scrape available on DB errors
+        counts.update(EvaluationStore().status_counts())
+    except Exception:  # noqa: BLE001 — keep metrics scrape available on store errors
         pass
     return counts
 
 
 def _fleet_totals() -> dict[str, int]:
     try:
-        with pooled_connection(timeout=3) as conn:
-            return OperationsRepository(conn).fleet_totals()
-    except Exception:  # noqa: BLE001 — keep metrics scrape available on DB errors
+        return {
+            "task_definitions": TaskStore().count(include_deleted=True),
+            **EvaluationStore().fleet_totals(),
+            "benchmark_runs": BenchmarkRunStore().count(),
+        }
+    except Exception:  # noqa: BLE001 — keep metrics scrape available on store errors
         return {}
 
 
@@ -406,25 +413,21 @@ def _dispatch_observability_snapshot() -> dict:
         "backend_failures": [],
     }
     try:
-        with pooled_connection(timeout=3) as conn:
-            return OperationsRepository(conn).dispatch_observability_snapshot(
-                stuck_queued_seconds=settings.observability_stuck_queued_seconds,
-                stuck_provisioning_seconds=settings.observability_stuck_provisioning_seconds,
-                stuck_running_seconds=settings.observability_stuck_running_seconds,
-                stale_worker_seconds=settings.observability_worker_stale_seconds,
-            )
-    except Exception:  # noqa: BLE001 — keep metrics scrape available on DB errors
+        return EvaluationStore().dispatch_snapshot(
+            stuck_queued_seconds=settings.observability_stuck_queued_seconds,
+            stuck_provisioning_seconds=settings.observability_stuck_provisioning_seconds,
+            stuck_running_seconds=settings.observability_stuck_running_seconds,
+            stale_worker_seconds=settings.observability_worker_stale_seconds,
+        )
+    except Exception:  # noqa: BLE001 — keep metrics scrape available on store errors
         return empty
 
 
 def _task_pack_observability_snapshot() -> dict[str, int]:
     snapshot = {"checked_ready_revisions": 0, "missing_ready_revisions": 0}
     try:
-        with pooled_connection(timeout=3) as conn:
-            rows = OperationsRepository(conn).ready_task_pack_revisions(
-                limit=settings.observability_task_pack_scan_limit
-            )
-    except Exception:  # noqa: BLE001 — keep metrics scrape available on DB errors
+        rows = TaskStore().ready_task_pack_revisions(limit=settings.observability_task_pack_scan_limit)
+    except Exception:  # noqa: BLE001 — keep metrics scrape available on store errors
         return snapshot
     for row in rows:
         object_key = row.get("tarball_object_key")

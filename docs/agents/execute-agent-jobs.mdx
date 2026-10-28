@@ -59,7 +59,7 @@ The examples below use the calculator agent that ships with the source checkout.
 Register it first if you have not already:
 
 ```bash
-nemo agents create \
+nemo agents register \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
 ```
@@ -106,6 +106,7 @@ print(job["name"], job["status"])
 | --- | --- | --- |
 | `agent` | Yes | An Agent entity name, a `workspace/name` ref, or an [inline agent definition](#inline-agents). |
 | `input` | Yes | The prompt handed to the agent. |
+| `context` | No | [Per-run parameters](#run-context) handed to the agent alongside the prompt. |
 | `environment` | No | A `workspace/name` ref to a stored `AgentEnvironment`, or an inline environment. Supplies secrets, environment variables, tool settings, and compute. |
 | `workdir` | No | The [working directory](#working-directories) the agent starts from. |
 | `timeout_seconds` | No | Maximum time to wait for a result. Defaults to 3600 (one hour). |
@@ -116,7 +117,7 @@ print(job["name"], job["status"])
 The CLI generates one flag per spec field (`--agent`, `--input`,
 `--environment`, `--workdir.base-workdir`, `--timeout-seconds`,
 `--auto-telemetry`, `--image`). Fields that do not reduce to a single flag — an
-inline agent, an inline environment, `workdir.artifact_mounts` — are supplied
+inline agent, an inline environment, `context`, `workdir.artifact_mounts` — are supplied
 with `--spec` (a JSON string) or `--spec-file` (a YAML or JSON file). Individual
 flags override values from the supplied spec.
 
@@ -205,6 +206,33 @@ read in memory. The same calls exist on `AsyncAgentsResource`.
 
 </Tabs>
 
+### List an Agent's Runs
+
+Each execute job records the `workspace/name` reference of the agent it ran as
+`spec.agent_ref`. Use it as a filter to list an agent's runs. Cross-workspace agent
+references are supported. Jobs that ran an [inline agent](#inline-agents) are not runs
+of any persisted agent and thus never match.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo jobs list --filter.source nemo-agents-plugin-execute \
+  --filter '{"spec.agent_ref": {"$in": ["default/calc", "research/calc"]}}'
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+runs = agents.jobs.execute.list(agents=["default/calc", "research/calc"])
+```
+
+</Tab>
+
+</Tabs>
+
 ### Result Names
 
 Results download as gzipped tarballs of a directory, or as a single JSON file.
@@ -230,7 +258,8 @@ downloads.
 
 An agent that reads and writes files needs somewhere to do it. `workdir` builds
 that directory from the [Files service](/documentation/get-started/core-concepts)
-before the agent starts.
+before the agent starts. Stored-agent skills come from the agent's ethos
+fileset, staged at the Fabric base before this directory is filled in.
 
 | Field | Description |
 | --- | --- |
@@ -316,13 +345,43 @@ nothing to keep in sync afterward.
 Supply it with `--spec`/`--spec-file` from the CLI, or as the `spec` body from
 the SDK.
 
+<a id="run-context"></a>
+
+## Run Context
+
+`context` carries per-run parameters to the agent as the top level of the
+Fabric request context, so one agent definition can serve many runs. The
+platform adds its own fields under the reserved `nemo_helix` key: `job_id`,
+`job_workspace`, and `agent` (the `workspace/name` that ran). A request whose
+`context` sets `nemo_helix` is rejected.
+
+```json
+{
+  "agent": "research/analyst",
+  "input": "Analyze recent runs.",
+  "context": {"since": "2026-10-01T00:00:00Z"}
+}
+```
+
+The agent receives:
+
+```json
+{
+  "since": "2026-10-01T00:00:00Z",
+  "nemo_helix": {"job_id": "job-…", "job_workspace": "research", "agent": "research/analyst"}
+}
+```
+
+`context` is stored on the job spec in plaintext. Use it for parameters, not
+secrets; bind secrets through an [environment](#environments-secrets-and-compute).
+
 <a id="execute-extensions"></a>
 
 ## Execute Extensions
 
 A plugin can register a trusted extension that runs after a successful
 invocation and turns the agent's output into something the plugin owns — for
-example, the Insights plugin's analysis runs attach an extension that saves an
+example, the Compass plugin's analysis runs attach an extension that saves an
 `analysis-report` result and files the insights it found.
 
 Extensions are named by `extension.kind` and configured by

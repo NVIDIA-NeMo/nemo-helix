@@ -12,6 +12,11 @@ import type { WarGameJobRequestOwnership } from './WarGameJobRequestOwnership.ts
 import type { WarGameSpec } from './WarGameSpec.ts';
 
 export interface WarGameJobRequest {
+  /**
+     * Job name. Name must start with a lowercase letter, be 2-63 characters, and use lowercase letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). At most 51 characters when output_location is not set. Auto-generated when omitted.
+     * @maxLength 63
+     * @pattern ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+     */
   name?: string;
   description?: string;
   project?: string;

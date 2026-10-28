@@ -358,10 +358,11 @@ describe('PackageAgentControl', () => {
 
     const commandSnippets = async () => {
       const dialog = screen.getByRole('dialog');
-      await waitFor(() => expect(dialog).toHaveTextContent(/nemo agents deploy/));
-      return within(dialog)
-        .getAllByRole('code')
-        .map((code) => code.textContent);
+      return waitFor(() => {
+        const snippets = within(dialog).getAllByRole('code');
+        expect(snippets).toHaveLength(2);
+        return snippets.map((code) => code.textContent);
+      });
     };
 
     it('disables the build and shows build and deploy as separate steps', async () => {

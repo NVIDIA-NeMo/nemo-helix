@@ -122,7 +122,10 @@ def test_job_factory_stamps_every_core_route_exactly() -> None:
         (base, "post"): ("customization.jobs.create", _WRITE),
         (base, "get"): ("customization.jobs.list", _READ),
         (f"{base}/{{name}}", "get"): ("customization.jobs.read", _READ),
+        (f"{base}/{{name}}", "patch"): ("customization.jobs.update", _WRITE),
         (f"{base}/{{name}}", "delete"): ("customization.jobs.delete", _WRITE),
+        (f"{base}/{{name}}/attempts", "get"): ("customization.jobs.read", _READ),
+        (f"{base}/{{name}}/attempts/{{attempt}}", "get"): ("customization.jobs.read", _READ),
         (f"{base}/{{name}}/status", "get"): ("customization.jobs.read", _READ),
         (f"{base}/{{name}}/cancel", "post"): ("customization.jobs.cancel", _WRITE),
         (f"{base}/{{name}}/logs", "get"): ("customization.jobs.read", _READ),
@@ -139,17 +142,33 @@ def test_job_factory_stamps_every_core_route_exactly() -> None:
 
 def test_job_factory_stamps_pause_resume_when_enabled() -> None:
     rules = _rules_by_path_method(
-        _mounted_customization_jobs(route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME])
+        _mounted_customization_jobs(
+            route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME, JobRouteOption.RERUN]
+        )
     )
     base = "/apis/customization/v2/workspaces/{workspace}/widget-jobs"
     _assert_single_rule(rules[(f"{base}/{{name}}/pause", "post")], "customization.jobs.pause", _WRITE)
     _assert_single_rule(rules[(f"{base}/{{name}}/resume", "post")], "customization.jobs.resume", _WRITE)
+    _assert_single_rule(rules[(f"{base}/{{name}}/rerun", "post")], "customization.jobs.rerun", _WRITE)
     _assert_single_rule(rules[(f"{base}/{{name}}/control", "patch")], "customization.jobs.control", _WRITE)
 
 
 def test_job_factory_core_only_omits_pause_resume() -> None:
     rules = _rules_by_path_method(_mounted_customization_jobs())
-    assert not any(path.endswith(("/pause", "/resume")) for path, _ in rules)
+    assert not any(path.endswith(("/pause", "/resume", "/control", "/rerun")) for path, _ in rules)
+
+
+def test_job_factory_rerun_is_its_own_option() -> None:
+    """A job can offer rerun without pause, and pause without rerun."""
+    pause_only = _rules_by_path_method(
+        _mounted_customization_jobs(route_options=[JobRouteOption.CORE, JobRouteOption.PAUSE_RESUME])
+    )
+    assert not any(path.endswith("/rerun") for path, _ in pause_only)
+    rerun_only = _rules_by_path_method(
+        _mounted_customization_jobs(route_options=[JobRouteOption.CORE, JobRouteOption.RERUN])
+    )
+    assert any(path.endswith("/rerun") for path, _ in rerun_only)
+    assert not any(path.endswith(("/pause", "/resume")) for path, _ in rerun_only)
 
 
 def test_job_factory_stamps_explicit_result_download_closure() -> None:
@@ -200,6 +219,7 @@ def test_job_factory_derivation_end_to_end() -> None:
         "customization.jobs.create",
         "customization.jobs.list",
         "customization.jobs.read",
+        "customization.jobs.update",
         "customization.jobs.delete",
         "customization.jobs.cancel",
     } <= set(contrib.permissions)

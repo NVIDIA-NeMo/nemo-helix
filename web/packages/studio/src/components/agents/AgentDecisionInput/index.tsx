@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ArrowDown, ArrowUp, Paperplane } from '@nemo/icons/icons';
 import { Button, Flex, Text, TextInput } from '@nvidia/foundations-react-core';
-import { ArrowDown, ArrowUp, Send } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 export type AgentDecisionInputStatus = 'pending' | 'submitting';
@@ -310,8 +310,8 @@ export const AgentDecisionInput = ({
                   >
                     {selected ? (
                       <>
-                        <ArrowUp size={16} />
-                        <ArrowDown size={16} />
+                        <ArrowUp size="16" />
+                        <ArrowDown size="16" />
                       </>
                     ) : null}
                   </Flex>
@@ -376,7 +376,7 @@ export const AgentDecisionInput = ({
               className={subduedButtonFocusClassName}
               onClick={() => void submitSelectedChoice()}
             >
-              <Send size={16} />
+              <Paperplane size="16" />
             </Button>
           </Flex>
         </Flex>

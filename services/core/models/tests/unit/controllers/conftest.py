@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError, UnprocessableEntityError
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayProviderClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
@@ -228,14 +228,17 @@ class _ModelResponse:
         return self._value
 
 
-def _status_error(status: int, detail: str):
-    """Build a plugin client HTTP error for a given status."""
+def _status_error(status: int, detail: str, code: str | None = None):
+    """Build a plugin client HTTP error for a given status, with an optional error ``code``."""
     request = httpx.Request("POST", "http://test")
-    response = httpx.Response(status, request=request, json={"detail": detail})
+    body = {"detail": detail} if code is None else {"detail": detail, "code": code}
+    response = httpx.Response(status, request=request, json=body)
     if status == 404:
         return NotFoundError(response)
     if status == 409:
         return ConflictError(response)
+    if status == 422:
+        return UnprocessableEntityError(response)
     return NemoHTTPError(response)
 
 

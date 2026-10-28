@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, Self, Union
 
 from nemo_helix_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.integrations import IntegrationsSpec
 from nhx.customization_common.schema import NamespacedModel
 from nhx.customization_common.schemas.values import OutputNameType
@@ -272,6 +273,7 @@ class DPOTraining(_TrainingBase):
     # present in the submitted JSON. Defaulting it here would make the generated
     # OpenAPI schema advertise the field as optional while the server rejects it.
     type: Literal["dpo"]
+    learning_rate: float = Field(default=5e-6, gt=0.0, description="Peak learning rate. DPO uses a low one.")
     ref_policy_kl_penalty: float = Field(
         default=0.05, ge=0.0, description="KL penalty coefficient (beta in the DPO paper)."
     )
@@ -298,6 +300,11 @@ class GRPOTraining(_TrainingBase):
     # No default: ``TrainingMethod`` is a discriminated union, so the tag has to be
     # present in the submitted JSON (same as DPOTraining.type).
     type: Literal["grpo"]
+    learning_rate: float = Field(
+        default=5e-6,
+        gt=0.0,
+        description="Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights' and 1e-5 for 'lora'.",
+    )
     finetuning_type: Literal["all_weights", "lora"] = Field(
         default="all_weights",
         description="Full-weight GRPO or LoRA adapter training. lora_merged is not supported.",
@@ -565,6 +572,14 @@ class GRPOTraining(_TrainingBase):
         "`integrations.wandb`.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _lora_learning_rate_default(cls, data: Any) -> Any:
+        """Default a LoRA run's learning rate before ``min_learning_rate`` is checked against it."""
+        if isinstance(data, dict) and data.get("finetuning_type") == "lora" and "learning_rate" not in data:
+            return {**data, "learning_rate": 1e-5}
+        return data
+
     @model_validator(mode="after")
     def _lora_defaults(self) -> Self:
         if self.finetuning_type == "lora" and self.lora is None:
@@ -759,7 +774,7 @@ TrainingMethod = Annotated[Union[DPOTraining, GRPOTraining], Discriminator("type
 
 
 class _OutputBase(RlSchema):
-    name: str = Field(max_length=255, examples=["my-dpo-llama"])
+    name: str = Field(max_length=NAME_MAX_LENGTH, examples=["my-dpo-llama"])
 
 
 class OutputRequest(_OutputBase):
@@ -770,7 +785,7 @@ class OutputResponse(_OutputBase):
     """Resolved output artifact details."""
 
     type: OutputNameType = Field(default=OutputNameType.MODEL)
-    fileset: str = Field(max_length=255)
+    fileset: str = Field(max_length=NAME_MAX_LENGTH)
 
 
 def trains_lora_adapter(training: TrainingMethod) -> bool:

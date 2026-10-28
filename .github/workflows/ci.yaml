@@ -34,7 +34,7 @@ concurrency:
 
 env:
   # Keep the CI uv binary aligned with the Flox development environment.
-  UV_VERSION: "0.10.10"
+  UV_VERSION: "0.13.4"
   # Jobs here provision their own toolchain, so Make bypasses Flox activation.
   TOOLCHAIN: system
 
@@ -1698,10 +1698,7 @@ jobs:
           NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml
           NHX_ZITADEL_K8S_IMAGE_PULL_SECRET: ${{ env.NHX_ZITADEL_K8S_IMAGE_PULL_SECRET }}
           NHX_ZITADEL_K8S_SKIP_IMAGE_LOAD: ${{ needs.build-cpu-smoke-images.outputs.publish_images == 'true' && '1' || '0' }}
-      - name: Collect Kubernetes logs
-        if: always() && matrix.backend == 'kubernetes'
-        shell: bash
-        run: e2e/k8s/scripts/collect_k8s_logs.sh
+      # run.sh writes cluster diagnostics into E2E_SERVICES_LOG_DIR before it deletes the cluster.
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1710,7 +1707,6 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           path: |
-            k8s-logs/
             report-auth-idp-${{ matrix.runtime }}.xml
             ${{ runner.temp }}/e2e-services-logs/
       - name: Delete kind cluster
@@ -1752,10 +1748,10 @@ jobs:
         with:
           package: ${{ matrix.package }}
           out-dir: ${{ github.workspace }}/dist
-          cadence: nightly
+          cadence: rc
           # Sentinel epoch — the wheel version is meaningless for a CI test
           # build, but stamp_sdk_version.py requires \d{14}.
-          nightly-timestamp: "19700101000000"
+          rc-timestamp: "19700101000000"
           python-version: ${{ matrix.python-version }}
       - name: Upload wheel
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1824,8 +1820,8 @@ jobs:
           fi
           WHEEL="${wheels[0]}"
           # Supply-chain: partial-pin the wheel's direct external deps to a committed constraints
-          # file. Regenerate with script/compile-wheel-constraints.sh.
-          CONSTRAINTS="${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-helix-services.txt"
+          # file. Regenerate with tools/wheel-constraints/compile-wheel-constraints.sh.
+          CONSTRAINTS="${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-services.txt"
           # --no-config: this step runs inside the checkout, so uv would otherwise apply the
           # repo's [tool.uv] override-dependencies and resolve a dependency set no user can get.
           if [[ "${INSTALL_METHOD}" == "tool" ]]; then
@@ -1865,7 +1861,7 @@ jobs:
           cd "${RUNNER_TEMP}/wheelcheck"
           uv venv .venv --python "${PYTHON_VERSION}"
           uv pip install --no-config --python .venv/bin/python \
-            --constraint "${GITHUB_WORKSPACE}/.github/wheel-constraints/nemo-helix-plugin.txt" \
+            --constraint "${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-plugin.txt" \
             "${WHEEL}"
           unset PYTHONPATH VIRTUAL_ENV
           # Import the package + a couple of representative submodules
@@ -1885,7 +1881,7 @@ jobs:
     name: Python e2e tests
     needs: [policy-wasm]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1904,7 +1900,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run e2e tests
-        run: make test-e2e PYTEST_EXTRA='-m "not full_e2e"'
+        # Two workers, one services pool per worker (see register_services_pool_items).
+        run: make test-e2e PYTEST_EXTRA='-m "not full_e2e" -n 2 --dist loadgroup --durations=25'
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
@@ -2432,11 +2429,7 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   deployments-openshell-tests:
-    # The openshell extra is a platform-restricted manylinux_2_39 wheel that the
-    # shared unit-test job does not install, so the OpenShell backend tests skip
-    # there. Install the extra in this isolated, path-filtered job and exercise the
-    # backend for real. Kept separate so a wheel-install failure fails only this
-    # small job, not the whole unit suite (mirrors the nemo-guardrails extra job).
+    # Path-filtered job that runs only the OpenShell deployment backend tests.
     name: Deployments OpenShell backend tests
     needs: [changes]
     if: >

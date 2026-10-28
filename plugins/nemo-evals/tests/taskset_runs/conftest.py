@@ -30,6 +30,7 @@ def plan(
     The returned plan has explicit unlimited caps and a fail-on-missing-image
     policy, providing deterministic input for serialization and acceptance tests.
     """
+    assert harbor_config.dispatcher_image is not None
     return TasksetRunPlan(
         run_id=derive_run_id("default", "user:alice", "key"),
         workspace="default",
@@ -63,6 +64,7 @@ def acceptance(plan: TasksetRunPlan) -> RunAcceptance:
         idempotency_key="key",
         request_digest="request-digest",
         accepted_at=accepted_at,
+        timeout_seconds=3600,
         execution_deadline_at=accepted_at + timedelta(hours=1),
         finalization_deadline_at=accepted_at + timedelta(hours=2),
     )

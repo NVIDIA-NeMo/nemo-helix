@@ -14,7 +14,10 @@ api:
       mountPath: /etc/nhx/workload-token
       readOnly: true
 platformConfig:
+  platform:
+    base_url: https://nemo-helix-envoy:8080
   auth:
+    enabled: true
     oidc:
       workload:
         client_id: nemo-workload

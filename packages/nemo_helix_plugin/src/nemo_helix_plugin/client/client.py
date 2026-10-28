@@ -22,6 +22,7 @@ import inspect
 import json
 import logging
 import os
+import string
 from asyncio import sleep as async_sleep
 from collections.abc import (
     AsyncGenerator,
@@ -71,6 +72,7 @@ from nemo_helix_plugin.client.response import (
 )
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.client.types import (
+    PATH_SPEC,
     RESPONSE_VALIDATION_CONTEXT,
     BinaryContent,
     OffsetPagination,
@@ -290,6 +292,30 @@ def _retry_after(response: httpx.Response) -> float | None:
             except (OverflowError, OSError, ValueError):
                 return None
     return delay if 0 < delay <= 60 else None
+
+
+def _format_path(template: str, params: Mapping[str, str]) -> str:
+    """Fill a path template, percent-encoding each value per its placeholder kind.
+
+    A ``{name:path}`` value keeps ``/`` literal, drops one leading ``/``, and must not
+    contain empty, ``.`` or ``..`` segments, which would resolve to a different route.
+    """
+    parts: list[str] = []
+    for literal, field_name, format_spec, _conversion in string.Formatter().parse(template):
+        parts.append(literal)
+        if field_name is None:
+            continue
+        value = str(params[field_name])
+        if format_spec == PATH_SPEC:
+            value = value.removeprefix("/")
+            if any(segment in ("", ".", "..") for segment in value.removesuffix("/").split("/")):
+                raise ValueError(
+                    f"Path parameter {field_name!r} must not contain empty, '.' or '..' segments, got {value!r}"
+                )
+            parts.append(quote(value, safe="/"))
+        else:
+            parts.append(quote(value, safe=""))
+    return "".join(parts)
 
 
 # Transport failures httpx raises before it starts reading the request body: the
@@ -549,9 +575,8 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         if self._workspace:
             params["workspace"] = self._workspace
         params.update(request.path_params)
-        encoded_params = {name: quote(str(value), safe="") for name, value in params.items()}
         try:
-            path = request.path_template.format_map(encoded_params)
+            path = _format_path(request.path_template, params)
         except KeyError as exc:
             raise ValueError(f"Missing path parameter {exc} for {request.method} {request.path_template}") from exc
         return self._base_url + path

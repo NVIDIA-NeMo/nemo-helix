@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 import yaml
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT, Agent
@@ -17,6 +19,7 @@ from nemo_agents_plugin.jobs.package_agent import (
     PackageAgentJob,
     PackageAgentSpec,
 )
+from nemo_helix_plugin.client.errors import NemoResponseValidationError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
@@ -102,6 +105,18 @@ class TestToSpec:
                 is_local=False,
             )
 
+    async def test_name_only_agent_fails_at_submit(self) -> None:
+        agent = _agent()
+        agent.config = {}
+        with pytest.raises(ValueError, match="Agent 'default/my-agent' has no configuration"):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=None,
+                is_local=False,
+            )
+
     async def test_nat_workflow_agent_is_rejected(self) -> None:
         with pytest.raises(HelixJobCompilationError, match="packaging supports"):
             await PackageAgentJob.to_spec(
@@ -144,6 +159,19 @@ class TestCompile:
         assert step["executor"]["provider"] == "subprocess"
         assert step["executor"]["command"] == ["python", "-m", "nemo_agents_plugin.tasks.package"]
 
+    async def test_step_carries_platform_image_registry_and_tag(self) -> None:
+        platform_config = SimpleNamespace(image_registry="my-registry", image_tag="local")
+        with (
+            _patch_profiles([_subprocess_profile()]),
+            patch("nemo_agents_plugin.jobs.package_agent.get_platform_config", return_value=platform_config),
+        ):
+            platform_spec = await self._compile()
+
+        step = next(iter(platform_spec["steps"]))
+        env = {e["name"]: e["value"] for e in step["environment"]}
+        assert env["NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY"] == "my-registry"
+        assert env["NEMO_AGENTS_SANDBOX_IMAGE_TAG"] == "local"
+
     async def test_url_workspace_overwrites_spec_workspace(self) -> None:
         with _patch_profiles([_subprocess_profile()]):
             platform_spec = await PackageAgentJob.compile(
@@ -175,6 +203,12 @@ class TestCompile:
     async def test_unreachable_jobs_service_is_retryable(self) -> None:
         with _patch_profiles(RuntimeError("connection refused")):
             with pytest.raises(HelixJobDependencyUnavailableError, match="Retry the submission"):
+                await self._compile()
+
+    async def test_invalid_profiles_response_is_not_reported_as_unavailable(self) -> None:
+        error = NemoResponseValidationError(httpx.Response(200, json=[{"backend": "unknown"}]), ValueError("bad"))
+        with _patch_profiles(error):
+            with pytest.raises(NemoResponseValidationError):
                 await self._compile()
 
     async def test_missing_sdk_does_not_promise_a_retry(self) -> None:

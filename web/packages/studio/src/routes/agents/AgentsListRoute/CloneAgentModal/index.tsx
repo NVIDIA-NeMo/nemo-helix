@@ -9,7 +9,7 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getAgentsListAgentsQueryKey,
-  useAgentsCreateAgent,
+  useAgentsRegisterAgent,
 } from '@nemo/sdk/generated/agents/agents';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
@@ -57,7 +57,7 @@ export const CloneAgentModal: FC<CloneAgentModalProps> = ({
     error: createError,
     isPending,
     reset: resetMutation,
-  } = useAgentsCreateAgent({
+  } = useAgentsRegisterAgent({
     mutation: {
       onSuccess: (agent) => {
         toast.success(`Agent "${agent.name}" created`);

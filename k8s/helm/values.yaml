@@ -127,6 +127,10 @@ builder:
   # -- Namespace builds run in, which the chart creates. Empty is `<release namespace>-builds`. Each release needs its own,
   # and it can't be the release namespace.
   namespace: ""
+  # -- How long a build step may stay pending before Jobs fails it, in seconds: the build profiles'
+  # `ttl_seconds_before_active`. Longer than the 30-minute profile default: a burst of builds (113 for one DeepSWE run)
+  # queues steps behind the Jobs controller, and that queue time counts.
+  ttlSecondsBeforeActive: 3600
   # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
   namespaceLabels: {}
   # -- The work volume every build step and sandbox mounts.
@@ -248,6 +252,10 @@ networkPolicies:
         matchLabels:
           app: nemo-job
           nhx.nvidia.com/managed_by: jobs-controller
+    # -- Allow Models-controller weight-puller pods in the same namespace to reach the Files API. Model servers and sandbox pods are not included.
+    modelPullers:
+      # -- Enable ingress from Models-controller weight-puller pods.
+      enabled: true
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
@@ -317,6 +325,18 @@ networkPolicies:
       ports: []
     # -- Extra NetworkPolicy egress rules appended to the managed job policy, for cluster-specific dependencies or additional allowed CIDRs.
     extraEgress: []
+
+  # -- Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training.
+  # @default -- This object has the following default values for per-step ingress isolation.
+  jobSteps:
+    # -- Opt in to per-step ingress NetworkPolicies. Off by default; set true to write jobs.executor_defaults step_network_policies_enabled, which lets the jobs controller create and delete those policies. The ValidatingAdmissionPolicy that limits the controller to those policies is installed from that resolved flag, including a platformConfig override, so enabling this needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
+    enabled: false
+    # -- TCP ports a job step may open to pods outside its own job, besides the generation range. The episode broker. Must include DEFAULT_BROKER_PORT.
+    allowedIngressTcpPorts: [51234]
+    # -- Half-open TCP ranges a job step may open to pods outside its own job. vLLM picks each generation server's port from the first span. Must include NeMo-RL DEFAULT_GENERATION_PORT_RANGE_LOW/HIGH.
+    allowedIngressTcpPortRanges:
+      - low: 3000
+        high: 4999
 
 # -- NCCL chart test (`helm test`): multi-node allreduce check. Templates use helm.sh/hook: test — they are not created on install/upgrade, only when you run helm test.
 # Requires nodes labeled with gpuNodeLabelKey/gpuNodeLabelValue (default NFD / GPU operator style).
@@ -607,7 +627,6 @@ baseHelixConfig: |
   auth:
     enabled: false
     policy_decision_point_provider: embedded
-    policy_decision_point_base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
     policy_data_refresh_interval: 5
     bundle_cache_seconds: 5
     admin_email: "admin@example.com"
@@ -635,6 +654,9 @@ baseHelixConfig: |
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
         env:
           NEMO_EVALS_ALLOW_INSECURE_CLOUDPICKLE_METRICS: {{ .Values.evals.allowInsecureCloudpickleMetrics | toString | quote }}
+        {{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+        step_network_policies_enabled: true
+        {{- end }}
       volcano_job:
         service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
         launcher_image: {{ include "nhx-core.image" . | quote }}
@@ -647,6 +669,9 @@ baseHelixConfig: |
         {{- if include "nemo-helix.multinodeNetworkingEnabled" . }}
         # Enable multi-node networking (triggers Kyverno policies for cloud-specific configuration)
         enable_multi_node_networking: true
+        {{- end }}
+        {{- if include "nemo-helix.jobStepNetworkPoliciesEnabled" . }}
+        step_network_policies_enabled: true
         {{- end }}
 
   # -- secrets is the configuration specific to storing secrets on the platform
@@ -723,8 +748,8 @@ baseHelixConfig: |
     job_storage_pvc_claim: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
     # Gym sandbox pod size.
     sandbox_resources:
-      cpu: "2"
-      memory: 4Gi
+      cpu: "4"
+      memory: 8Gi
 
   # -- safe_synthesizer is the configuration specific to the Safe Synthesizer service
   safe_synthesizer:

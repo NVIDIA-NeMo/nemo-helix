@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { SETTINGS_ENABLED } from '@studio/constants/environment';
+import { Cog } from '@nemo/icons/icons';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateSettingsRoutes, getWorkspaceSettingsRoute } from '@studio/routes/utils';
-import { Settings } from 'lucide-react';
+import { getWorkspaceSettingsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -16,22 +15,19 @@ const WorkspaceSettingsRoute = lazy(() =>
   }))
 );
 
-export const settingsRoutes: RouteObject[] = gateSettingsRoutes([
+export const settingsRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.settings,
     element: <WorkspaceSettingsRoute />,
     errorElement: <RouteErrorPanel title="Settings" />,
   },
-]);
+];
 
-export const getSettingsSideNavItems = (workspace: string) =>
-  SETTINGS_ENABLED
-    ? [
-        {
-          id: 'settings',
-          slotIcon: <Settings className={iconColorClass} />,
-          slotLabel: 'Settings',
-          href: getWorkspaceSettingsRoute(workspace),
-        },
-      ]
-    : [];
+export const getSettingsSideNavItems = (workspace: string) => [
+  {
+    id: 'settings',
+    slotIcon: <Cog className={iconColorClass} />,
+    slotLabel: 'Settings',
+    href: getWorkspaceSettingsRoute(workspace),
+  },
+];

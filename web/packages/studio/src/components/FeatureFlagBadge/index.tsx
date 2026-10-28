@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { InfoCircle } from '@nemo/icons/icons';
 import { Badge, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { featureFlags } from '@studio/constants/featureFlags';
 import { FeatureFlags } from '@studio/constants/featureFlags/featureFlags';
 import { PREVIEW } from '@studio/constants/featureFlags/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { Info } from 'lucide-react';
 import { FC } from 'react';
 
 interface FeatureFlagBadgeProps {
@@ -29,7 +29,7 @@ export const FeatureFlagBadge: FC<FeatureFlagBadgeProps> = ({ flag }) => {
       side="bottom"
     >
       <Badge color="gray" kind="solid" className="ml-2 align-middle">
-        <Info width="12px" height="12px" />
+        <InfoCircle width="12px" height="12px" />
         Early Preview
       </Badge>
     </Tooltip>

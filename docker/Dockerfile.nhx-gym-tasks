@@ -35,7 +35,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && find /opt/gym-venv -type d -path '*/site-packages/ray/jars' -prune -exec rm -rf {} + \
     && test -z "$(find /opt/gym-venv -path '*/site-packages/ray/jars/*' -print -quit)"
 
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 FROM cpu-tasks AS runtime
+COPY --from=gym-builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --chown=1000:1000 --from=gym-builder /opt/gym-venv /opt/gym-venv
 COPY --from=gym-builder /usr/local/bin/python* /usr/local/bin/
 COPY --from=gym-builder /usr/local/include/python3.13 /usr/local/include/python3.13

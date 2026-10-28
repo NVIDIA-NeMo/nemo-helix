@@ -6,6 +6,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { ChevronLeft } from '@nemo/icons/icons';
 import {
   Banner,
   Button,
@@ -31,7 +32,6 @@ import {
   DEFAULT_THRESHOLD,
   RoutingStrategiesSection,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/RoutingStrategiesSection';
-import { ChevronLeft } from 'lucide-react';
 import { type FC, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.core.entities.api.v2.entities import router as entities_router
 from nhx.core.entities.api.v2.projects import router as projects_router
@@ -50,6 +51,10 @@ async def validation_error_exception_handler(request: Request, ex: RequestValida
         content={"detail": str(ex)},
     )
 
+
+# Match the deployed service, which registers these through the service base.
+# Workspace-missing writes rely on them to return their error code.
+register_sdk_exception_handlers(app)
 
 app.include_router(entities_router, tags=[ENTITIES_ROUTER_NAME])
 app.include_router(projects_router, tags=[PROJECTS_ROUTER_NAME])

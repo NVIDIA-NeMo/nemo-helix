@@ -20,7 +20,7 @@ from nemo_evals.image_builds.builder import (
     ensure_build,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import ConflictError, PermissionDeniedError
 
 _SOURCE = FileSetSource(fileset="default/harbor-tasks", archive="sort/abc/task_archive", context_path="sort/tests")
 
@@ -50,9 +50,17 @@ def _submitted(name: str, revision: int) -> SubmitBuildResponse:
 
 
 class _Builder:
-    def __init__(self, revisions: list[Literal["pending", "ready", "failed"]], *, job: str | None = "active") -> None:
+    def __init__(
+        self,
+        revisions: list[Literal["pending", "ready", "failed"]],
+        *,
+        job: str | None = "active",
+        conflicting: frozenset[int] = frozenset(),
+    ) -> None:
         self.statuses = revisions
         self.job = job
+        #: Revisions Builder holds for another request.
+        self.conflicting = conflicting
         self.submitted: list[int] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
@@ -65,10 +73,21 @@ class _Builder:
         return self.job
 
     async def submit(
-        self, *, name: str, revision: int, source: FileSetSource | ImageSource, dockerfile: str | None
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: FileSetSource | ImageSource,
+        dockerfile: str | None,
+        platform: str | None,
     ) -> SubmitBuildResponse:
         self.submitted.append(revision)
+        if revision in self.conflicting:
+            raise ConflictError(httpx.Response(409, json={"detail": "a revision names one request"}))
         return _submitted(name, revision)
+
+    async def image_platforms(self, image: str) -> list[str]:
+        return []
 
 
 @pytest.mark.parametrize(
@@ -92,13 +111,34 @@ async def test_ensure_build_resubmits_the_newest_revision_unless_it_failed(
     assert builder.submitted == [submitted]
 
 
+async def test_ensure_build_moves_past_a_revision_builder_holds_for_another_request() -> None:
+    """Such as one built for the platform the deployment used to default to."""
+    builder = _Builder(["ready"], conflicting=frozenset({1}))
+
+    submitted = await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [1, 2]
+    assert submitted.job == "builder-harbor-env-0123456789ab-2"
+
+
 def test_builder_name_depends_on_every_build_input() -> None:
-    base = {"archive_digest": "a" * 64, "context_path": "sort/environment", "dockerfile": "Dockerfile"}
+    base = {
+        "archive": "default/harbor-tasks#sort/abc/task_archive",
+        "archive_digest": "a" * 64,
+        "context_path": "sort/environment",
+        "dockerfile": "Dockerfile",
+    }
     name = builder_name(**base)
 
     assert name == builder_name(**base)
     assert name.startswith("harbor-env-") and len(name) == len("harbor-env-") + 12
-    for field, other in [("archive_digest", "b" * 64), ("context_path", "sort/tests"), ("dockerfile", "D2")]:
+    for field, other in [
+        # Builder fingerprints the source location too: one name for two locations would conflict there.
+        ("archive", "team/harbor-tasks#sort/abc/task_archive"),
+        ("archive_digest", "b" * 64),
+        ("context_path", "sort/tests"),
+        ("dockerfile", "D2"),
+    ]:
         assert builder_name(**{**base, field: other}) != name
 
 
@@ -121,7 +161,7 @@ async def test_http_builder_submits_one_unnamed_spec_per_image() -> None:
         return httpx.Response(201, json=_submitted("harbor-env-0123456789ab", 2).model_dump(mode="json"))
 
     submitted = await _http_builder(handler).submit(
-        name="harbor-env-0123456789ab", revision=2, source=_SOURCE, dockerfile="Dockerfile"
+        name="harbor-env-0123456789ab", revision=2, source=_SOURCE, dockerfile="Dockerfile", platform=None
     )
 
     assert requests[0].method == "POST"
@@ -170,7 +210,7 @@ async def test_http_builder_raises_when_builder_refuses_a_read() -> None:
         await builder.get_image("harbor-env-0123456789ab-1")
 
 
-async def test_http_builder_submits_a_copy_without_a_dockerfile() -> None:
+async def test_http_builder_submits_a_copy_without_a_dockerfile_for_the_platform_given() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -178,11 +218,16 @@ async def test_http_builder_submits_a_copy_without_a_dockerfile() -> None:
         return httpx.Response(201, json=_submitted("harbor-img-0123456789ab", 1).model_dump(mode="json"))
 
     await _http_builder(handler).submit(
-        name="harbor-img-0123456789ab", revision=1, source=ImageSource(image="ubuntu:24.04"), dockerfile=None
+        name="harbor-img-0123456789ab",
+        revision=1,
+        source=ImageSource(image="ubuntu:24.04"),
+        dockerfile=None,
+        platform="linux/arm64",
     )
 
     spec = json.loads(requests[0].content)["build_specs"][0]
     assert spec["source"] == {"image": "ubuntu:24.04"}
+    assert spec["platform"] == "linux/arm64"
     assert "dockerfile" not in spec
 
 
@@ -225,3 +270,19 @@ async def test_a_pending_revision_whose_job_ended_or_never_ran_is_replaced(job: 
     await ensure_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
 
     assert builder.submitted == [submitted]
+
+
+def test_a_platform_is_its_own_builder_build_set() -> None:
+    """Builder refuses one revision of a set for two requests, so each platform needs its own name."""
+    built = {
+        "archive": "default/harbor-tasks#sort/abc/task_archive",
+        "archive_digest": "a" * 64,
+        "context_path": "sort/environment",
+        "dockerfile": "Dockerfile",
+    }
+
+    assert builder_name(**built, platform="linux/arm64") != builder_name(**built)
+    assert builder_name(**built, platform="linux/arm64") != builder_name(**built, platform="linux/amd64")
+    assert copy_builder_name("docker.io/library/ubuntu:24.04", "linux/arm64") != copy_builder_name(
+        "docker.io/library/ubuntu:24.04"
+    )

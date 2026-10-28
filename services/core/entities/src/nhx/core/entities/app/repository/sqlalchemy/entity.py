@@ -66,13 +66,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             ordering. Base columns and other dialects retain their existing behavior.
 
         Raises:
-            ValueError: The requested base column does not exist.
+            ValueError: The requested field is not a sortable scalar column or data path.
         """
         reverse = sort.startswith("-")
-        sort_key = sort.lstrip("-")
+        sort_key = sort.removeprefix("-")
 
         if sort_key.startswith("data."):
             path = sort_key.split(".")[1:]
+            if not all(path):
+                raise ValueError(f"Invalid sort field {sort_key}")
             result = DBEntity.data
             for key in path:
                 result = result[key]
@@ -85,8 +87,11 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
                 result = cast(result, JSONB)
             return result.desc() if reverse else result.asc()
 
-        if hasattr(DBEntity, sort_key):
-            return getattr(DBEntity, sort_key).desc() if reverse else getattr(DBEntity, sort_key).asc()
+        # Preserve existing scalar-column sorts without accepting ORM attributes,
+        # relationships, or the bare JSON column (which PostgreSQL cannot order).
+        if sort_key in DBEntity.__table__.columns and sort_key != "data":
+            column = DBEntity.__table__.columns[sort_key]
+            return column.desc() if reverse else column.asc()
 
         raise ValueError(f"Invalid sort field {sort_key}")
 
@@ -214,6 +219,9 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             else:
                 query = query.order_by(DBEntity.created_at.desc())
 
+            # OFFSET pages require a total order even when the requested values
+            # are equal or missing. IDs are unique across workspaces and types.
+            query = query.order_by(DBEntity.id.asc())
             query = query.offset((page - 1) * page_size).limit(page_size)
 
             result = await sess.execute(query)

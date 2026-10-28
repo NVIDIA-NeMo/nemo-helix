@@ -382,6 +382,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Evals Plugin Agent Eval Jobs Routes
+      summary: Update Job
+      operationId: update_job_apis_evals_v2_workspaces__workspace__agent_evaluate_jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentEvaluateJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEvaluateJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Evals Plugin Agent Eval Jobs Routes
@@ -407,6 +444,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs/{name}/attempts:
+    get:
+      tags:
+      - Evals Plugin Agent Eval Jobs Routes
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_evals_v2_workspaces__workspace__agent_evaluate_jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEvaluateJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Evals Plugin Agent Eval Jobs Routes
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_evals_v2_workspaces__workspace__agent_evaluate_jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEvaluateJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -484,6 +623,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -516,6 +673,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -576,18 +739,20 @@ paths:
         \ HTTP response whose status distinguishes acceptance from replay.\n    caller:\
         \ Effective authenticated principal, supplied by the platform dependency.\n\
         \    service: Caller-delegated request-scoped acceptance service.\n\nReturns:\n\
-        \    Public run status with advisory overlap warnings and one notice per task\
-        \ Job;\n    201 for acceptance or 200 for replay. Submission creates one task\
-        \ Job per task\n    right after acceptance; a keyed replay creates any that\
-        \ are still missing.\n\nRaises:\n    RequestValidationError: The execution\
-        \ budget exceeds the operator maximum.\n    HTTPException: Source denial (403),\
-        \ conflicting key (409), resolution rejection\n        (422), an unavailable\
-        \ image build service before acceptance (503, safe to resend), missing\n \
-        \       task Jobs after acceptance (503), or a sanitized unexpected failure\
-        \ (500).\n        When the request omits idempotency_key, submit generates\
-        \ one. A 5xx then names it in the\n        detail and the ``x-idempotency-key``\
-        \ header and says not to retry automatically: the SDK\n        would resend\
-        \ the keyless request and accept a second run. Resubmit with that key instead."
+        \    Public run status with advisory notices; 201 for acceptance or 200 for\
+        \ replay. Submission starts\n    no task Jobs (the run controller does) and\
+        \ no image builds: a task whose image isn't built yet is\n    rejected (422).\
+        \ A keyed replay returns the stored status.\n\nRaises:\n    RequestValidationError:\
+        \ The execution budget exceeds the operator maximum.\n    HTTPException: Source\
+        \ denial (403), conflicting key or Evaluation dataset (409), resolution rejection\n\
+        \        (422), an unavailable image build service before acceptance (503,\
+        \ safe to resend), an Intake\n        Evaluation that couldn't be created\
+        \ before acceptance (503), an Intake Evaluation refused\n        before acceptance\
+        \ (403, not retried), or a sanitized unexpected failure (500).\n        When\
+        \ the request omits idempotency_key, submit generates one. A 5xx then names\
+        \ it in the\n        detail and the ``x-idempotency-key`` header and says\
+        \ not to retry automatically: the SDK\n        would resend the keyless request\
+        \ and accept a second run. Resubmit with that key instead."
       operationId: submit_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_post
       parameters:
       - name: workspace
@@ -616,13 +781,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/TasksetRunSubmitResponse'
         '409':
-          description: The idempotency key already belongs to a different request.
+          description: The idempotency key already belongs to a different request,
+            or the run's Intake Evaluation exists with different dataset metadata.
         '422':
           description: Invalid request, excessive timeout, missing or incompatible
             source, unconfigured execution, or a task without images.
         '503':
-          description: The run was accepted but some task Jobs weren't created; retry
-            the same request.
+          description: Reading image builds, or Intake, failed before the run was
+            accepted; retry the same request.
     get:
       tags:
       - Evals Plugin Taskset Run Routes
@@ -702,13 +868,14 @@ paths:
       tags:
       - Evals Plugin Taskset Run Routes
       summary: Get Taskset Run
-      description: "Read one stored run without loading its plan or joining its tasks\
-        \ and Jobs.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
-        \    run_id: Public run name in that workspace.\n    service: Shared request-scoped\
-        \ run service.\n\nReturns:\n    Current stored status, excluding null optionals\
-        \ and internal metadata.\n\nRaises:\n    HTTPException: The record is absent\
-        \ (404), or an unexpected storage or\n        projection failure occurs (sanitized\
-        \ 500)."
+      description: "Read one stored run and its progress, counted from its members,\
+        \ without loading its plan or reading Jobs.\n\nArgs:\n    workspace: Workspace\
+        \ that scopes the record lookup.\n    run_id: Public run name in that workspace.\n\
+        \    service: Shared request-scoped run service.\n\nReturns:\n    Current\
+        \ stored status with ``progress`` (omitted while the run has no members),\
+        \ excluding null\n    optionals and internal metadata.\n\nRaises:\n    HTTPException:\
+        \ The record is absent (404), or an unexpected storage or\n        projection\
+        \ failure occurs (sanitized 500)."
       operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
       parameters:
       - name: workspace
@@ -738,6 +905,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/cancel:
+    post:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Cancel Taskset Run
+      description: "Record the intent to cancel a run and return its status; the phase\
+        \ changes on the controller's next pass.\n\nWrites only ``cancel_requested_at``:\
+        \ never the phase, members, Jobs or the Intake Evaluation. A repeat keeps\
+        \ the\nfirst request's time. The write goes through the evals service, after\
+        \ the caller's permission check, so it never\nerases a field only the service\
+        \ reads back.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
+        \    run_id: Public run name in that workspace.\n    store: Run store acting\
+        \ as the evals service.\n\nReturns:\n    The stored status with ``cancel_requested_at``\
+        \ set, excluding null optionals.\n\nRaises:\n    HTTPException: The record\
+        \ is absent (404), the run already finished (409), every write lost to a concurrent\n\
+        \        one (503, safe to retry), or an unexpected failure (sanitized 500)."
+      operationId: cancel_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Cancel requested now or earlier; the run controller stops the
+            run on its next pass.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunStatus'
+        '404':
+          description: Run not found in this workspace.
+        '409':
+          description: The run already finished; there is nothing to cancel.
+        '503':
+          description: The run kept changing while the cancel was recorded; retry.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks:
     get:
       tags:
@@ -750,9 +967,9 @@ paths:
         \ number, validated by FastAPI.\n    page_size: Maximum page size, from 1\
         \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
         \    Stored task page and filtered counts; existing runs with no members return\n\
-        \    an empty page. Null Job/error details are omitted.\n\nRaises:\n    HTTPException:\
-        \ The parent run is absent (404), or unexpected storage or\n        projection\
-        \ failure occurs (sanitized 500)."
+        \    an empty page. Null Job, Job status and error details are omitted.\n\n\
+        Raises:\n    HTTPException: The parent run is absent (404), or unexpected\
+        \ storage or\n        projection failure occurs (sanitized 500)."
       operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
       parameters:
       - name: workspace
@@ -1149,6 +1366,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Evals Plugin Jobs Routes
+      summary: Update Job
+      operationId: update_job_apis_evals_v2_workspaces__workspace__evaluate_jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Evals Plugin Jobs Routes
@@ -1174,6 +1428,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/evaluate/jobs/{name}/attempts:
+    get:
+      tags:
+      - Evals Plugin Jobs Routes
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_evals_v2_workspaces__workspace__evaluate_jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/evaluate/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Evals Plugin Jobs Routes
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_evals_v2_workspaces__workspace__evaluate_jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1251,6 +1607,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1283,6 +1657,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1820,6 +2200,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Evals Plugin Retrieve Eval Jobs Routes
+      summary: Update Job
+      operationId: update_job_apis_evals_v2_workspaces__workspace__retrieve_eval_jobs__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrieveEvalJobUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveEvalJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     delete:
       tags:
       - Evals Plugin Retrieve Eval Jobs Routes
@@ -1845,6 +2262,108 @@ paths:
           description: Job not Found
         '409':
           description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/retrieve-eval/jobs/{name}/attempts:
+    get:
+      tags:
+      - Evals Plugin Retrieve Eval Jobs Routes
+      summary: List Job Attempts
+      operationId: list_job_attempts_apis_evals_v2_workspaces__workspace__retrieve_eval_jobs__name__attempts_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          default: 25
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          enum:
+          - seq
+          - -seq
+          type: string
+          default: -seq
+          title: Sort
+      - name: filter
+        in: query
+        required: false
+        schema:
+          title: Filter
+          type: string
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveEvalJobAttemptsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/retrieve-eval/jobs/{name}/attempts/{attempt}:
+    get:
+      tags:
+      - Evals Plugin Retrieve Eval Jobs Routes
+      summary: Get Job Attempt
+      operationId: get_job_attempt_apis_evals_v2_workspaces__workspace__retrieve_eval_jobs__name__attempts__attempt__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveEvalJobAttempt'
         '422':
           description: Validation Error
           content:
@@ -1922,6 +2441,24 @@ paths:
           type: integer
           maximum: 10000
           exclusiveMinimum: 0
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
+      - name: step_id
+        in: query
+        required: false
+        schema:
+          title: Step Id
+          type: string
+      - name: task_id
+        in: query
+        required: false
+        schema:
+          title: Task Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -1954,6 +2491,12 @@ paths:
         schema:
           type: string
           title: Name
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          title: Attempt Id
+          type: string
       responses:
         '200':
           description: Successful Response
@@ -3458,6 +4001,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -3505,6 +4051,83 @@ components:
       - name
       - spec
       title: AgentEvaluateJob
+    AgentEvaluateJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/AgentEvalSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: AgentEvaluateJobAttempt
+    AgentEvaluateJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AgentEvaluateJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: AgentEvaluateJobAttemptsPage
     AgentEvaluateJobRequest:
       properties:
         name:
@@ -3514,8 +4137,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3546,6 +4168,17 @@ components:
       required:
       - spec
       title: AgentEvaluateJobRequest
+    AgentEvaluateJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/AgentEvalInputSpec'
+      additionalProperties: false
+      type: object
+      title: AgentEvaluateJobUpdate
     AgentEvaluateJobsListFilter:
       additionalProperties: false
       properties:
@@ -3641,10 +4274,11 @@ components:
       pattern: ^[\w\-.]+(/[\w\-.]+)?$
       title: AgentRef
       description: "Reference to an agent registered on the platform (format: ``workspace/name``\
-        \ or ``name``).\n\nNames an ``Agent`` entity (``nemo agents create``) so an\
-        \ evaluation can run it without repeating\nits configuration. Same shape as\
-        \ :class:`MetricRef`: a bare name resolves in the job workspace.\nAgents carry\
-        \ no revision fragment \u2014 the entity is looked up as it is at submit time."
+        \ or ``name``).\n\nNames an ``Agent`` entity (``nemo agents register``) so\
+        \ an evaluation can run it without repeating\nits configuration. Same shape\
+        \ as :class:`MetricRef`: a bare name resolves in the job workspace.\nAgents\
+        \ carry no revision fragment \u2014 the entity is looked up as it is at submit\
+        \ time."
     AgentTarget:
       properties:
         kind:
@@ -3988,6 +4622,12 @@ components:
           title: Image
           description: The image the task names, for a `prebuilt` image.
           type: string
+        platform:
+          title: Platform
+          description: 'The platform the image is built or copied for, once the build
+            decides it: the request''s `platform`, the task''s own pin, or a prebuilt
+            image''s only platform. None means the deployment''s default.'
+          type: string
         status:
           type: string
           enum:
@@ -4223,19 +4863,6 @@ components:
           - $ref: '#/components/schemas/RunConfigOnlineModel'
           title: Params
           description: Optional evals SDK execution parameters.
-        target:
-          anyOf:
-          - $ref: '#/components/schemas/Model'
-          - oneOf:
-            - $ref: '#/components/schemas/GenericAgent'
-            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
-            discriminator:
-              propertyName: format
-              mapping:
-                generic: '#/components/schemas/GenericAgent'
-                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
-          title: Target
-          description: Optional model or agent target for online evaluation.
         prompt_template:
           anyOf:
           - type: string
@@ -4263,6 +4890,22 @@ components:
           title: Metrics
           description: Metrics to evaluate, given as inline metrics and/or references
             to stored metrics.
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/Model'
+          - oneOf:
+            - $ref: '#/components/schemas/GenericAgent'
+            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
+            discriminator:
+              propertyName: format
+              mapping:
+                generic: '#/components/schemas/GenericAgent'
+                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
+          - $ref: '#/components/schemas/ModelRef'
+          title: Target
+          description: Optional model or agent target for online evaluation, or a
+            `workspace/model` reference to a platform model, resolved when the job
+            is submitted.
       additionalProperties: false
       type: object
       required:
@@ -4274,6 +4917,9 @@ components:
       properties:
         id:
           title: Id
+          type: string
+        attempt_id:
+          title: Attempt Id
           type: string
         name:
           type: string
@@ -4322,6 +4968,83 @@ components:
       - name
       - spec
       title: EvaluateJob
+    EvaluateJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/EvaluateSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: EvaluateJobAttempt
+    EvaluateJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/EvaluateJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: EvaluateJobAttemptsPage
     EvaluateJobRequest:
       properties:
         name:
@@ -4331,8 +5054,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4363,6 +5085,17 @@ components:
       required:
       - spec
       title: EvaluateJobRequest
+    EvaluateJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/EvaluateInputSpec'
+      additionalProperties: false
+      type: object
+      title: EvaluateJobUpdate
     EvaluateJobsListFilter:
       additionalProperties: false
       properties:
@@ -4587,19 +5320,6 @@ components:
           - $ref: '#/components/schemas/RunConfigOnlineModel'
           title: Params
           description: Optional evals SDK execution parameters.
-        target:
-          anyOf:
-          - $ref: '#/components/schemas/Model'
-          - oneOf:
-            - $ref: '#/components/schemas/GenericAgent'
-            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
-            discriminator:
-              propertyName: format
-              mapping:
-                generic: '#/components/schemas/GenericAgent'
-                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
-          title: Target
-          description: Optional model or agent target for online evaluation.
         prompt_template:
           anyOf:
           - type: string
@@ -4624,6 +5344,19 @@ components:
           minItems: 1
           title: Metrics
           description: Inline metrics with all references resolved.
+        target:
+          anyOf:
+          - $ref: '#/components/schemas/Model'
+          - oneOf:
+            - $ref: '#/components/schemas/GenericAgent'
+            - $ref: '#/components/schemas/NemoAgentToolkitAgent'
+            discriminator:
+              propertyName: format
+              mapping:
+                generic: '#/components/schemas/GenericAgent'
+                nemo_agent_toolkit: '#/components/schemas/NemoAgentToolkitAgent'
+          title: Target
+          description: Optional model or agent target for online evaluation.
       additionalProperties: false
       type: object
       required:
@@ -5172,16 +5905,37 @@ components:
           type: string
           title: Name
           description: Built-in Harbor agent to run, e.g. `oracle`.
-        model_name:
-          title: Model Name
-          description: Optional model slug passed to the agent.
-          type: string
+        model:
+          title: Model
+          description: 'Optional model for the agent: `{"name": ...}` passes a model
+            slug as-is, `{"ref": ...}` calls a model the Inference Gateway serves.'
+          oneOf:
+          - $ref: '#/components/schemas/HarborModelName'
+          - $ref: '#/components/schemas/HarborGatewayModel'
       additionalProperties: false
       type: object
       required:
       - name
       title: HarborBuiltinAgentSource
       description: One of Harbor's built-in agents, selected by name.
+    HarborGatewayModel:
+      properties:
+        ref:
+          allOf:
+          - $ref: '#/components/schemas/ModelRef'
+          description: 'A model the Inference Gateway serves, as `workspace/name`:
+            a model or a VirtualModel. The agent must declare an OpenAI- or Anthropic-style
+            model connection, or take its provider from the model name, as `codex`,
+            `claude-code`, `aider`, `goose` and `openhands` do; an agent of that last
+            kind calls the gateway''s OpenAI-style route and is given the model as
+            `openai/<name>`. Other agents are refused.'
+      additionalProperties: false
+      type: object
+      required:
+      - ref
+      title: HarborGatewayModel
+      description: A model the Inference Gateway serves. Evals sets the agent's model
+        name, base URL and API key variables.
     HarborImportedAgentSource:
       properties:
         import_path:
@@ -5199,6 +5953,19 @@ components:
       - import_path
       title: HarborImportedAgentSource
       description: A Harbor agent class the run environment can already import.
+    HarborModelName:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Model slug passed to the agent as-is, e.g. `openai/gpt-5`.
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: HarborModelName
+      description: A model the agent calls by name, through whatever endpoint its
+        environment gives it.
     HarborRunnerTarget:
       properties:
         kind:
@@ -5213,12 +5980,13 @@ components:
           - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
           description: "The agent Harbor runs in each task container: a built-in agent\
-            \ by `name`, your own by `import_path`, or a registered platform `agent`\
-            \ (with an optional `environment`). A registered agent is resolved at\
-            \ submit into the SDK's installed Fabric agent with the agent's translated\
-            \ config in `agent_kwargs.fabric_config`, so it runs as registered \u2014\
-            \ identity, skills, MCP servers, and telemetry included \u2014 and stays,\
-            \ qualified, as the run's provenance."
+            \ by `name` (with an optional `model`, by name or as a gateway model ref),\
+            \ your own by `import_path`, or a registered platform `agent` (with an\
+            \ optional `environment`). A registered agent is resolved at submit into\
+            \ the SDK's installed Fabric agent with the agent's translated config\
+            \ in `agent_kwargs.fabric_config`, so it runs as registered \u2014 identity,\
+            \ skills, MCP servers, and telemetry included \u2014 and stays, qualified,\
+            \ as the run's provenance."
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'
@@ -5403,15 +6171,6 @@ components:
           description: 'Execution strategy: one Kubernetes Job per Harbor task. Future
             strategies add new kinds.'
           default: harbor-task-jobs
-        sandbox_policy:
-          type: string
-          title: Sandbox Policy
-          description: 'Name of an operator-approved sandbox policy: which sandbox
-            provider and isolation policy each task''s agent and environment run under,
-            meaning the security and isolation boundary. It does not control compute
-            resources; see dispatcher_profile. Operators define the available policies.'
-          examples:
-          - harbor-standard
         dispatcher_profile:
           title: Dispatcher Profile
           description: Name of a Jobs Service profile that decides where task Jobs
@@ -5428,10 +6187,25 @@ components:
           - 5
           type: integer
           minimum: 1.0
+        sandbox:
+          allOf:
+          - $ref: '#/components/schemas/SandboxSelection'
+          description: 'Sandbox for every task. profile names an operator sandbox
+            profile: isolation, egress and resource ceilings; omitted uses the operator''s
+            default. cpus, memory_mb and storage_mb size each task''s agent sandbox,
+            over its task.toml [environment]; a separate verifier keeps task.toml''s
+            resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped
+            by the ceilings. Every sandbox''s values must stay within the profile''s
+            ceilings, or submit fails with 422. Omit the whole object for the default
+            profile and each task''s own resources.'
+          examples:
+          - cpus: 4
+            memory_mb: 8192
+            storage_mb: 20480
+          - memory_mb: 4096
+            profile: harbor-open
       additionalProperties: false
       type: object
-      required:
-      - sandbox_policy
       title: HarborTaskJobsExecutionInput
       description: 'Settings that run a Harbor taskset as many independent task Jobs
         instead of one Job.
@@ -5458,13 +6232,17 @@ components:
         runs.
 
 
-        Submit resolves ``sandbox_policy`` and ``dispatcher_profile`` against the
-        operator''s
+        Submit validates this input and freezes the ``sandbox`` profile, with its
+        resource
 
-        config and freezes them, the pinned dispatcher image and the concurrency cap
-        into the
+        overrides checked against the profile''s ceilings, the ``dispatcher_profile``,
+        the pinned
 
-        run''s plan. Earlier development runs are deleted rather than migrated.'
+        dispatcher image and the concurrency cap into the run''s plan, so operator
+        config edits
+
+        never reach a running run. Earlier development runs are deleted rather than
+        migrated.'
     HelixJobListResultResponse:
       properties:
         data:
@@ -5538,6 +6316,9 @@ components:
           title: Workspace
         project:
           title: Project
+          type: string
+        attempt_id:
+          title: Attempt Id
           type: string
         created_at:
           type: string
@@ -5785,6 +6566,9 @@ components:
             type: string
           type: array
           title: Allowed Registries
+        platform:
+          title: Platform
+          type: string
         images:
           items:
             $ref: '#/components/schemas/BuildImage'
@@ -5823,6 +6607,25 @@ components:
             named by the task may be copied from. Narrows the registries the deployment
             allows; empty allows all of those. A prebuilt image from any other registry
             fails the build.
+        platform:
+          title: Platform
+          description: 'The platform to build every image for, as `os/architecture`,
+            such as `linux/arm64`. Omit to follow the task: an image whose Dockerfile
+            or compose service pins a platform is built for it, a prebuilt image published
+            for one platform is copied for that one, and anything else follows the
+            deployment''s default. An image pinned to another platform fails the build.
+            BuildKit''s spellings, such as `linux/x86_64`, are taken and named as
+            it names them.'
+          type: string
+          pattern: ^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$
+        rebuild:
+          type: boolean
+          title: Rebuild
+          description: 'Start a new attempt even when the newest build is ready, so
+            the request reaches Builder again: after the deployment''s default platform
+            changes, this builds for the new one. A build still running is returned
+            as it is. Builder reuses any image it already has for an unchanged request.'
+          default: false
       additionalProperties: false
       type: object
       title: ImageBuildRequest
@@ -5943,8 +6746,9 @@ components:
           minLength: 1
           title: Agent Version
           description: Agent version recorded on each published trajectory. Neither
-            a Model nor an Agent carries a version, so this defaults to 'unknown'
-            unless the submitter supplies one.
+            a Model nor an Agent carries a version, so this defaults to the version
+            the agent's own trajectory records (a Harbor agent's, such as codex's),
+            else 'unknown'.
           default: unknown
         required:
           type: boolean
@@ -6044,11 +6848,14 @@ components:
           description: Metrics to score the row with, given as inline definitions
             and/or references to stored metrics (`workspace/metric-name`).
         target:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/Model'
-          description: Optional model to generate the row's output before scoring.
-            Omit to score an output already present on the row. Agent targets are
-            not supported on this route.
+          - $ref: '#/components/schemas/ModelRef'
+          title: Target
+          description: Optional model to generate the row's output before scoring,
+            inline or as a `workspace/model` reference to a platform model. Omit to
+            score an output already present on the row. Agent targets are not supported
+            on this route.
         prompt_template:
           anyOf:
           - type: string
@@ -6721,6 +7528,54 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
+    PublicationOutcome:
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: 'Platform job status vocabulary: COMPLETED when everything
+            published, ERROR otherwise. Only those two are ever emitted here.'
+        evaluation_id:
+          type: string
+          title: Evaluation Id
+          description: Evaluation the results were published under.
+        trial_count:
+          type: integer
+          title: Trial Count
+          description: Trials actually published (partial on failure).
+          default: 0
+        evaluator_result_count:
+          type: integer
+          title: Evaluator Result Count
+          description: Evaluator-result rows written.
+          default: 0
+        skipped:
+          items:
+            type: string
+          type: array
+          title: Skipped
+          description: 'Score outputs Intake cannot represent, as ''trial_id: name
+            (reason)''.'
+        error:
+          title: Error
+          description: Why publication failed; absent on success.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      - evaluation_id
+      title: PublicationOutcome
+      description: 'What publication did, as reported in the job output.
+
+
+        Deliberately not ``PublishReport``: that is the publisher''s internal shape
+        and names the
+
+        Evaluation ``experiment_id``, which contradicts the ``evaluation_id`` the
+        job API accepts. This
+
+        is the public contract, so it uses the API''s vocabulary and omits the rest.'
     PublicationSpec:
       properties:
         intake:
@@ -6814,7 +7669,7 @@ components:
       required:
       - agent
       title: RegisteredAgentSource
-      description: 'An agent registered on the platform (``nemo agents create``),
+      description: 'An agent registered on the platform (``nemo agents register``),
         resolved at submit.
 
 
@@ -7183,6 +8038,9 @@ components:
         id:
           title: Id
           type: string
+        attempt_id:
+          title: Attempt Id
+          type: string
         name:
           type: string
           title: Name
@@ -7230,6 +8088,83 @@ components:
       - name
       - spec
       title: RetrieveEvalJob
+    RetrieveEvalJobAttempt:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          $ref: '#/components/schemas/RetrieveEvalSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - spec
+      - status
+      - created_at
+      - updated_at
+      - is_current
+      title: RetrieveEvalJobAttempt
+    RetrieveEvalJobAttemptsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/RetrieveEvalJobAttempt'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: RetrieveEvalJobAttemptsPage
     RetrieveEvalJobRequest:
       properties:
         name:
@@ -7239,8 +8174,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -7271,6 +8205,17 @@ components:
       required:
       - spec
       title: RetrieveEvalJobRequest
+    RetrieveEvalJobUpdate:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          $ref: '#/components/schemas/RetrieveEvalInputSpec'
+      additionalProperties: false
+      type: object
+      title: RetrieveEvalJobUpdate
     RetrieveEvalJobsListFilter:
       additionalProperties: false
       properties:
@@ -7442,8 +8387,9 @@ components:
           minLength: 1
           title: Agent Version
           description: Agent version recorded on each published trajectory. Neither
-            a Model nor an Agent carries a version, so this defaults to 'unknown'
-            unless the submitter supplies one.
+            a Model nor an Agent carries a version, so this defaults to the version
+            the agent's own trajectory records (a Harbor agent's, such as codex's),
+            else 'unknown'.
           default: unknown
         required:
           type: boolean
@@ -7617,6 +8563,34 @@ components:
       type: object
       title: RunConfigOnlineModel
       description: Job parameters for model online evaluation.
+    SandboxSelection:
+      properties:
+        cpus:
+          title: Cpus
+          type: integer
+          exclusiveMinimum: 0.0
+        memory_mb:
+          title: Memory Mb
+          type: integer
+          exclusiveMinimum: 0.0
+        storage_mb:
+          title: Storage Mb
+          type: integer
+          exclusiveMinimum: 0.0
+        profile:
+          title: Profile
+          description: 'Name of an operator sandbox profile: the sandbox''s isolation
+            and egress rules and its resource ceilings. Omit for the operator''s default
+            profile.'
+          examples:
+          - harbor-standard
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      title: SandboxSelection
+      description: '``execution.sandbox``: an operator sandbox profile by name, and
+        resource overrides within its ceilings.'
     SecretRef:
       type: string
       pattern: ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$
@@ -8156,8 +9130,8 @@ components:
         execution:
           allOf:
           - $ref: '#/components/schemas/HarborTaskJobsExecutionInput'
-          description: 'Kubernetes task Job settings: sandbox policy, dispatcher profile
-            and run-wide task Job concurrency.'
+          description: 'Kubernetes task Job settings: sandbox profile and resources,
+            dispatcher profile and run-wide task Job concurrency.'
         idempotency_key:
           title: Idempotency Key
           description: Optional key, scoped to workspace and caller, so retries of
@@ -8166,10 +9140,17 @@ components:
           type: string
           maxLength: 256
           minLength: 1
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunPublicationInput'
+          description: Publish the run's trials to an Intake Experiment. Omit to publish
+            nowhere.
         timeout_seconds:
           title: Timeout Seconds
-          description: Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds.
-            Must not exceed evals.runs.max_timeout_seconds.
+          description: Execution budget in seconds, counted from when the run's first
+            task gets a slot. Omit to use evals.runs.default_timeout_seconds. Must
+            not exceed evals.runs.max_timeout_seconds. Until its first slot, the run
+            waits at most evals.runs.queue_timeout_seconds.
           type: integer
           exclusiveMinimum: 0.0
       additionalProperties: false
@@ -8183,6 +9164,46 @@ components:
         \ references or doing\nservice I/O. Submit uses it to derive request identity\
         \ and acceptance budgets.\n\nRaises:\n    ValidationError: Fields are invalid\
         \ or the spec violates Kubernetes run rules."
+    TasksetRunIntakeInput:
+      properties:
+        experiment:
+          type: string
+          minLength: 1
+          title: Experiment
+          description: Name of an existing Intake Experiment. Submit creates one Evaluation
+            in it per run, named after the run; each task Job publishes its trials
+            there when it finishes.
+          examples:
+          - swe-agent-tuning
+        agent_name:
+          title: Agent Name
+          description: Agent name recorded on each published trajectory. Defaults
+            to the Harbor agent.
+          type: string
+          minLength: 1
+        dataset_name:
+          title: Dataset Name
+          description: The Evaluation's dataset, such as the Harbor Hub dataset the
+            tasks came from. Defaults to the taskset (workspace/name).
+          examples:
+          - datacurve/deep-swe
+          type: string
+          minLength: 1
+        dataset_version:
+          title: Dataset Version
+          description: The dataset's version, such as a Harbor Hub dataset digest.
+            Defaults to the pinned taskset's content digest.
+          examples:
+          - sha256:aaa82ceb8404dccc17689c9383f93dbcbc8f029a7601d2e3856a416f2cb89269
+          type: string
+          minLength: 1
+      additionalProperties: false
+      type: object
+      required:
+      - experiment
+      title: TasksetRunIntakeInput
+      description: Publish the run's trials to an existing Intake Experiment, as one
+        Evaluation named after the run.
     TasksetRunPhase:
       type: string
       enum:
@@ -8202,6 +9223,58 @@ components:
         finalization is tracked separately by ``ResultState`` so execution completion
 
         does not imply that combined results are already available.'
+    TasksetRunProgress:
+      properties:
+        tasks:
+          type: integer
+          title: Tasks
+          description: Members created; the plan's task count from the controller's
+            first cycle on.
+        members:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/MemberPhase'
+          type: object
+          title: Members
+          description: Members by phase, settled phases included; a phase with no
+            members is left out.
+        queued:
+          type: integer
+          title: Queued
+          description: 'Members waiting for a task-Job slot: image_ready without a
+            create intent.'
+        task_jobs:
+          additionalProperties:
+            type: integer
+          propertyNames:
+            $ref: '#/components/schemas/HelixJobStatus'
+          type: object
+          title: Task Jobs
+          description: 'Registered members by their task Job''s status as the controller
+            last read it, for example {"active": 18, "pending": 2}.'
+      type: object
+      required:
+      - tasks
+      - members
+      - queued
+      - task_jobs
+      title: TasksetRunProgress
+      description: How far a run's tasks got, as of the controller's last writes to
+        its members.
+    TasksetRunPublicationInput:
+      properties:
+        intake:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunIntakeInput'
+          description: Publish trials and scores to an Intake Experiment.
+      additionalProperties: false
+      type: object
+      required:
+      - intake
+      title: TasksetRunPublicationInput
+      description: Where the run publishes its results, beyond its result bundle and
+        record.
     TasksetRunStatus:
       properties:
         run_id:
@@ -8225,25 +9298,37 @@ components:
         result_state:
           allOf:
           - $ref: '#/components/schemas/ResultState'
-          description: Availability of the combined results, tracked independently
-            of phase.
+          description: 'Availability of the combined results, tracked independently
+            of phase. An expired or cancelled run can be ready: its result covers
+            the tasks that finished.'
         accepted_at:
           type: string
           format: date-time
           title: Accepted At
           description: When submit accepted the run.
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
+          description: Execution budget in seconds, counted from started_at.
+        started_at:
+          title: Started At
+          description: When the run's first task got a slot and its execution clock
+            started; None while it waits.
+          type: string
+          format: date-time
         execution_deadline_at:
           type: string
           format: date-time
           title: Execution Deadline At
-          description: accepted_at plus the effective timeout; unfinished tasks expire
-            then. Retries do not reset it.
+          description: Unfinished tasks expire then. Until the run starts, accepted_at
+            plus the queue timeout; from its first slot, started_at plus timeout_seconds.
+            Retries do not reset it.
         finalization_deadline_at:
           type: string
           format: date-time
           title: Finalization Deadline At
-          description: execution_deadline_at plus operator grace; the final result
-            must be saved by then.
+          description: execution_deadline_at plus the operator grace at submit; the
+            final result must be saved by then.
         cancel_requested_at:
           title: Cancel Requested At
           description: When a caller requested cancellation; None if never requested.
@@ -8263,6 +9348,11 @@ components:
           description: 'Submit key: the caller''s, or the one submit generated when
             the request omitted it.'
           type: string
+        progress:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunProgress'
+          description: Counted from the run's members on each GET of this run; None
+            before the controller creates them, and in run lists and submit responses.
       additionalProperties: false
       type: object
       required:
@@ -8272,6 +9362,7 @@ components:
       - phase
       - result_state
       - accepted_at
+      - timeout_seconds
       - execution_deadline_at
       - finalization_deadline_at
       title: TasksetRunStatus
@@ -8328,25 +9419,37 @@ components:
         result_state:
           allOf:
           - $ref: '#/components/schemas/ResultState'
-          description: Availability of the combined results, tracked independently
-            of phase.
+          description: 'Availability of the combined results, tracked independently
+            of phase. An expired or cancelled run can be ready: its result covers
+            the tasks that finished.'
         accepted_at:
           type: string
           format: date-time
           title: Accepted At
           description: When submit accepted the run.
+        timeout_seconds:
+          type: integer
+          title: Timeout Seconds
+          description: Execution budget in seconds, counted from started_at.
+        started_at:
+          title: Started At
+          description: When the run's first task got a slot and its execution clock
+            started; None while it waits.
+          type: string
+          format: date-time
         execution_deadline_at:
           type: string
           format: date-time
           title: Execution Deadline At
-          description: accepted_at plus the effective timeout; unfinished tasks expire
-            then. Retries do not reset it.
+          description: Unfinished tasks expire then. Until the run starts, accepted_at
+            plus the queue timeout; from its first slot, started_at plus timeout_seconds.
+            Retries do not reset it.
         finalization_deadline_at:
           type: string
           format: date-time
           title: Finalization Deadline At
-          description: execution_deadline_at plus operator grace; the final result
-            must be saved by then.
+          description: execution_deadline_at plus the operator grace at submit; the
+            final result must be saved by then.
         cancel_requested_at:
           title: Cancel Requested At
           description: When a caller requested cancellation; None if never requested.
@@ -8366,6 +9469,11 @@ components:
           description: 'Submit key: the caller''s, or the one submit generated when
             the request omitted it.'
           type: string
+        progress:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRunProgress'
+          description: Counted from the run's members on each GET of this run; None
+            before the controller creates them, and in run lists and submit responses.
         warnings:
           items:
             type: string
@@ -8382,6 +9490,7 @@ components:
       - phase
       - result_state
       - accepted_at
+      - timeout_seconds
       - execution_deadline_at
       - finalization_deadline_at
       title: TasksetRunSubmitResponse
@@ -8404,12 +9513,23 @@ components:
           description: Stored image preparation and execution progress of this task.
         job:
           title: Job
-          description: Name of this task's Jobs Service Job; omitted until registered.
+          description: Name of this task's Jobs Service Job; set when the create is
+            first attempted.
           type: string
+        job_status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The Job's status as the controller last read it; omitted until
+            the task's Job is registered.
         error:
           title: Error
           description: Stored reason the task failed, was cancelled or expired.
           type: string
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/PublicationOutcome'
+          description: What the task published to Intake, as its Job reported it when
+            the task settled; omitted when it reported nothing.
       additionalProperties: false
       type: object
       required:
@@ -8421,9 +9541,9 @@ components:
         Job/error.
 
 
-        Construction takes the five public fields only. Instances contain no parent,
+        Construction takes the public fields only. Instances contain no parent,
 
-        persistence metadata or reconstructed Job state; read routes omit unset details.'
+        persistence metadata or live Job state; read routes omit unset details.'
     TasksetRunTasksPage:
       properties:
         data:

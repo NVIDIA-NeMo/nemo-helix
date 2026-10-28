@@ -8,6 +8,7 @@ import os
 import tarfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
 from functools import partial
@@ -19,13 +20,16 @@ from typing import (
     Callable,
     Generic,
     Literal,
+    Self,
     Type,
     TypeVar,
     Union,
+    cast,
     get_args,
     get_origin,
     overload,
 )
+from urllib.parse import quote
 
 from anyio import open_file, to_thread
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -36,12 +40,15 @@ from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_ru
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.dependencies import RequestAuthorizer, get_entity_client, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
+from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.jobs.providers import (
     ComputeResources,
@@ -76,18 +83,30 @@ from nemo_helix_plugin.jobs.spec import (
 from nemo_helix_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    HelixJobAttemptResponse,
     JobControl,
     JobLogsQueryParams,
     JobName,
+    ListAttemptsQueryParams,
+    ListJobResultsQueryParams,
     ListJobsQueryParams,
-    validate_job_name_fits_derived_fileset,
+    UpdateHelixJobRequest,
     validate_output_location,
 )
 from nemo_helix_plugin.jobs.types import (
     HelixJobResponse as HelixJob,
 )
-from nemo_helix_plugin.schema import DatetimeFilter, Filter, Page, PaginationData, StringFilter
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from nemo_helix_plugin.schema import Page, PaginationData
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +135,22 @@ _JOB_PERMISSION_DESCRIPTIONS: dict[str, str] = {
     "create": "Create {ns} jobs",
     "list": "List {ns} jobs",
     "read": "Read {ns} jobs, including status, logs, and results",
+    "update": "Update {ns} jobs",
     "delete": "Delete {ns} jobs",
     "cancel": "Cancel {ns} jobs",
     "pause": "Pause {ns} jobs",
     "resume": "Resume {ns} jobs",
+    "rerun": "Rerun {ns} jobs",
     "control": "Update {ns} job control settings",
 }
+
+# A plugin service can expose more than one logical job collection while keeping a
+# single Jobs ``source`` for service-level discovery and telemetry.  The Jobs service
+# has no first-class job-kind column, so discriminated routers persist their kind in
+# the plugin-defined spec (a server-filterable namespace). The factory restamps it
+# on typed definition updates; direct core Jobs updates remain a generic surface. The factory
+# strips this reserved field before validating or returning the plugin's public spec.
+_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY = "_nemo_job_route"
 
 JobConfigT = TypeVar("JobConfigT", bound=BaseModel)
 JobInputT = TypeVar("JobInputT", bound=BaseModel)
@@ -146,11 +175,11 @@ class BaseJobRequest(BaseModel, Generic[JobConfigT]):
     output_location: str | None = None
 
     _validate_output_location = field_validator("output_location")(validate_output_location)
-    _validate_name_fits_derived_fileset = model_validator(mode="after")(validate_job_name_fits_derived_fileset)
 
 
 class BaseJob(BaseModel, Generic[JobConfigT]):
     id: str | None = None
+    attempt_id: str | None = None
     name: str
     description: str | None = None
     project: str | None = None
@@ -166,25 +195,37 @@ class BaseJob(BaseModel, Generic[JobConfigT]):
     control: JobControl | None = None
 
 
-class BaseJobsListFilter(Filter):
-    created_at: DatetimeFilter | None = Field(
-        default=None, description="Jobs created at 'gte' datetime or 'lte' datetime."
-    )
-    name: StringFilter | str | None = Field(default=None, description="Name of the job.")
-    workspace: str | None = Field(default=None, description="Workspace of the job.")
-    project: str | None = Field(default=None, description="Project containing the job.")
-    status: HelixJobStatus | None = Field(default=None, description="The current status.")
-    spec: dict[str, Any] | None = Field(
-        default=None, description="Filter on a path within the job's spec, e.g. `spec.target.format`."
-    )
-    updated_at: DatetimeFilter | None = Field(
-        default=None, description="Jobs updated at 'gte' datetime or 'lte' datetime."
-    )
+class BaseJobUpdate(BaseModel, Generic[JobConfigT]):
+    """Mutable plugin job description or definition."""
 
-    @classmethod
-    def _get_entity_namespace_map(cls) -> dict[str, str]:
-        """Declare ``spec`` as a namespace so ``spec.<path>`` passes field validation."""
-        return {"spec": "data.spec"}
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
+    spec: JobConfigT | None = None
+
+    @model_validator(mode="after")
+    def validate_update(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job field is required")
+        spec_supplied = "spec" in self.model_fields_set
+        if spec_supplied and self.spec is None:
+            raise ValueError("spec cannot be null")
+        return self
+
+
+class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
+    id: str
+    name: str
+    job: str
+    workspace: str
+    seq: int
+    spec: JobConfigT
+    status: HelixJobStatus
+    status_details: dict[str, object] = Field(default_factory=dict)
+    error_details: dict[str, object] | None = None
+    created_at: datetime
+    updated_at: datetime
+    is_current: bool
 
 
 class BaseJobsSortField(StrEnum):
@@ -497,6 +538,7 @@ class JobRouteOption(StrEnum):
 
     CORE = auto()
     PAUSE_RESUME = auto()
+    RERUN = auto()
 
 
 class HelixJobResultRoute(BaseModel):
@@ -519,6 +561,12 @@ HelixJobSpecCompiler = Callable[
 HelixJobSpecCompilerAsync = Callable[
     [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncNemoClient], Awaitable[HelixJobSpecLike]
 ]
+
+
+@dataclass(frozen=True)
+class _SubmitControls:
+    profile: str | None
+    options: dict[str, Any] | None
 
 
 # Input-to-output transformer types: receives job_name to use for related fields (e.g., output)
@@ -584,6 +632,15 @@ def _validate_basemodel_or_union(
 
     if not (isinstance(base, type) and issubclass(base, BaseModel)):
         raise ValueError(f"{param_name} must be a BaseModel or a Union of BaseModel subclasses, got {obj!r}")
+
+
+def _validate_discriminated_job_schema(obj: JobSchemaLike, param_name: str) -> None:
+    """Require an object-shaped model whose persisted spec can carry the discriminator."""
+    base = _unwrap_annotated_schema(obj)
+    candidates = get_args(base) if _is_union_type(base) else (base,)
+    candidate_types = (_unwrap_annotated_schema(candidate) for candidate in candidates)
+    if any(isinstance(candidate, type) and issubclass(candidate, RootModel) for candidate in candidate_types):
+        raise ValueError(f"{param_name} must be an object-shaped BaseModel when job_discriminator is set")
 
 
 def _validate_and_resolve_job_output(
@@ -702,8 +759,8 @@ async def _compile_platform_spec(
     job_name: str | None,
     service_name: str,
     async_client: AsyncNemoClient,
-    profile: str | None,
-    options: dict[str, Any] | None,
+    *,
+    submit_controls: _SubmitControls | None = None,
 ) -> HelixJobSpec:
     """Compile input and output specs into a HelixJobSpec for execution.
 
@@ -720,7 +777,15 @@ async def _compile_platform_spec(
         PermissionError: If the compiler raises a PermissionError.
     """
     try:
-        submit_control_kwargs = _submit_control_kwargs(compiler, profile=profile, options=options)
+        submit_control_kwargs = (
+            _submit_control_kwargs(
+                compiler,
+                profile=submit_controls.profile,
+                options=submit_controls.options,
+            )
+            if submit_controls is not None
+            else {}
+        )
         compile_result: HelixJobSpecLike | Awaitable[HelixJobSpecLike]
         if inspect.iscoroutinefunction(compiler):
             compile_result = compiler(
@@ -816,6 +881,8 @@ def job_route_factory(
     generate_job_name: JobNameGenerator | None = None,
     authz: AuthzScope | None = None,
     jobs_list_filter: type[BaseJobsListFilter] | None = None,
+    job_discriminator: str | None = None,
+    legacy_job_filter: FilterOperation | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -835,6 +902,13 @@ def job_route_factory(
             job_name is None when no name was provided and no generator exists.
         route_options: Which routes to enable (defaults to CORE).
         job_result_routes: Custom result download routes.
+        job_discriminator: Server-owned collection marker in the stored job/attempt specs.
+            Removed from public specs and task configuration. Scopes every route.
+        legacy_job_filter: Optional server-defined predicate identifying unmarked historical
+            records. Applied before pagination and during named ownership checks using
+            InMemoryFilterRepository; use predicates with matching SQL/in-memory semantics.
+            Unknown non-null markers never fall back to this predicate. Without it,
+            unmarked records remain accessible only through core Jobs.
         job_output: The job output schema (what gets stored and returned).
             If not provided, defaults to job_input (same type for input/output).
         input_to_output: Transforms job input to job output.
@@ -890,8 +964,17 @@ def job_route_factory(
     """
     _validate_basemodel_or_union(job_input, "job_input")
 
+    if legacy_job_filter is not None and job_discriminator is None:
+        raise ValueError("legacy_job_filter requires job_discriminator")
+
+    if job_discriminator is not None and (not isinstance(job_discriminator, str) or not job_discriminator.strip()):
+        raise ValueError("job_discriminator must be a non-empty string when provided")
+
     # Handle job_output defaulting and validation
     job_output, input_to_output = _validate_and_resolve_job_output(job_output, job_input, input_to_output)
+    if job_discriminator is not None:
+        _validate_discriminated_job_schema(job_input, "job_input")
+        _validate_discriminated_job_schema(job_output, "job_output")
 
     if route_options is None:
         route_options = [JobRouteOption.CORE]
@@ -942,6 +1025,16 @@ def job_route_factory(
         (BaseJob[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
+    TypedJobUpdate = type(
+        f"{job_type}JobUpdate",
+        (BaseJobUpdate[BaseModel],),
+        {"__annotations__": {"spec": job_input | None}, "spec": None},
+    )
+    TypedJobAttempt = type(
+        f"{job_type}JobAttempt",
+        (BaseJobAttempt[BaseModel],),
+        {"__annotations__": {"spec": job_output}},
+    )
     TypedJobsListFilter = jobs_list_filter or type(
         f"{job_type}JobsListFilter",
         (BaseJobsListFilter,),
@@ -953,23 +1046,208 @@ def job_route_factory(
     # annotation must expose a concrete enum named for this job type.
     TypedJobsSortField = _make_jobs_sort_field(job_type)
 
+    collection_filter: FilterOperation | None = None
+    if job_discriminator is not None:
+        marked = ComparisonOperation(
+            operator=FilterOperator.EQ,
+            field=f"spec.{_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY}",
+            value=job_discriminator,
+        )
+        collection_filter = marked
+        if legacy_job_filter is not None:
+            collection_filter = LogicalOperation(
+                operator=FilterOperator.OR,
+                operations=[
+                    marked,
+                    LogicalOperation(
+                        operator=FilterOperator.AND,
+                        operations=[
+                            ComparisonOperation(
+                                operator=FilterOperator.EQ,
+                                field=f"spec.{_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY}",
+                                value=None,
+                            ),
+                            legacy_job_filter,
+                        ],
+                    ),
+                ],
+            )
+
+    def _matches_job_collection(job_resp: HelixJob) -> bool:
+        """Return whether a core Jobs record belongs to this generated router."""
+        if job_discriminator is None:
+            return True
+        if job_resp.source != service_name or not isinstance(job_resp.spec, Mapping):
+            return False
+        marker = job_resp.spec.get(_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY)
+        if marker is not None:
+            return marker == job_discriminator
+        return legacy_job_filter is not None and bool(legacy_job_filter.apply(InMemoryFilterRepository(job_resp)))
+
+    def _without_job_discriminator(spec: JobInputT) -> JobInputT:
+        """Remove a caller-supplied reserved marker before transform or compile hooks see it."""
+        if job_discriminator is None:
+            return spec
+        clean = spec.model_copy(deep=True)
+        extra = getattr(clean, "__pydantic_extra__", None)
+        if isinstance(extra, dict):
+            extra.pop(_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY, None)
+        return clean
+
+    def _public_job_spec(spec: object) -> object:
+        """Remove the factory-owned discriminator from jobs and historical attempt specs."""
+        if job_discriminator is None or not isinstance(spec, Mapping):
+            return spec
+        public_spec = dict(spec)
+        public_spec.pop(_JOB_ROUTE_DISCRIMINATOR_SPEC_KEY, None)
+        return public_spec
+
+    def _stored_job_spec(spec: Any) -> Any:
+        """Stamp server-owned metadata on both creates and definition updates."""
+        if job_discriminator is None:
+            return spec
+        if not isinstance(spec, Mapping):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to serialize {service_name} job spec as an object.",
+            )
+        return {**spec, _JOB_ROUTE_DISCRIMINATOR_SPEC_KEY: job_discriminator}
+
+    async def _require_job_in_collection(
+        jobs_client: AsyncJobsClient,
+        *,
+        workspace: str,
+        name: str,
+    ) -> HelixJob | None:
+        """Fail closed before a name-scoped route reads or mutates another job kind."""
+        if job_discriminator is None:
+            return None
+        job_resp = (await jobs_client.get_job(name=name, workspace=workspace)).data()
+        if not _matches_job_collection(job_resp):
+            # Treat a different source/kind exactly like an unknown name.  This avoids
+            # leaking another collection's inventory through a typed plugin surface.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job '{name}' not found in workspace '{workspace}'.",
+            )
+        return job_resp
+
+    async def _require_mutation_target_in_collection(
+        *,
+        workspace: str,
+        name: str,
+        authorize: RequestAuthorizer,
+        method: str,
+        suffix: str = "",
+    ) -> HelixJob | None:
+        """Verify subtype ownership without adding ``jobs.read`` to the caller's contract.
+
+        The actual mutation still uses the request-scoped client below, so core Jobs
+        enforces the caller's delete/cancel/update permission and records the caller as
+        the actor.  Only this metadata-only ownership lookup uses the plugin's internal
+        service principal.  Keeping the two clients separate avoids turning a subtype
+        guard into an undocumented read-permission requirement for write-only roles.
+
+        This lookup is not atomic with the mutation; core Jobs has no subtype
+        precondition, and direct core definition updates remain generic.
+
+        Authorize the core mutation before the privileged lookup. Otherwise a caller
+        holding only the plugin permission could distinguish a matching job (later 403)
+        from another collection (404), turning the guard into an inventory oracle.
+        """
+        if job_discriminator is None:
+            return
+        workspace_path = quote(workspace, safe="")
+        name_path = quote(name, safe="")
+        await authorize(method, f"/apis/jobs/v2/workspaces/{workspace_path}/jobs/{name_path}{suffix}")
+        async with get_async_nemo_client(
+            as_service=service_name,
+            internal=True,
+            workspace=workspace,
+        ) as ownership_client:
+            return await _require_job_in_collection(
+                AsyncJobsClient.from_client(ownership_client),
+                workspace=workspace,
+                name=name,
+            )
+
+    async def _noop_mutation_authorize(method: str, path: str) -> None:
+        del method, path
+        return None
+
+    def _noop_mutation_authorizer() -> RequestAuthorizer:
+        return _noop_mutation_authorize
+
+    # Preserve the standalone/non-authenticated behavior of every existing,
+    # non-discriminated factory route. Only collections that need a privileged
+    # ownership lookup require the platform's request-scoped authorizer.
+    mutation_authorizer_dependency = (
+        get_request_authorizer if job_discriminator is not None else _noop_mutation_authorizer
+    )
+
     def from_response(job_resp: HelixJob) -> TypedJobResponse:
+        if not _matches_job_collection(job_resp):
+            # List/create/mutation responses should already be scoped.  A mismatched
+            # record here means the core Jobs service violated the factory contract;
+            # fail closed instead of attempting the wrong Pydantic schema.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Jobs service returned a record outside the {job_type} collection.",
+            )
         # Use job_output for deserialization (what's stored and returned)
         return TypedJobResponse(
             id=job_resp.id,
+            attempt_id=job_resp.attempt_id,
             name=job_resp.name,
             description=job_resp.description,
-            project=None,
+            project=job_resp.project,
             workspace=job_resp.workspace,
             created_at=job_resp.created_at,
             updated_at=job_resp.updated_at,
-            spec=handle_job_spec_mismatch(job_output, job_resp.spec),
+            spec=handle_job_spec_mismatch(job_output, _public_job_spec(job_resp.spec)),
             status=job_resp.status,
             status_details=job_resp.status_details,
             error_details=job_resp.error_details,
             ownership=job_resp.ownership,
             custom_fields=job_resp.custom_fields,
             control=job_resp.control,
+        )
+
+    job_output_adapter = TypeAdapter(job_output)
+
+    async def require_own_job(jobs_client: AsyncJobsClient, name: str, workspace: str) -> None:
+        """Refuse a job these routes do not serve, before acting on it.
+
+        Services can share a job source, as the customization trainers do, so the stored spec
+        must also fit this route's schema. Otherwise the action would land on another service's
+        job, and its response could not be rendered.
+        """
+        job = (await jobs_client.get_job(name=name, workspace=workspace)).data()
+        if job.source == service_name:
+            try:
+                job_output_adapter.validate_python(job.spec)
+                return
+            except ValidationError:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{name}' was not found among {job_type} jobs in workspace '{workspace}'.",
+        )
+
+    def attempt_from_response(attempt: HelixJobAttemptResponse) -> TypedJobAttempt:
+        return TypedJobAttempt(
+            id=attempt.id,
+            name=attempt.name,
+            job=attempt.job,
+            workspace=attempt.workspace,
+            seq=attempt.seq,
+            spec=handle_job_spec_mismatch(job_output, _public_job_spec(attempt.spec)),
+            status=attempt.status,
+            status_details=attempt.status_details,
+            error_details=attempt.error_details,
+            created_at=attempt.created_at,
+            updated_at=attempt.updated_at,
+            is_current=attempt.is_current,
         )
 
     # Core job routes
@@ -988,9 +1266,10 @@ def job_route_factory(
             f"""Create a new job for the {service_name} microservice."""
 
             job_name = _resolve_job_name(request.name, generate_job_name)
+            input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
             job_spec = await _transform_input_to_output(
                 input_to_output,
-                request.spec,
+                input_spec,
                 workspace,
                 entity_client,
                 job_name,
@@ -1000,14 +1279,16 @@ def job_route_factory(
             platform_spec = await _compile_platform_spec(
                 platform_job_config_compiler,
                 workspace,
-                request.spec,
+                input_spec,
                 job_spec,
                 entity_client,
                 job_name,
                 service_name,
                 async_client,
-                request.profile,
-                request.options,
+                submit_controls=_SubmitControls(
+                    profile=request.profile,
+                    options=request.options,
+                ),
             )
 
             # Create the job through the typed Jobs client.
@@ -1025,6 +1306,8 @@ def job_route_factory(
             # JSON-encode on the wire (invalid utf-8 on the pickle marker). ``mode="json"`` runs each
             # nested model's own JSON serializer, so bytes base64-encode and round-trip on read.
             spec_dict = job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
+            # Stamp only after transform/compile; metadata must not enter task configuration.
+            spec_dict = _stored_job_spec(spec_dict)
 
             # Only include optional fields when they have values — passing None
             # explicitly serializes differently than omitting (exclude_unset).
@@ -1091,6 +1374,8 @@ def job_route_factory(
             # when the user filter has a logical root ($or/$and/$not), since the
             # downstream parser short-circuits on the first logical operator.
             parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="source", value=service_name))
+            if collection_filter is not None:
+                parsed.and_with(collection_filter)
             # Fields a plugin adds on top of BaseJobsListFilter, with a default,
             # are the spec values that identify that plugin, or other default filters.
             # i.e. ``backend: Literal["rl"] = "rl"`` becomes ``spec.backend == "rl"``.
@@ -1146,8 +1431,132 @@ def job_route_factory(
         ) -> TypedJobResponse:
             f"""Get a job by name for the {service_name} microservice."""
 
-            job_resp = (await AsyncJobsClient.from_client(async_client).get_job(name=name, workspace=workspace)).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            job_resp = await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
+            if job_resp is None:
+                job_resp = (await jobs_client.get_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
+
+        @router.patch(
+            "/jobs/{name}",
+        )
+        async def update_job(
+            workspace: str,
+            name: str,
+            request: TypedJobUpdate,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            entity_client: EntityClient = Depends(get_entity_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
+        ) -> TypedJobResponse:
+            f"""Update a job for the {service_name} microservice."""
+
+            jobs = AsyncJobsClient.from_client(async_client)
+            existing_job = await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="PATCH",
+            )
+            update_fields: dict[str, Any] = {}
+            update_identifier = name
+            if "description" in request.model_fields_set:
+                update_fields["description"] = request.description
+            if "spec" in request.model_fields_set:
+                assert request.spec is not None
+                if existing_job is None:
+                    existing_job = (await jobs.get_job(name=name, workspace=workspace)).data()
+                update_identifier = existing_job.id
+                input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
+                job_spec = await _transform_input_to_output(
+                    input_to_output,
+                    input_spec,
+                    workspace,
+                    entity_client,
+                    existing_job.name,
+                    service_name,
+                    async_client,
+                )
+                platform_spec = await _compile_platform_spec(
+                    platform_job_config_compiler,
+                    workspace,
+                    input_spec,
+                    job_spec,
+                    entity_client,
+                    existing_job.name,
+                    service_name,
+                    async_client,
+                )
+                update_fields["spec"] = _stored_job_spec(
+                    job_spec.model_dump(mode="json") if isinstance(job_spec, BaseModel) else job_spec
+                )
+                update_fields["platform_spec"] = platform_spec
+
+            response = (
+                await jobs.update_job(
+                    name=update_identifier,
+                    workspace=workspace,
+                    body=UpdateHelixJobRequest.model_validate(update_fields),
+                )
+            ).data()
+            return from_response(response)
+
+        async def list_job_attempts(
+            workspace: str,
+            name: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            page: int = Query(default=1, gt=0),
+            page_size: int = Query(default=25, gt=0),
+            sort: Literal["seq", "-seq"] = Query(default="-seq"),
+            filter: str | None = Query(default=None),
+        ) -> Page[TypedJobAttempt]:
+            f"""List attempts for a {service_name} job."""
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=name, workspace=workspace)
+            query: ListAttemptsQueryParams = {"page": page, "page_size": page_size, "sort": sort}
+            if filter is not None:
+                query["filter"] = filter
+            attempt_page = (
+                await jobs.list_job_attempts(
+                    workspace=workspace,
+                    job=name,
+                    query_params=query,
+                )
+            ).page()
+            return Page(
+                data=[attempt_from_response(attempt) for attempt in attempt_page.items],
+                pagination=PaginationData.model_validate(attempt_page.metadata),
+                sort=sort,
+                filter=None,
+            )
+
+        router.add_api_route(
+            "/jobs/{name}/attempts",
+            list_job_attempts,
+            methods=["GET"],
+            response_model=Page[TypedJobAttempt],
+            response_model_exclude_none=True,
+        )
+
+        @router.get(
+            "/jobs/{name}/attempts/{attempt}",
+        )
+        async def get_job_attempt(
+            workspace: str,
+            name: str,
+            attempt: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+        ) -> TypedJobAttempt:
+            f"""Get one attempt for a {service_name} job."""
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=name, workspace=workspace)
+            response = (
+                await jobs.get_job_attempt(
+                    workspace=workspace,
+                    job=name,
+                    attempt=attempt,
+                )
+            ).data()
+            return attempt_from_response(response)
 
         # Status
         @router.get(
@@ -1159,9 +1568,9 @@ def job_route_factory(
             async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobStatusResponse:
             f"""Get the status of a job by name for the {service_name} microservice."""
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).get_job_status(name=name, workspace=workspace)
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
+            job_resp = (await jobs_client.get_job_status(name=name, workspace=workspace)).data()
             return HelixJobStatusResponse(**job_resp.model_dump())
 
         @router.delete(
@@ -1176,10 +1585,17 @@ def job_route_factory(
             workspace: str,
             name: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> None:
             f"""Delete a job by name for the {service_name} microservice."""
             try:
                 jobs_client = AsyncJobsClient.from_client(async_client).with_retry(RetryPolicy(max_retries=0))
+                await _require_mutation_target_in_collection(
+                    name=name,
+                    workspace=workspace,
+                    authorize=authorize,
+                    method="DELETE",
+                )
                 await jobs_client.delete_job(name=name, workspace=workspace)
             except NemoHTTPError as exc:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -1192,12 +1608,19 @@ def job_route_factory(
             workspace: str,
             name: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Cancel a job by name for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).cancel_job(name=name, workspace=workspace)
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="POST",
+                suffix="/cancel",
+            )
+            job_resp = (await jobs_client.cancel_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         # Logs
@@ -1211,6 +1634,9 @@ def job_route_factory(
             limit: int | None = Query(default=None),
             page_cursor: str | None = Query(default=None),
             tail: int | None = Query(default=None, gt=0, le=10_000),
+            attempt_id: str | None = Query(default=None),
+            step_id: str | None = Query(default=None),
+            task_id: str | None = Query(default=None),
         ) -> HelixJobLogPage:
             f"""Get the logs of a job by name for the {service_name} microservice."""
 
@@ -1221,39 +1647,56 @@ def job_route_factory(
                 logs_query["page_cursor"] = page_cursor
             if tail is not None:
                 logs_query["tail"] = tail
+            if attempt_id is not None:
+                logs_query["attempt_id"] = attempt_id
+            if step_id is not None:
+                logs_query["step_id"] = step_id
+            if task_id is not None:
+                logs_query["task_id"] = task_id
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs_client, name=name, workspace=workspace)
             logs_page = (
-                await AsyncJobsClient.from_client(async_client).list_job_logs(
-                    workspace=workspace, name=name, query_params=logs_query
-                )
+                await jobs_client.list_job_logs(workspace=workspace, name=name, query_params=logs_query)
             ).page()
             return HelixJobLogPage(data=logs_page.items, **logs_page.metadata)
 
         # Results
         @router.get(
             "/jobs/{name}/results",
+            response_model_exclude_none=True,
         )
         async def list_job_results(
             workspace: str,
             name: str,
             request: Request,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            attempt_id: str | None = Query(default=None),
         ) -> HelixJobListResultResponse:
             f"""Get the results of a job by name for the {service_name} microservice."""
 
-            results = (
-                await AsyncJobsClient.from_client(async_client).list_job_results(name=name, workspace=workspace)
-            ).data()
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=name, workspace=workspace)
+            if attempt_id is not None:
+                query_params: ListJobResultsQueryParams = {"attempt_id": attempt_id}
+                results = (
+                    await jobs.list_job_results(name=name, workspace=workspace, query_params=query_params)
+                ).data()
+            else:
+                results = (await jobs.list_job_results(name=name, workspace=workspace)).data()
             result_dicts = [result.model_dump() for result in results.data]
             list_results = []
             for result_dict in result_dicts:
                 result_name = result_dict["name"]
-                result_dict["download_url"] = f"{request.url}/{result_name}/download"
+                result_dict["download_url"] = str(
+                    request.url.replace(path=f"{request.url.path}/{result_name}/download")
+                )
                 list_results.append(HelixJobResultResponse(**result_dict))
 
             return HelixJobListResultResponse(data=list_results)
 
         @router.get(
             "/jobs/{job}/results/{name}",
+            response_model_exclude_none=True,
         )
         async def get_job_result(
             workspace: str,
@@ -1262,15 +1705,15 @@ def job_route_factory(
             request: Request,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobResultResponse:
-            f"""Get the result of a job by name for the {service_name} microservice."""
+            f"""Get a result by its job-wide unique name for the {service_name} microservice."""
 
-            result_obj = (
-                await AsyncJobsClient.from_client(async_client).get_job_result(name=name, job=job, workspace=workspace)
-            ).data()
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=job, workspace=workspace)
+            result_obj = (await jobs.get_job_result(name=name, job=job, workspace=workspace)).data()
 
             # Construct the URL for downloading this result
             result_dict = result_obj.model_dump()
-            result_dict["download_url"] = f"{request.url}/download"
+            result_dict["download_url"] = str(request.url.replace(path=f"{request.url.path}/download"))
             return HelixJobResultResponse(**result_dict)
 
         # Stamp authorization rules on the generated routes. Reads use one shared
@@ -1278,6 +1721,9 @@ def job_route_factory(
         _stamp(create_job, perm="create", write=True)
         _stamp(list_jobs, perm="list", write=False)
         _stamp(get_job, perm="read", write=False)
+        _stamp(update_job, perm="update", write=True)
+        _stamp(list_job_attempts, perm="read", write=False)
+        _stamp(get_job_attempt, perm="read", write=False)
         _stamp(get_job_status, perm="read", write=False)
         _stamp(delete_job, perm="delete", write=True)
         _stamp(cancel_job, perm="cancel", write=True)
@@ -1310,9 +1756,9 @@ def job_route_factory(
             - Use the `result_serializer` to know how to properly serialize the output
             """
 
-            result_info = (
-                await AsyncJobsClient.from_client(async_client).get_job_result(name=name, job=job, workspace=workspace)
-            ).data()
+            jobs = AsyncJobsClient.from_client(async_client)
+            await _require_job_in_collection(jobs, name=job, workspace=workspace)
+            result_info = (await jobs.get_job_result(name=name, job=job, workspace=workspace)).data()
             _, tmp_dir_path = await download_from_result_info(
                 result_name=name,
                 job_name=job,
@@ -1421,12 +1867,21 @@ def job_route_factory(
             name: str,
             workspace: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Pause a job by name for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).pause_job(name=name, workspace=workspace)
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            if job_discriminator is None:
+                await require_own_job(jobs_client, name, workspace)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="POST",
+                suffix="/pause",
+            )
+            job_resp = (await jobs_client.pause_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         @router.post(
@@ -1436,12 +1891,21 @@ def job_route_factory(
             name: str,
             workspace: str,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Resume a job by name for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).resume_job(name=name, workspace=workspace)
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            if job_discriminator is None:
+                await require_own_job(jobs_client, name, workspace)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="POST",
+                suffix="/resume",
+            )
+            job_resp = (await jobs_client.resume_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         @router.patch("/jobs/{name}/control")
@@ -1450,18 +1914,54 @@ def job_route_factory(
             workspace: str,
             body: JobControl,
             async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
         ) -> TypedJobResponse:
             f"""Change mutable job behavior for the {service_name} microservice."""
 
-            job_resp = (
-                await AsyncJobsClient.from_client(async_client).update_job_control(
-                    name=name, workspace=workspace, body=body
-                )
-            ).data()
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            if job_discriminator is None:
+                await require_own_job(jobs_client, name, workspace)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="PATCH",
+                suffix="/control",
+            )
+            job_resp = (await jobs_client.update_job_control(name=name, workspace=workspace, body=body)).data()
             return from_response(job_resp)
 
         _stamp(pause_job, perm="pause", write=True)
         _stamp(resume_job, perm="resume", write=True)
         _stamp(update_job_control, perm="control", write=True)
+
+    # Some jobs can be rerun from what survives on job storage after they fail.
+    if JobRouteOption.RERUN in route_options:
+
+        @router.post("/jobs/{name}/rerun")
+        async def rerun_job(
+            name: str,
+            workspace: str,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            authorize: RequestAuthorizer = Depends(mutation_authorizer_dependency),
+        ) -> TypedJobResponse:
+            f"""Rerun a failed job by name for the {service_name} microservice."""
+
+            jobs_client = AsyncJobsClient.from_client(async_client)
+            if job_discriminator is None:
+                await require_own_job(jobs_client, name, workspace)
+            await _require_mutation_target_in_collection(
+                name=name,
+                workspace=workspace,
+                authorize=authorize,
+                method="POST",
+                suffix="/rerun",
+            )
+            # Sent once: a retry after a lost response would find the new attempt and fail with 409.
+            rerun_client = jobs_client.with_retry(RetryPolicy(max_retries=0))
+            job_resp = (await rerun_client.rerun_job(job=name, workspace=workspace)).data()
+            return from_response(job_resp)
+
+        _stamp(rerun_job, perm="rerun", write=True)
 
     return router

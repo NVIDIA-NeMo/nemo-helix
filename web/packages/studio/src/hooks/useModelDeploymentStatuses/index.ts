@@ -37,11 +37,18 @@ export type DeploymentIndicatorState =
       status?: ModelDeploymentStatus;
       statusMessage?: string;
       providerRef?: string;
+      /** `<workspace>/<name>` of the backing deployment, when `hasDeployment`. */
+      deploymentRef?: string;
     }
   /** Adapter only: the base model is served, but this adapter is not loaded. */
   | { kind: 'adapter-not-loaded' }
   /** Nothing serves this id, and (for an adapter) nothing serves its base either. */
   | { kind: 'not-deployed' }
+  /**
+   * Nothing serves it yet, but a deployment of the model exists: still starting, or
+   * failed. Providers can't show this, so only `useModelLineage` reports it.
+   */
+  | { kind: 'not-serving'; deployment: ModelDeployment }
   /**
    * A provider could not be fetched, so whether this is served is genuinely
    * unknown. Distinct from `not-deployed`, which asserts nothing serves it.
@@ -216,6 +223,7 @@ export function useModelDeploymentStatuses(
           status: deployment?.status,
           statusMessage: deployment?.statusMessage,
           providerRef: `${servesTarget.workspace}/${servesTarget.name}`,
+          deploymentRef,
         });
         continue;
       }

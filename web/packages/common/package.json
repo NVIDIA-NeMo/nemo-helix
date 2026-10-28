@@ -68,6 +68,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@nemo/icons": "catalog:",
     "@assistant-ui/react": "^0.12.28",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/lang-javascript": "^6.2.4",

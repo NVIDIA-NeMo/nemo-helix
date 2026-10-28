@@ -127,7 +127,7 @@ Get a key from https://wandb.ai/authorize (User settings → API keys).
 
 ## Verify end-to-end
 
-1. Submit a job with both integrations (fixtures: `plugins/nemo-automodel/tests/fixtures/integrations_wandb_mlflow.json`, `plugins/nemo-unsloth/tests/fixtures/integrations_wandb_mlflow.json`).
+1. Submit a job with both `integrations` blocks set (`hyperparameters.md` § **Integrations (all backends)**).
 2. Training logs: launcher secret fetch, `wandb: Syncing run …`, MLflow run under the configured experiment.
 3. W&B UI: `https://wandb.ai/<entity>/<project>`
 4. MLflow UI: `http://<platform-host>:5001`

@@ -31,9 +31,6 @@ from nemo_agents_plugin.entities import (
     DeploymentStatus,
 )
 from nemo_helix_plugin.agents.types import (
-    CreateAgentRequest as CreateAgentRequest,
-)
-from nemo_helix_plugin.agents.types import (
     CreateComputeSpecRequest as CreateComputeSpecRequest,
 )
 from nemo_helix_plugin.agents.types import (
@@ -48,6 +45,11 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
 )
+from nemo_helix_plugin.agents.types import (
+    RegisterAgentRequest as RegisterAgentRequest,
+)
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
+from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import BaseModel, Field
 
@@ -56,6 +58,13 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
+_LABELS_FIELD = "labels"
+_LABELS_PREFIX = f"{_LABELS_FIELD}."
+
+
+# Implements the hooks ``make_filter_dep`` looks for, so declared fields are
+# rewritten to their ``data.*`` entity-store paths and ``labels.<key>`` is
+# accepted as a namespace sub-path.
 class AgentFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/agents``."""
 
@@ -63,6 +72,34 @@ class AgentFilter(NemoFilter):
         default=None,
         description="Filter to agents with this config format.",
     )
+    labels: dict[str, str] | None = Field(
+        default=None,
+        description="Filter on a label, e.g. `filter[labels.helix-agents/managed-by]=compass`.",
+    )
+
+    @classmethod
+    def _get_entity_field_map(cls) -> dict[str, str]:
+        return {name: f"data.{name}" for name in cls.model_fields if name not in ENTITY_BASE_FIELDS}
+
+    @classmethod
+    def _get_entity_namespace_map(cls) -> dict[str, str]:
+        return {_LABELS_FIELD: f"data.{_LABELS_FIELD}"}
+
+    @classmethod
+    def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
+        field_map = cls._get_entity_field_map()
+
+        def _walk(op: FilterOperation) -> FilterOperation:
+            if isinstance(op, ComparisonOperation):
+                if op.field.startswith(_LABELS_PREFIX):
+                    return op.model_copy(update={"field": f"data.{op.field}"})
+                mapped = field_map.get(op.field)
+                return op if mapped is None else op.model_copy(update={"field": mapped})
+            if isinstance(op, LogicalOperation):
+                return op.model_copy(update={"operations": [_walk(child) for child in op.operations]})
+            return op
+
+        return _walk(operation)
 
 
 class DeploymentFilter(NemoFilter):

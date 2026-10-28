@@ -39,8 +39,10 @@ from nemo_helix_plugin.jobs.api_factory import (
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
+    StepLifecycle,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork, TcpPortRange
 from nemo_helix_plugin.models.types import ModelDeploymentConfig, ModelEntity
 from nhx.common.auth import auth_client_context
 from nhx.common.entities.utils import parse_entity_ref
@@ -54,6 +56,7 @@ from nhx.customization_common.schemas.file_io import (
     FileIOTaskConfig,
     FileSetRef,
     UploadItem,
+    model_upload_lifecycle,
 )
 from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
 from nhx.customization_common.service.platform_client import (
@@ -65,10 +68,14 @@ from nhx.customization_common.service.platform_client import (
 from nhx.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nhx.rl.app.constants import (
     BASE_LOG_DIR_ENVVAR,
+    DEFAULT_BROKER_PORT,
     DEFAULT_DATASET_PATH,
     DEFAULT_ENVIRONMENT_PATH,
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
+    DEFAULT_VLLM_PORT,
+    DEFAULT_VLLM_PORT_RANGE_HIGH,
+    DEFAULT_VLLM_PORT_RANGE_LOW,
     NHX_BROKER_HOST_ENVVAR,
     NHX_BROKER_PORT_ENVVAR,
     NHX_JOB_STORAGE_PVC_ENVVAR,
@@ -76,6 +83,7 @@ from nhx.rl.app.constants import (
     NHX_VLLM_PORT_ENVVAR,
     SANDBOX_DATASET_PATH,
     SANDBOX_ENVIRONMENT_PATH,
+    SANDBOX_JOB_ID_LABEL,
 )
 from nhx.rl.app.jobs.training.schemas import (
     DPOConfig,
@@ -604,14 +612,28 @@ def _build_training_step(
     warn_incomplete_integrations(job_spec.integrations)
     environment = [*base_env, *collect_integration_secret_envs(job_spec.integrations)]
 
+    network: StepNetwork | None = None
     if job_spec.training_type == TrainingType.GRPO:
         for name, value in (
             (NHX_VLLM_HOST_ENVVAR, "127.0.0.1"),
-            (NHX_VLLM_PORT_ENVVAR, "8000"),
+            (NHX_VLLM_PORT_ENVVAR, str(DEFAULT_VLLM_PORT)),
             (NHX_BROKER_HOST_ENVVAR, "127.0.0.1"),
-            (NHX_BROKER_PORT_ENVVAR, "51234"),
+            (NHX_BROKER_PORT_ENVVAR, str(DEFAULT_BROKER_PORT)),
         ):
             environment.append(EnvironmentVariable(name=name, value=value))
+        # Sandboxes reach the training pods on the broker and on the port range vLLM picks a
+        # generation server from, never on Ray. The span is inclusive; the controller emits each port.
+        network = StepNetwork(
+            ingress=[
+                StepIngressRule(
+                    job_id_label=SANDBOX_JOB_ID_LABEL,
+                    tcp_ports=[DEFAULT_BROKER_PORT],
+                    tcp_port_ranges=[
+                        TcpPortRange(low=DEFAULT_VLLM_PORT_RANGE_LOW, high=DEFAULT_VLLM_PORT_RANGE_HIGH - 1)
+                    ],
+                )
+            ]
+        )
         if config.job_storage_pvc_claim:
             environment.append(EnvironmentVariable(name=NHX_JOB_STORAGE_PVC_ENVVAR, value=config.job_storage_pvc_claim))
 
@@ -655,6 +677,8 @@ def _build_training_step(
         executor=executor,
         environment=environment,
         config=step_config.model_dump(mode="json"),
+        network=network,
+        lifecycle=StepLifecycle(pause_deadline_seconds=config.training_pause_deadline_seconds),
     )
 
 
@@ -703,6 +727,7 @@ async def platform_job_config_compiler(
         name: str,
         command: list[str],
         task_config: FileIOTaskConfig | ModelEntityTaskConfig,
+        lifecycle: StepLifecycle | None = None,
     ) -> HelixJobStep:
         return HelixJobStep(
             name=name,
@@ -717,6 +742,7 @@ async def platform_job_config_compiler(
             ),
             environment=base_env,
             config=task_config.model_dump(mode="json"),
+            lifecycle=lifecycle or StepLifecycle(),
         )
 
     steps: list[HelixJobStep] = [
@@ -728,7 +754,12 @@ async def platform_job_config_compiler(
             _build_download_config(job_spec, me, workspace=workspace),
         ),
         _build_training_step(job_spec, base_env, trust_remote_code=trust_remote_code, profile=profile),
-        _cpu_task_step("model-upload", FILE_IO_TASK_COMMAND, _build_upload_config(job_spec, me)),
+        _cpu_task_step(
+            "model-upload",
+            FILE_IO_TASK_COMMAND,
+            _build_upload_config(job_spec, me),
+            lifecycle=model_upload_lifecycle(),
+        ),
         _cpu_task_step(
             "model-entity-creation",
             MODEL_ENTITY_TASK_COMMAND,

@@ -8,21 +8,22 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { Cloud, Db } from '@nemo/icons/icons';
 import {
   FilesetPurpose,
   StorageConfigType,
   type FilesetOutput as Dataset,
 } from '@nemo/sdk/generated/platform/schema';
-import { type DropdownEntry, Flex, Text } from '@nvidia/foundations-react-core';
-import { PURPOSE_LABELS } from '@studio/components/DatasetsTable/constants';
+import { type DropdownEntry, Flex, Tag, Text } from '@nvidia/foundations-react-core';
+import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/DatasetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/DatasetsTable/helpers';
 import {
   type DatasetWithId,
   type DatasetsTableProps,
   type ModalOpenState,
 } from '@studio/components/DatasetsTable/types';
+import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
-import { Cloud, Database } from 'lucide-react';
 import { type ComponentProps, type Dispatch, type SetStateAction } from 'react';
 
 interface MakeDatasetsTableColumnsArgs {
@@ -96,7 +97,7 @@ export function makeDatasetsTableColumns({
           if (!backend) return null;
           const label = formatStorageBackendLabel(backend);
           const isLocal = backend === 'local';
-          const Icon = isLocal ? Database : Cloud;
+          const Icon = isLocal ? Db : Cloud;
           return (
             <Flex align="center" gap="density-sm" className="min-w-0">
               <Icon className="flex-none text-fg-subdued" size="16" strokeWidth={0} />
@@ -114,19 +115,30 @@ export function makeDatasetsTableColumns({
         meta: {
           filter: {
             label: 'Purpose',
-            type: 'single-select',
+            type: 'multi-select',
             options: [
-              { value: '', label: 'All' },
-              { value: FilesetPurpose.generic, label: 'Generic' },
               { value: FilesetPurpose.dataset, label: 'Dataset' },
               { value: FilesetPurpose.environment, label: 'Environment' },
               { value: FilesetPurpose.model, label: 'Model' },
+              { value: FilesetPurpose.generic, label: 'Generic' },
             ],
           },
         },
         cell({ row }) {
           const purpose = row.original?.purpose;
-          return purpose ? <Text>{PURPOSE_LABELS[purpose] ?? purpose}</Text> : null;
+          if (!purpose) return null;
+          const color = PURPOSE_TAG_COLORS[purpose];
+          return (
+            <Tag
+              color={color}
+              kind="outline"
+              density="compact"
+              readOnly
+              data-testid={`purpose-pill-${purpose}`}
+            >
+              {PURPOSE_LABELS[purpose] ?? purpose}
+            </Tag>
+          );
         },
       }),
       accessor((row) => getStoragePath(row.storage), {
@@ -148,6 +160,17 @@ export function makeDatasetsTableColumns({
           return (
             <Text className="truncate" title={row.original?.description}>
               {row.original?.description}
+            </Text>
+          );
+        },
+      }),
+      accessor('created_by', {
+        header: 'Created By',
+        size: 150,
+        cell({ row }) {
+          return (
+            <Text className="truncate" title={row.original?.created_by ?? undefined}>
+              {row.original?.created_by ?? EMPTY_FIELD_VALUE}
             </Text>
           );
         },

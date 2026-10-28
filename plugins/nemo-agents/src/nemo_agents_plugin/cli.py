@@ -23,7 +23,7 @@ group by ``nemo-agent-optimization-plugin``, which dispatches
 
 **Agent Resources commands (require a running cluster):**
 
-- ``create``       — register an agent config on the platform
+- ``register``     — register an agent config on the platform
 - ``list``         — list agents
 - ``get``          — get an agent by name
 - ``delete``       — delete an agent
@@ -45,7 +45,7 @@ import re
 import shlex
 import sys
 import tempfile
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -84,13 +84,16 @@ from nemo_helix_plugin.agents.types import (
     AgentDeployment as ClientAgentDeployment,
 )
 from nemo_helix_plugin.agents.types import (
-    CreateAgentRequest,
     CreateComputeSpecRequest,
     CreateDeploymentRequest,
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateSessionRequest,
+    Labels,
+    ListAgentsQueryParams,
     ListSessionsQueryParams,
+    ReferenceConfig,
+    RegisterAgentRequest,
 )
 from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_codegen import handle_code_generation
@@ -130,13 +133,15 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
-from pydantic import BaseModel, ValidationError
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from typer.main import get_command as _typer_get_command
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WORKSPACE = "default"
 _DEPLOYMENT_RESOLUTION_PAGE_SIZE = 100
+_LABELS_ADAPTER: TypeAdapter[dict[str, str]] = TypeAdapter(Labels)
 _T = TypeVar("_T")
 
 _AGENT_LIST_COLUMNS = [
@@ -210,7 +215,7 @@ class _LazyAgentCliGroup(NhxGroup):
     ``discover_agent_cli()`` (``nemo_helix_plugin.discovery``) fully imports
     every ``nemo.cli.agents`` entry point up front, which makes plain ``nemo
     agents -h`` pay the import cost of every contributing plugin (e.g. the
-    nemo-insights analyst stack) even though none of them is being invoked.
+    nemo-compass analysis stack) even though none of them is being invoked.
     This group instead lists subcommand names from cheap entry-point metadata
     and only imports/builds a given plugin's Typer app when that specific
     subcommand name is resolved by Click — including when rendering its own
@@ -1052,30 +1057,39 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer.echo(f"Session '{name}' closed.")
 
     @app.command(rich_help_panel="Agent Resources")
-    def create(
+    def register(
         typer_ctx: typer.Context,
         name: str = typer.Option(..., "--name", "-n", help="Agent name."),
-        agent_config: Path = typer.Option(
-            ...,
+        agent_config: Path | None = typer.Option(
+            None,
             "--agent-config",
             "-c",
-            help="Path to an agent YAML config file.",
+            help="Optional path to an agent YAML config file.",
             exists=True,
             file_okay=True,
             dir_okay=False,
         ),
         description: str = typer.Option("", "--description"),
+        label: list[str] = typer.Option(
+            [],
+            "--label",
+            "-l",
+            help="Agent label as KEY=VALUE, e.g. team=search. Repeatable.",
+        ),
         workspace: WorkspaceOption = None,
     ) -> None:
         """Register an agent on the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        config_dict, config_format = _validate_agent_config_for_create(agent_config, name=name)
-        resp = _create_agent_from_validated_config(
+        config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=name)
+        labels = _parse_labels(label)
+        resp = _register_agent_from_validated_config(
             name=name,
             description=description,
+            labels=labels,
             config_dict=config_dict,
             config_format=config_format,
+            reference=reference,
             agent_config=agent_config,
             workspace=workspace,
             base_url=base_url,
@@ -1091,16 +1105,25 @@ def _register_platform_commands(app: typer.Typer) -> None:
         no_truncate: NoTruncateOption = None,
         columns: OutputColumnsOption = None,
         all_pages: AllPagesOption = False,
+        label: list[str] = typer.Option(
+            [],
+            "--label",
+            "-l",
+            help="Only list agents with this label, as KEY=VALUE. Repeat to require several labels.",
+        ),
     ) -> None:
         """List agents on the platform."""
         workspace = resolve_cli_workspace(ctx, workspace)
         base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
+        query_params: ListAgentsQueryParams = {}
+        if labels := _parse_labels(label):
+            query_params["filter"] = json.dumps({f"labels.{key}": value for key, value in labels.items()})
         _print_list(
             ctx,
             client,
             "list_agents",
-            {"workspace": workspace},
+            {"workspace": workspace, "query_params": query_params},
             default_columns=_AGENT_LIST_COLUMNS,
             output_format=output_format,
             no_truncate=no_truncate,
@@ -1270,7 +1293,16 @@ def _register_platform_commands(app: typer.Typer) -> None:
             file_okay=True,
             dir_okay=False,
         ),
-        description: str = typer.Option("", "--description", help="Agent description (as on create)."),
+        description: str = typer.Option("", "--description", help="Agent description (as on register)."),
+        label: list[str] = typer.Option(
+            [],
+            "--label",
+            "-l",
+            help="Agent label as KEY=VALUE. Repeatable. Replaces the agent's labels; omit to keep them.",
+        ),
+        clear_labels: bool = typer.Option(
+            False, "--clear-labels", help="Recreate the agent with no labels. Cannot be combined with --label."
+        ),
         name: Optional[str] = typer.Option(
             None, "--name", "-n", help="Deployment name for the new deployment (auto-generated if omitted)."
         ),
@@ -1332,7 +1364,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         """Redeploy an agent from a new config, in one command.
 
         Wraps the four steps you would otherwise run by hand to push a changed
-        agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
+        agent config to a running agent: ``undeploy`` → ``delete`` → ``register``
         → ``deploy`` (the agent entity is immutable by name, so it must be torn
         down and rebuilt). The new config is validated before any teardown, so a
         bad config is a safe no-op; once teardown starts the operation is not
@@ -1345,9 +1377,27 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         # 1. Fail-fast: validate the new config client-side, before any teardown.
         #    A bad config aborts here with zero side effects.
-        config_dict, config_format = _validate_agent_config_for_create(agent_config, name=agent)
+        config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=agent)
+
+        if reference is not None and reference.fileset is not None:
+            ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
+            files_client = shared_cli_client(FilesClient)
+            _run_sdk(
+                "GET referenced fileset",
+                lambda: files_client.get_fileset(workspace=ref.workspace, name=ref.name).data(),
+            )
+            reference.fileset = FilesetRef(f"{ref.workspace}/{ref.name}")
+        if clear_labels and label:
+            typer.echo("Error: --clear-labels cannot be combined with --label.", err=True)
+            raise typer.Exit(code=2)
+        labels = _parse_labels(label)
 
         client = _agents_client(base_url, workspace)
+
+        # Recreating the agent would otherwise drop its labels, so carry them over
+        # unless the caller passed --label, which replaces them, or --clear-labels.
+        if not label and not clear_labels:
+            labels = _run_sdk("GET agent API", lambda: _existing_agent_labels(client, agent, workspace))
 
         # 2. Auto-detect runtime args from the agent's existing deployment(s).
         #    Explicit flags always win; omitted flags are filled from the
@@ -1442,18 +1492,20 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         # 6. Recreate the agent from the new config (re-uploads the ethos fileset).
         try:
-            _create_agent_from_validated_config(
+            _register_agent_from_validated_config(
                 name=agent,
                 description=description,
+                labels=labels,
                 config_dict=config_dict,
                 config_format=config_format,
+                reference=reference,
                 agent_config=agent_config,
                 workspace=workspace,
                 base_url=base_url,
             )
             typer.echo(f"Recreated agent '{agent}'.")
         except typer.Exit:
-            _redeploy_recovery_hint(agent, agent_config, stage="recreate", workspace=workspace)
+            _redeploy_recovery_hint(agent, agent_config, stage="recreate", workspace=workspace, labels=labels)
             raise
 
         # 7. Deploy the recreated agent.
@@ -1474,7 +1526,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 ),
             )
         except typer.Exit:
-            _redeploy_recovery_hint(agent, agent_config, stage="deploy", workspace=workspace)
+            _redeploy_recovery_hint(agent, agent_config, stage="deploy", workspace=workspace, labels=labels)
             raise
 
         if not wait:
@@ -2336,7 +2388,7 @@ def _local_fabric_invoke(config: dict[str, Any], inputs: list[Any], *, base_dir:
     from nemo_agents_plugin.fabric.translator import FabricTranslationError
 
     try:
-        agent_config = AgentConfig.model_validate(config)
+        agent_config = AgentConfig.model_validate({key: value for key, value in config.items() if key != "reference"})
         results = asyncio.run(invoke_agent_config_once(agent_config, inputs, base_dir=base_dir))
     except (FabricRuntimeExecutionError, FabricTranslationError, ValidationError) as error:
         typer.echo(f"Error: Fabric invocation failed: {error}", err=True)
@@ -2997,17 +3049,22 @@ _USE_IMAGE_ENTRYPOINT_MODE_ERROR = (
 )
 
 
-def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
+def _redeploy_recovery_hint(
+    agent: str, agent_config: Path, *, stage: str, workspace: str, labels: Mapping[str, str]
+) -> None:
     """Print an actionable recovery hint when redeploy fails after teardown.
 
     Once the old agent has been deleted, a failed recreate/deploy leaves the
     agent torn down. The config file is untouched, so the operation is safe to
     re-run — tell the user exactly how, preserving the non-default workspace so
-    the printed command targets the same place the failed run did.
+    the printed command targets the same place the failed run did, and the
+    labels, which a re-run can no longer read from the deleted agent.
     """
     args = ["nemo", "agents", "redeploy", "--agent", agent, "--agent-config", str(agent_config)]
     if workspace != _DEFAULT_WORKSPACE:
         args += ["--workspace", workspace]
+    for key, value in labels.items():
+        args += ["--label", f"{key}={value}"]
     rerun = shlex.join(args)
     typer.echo(
         f"Error: redeploy failed during {stage} for agent {agent!r} after the old "
@@ -3017,70 +3074,111 @@ def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, works
     )
 
 
-def _validate_agent_config_for_create(agent_config: Path, *, name: str) -> tuple[dict[str, Any], str]:
+def _validate_agent_config_for_register(
+    agent_config: Path | None, *, name: str
+) -> tuple[dict[str, Any], str, ReferenceConfig | None]:
     """Load and validate an agent config **client-side**, with zero network calls.
 
-    Returns the resolved ``(config_dict, config_format)`` ready to POST, or raises
-    ``typer.Exit`` on any problem. This is the exact validation the ``create``
+    Returns the resolved ``(config_dict, config_format, reference)`` ready to POST, or raises
+    ``typer.Exit`` on any problem. This is the exact validation the ``register``
     command runs before it touches the API; ``redeploy`` reuses it as a
     fail-fast gate so a bad config aborts before any destructive teardown.
     """
     from nemo_agents_plugin.utils import inject_default_model
 
+    if agent_config is None:
+        return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, None
+
     config_dict = _load_yaml(agent_config)
-    config_format = config_dict.get("config_format", NAT_WORKFLOW_CONFIG_FORMAT)
-    if config_format in {NEMO_AGENTS_SPEC_CONFIG_FORMAT, NAT_WORKFLOW_CONFIG_FORMAT}:
-        # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
-        # no user context at deploy time.
-        config_dict = inject_default_model(config_dict)
-        if _contains_default_model_placeholder(config_dict):
-            typer.echo(
-                "Error: agent config references ${NEMO_DEFAULT_MODEL} but no "
-                "default model is selected. Run `nemo setup` to pick one, or "
-                "replace the placeholder in the config with an explicit model name.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
+    if not isinstance(config_dict, dict):
+        typer.echo(f"Error: agent config {agent_config} root must be a YAML mapping.", err=True)
+        raise typer.Exit(code=1)
+    reference = config_dict.pop("reference", None)
+    payload: dict[str, Any] = {"name": name, "config": config_dict, "reference": reference}
+    if config_dict.keys() <= {"name", "description", "config_format"}:
+        payload["config"] = {}
+        if "config_format" in config_dict:
+            payload["config_format"] = config_dict["config_format"]
+    try:
+        request = RegisterAgentRequest.model_validate(payload)
+    except ValidationError as error:
+        typer.echo(f"Error: invalid agent config {agent_config}: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    config_dict, config_format = request.config, request.config_format
+    if config_format not in {NEMO_AGENTS_SPEC_CONFIG_FORMAT, NAT_WORKFLOW_CONFIG_FORMAT}:
+        typer.echo(f"Error: unsupported config_format {config_format!r}", err=True)
+        raise typer.Exit(code=1)
+    if not config_dict:
+        return config_dict, config_format, request.reference
+    # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
+    # no user context at deploy time.
+    config_dict = inject_default_model(config_dict)
+    if _contains_default_model_placeholder(config_dict):
+        typer.echo(
+            "Error: agent config references ${NEMO_DEFAULT_MODEL} but no "
+            "default model is selected. Run `nemo setup` to pick one, or "
+            "replace the placeholder in the config with an explicit model name.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
     if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
         config_dict = _validate_platform_agent_config_for_cli(config_dict, base_dir=agent_config.parent)
         for line in _spec_package_warning(name, agent_config):
             typer.echo(line, err=True)
-    elif config_format != NAT_WORKFLOW_CONFIG_FORMAT:
-        typer.echo(f"Error: unsupported config_format {config_format!r}", err=True)
-        raise typer.Exit(code=1)
-    return config_dict, config_format
+    return config_dict, config_format, request.reference
 
 
-def _create_agent_from_validated_config(
+def _parse_labels(values: list[str]) -> dict[str, str]:
+    """Parse repeated ``KEY=VALUE`` options into validated agent labels, or exit 2."""
+    labels: dict[str, str] = {}
+    for value in values:
+        key, separator, label_value = value.partition("=")
+        if not separator:
+            typer.echo(f"Error: --label {value!r} must be KEY=VALUE.", err=True)
+            raise typer.Exit(code=2)
+        labels[key] = label_value
+    try:
+        return _LABELS_ADAPTER.validate_python(labels)
+    except ValidationError as exc:
+        typer.echo(f"Error: invalid --label: {exc.errors()[0]['msg']}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+def _register_agent_from_validated_config(
     *,
     name: str,
     description: str,
+    labels: dict[str, str],
     config_dict: dict[str, Any],
     config_format: str,
-    agent_config: Path,
+    reference: ReferenceConfig | None,
+    agent_config: Path | None,
     workspace: str,
     base_url: str,
 ) -> Any:
     """Register the agent entity and (for spec agents) upload its Ethos fileset.
 
     Returns the created-agent API response. Mirrors the second half of the
-    ``create`` command: on a fileset-upload failure it rolls the entity back so a
-    half-created agent is not left behind. Shared by ``create`` and ``redeploy``.
+    ``register`` command: on a fileset-upload failure it rolls the entity back so a
+    half-created agent is not left behind. Shared by ``register`` and ``redeploy``.
     """
-    payload = {
-        "name": name,
-        "description": description,
-        "config": config_dict,
-        "config_format": config_format,
-    }
+    payload: dict[str, Any] = {"name": name}
+    if description:
+        payload["description"] = description
+    if reference is not None:
+        payload["reference"] = reference
+    if labels:
+        payload["labels"] = labels
+    if agent_config is not None:
+        payload.update(config=config_dict, config_format=config_format)
     client = _agents_client(base_url, workspace)
     resp = _run_sdk(
         "POST agent API",
         lambda: _json_from_response(
-            client.create_agent(workspace=workspace, body=CreateAgentRequest.model_validate(payload))
+            client.register_agent(workspace=workspace, body=RegisterAgentRequest.model_validate(payload))
         ),
     )
-    if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+    if agent_config is not None and config_dict and config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
         try:
             _upload_ethos_fileset(
                 agent_name=name,
@@ -3213,6 +3311,15 @@ def _delete_agent_entity_if_present(client: AgentsClient, *, agent_name: str, wo
     except PluginNotFoundError:
         return False
     return True
+
+
+def _existing_agent_labels(client: AgentsClient, agent_name: str, workspace: str) -> dict[str, str]:
+    """Return the agent entity's labels, or none if it is already absent (e.g. a re-run after teardown)."""
+    try:
+        agent = _json_from_response(client.get_agent(workspace=workspace, name=agent_name))
+    except PluginNotFoundError:
+        return {}
+    return dict(agent.get("labels") or {})
 
 
 def _load_yaml(path: Path) -> Any:

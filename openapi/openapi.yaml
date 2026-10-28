@@ -1274,12 +1274,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to create entities in the requested workspace.
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     get:
       tags:
       - Entity Store
@@ -1351,7 +1354,14 @@ paths:
         required: false
         schema:
           type: string
-          description: Sort field
+          description: 'Sort by id, workspace, entity_type, name, parent, project,
+            created_at, updated_at, created_by, updated_by, or db_version; or by a
+            dotted JSON path such as data.priority or data.owner.name. JSON path components
+            must be nonempty; missing paths are allowed and use the database''s native
+            null ordering. Prefix with a single ''-'' for descending order. Invalid
+            sort fields return HTTP 400. Equal values are ordered by id ascending.
+            Pagination uses offsets, not a snapshot: concurrent writes can cause rows
+            to be repeated or skipped between pages.'
           examples:
           - -created_at
           - created_at
@@ -1361,7 +1371,14 @@ paths:
           - name
           default: -created_at
           title: Sort
-        description: Sort field
+        description: 'Sort by id, workspace, entity_type, name, parent, project, created_at,
+          updated_at, created_by, updated_by, or db_version; or by a dotted JSON path
+          such as data.priority or data.owner.name. JSON path components must be nonempty;
+          missing paths are allowed and use the database''s native null ordering.
+          Prefix with a single ''-'' for descending order. Invalid sort fields return
+          HTTP 400. Equal values are ordered by id ascending. Pagination uses offsets,
+          not a snapshot: concurrent writes can cause rows to be repeated or skipped
+          between pages.'
       - name: count_by
         in: query
         required: false
@@ -1407,6 +1424,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntitiesPage'
+        '403':
+          description: Not allowed to list entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1463,6 +1482,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to read entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1526,12 +1547,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to update entities in the requested workspace.
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Entity Store
@@ -1591,6 +1615,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Not allowed to delete entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -5863,6 +5889,544 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts:
+    get:
+      tags:
+      - Jobs
+      summary: List Job Attempts
+      description: List the execution attempts for a job.
+      operationId: list_job_attempts_apis_jobs_v2_workspaces__workspace__jobs__job__attempts_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobAttemptSortField'
+          description: Sort attempts by sequence. Prefix with `-` for descending order.
+          default: -seq
+        description: Sort attempts by sequence. Prefix with `-` for descending order.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/HelixJobAttemptsListFilter'
+        description: Filter attempts by status.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobAttemptResponsesPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}:
+    get:
+      tags:
+      - Jobs
+      summary: Get Job Attempt
+      description: Get an attempt by ID or the reserved current selector.
+      operationId: get_job_attempt_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobAttemptResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Job Attempt Status Details
+      description: Update status details for one resolved attempt.
+      operationId: update_job_attempt_status_details_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__status_details_patch
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: expected_step_id
+        in: query
+        required: false
+        schema:
+          description: Update only while this step is in this attempt and the attempt
+            is the job's current one.
+          title: Expected Step Id
+          type: string
+        description: Update only while this step is in this attempt and the attempt
+          is the job's current one.
+      - name: expected_step_status
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: With expected_step_id, update only while the step has this
+            status.
+          title: Expected Step Status
+        description: With expected_step_id, update only while the step has this status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Request
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '404':
+          description: Attempt not Found
+        '409':
+          description: The expected step is no longer current or in the expected status
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps:
+    get:
+      tags:
+      - Jobs
+      summary: List Attempt Steps
+      description: List steps for one attempt.
+      operationId: list_attempt_steps_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 25
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobSortField'
+          default: created_at
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/HelixAttemptStepsListFilter'
+        description: Filter steps within the selected attempt.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStepWithContextsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}:
+    get:
+      tags:
+      - Jobs
+      summary: Get Attempt Step
+      description: Get a step from one attempt.
+      operationId: get_attempt_step_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__name__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStep'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}/status:
+    patch:
+      tags:
+      - Jobs
+      summary: Update Attempt Step Status
+      description: Update a step selected through a concrete attempt.
+      operationId: update_attempt_step_status_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__name__status_patch
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HelixJobStatusUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobStep'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks:
+    get:
+      tags:
+      - Jobs
+      summary: List Attempt Step Tasks
+      description: List tasks after validating the job, attempt, and step chain.
+      operationId: list_attempt_step_tasks_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__step__tasks_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Step
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobListTaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}:
+    put:
+      tags:
+      - Jobs
+      summary: Update Attempt Step Task
+      description: Create or update a task under one concrete attempt step.
+      operationId: update_attempt_step_task_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__step__tasks__name__put
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Step
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HelixJobTaskUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobTask'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Jobs
+      summary: Get Attempt Step Task
+      description: Get a task under one concrete attempt step.
+      operationId: get_attempt_step_task_apis_jobs_v2_workspaces__workspace__jobs__job__attempts__attempt__steps__step__tasks__name__get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: attempt
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt
+      - name: step
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Step
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobTask'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/rerun:
+    post:
+      tags:
+      - Jobs
+      summary: Rerun Job
+      description: Rerun a failed job from its surviving storage as a new attempt.
+      operationId: rerun_job_apis_jobs_v2_workspaces__workspace__jobs__job__rerun_post
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: The job cannot be rerun, or its status changed during the request
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
     post:
       tags:
@@ -5914,7 +6478,7 @@ paths:
       tags:
       - Jobs
       summary: Get Job Result
-      description: Get a specific job result.
+      description: Get a specific job result by its job-wide unique name.
       operationId: get_job_result_apis_jobs_v2_workspaces__workspace__jobs__job__results__name__get
       parameters:
       - name: job
@@ -6124,58 +6688,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{step}/tasks/{name}:
-    put:
-      tags:
-      - Jobs
-      summary: Update Job Step Task
-      description: Update a job step task.
-      operationId: update_job_step_task_apis_jobs_v2_workspaces__workspace__jobs__job__steps__step__tasks__name__put
-      parameters:
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: step
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Step
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/HelixJobTaskUpdate'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HelixJobTask'
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
     get:
       tags:
       - Jobs
@@ -6257,6 +6769,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Jobs
+      summary: Update Job
+      description: Update mutable job metadata or the definition used by future attempts.
+      operationId: update_job_apis_jobs_v2_workspaces__workspace__jobs__name__patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHelixJobRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelixJobResponse'
+        '404':
+          description: Job not Found
+        '409':
+          description: Version conflict
+        '422':
+          description: Invalid job update
     delete:
       tags:
       - Jobs
@@ -6363,7 +6913,7 @@ paths:
         '404':
           description: Job not Found
         '409':
-          description: The job changed during the request
+          description: Storage has been reclaimed, or the job changed during the request
         '422':
           description: The pause window exceeds the platform maximum
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs:
@@ -6419,10 +6969,12 @@ paths:
         in: query
         required: false
         schema:
-          description: Filter logs by job attempt ID
+          anyOf:
+          - type: string
+          - type: integer
+          description: Filter logs by job attempt ID or `current`
           title: Attempt Id
-          type: integer
-        description: Filter logs by job attempt ID
+        description: Filter logs by job attempt ID or `current`
       - name: step_id
         in: query
         required: false
@@ -6523,6 +7075,14 @@ paths:
           default: -created_at
         description: The field to sort by. To sort in decreasing order, use `-` in
           front of the field name.
+      - name: attempt_id
+        in: query
+        required: false
+        schema:
+          description: Producing attempt ID or 'current'
+          title: Attempt Id
+          type: string
+        description: Producing attempt ID or 'current'
       responses:
         '200':
           description: Successful Response
@@ -6603,48 +7163,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobStatusResponse'
-        '404':
-          description: Job not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details:
-    patch:
-      tags:
-      - Jobs
-      summary: Update Job Status Details
-      description: Update the status details of a platform job.
-      operationId: update_job_status_details_apis_jobs_v2_workspaces__workspace__jobs__name__status_details_patch
-      parameters:
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
-              title: Request
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema: {}
         '404':
           description: Job not Found
         '422':
@@ -7787,11 +8305,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     get:
       tags:
       - Models
@@ -7905,11 +8424,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Adapter'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
   /apis/models/v2/workspaces/{workspace}/models/{model_name}/adapters/{adapter}:
     delete:
       tags:
@@ -7988,11 +8508,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Adapter'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
   /apis/models/v2/workspaces/{workspace}/models/{name}:
     get:
       tags:
@@ -8087,11 +8608,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Models
@@ -9706,7 +10228,11 @@ components:
     AtifIngestRequest:
       properties:
         evaluation_context:
-          $ref: '#/components/schemas/EvaluationContext'
+          allOf:
+          - $ref: '#/components/schemas/EvaluationContext'
+          description: Intake extension outside ATIF. Spec-valid producers put the
+            same object at extra.evaluation_context. Existing callers may keep sending
+            this top-level alias.
         schema_version:
           type: string
           enum:
@@ -9760,7 +10286,11 @@ components:
 
         ATIF project scoping is intentionally not accepted here; use the workspace
 
-        route and ``evaluation_context`` for evaluation identity.'
+        route. Evaluation identity is an Intake extension: spec-valid ATIF puts it
+
+        at ``extra.evaluation_context``. The top-level field is a compatibility alias
+
+        for existing callers.'
     AtifMetrics:
       properties:
         prompt_tokens:
@@ -10276,18 +10806,6 @@ components:
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
-    BaseModelFilter:
-      additionalProperties: false
-      description: Filter for base model properties.
-      properties:
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Filter by name of the base model.
-          title: Name
-      title: BaseModelFilter
-      type: object
     CPUExecutionProvider:
       properties:
         provider:
@@ -11164,8 +11682,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -12219,6 +12736,23 @@ components:
           training_options:
             learning_rate: 0.01
         name: my-config
+    EntityErrorResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+        code:
+          title: Code
+          description: Set to workspace_not_found when the target workspace does not
+            exist.
+          nullable: true
+          type: string
+          const: workspace_not_found
+      type: object
+      required:
+      - detail
+      title: EntityErrorResponse
+      description: Error returned when an entity write is rejected by the entity store.
     EntityUpdate:
       properties:
         new_name:
@@ -12259,6 +12793,18 @@ components:
           target_id: llama-2-7b
           training_options:
             learning_rate: 0.02
+    EntityWriteValidationErrorResponse:
+      anyOf:
+      - $ref: '#/components/schemas/HTTPValidationError'
+      - $ref: '#/components/schemas/EntityErrorResponse'
+      title: EntityWriteValidationErrorResponse
+      description: 'Request validation error, or an entity write rejected by the entity
+        store.
+
+
+        Routes that write entities declare this for 422. Declaring any 422 model
+
+        replaces FastAPI''s request-validation schema, so the union keeps both shapes.'
     EnvironmentMetadataContent:
       properties:
         format:
@@ -12756,19 +13302,19 @@ components:
           type: string
         input_tokens:
           title: Input Tokens
-          description: Sum of input tokens across this session's spans.
+          description: Session input tokens, counting each model call once.
           type: integer
         output_tokens:
           title: Output Tokens
-          description: Sum of output tokens across this session's spans.
+          description: Session output tokens, counting each model call once.
           type: integer
         cached_tokens:
           title: Cached Tokens
-          description: Sum of cached tokens across this session's spans.
+          description: Session cached tokens, counting each model call once.
           type: integer
         cost_total_usd:
           title: Cost Total Usd
-          description: Sum of cost across this session's spans.
+          description: Session cost, counting each model call once.
           type: number
         evaluator_scores:
           additionalProperties:
@@ -13541,6 +14087,18 @@ components:
           allOf:
           - $ref: '#/components/schemas/StorageConfigType'
           description: Filter by the storage backend type (e.g., 'local', 'ngc').
+        created_by:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by the principal id that created the fileset.
+          title: Created By
+        updated_by:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by the principal id that last updated the fileset.
+          title: Updated By
         created_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -13602,9 +14160,19 @@ components:
         created_at:
           type: string
           title: Created At
+        created_by:
+          title: Created By
+          description: Principal id for the fileset creator.
+          nullable: true
+          type: string
         updated_at:
           type: string
           title: Updated At
+        updated_by:
+          title: Updated By
+          description: Principal id for the last fileset update.
+          nullable: true
+          type: string
       type: object
       required:
       - id
@@ -13682,16 +14250,6 @@ components:
       - grpo
       title: FinetuningType
       description: Finetuning types.
-    FinetuningTypeFilter:
-      additionalProperties: false
-      description: Filter for PEFT-related properties.
-      properties:
-        finetuning_type:
-          allOf:
-          - $ref: '#/components/schemas/FinetuningType'
-          description: Filter models with adapters with this fine-tuning type.
-      title: FinetuningTypeFilter
-      type: object
     FloatFilter:
       additionalProperties: false
       properties:
@@ -14634,6 +15192,121 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixAttemptStepsListFilter:
+      additionalProperties: false
+      description: Filter options for steps nested under one attempt.
+      properties:
+        status:
+          description: The list of statuses to filter steps by.
+          title: Status
+          items:
+            $ref: '#/components/schemas/HelixJobStatus'
+          type: array
+        task_cleanup_pending:
+          description: Whether terminal child-task cleanup is unfinished.
+          title: Task Cleanup Pending
+          type: boolean
+      title: HelixAttemptStepsListFilter
+      type: object
+    HelixJobAttemptResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+          description: Parent job ID
+        workspace:
+          type: string
+          title: Workspace
+        seq:
+          type: integer
+          title: Seq
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+        platform_spec:
+          $ref: '#/components/schemas/HelixJobSpec'
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        is_current:
+          type: boolean
+          title: Is Current
+          default: false
+      type: object
+      required:
+      - id
+      - name
+      - job
+      - workspace
+      - seq
+      - platform_spec
+      - status
+      - created_at
+      - updated_at
+      title: HelixJobAttemptResponse
+      description: Response model for one execution attempt of a platform job.
+    HelixJobAttemptResponsesPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobAttemptResponse'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: HelixJobAttemptResponsesPage
+    HelixJobAttemptSortField:
+      type: string
+      enum:
+      - seq
+      - -seq
+      title: HelixJobAttemptSortField
+    HelixJobAttemptsListFilter:
+      additionalProperties: false
+      description: Filter options for listing platform job attempts.
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+      title: HelixJobAttemptsListFilter
+      type: object
     HelixJobEnvironmentVariable:
       properties:
         name:
@@ -14848,6 +15521,10 @@ components:
       title: HelixJobResponsesPage
     HelixJobResultCreateRequest:
       properties:
+        attempt_id:
+          type: string
+          title: Attempt Id
+          description: Concrete ID of the attempt that produced the result
         artifact_url:
           type: string
           title: Artifact Url
@@ -14855,6 +15532,7 @@ components:
           $ref: '#/components/schemas/FileStorageType'
       type: object
       required:
+      - attempt_id
       - artifact_url
       - artifact_storage_type
       title: HelixJobResultCreateRequest
@@ -14871,6 +15549,9 @@ components:
           title: Workspace
         project:
           title: Project
+          type: string
+        attempt_id:
+          title: Attempt Id
           type: string
         created_at:
           type: string
@@ -15181,6 +15862,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/StepLifecycle'
           description: Lifecycle configuration settings for the step
+        network:
+          allOf:
+          - $ref: '#/components/schemas/StepNetwork'
+          description: Network isolation for the step's pods. Unset leaves ingress
+            unrestricted.
       type: object
       required:
       - name
@@ -15237,6 +15923,11 @@ components:
         job:
           type: string
           title: Job
+        job_id:
+          title: Job Id
+          description: ID of the platform job. Unlike the job name, it is never reused
+            by a later job.
+          type: string
         attempt_id:
           type: string
           title: Attempt Id
@@ -16208,6 +16899,13 @@ components:
           type: object
           title: Pod Security Context
           description: Pod security context for the Kubernetes job pods.
+        step_network_policies_enabled:
+          type: boolean
+          title: Step Network Policies Enabled
+          description: Create an ingress NetworkPolicy for each step that declares
+            `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC
+            on networking.k8s.io/networkpolicies.
+          default: false
         image_pull_secrets:
           items:
             $ref: '#/components/schemas/ImagePullSecret'
@@ -17635,18 +18333,16 @@ components:
           type: string
         base_model:
           anyOf:
-          - $ref: '#/components/schemas/BaseModelFilter'
           - type: boolean
           - type: string
           description: 'Filter by base model: true = has a base model, false = no
-            base model, { name: string } or string = match base model name.'
+            base model, string = match base model name.'
           title: Base Model
         adapters:
-          anyOf:
-          - $ref: '#/components/schemas/FinetuningTypeFilter'
-          - type: boolean
-          description: Filter models with Parameter Efficient Fine-tuning Adapters.
+          description: 'Filter by Parameter Efficient Fine-tuning adapters: true =
+            has at least one adapter, false = has none.'
           title: Adapters
+          type: boolean
         finetuning_type:
           anyOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -18602,9 +19298,9 @@ components:
             egress (breaks secrets fetch and OTLP log export).
         policy_path:
           title: Policy Path
-          description: Path to a hand-written OpenShell SandboxPolicy YAML applied
-            to created sandboxes. When unset, a default-deny policy is generated from
-            platform_egress plus the sandbox filesystem defaults.
+          description: Path to a hand-written OpenShell SandboxPolicy YAML layered
+            over the generated default-deny policy. Mappings merge recursively, lists
+            and scalars replace, and null keeps the generated value.
           type: string
         image:
           title: Image
@@ -18616,8 +19312,8 @@ components:
           title: Default Entrypoint
           description: Entrypoint for job steps that do not declare one. The OpenShell
             supervisor ignores the image ENTRYPOINT, so the sandbox command must name
-            the binary explicitly. When unset, defaults to the nhx-tasks entrypoint
-            (/app/.venv/bin/nemo-helix).
+            the binary explicitly. When unset, defaults to `nemo-helix`, resolved
+            on the PATH from the image ENV.
           items:
             type: string
           type: array
@@ -20412,6 +21108,30 @@ components:
       - success
       - unknown
       title: StatusEnum
+    StepIngressRule:
+      properties:
+        job_id_label:
+          type: string
+          pattern: ^([a-z0-9]([-a-z0-9.]*[a-z0-9])?/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$
+          title: Job Id Label
+          description: Label key on peer pods whose value must equal the job ID, e.g.
+            'nemo-rl-job-id'.
+        tcp_ports:
+          items:
+            type: integer
+            maximum: 65535.0
+            minimum: 1.0
+          type: array
+          minItems: 1
+          title: Tcp Ports
+          description: TCP ports on the step's pods that matching peers may reach.
+      type: object
+      required:
+      - job_id_label
+      - tcp_ports
+      title: StepIngressRule
+      description: Ingress into the step's pods from peer pods that carry this job's
+        ID under ``job_id_label``.
     StepLifecycle:
       properties:
         staleness_timeout_seconds:
@@ -20427,6 +21147,14 @@ components:
           description: How long a pause may stay in progress before the workload is
             deleted and the step fails. A value of 0 means this step cannot be paused.
           default: 0
+        ttl_seconds_active:
+          type: integer
+          minimum: 0.0
+          title: Ttl Seconds Active
+          description: How long the step may stay active before it is terminated,
+            in place of the execution profile's `ttl_seconds_active`. A value of 0
+            uses the profile's value.
+          default: 0
       type: object
       title: StepLifecycle
       description: 'Controller-level lifecycle configuration for a job step.
@@ -20437,6 +21165,24 @@ components:
         as opposed to ``config`` which is the task payload forwarded to
 
         the container.'
+    StepNetwork:
+      properties:
+        ingress:
+          items:
+            $ref: '#/components/schemas/StepIngressRule'
+          type: array
+          title: Ingress
+          description: Additional ingress allowed into the step's pods.
+      type: object
+      title: StepNetwork
+      description: 'Network isolation for a step''s pods.
+
+
+        Enforced only when the execution profile enables step network policies. The
+        step''s pods then
+
+        accept ingress from other pods of the same job plus the listed rules, and
+        nothing else.'
     StorageConfigType:
       enum:
       - local
@@ -21119,6 +21865,22 @@ components:
           type: object
       type: object
       title: UpdateFilesetRequest
+    UpdateHelixJobRequest:
+      properties:
+        description:
+          title: Description
+          nullable: true
+          type: string
+        spec:
+          title: Spec
+          additionalProperties: true
+          type: object
+        platform_spec:
+          $ref: '#/components/schemas/HelixJobSpec'
+      additionalProperties: false
+      type: object
+      title: UpdateHelixJobRequest
+      description: Validated partial update for a job description or definition.
     UpdateModelDeploymentConfigRequest:
       properties:
         description:
@@ -21903,6 +22665,13 @@ components:
           type: object
           title: Pod Security Context
           description: Pod security context for the Kubernetes job pods.
+        step_network_policies_enabled:
+          type: boolean
+          title: Step Network Policies Enabled
+          description: Create an ingress NetworkPolicy for each step that declares
+            `network`. Requires a NetworkPolicy-enforcing CNI and controller RBAC
+            on networking.k8s.io/networkpolicies.
+          default: false
         image_pull_secrets:
           items:
             $ref: '#/components/schemas/ImagePullSecret'

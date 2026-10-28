@@ -22,7 +22,7 @@ ARG KUBECTL_VERSION=v1.33.2
 
 FROM ${BUILDKIT_IMAGE} AS buildkit
 
-FROM --platform=$BUILDPLATFORM golang:1.26.7 AS jobs-launcher
+FROM --platform=$BUILDPLATFORM golang:1.27.3 AS jobs-launcher
 ARG TARGETOS
 ARG TARGETARCH
 COPY services/core/jobs/jobs-launcher /app/jobs-launcher
@@ -151,7 +151,7 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim
 # runs inside the workspace, so it is bound by the root pyproject's
 # `required-version`. Overlay the pinned binary the platform builds with;
 # the harbor stage above is exempt because it installs outside the workspace.
-COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv
 
 # Both the API (`GET /v1/readyz`) and the build worker shell out to buildctl.
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl

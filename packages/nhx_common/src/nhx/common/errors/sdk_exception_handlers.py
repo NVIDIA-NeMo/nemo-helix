@@ -62,16 +62,22 @@ async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSO
         exc.status_code,
     )
 
+    content: dict[str, str] = {"detail": exc.detail}
+    # Relay the downstream service's machine-readable reason, if it sent one.
+    code = exc.body.get("code") if isinstance(exc.body, dict) else None
+    if isinstance(code, str):
+        content["code"] = code
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
+        content=content,
     )
 
 
 async def entity_store_error_handler(request: Request, exc: EntityStoreError) -> JSONResponse:
     """Convert EntityStoreError exceptions to HTTP responses.
 
-    Maps entity store exceptions to appropriate HTTP status codes:
+    Maps entity store exceptions to appropriate HTTP status codes, keeping the
+    exception's ``code`` alongside ``detail`` when it has one:
     - EntityNotFoundError -> 404
     - EntityConflictError -> 409 (entity already exists on create, or version mismatch on update)
     - EntityValidationError -> 422
@@ -95,9 +101,12 @@ async def entity_store_error_handler(request: Request, exc: EntityStoreError) ->
         _scrub_crlf(request.url.path),
     )
 
+    content: dict[str, str] = {"detail": str(exc)}
+    if exc.code is not None:
+        content["code"] = exc.code
     return JSONResponse(
         status_code=status_code,
-        content={"detail": str(exc)},
+        content=content,
     )
 
 

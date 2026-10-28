@@ -16,8 +16,10 @@ Jobs service.
 
 import argparse
 import logging
+from pathlib import Path
 from typing import Any, cast
 
+import nemo_rl.algorithms.dpo as dpo_algorithm
 from nemo_rl.algorithms.dpo import MasterConfig, dpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data.utils import setup_preference_data
@@ -25,10 +27,18 @@ from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.training.pause import (
+    check_resumed_from_pause,
+    exit_paused,
+    pause_marker_path,
+    take_pause_marker,
+    write_pause_marker,
+)
 from nhx.rl.tasks.training.backends.nemo_rl.nemo_rl_logger import (
     DPO_DEFAULT_TIME_SERIES_METRICS,
     NemoRLLogger,
 )
+from nhx.rl.tasks.training.backends.nemo_rl.pause import planned_steps, stop_for_pause
 from nhx.rl.tasks.training.backends.nemo_rl.preference_datasets import register_preference_datasets
 from omegaconf import OmegaConf
 
@@ -106,6 +116,13 @@ def main():
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
 
+    # setup() restored the newest complete checkpoint, or started from step 0 when it found none.
+    # A resume must not start over.
+    checkpoint_dir = Path(config.checkpointing["checkpoint_dir"])
+    check_resumed_from_pause(
+        take_pause_marker(pause_marker_path(checkpoint_dir)), dpo_save_state.total_steps, checkpoint_dir
+    )
+
     # Add NemoRLLogger for progress reporting if Jobs service is configured
     job_ctx = NHXJobContext.from_env()
     # Log only the non-sensitive job id; the full context carries service URLs
@@ -134,6 +151,9 @@ def main():
             # data rather than like "not GRPO".
             run_facts={"training_type": "dpo"},
         )
+        # setup() restored the newest complete checkpoint. A rerun after a crash can restore an
+        # earlier step than the last one reported, and those steps are about to run again.
+        customizer_logger.rewind_to(dpo_save_state.total_steps)
         # The setup() logger is a composite with a `.loggers` list; guard in case
         # that internal shape changes.
         if hasattr(logger, "loggers"):
@@ -144,23 +164,30 @@ def main():
     logger.log_hyperparams(config.model_dump())
 
     try:
-        dpo_train(
-            policy,
-            train_dataloader,
-            val_dataloader,
-            tokenizer,
-            loss_fn,
-            master_config,
-            logger,
-            checkpointer,
-            dpo_save_state,
-        )
+        with stop_for_pause(dpo_algorithm, job_ctx) as pause:
+            dpo_train(
+                policy,
+                train_dataloader,
+                val_dataloader,
+                tokenizer,
+                loss_fn,
+                master_config,
+                logger,
+                checkpointer,
+                dpo_save_state,
+            )
     finally:
         # Flushes the final training step. NeMo-RL never closes the loggers it is
         # handed, so without this the only fallback is NemoRLLogger.__del__ at
         # interpreter shutdown, which does not run at all on an abnormal exit.
         if customizer_logger is not None:
             customizer_logger.close()
+
+    planned = planned_steps(config.dpo.max_num_steps, config.dpo.max_num_epochs, len(train_dataloader))
+    if pause.stopped_training(dpo_save_state.total_steps, planned):
+        print(f"Training paused at step {dpo_save_state.total_steps}", flush=True)
+        write_pause_marker(pause_marker_path(checkpoint_dir), dpo_save_state.total_steps)
+        exit_paused()
 
 
 if __name__ == "__main__":

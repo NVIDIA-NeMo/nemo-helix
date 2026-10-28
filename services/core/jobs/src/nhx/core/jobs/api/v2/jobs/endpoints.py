@@ -38,6 +38,10 @@ from nhx.common.observability import scoped_app_ctx
 from nhx.core.jobs.api.dependencies import dep_dispatcher, dep_files_client
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixAttemptStepsListFilter,
+    HelixJobAttemptResponse,
+    HelixJobAttemptsListFilter,
+    HelixJobAttemptSortField,
     HelixJobListSortField,
     HelixJobListTaskResponse,
     HelixJobResponse,
@@ -48,6 +52,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobStepsListFilter,
     HelixJobStepWithContext,
     HelixJobTaskUpdate,
+    UpdateHelixJobRequest,
     job_artifact_base_path,
 )
 from nhx.core.jobs.app.ctx import JobContext
@@ -55,12 +60,15 @@ from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDeletionConflictError,
     JobDispatcher,
+    JobHasNoAttemptError,
     JobOperationConflictError,
     JobOutputLocationError,
     JobSecretValidationError,
     JobStatusUpdateSkippedError,
+    JobStorageReclaimPendingError,
     PauseTTLLimitError,
     StateTransitionConflictError,
+    create_attempt_response,
 )
 from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.providers import CPUExecutionProvider, SubprocessExecutionProvider
@@ -220,6 +228,8 @@ def _format_create_job_conflict(exc: ValueError, *, job_name: str | None, worksp
             f"Job '{job_name}' already exists in workspace '{workspace}'. Choose a different job name or delete the "
             "existing job before creating a new one."
         )
+    if isinstance(exc, JobStorageReclaimPendingError):
+        return str(exc)
     if isinstance(exc, JobSecretValidationError):
         return (
             "Unable to create job because one or more referenced secrets were not found or are not accessible. "
@@ -304,6 +314,22 @@ def configured_subprocess_translation_profiles() -> set[str]:
     return {profile.profile for profile in config.executors if profile.provider == "subprocess"}
 
 
+async def require_delegated_create_permission(auth_client: AuthClient, workspace: str) -> None:
+    """Refuse with 403 a create that a service makes for a user who may not create jobs in ``workspace``.
+
+    The route gate passes a delegated service principal on the service's own role. Without this
+    check, the user's missing access first shows up as the entity store's 422 for the workspace.
+    """
+    principal = auth_client.principal
+    if not (principal.is_privileged() and principal.is_delegated):
+        return
+    if not await auth_client.on_behalf_of_has_permissions(workspace, ["jobs.create"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Principal '{principal.on_behalf_of}' is not allowed to create jobs in workspace '{workspace}'.",
+        )
+
+
 # Execution Profiles Endpoint
 @router.get("/v2/execution-profiles")
 async def get_execution_profiles() -> list[ExecutionProfileT]:
@@ -328,6 +354,7 @@ async def create_job(
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
     """Create a new platform job."""
+    await require_delegated_create_permission(auth_client, workspace)
     platform_spec = translate_cpu_container_steps_to_subprocess(
         request.platform_spec, configured_subprocess_translation_profiles()
     )
@@ -433,6 +460,53 @@ async def get_job(
         return job
 
 
+@router.patch(
+    "/v2/workspaces/{workspace}/jobs/{name}",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_200_OK: {"description": "Successful Response"},
+        status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_409_CONFLICT: {"description": "Version conflict"},
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Invalid job update"},
+    },
+)
+async def update_job(
+    name: str,
+    request: UpdateHelixJobRequest,
+    workspace: str,
+    auth_client: AuthClient = Depends(get_auth_client),
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobResponse:
+    """Update mutable job metadata or the definition used by future attempts."""
+    if request.platform_spec is not None:
+        platform_spec = translate_cpu_container_steps_to_subprocess(
+            request.platform_spec, configured_subprocess_translation_profiles()
+        )
+        validate_job_spec(platform_spec, profiles)
+        request = request.model_copy(update={"platform_spec": platform_spec})
+
+    with scoped_app_ctx(JobContext(id=name)):
+        try:
+            job = await dispatcher.update_job(
+                name,
+                workspace,
+                request,
+                auth_context=AuthContext.from_principal(auth_client.principal),
+            )
+        except EntityConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except (JobSecretValidationError, EntityValidationError) as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        if job is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job '{name}' not found in workspace '{workspace}'.",
+            )
+        return job
+
+
 @router.post(
     "/v2/workspaces/{workspace}/jobs/{name}/cancel",
     responses={
@@ -517,7 +591,7 @@ async def resume_job(
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
-        status.HTTP_409_CONFLICT: {"description": "The job changed during the request"},
+        status.HTTP_409_CONFLICT: {"description": "Storage has been reclaimed, or the job changed during the request"},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The pause window exceeds the platform maximum"},
     },
 )
@@ -603,27 +677,123 @@ async def get_job_status(
         return job_status
 
 
+@router.get(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts",
+    response_model=Page[HelixJobAttemptResponse],
+    response_model_exclude_none=True,
+    openapi_extra=generate_openapi_extra_params(
+        filter_schema=HelixJobAttemptsListFilter,
+        filter_description="Filter attempts by status.",
+    ),
+)
+async def list_job_attempts(
+    job: str,
+    workspace: str,
+    page: int = Query(default=1, description="Page number.", gt=0),
+    page_size: int = Query(default=25, description="Page size.", gt=0),
+    sort: HelixJobAttemptSortField = Query(
+        default=HelixJobAttemptSortField.SEQ_DESC,
+        description="Sort attempts by sequence. Prefix with `-` for descending order.",
+    ),
+    parsed: ParsedFilter = Depends(make_filter_dep(HelixJobAttemptsListFilter)),
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> Page[HelixJobAttemptResponse]:
+    """List the execution attempts for a job."""
+    with scoped_app_ctx(JobContext(id=job)):
+        result = await dispatcher.list_attempts(
+            job,
+            workspace,
+            parsed,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job '{job}' not found in workspace '{workspace}'.",
+            )
+        attempts, total_count = result
+        return Page(
+            data=attempts,
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                current_page_size=len(attempts),
+                total_pages=int(math.ceil(total_count / page_size)) if total_count > 0 else 1,
+                total_results=total_count,
+            ),
+            sort=sort,
+            filter=parsed.to_response(),
+        )
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_job_attempt(
+    job: str,
+    attempt: str,
+    workspace: str,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobAttemptResponse:
+    """Get an attempt by ID or the reserved current selector."""
+    with scoped_app_ctx(JobContext(id=job)):
+        try:
+            resolved = await dispatcher.resolve_attempt(job, attempt, workspace)
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Attempt '{attempt}' for job '{job}' not found in workspace '{workspace}'.",
+            )
+        job_entity, attempt_entity = resolved
+        return create_attempt_response(attempt_entity, current_attempt_id=job_entity.current_attempt_id)
+
+
 @router.patch(
-    "/v2/workspaces/{workspace}/jobs/{name}/status-details",
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/status-details",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
-        status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
+        status.HTTP_404_NOT_FOUND: {"description": "Attempt not Found"},
+        status.HTTP_409_CONFLICT: {"description": "The expected step is no longer current or in the expected status"},
     },
 )
-async def update_job_status_details(
-    name: str,
+async def update_job_attempt_status_details(
+    job: str,
+    attempt: str,
     request: HelixJobStatusDetailsUpdateRequest,
     workspace: str,
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
+    expected_step_id: str | None = Query(
+        default=None,
+        description="Update only while this step is in this attempt and the attempt is the job's current one.",
+    ),
+    expected_step_status: HelixJobStatus | None = Query(
+        default=None,
+        description="With expected_step_id, update only while the step has this status.",
+    ),
 ) -> None:
-    """Update the status details of a platform job."""
-    with scoped_app_ctx(JobContext(id=name)):
-        result = await dispatcher.update_job_status_details(name, workspace, request)
-        if not result:
+    """Update status details for one resolved attempt."""
+    with scoped_app_ctx(JobContext(id=job)), job_operation_errors("update the status details of", job, workspace):
+        try:
+            result = await dispatcher.update_attempt_status_details(
+                job,
+                attempt,
+                workspace,
+                request,
+                expected_step_id=expected_step_id,
+                expected_step_status=expected_step_status,
+            )
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if result is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job '{name}' not found in workspace '{workspace}'.",
+                detail=f"Attempt '{attempt}' for job '{job}' not found in workspace '{workspace}'.",
             )
 
 
@@ -651,7 +821,7 @@ async def page_job_logs(
     tail: int | None = Query(
         default=None, description="Number of newest log lines to return", gt=0, le=MAX_LOG_QUERY_LINES
     ),
-    attempt_id: Optional[int] = Query(default=None, description="Filter logs by job attempt ID"),
+    attempt_id: str | int | None = Query(default=None, description="Filter logs by job attempt ID or `current`"),
     step_id: Optional[str] = Query(default=None, description="Filter logs by step name"),
     task_id: Optional[str] = Query(default=None, description="Filter logs by task ID"),
 ) -> HelixJobLogPage:
@@ -676,9 +846,18 @@ async def page_job_logs(
             )
 
         try:
+            resolved_attempt_id = job.attempt_id
+            if attempt_id is not None:
+                resolved = await dispatcher.resolve_attempt(name, str(attempt_id), workspace)
+                if resolved is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Attempt '{attempt_id}' for job '{name}' not found in workspace '{workspace}'.",
+                    )
+                resolved_attempt_id = resolved[1].id
             filters: dict[str, str] = {
-                "job": name,
-                "job_attempt": str(attempt_id if attempt_id is not None else job.attempt_id),
+                "job": job.name,
+                "job_attempt": resolved_attempt_id,
             }
             if step_id:
                 filters["job_step"] = step_id
@@ -691,8 +870,12 @@ async def page_job_logs(
                 page_size=limit or DEFAULT_LOG_QUERY_LIMIT,
                 page_cursor=page_cursor,
                 tail=tail,
-                artifact_base_path=job_artifact_base_path(name, job.output_location),
+                artifact_base_path=job_artifact_base_path(job.name, job.output_location),
             )
+        except HTTPException:
+            raise
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         except InvalidPageCursorError as e:
             logger.error(f"Invalid page cursor: {str(e)}")
             raise HTTPException(status_code=422, detail=str(e))
@@ -705,6 +888,7 @@ async def page_job_logs(
 @router.post(
     "/v2/workspaces/{workspace}/jobs/{job}/results/{name}",
     status_code=status.HTTP_201_CREATED,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_201_CREATED: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
@@ -728,16 +912,17 @@ async def create_job_result(
         try:
             result = await dispatcher.create_result(
                 job_id=job_entity.id,
-                job_name=job,
+                job_name=job_entity.name,
                 result_name=name,
                 workspace=workspace,
+                attempt_id=request.attempt_id,
                 artifact_url=request.artifact_url,
                 artifact_storage_type=request.artifact_storage_type,
             )
         except EntityNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job '{job}' not found in workspace '{workspace}'.",
+                detail=f"Attempt '{request.attempt_id}' for job '{job}' not found in workspace '{workspace}'.",
             ) from exc
         return result.to_response()
 
@@ -745,6 +930,7 @@ async def create_job_result(
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{name}/results",
     status_code=status.HTTP_200_OK,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Job not Found"},
@@ -757,6 +943,7 @@ async def list_job_results(
         default=HelixJobSortField.CREATED_AT_DESC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
     ),
+    attempt_id: str | None = Query(default=None, description="Producing attempt ID or 'current'"),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobListResultResponse:
     """List results for a job."""
@@ -768,13 +955,32 @@ async def list_job_results(
                 detail=f"Job '{name}' not found in workspace '{workspace}'.",
             )
 
-        results, _ = await dispatcher.list_results(job_id=job_entity.id, workspace=workspace, sort=sort)
+        resolved_attempt_id = None
+        if attempt_id is not None:
+            try:
+                resolved = await dispatcher.resolve_attempt(name, attempt_id, workspace)
+            except JobHasNoAttemptError as exc:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+            if resolved is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Attempt '{attempt_id}' for job '{name}' not found in workspace '{workspace}'.",
+                )
+            resolved_attempt_id = resolved[1].id
+
+        results, _ = await dispatcher.list_results(
+            job_id=job_entity.id,
+            workspace=workspace,
+            sort=sort,
+            attempt_id=resolved_attempt_id,
+        )
         return HelixJobListResultResponse(data=[r.to_response() for r in results])
 
 
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/results/{name}",
     status_code=status.HTTP_200_OK,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_200_OK: {"description": "Successful Response"},
         status.HTTP_404_NOT_FOUND: {"description": "Not Found"},
@@ -786,7 +992,7 @@ async def get_job_result(
     workspace: str,
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResultResponse:
-    """Get a specific job result."""
+    """Get a specific job result by its job-wide unique name."""
     with scoped_app_ctx(JobContext(id=job, result_name=name)):
         result = await dispatcher.get_result(job, name, workspace)
         if not result:
@@ -983,6 +1189,133 @@ async def update_job_step_status(
         return step_entity
 
 
+@router.get(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps",
+    response_model=Page[HelixJobStepWithContext],
+    response_model_exclude_none=True,
+    openapi_extra=generate_openapi_extra_params(
+        filter_schema=HelixAttemptStepsListFilter,
+        filter_description="Filter steps within the selected attempt.",
+    ),
+)
+async def list_attempt_steps(
+    job: str,
+    attempt: str,
+    workspace: str,
+    page: int = Query(default=1, description="Page number.", gt=0),
+    page_size: int = Query(default=25, description="Page size.", gt=0),
+    sort: HelixJobSortField = Query(default=HelixJobSortField.CREATED_AT_ASC),
+    parsed: ParsedFilter = Depends(make_filter_dep(HelixAttemptStepsListFilter)),
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> Page[HelixJobStepWithContext]:
+    """List steps for one attempt."""
+    with scoped_app_ctx(JobContext(id=job)):
+        try:
+            result = await dispatcher.list_attempt_steps(
+                job,
+                attempt,
+                workspace,
+                parsed,
+                page=page,
+                page_size=page_size,
+                sort=sort,
+            )
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Attempt '{attempt}' for job '{job}' not found in workspace '{workspace}'.",
+            )
+        steps, total_count = result
+        return Page(
+            data=steps,
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                current_page_size=len(steps),
+                total_pages=int(math.ceil(total_count / page_size)) if total_count > 0 else 1,
+                total_results=total_count,
+            ),
+            sort=sort,
+            filter=parsed.to_response(),
+        )
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_attempt_step(
+    job: str,
+    attempt: str,
+    name: str,
+    workspace: str,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobStep:
+    """Get a step from one attempt."""
+    with scoped_app_ctx(JobContext(id=job, step_name=name)):
+        try:
+            step = await dispatcher.get_attempt_step_by_name(job, attempt, name, workspace)
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if step is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Step '{name}' for attempt '{attempt}' of job '{job}' not found.",
+            )
+        return step
+
+
+@router.patch(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{name}/status",
+    status_code=status.HTTP_200_OK,
+)
+async def update_attempt_step_status(
+    job: str,
+    attempt: str,
+    name: str,
+    request: HelixJobStatusUpdateRequest,
+    workspace: str,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobStep:
+    """Update a step selected through a concrete attempt."""
+    with scoped_app_ctx(JobContext(id=job, step_name=name)):
+        try:
+            step = await dispatcher.get_attempt_step_by_name(job, attempt, name, workspace)
+        except JobHasNoAttemptError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if step is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Step '{name}' for attempt '{attempt}' of job '{job}' not found.",
+            )
+        try:
+            step, _ = await dispatcher.update_job_status_from_step(
+                step,
+                request.status,
+                status_details=request.status_details,
+                error_details=request.error_details,
+                expected_step_id=request.expected_step_id,
+            )
+        except (StateTransitionConflictError, EntityConflictError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Conflict updating job step. Refresh the step and retry.",
+            ) from exc
+        except JobStatusUpdateSkippedError:
+            logger.info(
+                "Skipping job step status update because the job was deleted",
+                extra={
+                    "job": sanitize_for_log(job),
+                    "step": sanitize_for_log(name),
+                    "workspace": sanitize_for_log(workspace),
+                    "attempt": sanitize_for_log(attempt),
+                },
+            )
+        return step
+
+
 # Job Tasks Endpoints
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/steps/{name}/tasks",
@@ -1017,46 +1350,6 @@ async def list_job_step_tasks(
         return HelixJobListTaskResponse(data=await dispatcher.list_tasks(step_entity.id, workspace=workspace))
 
 
-@router.put(
-    "/v2/workspaces/{workspace}/jobs/{job}/steps/{step}/tasks/{name}",
-    status_code=status.HTTP_200_OK,
-    responses={
-        status.HTTP_200_OK: {"description": "Successful Response"},
-        status.HTTP_404_NOT_FOUND: {"description": "Not Found"},
-    },
-)
-async def update_job_step_task(
-    job: str,
-    step: str,
-    name: str,
-    update: HelixJobTaskUpdate,
-    workspace: str,
-    dispatcher: JobDispatcher = Depends(dep_dispatcher),
-) -> HelixJobTask:
-    """Update a job step task."""
-    with scoped_app_ctx(JobContext(id=job, step_name=step)):
-        step_entity = await dispatcher.get_current_job_step_by_name(job, step, workspace)
-        if not step_entity:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Step '{step}' for job '{job}' not found in workspace '{workspace}'.",
-            )
-
-        try:
-            return await dispatcher.create_or_update_task(
-                job,
-                name,
-                workspace,
-                update,
-                step_entity,
-            )
-        except EntityNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Step '{step}' for job '{job}' not found in workspace '{workspace}'.",
-            ) from exc
-
-
 @router.get(
     "/v2/workspaces/{workspace}/jobs/{job}/steps/{step}/tasks/{name}",
     status_code=status.HTTP_200_OK,
@@ -1088,3 +1381,86 @@ async def get_job_step_task(
                 detail=(f"Task '{name}' for step '{step}' of job '{job}' not found in workspace '{workspace}'."),
             )
         return task
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks",
+    status_code=status.HTTP_200_OK,
+)
+async def list_attempt_step_tasks(
+    job: str,
+    attempt: str,
+    step: str,
+    workspace: str,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobListTaskResponse:
+    """List tasks after validating the job, attempt, and step chain."""
+    try:
+        step_entity = await dispatcher.get_attempt_step_by_name(job, attempt, step, workspace)
+    except JobHasNoAttemptError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if step_entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Step '{step}' for attempt '{attempt}' of job '{job}' not found.",
+        )
+    return HelixJobListTaskResponse(data=await dispatcher.list_tasks(step_entity.id, workspace))
+
+
+@router.put(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    status_code=status.HTTP_200_OK,
+)
+async def update_attempt_step_task(
+    job: str,
+    attempt: str,
+    step: str,
+    name: str,
+    update: HelixJobTaskUpdate,
+    workspace: str,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobTask:
+    """Create or update a task under one concrete attempt step."""
+    try:
+        resolved = await dispatcher.resolve_attempt(job, attempt, workspace)
+        step_entity = await dispatcher.get_attempt_step_by_name(job, attempt, step, workspace)
+    except JobHasNoAttemptError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if resolved is None or step_entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Step '{step}' for attempt '{attempt}' of job '{job}' not found.",
+        )
+    job_entity, _ = resolved
+    return await dispatcher.create_or_update_task(job_entity.name, name, workspace, update, step_entity)
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/jobs/{job}/attempts/{attempt}/steps/{step}/tasks/{name}",
+    status_code=status.HTTP_200_OK,
+)
+async def get_attempt_step_task(
+    job: str,
+    attempt: str,
+    step: str,
+    name: str,
+    workspace: str,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> HelixJobTask:
+    """Get a task under one concrete attempt step."""
+    try:
+        step_entity = await dispatcher.get_attempt_step_by_name(job, attempt, step, workspace)
+    except JobHasNoAttemptError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if step_entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Step '{step}' for attempt '{attempt}' of job '{job}' not found.",
+        )
+    task = await dispatcher.get_task(step_entity.id, name, workspace)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task '{name}' for step '{step}' of attempt '{attempt}' not found.",
+        )
+    return task

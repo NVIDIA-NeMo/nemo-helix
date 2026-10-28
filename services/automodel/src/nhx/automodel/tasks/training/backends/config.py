@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
+from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
 from nhx.automodel.tasks.training.datasets.preparation import (
     DatasetSchema,
@@ -102,6 +103,8 @@ def compile_automodel_config(
     else:
         cfg = _compile_llm_config(customizer_config, workspace_dir, job_ctx, recipe)
     cfg["_recipe"] = recipe.value  # ours; create_automodel_recipe reads this
+    # Ours too: where global rank 0 records that training stopped for a pause.
+    cfg["_pause_sentinel"] = str(workspace_dir / PAUSE_SENTINEL_FILE_NAME)
     return cfg
 
 
@@ -507,6 +510,9 @@ def _build_schedule(
         "local_batch_size": customizer_config.batch.micro_batch_size,
         "max_steps": max_steps,
         "num_epochs": epochs,
+        # On this signal Automodel saves a checkpoint, skips validation, and stops, on every rank.
+        # The pause poller sends it to global rank 0.
+        "preemption_signal": PAUSE_SIGNAL.name,
     }
 
     # Ours, not the recipe's -- underscore-prefixed like `_resolved_chat_template`
@@ -585,6 +591,10 @@ def _build_checkpoint(
         "enabled": True,
         "model_save_format": "safetensors",
         "checkpoint_dir": str(workspace_dir / "checkpoints"),
+        # Resume and rerun continue from the newest complete checkpoint. Naming it explicitly, rather
+        # than leaving it unset, also makes a model config mismatch warn and restore instead of
+        # silently starting over.
+        "restore_from": "LATEST",
         "save_consolidated": True,
         # Required for models with quantized base weights (e.g., GPT-OSS)
         # Safe to enable even for non-quantized models

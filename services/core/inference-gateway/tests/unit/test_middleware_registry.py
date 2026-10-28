@@ -126,7 +126,8 @@ class TestInferenceMiddlewareCacheAccessorImpl:
 
     def test_get_model_providers_invalid_ref_returns_empty(self):
         accessor = self._make_accessor()
-        assert accessor.get_model_providers_for_model("not/a/valid/ref") == []
+        # Bare unqualified name with no default workspace -> ValueError in the parser -> [].
+        assert accessor.get_model_providers_for_model("unqualified-name") == []
 
     def test_get_model_entity_returns_minimal_entity(self):
         model_cache = ModelCache()
@@ -304,6 +305,29 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         accessor = self._make_accessor()
         with pytest.raises(KeyError):
             accessor.get_inference_url_and_model("ws/missing")
+
+    def test_get_inference_url_and_model_resolves_lora_composite_id(self):
+        # Regression: a LoRA composite model-entity id (base&adapters/adapter-ws/adapter-name)
+        # must resolve through the middleware accessor. The ModelCache keys such entities on
+        # (workspace, composite_name) via a first-'/'-only split, so the accessor must parse the
+        # inbound id the same way. (The proxy already accepted these; the accessor previously used
+        # a parser that rejected any id with more than one '/', refusing every LoRA request.)
+        composite_id = "ws/base&adapters/adapter-ws/adapter-name"
+        composite_name = "base&adapters/adapter-ws/adapter-name"
+
+        model_cache = ModelCache()
+        provider_info = _make_model_provider_info("ws", "nim-provider", host_url="http://nim.svc:8080")
+        entity_info = ModelEntityInfo(workspace="ws", name=composite_name)
+        entity_info.model_providers.append(("adapter-served-name", provider_info))
+        # Seed the real cache under the same (workspace, composite_name) key the IGW builds
+        # from a first-'/'-only split — no mocking of the parse itself.
+        model_cache.model_entity_info_map[("ws", composite_name)] = entity_info
+
+        accessor = self._make_accessor(model_cache=model_cache)
+        target = accessor.get_inference_url_and_model(composite_id)
+
+        assert target.model_provider_gateway_url == "http://nim.svc:8080/v1"
+        assert target.served_model_name == "adapter-served-name"
 
     def test_get_openai_compatible_inference_url_and_model_returns_target(self):
         vm_cache = VirtualModelCache()

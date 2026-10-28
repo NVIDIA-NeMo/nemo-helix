@@ -4,8 +4,8 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { Warning } from '@nemo/icons/icons';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { AGENTS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
@@ -13,12 +13,12 @@ import { QuickstartSamplePanel } from '@studio/routes/WorkspaceDashboardHomeRout
 import { QuickstartSamplePanelError } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelError';
 import { QuickstartSamplePanelSkeleton } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSamplePanelSkeleton';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
+import { RecentJobsTable } from '@studio/routes/WorkspaceDashboardHomeRoute/RecentJobsTable';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
 import {
   isSampleWorkspace,
   useSampleQuickstartAgent,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
-import { TriangleAlert } from 'lucide-react';
 import { useRef, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -27,9 +27,7 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
   const navigate = useNavigate();
   const getStartedRef = useRef<HTMLDivElement>(null);
   const isSample = isSampleWorkspace(workspace);
-  // The panel returns null with agents disabled, so gating the fetch on AGENTS_ENABLED sends
-  // that case to the regular Quickstart rather than leaving the heading below with no panel.
-  const sample = useSampleQuickstartAgent(workspace, isSample && AGENTS_ENABLED);
+  const sample = useSampleQuickstartAgent(workspace, isSample);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Dashboard' }],
@@ -38,7 +36,7 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
   return (
     <GradientBackground>
       {isSample && (
-        <Banner kind="global" status="warning" slotIcon={<TriangleAlert role="img" aria-hidden />}>
+        <Banner kind="global" status="warning" slotIcon={<Warning role="img" aria-hidden />}>
           Sample Sandbox. This sandbox can be reset at any time with nemo CLI.
         </Banner>
       )}
@@ -82,6 +80,13 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
                 onDismiss={() => getStartedRef.current?.focus()}
               />
             )}
+          </Stack>
+          <Stack gap="density-lg">
+            <Text kind="title/md">Recent Jobs</Text>
+            <Text kind="body/regular/sm" className="text-secondary">
+              Jobs in progress and jobs that finished in the last 48 hours.
+            </Text>
+            <RecentJobsTable />
           </Stack>
         </Stack>
       </AccessibleTitle>

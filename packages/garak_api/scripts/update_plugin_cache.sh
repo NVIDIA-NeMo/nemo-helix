@@ -48,7 +48,11 @@ declare -a pyfiles=("_selection.py" "_spec.py" "_config.py" "_plugins.py" "excep
 
 for pyfile in "${pyfiles[@]}"; do
 	pyfile_url="https://raw.githubusercontent.com/NVIDIA/garak/refs/tags/v${garak_ver}/garak/${pyfile}"
-	curl -f -H "Accept: text/plain" -o "${CODE_DIR}/${pyfile}" "${pyfile_url}"
+	pyfile_path="${CODE_DIR}/${pyfile}"
+	curl -f -H "Accept: text/plain" -o "${pyfile_path}" "${pyfile_url}"
+	echo "# WARNING: This file is maintained by the garak project. Do not modify it directly in Helix." | \
+		cat - "${pyfile_path}" > "${pyfile_path}.tmp"
+	mv "${pyfile_path}.tmp" "${pyfile_path}"
 	if [ $? -ne 0 ]; then
 		echo "ERROR: Failed to download python code file at URL ${pyfile_url}. Check that the version is valid and the URL exists." 1>&2
 		echo "If python file is missing in upstream garak repo, local garak API package may need to be modified for compatibility with upstream garak version." 1>&2

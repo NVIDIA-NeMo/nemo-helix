@@ -9,7 +9,9 @@ from datetime import datetime
 from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
+from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
+from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.taskset_runs.entities import (
     MemberPhase,
     ResultState,
@@ -17,6 +19,8 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
+from nemo_evals.taskset_runs.progress import TasksetRunProgress
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -32,9 +36,10 @@ class HarborTaskJobsExecutionInput(BaseModel):
     own model, selected by ``kind``, lets future execution strategies add new models rather
     than new ``submit`` methods. It never changes benchmark content or which agent runs.
 
-    Submit resolves ``sandbox_policy`` and ``dispatcher_profile`` against the operator's
-    config and freezes them, the pinned dispatcher image and the concurrency cap into the
-    run's plan. Earlier development runs are deleted rather than migrated.
+    Submit validates this input and freezes the ``sandbox`` profile, with its resource
+    overrides checked against the profile's ceilings, the ``dispatcher_profile``, the pinned
+    dispatcher image and the concurrency cap into the run's plan, so operator config edits
+    never reach a running run. Earlier development runs are deleted rather than migrated.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -42,14 +47,6 @@ class HarborTaskJobsExecutionInput(BaseModel):
     kind: Literal["harbor-task-jobs"] = Field(
         default="harbor-task-jobs",
         description="Execution strategy: one Kubernetes Job per Harbor task. Future strategies add new kinds.",
-    )
-    sandbox_policy: str = Field(
-        description=(
-            "Name of an operator-approved sandbox policy: which sandbox provider and isolation policy "
-            "each task's agent and environment run under, meaning the security and isolation boundary. "
-            "It does not control compute resources; see dispatcher_profile. Operators define the available policies."
-        ),
-        examples=["harbor-standard"],
     )
     dispatcher_profile: str | None = Field(
         default=None,
@@ -68,6 +65,58 @@ class HarborTaskJobsExecutionInput(BaseModel):
         ),
         examples=[5],
     )
+    sandbox: SandboxSelection | None = Field(
+        default=None,
+        description=(
+            "Sandbox for every task. profile names an operator sandbox profile: isolation, egress and "
+            "resource ceilings; omitted uses the operator's default. cpus, memory_mb and storage_mb size each "
+            "task's agent sandbox, over its task.toml [environment]; a separate verifier keeps task.toml's "
+            "resources. Unset cpus and memory_mb default to 1 CPU and 2048 MB, capped by the ceilings. Every "
+            "sandbox's values must stay within the profile's ceilings, or submit fails with 422. Omit the "
+            "whole object for the default profile and each task's own resources."
+        ),
+        examples=[{"cpus": 4, "memory_mb": 8192, "storage_mb": 20480}, {"profile": "harbor-open", "memory_mb": 4096}],
+    )
+
+
+class TasksetRunIntakeInput(BaseModel):
+    """Publish the run's trials to an existing Intake Experiment, as one Evaluation named after the run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    experiment: str = Field(
+        min_length=1,
+        description="Name of an existing Intake Experiment. Submit creates one Evaluation in it per run, "
+        "named after the run; each task Job publishes its trials there when it finishes.",
+        examples=["swe-agent-tuning"],
+    )
+    agent_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Agent name recorded on each published trajectory. Defaults to the Harbor agent.",
+    )
+    dataset_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The Evaluation's dataset, such as the Harbor Hub dataset the tasks came from. "
+        "Defaults to the taskset (workspace/name).",
+        examples=["datacurve/deep-swe"],
+    )
+    dataset_version: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The dataset's version, such as a Harbor Hub dataset digest. "
+        "Defaults to the pinned taskset's content digest.",
+        examples=["sha256:aaa82ceb8404dccc17689c9383f93dbcbc8f029a7601d2e3856a416f2cb89269"],
+    )
+
+
+class TasksetRunPublicationInput(BaseModel):
+    """Where the run publishes its results, beyond its result bundle and record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intake: TasksetRunIntakeInput = Field(description="Publish trials and scores to an Intake Experiment.")
 
 
 class TasksetRunInput(BaseModel):
@@ -87,7 +136,7 @@ class TasksetRunInput(BaseModel):
         "Inline tasks and precomputed trials are not supported for Kubernetes runs."
     )
     execution: HarborTaskJobsExecutionInput = Field(
-        description="Kubernetes task Job settings: sandbox policy, dispatcher profile and "
+        description="Kubernetes task Job settings: sandbox profile and resources, dispatcher profile and "
         "run-wide task Job concurrency."
     )
     idempotency_key: str | None = Field(
@@ -97,11 +146,16 @@ class TasksetRunInput(BaseModel):
         description="Optional key, scoped to workspace and caller, so retries of the same request return the "
         "accepted run. When omitted, submit generates one and returns it as the run's idempotency_key.",
     )
+    publication: TasksetRunPublicationInput | None = Field(
+        default=None,
+        description="Publish the run's trials to an Intake Experiment. Omit to publish nowhere.",
+    )
     timeout_seconds: int | None = Field(
         default=None,
         gt=0,
-        description="Execution budget in seconds from acceptance. Omit to use evals.runs.default_timeout_seconds. "
-        "Must not exceed evals.runs.max_timeout_seconds.",
+        description="Execution budget in seconds, counted from when the run's first task gets a slot. Omit to use "
+        "evals.runs.default_timeout_seconds. Must not exceed evals.runs.max_timeout_seconds. Until its first slot, "
+        "the run waits at most evals.runs.queue_timeout_seconds.",
     )
 
     @model_validator(mode="after")
@@ -117,6 +171,23 @@ class TasksetRunInput(BaseModel):
         if not isinstance(self.spec.tasks, TasksetRef):
             raise ValueError(
                 "Kubernetes runs take a stored taskset reference in spec.tasks; publish the tasks as a taskset first"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_spec_publication(self) -> Self:
+        """Refuse ``spec.publication``: every task Job would publish to it with the wrong settings.
+
+        It would publish under a random run id, fail the task Job (and drop its result) on any Intake
+        error, and race sibling Jobs on the Evaluation's metadata. ``publication.intake`` avoids all three.
+
+        Raises:
+            ValueError: The spec carries its own publication.
+        """
+        if self.spec.publication is not None:
+            raise ValueError(
+                "spec.publication isn't supported for Kubernetes runs; "
+                "set publication.intake.experiment to publish the run to an Intake Experiment"
             )
         return self
 
@@ -161,9 +232,11 @@ def request_digest(req: TasksetRunInput) -> str:
         req: Validated caller request, with model defaults filled.
 
     Returns:
-        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded.
+        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
+        ``publication`` is left out too, so requests from before the field existed keep their digest.
     """
-    body = req.model_dump(mode="json", exclude={"idempotency_key"})
+    exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
+    body = req.model_dump(mode="json", exclude=exclude)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -184,14 +257,25 @@ class TasksetRunStatus(BaseModel):
     )
     phase: TasksetRunPhase = Field(description="Execution progress. Starts accepted; terminal phases never change.")
     result_state: ResultState = Field(
-        description="Availability of the combined results, tracked independently of phase."
+        description=(
+            "Availability of the combined results, tracked independently of phase. An expired or cancelled run "
+            "can be ready: its result covers the tasks that finished."
+        )
     )
     accepted_at: datetime = Field(description="When submit accepted the run.")
+    timeout_seconds: int = Field(description="Execution budget in seconds, counted from started_at.")
+    started_at: datetime | None = Field(
+        default=None,
+        description="When the run's first task got a slot and its execution clock started; None while it waits.",
+    )
     execution_deadline_at: datetime = Field(
-        description="accepted_at plus the effective timeout; unfinished tasks expire then. Retries do not reset it."
+        description=(
+            "Unfinished tasks expire then. Until the run starts, accepted_at plus the queue timeout; from its "
+            "first slot, started_at plus timeout_seconds. Retries do not reset it."
+        )
     )
     finalization_deadline_at: datetime = Field(
-        description="execution_deadline_at plus operator grace; the final result must be saved by then."
+        description="execution_deadline_at plus the operator grace at submit; the final result must be saved by then."
     )
     cancel_requested_at: datetime | None = Field(
         default=None, description="When a caller requested cancellation; None if never requested."
@@ -204,6 +288,13 @@ class TasksetRunStatus(BaseModel):
     idempotency_key: str | None = Field(
         default=None, description="Submit key: the caller's, or the one submit generated when the request omitted it."
     )
+    progress: TasksetRunProgress | None = Field(
+        default=None,
+        description=(
+            "Counted from the run's members on each GET of this run; None before the controller creates them, "
+            "and in run lists and submit responses."
+        ),
+    )
 
 
 _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
@@ -212,8 +303,8 @@ _INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
 class TasksetRunTask(BaseModel):
     """Expose one stored member's task identity, progress and optional Job/error.
 
-    Construction takes the five public fields only. Instances contain no parent,
-    persistence metadata or reconstructed Job state; read routes omit unset details.
+    Construction takes the public fields only. Instances contain no parent,
+    persistence metadata or live Job state; read routes omit unset details.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -223,19 +314,30 @@ class TasksetRunTask(BaseModel):
     phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
     job: str | None = Field(
         default=None,
-        description="Name of this task's Jobs Service Job; omitted until registered.",
+        description="Name of this task's Jobs Service Job; set when the create is first attempted.",
+    )
+    job_status: HelixJobStatus | None = Field(
+        default=None,
+        description="The Job's status as the controller last read it; omitted until the task's Job is registered.",
     )
     error: str | None = Field(default=None, description="Stored reason the task failed, was cancelled or expired.")
+    publication: PublicationOutcome | None = Field(
+        default=None,
+        description=(
+            "What the task published to Intake, as its Job reported it when the task settled; omitted when it "
+            "reported nothing."
+        ),
+    )
 
 
 def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
     """Copy a stored member's public state without accessing its plan or Job.
 
     Args:
-        member: Persisted child record with an optional task Job name and error.
+        member: Persisted child record with an optional task Job name, Job status and error.
 
     Returns:
-        Five-field task DTO with task_job renamed to job and absent values retained
+        The task DTO, with task_job renamed to job and absent values retained
         as None until HTTP serialization.
     """
     return TasksetRunTask(
@@ -243,7 +345,9 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
         task_index=member.task_index,
         phase=member.phase,
         job=member.task_job,
+        job_status=member.job_status,
         error=member.error,
+        publication=member.publication,
     )
 
 

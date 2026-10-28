@@ -133,33 +133,6 @@ const mockApiHooks = (
   );
 };
 
-describe('GenerateJobDetailsRoute - Feature Flag', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  it('should be defined when feature flag is enabled', async () => {
-    // Mock the environment constant to enable the component
-    vi.doMock('@studio/constants/environment', () => ({
-      SAFE_SYNTHESIZER_ENABLED: true,
-    }));
-
-    const module = await import('./index');
-    expect(module.GenerateJobDetailsRoute).toBeDefined();
-    expect(module.GenerateJobDetailsRoute).not.toBeNull();
-  });
-
-  it('should be null when feature flag is disabled', async () => {
-    // Mock the environment constant to disable the component
-    vi.doMock('@studio/constants/environment', () => ({
-      SAFE_SYNTHESIZER_ENABLED: false,
-    }));
-
-    const module = await import('./index');
-    expect(module.GenerateJobDetailsRoute).toBeNull();
-  });
-});
-
 describe('GenerateJobDetailsRoute - Rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();

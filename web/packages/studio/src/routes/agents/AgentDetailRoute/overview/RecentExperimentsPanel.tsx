@@ -3,6 +3,7 @@
 
 import { formatSignedDelta } from '@nemo/common/src/components/DeltaText';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
+import { Beaker } from '@nemo/icons/icons';
 import {
   Anchor,
   Block,
@@ -21,7 +22,6 @@ import {
   DELTA_COMPARISON_LABEL,
   type RecentExperiment,
 } from '@studio/routes/agents/AgentDetailRoute/overview/recentExperiments';
-import { FlaskConical } from 'lucide-react';
 import type { FC } from 'react';
 
 interface RecentExperimentsPanelProps {
@@ -115,7 +115,7 @@ export const RecentExperimentsPanel: FC<RecentExperimentsPanelProps> = ({
               slotFooter={
                 onRunEvaluation ? (
                   <Button kind="tertiary" onClick={onRunEvaluation}>
-                    <FlaskConical size={16} className="text-brand" aria-hidden />
+                    <Beaker size="16" className="text-brand" aria-hidden />
                     Run Evaluation
                   </Button>
                 ) : null

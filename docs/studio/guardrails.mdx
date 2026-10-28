@@ -8,7 +8,7 @@ description: "Create, edit, and test NeMo Guardrails configurations in Studio wh
 
 <Warning>
 
-The Guardrails Studio UI is a preview feature and is disabled by default. An administrator must set `studio.feature_flags.guardrails_enabled: true` in the platform configuration and restart Studio before **Governance > Guardrails** appears. The same feature flag controls the **Models > Virtual Models** page.
+The Guardrails Studio UI is a preview feature and is disabled by default. An administrator must set `studio.feature_flags.guardrails_enabled: true` in the platform configuration and restart Studio before **Governance > Guardrails** appears. This flag also shows the **Models > Virtual Models** page.
 
 </Warning>
 
@@ -18,15 +18,15 @@ Use **Governance > Guardrails** in the NeMo Studio workspace sidebar to create, 
 
 The Guardrail Configs table shows all guardrail configurations in the current workspace. Select a row to open the config detail page.
 
-| Action | Where | Result |
-|--------|-------|--------|
-| Create a config | **Create Guardrail** | Opens the create dialog. |
-| View details | Select a row | Opens the guardrail config detail page. |
-| Search | **Search Guardrail Configs...** search bar | Filters the list to configs whose names match the query. |
-| Filter by date | **Updated At** and **Created At** filters | Narrows results to a specific date range. |
-| Duplicate a config | Row actions > **Duplicate** | Opens the create dialog prefilled with a copy of the config. |
-| Delete a config | Row actions > **Delete** | Removes the guardrail configuration from the workspace. |
-| Delete several configs | Select rows, then **Delete** | Removes all selected configurations. |
+| Action                 | Where                                      | Result                                                       |
+| ---------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| Create a config        | **Create Guardrail**                       | Opens the create dialog.                                     |
+| View details           | Select a row                               | Opens the guardrail config detail page.                      |
+| Search                 | **Search Guardrail Configs...** search bar | Filters the list to configs whose names match the query.     |
+| Filter by date         | **Updated At** and **Created At** filters  | Narrows results to a specific date range.                    |
+| Duplicate a config     | Row actions > **Duplicate**                | Opens the create dialog prefilled with a copy of the config. |
+| Delete a config        | Row actions > **Delete**                   | Removes the guardrail configuration from the workspace.      |
+| Delete several configs | Select rows, then **Delete**               | Removes all selected configurations.                         |
 
 The table shows each config's name, main model, flows (**Input** and **Output** badges for the rail stages the config uses), and last updated time. The **Created** column is hidden by default and can be enabled from the column controls.
 
@@ -46,9 +46,9 @@ The detail page header shows the config name and an actions menu (**⋯**) with 
 
 The **Guardrail Configuration** panel is where you edit the config.
 
-| Field | Description |
-|-------|-------------|
-| Main Model | The model that generates completions when you run this config's tests. It does not change routing at inference time. |
+| Field      | Description                                                                                                                                                                                                                                                                                                                                                |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Main Model | The model that generates completions when you run this config's tests. It does not change routing at inference time.                                                                                                                                                                                                                                       |
 | Guardrails | The rails Studio can configure, each with a switch to turn it on or off, stage badges (for example, **Input** and **Output**) that show which stages are active, and a settings button. Studio currently supports **Self Checks**, which asks your own model to judge whether user inputs and LLM outputs violate your policies, using prompts you define. |
 
 Turning a rail on writes every setting it needs (flows and prompts) into the config. When you turn a rail off and its settings remain, a discard button removes them.

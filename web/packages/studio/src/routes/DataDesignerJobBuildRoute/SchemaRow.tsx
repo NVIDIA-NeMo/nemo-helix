@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cube, Trash } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
 import type { BuilderColumn } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import { describeColumn } from '@studio/routes/DataDesignerJobBuildRoute/describeColumn';
-import { Box, Trash2 } from 'lucide-react';
 import { type FC, memo } from 'react';
 
 /** Accent color → NVIDIA Foundations text token, matching the DAG node icon styling. */
@@ -42,7 +42,7 @@ export const SchemaRow: FC<SchemaRowProps> = memo(function SchemaRow({
 }) {
   const { option } = column;
   const { typeLabel, detail } = describeColumn(column);
-  const Icon = option.icon ?? Box;
+  const Icon = option.icon ?? Cube;
 
   return (
     <Flex
@@ -59,7 +59,7 @@ export const SchemaRow: FC<SchemaRowProps> = memo(function SchemaRow({
         className="flex min-w-0 flex-1 items-center gap-density-md px-density-lg py-density-md text-left focus-visible:outline-none cursor-pointer"
       >
         <CardIconBadge>
-          <Icon size={16} className={ACCENT_ICON_CLASS[option.color] ?? ''} aria-hidden />
+          <Icon size="16" className={ACCENT_ICON_CLASS[option.color] ?? ''} aria-hidden />
         </CardIconBadge>
 
         <Stack gap="density-xxs" className="min-w-0 flex-1">
@@ -97,7 +97,7 @@ export const SchemaRow: FC<SchemaRowProps> = memo(function SchemaRow({
           aria-label={`Delete ${column.name || option.label}`}
           className="h-full rounded-none opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
         >
-          <Trash2 size={16} aria-hidden />
+          <Trash size="16" aria-hidden />
         </Button>
       </Flex>
     </Flex>

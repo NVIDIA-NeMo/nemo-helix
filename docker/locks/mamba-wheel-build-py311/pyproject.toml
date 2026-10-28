@@ -13,8 +13,8 @@ dependencies = [
 ]
 
 [tool.uv]
-required-version = ">=0.9.14,<0.10.0"
-prerelease = "if-necessary-or-explicit"
+required-version = ">=0.13.4"
+prerelease = "if-necessary"
 index-strategy = "unsafe-best-match"
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",

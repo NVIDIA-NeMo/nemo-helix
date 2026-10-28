@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared pause and resume decisions for the jobs service."""
+"""Shared pause, resume, rerun, and storage-retention decisions for the jobs service."""
 
 from __future__ import annotations
 
@@ -11,7 +11,34 @@ from typing import Any, Protocol
 
 from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nhx.core.jobs.app.constants import PAUSE_REQUESTED_AT, RESUMED_AT, STOPPED_AT
+from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
+from nemo_helix_plugin.jobs.types import JobControl
+from nhx.core.jobs.app.constants import (
+    DEFAULT_PROFILE,
+    DEFAULT_PROVIDER,
+    IMAGE_COMPARISON_DETAILS,
+    IMAGE_DIGEST,
+    IMAGE_DIGEST_AT_SAVE,
+    IMAGE_DIGEST_COMPARISON_SKIPPED,
+    IMAGE_DIGEST_STEP,
+    IMAGE_DIGEST_WARNING,
+    NON_RESUMABLE_REASON,
+    PAUSE_REQUESTED_AT,
+    POD_PHASES,
+    RERUN_EXCLUDED_STATUS_DETAILS,
+    RERUN_WARNING,
+    RESUMABLE,
+    RESUMED_AT,
+    STOPPED_AT,
+)
+from nhx.core.jobs.entities import JobStorageTarget
+
+
+class PauseStorageSettings(Protocol):
+    """The platform pause-storage settings, as read from ``jobs.storage``."""
+
+    paused_storage_ttl_seconds: int
+    maximum_pause_ttl_seconds: int
 
 
 class _PauseDeadline(Protocol):
@@ -127,7 +154,7 @@ def with_lifecycle_timestamps(
     status_details: Mapping[str, Any] | None,
     now: datetime.datetime | None = None,
 ) -> dict[str, Any] | None:
-    """Stamp the pause, resume and stop clocks.
+    """Stamp the pause, resume and stop clocks, and snapshot the image digest at save time.
 
     ``pause_requested_at``, ``resumed_at`` and ``stopped_at`` are overwritten on each
     new occurrence. A same-status write does not move them, so a repeated pause
@@ -141,6 +168,12 @@ def with_lifecycle_timestamps(
         details[PAUSE_REQUESTED_AT] = stamp
     elif status in (HelixJobStatus.PAUSED, HelixJobStatus.ERROR):
         details[STOPPED_AT] = stamp
+        existing = step.status_details or {}
+        digest = details.get(IMAGE_DIGEST)
+        if not isinstance(digest, str) or not digest:
+            digest = existing.get(IMAGE_DIGEST)
+        if isinstance(digest, str) and digest:
+            details[IMAGE_DIGEST_AT_SAVE] = digest
     elif status == HelixJobStatus.RESUMING:
         details[RESUMED_AT] = stamp
     return details or None
@@ -159,6 +192,68 @@ def attempt_can_transition(current: HelixJobStatus, new: HelixJobStatus) -> bool
     return current.can_transition_to(new)
 
 
+def saved_image_digest_for_step(attempt_details: Mapping[str, Any] | None, step_spec_name: str) -> dict[str, Any]:
+    """Seed a new step with the digest its image had when the previous attempt stopped.
+
+    The digest belongs to the step that stopped, usually training. Other steps run
+    other images, so they get nothing to compare against.
+    """
+    details = attempt_details or {}
+    saved = details.get(IMAGE_DIGEST_AT_SAVE)
+    if isinstance(saved, str) and saved and details.get(IMAGE_DIGEST_STEP) == step_spec_name:
+        return {IMAGE_DIGEST_AT_SAVE: saved}
+    return {}
+
+
+def image_digest_updates(existing: dict[str, Any] | None, observed: str | None) -> dict[str, Any]:
+    """Record the live image digest, and compare it with the saved one once per resume or rerun.
+
+    ``observed`` is None until the task container starts, for example while the
+    image is still pulling, so nothing is decided then. The saved digest is
+    ``image_digest_at_save``: copied when the step enters ``paused`` or ``error``,
+    or seeded into a rerun's step. A resumed step without one gets a single note
+    that the images were not compared.
+    """
+    if not observed:
+        return {}
+    current = existing or {}
+    updates: dict[str, Any] = {}
+    if current.get(IMAGE_DIGEST) != observed:
+        updates[IMAGE_DIGEST] = observed
+    if any(current.get(key) for key in IMAGE_COMPARISON_DETAILS):
+        return updates
+    saved = current.get(IMAGE_DIGEST_AT_SAVE)
+    if isinstance(saved, str) and saved:
+        if observed != saved:
+            updates[IMAGE_DIGEST_WARNING] = (
+                "The training image changed since this state was saved "
+                f"(was {saved}, now {observed}). Training may behave differently or fail to resume."
+            )
+    elif current.get(RESUMED_AT):
+        updates[IMAGE_DIGEST_COMPARISON_SKIPPED] = (
+            "Image digests were not compared because none was recorded when the job paused."
+        )
+    return updates
+
+
+def clear_image_comparison(status_details: dict[str, Any] | None) -> None:
+    """Drop the previous resume's comparison result, so the next pod is compared afresh."""
+    for key in IMAGE_COMPARISON_DETAILS:
+        (status_details or {}).pop(key, None)
+
+
+def storage_window_expired(
+    stopped_at: datetime.datetime | None, ttl_seconds: int, now: datetime.datetime | None = None
+) -> bool:
+    """Return whether ``stopped_at`` is older than ``ttl_seconds``. A non-positive TTL is already expired."""
+    if ttl_seconds <= 0:
+        return True
+    anchor = ensure_aware(stopped_at)
+    if anchor is None:
+        return True
+    return anchor + datetime.timedelta(seconds=ttl_seconds) < _resolve_now(now)
+
+
 def active_ttl_anchor(step: TimedStep) -> datetime.datetime | None:
     """Anchor the active TTL on the later of creation and the latest resume.
 
@@ -172,3 +267,72 @@ def active_ttl_anchor(step: TimedStep) -> datetime.datetime | None:
     if resumed_at is None:
         return created_at
     return max(created_at, resumed_at)
+
+
+def effective_pause_ttl_seconds(control: JobControl, settings: PauseStorageSettings) -> int:
+    """Return the pause window a job actually gets.
+
+    This is the one place that combines a job's control settings with the platform
+    settings. A job with no value gets the platform default. Both are capped by the
+    platform maximum, so lowering that maximum shortens windows that were saved earlier.
+    """
+    requested = control.pause_ttl_seconds
+    chosen = settings.paused_storage_ttl_seconds if requested is None else requested
+    return min(chosen, settings.maximum_pause_ttl_seconds)
+
+
+def step_provider_profile(step_spec: HelixJobStepSpec) -> tuple[str, str]:
+    """Return the ``(provider, profile)`` a step runs on, which selects its backend."""
+    if isinstance(step_spec.executor, str):
+        return step_spec.executor, DEFAULT_PROFILE
+    return step_spec.executor.provider or DEFAULT_PROVIDER, step_spec.executor.profile or DEFAULT_PROFILE
+
+
+def storage_targets(platform_spec: HelixJobSpec) -> list[JobStorageTarget]:
+    """Return each backend that holds storage for a job, once.
+
+    Job storage is shared by every step that mounts it. Steps on different
+    profiles can mount different volumes, so each of those backends reclaims.
+    """
+    targets: list[JobStorageTarget] = []
+    for step_spec in platform_spec.steps:
+        if not step_spec.requires_persistent_storage:
+            continue
+        provider, profile = step_provider_profile(step_spec)
+        target = JobStorageTarget(provider=provider, profile=profile)
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def rerun_status_details(previous: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy progress scalars and the metrics series onto a new attempt.
+
+    ``resumable``, pod details, and ``storage_reclaimed_at`` stay behind. A
+    non-resumable failure is reported as ``rerun_warning`` without copying the flag.
+    ``image_digest_at_save`` and the step it belongs to are carried so the new
+    attempt can compare images on that step.
+    """
+    source = previous or {}
+    copied: dict[str, Any] = {}
+    metrics = source.get("metrics")
+    if isinstance(metrics, dict):
+        copied["metrics"] = metrics
+    saved = source.get(IMAGE_DIGEST_AT_SAVE)
+    saved_step = source.get(IMAGE_DIGEST_STEP)
+    if isinstance(saved, str) and saved and isinstance(saved_step, str) and saved_step:
+        copied[IMAGE_DIGEST_AT_SAVE] = saved
+        copied[IMAGE_DIGEST_STEP] = saved_step
+    for key, value in source.items():
+        if key in RERUN_EXCLUDED_STATUS_DETAILS or key in ("metrics", IMAGE_DIGEST_AT_SAVE, IMAGE_DIGEST_STEP):
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            copied[key] = value
+        elif key == "phase" and isinstance(value, str) and value not in POD_PHASES:
+            copied[key] = value
+    if source.get(RESUMABLE) is False:
+        reason = source.get(NON_RESUMABLE_REASON) or "the previous attempt failed in a way a rerun would repeat"
+        copied[RERUN_WARNING] = str(reason)
+    return copied

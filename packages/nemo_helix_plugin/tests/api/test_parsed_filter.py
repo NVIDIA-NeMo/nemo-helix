@@ -10,6 +10,7 @@ is tested in ``packages/nhx_common/tests/api/test_parsed_filter.py`` since those
 helpers live on the entity-aware ``nhx.common.entities.values.Filter`` subclass.
 """
 
+import pytest
 from fastapi import Depends, FastAPI
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -237,3 +238,140 @@ class TestMakeFilterDep:
         )
         assert resp.status_code == 400
         assert "logical operator" in resp.json()["detail"]
+
+
+class LabelsFilter(Filter):
+    name: str | None = None
+    labels: dict[str, str] | None = None
+
+    @classmethod
+    def _get_entity_namespace_map(cls) -> dict[str, str]:
+        return {"labels": "data.labels"}
+
+
+class TestNamespaceDictExpansion:
+    """A dict-valued filter on a namespace field means "contains these pairs", not "equals this object"."""
+
+    def _get(self, *args, **kwargs):
+        return TestClient(_make_app(LabelsFilter)).get(*args, **kwargs)
+
+    def test_bracket_form_expands_to_subpath(self):
+        resp = self._get("/items", params={"filter[labels][team]": "x"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"labels.team": {"$eq": "x"}}
+
+    def test_json_form_expands_to_subpath(self):
+        resp = self._get("/items", params={"filter": '{"labels": {"team": "x"}}'})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"labels.team": {"$eq": "x"}}
+
+    def test_multiple_keys_are_anded(self):
+        resp = self._get("/items", params={"filter[labels][team]": "x", "filter[labels][tier]": "1"})
+        assert resp.status_code == 200, resp.text
+        assert sorted(resp.json()["operation"]["$and"], key=str) == [
+            {"labels.team": {"$eq": "x"}},
+            {"labels.tier": {"$eq": "1"}},
+        ]
+
+    def test_bracket_nested_operator_applies_to_key(self):
+        resp = self._get("/items", params={"filter[labels][team][in]": "a,b"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"labels.team": {"$in": ["a", "b"]}}
+
+    def test_json_nested_operator_applies_to_key(self):
+        resp = self._get("/items", params={"filter": '{"labels": {"team": {"$in": ["a", "b"]}, "tier": "1"}}'})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {
+            "$and": [{"labels.team": {"$in": ["a", "b"]}}, {"labels.tier": {"$eq": "1"}}]
+        }
+
+    def test_nested_objects_flatten_to_dotted_paths(self):
+        resp = self._get("/items", params={"filter[labels][team][lead]": "x"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"labels.team.lead": {"$eq": "x"}}
+
+    def test_expands_inside_logical_tree(self):
+        resp = self._get("/items", params={"filter": '{"$or": [{"labels": {"team": "x"}}, {"name": "n"}]}'})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"$or": [{"labels.team": {"$eq": "x"}}, {"name": {"$eq": "n"}}]}
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"filter[labels]": "x"},
+            {"filter[labels][$hasKey]": "team"},
+            {"filter[labels][$exists]": "true"},
+            {"filter[labels][$like]": "x"},
+            {"filter": '{"$not": {"labels": {"$hasKey": "team"}}}'},
+        ],
+    )
+    def test_other_bare_namespace_comparisons_rejected(self, params):
+        resp = self._get("/items", params=params)
+        assert resp.status_code == 400
+        assert "key/value pairs" in resp.json()["detail"]
+
+    def test_non_namespace_dict_value_is_not_expanded(self):
+        # Only namespace fields get per-key expansion; an object elsewhere is rejected (see TestObjectValues).
+        resp = self._get("/items", params={"filter": '{"name": {"first": "x"}}'})
+        assert resp.status_code == 400
+        assert "not an object" in resp.json()["detail"]
+
+    def test_mixed_operator_and_subkey_rejected(self):
+        resp = self._get("/items", params={"filter": '{"labels": {"team": {"$eq": "x", "lead": "y"}}}'})
+        assert resp.status_code == 400
+        assert "mixes operators" in resp.json()["detail"]
+
+    def test_empty_object_rejected(self):
+        resp = self._get("/items", params={"filter": '{"labels": {}}'})
+        assert resp.status_code == 400
+        assert "key/value pairs" in resp.json()["detail"]
+
+
+class TestObjectValues:
+    """Comparing a non-namespace field to an object matched nothing or crashed the store; now a 400."""
+
+    @pytest.mark.parametrize(
+        ("params", "detail"),
+        [
+            ({"filter": '{"name": {"first": "x"}}'}, "not an object"),
+            ({"filter[name][first]": "x"}, "not an object"),
+            ({"filter": '{"name": {}}'}, "not an object"),
+            ({"filter": '{"name": {"$eq": {"first": "x"}}}'}, "not an object"),
+            ({"filter": '{"$or": [{"name": {"first": "x"}}, {"status": "a"}]}'}, "not an object"),
+            ({"filter": '{"created_at": {"gte": "2024-01-01"}}'}, "without '$'"),
+            ({"filter": '{"name": {"$in": [{"first": "x"}]}}'}, "not objects"),
+            ({"filter": '{"name": {"$nin": ["a", {"first": "x"}]}}'}, "not objects"),
+            ({"filter": '{"name": {"$eq": "x", "tier": "gold"}}'}, "mixes operators with sub-keys"),
+            (
+                {"filter[created_at][gte]": "2024-01-01", "filter[created_at][foo]": "x"},
+                "mixes operators with sub-keys",
+            ),
+        ],
+    )
+    def test_rejected(self, params, detail):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params=params)
+        assert resp.status_code == 400
+        assert detail in resp.json()["detail"]
+
+    def test_unprefixed_operator_hint_names_the_fix(self):
+        resp = TestClient(_make_app(SampleFilter)).get(
+            "/items", params={"filter": '{"created_at": {"gte": "2024-01-01"}}'}
+        )
+        assert "$gte" in resp.json()["detail"]
+
+    def test_elem_match_criteria_object_allowed(self):
+        resp = TestClient(_make_app(SampleFilter)).get(
+            "/items", params={"filter": '{"name": {"$elemMatch": {"key": "a", "value": "b"}}}'}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"name": {"$elemMatch": {"key": "a", "value": "b"}}}
+
+    def test_scalar_list_still_works(self):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params={"filter": '{"name": {"$in": ["a", "b"]}}'})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"name": {"$in": ["a", "b"]}}
+
+    def test_bracket_operator_alias_still_works(self):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params={"filter[created_at][gte]": "2024-01-01"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"created_at": {"$gte": "2024-01-01"}}

@@ -10,11 +10,25 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
 export const filesetsHandlers = [
-  http.get<never, never, FilesetOutputsPage>(
+  http.get<{ workspace: string }, never, FilesetOutputsPage>(
     `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`,
-    async () => {
+    async ({ request, params: { workspace } }) => {
       const { datasets } = await import('@studio/mocks/datasets');
-      return HttpResponse.json(datasets);
+      // Honor the exact-name filter the create forms use to check whether a name is taken.
+      const name = new URL(request.url).searchParams.get('filter[name]');
+      if (name === null) return HttpResponse.json(datasets);
+      const data = datasets.data.filter((d) => d.workspace === workspace && d.name === name);
+      return HttpResponse.json({
+        ...datasets,
+        data,
+        pagination: {
+          page: 1,
+          page_size: data.length,
+          current_page_size: data.length,
+          total_pages: 1,
+          total_results: data.length,
+        },
+      });
     }
   ),
   http.get<{ workspace: string; name: string }, never, FilesetOutput>(

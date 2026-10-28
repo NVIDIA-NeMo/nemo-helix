@@ -101,7 +101,7 @@ describe('AgentDetailRoute optimizations tab', () => {
       await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('radio', { name: /Hyperparameter optimization/ })
+      screen.queryByRole('radio', { name: /Hyper-parameter and prompt optimization/ })
     ).not.toBeInTheDocument();
     expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
   });

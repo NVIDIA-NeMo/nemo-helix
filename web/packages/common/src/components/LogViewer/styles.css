@@ -1,0 +1,61 @@
+/* SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Rules hang off .log-viewer .cm-editor: CodeMirror's base theme lives in adopted
+   stylesheets that win specificity ties, and CodeEditor's unscoped .cm-editor rules
+   load whenever a CodeEditor is on the page. */
+.log-viewer .cm-editor {
+  border: 1px solid var(--border-color-base);
+  border-radius: var(--radius-md);
+  background-color: var(--nv-code-snippet-custom-background);
+  font-size: inherit;
+  /* Shrinks inside the capped wrapper (LogEditor) rather than overflowing it. */
+  min-height: 0;
+
+  &.cm-focused {
+    outline: none;
+  }
+
+  &:has(.cm-content:focus-visible) {
+    outline: 2px solid var(--nv-focus-outline-color, currentColor);
+    outline-offset: -2px;
+  }
+
+  & .cm-scroller {
+    font-family: inherit;
+    line-height: inherit;
+    scrollbar-width: thin;
+    scrollbar-color: var(--nv-scrollbar-color);
+  }
+
+  & .cm-content {
+    padding: calc(var(--spacing) * 2) 0;
+    font-family: inherit;
+  }
+
+  /* Wrapping is the toggle's job; CodeEditor's stylesheet would otherwise force it on. */
+  & .cm-content:not(.cm-lineWrapping) {
+    white-space: pre;
+    word-break: normal;
+  }
+
+  & .cm-line {
+    padding: 0 calc(var(--spacing) * 4);
+  }
+
+  & .cm-panels {
+    background-color: var(--background-color-surface-raised);
+    color: var(--text-color-base);
+    border-color: var(--border-color-base);
+  }
+}
+
+/* The rows cap sits on the editor's wrapper, the flex item that shrinks to fit a short
+   slot, and the editor shrinks with it; capped any deeper, the newest lines get clipped. */
+.log-viewer .log-viewer--capped {
+  max-height: calc(var(--nv-code-snippet-rows) * 1lh);
+}
+
+.log-viewer .log-viewer--scroll-locked .cm-editor .cm-scroller {
+  overflow-y: hidden;
+}

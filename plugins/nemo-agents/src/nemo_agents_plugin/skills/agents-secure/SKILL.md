@@ -17,6 +17,8 @@ description: >-
   leaked token, telemetry scan, redact telemetry, Safe Synthesizer, Anonymizer,
   gliner, nemoguard.
 allowed-tools: Bash
+permissions:
+  - file_read
 metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---

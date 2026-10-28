@@ -59,7 +59,6 @@ def test_rl_grpo_reward_uplift(
                 "num_generations_per_prompt": 8,
                 "batch_size": 256,
                 "micro_batch_size": 4,
-                "learning_rate": 5e-6,
                 "max_seq_length": 2048,
                 "max_new_tokens": 1024,
                 "val_at_start": True,

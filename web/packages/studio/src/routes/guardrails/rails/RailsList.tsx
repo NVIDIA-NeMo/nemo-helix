@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Trash } from '@nemo/icons/icons';
 import type { RailsConfig } from '@nemo/sdk/generated/platform/schema';
 import {
   Badge,
@@ -15,7 +16,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import { RAIL_DEFINITIONS } from '@studio/routes/guardrails/rails/registry';
 import type { RailDefinition, RailScope } from '@studio/routes/guardrails/rails/types';
-import { Trash2 } from 'lucide-react';
 import type { FC } from 'react';
 
 const SCOPE_LABELS: Record<RailScope, string> = {
@@ -107,7 +107,7 @@ const RailRow: FC<RailRowProps> = ({ rail, data, onChange }) => {
                   onClick={() => onChange(rail.clearSettings(data))}
                   aria-label={`Discard saved ${rail.label} settings`}
                 >
-                  <Trash2 size={16} />
+                  <Trash size="16" />
                 </Button>
               </Tooltip>
             ) : null}

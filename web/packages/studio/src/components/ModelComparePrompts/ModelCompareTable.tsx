@@ -4,6 +4,7 @@
 import { TableExpandableCell } from '@nemo/common/src/components/DataView/TableExpandableCell';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import type { FileSampleMethod } from '@nemo/common/src/utils/sampleTextLines';
+import { Trash } from '@nemo/icons/icons';
 import { Button, Flex, Select, Text } from '@nvidia/foundations-react-core';
 import { StatsBadge } from '@studio/components/chat/StatsBadge';
 import { FileSamplingMethodSelect } from '@studio/components/FileSamplingSnippet/FileSamplingMethodSelect';
@@ -20,7 +21,6 @@ import {
   type SharedModelEntry,
 } from '@studio/routes/ModelCompareRoute/types';
 import type { DatasetInputFileResult } from '@studio/types/dataset';
-import { Trash2 } from 'lucide-react';
 import type { Dispatch, FC, SetStateAction } from 'react';
 
 interface ModelCompareTableProps {
@@ -144,7 +144,7 @@ export const ModelCompareTable: FC<ModelCompareTableProps> = ({
                     className="cursor-pointer rounded p-1 text-fg-subdued hover:bg-surface-sunken hover:text-fg-base"
                     aria-label="Remove model column"
                   >
-                    <Trash2 size={14} />
+                    <Trash size="14" />
                   </button>
                 </Flex>
               </th>

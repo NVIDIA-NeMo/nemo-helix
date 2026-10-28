@@ -19,4 +19,4 @@ paths-ignore:
   - packages/nemo_helix_ext/src/nemo_helix_ext/quickstart/preflight.py
   - packages/nemo_helix_plugin/src/nemo_helix_plugin/client/client.py
   - plugins/nemo-agents/src/nemo_agents_plugin/api/v2/deployments.py
-  - plugins/nemo-insights/src/nemo_insights_plugin/analysis_runs.py
+  - plugins/nemo-compass/src/nemo_compass_plugin/analysis_runs.py

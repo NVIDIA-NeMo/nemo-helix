@@ -4,6 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
+import { Wrench } from '@nemo/icons/icons';
 import { type Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
 import {
@@ -26,7 +27,6 @@ import {
   findToolCallSpans,
 } from '@studio/routes/EvaluationSessionDetailRoute/transcriptSpans';
 import type { SessionTrajectory } from '@studio/util/intakeTelemetry';
-import { Wrench } from 'lucide-react';
 import { type FC, type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -97,7 +97,7 @@ const ToolCalls: FC<{
               size="small"
               onClick={() => openSpan(span)}
             >
-              <Wrench size={14} aria-hidden />
+              <Wrench size="14" aria-hidden />
               {span.tool_name ?? span.name ?? 'tool'}
               {spanDuration(span) ? (
                 <span className="text-secondary">{spanDuration(span)}</span>

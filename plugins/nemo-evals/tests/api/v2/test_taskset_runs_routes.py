@@ -3,16 +3,19 @@
 
 """Stored run/status/task HTTP contracts, query validation and real authorization."""
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
-from nemo_evals.api.dependencies import get_taskset_run_service
+from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.v2.taskset_runs import router
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs.entities import MemberPhase, ResultState, TasksetRunMemberEntity, TasksetRunPhase
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx.core.entities.service import EntitiesService
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
@@ -21,11 +24,12 @@ PATH = "/apis/evals/v2/workspaces/default/agent-evaluate/runs"
 
 
 @pytest.fixture
-def read_app(service):
+def read_app(service, run_store):
     """Mount the shared router over the real service/store and a controlled caller."""
     app = FastAPI()
     app.include_router(router, prefix="/apis/evals/v2/workspaces/{workspace}")
     app.dependency_overrides[get_taskset_run_service] = lambda: service
+    app.dependency_overrides[get_service_run_store] = lambda: run_store
     app.dependency_overrides[get_effective_principal_id] = lambda: "user:alice"
     return app
 
@@ -57,6 +61,7 @@ async def test_get_run_returns_all_stored_status_fields(read_client, seed_run, f
         "phase": "expired",
         "result_state": "ready",
         "accepted_at": "2026-10-14T12:00:00Z",
+        "timeout_seconds": 3600,
         "execution_deadline_at": "2026-10-14T13:00:00Z",
         "finalization_deadline_at": "2026-10-14T14:00:00Z",
         "cancel_requested_at": "2026-10-14T12:00:00Z",
@@ -136,6 +141,7 @@ async def test_m1_submission_has_empty_task_page(read_client, published, request
     """The real submit path creates an accepted run whose task collection is empty until M4."""
     submitted = await read_client.post(PATH, json=request_body)
     assert submitted.status_code == 201
+    assert submitted.json()["progress"] is None  # only GET /runs/{id} counts members
     response = await read_client.get(f"{PATH}/{submitted.json()['run_id']}/tasks")
     assert response.status_code == 200
     assert response.json() == {
@@ -251,7 +257,7 @@ async def test_read_routes_sanitize_unexpected_storage_errors(
     assert response.status_code == 500 and response.json() == {"detail": "Internal server error"}
 
 
-async def test_status_cost_is_one_run_read_with_twenty_thousand_members(
+async def test_status_cost_is_one_run_read_and_one_member_page_with_twenty_thousand_members(
     read_client, seed_run, entity_store, run_store, files_service, monkeypatch
 ):
     """Status work stays constant with 20 runs of 1,000 tasks; this is a query budget, not a latency benchmark."""
@@ -267,12 +273,84 @@ async def test_status_cost_is_one_run_read_with_twenty_thousand_members(
             member._parent = run.id
             await entity_store.create(member)
     get = AsyncMock(wraps=entity_store.get)
+    list_ = AsyncMock(wraps=entity_store.list)
     monkeypatch.setattr(entity_store, "get", get)
-    monkeypatch.setattr(entity_store, "list", AsyncMock(side_effect=AssertionError("status joined members")))
+    monkeypatch.setattr(entity_store, "list", list_)
     monkeypatch.setattr(run_store, "load_plan", AsyncMock(side_effect=AssertionError("status loaded plan")))
     response = await read_client.get(f"{PATH}/run-19")
     assert response.status_code == 200 and response.json()["run_id"] == "run-19"
+    assert response.json()["progress"] == {
+        "tasks": 1000,
+        "members": {"registered": 1000},
+        "queued": 0,
+        "task_jobs": {},
+    }
     assert get.await_count == 1 and not files_service.calls
+    assert list_.await_count == 1 and list_.await_args is not None and list_.await_args.kwargs["page_size"] == 1000
+
+
+async def test_run_state_comes_from_members_without_jobs(
+    read_client, seed_run, entity_store, fake_task_jobs, monkeypatch
+):
+    """GET /runs/{id} counts progress and /tasks adds job_status, from Evals records only; GET /runs leaves progress out."""
+    run = await seed_run(phase=TasksetRunPhase.RUNNING)
+    for index, phase, job_status in [
+        (0, MemberPhase.REGISTERED, HelixJobStatus.ACTIVE),
+        (1, MemberPhase.REGISTERED, HelixJobStatus.PENDING),
+        (2, MemberPhase.IMAGE_READY, None),  # a create intent
+        (3, MemberPhase.IMAGE_READY, None),  # queued
+        (4, MemberPhase.FAILED, HelixJobStatus.ERROR),
+    ]:
+        member = TasksetRunMemberEntity(
+            name=f"task-{index}",
+            workspace="default",
+            task_index=index,
+            phase=phase,
+            task_job=f"run-selected-task-{index}" if index != 3 else None,
+            job_status=job_status,
+            error="job_failed: exit 1" if phase is MemberPhase.FAILED else None,
+        )
+        member._parent = run.id
+        await entity_store.create(member)
+    monkeypatch.setattr(fake_task_jobs, "is_subprocess_profile", AsyncMock(side_effect=AssertionError("Jobs call")))
+    response = await read_client.get(f"{PATH}/run-selected")
+    assert response.status_code == 200
+    assert response.json()["progress"] == {
+        "tasks": 5,
+        "members": {"registered": 2, "image_ready": 2, "failed": 1},
+        "queued": 1,
+        "task_jobs": {"active": 1, "pending": 1},
+    }
+    listed = await read_client.get(PATH)
+    assert listed.status_code == 200 and "progress" not in listed.json()["data"][0]
+    tasks = await read_client.get(f"{PATH}/run-selected/tasks")
+    assert tasks.status_code == 200
+    assert tasks.json()["data"] == [
+        {
+            "task": "task-0",
+            "task_index": 0,
+            "phase": "registered",
+            "job": "run-selected-task-0",
+            "job_status": "active",
+        },
+        {
+            "task": "task-1",
+            "task_index": 1,
+            "phase": "registered",
+            "job": "run-selected-task-1",
+            "job_status": "pending",
+        },
+        {"task": "task-2", "task_index": 2, "phase": "image_ready", "job": "run-selected-task-2"},
+        {"task": "task-3", "task_index": 3, "phase": "image_ready"},
+        {
+            "task": "task-4",
+            "task_index": 4,
+            "phase": "failed",
+            "job": "run-selected-task-4",
+            "job_status": "error",
+            "error": "job_failed: exit 1",
+        },
+    ]
 
 
 class RunReadTestService(NemoServiceAdapter):
@@ -320,3 +398,93 @@ async def test_auth_disabled_mine_uses_effective_development_creator(read_client
     response = await read_client.get(PATH, params={"mine": True})
     assert response.status_code == 200
     assert [run["run_id"] for run in response.json()["data"]] == ["dev-run"]
+
+
+# ---- cancel ----------------------------------------------------------------------------------------------
+
+CANCEL_AT = datetime(2026, 10, 14, 12, 30, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def cancel_clock(monkeypatch):
+    """Pin the cancel route's clock; returns a setter for a later request's time."""
+
+    def at(when: datetime) -> None:
+        monkeypatch.setattr("nemo_evals.api.v2.taskset_runs.utc_now", lambda: when)
+
+    at(CANCEL_AT)
+    return at
+
+
+async def test_cancel_records_the_intent_and_the_run_stays_active(read_client, seed_run, cancel_clock):
+    """Only ``cancel_requested_at`` changes; the run stays accepted, and listed as active, until the controller acts."""
+    await seed_run()
+    response = await read_client.post(f"{PATH}/run-selected/cancel")
+    assert response.status_code == 200
+    assert response.json()["cancel_requested_at"] == "2026-10-14T12:30:00Z"
+    assert response.json()["phase"] == "accepted"
+    assert (await read_client.get(f"{PATH}/run-selected")).json()["cancel_requested_at"] == "2026-10-14T12:30:00Z"
+    active = await read_client.get(PATH, params={"active": True})
+    assert [run["run_id"] for run in active.json()["data"]] == ["run-selected"]
+
+
+async def test_cancel_again_returns_the_first_request_time(read_client, seed_run, cancel_clock):
+    await seed_run()
+    first = await read_client.post(f"{PATH}/run-selected/cancel")
+    cancel_clock(CANCEL_AT + timedelta(minutes=1))
+    again = await read_client.post(f"{PATH}/run-selected/cancel")
+    assert again.status_code == 200 and again.json() == first.json()
+
+
+@pytest.mark.parametrize("phase", [TasksetRunPhase.COMPLETED, TasksetRunPhase.FAILED, TasksetRunPhase.EXPIRED])
+async def test_cancel_of_a_finished_run_is_a_409_not_to_retry(read_client, seed_run, cancel_clock, phase):
+    await seed_run(phase=phase)
+    response = await read_client.post(f"{PATH}/run-selected/cancel")
+    assert response.status_code == 409
+    assert response.json()["detail"] == f"run run-selected already finished: {phase.value}"
+    assert response.headers["x-should-retry"] == "false"
+    assert "cancel_requested_at" not in (await read_client.get(f"{PATH}/run-selected")).json()
+
+
+async def test_cancel_of_an_unknown_or_cross_workspace_run_is_a_404(read_client, seed_run, cancel_clock):
+    await seed_run(workspace="other")
+    for run_id in ["unknown", "run-selected"]:
+        assert (await read_client.post(f"{PATH}/{run_id}/cancel")).status_code == 404
+
+
+async def test_cancel_that_keeps_losing_to_the_controller_is_a_503_to_retry(
+    read_client, seed_run, entity_store, cancel_clock, monkeypatch
+):
+    await seed_run()
+    monkeypatch.setattr(entity_store, "update", AsyncMock(side_effect=NemoEntityConflictError("stale")))
+    response = await read_client.post(f"{PATH}/run-selected/cancel")
+    assert response.status_code == 503 and response.headers["x-should-retry"] == "true"
+
+
+def test_real_authorization_denies_cancel_without_the_permission(
+    tmp_path, service, run_store, entity_store, monkeypatch
+):
+    """A caller without ``evaluator.taskset-runs.cancel``, or a service caller, is refused before any read or write."""
+    get = AsyncMock(side_effect=AssertionError("unauthorized get"))
+    update = AsyncMock(side_effect=AssertionError("unauthorized update"))
+    monkeypatch.setattr(entity_store, "get", get)
+    monkeypatch.setattr(entity_store, "update", update)
+    with create_test_client(
+        RunReadTestService,
+        EntitiesService,
+        client_type=ClientContext,
+        auth_enabled=True,
+        tmp_dir=tmp_path,
+        workspaces=["private"],
+        projects=[],
+        auth_bundle_cache_seconds=0,
+        dependency_overrides={get_taskset_run_service: lambda: service, get_service_run_store: lambda: run_store},
+    ) as ctx:
+        for principal in ["no-run-permissions@example.com", "service:integration-test"]:
+            response = ctx.test_client.post(
+                PATH.replace("/default/", "/private/") + "/run-selected/cancel",
+                headers={"X-NHX-Principal-Id": principal},
+            )
+            assert response.status_code == 403, response.text
+    get.assert_not_awaited()
+    update.assert_not_awaited()

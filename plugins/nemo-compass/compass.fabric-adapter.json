@@ -1,0 +1,64 @@
+{
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "nvidia.fabric.insights-analyst",
+  "adapter_kind": "python",
+  "runner": {
+    "module": "nemo_compass_plugin.fabric_adapter"
+  },
+  "model_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "provider": {"type": "string", "minLength": 1},
+      "model": {"type": "string", "minLength": 1},
+      "temperature": {"type": "number"},
+      "api_key_env": {"type": "string", "minLength": 1},
+      "base_url": {"type": "string", "minLength": 1},
+      "settings": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "required": ["provider", "model"],
+    "additionalProperties": false
+  },
+  "settings_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "agent": {"type": "string", "minLength": 1},
+      "target_agent": {"type": "string", "minLength": 1},
+      "ethos": {"type": "string", "minLength": 1},
+      "workspace": {"type": "string", "minLength": 1},
+      "base_url": {"type": "string", "minLength": 1},
+      "since": {"type": "string", "format": "date-time"},
+      "evaluation_id": {"type": "string", "minLength": 1},
+      "enable_observability": {"type": "boolean", "default": true},
+      "default_model": {"type": "string", "minLength": 1},
+      "fast_model": {"type": "string", "minLength": 1}
+    },
+    "oneOf": [
+      {"required": ["agent"]},
+      {"required": ["target_agent"]}
+    ],
+    "additionalProperties": false
+  },
+  "telemetry": {
+    "providers": {
+      "relay": {"outputs": ["atif", "otel", "openinference"]}
+    }
+  },
+  "requirements": {},
+  "config": {
+    "accepts": [
+      "models"
+    ]
+  },
+  "capabilities": {
+    "service": false,
+    "streaming": false,
+    "updates": false,
+    "cancellation": false
+  }
+}

@@ -7,6 +7,9 @@ import {
   formatRange,
   type OptimizationBudget,
   type OptimizationIntent,
+  PROMPT_CANDIDATES,
+  PROMPT_SEARCH,
+  type PromptModeId,
   type SearchParameter,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import { type FC } from 'react';
@@ -24,6 +27,11 @@ export interface RunSummaryPanelProps {
   intent: OptimizationIntent;
   budget: OptimizationBudget;
   searchSpace: SearchParameter[];
+  /** How the system prompt is tuned, if at all. Only `rewrite` adds runs; `versions` rides on the
+   *  sweep's own trials. */
+  promptMode?: PromptModeId;
+  /** Distinct versions the sweep will choose between, in `versions` mode. */
+  promptVersions?: number;
   rows?: number;
   blockingReason?: string;
   submitError?: string;
@@ -42,13 +50,21 @@ export interface RunSummaryPanelProps {
 export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
   budget,
   searchSpace,
+  promptMode,
+  promptVersions = 0,
   rows,
   blockingReason,
   submitError,
   isSubmitting,
   onRun,
 }) => {
-  const agentRuns = rows === undefined ? undefined : budget.trials * rows;
+  const rewrites = promptMode === 'rewrite';
+  const prompts = rewrites ? PROMPT_CANDIDATES : 0;
+  const agentRuns = rows === undefined ? undefined : (budget.trials + prompts) * rows;
+  const minutes = budget.estimatedMinutes + (rewrites ? PROMPT_SEARCH.estimatedMinutes : 0);
+  const runBreakdown = rewrites
+    ? `(${budget.trials} trials + ${prompts} prompts) × ${rows} rows.`
+    : `${budget.trials} trials × ${rows} rows.`;
 
   return (
     <Card className="h-fit self-start">
@@ -62,19 +78,30 @@ export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
               {parameter.label} {formatRange(parameter)}
             </Badge>
           ))}
+          {rewrites && (
+            <Badge color="gray" kind="outline">
+              system prompt
+            </Badge>
+          )}
+          {promptMode === 'versions' && (
+            <Badge color="gray" kind="outline">
+              system prompt · {promptVersions} {promptVersions === 1 ? 'version' : 'versions'}
+            </Badge>
+          )}
         </Flex>
 
         <Divider />
 
         <Flex gap="density-xl" wrap="wrap">
           <Stat value={agentRuns === undefined ? '—' : String(agentRuns)} label="agent runs" />
-          <Stat value={`~${budget.estimatedMinutes} min`} label="runtime" />
+          <Stat value={`~${minutes} min`} label="runtime" />
           <Stat value={String(budget.trials)} label="trials" />
+          {rewrites && <Stat value={String(prompts)} label="prompts" />}
         </Flex>
         <Text kind="body/regular/xs" color="secondary">
           {rows === undefined
             ? "Agent runs are unknown until the evaluation's rows are counted."
-            : `${budget.trials} trials × ${rows} rows.`}{' '}
+            : runBreakdown}{' '}
           Trials run against the deployed agent — nothing is overwritten until you promote one.
         </Text>
 

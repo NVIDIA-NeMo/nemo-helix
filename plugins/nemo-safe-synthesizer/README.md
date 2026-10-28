@@ -36,6 +36,10 @@ Use the Safe Synthesizer plugin to create jobs through the platform Jobs service
 
    You can also use the SDK builder or Jobs API. See `docs/safe-synthesizer/sdk-resources.mdx`.
 
+## Task image compatibility
+
+Use Safe Synthesizer task images from the same NeMo Helix release as the control plane. Config serialization omits unset fields, but different task-library versions can have different defaults or reject explicitly supplied options; this is not a general cross-version compatibility guarantee. Previously stored, fully expanded specs must be recreated or replaced with a sparse spec to remove injected defaults. Older task images do not gain this reporting change.
+
 ## Troubleshooting
 
 - If model downloads fail, confirm the Files API URL is reachable and the model filesets exist in the selected workspace.

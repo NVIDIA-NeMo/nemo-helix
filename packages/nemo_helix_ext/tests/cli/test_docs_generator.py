@@ -9,6 +9,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 import typer
 from nemo_helix_ext.cli.core.lazy_load import ManifestBackedNhxGroup, attach_lazy_entries
 from nemo_helix_ext.cli.manifest import TopLevelEntry
@@ -47,7 +48,7 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
         "evals",
         "experiments",
         "guardrail",
-        "insights",
+        "compass",
         "intake",
         "safe-synthesizer",
     )
@@ -150,6 +151,41 @@ def test_index_snippet_skips_hidden_lazy_commands_without_loading():
     assert "* `--help, -h`: Show this message and exit." in reference
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "https://github.com/<org>/<repo>/tree/<ref>/<dir>",
+            "https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>",
+        ),
+        ("Use <name> with {key}", r"Use &lt;name> with \{key}"),
+        ("Use `<name>` and `{key}`", "Use `<name>` and `{key}`"),
+        ("Use ``<name> {key}``", "Use ``<name> {key}``"),
+        ("Use ``<name> with a ` tick``", "Use ``<name> with a ` tick``"),
+        ("Unmatched ` <name>", "Unmatched ` &lt;name>"),
+        ("```text\n<name> {key}\n```", "```text\n<name> {key}\n```"),
+    ],
+)
+def test_escape_mdx_keeps_placeholders_out_of_jsx(source: str, expected: str) -> None:
+    assert _docs_generator._escape_mdx(source) == expected
+
+
+def test_generated_option_help_escapes_url_placeholders() -> None:
+    docs_app = typer.Typer()
+
+    @docs_app.command()
+    def fetch(
+        target: str = typer.Option(help="GitHub tree URL: https://github.com/<org>/<repo>/tree/<ref>/<dir>"),
+    ) -> None:
+        """Fetch tasks."""
+
+    reference = generate_docs(docs_app, name="nemo")
+
+    assert "https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>" in reference
+    assert "<org>" not in reference
+    assert r"\<org>" not in reference
+
+
 def test_write_docs_files_matches_individual_generators(tmp_path):
     docs_app = typer.Typer()
 
@@ -170,3 +206,15 @@ def test_write_docs_files_matches_individual_generators(tmp_path):
     assert summary_path.read_text(encoding="utf-8") == with_trailing_newline(
         generate_index_snippet(docs_app, name="nemo")
     )
+
+
+def test_committed_cli_reference_has_no_bare_placeholder_urls() -> None:
+    """A URL template in help text must be a code span, not an autolinked dead URL.
+
+    Fern autolinks a bare ``https://`` URL in prose, so an escaped placeholder such as
+    ``https://github.com/&lt;org>/...`` becomes a live link whose href GitHub cannot resolve.
+    """
+    reference = Path(_docs_generator._REFERENCE_DOCS_PATH).read_text(encoding="utf-8")
+    prose = re.sub(r"(`+)(?:(?!\1).)+?\1", "", reference)
+    offenders = [line for line in prose.splitlines() if re.search(r"https?://\S*&lt;", line)]
+    assert offenders == []

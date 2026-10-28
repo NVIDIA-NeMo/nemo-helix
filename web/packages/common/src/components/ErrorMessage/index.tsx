@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { IconError } from '@nemo/icons/icons';
 import {
   StatusMessage,
   StatusMessageProps,
@@ -8,7 +9,6 @@ import {
   Stack,
   Button,
 } from '@nvidia/foundations-react-core';
-import { CircleAlert as ErrorIcon } from 'lucide-react';
 import { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -45,7 +45,7 @@ export const ErrorMessage: FC<ErrorMessageProps> = ({
     <Stack gap="density-md" align="center" justify="center" style={{ height }}>
       <StatusMessage
         slotHeading={header}
-        slotMedia={slotMedia ?? <ErrorIcon className="size-16" />}
+        slotMedia={slotMedia ?? <IconError className="size-16" />}
         slotSubheading={message}
         slotFooter={slotFooter ?? defaultRenderAction}
         className="max-w-[640px]"

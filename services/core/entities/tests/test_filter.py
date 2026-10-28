@@ -117,6 +117,11 @@ class TestParseJsonSearch:
         assert result.operator == FilterOperator.ELEM_MATCH
         assert result.value == {"key": "owner", "value": "alice"}
 
+    def test_mixed_operator_and_plain_keys_rejected(self):
+        """A plain key beside an operator used to be dropped silently."""
+        with pytest.raises(ValueError, match="mixes operators with sub-keys"):
+            _parse_json_filter('{"name":{"$eq":"a","tier":"gold"}}')
+
     def test_invalid_json(self):
         """Test invalid JSON raises ValueError."""
         with pytest.raises(ValueError, match="Invalid JSON"):

@@ -234,7 +234,12 @@ uv pip install --python .venv/bin/python hermes-agent tomli-w
 For platform jobs, install it in the job worker's environment or image as well. The default local
 sandbox image already includes it.
 
+Set `NVIDIA_BASE_URL` to override the full OpenAI-compatible API base URL (including `/v1`),
+for example `https://inference-api.nvidia.com/v1`. The default remains `https://integrate.api.nvidia.com/v1`.
+
 ```python
+import os
+
 from nhx_evals_sdk.values.common import SecretRef
 
 hermes_config = {
@@ -247,7 +252,7 @@ hermes_config = {
         "default": {
             "provider": "nvidia",
             "model": "<nvidia-model-id>",
-            "base_url": "https://integrate.api.nvidia.com/v1",
+            "base_url": os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/"),
             "api_key_env": "NVIDIA_API_KEY",
         },
     },
@@ -424,7 +429,7 @@ with a deprecation warning and will be removed in 0.9; move both under `source`.
 
 ### Evaluate an agent registered on the platform
 
-If the agent is already registered with `nemo agents create`, make it the `source`:
+If the agent is already registered with `nemo agents register`, make it the `source`:
 
 ```json
 {"kind": "fabric", "source": {"agent": "calculator-agent"}}

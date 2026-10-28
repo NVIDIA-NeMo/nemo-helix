@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Publishes the Fern documentation site from the default branch when docs
-# change, a release tag is pushed, a docs republish tag is pushed, or the
-# workflow is manually triggered.
+# Publishes the Fern documentation site using the default branch's tooling when
+# docs change on main or a release branch, a release/docs tag is pushed, or the
+# workflow is manually triggered. Versioned content follows origin release branches.
 #
-# To publish a release version: push a stable SemVer release tag, for example
-# `git tag 1.2.0 && git push origin 1.2.0`.
+# Stable SemVer release tags only remove the matching branch's preview badge;
+# they never supply documentation content or create separate version entries.
 # To republish docs without creating a release version: push a docs tag, for
 # example `git tag docs/v1.2.0 && git push origin docs/v1.2.0`.
 # Or use the "Run workflow" button in the Actions tab.
@@ -20,6 +20,7 @@ on:
   push:
     branches:
       - main
+      - 'release/*'
     paths:
       - 'docs/**'
     tags:

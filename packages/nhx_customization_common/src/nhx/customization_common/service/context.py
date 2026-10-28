@@ -18,6 +18,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_ID_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
 )
 from nhx.customization_common.service.constants import (
@@ -64,6 +65,10 @@ class NHXJobContext:
     # Storage paths
     storage_path: Path
     config_path: Path
+    #: The platform job's entity ID. ``job_id`` is the job name, which a later job
+    #: can reuse after this one is deleted, so anything that must identify this
+    #: job for good, such as a tracker run, uses this instead.
+    job_uid: str | None = None
 
     @property
     def normalized_task(self) -> str:
@@ -75,13 +80,14 @@ class NHXJobContext:
         """True only when populated from real Job Controller env vars.
 
         ``from_env`` fills missing identifiers with non-empty placeholder
-        sentinels (``unknown-job-id`` / ``unknown-step`` / ``unknown-task``).
+        sentinels (``unknown-job-id`` / ``attempt-0`` / ``unknown-step`` / ``unknown-task``).
         Callers (e.g. progress reporting) must gate on this rather than a bare
         truthiness check, or they issue failing SDK calls / log spam when
         running outside a real platform job (local ``run`` paths, tests).
         """
         return (
             self.job_id not in ("", DEFAULT_JOB_ID)
+            and self.attempt_id not in ("", DEFAULT_ATTEMPT_ID)
             and self.step not in ("", DEFAULT_STEP)
             and self.task not in ("", DEFAULT_TASK)
         )
@@ -99,4 +105,5 @@ class NHXJobContext:
             files_url=os.environ.get(NHX_FILES_URL_ENVVAR),
             storage_path=get_job_storage_path_from_env(),
             config_path=get_job_step_config_path_from_env(),
+            job_uid=os.environ.get(NEMO_JOB_UID_ENVVAR) or None,
         )

@@ -1,17 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useStickToBottom } from '@nemo/common/src/hooks/useStickToBottom';
+import { LogEditor } from '@nemo/common/src/components/LogViewer/LogEditor';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
-import { formatLogs, type LogLoadProgress } from '@nemo/common/src/utils/logs';
+import {
+  formatLogs,
+  formatLogsForDisplay,
+  type LogLoadProgress,
+} from '@nemo/common/src/utils/logs';
+import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
   Button,
   CodeSnippetActions,
-  CodeSnippetCode,
   CodeSnippetCopyButton,
   CodeSnippetRoot,
   Flex,
@@ -19,9 +23,9 @@ import {
   Tag,
   Text,
 } from '@nvidia/foundations-react-core';
-import classNames from 'classnames';
-import { ArrowUp, Copy, Download, WrapText } from 'lucide-react';
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
+
+import '@nemo/common/src/components/LogViewer/styles.css';
 
 const DEFAULT_ROW_COUNT = 30;
 
@@ -82,10 +86,9 @@ export const LogViewer: FC<LogViewerProps> = ({
   const [wrapLines, setWrapLines] = useState(false);
   const tailLogs = logs?.slice(-rows) || [];
   const displayedLogs = showAllLogs ? logs : tailLogs;
-  const logText = formatLogs(displayedLogs);
+  // Copy what's on screen; download keeps the raw messages.
+  const logText = formatLogsForDisplay(displayedLogs);
   const hasMoreLogs = logs && logs.length > rows;
-
-  const isShowingLogs = useMemo(() => logs.length > 0 && !isLoading, [logs.length, isLoading]);
 
   // Announce the wait straight away; the counts join it once the first page tells us
   // the denominator.
@@ -97,20 +100,10 @@ export const LogViewer: FC<LogViewerProps> = ({
 
   const notify = useNotify(onNotify);
 
-  const { ref: codeScrollRef, scrollToBottom } = useStickToBottom<HTMLDivElement>({
-    enabled: isShowingLogs,
-    resetKey: showAllLogs,
-  });
-
   const handleDownload = () => {
     if (downloadFilename) {
       triggerDownload(formatLogs(logs), downloadFilename);
     }
-  };
-
-  const handleLoadMore = () => {
-    scrollToBottom();
-    setShowAllLogs(true);
   };
 
   if (isLoading) {
@@ -152,19 +145,11 @@ export const LogViewer: FC<LogViewerProps> = ({
 
   return (
     <Block className="relative w-full min-w-0 max-w-full overflow-hidden h-full">
-      {!showAllLogs && hasMoreLogs && (
-        <Block className="absolute top-6 mt-[2px] left-px right-px z-10 py-5 text-center bg-[linear-gradient(to_bottom,var(--background-color-surface-sunken),transparent)]">
-          <Tag color="gray" kind="solid" onClick={handleLoadMore}>
-            <ArrowUp />
-            Load previous logs
-          </Tag>
-        </Block>
-      )}
       <CodeSnippetRoot
         kind="block"
         collapsible={false}
         rows={fillHeight ? undefined : rows}
-        className="min-h-auto h-full"
+        className="log-viewer min-h-auto h-full"
       >
         <CodeSnippetActions>
           <Flex className="w-full" justify="between" wrap="wrap">
@@ -181,7 +166,7 @@ export const LogViewer: FC<LogViewerProps> = ({
                 aria-pressed={wrapLines}
                 onClick={() => setWrapLines((prev) => !prev)}
               >
-                <WrapText />
+                <Paragraph />
               </Button>
               {downloadFilename && (
                 <Button
@@ -202,23 +187,27 @@ export const LogViewer: FC<LogViewerProps> = ({
             aria-label="Copy logs"
             onClick={() => notify('Copied to clipboard!', 'success', { durationMs: 3000 })}
           >
-            <Copy />
+            <CopyGeneric />
           </CodeSnippetCopyButton>
         </CodeSnippetActions>
-        <CodeSnippetCode
-          value={logText}
-          language="shell"
-          ref={codeScrollRef}
-          className={classNames(
-            'min-w-0 max-w-full',
-            { 'h-full !overflow-y-auto': fillHeight },
-            // Keep scroll on when wrapping: wrapped rows exceed the fixed height.
-            { '!overflow-y-hidden': !showAllLogs && !wrapLines },
-            {
-              'whitespace-pre-wrap [overflow-wrap:anywhere] [&_code]:whitespace-pre-wrap [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]':
-                wrapLines,
-            }
-          )}
+        {!showAllLogs && hasMoreLogs && (
+          // Zero-height anchor so the fade starts at the editor's top edge.
+          <Block className="relative z-10 h-0">
+            <Block className="absolute inset-x-px top-px max-h-none rounded-t-md py-5 text-center bg-[linear-gradient(to_bottom,var(--nv-code-snippet-custom-background),transparent)]">
+              <Tag color="gray" kind="solid" onClick={() => setShowAllLogs(true)}>
+                <ArrowUp />
+                Load previous logs
+              </Tag>
+            </Block>
+          </Block>
+        )}
+        <LogEditor
+          logs={displayedLogs}
+          resetKey={showAllLogs}
+          wrapLines={wrapLines}
+          fillHeight={fillHeight}
+          // The unwrapped tail is sized to its rows, so it doesn't scroll.
+          scrollLocked={!showAllLogs && !wrapLines}
         />
       </CodeSnippetRoot>
     </Block>

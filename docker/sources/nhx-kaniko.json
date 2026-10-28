@@ -7,7 +7,8 @@
       "url": "https://github.com/osscontainertools/kaniko/archive/refs/tags/v1.28.5.tar.gz",
       "sha256": "37362cb5fb31c1b1f4de07d4c1150f158864b52aa85a9c9a93f145666fd6eef8",
       "covers": [
-        "go-module:github.com/osscontainertools/kaniko@v1.28.5"
+        "go-module:github.com/osscontainertools/kaniko@v1.28.5",
+        "go-module:github.com/osscontainertools/kaniko@(devel)"
       ]
     },
     {
@@ -243,13 +244,6 @@
       "license": "EPL-1.0",
       "url": "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/cross-toolchain-base/10ubuntu1/cross-toolchain-base_10ubuntu1.tar.xz",
       "sha256": "4ad675289604ff38a49f625e026acba11e87bcba1c4128db9b71f8688f89e056"
-    },
-    {
-      "name": "ca-certificates",
-      "version": "20250419",
-      "license": "MPL-2.0 AND GPL-2.0-or-later",
-      "url": "https://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20250419.tar.xz",
-      "sha256": "33b44ef78653ecd3f0f2f13e5bba6be466be2e7da72182f737912b81798ba5d2"
     }
   ]
 }

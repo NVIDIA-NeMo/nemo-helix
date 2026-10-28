@@ -3,10 +3,10 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { GUARDRAILS_ENABLED } from '@studio/constants/environment';
+import { VIRTUAL_MODELS_ROUTE_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateGuardrailsRoutes, getWorkspaceVirtualModelsRoute } from '@studio/routes/utils';
+import { gateVirtualModelsRoutes, getWorkspaceVirtualModelsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 
@@ -34,7 +34,7 @@ const VirtualModelChatTab = lazy(() =>
   }))
 );
 
-export const virtualModelsRoutes: RouteObject[] = gateGuardrailsRoutes([
+export const virtualModelsRoutes: RouteObject[] = gateVirtualModelsRoutes([
   {
     path: ROUTES.workspace.virtualModels,
     element: <VirtualModelsListRoute />,
@@ -64,7 +64,7 @@ export const virtualModelsRoutes: RouteObject[] = gateGuardrailsRoutes([
 const NavIcon = ENTITY_ICONS.virtualModels;
 
 export const getVirtualModelsSideNavItems = (workspace: string) =>
-  GUARDRAILS_ENABLED
+  VIRTUAL_MODELS_ROUTE_ENABLED
     ? [
         {
           id: 'virtual-models',

@@ -4,6 +4,8 @@
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { getFileExtension } from '@nemo/common/src/utils/file';
+import { Eye } from '@nemo/icons/icons';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Button, Flex, FormField, Tag, Text } from '@nvidia/foundations-react-core';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
@@ -17,8 +19,7 @@ import {
   SEED_SAMPLING_STRATEGY_KEY,
 } from '@studio/routes/DataDesignerJobBuildRoute/columns';
 import type { JobBuilderFormValues } from '@studio/routes/DataDesignerJobBuildRoute/useJobBuilder';
-import { getContentColumns, getFileExtension } from '@studio/util/files';
-import { Eye } from 'lucide-react';
+import { getContentColumns } from '@studio/util/files';
 import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -136,7 +137,7 @@ export const SeedDatasetConfig: FC<SeedDatasetConfigProps> = ({ columnIndex }) =
                 onClick={() => setIsPreviewOpen(true)}
                 className="h-auto p-0"
               >
-                <Eye size={14} aria-hidden />
+                <Eye size="14" aria-hidden />
               </Button>
             </Flex>
           ),

@@ -1,0 +1,91 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.9.0 - 2026-11-09"
+description: ""
+---
+NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor taskset runs, and NeMo Compass trace analysis. Studio expands evaluation and optimization workflows, while deployment and evaluation changes strengthen isolation and make failures easier to diagnose.
+
+## Highlights
+
+- **Pause and recover training.** Pause supported training steps to save a checkpoint and release GPUs, resume them later, or rerun a failed job while retaining its attempt history and experiment-tracker continuity.
+- **Scale Harbor tasksets on Kubernetes.** Submit a taskset as individual task Jobs, build task images, size sandboxes, and publish results to an Intake experiment. (documentation not yet available)
+- **Evidence-backed analysis with NeMo Compass.** Analyze agent traces on demand or on a schedule, with structured trace and span evidence, severity, and confidence on insights.
+- **More complete Studio evaluation workflows.** Run agent and model evaluations through full-page wizards, compare experiment results against a baseline, and inspect token counts alongside evaluation scores.
+
+## What's included
+
+### Agents and Fabric
+
+- Agent registration uses `nemo agents register` and the SDK's `AgentsResource.register`. A name alone registers a trace-only agent for analysis; workflows that require a runnable config reject it at submission. Mini-SWE-Agent 2.x is available through its optional harness extra. See [Register Agents](/documentation/agents/register-agents).
+- NeMo Compass replaces the Insights plugin naming for trace analysis. Use `nemo compass analysis-runs create --agent <name> --wait` for an on-demand run. Insights carry structured trace and span evidence, optional severity and confidence, and evidence updates that preserve an existing insight's identity and status. Existing stored legacy evidence fields are read automatically. See [Insights from Traces](/documentation/agents/traces-and-insights/insights-from-traces).
+- Agent hardening can use a separate safety-model endpoint and API-key secret. Victim credentials can reference the platform Secrets store, declared host backends survive manifest refresh, and failed runs retain hitlogs for replay. See [Agent Hardening CLI Reference](/documentation/agents/governance/cli-reference).
+- OpenShell agent deployments route service requests through the gateway using the service host header. Operators can configure either gateway compute driver, TLS certificate paths, and explicit sandbox policy settings. The gateway's user-authentication requirements still apply; see [OpenShell](/documentation/kubernetes-deployment/setup/helm/openshell).
+- Agent deployment failures retain more useful startup and container-log diagnostics. Local Docker agents can reach the platform gateway and Intake endpoints, with platform-bound telemetry URLs rewritten for the selected endpoint while independent collectors retain their own destinations. See [Deploy Agents](/documentation/agents/deploy-agents).
+
+### Switchyard API and Configuration
+
+- Switchyard optimization generates content-addressed virtual-model names in the form `<agent>-<digest>`, replacing positional names. Exact reruns reuse the same virtual models; changed routing content gets new names. Read `switchyard-result.json` to locate candidates and their `agent-<virtual-model>.yaml` artifacts rather than constructing names. See [Optimize Agents](/documentation/agents/optimize-agents#switchyard). ([PR #2797](https://github.com/NVIDIA-NeMo/nemo-helix/pull/2797))
+- Classifier `max_output_tokens` may be omitted or set to JSON `null` to use the native Switchyard default; explicit integers remain supported. This applies to both `llm_classifier` and the nested `stage_router.classifier` configuration. See [Classifier Output Token Limits](/documentation/models-and-inference/virtual-models#classifier-output-token-limits). ([PR #2807](https://github.com/NVIDIA-NeMo/nemo-helix/pull/2807))
+
+### Agent Evaluation
+
+- Kubernetes Harbor taskset runs freeze the selected task revisions, build their images, and launch one task Job per task. The `nemo evals runs` commands support submission and inspection, including task imports from a pinned public Git repository, sandbox resource overrides, idempotent submission, and publication to an Intake experiment. (documentation not yet available)
+- Sandboxed Gym hosts can run complete `wheels-v1` environments offline when no egress is allowed. Failed trials, including trials where the agent never runs, are reported as errors rather than successes; failed metric results can be published to Intake and shown in Studio. See [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration) and [Reading Results](/documentation/evaluate-models/agent-eval/reading-results).
+- Custom Python metrics serialized with `cloudpickle` are disabled by default. Creating or submitting these metrics requires an explicit deployment-wide opt-in; built-in metrics remain available without it. See [Define and Run Custom Python Metrics](/documentation/evaluate-models/tutorials/define-and-run-custom-python-metrics#enable-cloudpickle-metrics-on-the-deployment).
+
+### Studio
+
+- Agent and model evaluations run through full-page wizards. Agent evaluations can select an evaluator config from a fileset, and model evaluations map OpenAI messages arrays to input and reference fields. See [Studio Agents](/documentation/studio/agents) and [Model Evaluations](/documentation/studio/model-evaluations).
+- Experiments support evaluation comparison, scorecards with a selectable baseline, and token counts on Pareto-chart axes. Trace lists refresh automatically as new telemetry arrives. See [Studio Experiments](/documentation/studio/experiments) and [Traces](/documentation/studio/traces).
+- Optimization forms render the available strategy options, including Switchyard routing, and Switchyard results expose routing tests and deployment actions. (documentation not yet available)
+- Model chat renders streamed reasoning and tool calls in collapsible sections, and the workspace dashboard shows recent jobs with live elapsed time and service-specific navigation. (documentation not yet available)
+- Data Designer previews show generated rows in a table alongside preview-run logs. The preview panel can collapse without stopping generation, and a separate stop action ends an in-progress preview. (documentation not yet available)
+- Fine-tuning can draft a job configuration with AI for review before submission. Model lists show in-progress fine-tuning runs, link adapters to the runs that produced them, and explain when a finished training step is still uploading or registering its model. See [Custom Models](/documentation/studio/customization).
+- Ability to view VirtualModels when Guardrails or Agent Optimizations are enabled.
+
+### Customizer
+
+- Automodel, Unsloth, and RL training steps support cooperative pause, checkpoint-backed resume, and rerun after failure. W&B and MLflow runs continue across recovery. Paused jobs retain storage for seven days by default, failed jobs for four hours; expired storage prevents recovery. Changed training-image digests produce a warning. See [Pause, Resume, and Rerun a Job](/documentation/customizer-reference/manage-customization-jobs/pause-resume-rerun).
+- Sandboxed GRPO can restrict access to the training pod to the episode broker and generation-server ports, keeping Ray control-plane ports unreachable from the Gym sandbox. This requires both job-step network-policy flags and an enforcing CNI; Kata supplies a separate kernel boundary. See [Secure Sandboxed GRPO](/documentation/kubernetes-deployment/setup/helm/sandboxed-grpo).
+
+### Platform, CLI, and Deployment
+
+- Job APIs, logs, and results distinguish execution attempts. Use `nemo jobs attempts list <job-name>` to inspect history and attempt selectors to inspect a particular run. Job updates separate mutable metadata from the definition used by future attempts. See [Manage Jobs](/documentation/kubernetes-deployment/setup/jobs).
+- Filesets return creator and updater metadata and support filtering by those identities. (documentation not yet available)
+- Entity `$contains` filters match individual array elements, and filters that cannot apply to a field return HTTP 400 instead of silently producing misleading results. See [Filtering](/documentation/get-started/core-concepts/filtering).
+- Setup prefers OpenRouter among automatically detected provider keys. `NVIDIA_API_KEY` alone no longer auto-creates a provider; NVIDIA Build remains available interactively or through the explicit custom-provider settings. See [Setup](/documentation/get-started/setup#non-interactive-setup).
+- Authentication reuses cached identity-provider discovery and signing keys rather than refetching them on each authorization check. The CLI also accepts older servers' flat OIDC discovery documents. Studio direct OIDC login attempts to create a workspace from the user's email prefix, subject to authorization. See [Workspaces](/documentation/get-started/core-concepts/workspaces#workspace-creation-on-login).
+
+## Upgrade from v0.8.x
+
+- Update agent-registration scripts from `nemo agents create` to `nemo agents register`, and SDK calls from `AgentsResource.create` to `AgentsResource.register`.
+- Update trace-analysis automation from `nemo insights` to `nemo compass`, SDK imports to `nemo_compass_plugin`, and scheduled-analysis configuration from `insights.analyst` to `compass.analysis`. Existing stored insight evidence is adapted on read; it does not require a data migration.
+- Auto-generated plugin job and function commands drop the legacy nested `run` and `submit` verbs in favor of direct remote invocation. For example, use `nemo customization <backend> --job-json <job.json>` for training submissions. Check the [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference) for each command's supported arguments and [Create a Customization Job](/documentation/customizer-reference/manage-customization-jobs/create-a-customization-job) for training.
+- Review custom-metric usage before upgrading. If cloudpickle metrics are required, administrators must explicitly enable `evals.allow_insecure_cloudpickle_metrics` and the matching worker setting; Helm exposes `evals.allowInsecureCloudpickleMetrics`. These metrics execute user-defined Python with service credentials, so enable them only for trusted submitters.
+- Update custom job integrations to the attempt-aware APIs and preserve concrete attempt IDs on execution updates and results. Results remain job-owned and their names remain unique across attempts.
+- Review automated setup scripts that relied on `NVIDIA_API_KEY` detection. To keep using NVIDIA Build non-interactively, set `NEMO_DEFAULT_INFERENCE_KEY` and `NEMO_DEFAULT_INFERENCE_BASE_URL` as described in the setup guide.
+
+## Current constraints
+
+- Kubernetes Harbor taskset runs require configured task-image builds, Kubernetes job execution, and OpenSandbox resources. Their generated CLI reference is available, but a task-oriented guide is not yet available.
+- Secure sandboxed GRPO requires an enforcing CNI, both `networkPolicies.enabled` and `networkPolicies.jobSteps.enabled`, and Kata for a separate guest kernel. A successful training run alone does not establish those isolation guarantees.
+- The OpenShell executor cannot supply an OIDC bearer token to a gateway that requires user authentication. The default Landlock `best_effort` setting does not provide filesystem confinement on unsupported kernels; use `hard_requirement` when that boundary is required.
+- Compass is included in the PyPI `all` extra on Python 3.12 and 3.13. The user-sentiment signal remains skipped because analysis runs do not configure an embedding backend.
+
+## Maintenance
+
+- Typed clients preserve literal slashes for multi-segment file paths and inference model identifiers. CLI pagination keeps progress output off standard output for machine-readable responses.
+- Live evaluation resolves judge-model secrets through the Evals service on behalf of the caller, enforcing the caller's access to the secret's workspace.
+- Safe Synthesizer updates to 0.1.15, with multi-architecture task-image handling, architecture-aware dependency validation, and a PII-replacement fix that avoids an inappropriate dataframe check. garak updates to 0.17.1 and reads its packaged plugin cache instead of racing to create a per-user copy. Container builds refresh CA-certificate handling and Python and Go dependencies.
+- Image-builder distribution includes the platform Helm chart and published-image copy support. Shutdown, workspace-deletion recovery, large telemetry inserts, and job-list filtering receive reliability fixes.
+
+## Install
+
+See [Setup](/documentation/get-started/setup) for local installations and [Install](/documentation/kubernetes-deployment/setup/helm/install) for self-managed Kubernetes deployments.
+
+## Links
+
+- [Repository](https://github.com/NVIDIA-NeMo/nemo-helix)
+- [Issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)

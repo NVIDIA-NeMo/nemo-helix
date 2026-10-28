@@ -9,16 +9,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Check that new or modified canonical SKILL.md files carry `metadata.author` and `allowed-tools`.
+"""Check that new or modified canonical SKILL.md files carry `metadata.author` and `allowed-tools`,
+and stay within the SKILL.md token budget.
 
 Both fields are load-bearing per docs/contributing/skills-spec.mdx: `allowed-tools` is the
 safety signal the agent harness honors, and `metadata.author` is how a skill maintainer is
 found. This only checks files a PR actually touches, so it does not block unrelated work on
 skills that predate the rule; it stops the gap from growing.
 
+The token budget mirrors SkillEvaluator (`len(entire SKILL.md) // 4`, frontmatter included); move
+detail into the skill's `references/` directory when a skill runs over.
+
 Exit codes:
     0  no violations
-    1  one or more canonical SKILL.md files are missing a required field
+    1  one or more canonical SKILL.md files are missing a required field or over the token budget
     2  internal error (bad frontmatter, git failure, etc.)
 """
 
@@ -45,6 +49,9 @@ CANONICAL_SKILL_GLOBS = [
 ]
 
 REQUIRED_FIELDS = ("metadata.author", "allowed-tools")
+
+# Estimated tokens (characters // 4) allowed in a whole SKILL.md, frontmatter included.
+MAX_SKILL_TOKENS = 5000
 
 # Comma-separated `allowed-tools` entries must be bare tool names (e.g. `Bash`, `mcp__nemo__list`),
 # not free text: this catches unparseable values like "Bash Read" (missing comma).
@@ -125,6 +132,16 @@ def check_file(path: Path) -> list[Violation]:
             )
         )
 
+    tokens = len(path.read_text(encoding="utf-8")) // 4
+    if tokens > MAX_SKILL_TOKENS:
+        violations.append(
+            Violation(
+                path,
+                f"SKILL.md is ~{tokens} tokens (characters // 4, frontmatter included), over the "
+                f"{MAX_SKILL_TOKENS} limit; move detail into references/",
+            )
+        )
+
     return violations
 
 
@@ -171,7 +188,9 @@ def main() -> int:
         return 2
 
     if not all_violations:
-        print(f"OK: {len(skill_files)} changed skill(s), {' and '.join(REQUIRED_FIELDS)} present.")
+        print(
+            f"OK: {len(skill_files)} changed skill(s), {' and '.join(REQUIRED_FIELDS)} present, within the token budget."
+        )
         return 0
 
     if args.format == "github":

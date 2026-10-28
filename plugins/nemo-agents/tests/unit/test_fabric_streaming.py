@@ -8,37 +8,39 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStartError, FabricRuntimeStream
 from nemo_agents_plugin.fabric.streaming import (
     FabricStreamResultError,
+    StreamingMethod,
     extract_assistant_text_delta,
     iter_fabric_assistant_text_deltas,
+    iter_fabric_chat_completion_sse,
     iter_openai_chat_completion_sse,
+    resolve_streaming_method,
 )
+from nemo_fabric import FabricConfig, RunPlan
 
 
-class _FakeFabricRuntimeResult:
-    def __init__(self, *, status: str = "succeeded", response: str | None = "done", error: object = None) -> None:
-        self.status = status
-        self.response = response
-        self.error = error
+class _FakeFabricRuntimeStream(FabricRuntimeStream):
+    """A Fabric runtime stream that replays scripted ATOF records and a terminal result."""
 
-
-class _FakeFabricRuntimeStream:
     def __init__(
         self,
         records: list[dict[str, Any]],
         *,
-        result: _FakeFabricRuntimeResult | None = None,
+        result: FabricRuntimeResult | None = None,
+        streaming_method: StreamingMethod = StreamingMethod.RELAY,
     ) -> None:
+        super().__init__(stream=None, streaming_method=streaming_method)
         self._records = records
-        self._result = result or _FakeFabricRuntimeResult()
+        self._result = result or FabricRuntimeResult(status="succeeded", response="done")
         self.result_awaited = False
 
     async def records(self) -> AsyncIterator[dict[str, Any]]:
         for record in self._records:
             yield record
 
-    async def result(self) -> _FakeFabricRuntimeResult:
+    async def result(self) -> FabricRuntimeResult:
         self.result_awaited = True
         return self._result
 
@@ -83,6 +85,34 @@ async def test_iter_openai_chat_completion_sse_frames_content_chunks() -> None:
 
     terminal_chunk = _event_payload(events[3])
     assert terminal_chunk["choices"] == [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_chat_completion_sse_preserves_native_chunks() -> None:
+    chunks = [
+        {
+            "id": "native-id",
+            "object": "chat.completion.chunk",
+            "model": "native-model",
+            "created": 123,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": "hello"}}],
+        },
+        {
+            "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]}}],
+        },
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
+        {"choices": [], "usage": {"completion_tokens": 12, "prompt_tokens": 5, "total_tokens": 17}},
+    ]
+    stream = _FakeFabricRuntimeStream(chunks, streaming_method=StreamingMethod.OPENAI)
+
+    events = [
+        event
+        async for event in iter_fabric_chat_completion_sse(stream, completion_id="platform-id", model="platform-model")
+    ]
+
+    assert [_event_payload(event) for event in events[:-1]] == chunks
+    assert events[-1] == "data: [DONE]\n\n"
+    assert stream.result_awaited
 
 
 @pytest.mark.parametrize(
@@ -221,7 +251,7 @@ async def test_iter_fabric_assistant_text_deltas_skips_duplicate_turn_summary() 
 async def test_iter_fabric_assistant_text_deltas_falls_back_to_terminal_response() -> None:
     stream = _FakeFabricRuntimeStream(
         [{"kind": "scope", "scope_category": "start", "name": "request"}],
-        result=_FakeFabricRuntimeResult(response="terminal response"),
+        result=FabricRuntimeResult(status="succeeded", response="terminal response"),
     )
 
     assert [text async for text in iter_fabric_assistant_text_deltas(stream)] == ["terminal response"]
@@ -231,8 +261,83 @@ async def test_iter_fabric_assistant_text_deltas_falls_back_to_terminal_response
 async def test_iter_fabric_assistant_text_deltas_raises_failed_terminal_result() -> None:
     stream = _FakeFabricRuntimeStream(
         [{"data": {"choices": [{"delta": {"content": "partial"}}]}}],
-        result=_FakeFabricRuntimeResult(status="failed", error={"message": "terminal failure"}),
+        result=FabricRuntimeResult(status="failed", response="done", error={"message": "terminal failure"}),
     )
 
     with pytest.raises(FabricStreamResultError, match="terminal failure"):
         _ = [text async for text in iter_fabric_assistant_text_deltas(stream)]
+
+
+def _streaming_plan(config: FabricConfig, descriptor: dict[str, Any] | None, *, streaming: bool = False) -> RunPlan:
+    assert config.harness is not None
+    return RunPlan.from_mapping(
+        {
+            "base_dir": "/tmp",
+            "config": config.model_dump(mode="json"),
+            "adapter": {"adapter_id": config.harness.adapter_id, "adapter_kind": "python"},
+            "capabilities": {"streaming": streaming},
+            "adapter_descriptor": {"descriptor": descriptor} if descriptor is not None else None,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "streaming", "expected"),
+    [
+        ({"telemetry": {"providers": {"relay": {}}}}, False, StreamingMethod.RELAY),
+        (
+            {"telemetry": {"providers": {"relay": {}}}, "capabilities": {"streaming": True}},
+            True,
+            StreamingMethod.RELAY,
+        ),
+        ({"capabilities": {"streaming": True}}, True, StreamingMethod.OPENAI),
+        ({"capabilities": {"streaming": True}}, False, StreamingMethod.BUFFERED),
+        ({"capabilities": {"streaming": False}}, True, StreamingMethod.BUFFERED),
+        (None, True, StreamingMethod.BUFFERED),
+        ({}, False, StreamingMethod.BUFFERED),
+    ],
+)
+def test_resolve_streaming_method(
+    descriptor: dict[str, Any] | None, streaming: bool, expected: StreamingMethod
+) -> None:
+    config = FabricConfig.model_validate(
+        {"metadata": {"name": "test-agent"}, "harness": {"adapter_id": "nvidia.fabric.custom"}}
+    )
+    plan = _streaming_plan(config, descriptor, streaming=streaming)
+    before_config, before_plan = config.model_dump(), plan.to_mapping()
+
+    assert resolve_streaming_method(plan, config) is expected
+    assert config.model_dump() == before_config
+    assert plan.to_mapping() == before_plan
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_streaming_method_validates_remote_collector(configured: bool) -> None:
+    config = FabricConfig.model_validate(
+        {
+            "metadata": {"name": "remote"},
+            "harness": {"adapter_id": "nvidia.fabric.remote-agent", "settings": {"relay_streaming": True}},
+            "relay": {
+                "observability": {
+                    "atof": {
+                        "enabled": True,
+                        "sinks": (
+                            [{"name": "nemo-fabric-stream", "type": "stream", "url": "http://collector:8080/v1/atof"}]
+                            if configured
+                            else []
+                        ),
+                    }
+                }
+            },
+        }
+    )
+    plan = _streaming_plan(
+        config,
+        {"telemetry": {"providers": {"relay": {"outputs": ["atof"]}}}, "capabilities": {"streaming": True}},
+        streaming=True,
+    )
+    if configured:
+        assert resolve_streaming_method(plan, config) is StreamingMethod.RELAY
+    else:
+        with pytest.raises(FabricRuntimeStartError, match="shared collector"):
+            resolve_streaming_method(plan, config)

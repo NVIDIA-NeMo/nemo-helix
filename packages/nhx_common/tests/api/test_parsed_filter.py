@@ -5,6 +5,7 @@
 
 from typing import Annotated, Optional, Union
 
+import pytest
 from fastapi import Depends, FastAPI
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -351,6 +352,13 @@ class TestMakeFilterDep:
         assert resp.status_code == 400
         assert "bogus" in resp.json()["detail"]
 
+    @pytest.mark.parametrize("field", ["created_by", "updated_by"])
+    def test_principal_base_field_stays_at_entity_root(self, field):
+        client = TestClient(_make_app(SampleFilter))
+        resp = client.get("/items", params={f"filter[{field}]": "alice@example.com"})
+        assert resp.status_code == 200
+        assert resp.json()["operation"] == {field: {"$eq": "alice@example.com"}}
+
     def test_operation_is_full_tree(self):
         """The operation should contain ALL fields — nothing extracted away."""
         client = TestClient(_make_app(SampleFilter))
@@ -579,6 +587,19 @@ class TestNamespaceEndToEnd:
         # ``name`` is a scalar field; ``name.foo`` is not a valid namespace sub-path.
         resp = self._client().get("/items", params={"filter[name.foo]": "x"})
         assert resp.status_code == 400
+
+    def test_bracket_dict_form_translates_per_key(self):
+        # filter[labels][team]=x means "has team=x", not "labels equals {team: x}".
+        resp = self._client().get("/items", params={"filter[labels][team]": "eval"})
+        assert resp.status_code == 200
+        assert resp.json()["operation"] == {"data.labels.team": {"$eq": "eval"}}
+
+    def test_json_dict_form_translates_per_key(self):
+        resp = self._client().get("/items", params={"filter": '{"labels": {"team": "eval", "tier": {"$in": ["1"]}}}'})
+        assert resp.status_code == 200
+        assert resp.json()["operation"] == {
+            "$and": [{"data.labels.team": {"$eq": "eval"}}, {"data.labels.tier": {"$in": ["1"]}}]
+        }
 
 
 class TestStringFilterEndToEnd:

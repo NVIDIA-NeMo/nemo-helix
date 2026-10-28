@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+from nemo_helix_plugin.jobs.spec import StepIngressRule, StepNetwork
 from nhx.common.auth import KUBERNETES_POD_UID_REFERENCE_NAME, AuthContext, reference_delegation_name
 from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
@@ -47,6 +48,7 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    UNSTARTED_PAUSE_MESSAGE,
     KubernetesJobStorageConfig,
     KubernetesObjectMetadata,
     PodStatus,
@@ -276,7 +278,7 @@ def test_schedule_pausable_step_keeps_the_job_when_a_pod_exits_for_a_pause(
     test_step_pending: HelixJobStepWithContext,
     num_nodes: int,
 ):
-    """Exit 75 must not trigger the job-level RestartJob policy, on the leader or the workers."""
+    """Exit 75 must not trigger the job-level TerminateJob policy, on the leader or the workers."""
     step = test_step_pending.model_copy(deep=True)
     step.step_spec.lifecycle = StepLifecycle(pause_deadline_seconds=3600)
     distributed_gpu_execution_provider.resources.num_nodes = num_nodes
@@ -285,7 +287,7 @@ def test_schedule_pausable_step_keeps_the_job_when_a_pod_exits_for_a_pause(
     volcano_job.schedule(distributed_gpu_execution_provider, step)
 
     job_body = volcano_job._custom_v1.create_namespaced_custom_object.call_args.kwargs["body"]  # ty: ignore[possibly-unbound-attribute]
-    assert job_body["spec"]["policies"] == [{"event": "PodFailed", "action": "RestartJob"}]
+    assert job_body["spec"]["policies"] == _END_JOB_ON_POD_FAILURE
     tasks = {task["name"]: task for task in job_body["spec"]["tasks"]}
     leader = tasks["leader"] if num_nodes > 1 else tasks["worker"]
     assert leader["policies"] == [{"event": "TaskCompleted", "action": "CompleteJob"}, pause_policy]
@@ -293,10 +295,47 @@ def test_schedule_pausable_step_keeps_the_job_when_a_pod_exits_for_a_pause(
         assert tasks["worker"]["policies"] == [pause_policy]
 
 
+_END_JOB_ON_POD_FAILURE = [
+    {"event": "PodFailed", "action": "TerminateJob"},
+    {"event": "PodEvicted", "action": "TerminateJob"},
+]
+
+
+@pytest.mark.parametrize("num_nodes", [1, 3])
+def test_schedule_a_failed_or_deleted_pod_ends_the_job(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider,
+    test_step_pending: HelixJobStepWithContext,
+    num_nodes: int,
+):
+    """Like a Kubernetes Job with no retries, a failed pod is not retried. Rerun recovers the job."""
+    distributed_gpu_execution_provider.resources.num_nodes = num_nodes
+
+    volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
+
+    job_body = volcano_job._custom_v1.create_namespaced_custom_object.call_args.kwargs["body"]  # ty: ignore[possibly-unbound-attribute]
+    assert job_body["spec"]["policies"] == _END_JOB_ON_POD_FAILURE
+    task_actions = [policy["action"] for task in job_body["spec"]["tasks"] for policy in task.get("policies", [])]
+    assert "RestartJob" not in task_actions
+
+
+def test_schedule_max_retry_restarts_the_job(
+    volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_pending: HelixJobStepWithContext
+):
+    """A profile that sets max_retry opts in to Volcano restarting the job after a failed pod."""
+    volcano_job._execution_profile_config.max_retry = 2
+
+    volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
+
+    job_body = volcano_job._custom_v1.create_namespaced_custom_object.call_args.kwargs["body"]  # ty: ignore[possibly-unbound-attribute]
+    assert job_body["spec"]["policies"] == [{"event": "PodFailed", "action": "RestartJob"}]
+    assert job_body["spec"]["maxRetry"] == 2
+
+
 def test_schedule_step_without_pause_has_no_pause_policy(
     volcano_job: VolcanoJobBackend, distributed_gpu_execution_provider, test_step_pending: HelixJobStepWithContext
 ):
-    """A step that cannot pause keeps the restart-on-failure behavior for every exit code."""
+    """A step that cannot pause ends the job on any failed exit code."""
     volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending)
 
     job_body = volcano_job._custom_v1.create_namespaced_custom_object.call_args.kwargs["body"]  # ty: ignore[possibly-unbound-attribute]
@@ -944,7 +983,7 @@ def test_schedule_job_volcano_not_installed(
     """Test job scheduling when Volcano is not installed (404 error)."""
 
     # Mock API exception with 404 status (Volcano CRD not found)
-    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[invalid-assignment]
+    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[unresolved-attribute]
 
     # delete_configmap reads first and only deletes if managed by jobs-controller; mock so cleanup proceeds
     volcano_job._core_v1.read_namespaced_config_map.return_value = MagicMock(  # ty: ignore[attr-defined]
@@ -1087,10 +1126,10 @@ def test_sync_job_completed_revokes_pod_uid_workload_delegation(
     revoke_delegation.assert_called_once_with(expected_name)
 
 
-def test_sync_job_failed(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
-    """Test syncing a failed job."""
-    # Mock failed job status
-    mock_job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "test-job"}}
+@pytest.mark.parametrize("phase", ["Failed", "Terminating", "Terminated"])
+def test_sync_job_failed(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext, phase: str):
+    """A job that failed, or that a failed pod ended, is an error with error details, as on Kubernetes."""
+    mock_job = {"status": {"state": {"phase": phase}}, "metadata": {"name": "test-job"}}
     mock_job_list = {"items": [mock_job]}
     volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
     volcano_job._custom_v1.list_namespaced_custom_object.return_value = mock_job_list  # ty: ignore[invalid-assignment]
@@ -1099,6 +1138,7 @@ def test_sync_job_failed(volcano_job: VolcanoJobBackend, test_step_pending: Heli
     job_update = volcano_job.sync(test_step_pending)
 
     assert job_update.status == HelixJobStatus.ERROR
+    assert job_update.error_details == {"message": "Job failed"}
 
 
 def test_sync_job_not_found(volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext):
@@ -1225,7 +1265,7 @@ def test_schedule_with_storage_integration(
         assert "chmod -R 777" in fix_permissions_cmd
 
 
-@pytest.mark.parametrize("status", ["Completed", "Failed"])
+@pytest.mark.parametrize("status", ["Completed", "Failed", "Terminated"])
 def test_cleanup_steps_by_ttl(volcano_job: VolcanoJobBackend, status):
     """Test job cleanup with one active, one recently completed, one harvestable completed."""
 
@@ -1493,7 +1533,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
     volcano_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     # Mock check_step_is_terminal: step1 terminal (True), step2 not terminal (False)
-    def check_step_side_effect(job, step_name, workspace):
+    def check_step_side_effect(job, step_name, workspace, attempt_id=None):
         return step_name == "step1"
 
     volcano_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)  # type: ignore[assignment]
@@ -1560,12 +1600,16 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
 
         # Verify check_step_is_terminal was called for both steps (loop checks all jobs)
         assert volcano_job.check_step_is_terminal.call_count == 2
-        volcano_job.check_step_is_terminal.assert_any_call(job="multi-step-job", step_name="step1", workspace="default")
-        volcano_job.check_step_is_terminal.assert_any_call(job="multi-step-job", step_name="step2", workspace="default")
+        volcano_job.check_step_is_terminal.assert_any_call(
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
+        )
+        volcano_job.check_step_is_terminal.assert_any_call(
+            job="multi-step-job", step_name="step2", workspace="default", attempt_id=None
+        )
 
         # Verify persistent storage cleanup eligibility was checked once for step 1
         volcano_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
-            job="multi-step-job", step_name="step1", workspace="default"
+            job="multi-step-job", step_name="step1", workspace="default", attempt_id=None
         )
 
         # Verify persistent storage cleanup was NOT called
@@ -1812,6 +1856,23 @@ def test_volcano_pausing_completed_is_training_finished(volcano_job, test_step_p
     terminate.assert_not_called()
 
 
+def test_volcano_pausing_terminated_without_pods_is_error(volcano_job, test_step_pausing):
+    """A failed pod ends the job while pausing. With no task container left to read, that is a failed exit."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Terminated"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=[],
+        ),
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+
+
 def test_volcano_pausing_without_a_job_is_paused(volcano_job, test_step_pausing):
     """A step paused before its VolcanoJob exists has nothing to wait for."""
     step = _cooperative_pausing_step(test_step_pausing)
@@ -1825,9 +1886,7 @@ def test_volcano_pausing_without_a_job_is_paused(volcano_job, test_step_pausing)
 def test_volcano_pausing_exit_75_deletes_job(volcano_job, test_step_pausing):
     step = _cooperative_pausing_step(test_step_pausing)
     job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "vj"}}
-    terminated = SimpleNamespace(exit_code=75, finished_at=None)
-    container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=terminated))
-    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Failed"))
+    pod = _task_pod("uid-1", 75)
 
     with (
         patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
@@ -1843,19 +1902,27 @@ def test_volcano_pausing_exit_75_deletes_job(volcano_job, test_step_pausing):
     terminate.assert_called_once_with(job)
 
 
-def _volcano_task_pod(exit_code: int, finished_at: datetime.datetime | None) -> SimpleNamespace:
-    terminated = SimpleNamespace(exit_code=exit_code, finished_at=finished_at)
-    container = SimpleNamespace(name="nemo-job-task", state=SimpleNamespace(terminated=terminated))
-    return SimpleNamespace(status=SimpleNamespace(container_statuses=[container], phase="Failed"))
+def _volcano_task_pod(exit_code: int, finished_at: datetime.datetime | None) -> client.V1Pod:
+    pod = _task_pod("uid-1", exit_code)
+    pod.status.container_statuses[0].state.terminated.finished_at = finished_at
+    return pod
 
 
 def test_volcano_pausing_reads_the_task_while_a_sidecar_keeps_the_job_running(volcano_job, test_step_pausing):
     """A classic sidecar named before the task keeps the pod running and hides exit 75 from Volcano."""
     step = _cooperative_pausing_step(test_step_pausing)
     job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
-    sidecar = SimpleNamespace(name="istio-proxy", state=SimpleNamespace(terminated=None))
-    task = _volcano_task_pod(75, None).status.container_statuses[0]
-    pod = SimpleNamespace(status=SimpleNamespace(container_statuses=[sidecar, task], phase="Running"))
+    sidecar = client.V1ContainerStatus(
+        image="proxy-image",
+        image_id="proxy-image-id",
+        name="istio-proxy",
+        ready=True,
+        restart_count=0,
+        state=client.V1ContainerState(running=client.V1ContainerStateRunning()),
+    )
+    pod = _task_pod("uid-1", 75)
+    pod.status.container_statuses.insert(0, sidecar)
+    pod.status.phase = "Running"
 
     with (
         patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
@@ -1882,6 +1949,57 @@ def test_volcano_pausing_running_job_without_pods_keeps_pausing(volcano_job, tes
 
     assert update.status == HelixJobStatus.PAUSING
     terminate.assert_not_called()
+
+
+def _unscheduled_pod(uid: str) -> client.V1Pod:
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase="Pending"),
+    )
+
+
+def test_volcano_pausing_unscheduled_pods_is_paused_after_the_deadline(
+    volcano_job, mock_jobs_client, test_step_pausing
+):
+    """Pods still waiting for GPUs have nothing to save, so the deadline does not turn the pause into an error."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    job = {"status": {"state": {"phase": "Pending"}, "pending": 2}, "metadata": {"name": "vj"}}
+    pods = {"leader": _unscheduled_pod("uid-leader"), "worker": _unscheduled_pod("uid-worker")}
+    volcano_job._core_v1.read_namespaced_pod.side_effect = lambda namespace, name: pods[name.split("-")[-1]]  # ty: ignore[invalid-assignment]
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=list(pods.values()),
+        ),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    assert update.status_details == {"message": UNSTARTED_PAUSE_MESSAGE}
+    terminate.assert_called_once_with(job)
+    task_updates = {
+        call.kwargs["name"]: call.kwargs["body"] for call in mock_jobs_client.update_attempt_step_task.call_args_list
+    }
+    assert set(task_updates) == {"task-uid-leader", "task-uid-worker"}
+    assert all(body.status == HelixJobStatus.PAUSED for body in task_updates.values())
+
+
+def test_volcano_pausing_pending_job_without_pods_is_paused(volcano_job, test_step_pausing):
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Pending"}}, "metadata": {"name": "vj"}}
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels", return_value=[]),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    terminate.assert_called_once_with(job)
 
 
 def test_volcano_pausing_without_a_job_is_paused_after_the_deadline(volcano_job, test_step_pausing):
@@ -1945,6 +2063,74 @@ def test_volcano_pausing_judges_an_exit_seen_late_by_its_exit_time(
     terminate.assert_called_once_with(job)
 
 
+def _task_pod(uid: str, exit_code: int | None) -> client.V1Pod:
+    """A pod whose task container is running (exit_code None) or exited with exit_code."""
+    state = (
+        client.V1ContainerState(running=client.V1ContainerStateRunning())
+        if exit_code is None
+        else client.V1ContainerState(terminated=client.V1ContainerStateTerminated(exit_code=exit_code))
+    )
+    phase = "Running" if exit_code is None else "Succeeded" if exit_code == 0 else "Failed"
+    container = client.V1ContainerStatus(
+        image="test-image", image_id="test-image-id", name="nemo-job-task", ready=False, restart_count=0, state=state
+    )
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name=f"pod-{uid}", namespace="test-namespace", uid=uid),
+        status=client.V1PodStatus(phase=phase, container_statuses=[container]),
+    )
+
+
+def test_volcano_pausing_exit_gives_each_task_the_pause_outcome(volcano_job, mock_jobs_client, test_step_pausing):
+    """In a multi-node pause the leader exits 75 and a worker can exit 0. Both tasks record the pause."""
+    step = _cooperative_pausing_step(test_step_pausing)
+    job = {"status": {"state": {"phase": "Failed"}}, "metadata": {"name": "vj"}}
+    pods = {"leader": _task_pod("uid-leader", 75), "worker": _task_pod("uid-worker", 0)}
+    volcano_job._core_v1.read_namespaced_pod.side_effect = lambda namespace, name: pods[name.split("-")[-1]]  # ty: ignore[invalid-assignment]
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch(
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels",
+            return_value=list(pods.values()),
+        ),
+        patch.object(volcano_job, "terminate_job"),
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.PAUSED
+    calls = mock_jobs_client.update_attempt_step_task.call_args_list
+    assert all(call.kwargs["attempt"] == step.attempt_id for call in calls)
+    task_updates = {call.kwargs["name"]: call.kwargs["body"] for call in calls}
+    assert set(task_updates) == {"task-uid-leader", "task-uid-worker"}
+    for body in task_updates.values():
+        assert body.status == HelixJobStatus.PAUSED
+        assert body.error_stack == ""
+
+
+def test_volcano_pausing_deadline_fails_each_task(volcano_job, mock_jobs_client, test_step_pausing):
+    """The deadline fails a still-running pod's task as well as the step."""
+    step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
+    job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
+    pod = _task_pod("uid-1", None)
+    volcano_job._core_v1.read_namespaced_pod.return_value = pod  # ty: ignore[invalid-assignment]
+
+    with (
+        patch.object(volcano_job, "get_volcano_job_by_name", return_value=job),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.list_pods_by_labels", return_value=[pod]),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+        patch.object(volcano_job, "terminate_job"),
+    ):
+        update = volcano_job.sync(step)
+
+    assert update.status == HelixJobStatus.ERROR
+    task_update = mock_jobs_client.update_attempt_step_task.call_args.kwargs
+    assert task_update["name"] == "task-uid-1"
+    assert task_update["attempt"] == step.attempt_id
+    assert task_update["body"].status == HelixJobStatus.ERROR
+    assert task_update["body"].error_details == {"message": "Pause deadline exceeded"}
+
+
 def test_volcano_pausing_deadline_returns_error(volcano_job, test_step_pausing):
     step = _cooperative_pausing_step(test_step_pausing, requested_ago_seconds=120, deadline_seconds=30)
     job = {"status": {"state": {"phase": "Running"}}, "metadata": {"name": "vj"}}
@@ -1961,3 +2147,165 @@ def test_volcano_pausing_deadline_returns_error(volcano_job, test_step_pausing):
     assert update.status == HelixJobStatus.ERROR
     assert update.error_details["message"] == "Pause deadline exceeded"
     terminate.assert_called_once_with(job)
+
+
+def _step_with_network(step: HelixJobStepWithContext) -> HelixJobStepWithContext:
+    step = step.model_copy(deep=True)
+    assert step.step_spec is not None
+    step.step_spec.network = StepNetwork(
+        ingress=[StepIngressRule(job_id_label="nemo-rl-job-id", tcp_ports=[8000, 51234])]
+    )
+    return step
+
+
+def test_schedule_creates_network_policy_before_volcano_job_and_hands_it_to_the_job(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    calls = MagicMock()
+    volcano_job._networking_v1 = calls.networking
+    volcano_job._custom_v1 = calls.custom
+    calls.custom.create_namespaced_custom_object.return_value = {"metadata": {"uid": "vcjob-uid"}}
+
+    volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
+
+    order = [
+        c[0]
+        for c in calls.mock_calls
+        if c[0] in ("networking.create_namespaced_network_policy", "custom.create_namespaced_custom_object")
+    ]
+    assert order == ["networking.create_namespaced_network_policy", "custom.create_namespaced_custom_object"]
+    (owner,) = calls.networking.patch_namespaced_network_policy.call_args.kwargs["body"]["metadata"]["ownerReferences"]
+    assert (owner["apiVersion"], owner["kind"], owner["uid"]) == ("batch.volcano.sh/v1alpha1", "Job", "vcjob-uid")
+    assert owner["controller"] is True
+    assert owner["blockOwnerDeletion"] is True
+    calls.networking.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_schedule_removes_network_policy_when_volcano_is_missing(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[unresolved-attribute]
+
+    update = volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
+
+    assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once()
+
+
+@pytest.mark.parametrize("error", [ApiException(status=500), RuntimeError("boom")])
+def test_schedule_removes_network_policy_when_volcano_job_creation_fails(
+    volcano_job: VolcanoJobBackend,
+    distributed_gpu_execution_provider: DistributedGPUExecutionProvider,
+    test_step_pending: HelixJobStepWithContext,
+    error: Exception,
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+    volcano_job._custom_v1.create_namespaced_custom_object.side_effect = error  # ty: ignore[unresolved-attribute]
+
+    with pytest.raises(type(error)):
+        volcano_job.schedule(distributed_gpu_execution_provider, _step_with_network(test_step_pending))
+
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once()
+
+
+def test_finished_volcano_step_deletes_its_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+    ):
+        update = volcano_job.create_step_update(
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase="Completed")
+        )
+
+    assert update.status == HelixJobStatus.COMPLETED
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+# A pod failure or eviction ends the job Terminated, through Terminating while its pods stop.
+@pytest.mark.parametrize("phase", ["Failed", "Terminated"])
+def test_failed_volcano_step_deletes_its_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext, phase: str
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+    ):
+        update = volcano_job.create_step_update(
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase=phase)
+        )
+
+    assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )
+
+
+def test_terminating_volcano_step_keeps_its_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=False),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+    ):
+        update = volcano_job.create_step_update(
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase="Terminating")
+        )
+
+    assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_running_volcano_step_keeps_its_network_policy_when_a_task_errors(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks", return_value=True),
+        patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
+        patch.object(volcano_job, "get_volcano_pod_group_events", return_value=[]),
+    ):
+        update = volcano_job.create_step_update(
+            test_step_pending, _volcano_job_for_step(test_step_pending, phase="Running")
+        )
+
+    assert update.status == HelixJobStatus.ERROR
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_not_called()
+
+
+def test_terminate_volcano_job_deletes_network_policy(
+    volcano_job: VolcanoJobBackend, test_step_pending: HelixJobStepWithContext
+):
+    volcano_job._execution_profile_config.step_network_policies_enabled = True
+    volcano_job._networking_v1 = MagicMock()
+
+    volcano_job.terminate_job(_volcano_job_for_step(test_step_pending))
+
+    volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
+        name=name_for_step(test_step_pending), namespace="test-namespace"
+    )

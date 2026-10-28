@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import functools
+import datetime as dt
 import logging
 import math
 import socket
@@ -15,22 +15,19 @@ from typing import Any
 
 import anyio.from_thread
 from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.client_provider import get_async_nemo_client, get_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.base import EntityConflictError, SyncEntityClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
-from nemo_helix_plugin.workspaces.client import WorkspacesClient
-from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import evaluation_execution_job_name
 from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, EvaluationExecutionSpec, TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
-from nemo_scaled_evals_plugin.projection import jsonable, platform_entities
+from scaled_evals.api import entity_store
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
-from scaled_evals.api.db import pooled_connection
-from scaled_evals.api.repositories.evaluation_repository import DISPATCH_STATE_COLUMNS, EvaluationRepository
+from scaled_evals.api.evaluation_store import DISPATCH_STATE_COLUMNS, EvaluationStore
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.worker import _retry_delay_seconds, evaluation_run_budget_seconds
 
@@ -43,24 +40,17 @@ IMMEDIATE_SUBMIT_TIMEOUT_SECONDS = 10.0
 _pending: set[concurrent.futures.Future[None]] = set()
 
 
-@functools.cache
-def private_workspace() -> str:
-    """Return the workspace only this service can read, creating it on first use.
-
-    Raises:
-        RuntimeError: if someone else created a workspace with that name first.
-
-    """
-    name = settings.entity_store_private_workspace
-    client = WorkspacesClient.from_client(get_nemo_client(as_service=SERVICE_NAME, internal=True))
-    try:
-        client.create_workspace(body=CreateWorkspaceRequest(name=name))
-    except ConflictError:
-        # Its creator is its Admin; a user who claimed the name first could read every input.
-        owner = client.get_workspace(name=name).data().created_by
-        if owner != f"service:{SERVICE_NAME}":
-            raise RuntimeError(f"workspace {name!r} belongs to {owner!r}, not the {SERVICE_NAME} service") from None
-    return name
+def jsonable(value: Any) -> Any:
+    """Return `value` with timestamps made JSON-safe."""
+    if isinstance(value, dt.datetime | dt.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [jsonable(item) for item in value]
+    if value is None or isinstance(value, str | bool | int | float):
+        return value
+    return str(value)
 
 
 class EvaluationSubmitter:
@@ -69,7 +59,7 @@ class EvaluationSubmitter:
     def __init__(self, jobs: AsyncJobsClient, worker_id: str, entities: SyncEntityClient | None = None) -> None:
         self.jobs = jobs
         self.worker_id = worker_id
-        # Without it the Job loads its inputs from Postgres, as before.
+        # Without it the Job loads its inputs from the evaluation itself.
         self.entities = entities
 
     async def submit(self, evaluation_id: str | None = None) -> bool:
@@ -96,6 +86,7 @@ class EvaluationSubmitter:
             evaluation_id=claimed_id,
             execution_number=execution_number,
             runtime=str(current["runtime"]),
+            credentials=dict(current.get("credentials") or {}),
             deadline_seconds=max(
                 1,
                 math.ceil(
@@ -149,25 +140,22 @@ class EvaluationSubmitter:
         return (await self.jobs.create_job(workspace=settings.platform_jobs_workspace, body=request)).data()
 
     def _claim(self, evaluation_id: str | None) -> dict[str, Any] | None:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).claim_next(
-                claim_timeout=TaskBuildWorker.claim_timeout,
-                worker_id=self.worker_id,
-                cluster_slot_limit=settings.control_plane_cluster_run_limit,
-                per_user_slot_limit=settings.control_plane_per_user_run_limit,
-                evaluation_id=evaluation_id,
-            )
+        return EvaluationStore().claim_next(
+            claim_timeout=TaskBuildWorker.claim_timeout,
+            worker_id=self.worker_id,
+            cluster_slot_limit=settings.control_plane_cluster_run_limit,
+            per_user_slot_limit=settings.control_plane_per_user_run_limit,
+            evaluation_id=evaluation_id,
+        )
 
     def _load(self, evaluation_id: str) -> dict[str, Any] | None:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+        return EvaluationStore().load_for_dispatch(evaluation_id)
 
     def _write_inputs(self, evaluation_id: str, execution_number: int, name: str) -> None:
         """Store the execution's immutable launch inputs where its Job reads them."""
         if self.entities is None:
             return
-        with pooled_connection() as conn:
-            row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+        row = EvaluationStore().load_for_dispatch(evaluation_id)
         if row is None:
             raise RuntimeError(f"evaluation not found: {evaluation_id}")
         inputs = {key: value for key, value in row.items() if key not in DISPATCH_STATE_COLUMNS}
@@ -175,7 +163,7 @@ class EvaluationSubmitter:
             self.entities.create(
                 ScaledEvaluationExecution(
                     name=name,
-                    workspace=private_workspace(),
+                    workspace=entity_store.private_workspace(),
                     evaluation_id=evaluation_id,
                     execution_number=execution_number,
                     inputs=jsonable(inputs),
@@ -186,24 +174,17 @@ class EvaluationSubmitter:
             pass
 
     def _record(self, evaluation_id: str, execution_number: int, name: str, uid: str) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).record_dispatch_job(
-                evaluation_id,
-                execution_number=execution_number,
-                name=name,
-                uid=uid,
-            )
+        EvaluationStore().record_dispatch_job(evaluation_id, execution_number=execution_number, name=name, uid=uid)
 
     def _retry(self, evaluation_id: str, execution_number: int) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).schedule_retry(
-                evaluation_id,
-                execution_number=execution_number,
-                failure_code="HelixJobSubmissionError",
-                failure_category="infrastructure",
-                delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
-                expected_dispatch_owner=self.worker_id,
-            )
+        EvaluationStore().schedule_retry(
+            evaluation_id,
+            execution_number=execution_number,
+            failure_code="HelixJobSubmissionError",
+            failure_category="infrastructure",
+            delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
+            expected_dispatch_owner=self.worker_id,
+        )
 
 
 def submit_evaluation_now(evaluation_id: str) -> None:
@@ -229,14 +210,12 @@ def submit_evaluation_now(evaluation_id: str) -> None:
     future.add_done_callback(lambda done: _log_failure(evaluation_id, done))
 
 
-# One Entity Store client per process; one per submission would leak its HTTP pool.
-_api_entities = functools.cache(platform_entities)
-
-
 async def _submit_bounded(evaluation_id: str) -> None:
     async with get_async_nemo_client(as_service=SERVICE_NAME, internal=True) as client:
         submitter = EvaluationSubmitter(
-            AsyncJobsClient.from_client(client), f"{SERVICE_NAME}-api:{socket.gethostname()}", _api_entities()
+            AsyncJobsClient.from_client(client),
+            f"{SERVICE_NAME}-api:{socket.gethostname()}",
+            entity_store.entity_client(),
         )
         async with asyncio.timeout(IMMEDIATE_SUBMIT_TIMEOUT_SECONDS):
             await submitter.submit(evaluation_id)

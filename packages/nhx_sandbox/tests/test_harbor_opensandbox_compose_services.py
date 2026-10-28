@@ -27,7 +27,7 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
-from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver
+from nhx_sandbox.harbor_opensandbox_driver import CommandResult, OpenSandboxDriver
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
@@ -117,14 +117,17 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Server:
 
 
 @pytest.fixture
-def extension(monkeypatch: pytest.MonkeyPatch) -> _Extension:
-    """Route the environment's direct server requests to a fake extension."""
+def extension(monkeypatch: pytest.MonkeyPatch, server: Server) -> _Extension:
+    """Route the environment's direct server requests to a fake extension, and the endpoints route to ``server``."""
     extension = _Extension()
     real_client = httpx.AsyncClient
 
+    def handle(request: httpx.Request) -> httpx.Response:
+        return server.endpoint_route(request) or extension.handle(request)
+
     def client(**kwargs: Any) -> httpx.AsyncClient:
         extension.timeouts.append(kwargs["timeout"])
-        return real_client(transport=httpx.MockTransport(extension.handle), **kwargs)
+        return real_client(transport=httpx.MockTransport(handle), **kwargs)
 
     monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
     return extension
@@ -301,19 +304,23 @@ async def test_start_waits_for_main_then_the_services(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     environment = _environment(_task(tmp_path), server)
-    results = [ExecResult(stdout="", stderr="refused", return_code=7), ExecResult(stdout="ok", return_code=0)]
+    results = [
+        CommandResult(stdout="", stderr="refused", exit_code=7),
+        CommandResult(stdout="ok", stderr="", exit_code=0),
+    ]
     commands: list[str] = []
 
-    async def exec_(command: str, **kwargs: Any) -> ExecResult:
-        # start() also opens up the log directories; only main's readiness check is scripted.
-        if command.startswith("chmod "):
-            return ExecResult(stdout="", stderr="", return_code=0)
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> CommandResult:
+        # start() also opens up the log directories, as root; only main's readiness check is scripted.
+        if command != "curl -sf http://localhost:8000/health":
+            return CommandResult(stdout="0", stderr="", exit_code=0)
         commands.append(command)
-        assert kwargs["user"] == "root"
-        assert kwargs["cwd"] == "/"
+        # Like a Docker healthcheck: the image's own user and WORKDIR, so neither is sent.
+        assert kwargs.get("uid") is None
+        assert kwargs.get("cwd") is None
         return results.pop(0)
 
-    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment._driver, "run", run)
     # The first status is read by the create's readiness wait, the rest by start's own wait.
     extension.statuses = [
         {"failure": None, "not_ready": ["db"]},
@@ -327,15 +334,65 @@ async def test_start_waits_for_main_then_the_services(
     assert extension.statuses == []
 
 
+@pytest.mark.parametrize(
+    ("main", "services_timeout_sec", "expected_sec"),
+    [
+        # main's own timeout carries the wait, whatever the services' says.
+        ({"readiness": {"exec": ["true"], "timeout_sec": 900}}, 660, 900),
+        ({"readiness": {"exec": ["true"]}}, 660, 300),
+        # Without a check on main, the services' timeout does.
+        ({}, 660, 660),
+        ({}, None, 300),
+    ],
+)
+async def test_start_waits_as_long_as_the_spec_allows(
+    tmp_path: Path,
+    server: Server,
+    extension: _Extension,
+    monkeypatch: pytest.MonkeyPatch,
+    main: dict[str, Any],
+    services_timeout_sec: int | None,
+    expected_sec: int,
+) -> None:
+    spec = {**COMPOSE_SERVICES, "main": main}
+    if services_timeout_sec is not None:
+        spec["services_timeout_sec"] = services_timeout_sec
+    environment = _environment(_task(tmp_path), server, compose_services=spec)
+    deadlines: list[float] = []
+
+    async def exec_(command: str, **kwargs: Any) -> ExecResult:
+        """A command that succeeds without running anything."""
+        return ExecResult(stdout="", stderr="", return_code=0)
+
+    async def wait_for_main(command: list[str], deadline: float) -> None:
+        """Record the deadline ``start`` gives the wait for main."""
+        deadlines.append(deadline)
+
+    async def wait_for_services(deadline: float) -> None:
+        """Record the deadline ``start`` gives the wait for the services."""
+        deadlines.append(deadline)
+
+    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment, "_wait_for_main", wait_for_main)
+    monkeypatch.setattr(environment, "_wait_for_services", wait_for_services)
+
+    before = time.monotonic()
+    await environment.start(force_build=False)
+    after = time.monotonic()
+
+    assert deadlines
+    assert all(before + expected_sec <= deadline <= after + expected_sec for deadline in deadlines)
+
+
 async def test_main_readiness_timeout_reports_last_output(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    environment = _environment(_task(tmp_path), server)
+    environment = await _started(_environment(_task(tmp_path), server))
 
-    async def exec_(command: str, **kwargs: Any) -> ExecResult:
-        return ExecResult(stdout="", stderr="connection refused", return_code=7)
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> CommandResult:
+        return CommandResult(stdout="", stderr="connection refused", exit_code=7)
 
-    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment._driver, "run", run)
 
     with pytest.raises(RuntimeError, match="main was not ready.*connection refused"):
         await environment._wait_for_main(["false"], deadline=0)

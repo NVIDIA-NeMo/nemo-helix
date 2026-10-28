@@ -25,6 +25,11 @@ logger = getLogger(__name__)
 
 T = TypeVar("T")
 
+_MULTI_LLM_NIM_IMAGE_NAME = "llm-nim"
+# NIM 2.0.x published the vLLM model-free NIM as ``model-free-nim``; NIM 2.1 renamed it ``vllm-model-free-nim``.
+_SGLANG_MODEL_FREE_NIM_IMAGE_NAMES = frozenset({"sglang-model-free-nim"})
+_MODEL_FREE_NIM_IMAGE_NAMES = frozenset({"model-free-nim", "vllm-model-free-nim"}) | _SGLANG_MODEL_FREE_NIM_IMAGE_NAMES
+
 
 class PaginatedResult(BaseModel, Generic[T]):
     """Generic container for paginated repository results.
@@ -114,13 +119,37 @@ def parse_model_name_revision(
     return parsed_namespace, parsed_name, parsed_revision
 
 
+def _image_basename(image_name: str) -> str:
+    """Last path segment of an image reference, without its tag or digest."""
+    basename = image_name.split("/")[-1]
+    return basename.split("@", 1)[0].split(":", 1)[0]
+
+
 def is_multi_llm_image(image_name: Optional[str]) -> bool:
-    # Default is nvcr.io/nim/nvidia/llm-nim but we support other prefixes, as long as the image ends in `llm-nim`
-    if not image_name:
-        return True
-    multi_llm_name = "llm-nim"
-    split_image_name = image_name.split("/")
-    return split_image_name[-1] == multi_llm_name
+    """Whether the image is the NIM 1.x multi-LLM NIM (any registry, as long as the image is named ``llm-nim``)."""
+    return bool(image_name) and _image_basename(image_name) == _MULTI_LLM_NIM_IMAGE_NAME
+
+
+def is_model_free_nim_image(image_name: Optional[str]) -> bool:
+    """Whether the image is a NIM 2.x model-free NIM, the successor to the multi-LLM NIM.
+
+    Accepts any registry, as long as the image is named ``vllm-model-free-nim``, ``model-free-nim`` or
+    ``sglang-model-free-nim``.
+    """
+    return bool(image_name) and _image_basename(image_name) in _MODEL_FREE_NIM_IMAGE_NAMES
+
+
+def is_sglang_model_free_nim_image(image_name: Optional[str]) -> bool:
+    """Whether the image is the model-free NIM that serves with SGLang rather than vLLM."""
+    return bool(image_name) and _image_basename(image_name) in _SGLANG_MODEL_FREE_NIM_IMAGE_NAMES
+
+
+def is_generic_nim_image(image_name: Optional[str]) -> bool:
+    """Whether the NIM loads whatever weights it is given rather than serving baked-in weights.
+
+    An unset image uses the platform default, which is the model-free NIM.
+    """
+    return not image_name or is_multi_llm_image(image_name) or is_model_free_nim_image(image_name)
 
 
 def get_model_weights_type(
@@ -171,12 +200,12 @@ def get_model_weights_type(
     image_name = executor_cfg.image_name if executor_cfg else None
     model_name = model_spec_cfg.model_name if model_spec_cfg else None
 
-    # If the model is a multi-LLM, we have already ruled out HF weights, so we download from Files service
-    if is_multi_llm_image(image_name) and model_name:
-        logger.debug("Detected Files service weights via multi-LLM: downloading from NeMo Helix Files service")
+    # A multi-LLM or model-free NIM has no weights of its own, so we download from Files service
+    if is_generic_nim_image(image_name) and model_name:
+        logger.debug("Detected Files service weights via generic NIM: downloading from NeMo Helix Files service")
         return ModelWeightsType.FILES_SERVICE
     # Baked container weights are the default assumed case for model-specific NIM images
-    if not is_multi_llm_image(image_name):
+    if not is_generic_nim_image(image_name):
         logger.debug("Detected baked container weights: model-specific NIM image with model_name")
         return ModelWeightsType.BAKED_CONTAINER
 

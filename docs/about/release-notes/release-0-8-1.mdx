@@ -1,0 +1,24 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.8.1 - 2026-10-23"
+description: ""
+---
+NeMo Helix v0.8.1 is a patch release for the 0.8 release line with security updates and fixes for authentication, Fabric validation, and Studio date filters.
+
+## What's fixed
+
+- **OIDC login and token refresh.** Brokered login honors the configured `bearer_token_source`, including providers that use signed ID tokens as API credentials. Brokered CLI token refresh uses the bearer token already selected by the server instead of trying to select it again. See [OIDC Setup](/documentation/access-control/authentication/oidc-setup#selecting-the-api-bearer).
+- **Workflow-only Fabric validation.** Otherwise healthy workflow-only Fabric configurations are no longer rejected for the `no resolution strategy selected` warning. Other preflight problems still block validation, and the same warning still blocks harness configurations.
+- **Studio date filters.** Calendar edits remain draft until **Apply**. Cancelling or dismissing the picker restores the committed range when it is reopened, and applied ranges use UTC day boundaries. Opening the picker no longer changes trace filters or triggers a refetch before **Apply**.
+- **Certificate trust and dependency security.** Container builds update system and Python certificate trust stores and embedded TLS clients. LiteLLM is pinned to `1.95.1` for security fixes while preserving the 0.8 release line's garak version.
+- **RL image hardening.** RL image builds exclude unused Mooncake transfer-engine wheels and clean up wheel-cache references across uv cache versions.
+
+## Upgrade from v0.8.0
+
+When using uv to install or update NeMo Helix, use **uv 0.13.4 or later**. Source-checkout users should refresh their toolchain with Flox, or install the versions reported by `make toolchain-versions` when using the system-toolchain path. See [Setup](/documentation/get-started/setup).
+
+## Known issues
+
+- The sandboxing in GRPO fine-tuning has not undergone security review.

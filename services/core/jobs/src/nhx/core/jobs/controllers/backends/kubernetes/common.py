@@ -23,10 +23,16 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     ImagePullSecret as ImagePullSecret,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesConfigMapVolume as PluginKubernetesConfigMapVolume,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesEmptyDirVolume as KubernetesEmptyDirVolume,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobStorageConfig as PluginKubernetesJobStorageConfig,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesKeyToPath as PluginKubernetesKeyToPath,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesObjectMetadata as KubernetesObjectMetadata,
@@ -35,11 +41,15 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesPersistentVolumeClaim as KubernetesPersistentVolumeClaim,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesSecretVolume as PluginKubernetesSecretVolume,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesVolume as PluginKubernetesVolume,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesVolumeMount as PluginKubernetesVolumeMount,
 )
+from nemo_helix_plugin.jobs.spec import StepIngressRule
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
 from nhx.common.config import get_platform_config
@@ -56,6 +66,7 @@ from nhx.common.jobs.constants import (
     NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
+    NEMO_JOB_UID_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     TERMINAL_EXIT_CODES,
@@ -91,10 +102,11 @@ from nhx.core.jobs.controllers.backends.base import (
     is_workload_identity_token_exchange_enabled,
     resolve_gpu_job_shm_size,
     resolve_task_image,
+    step_ttl_seconds_active,
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -540,6 +552,33 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     return False, 0
 
 
+UNSTARTED_PAUSE_MESSAGE = "Job paused before its task started"
+
+
+def task_never_started(pods: list[V1Pod], *, workload_has_live_pods: bool) -> bool:
+    """Return whether no task container of a step has started, so it has no progress to save.
+
+    A pod waiting to be scheduled, pulling its image, or running init containers has
+    not started its task. When no pod is listed but the workload still reports a live
+    one, the list may have missed it, so the task counts as started until the next read.
+    """
+    if not pods:
+        return not workload_has_live_pods
+    for pod in pods:
+        statuses = pod.status.container_statuses if pod.status is not None else None
+        for status in statuses or []:
+            if status.name != NEMO_JOB_TASK_CONTAINER_NAME:
+                continue
+            state = status.state
+            if state is not None and (state.running is not None or state.terminated is not None):
+                return False
+            if status.last_state is not None and status.last_state.terminated is not None:
+                return False
+            if isinstance(status.restart_count, int) and status.restart_count > 0:
+                return False
+    return True
+
+
 def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
     """Return when the last task container exited.
 
@@ -559,6 +598,21 @@ def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
                 return None
             exit_times.append(finished_at)
     return max(exit_times, default=None)
+
+
+def first_task_image_id(pods: list[V1Pod]) -> str | None:
+    """Return the image id of the first started task container.
+
+    The task container is matched by name. ``container_statuses`` excludes init
+    containers, but it can still hold injected sidecars, and its order is not
+    guaranteed to follow the pod spec.
+    """
+    for pod in pods:
+        statuses = pod.status.container_statuses if pod.status is not None else None
+        for container in statuses or []:
+            if container.name == NEMO_JOB_TASK_CONTAINER_NAME and container.image_id:
+                return container.image_id
+    return None
 
 
 def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tuple[dict[str, Any], dict[str, str], str]:
@@ -597,7 +651,10 @@ def get_pod_details(core_v1: client.CoreV1Api, namespace: str, name: str) -> tup
                         "name": container_status.name,
                         "ready": container_status.ready,
                         "restart_count": container_status.restart_count,
+                        "image_id": container_status.image_id,
                     }
+                    if container_status.name == NEMO_JOB_TASK_CONTAINER_NAME and container_status.image_id:
+                        pod_info["image_digest"] = container_status.image_id
                     if container_status.state and container_status.state.terminated:
                         container_info["terminated"] = {
                             "exit_code": container_status.state.terminated.exit_code,
@@ -769,6 +826,141 @@ def delete_configmap(core_v1: client.CoreV1Api, namespace: str, name: str) -> No
         raise e
 
 
+def _network_policy_ports(rule: StepIngressRule) -> list[client.V1NetworkPolicyPort]:
+    """Expand a rule into one TCP port entry, with no ``endPort``.
+
+    Cilium 1.15 ignores ``endPort`` and admits only ``port``. Overlaps between the discrete
+    list and a span are emitted once.
+    """
+    seen: set[int] = set()
+    ports: list[client.V1NetworkPolicyPort] = []
+    for port in rule.tcp_ports:
+        if port not in seen:
+            seen.add(port)
+            ports.append(client.V1NetworkPolicyPort(protocol="TCP", port=port))
+    for span in rule.tcp_port_ranges:
+        for port in range(span.low, span.high + 1):
+            if port not in seen:
+                seen.add(port)
+                ports.append(client.V1NetworkPolicyPort(protocol="TCP", port=port))
+    return ports
+
+
+def build_step_network_policy(step: HelixJobStepWithContext) -> client.V1NetworkPolicy | None:
+    """Build the ingress NetworkPolicy for a step that declares ``network``, else ``None``.
+
+    The step's pods accept ingress from pods of the same job on any port, and from pods matching each
+    declared rule on that rule's TCP ports. Declared ranges are written as one port each: Cilium 1.15
+    ignores NetworkPolicy ``endPort`` and would admit only the first port of the span. NetworkPolicy
+    allows are additive across policies, so this only isolates the step when no other policy in the
+    namespace selects its pods with a broader allow.
+
+    The Helm chart's ValidatingAdmissionPolicy (``job-step-networkpolicy-vap.yaml``) only admits this exact
+    shape from the controller; keep the two in sync.
+    """
+    network = step.step_spec.network if step.step_spec else None
+    if network is None:
+        return None
+    managed = {JOB_MANAGED_BY_LABEL: JOB_MANAGED_BY_JOBS_CONTROLLER}
+    ingress = [
+        client.V1NetworkPolicyIngressRule(
+            _from=[
+                client.V1NetworkPolicyPeer(
+                    pod_selector=client.V1LabelSelector(match_labels={**managed, JOB_ID_LABEL: step.job})
+                )
+            ]
+        )
+    ]
+    for rule in network.ingress:
+        ingress.append(
+            client.V1NetworkPolicyIngressRule(
+                _from=[
+                    client.V1NetworkPolicyPeer(
+                        pod_selector=client.V1LabelSelector(match_labels={rule.job_id_label: step.job})
+                    )
+                ],
+                ports=_network_policy_ports(rule),
+            )
+        )
+    return client.V1NetworkPolicy(
+        api_version="networking.k8s.io/v1",
+        kind="NetworkPolicy",
+        metadata=client.V1ObjectMeta(name=name_for_step(step), labels=common_labels_for_step(step)),
+        spec=client.V1NetworkPolicySpec(
+            pod_selector=client.V1LabelSelector(
+                match_labels={**managed, JOB_ID_LABEL: step.job, JOB_STEP_ID_LABEL: step.id}
+            ),
+            policy_types=["Ingress"],
+            ingress=ingress,
+        ),
+    )
+
+
+def create_step_network_policy(
+    networking_v1: client.NetworkingV1Api, namespace: str, step: HelixJobStepWithContext
+) -> str | None:
+    """Create the step's ingress NetworkPolicy before its pods exist. Returns its name, or ``None`` if not needed."""
+    policy = build_step_network_policy(step)
+    if policy is None:
+        return None
+    name = policy.metadata.name
+    try:
+        try:
+            networking_v1.create_namespaced_network_policy(namespace=namespace, body=policy)
+        except ApiException as e:
+            if e.status != 409:
+                raise
+            # Recreate rather than replace so the controller needs no `update` permission.
+            networking_v1.delete_namespaced_network_policy(name=name, namespace=namespace)
+            networking_v1.create_namespaced_network_policy(namespace=namespace, body=policy)
+    except ApiException as e:
+        raise FailedToScheduleError(
+            f"Failed to create NetworkPolicy {name} for job step {step.job}/{step.name}: {e}"
+        ) from e
+    logger.info("Created step NetworkPolicy", extra=dict(network_policy=name, job=step.job, step=step.name))
+    return name
+
+
+def adopt_step_network_policy(
+    networking_v1: client.NetworkingV1Api, namespace: str, name: str, owner: client.V1OwnerReference
+) -> None:
+    """Make the workload own the policy so garbage collection removes it with the workload."""
+    owner.controller = True
+    owner.block_owner_deletion = True
+    try:
+        networking_v1.patch_namespaced_network_policy(
+            name=name,
+            namespace=namespace,
+            body={"metadata": {"ownerReferences": [client.ApiClient().sanitize_for_serialization(owner)]}},
+        )
+    except ApiException:
+        logger.warning(
+            "Failed to set owner on step NetworkPolicy; it will be deleted on termination",
+            extra=dict(network_policy=name, namespace=namespace),
+            exc_info=True,
+        )
+
+
+def delete_step_network_policy(networking_v1: client.NetworkingV1Api, namespace: str, name: str) -> None:
+    """Delete the step's NetworkPolicy.
+
+    Admission rejects deleting a policy the jobs controller does not manage, so there is no read-before-delete.
+    """
+    try:
+        networking_v1.delete_namespaced_network_policy(name=name, namespace=namespace)
+        logger.info("Deleted step NetworkPolicy", extra=dict(network_policy=name, namespace=namespace))
+    except ApiException as e:
+        if e.status == 404:
+            return
+        if e.status == 403:
+            logger.warning(
+                "Skipping NetworkPolicy deletion: not managed by jobs-controller or not permitted",
+                extra=dict(network_policy=name, namespace=namespace),
+            )
+            return
+        raise
+
+
 def load_from_dict(data: dict, klass: str):
     """
     Convert a dictionary containing kubernetes config to a deserialized object
@@ -806,25 +998,12 @@ def load_from_dict(data: dict, klass: str):
 # ``to_k8s()`` is available on nested volumes.
 
 
-class KubernetesKeyToPath(BaseModel):
-    """Kubernetes volume key-to-path mapping."""
-
-    key: str = Field(description="Source key to project from the volume source")
-    path: str = Field(description="Relative file path to write the key to")
-    mode: int | None = Field(default=None, description="Optional file mode for this key")
-
-    def to_k8s(self) -> client.V1KeyToPath:
-        """Convert to Kubernetes V1KeyToPath object."""
-        return client.V1KeyToPath(key=self.key, path=self.path, mode=self.mode)
+def _key_to_path(item: PluginKubernetesKeyToPath) -> client.V1KeyToPath:
+    return client.V1KeyToPath(key=item.key, path=item.path, mode=item.mode)
 
 
-class KubernetesSecretVolume(BaseModel):
+class KubernetesSecretVolume(PluginKubernetesSecretVolume):
     """Kubernetes Secret volume definition."""
-
-    secret_name: str = Field(description="Secret name to mount")
-    default_mode: int | None = Field(default=None, description="Optional default file mode")
-    optional: bool | None = Field(default=None, description="Whether the Secret is optional")
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional Secret keys to project")
 
     def to_k8s(self) -> client.V1SecretVolumeSource:
         """Convert to Kubernetes V1SecretVolumeSource object."""
@@ -832,17 +1011,12 @@ class KubernetesSecretVolume(BaseModel):
             secret_name=self.secret_name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
-class KubernetesConfigMapVolume(BaseModel):
+class KubernetesConfigMapVolume(PluginKubernetesConfigMapVolume):
     """Kubernetes ConfigMap volume definition."""
-
-    name: str = Field(description="ConfigMap name to mount")
-    default_mode: int | None = Field(default=None, description="Optional default file mode")
-    optional: bool | None = Field(default=None, description="Whether the ConfigMap is optional")
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional ConfigMap keys to project")
 
     def to_k8s(self) -> client.V1ConfigMapVolumeSource:
         """Convert to Kubernetes V1ConfigMapVolumeSource object."""
@@ -850,7 +1024,7 @@ class KubernetesConfigMapVolume(BaseModel):
             name=self.name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
@@ -873,16 +1047,6 @@ class KubernetesVolume(PluginKubernetesVolume):
 
     secret: KubernetesSecretVolume | None = Field(default=None, description="Secret Volume configuration")
     config_map: KubernetesConfigMapVolume | None = Field(default=None, description="ConfigMap Volume configuration")
-
-    @model_validator(mode="after")
-    def validate_self(self):
-        """Ensure that exactly one volume source is specified."""
-        sources = [self.persistent_volume_claim, self.empty_dir, self.secret, self.config_map]
-        if sum(source is not None for source in sources) != 1:
-            raise ValueError(
-                "Exactly one of 'persistent_volume_claim', 'empty_dir', 'secret', or 'config_map' must be specified."
-            )
-        return self
 
     def to_k8s(self) -> client.V1Volume:
         """Convert to Kubernetes V1Volume object."""
@@ -1035,9 +1199,36 @@ def cleanup_job_persistent_storage(
         pod_security_context: Same pod security context as workload jobs (runAsUser/fsGroup, etc.) so cleanup
             can remove files on NFS and similar storage where the workload user owns the data.
     """
-    job_storage_subpath = build_job_storage_subpath(workspace, job_id)
-    cleanup_job_name = f"cleanup-{workspace}-{job_id}-{uuid.uuid4().hex[:8]}"[:63].rstrip("-")
+    cleanup_job_name, cleanup_job = _storage_cleanup_job(
+        namespace=namespace,
+        pvc_name=pvc_name,
+        workspace=workspace,
+        job_id=job_id,
+        step_name=step_name,
+        permissions_image=permissions_image,
+        execution_backend=execution_backend,
+        execution_profile=execution_profile,
+        job_metadata=job_metadata,
+        pod_metadata=pod_metadata,
+        pod_security_context=pod_security_context,
+    )
+    try:
+        batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
+        logger.info(
+            "Created persistent storage cleanup job",
+            extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
+        )
+    except ApiException as e:
+        logger.error(
+            "Failed to create persistent storage cleanup job",
+            extra=dict(job=f"{workspace}/{job_id}", error=e),
+            exc_info=True,
+        )
 
+
+def _storage_cleanup_labels(
+    workspace: str, job_id: str, step_name: str, execution_backend: str, execution_profile: str
+) -> dict[str, str]:
     # Use same common labels as regular jobs (app, managed-by, backend, profile) plus cleanup-specific labels
     cleanup_common_labels = copy.deepcopy(KUBE_JOB_SELECTOR_LABELS)
     cleanup_common_labels.update(
@@ -1050,6 +1241,26 @@ def cleanup_job_persistent_storage(
             JOB_EXECUTION_PROFILE_LABEL: execution_profile,
         }
     )
+    return cleanup_common_labels
+
+
+def _storage_cleanup_job(
+    namespace: str,
+    pvc_name: str,
+    workspace: str,
+    job_id: str,
+    step_name: str,
+    permissions_image: str,
+    execution_backend: str,
+    execution_profile: str,
+    job_metadata: KubernetesObjectMetadata,
+    pod_metadata: KubernetesObjectMetadata,
+    pod_security_context: dict[str, Any] | None,
+) -> tuple[str, client.V1Job]:
+    """Build the Job that removes a job's storage directory, and return its name and body."""
+    job_storage_subpath = build_job_storage_subpath(workspace, job_id)
+    cleanup_job_name = f"cleanup-{workspace}-{job_id}-{uuid.uuid4().hex[:8]}"[:63].rstrip("-")
+    cleanup_common_labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
 
     job_meta = build_metadata(cleanup_common_labels, job_metadata)
     job_meta.name = cleanup_job_name  # type: ignore[assignment]
@@ -1087,7 +1298,7 @@ fi
                             ],
                             volume_mounts=[
                                 client.V1VolumeMount(
-                                    name="job-storage",
+                                    name=JOB_STORAGE_VOLUME_NAME,
                                     mount_path="/vol",
                                 )
                             ],
@@ -1095,7 +1306,7 @@ fi
                     ],
                     volumes=[
                         client.V1Volume(
-                            name="job-storage",
+                            name=JOB_STORAGE_VOLUME_NAME,
                             persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                                 claim_name=pvc_name,
                                 read_only=False,
@@ -1106,19 +1317,101 @@ fi
             ),
         ),
     )
+    return cleanup_job_name, cleanup_job
 
-    try:
+
+# Step name label of the cleanup Jobs that reclaim a stopped or deleted job's storage.
+STORAGE_RECLAIM_STEP_NAME = "retention"
+
+
+def reclaim_job_persistent_storage(
+    namespace: str,
+    batch_v1: client.BatchV1Api,
+    pvc_name: str,
+    workspace: str,
+    job_id: str,
+    permissions_image: str,
+    execution_backend: str,
+    execution_profile: str,
+    job_metadata: KubernetesObjectMetadata,
+    pod_metadata: KubernetesObjectMetadata,
+    pod_security_context: dict[str, Any] | None = None,
+) -> bool:
+    """Remove a job's persistent storage with a cleanup Job. Return True once the storage is gone.
+
+    The first call creates the cleanup Job and later calls poll it, so the caller keeps its
+    reclaim record until the Job succeeds. A finished cleanup Job is deleted, so a later
+    reclaim of a job with the same name runs its own. A failed one also raises, and the next
+    call starts a new one.
+    """
+    labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
+    selector = ",".join(f"{key}={value}" for key, value in labels.items())
+    cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
+    # Providers may use the same profile name with different PVCs. A cleanup of one
+    # PVC must not count as completion of another. Inspect the mounted claim rather
+    # than adding a selector label, so existing cleanup Jobs remain discoverable.
+    cleanup_jobs = [
+        cleanup_job
+        for cleanup_job in cleanup_jobs
+        if any(
+            volume.name == JOB_STORAGE_VOLUME_NAME
+            and volume.persistent_volume_claim is not None
+            and volume.persistent_volume_claim.claim_name == pvc_name
+            for volume in cleanup_job.spec.template.spec.volumes or []
+        )
+    ]
+    if not cleanup_jobs:
+        cleanup_job_name, cleanup_job = _storage_cleanup_job(
+            namespace=namespace,
+            pvc_name=pvc_name,
+            workspace=workspace,
+            job_id=job_id,
+            step_name=STORAGE_RECLAIM_STEP_NAME,
+            permissions_image=permissions_image,
+            execution_backend=execution_backend,
+            execution_profile=execution_profile,
+            job_metadata=job_metadata,
+            pod_metadata=pod_metadata,
+            pod_security_context=pod_security_context,
+        )
+        # Finished reclaim Jobs are deleted here. A TTL could delete one before it is seen to
+        # succeed, and the next call would start another.
+        cleanup_job.spec.ttl_seconds_after_finished = None
         batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
         logger.info(
-            "Created persistent storage cleanup job",
+            "Created storage reclaim job",
             extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
         )
-    except ApiException as e:
-        logger.error(
-            "Failed to create persistent storage cleanup job",
-            extra=dict(job=f"{workspace}/{job_id}", error=e),
-            exc_info=True,
-        )
+        return False
+
+    outcomes = [_finished_condition(cleanup_job) for cleanup_job in cleanup_jobs]
+    for cleanup_job, outcome in zip(cleanup_jobs, outcomes, strict=True):
+        if outcome is None:
+            continue
+        try:
+            batch_v1.delete_namespaced_job(
+                name=cleanup_job.metadata.name,
+                namespace=namespace,
+                body=client.V1DeleteOptions(propagation_policy="Background"),
+            )
+        except ApiException as e:
+            if e.status != 404:
+                raise
+    # Another cleanup Job still running could remove storage a new job with the same name wrote.
+    if None in outcomes:
+        return False
+    if "Complete" in outcomes:
+        return True
+    raise JobStorageError(f"Storage reclaim job for {workspace}/{job_id} failed")
+
+
+def _finished_condition(job: client.V1Job) -> str | None:
+    """Return ``Complete`` or ``Failed`` once Kubernetes has finished the Job, else None."""
+    conditions = job.status.conditions if job.status is not None else None
+    for condition in conditions or []:
+        if condition.type in ("Complete", "Failed") and condition.status == "True":
+            return condition.type
+    return None
 
 
 def build_event_field_selector(kind: str, api_version: str, name: str = "") -> str:
@@ -1217,6 +1510,7 @@ def create_pod_template_spec(
                 value_from=client.V1EnvVarSource(field_ref=client.V1ObjectFieldSelector(field_path="metadata.uid")),
             ),
             client.V1EnvVar(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value=DEFAULT_TASK_STORAGE_PATH),
+            *([client.V1EnvVar(name=NEMO_JOB_UID_ENVVAR, value=step.job_id)] if step.job_id else []),
             client.V1EnvVar(
                 name=NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
                 value=get_logs_endpoint_from_fileset(
@@ -1429,7 +1723,7 @@ def create_pod_template_spec(
         "containers": [job_container],
         "volumes": volumes,
         "restart_policy": "Never",
-        "active_deadline_seconds": config.ttl_seconds_active,
+        "active_deadline_seconds": step_ttl_seconds_active(step, config.ttl_seconds_active),
         "tolerations": build_tolerations(config.tolerations, num_gpus=num_gpus),
         "node_selector": config.node_selector or {},
         "affinity": build_affinity(config.affinity),
@@ -1492,10 +1786,11 @@ def update_all_tasks(
             error_details["message"] = f"Pod {pod_status.name} is in error state"
 
         # Upsert the task against the Jobs API.
-        JobsClient.from_client(nemo_client).update_job_step_task(
+        JobsClient.from_client(nemo_client).update_attempt_step_task(
             name=pod_status.task_id,
             workspace=step.workspace,
             job=step.job,
+            attempt=step.attempt_id,
             step=step.name,
             body=HelixJobTaskUpdate(
                 status=status,
@@ -1507,3 +1802,37 @@ def update_all_tasks(
         logger.info(f"updated task '{pod_status.task_id}'")
 
     return has_errors
+
+
+def update_tasks_with_pause_outcome(
+    nemo_client: NemoClient,
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    step: HelixJobStepWithContext,
+    pods: list[V1Pod],
+    status: HelixJobStatus,
+    error_details: dict[str, str],
+) -> None:
+    """Give every task of a pausing step the step's outcome.
+
+    ``update_all_tasks`` maps a pod by its phase, and a pod that exits 75 for a pause ends
+    Failed, which reads as an error. Each pod's details keep its own exit code: in a
+    multi-node pause the leader exits 75 and a worker can exit 0.
+    """
+    for pod in pods:
+        pod_status = map_pod_to_pod_status(pod)
+        pod_details, _, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
+        JobsClient.from_client(nemo_client).update_attempt_step_task(
+            name=pod_status.task_id,
+            workspace=step.workspace,
+            job=step.job,
+            attempt=step.attempt_id,
+            step=step.name,
+            body=HelixJobTaskUpdate(
+                status=status,
+                status_details={"pod": pod_details},
+                error_details=error_details,
+                error_stack=error_stack if status == HelixJobStatus.ERROR else "",
+            ),
+        )
+        logger.info(f"updated task '{pod_status.task_id}'")

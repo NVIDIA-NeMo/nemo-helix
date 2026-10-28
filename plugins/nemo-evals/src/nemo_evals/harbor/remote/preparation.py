@@ -5,7 +5,7 @@
 
 Contract module (M1 story 5). ``ImageBuildPreparer`` is M2 story 0's MVP: ``check`` rejects what a
 Kubernetes run can't take, then one call reads the task revision's image build through ``ImageBuildService``
-(starting or repairing it when needed) and returns ``ready`` or ``failed``, never ``pending``.
+(read-only: it never starts one) and returns ``ready`` or ``failed``, never ``pending``.
 TODO(M3 story 7): store the pending build and poll it instead of failing. Types change only additively,
 and ``FakePreparer`` (tests/conftest.py) changes with them.
 """
@@ -19,16 +19,17 @@ from typing import Literal, Protocol, Self, get_args
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy, ResourceClass
-from nemo_evals.image_builds.models import ImageBuild, ImageBuildRequest
+from nemo_evals.harbor.remote.sandbox_policy import task_resources_violation
+from nemo_evals.image_builds.models import ImageBuild
 from nemo_evals.image_builds.planning import MAIN_SERVICE, VERIFIER_ROLE, ImagePlanError, parse_task_config
 from nemo_evals.image_builds.runner import read_task_archive
-from nemo_evals.image_builds.service import ImageBuildForbiddenError, ImageBuildJobConflictError, ImageBuildService
+from nemo_evals.image_builds.service import ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, PreparedImage
 from nemo_evals.revisions import RevisionNotFoundError
-from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, PermissionDeniedError
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -46,6 +47,7 @@ PreparationErrorCode = Literal[
     "registry_not_allowed",
     "main_dockerfile_missing",
     "dockerfile_missing",
+    "unsupported_compose_build_option",
     # Task shape (M3 story 1)
     "invalid_task_config",
     "shared_verifier_unsupported",
@@ -56,6 +58,7 @@ PreparationErrorCode = Literal[
     "unsupported_gpu_type",
     "gpu_request_exceeds_policy",
     "gpu_unsupported_by_backend",
+    "resources_exceed_policy",
     # Prebuilt images (M3 story 2)
     "image_unavailable",
     # Building (M3 stories 4-5)
@@ -167,7 +170,8 @@ class ImageBuildPreparer:
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
     ) -> PreparationErrorInfo | None:
-        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks.
+        """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks, and tasks whose sandboxes exceed
+        the profile's ceilings.
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
@@ -181,6 +185,8 @@ class ImageBuildPreparer:
                 return PreparationErrorInfo(
                     code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet"
                 )
+            if (violation := task_resources_violation(task_config, policy)) is not None:
+                return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
             archive = await read_task_archive(clients.files, task.spec.source)
         except ImagePlanError as exc:
             return _plan_error(exc)
@@ -204,8 +210,11 @@ class ImageBuildPreparer:
     ) -> TaskPreparation:
         """MVP: one call returns ``ready`` or ``failed``, never ``pending``.
 
+        Reads the revision's newest build for the deployment's default platform and never starts one, so it needs
+        no Builder permission: a task whose newest build isn't ``ready`` fails until someone builds it.
+
         Raises:
-            ImagePreparationUnavailableError: The Jobs service failed while starting or repairing a build.
+            ImagePreparationUnavailableError: Reading the task's builds failed transiently.
         """
         if recorded is not None and recorded.status != "pending":
             return recorded
@@ -215,49 +224,30 @@ class ImageBuildPreparer:
             raise ValueError("PreparationClients.image_builds is required to prepare Harbor task images")
         definition = task.spec
         workspace, _, name = definition.provenance.entity_name.partition("/")
+        revision = definition.provenance.revision_digest
+        # A run takes images for the deployment's default platform: another platform's build, ready or failed,
+        # is no answer.
         try:
-            build = await _current_build(
-                clients.image_builds(workspace), workspace, name, definition.provenance.revision_digest
-            )
-        except (RevisionNotFoundError, UnsupportedTaskKindError) as exc:
-            return _failed("invalid_task_config", str(exc))
-        except ImagePlanError as exc:
-            return TaskPreparation(status="failed", error=_plan_error(exc))
-        except (ImageBuildForbiddenError, PermissionDeniedError) as exc:
-            return _failed("image_unavailable", f"could not start an image build: {exc}")
-        except ImageBuildJobConflictError as exc:
-            return _failed("image_unavailable", f"could not start an image build: {exc}")
-        except NemoHTTPError as exc:
-            raise ImagePreparationUnavailableError(f"could not start an image build for task {task.id}: {exc}") from exc
-        if build is None:
+            build = await clients.image_builds(workspace).newest_build(workspace, name, revision)
+        except NemoEntityNotFoundError:
             return _failed("invalid_task_config", f"task {definition.provenance.entity_name} no longer exists")
+        except RevisionNotFoundError as exc:
+            return _failed("invalid_task_config", str(exc))
+        except PermissionDeniedError as exc:
+            return _failed("image_unavailable", f"could not read the image builds: {exc}")
+        except NemoHTTPError as exc:
+            raise ImagePreparationUnavailableError(f"could not read the image builds of task {task.id}: {exc}") from exc
+        if build is None:
+            return _failed(
+                "image_unavailable",
+                f"{definition.provenance.entity_name}#{revision} has no image build; build it first "
+                "(`nemo evals runs submit` builds and waits)",
+            )
         return _from_build(build, definition)
 
 
 prepare_task_images = ImageBuildPreparer()
 """The deployment's preparer."""
-
-
-async def _current_build(builds: ImageBuildService, workspace: str, name: str, revision: str) -> ImageBuild | None:
-    """The revision's newest build, after ``request_build`` starts or repairs it; None when the task is gone.
-
-    A ready or failed build is returned as is, so a broken task fails here instead of starting attempt after
-    attempt. Only a missing, pending or running build goes through ``request_build``: that starts the first
-    attempt, recreates a lost Job, or replaces a build whose Job ended without a result. ``request_build``
-    checks build permission first, so a caller without it still learns that someone else's build is running.
-    """
-    page = await builds.list_builds(workspace, name, revision, page_size=1)
-    if page is None:
-        return None
-    newest = page.data[0] if page.data else None
-    if newest is not None and newest.status in ("ready", "failed"):
-        return newest
-    try:
-        return await builds.request_build(workspace, name, revision, ImageBuildRequest())
-    except ImageBuildForbiddenError:
-        if newest is None:
-            raise
-        return newest
 
 
 def _from_build(build: ImageBuild, definition: ResolvedHarborTaskDefinition) -> TaskPreparation:

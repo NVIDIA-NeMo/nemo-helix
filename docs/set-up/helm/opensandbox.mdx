@@ -18,7 +18,7 @@ This page is the **shared-kernel** path: sandbox pods use the cluster default OC
 
 OpenSandbox `[secure_runtime]` is **server-global**. One OpenSandbox server cannot mix shared-kernel and Kata, so point the platform at **one** Service DNS. The cluster keeps its default OCI runtime for every other workload.
 
-Upstream Helm, TOML, and SDK documentation: [Kubernetes deployment](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/kubernetes/deployment.md), [configuration](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/getting-started/configuration.md), [server configuration reference](https://github.com/opensandbox-group/OpenSandbox/blob/main/server/configuration.md).
+Upstream Helm, TOML, and SDK documentation: [Kubernetes deployment](https://github.com/opensandbox-group/OpenSandbox/blob/server/v0.2.1/docs/kubernetes/deployment.md), [configuration](https://github.com/opensandbox-group/OpenSandbox/blob/server/v0.2.1/docs/getting-started/configuration.md), [server configuration reference](https://github.com/opensandbox-group/OpenSandbox/blob/server/v0.2.1/server/configuration.md).
 
 ## Prerequisites
 
@@ -100,6 +100,8 @@ opensandbox:
 ```
 
 When `sandboxClusterCapable` is true, Kubernetes and Volcano job pods receive `OPEN_SANDBOX_DOMAIN` and a Secret-backed `OPEN_SANDBOX_API_KEY`. The chart still does not create OpenSandbox Deployments.
+
+These values let sandboxed GRPO run. Kata adds kernel isolation. The NetworkPolicy values lock down the sandbox's cluster access when the cluster CNI enforces NetworkPolicy, and they are not required for the job to start. A CNI that only stores the policies leaves that access open. See [Secure Sandboxed GRPO](/documentation/kubernetes-deployment/setup/helm/sandboxed-grpo).
 
 ## Verify
 

@@ -9,9 +9,9 @@ import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getAgentsListAgentsQueryKey,
-  useAgentsCreateAgent,
+  useAgentsRegisterAgent,
 } from '@nemo/sdk/generated/agents/agents';
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import { loadSampleAgentConfig } from '@studio/api/agents/loadSampleAgentConfig';
 import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
@@ -78,7 +78,7 @@ const CreateExampleAgentModalInner: FC<CreateExampleAgentModalProps> = ({
     error: createError,
     isPending,
     reset: resetMutation,
-  } = useAgentsCreateAgent({
+  } = useAgentsRegisterAgent({
     mutation: {
       onSuccess: (agent) => {
         toast.success(`Agent "${agent.name}" created`);
@@ -148,7 +148,7 @@ const CreateExampleAgentModalInner: FC<CreateExampleAgentModalProps> = ({
   const onSubmit: SubmitHandler<ExampleAgentFormData> = async (formData) => {
     const example = getSampleAgent(formData.exampleKey);
     setLoadError(undefined);
-    let config: CreateAgentRequestConfig;
+    let config: RegisterAgentRequestConfig;
     try {
       config = await loadSampleAgentConfig(example.agentConfigPath, formData.modelName, workspace);
     } catch (err) {
@@ -161,7 +161,7 @@ const CreateExampleAgentModalInner: FC<CreateExampleAgentModalProps> = ({
         data: {
           name: buildSampleAgentName(example.namePrefix),
           // The config is the single source of truth for the blurb; the registry no
-          // longer carries a copy that could drift from the shipped agent.yml.
+          // longer carries a copy that could drift from the shipped agent.yaml.
           description: typeof config.description === 'string' ? config.description : '',
           config,
           // Omitted for NAT samples (API defaults to nat-workflow-v1); set for

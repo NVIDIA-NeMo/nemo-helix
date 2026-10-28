@@ -625,7 +625,9 @@ class DatabaseConfig(EnvironmentFirstSettings):
     user: str | None = Field(default=None, description="Optional database username")
     password: str | None = Field(default=None, description="Optional database password")
     connections_limit: int = Field(
-        default=10, description="Maximum number of connections in the database connection pool"
+        default=10,
+        description="Number of connections kept open in the PostgreSQL connection pool. Bursts beyond this open "
+        "short-lived overflow connections (up to SQLAlchemy's default of 10 more).",
     )
     connect_timeout_seconds: int = Field(
         default=30,

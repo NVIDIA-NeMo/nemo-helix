@@ -41,6 +41,8 @@ ARG TAG=latest
 
 #docker-intake:
     FROM root-distroless-base-3-11 AS docker
+    RUN ["python", "-c", "import shutil; shutil.rmtree('/etc/ssl/certs')"]
+    COPY --from=build /etc/ssl/certs/ /etc/ssl/certs/
 
     # Update PYTHONPATH to ensure imports can be resolved
     ENV PYTHONPATH=/app:/app/services/intake:/app/packages/nhx_common/src

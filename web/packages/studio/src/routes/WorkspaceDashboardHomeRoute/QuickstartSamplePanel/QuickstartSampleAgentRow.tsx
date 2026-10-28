@@ -3,9 +3,9 @@
 
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
+import { ChevronRight } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { QuickstartSampleAgent } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/quickstartSampleContent';
-import { ChevronRight } from 'lucide-react';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 

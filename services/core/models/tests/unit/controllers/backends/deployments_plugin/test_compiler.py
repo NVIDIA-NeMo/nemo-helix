@@ -1,21 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import shlex
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from nemo_deployments_plugin.entities import SecretRef
+from nemo_deployments_plugin.entities import Container, SecretRef
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.models.types import K8sNIMOperatorConfig
+from nemo_helix_plugin.models.types import K8sNIMOperatorConfig, ToolCallConfig
 from nhx.common.config import Runtime
 from nhx.core.models.app import ModelWeightsType
 from nhx.core.models.controllers.backends.common import DeploymentConfigView
 from nhx.core.models.controllers.backends.deployments_plugin.compiler import _busybox_image, compile_model_deployment
 from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
-from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import pod_security_context_for_engine
+from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import (
+    compile_nim_server_env,
+    pod_security_context_for_engine,
+)
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
 
@@ -34,6 +40,13 @@ def _resolved(engine: str, *, lora: bool = False, runtime: Runtime = Runtime.KUB
         huggingface_model_puller="puller:latest",
         runtime=runtime,
     )
+
+
+_MODEL_SPECIFIC_NIM_1X = "nvcr.io/nim/meta/llama-3.1-8b-instruct"
+# Retriever NIM 2.2.0 retired NIM_MODEL_NAME / NIM_MODEL_PATH and needs nimLegacy: false.
+_RETRIEVER_NIM_2X = "nvcr.io/nim/nvidia/nemotron-3-embed-1b"
+_MODEL_FREE_NIM = "nvcr.io/nim/nvidia/vllm-model-free-nim"
+_SGLANG_MODEL_FREE_NIM = "nvcr.io/nim/nvidia/sglang-model-free-nim"
 
 
 def test_vllm_weighted_chain_has_on_failure_puller_and_always_server() -> None:
@@ -146,10 +159,10 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     assert "nvidia.com/gpu" not in puller.resources.limits
 
 
-def test_nim_defaults_to_the_multi_llm_nim_image() -> None:
+def test_nim_defaults_to_the_model_free_nim_image() -> None:
     compiled = compile_model_deployment(_resolved("nim"), DeploymentsPluginConfig())
     server = compiled.server_config.containers[0]
-    assert server.image == "nvcr.io/nim/nvidia/llm-nim:latest"
+    assert server.image == "nvcr.io/nim/nvidia/vllm-model-free-nim:latest"
 
 
 def test_nim_gpu_resources_without_override() -> None:
@@ -180,12 +193,14 @@ def test_nim_gpu_resources_without_override() -> None:
 
 
 def test_nim_weighted_chain_sets_model_path_env() -> None:
+    resolved = _resolved("nim")
+    resolved.view.image_name = _MODEL_SPECIFIC_NIM_1X
     secret_ref = SecretRef(workspace="system", name="ngc-api-key")
     with patch(
         "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
         return_value=secret_ref,
     ):
-        compiled = compile_model_deployment(_resolved("nim"), DeploymentsPluginConfig())
+        compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
     assert compiled.volume is not None
     assert compiled.puller_config is not None
     env_items = compiled.server_config.containers[0].env
@@ -193,9 +208,8 @@ def test_nim_weighted_chain_sets_model_path_env() -> None:
     assert env["NIM_MODEL_NAME"] == "/model-store"
     assert env["NIM_MODEL_PATH"] == "/model-store"
     assert env["NIM_SERVED_MODEL_NAME"] == "org/model"
-    # The default image is the multi-LLM NIM, which takes no fine-tuned-model env.
-    assert "NIM_FT_MODEL" not in env
-    assert "NIM_CUSTOM_MODEL" not in env
+    assert env["NIM_FT_MODEL"] == "/model-store"
+    assert env["NIM_CUSTOM_MODEL"] == "/model-store"
     ngc_env = next(item for item in env_items if item.name == "NGC_API_KEY")
     assert ngc_env.value is None
     assert ngc_env.secret_ref == secret_ref
@@ -207,6 +221,7 @@ def test_nim_non_legacy_weighted_chain_uses_engine_model_env() -> None:
     # validation when either name is present, so the two cannot be emitted
     # alongside their replacements.
     resolved = _resolved("nim")
+    resolved.view.image_name = _RETRIEVER_NIM_2X
     resolved.view.override_config = {"nimLegacy": False}
     with patch(
         "nhx.core.models.controllers.backends.deployments_plugin.compiler.platform_ngc_secret_ref",
@@ -231,7 +246,7 @@ def test_nim_non_legacy_weighted_chain_uses_engine_model_env() -> None:
 )
 def test_nim_additional_envs_path_overrides_weights_dir_only(runtime: Runtime, path_env: dict[str, str]) -> None:
     resolved = _resolved("nim", runtime=runtime)
-    resolved.view.image_name = "nvcr.io/nim/meta/llama-3.1-8b-instruct"
+    resolved.view.image_name = _RETRIEVER_NIM_2X
     resolved.view.override_config = {"nimLegacy": False}
     resolved.view.additional_envs = path_env
     with patch(
@@ -265,7 +280,7 @@ def test_nim_baked_engine_model_name_falls_back_to_model_entity() -> None:
             spec=None,
             trust_remote_code=False,
         ),
-        view=DeploymentConfigView(override_config={"nimLegacy": False}),
+        view=DeploymentConfigView(image_name=_RETRIEVER_NIM_2X, override_config={"nimLegacy": False}),
         weights_type=ModelWeightsType.BAKED_CONTAINER,
         model_namespace=None,
         model_name=None,
@@ -341,8 +356,9 @@ def test_nim_multi_llm_weighted_omits_ft_model_env() -> None:
     assert env["NIM_SERVED_MODEL_NAME"] == "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"
 
 
-def test_nim_tool_call_plugin_adds_init_containers_and_env() -> None:
-    resolved = _resolved("nim")
+@pytest.mark.parametrize("engine", ["nim", "vllm"])
+def test_tool_call_plugin_mount_reaches_engine_config(engine: str) -> None:
+    resolved = _resolved(engine)
     resolved = ResolvedPluginDeployment(
         deployment=resolved.deployment,
         config=resolved.config,
@@ -350,10 +366,11 @@ def test_nim_tool_call_plugin_adds_init_containers_and_env() -> None:
         view=DeploymentConfigView(
             model_namespace="org",
             model_name="model",
-            tool_call_config=SimpleNamespace(
+            image_name="nvcr.io/nim/nvidia/llm-nim",
+            tool_call_config=ToolCallConfig(
                 tool_call_plugin="test-ws/my-plugin-fileset",
-                tool_call_parser=None,
-                auto_tool_choice=None,
+                tool_call_parser="custom",
+                auto_tool_choice=True,
             ),
         ),
         weights_type=resolved.weights_type,
@@ -371,8 +388,189 @@ def test_nim_tool_call_plugin_adds_init_containers_and_env() -> None:
     pull_env = {item.name: item.value for item in pull.env}
     assert pull_env["HF_TOKEN"] == "service:models"
     assert pull_env["HF_ENDPOINT"] == resolved.files_hf_url
-    server_env = {item.name: item.value for item in compiled.server_config.containers[0].env}
-    assert server_env["NIM_TOOL_PARSER_PLUGIN"] == "/model-store/plugin/plugin.py"
+    server = compiled.server_config.containers[0]
+    if engine == "nim":
+        server_env = {item.name: item.value for item in server.env}
+        assert server_env["NIM_TOOL_PARSER_PLUGIN"] == "/model-store/plugin/plugin.py"
+    else:
+        assert server.args[server.args.index("--tool-parser-plugin") + 1] == "/model-store/plugin/plugin.py"
+        assert server.args[server.args.index("--tool-call-parser") + 1] == "custom"
+        assert "--enable-auto-tool-choice" in server.args
+        assert "test-ws/my-plugin-fileset" not in server.args
+
+
+def _model_free_resolved() -> ResolvedPluginDeployment:
+    resolved = _resolved("nim")
+    resolved.view.image_name = _MODEL_FREE_NIM
+    return resolved
+
+
+def _env_dict(container: Container) -> dict[str, str]:
+    return {item.name: item.value for item in container.env if item.value is not None}
+
+
+# An unset image uses the platform default, the model-free NIM.
+@pytest.mark.parametrize(
+    "image_name",
+    [
+        None,
+        "nvcr.io/nim/nvidia/vllm-model-free-nim",
+        "nvcr.io/nim/nvidia/model-free-nim",
+        "mirror.example.com/model-free-nim",
+        _SGLANG_MODEL_FREE_NIM,
+    ],
+)
+@pytest.mark.parametrize("override_config", [None, {"nimLegacy": False}])
+def test_nim_model_free_weighted_chain_sets_only_the_env_it_reads(
+    image_name: str | None, override_config: dict | None
+) -> None:
+    # The model-free NIM reads NIM_MODEL_PATH whatever nimLegacy says; NIM_ENGINE_* and the
+    # model-specific override pair (NIM_FT_MODEL / NIM_CUSTOM_MODEL) would be ignored.
+    resolved = _resolved("nim")
+    resolved.view.image_name = image_name
+    resolved.view.override_config = override_config
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert env["NIM_MODEL_PATH"] == "/model-store"
+    assert env["NIM_SERVED_MODEL_NAME"] == "org/model"
+    for unread in (
+        "NIM_MODEL_NAME",
+        "NIM_FT_MODEL",
+        "NIM_CUSTOM_MODEL",
+        "NIM_ENGINE_MODEL_PATH",
+        "NIM_ENGINE_MODEL_NAME",
+        "NIM_PASSTHROUGH_ARGS",
+    ):
+        assert unread not in env
+
+
+def test_nim_model_free_trust_remote_code_sets_only_trust_custom_code() -> None:
+    resolved = replace(
+        _model_free_resolved(),
+        model_entity=SimpleNamespace(workspace="default", name="model", spec=None, trust_remote_code=True),
+    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert env["NIM_TRUST_CUSTOM_CODE"] == "1"
+    assert "NIM_FORCE_TRUST_REMOTE_CODE" not in env
+
+
+def test_nim_model_free_passes_tool_calling_as_passthrough_args() -> None:
+    resolved = replace(_model_free_resolved(), huggingface_model_puller="nvcr.io/nvidia/model-puller:latest")
+    resolved.view.tool_call_config = ToolCallConfig(
+        tool_call_plugin="test-ws/my-plugin-fileset", tool_call_parser="my_parser", auto_tool_choice=True
+    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert shlex.split(env["NIM_PASSTHROUGH_ARGS"]) == [
+        "--tool-call-parser",
+        "my_parser",
+        "--tool-parser-plugin",
+        "/model-store/plugin/plugin.py",
+        "--enable-auto-tool-choice",
+    ]
+    for unread in ("NIM_TOOL_CALL_PARSER", "NIM_TOOL_PARSER_PLUGIN", "NIM_ENABLE_AUTO_TOOL_CHOICE"):
+        assert unread not in env
+
+
+def test_nim_model_free_deployment_tool_calling_overrides_the_model_entity() -> None:
+    resolved = replace(
+        _model_free_resolved(),
+        model_entity=SimpleNamespace(
+            workspace="default",
+            name="model",
+            spec=SimpleNamespace(
+                chat_template=None,
+                tool_call_config=ToolCallConfig(
+                    tool_call_plugin=None, tool_call_parser="llama3_json", auto_tool_choice=True
+                ),
+            ),
+            trust_remote_code=False,
+        ),
+    )
+    resolved.view.tool_call_config = ToolCallConfig(
+        tool_call_plugin=None, tool_call_parser="hermes", auto_tool_choice=False
+    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert shlex.split(env["NIM_PASSTHROUGH_ARGS"]) == ["--tool-call-parser", "hermes"]
+
+
+def test_nim_model_free_user_passthrough_args_come_last_so_they_win() -> None:
+    resolved = _model_free_resolved()
+    resolved.view.tool_call_config = ToolCallConfig(
+        tool_call_plugin=None, tool_call_parser="hermes", auto_tool_choice=None
+    )
+    resolved.view.additional_envs = {"NIM_PASSTHROUGH_ARGS": "--tool-call-parser llama3_json --max-num-seqs 16"}
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert env["NIM_PASSTHROUGH_ARGS"] == "--tool-call-parser hermes --tool-call-parser llama3_json --max-num-seqs 16"
+
+
+def test_nim_sglang_model_free_omits_flags_sglang_rejects() -> None:
+    resolved = _resolved("nim")
+    resolved.view.image_name = _SGLANG_MODEL_FREE_NIM
+    resolved.view.tool_call_config = ToolCallConfig(
+        tool_call_plugin=None, tool_call_parser="qwen25", auto_tool_choice=True
+    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert shlex.split(env["NIM_PASSTHROUGH_ARGS"]) == ["--tool-call-parser", "qwen25"]
+    assert env["NIM_MODEL_PATH"] == "/model-store"
+
+
+def test_nim_sglang_model_free_rejects_a_tool_parser_plugin() -> None:
+    resolved = replace(_resolved("nim"), huggingface_model_puller="nvcr.io/nvidia/model-puller:latest")
+    resolved.view.image_name = _SGLANG_MODEL_FREE_NIM
+    resolved.view.tool_call_config = ToolCallConfig(
+        tool_call_plugin="test-ws/my-plugin-fileset", tool_call_parser="qwen25", auto_tool_choice=None
+    )
+    with pytest.raises(ValueError, match="SGLang"):
+        compile_model_deployment(resolved, DeploymentsPluginConfig())
+
+
+def test_nim_model_free_writes_the_chat_template_to_a_file(tmp_path: Path) -> None:
+    # The model-free NIM treats any --chat-template value containing "." or "/" as a file path,
+    # so an inline template would fail startup; the template is written to scratch instead.
+    chat_template = "{%- for m in messages %}{{ m['content'] | trim }}\n{%- endfor %}$HOME \"quoted\""
+    resolved = _model_free_resolved()
+    resolved.view.chat_template = chat_template
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    server = compiled.server_config.containers[0]
+    env = _env_dict(server)
+    assert shlex.split(env["NIM_PASSTHROUGH_ARGS"]) == ["--chat-template", "/scratch/chat_template.jinja"]
+    assert "NIM_CHAT_TEMPLATE" not in env
+    assert compiled.scratch_volume is not None
+    assert any(mount.mount_path == "/scratch" for mount in server.volume_mounts)
+
+    writer = next(c for c in compiled.server_config.init_containers if c.name == "chat-template-write")
+    assert writer.volume_mounts[0].mount_path == "/scratch"
+    script = writer.command[2].replace("/scratch", str(tmp_path))
+    subprocess.run([*writer.command[:2], script], env=_env_dict(writer), check=True)
+    assert (tmp_path / "chat_template.jinja").read_text() == chat_template
+
+
+def test_nim_model_free_chat_template_requires_a_path() -> None:
+    resolved = _model_free_resolved()
+    resolved.view.chat_template = "{{ messages }}"
+    with pytest.raises(ValueError, match="chat_template_path"):
+        compile_nim_server_env(resolved, DeploymentsPluginConfig(), weighted=True, tool_call_plugin_path=None)
+
+
+def test_nim_1x_keeps_tool_calling_and_chat_template_env() -> None:
+    resolved = _resolved("nim")
+    resolved.view.image_name = "nvcr.io/nim/nvidia/llm-nim"
+    resolved.view.chat_template = "{{ messages }}"
+    resolved.view.tool_call_config = ToolCallConfig(
+        tool_call_plugin=None, tool_call_parser="hermes", auto_tool_choice=False
+    )
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    env = _env_dict(compiled.server_config.containers[0])
+    assert env["NIM_CHAT_TEMPLATE"] == "{{ messages }}"
+    assert env["NIM_TOOL_CALL_PARSER"] == "hermes"
+    assert env["NIM_ENABLE_AUTO_TOOL_CHOICE"] == "0"
+    assert "NIM_PASSTHROUGH_ARGS" not in env
+    assert not any(c.name == "chat-template-write" for c in compiled.server_config.init_containers)
 
 
 def test_nim_k8s_nim_operator_config_maps_tolerations_and_resources() -> None:

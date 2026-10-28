@@ -7,7 +7,7 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'true');
 });
 
-import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
@@ -20,7 +20,7 @@ import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
-const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
+const INSIGHTS_URL = mockApiUrl(getCompassListInsightsQueryKey, ':workspace');
 
 const renderDetail = () =>
   renderRoute(undefined, {
@@ -65,7 +65,7 @@ describe('Open insights on the agent overview', () => {
 
     renderDetail();
 
-    await screen.findByText(/Insights are filed by the analyst/);
+    await screen.findByText(/Insights are filed by Compass/);
     expect(request).toHaveBeenCalledWith(
       expect.objectContaining({ agent: agentName, status: 'open' })
     );
@@ -100,7 +100,7 @@ describe('Open insights on the agent overview', () => {
 
     renderDetail();
 
-    expect(await screen.findByText(/Insights are filed by the analyst/)).toBeInTheDocument();
+    expect(await screen.findByText(/Insights are filed by Compass/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'View all' })).not.toBeInTheDocument();
   });
 

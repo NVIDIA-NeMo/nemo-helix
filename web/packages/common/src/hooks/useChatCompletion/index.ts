@@ -63,7 +63,12 @@ export const createChatCompletion = async (
 
   let resolvedBaseURL = baseURL;
   if (!resolvedBaseURL && workspace) {
-    resolvedBaseURL = PLATFORM_BASE_URL + getGatewayProxyGetQueryKey(workspace, model, 'v1/')[0];
+    // A LoRA composite `base&adapters/{ws}/{name}` can't go in the URL: auth's route
+    // matcher reads `{name}` as one segment, so the extra slashes 403 the request.
+    // Route on the base model and let the gateway read the adapter from body.model.
+    const routeName = model.split('&adapters/')[0];
+    resolvedBaseURL =
+      PLATFORM_BASE_URL + getGatewayProxyGetQueryKey(workspace, routeName, 'v1/')[0];
   } else if (!resolvedBaseURL) {
     throw new Error('Unable to resolve client base URL');
   }

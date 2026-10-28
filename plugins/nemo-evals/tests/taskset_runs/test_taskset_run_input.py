@@ -20,6 +20,7 @@ from nemo_evals.api.taskset_run_schemas import (
     to_status,
 )
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, HarborRunnerTarget
+from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.runner_targets import runner_to_target
 from nemo_evals.taskset_runs.entities import (
     MemberPhase,
@@ -28,6 +29,7 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from pydantic import ValidationError
 
@@ -36,7 +38,7 @@ from pydantic import ValidationError
 def run_body() -> dict[str, Any]:
     return {
         "spec": {"tasks": "default/sort-suite", "target": {"kind": "harbor"}},
-        "execution": {"sandbox_policy": "harbor-standard"},
+        "execution": {},
     }
 
 
@@ -86,10 +88,15 @@ def test_run_requires_execution(run_body):
 @pytest.mark.parametrize(
     "execution",
     [
-        {},
-        {"sandbox_policy": "harbor-standard", "kind": "docker"},
-        {"sandbox_policy": "harbor-standard", "max_concurrent_task_jobs": 0},
-        {"sandbox_policy": "harbor-standard", "max_failed_tasks": 1},
+        {"sandbox_policy": "harbor-standard"},
+        {"kind": "docker"},
+        {"sandbox": {"profile": ""}},
+        {"sandbox": {"gpus": 1}},
+        {"max_concurrent_task_jobs": 0},
+        {"max_failed_tasks": 1},
+        {"sandbox": {"cpus": 0}},
+        {"sandbox": {"memory_mb": -1}},
+        {"sandbox": {"cpu": 4}},
     ],
 )
 def test_run_preserves_execution_validation(run_body, execution):
@@ -222,9 +229,9 @@ def test_shared_scoring_schema_has_correct_scope(spec_type):
     )
 
 
-def test_run_schema_has_only_the_four_request_fields():
+def test_run_schema_has_only_the_five_request_fields():
     schema = TasksetRunInput.model_json_schema()
-    assert set(schema["properties"]) == {"spec", "execution", "idempotency_key", "timeout_seconds"}
+    assert set(schema["properties"]) == {"spec", "execution", "publication", "idempotency_key", "timeout_seconds"}
     assert set(schema["required"]) == {"spec", "execution"}
     assert schema["additionalProperties"] is False
 
@@ -250,6 +257,15 @@ def test_digest_ignores_key_and_fills_accepted_defaults(run_body, overrides):
     )
 
 
+def test_digest_fills_omitted_sandbox_overrides(run_body):
+    run_body["execution"]["sandbox"] = {"cpus": 4}
+    other = deepcopy(run_body)
+    other["execution"]["sandbox"] = {"cpus": 4, "profile": None}
+    assert request_digest(TasksetRunInput.model_validate(run_body)) == request_digest(
+        TasksetRunInput.model_validate(other)
+    )
+
+
 def test_digest_sorts_nested_dictionary_keys(run_body):
     run_body["spec"]["target"]["env_vars"] = {"LANG": "C", "DEBUG": "1"}
     other = deepcopy(run_body)
@@ -265,10 +281,11 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("spec", "tasks"), "default/sort-suite", "sort-suite"),
         (("spec", "target", "source"), {"name": "oracle"}, {"name": "codex"}),
         (("timeout_seconds",), None, 3600),
-        (("execution", "sandbox_policy"), "harbor-standard", "another-policy"),
+        (("execution", "sandbox"), {"profile": "harbor-standard"}, {"profile": "another-profile"}),
         (("execution", "dispatcher_profile"), "local-k8s", "remote-k8s"),
         (("spec", "target", "artifacts"), ["/a", "/b"], ["/b", "/a"]),
         (("execution", "max_concurrent_task_jobs"), None, 10),
+        (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
     ],
 )
@@ -284,6 +301,24 @@ def test_digest_preserves_meaningful_request_differences(run_body, path, left, r
     assert request_digest(requests[0]) != request_digest(requests[1])
 
 
+def test_spec_publication_is_rejected_with_guidance(run_body):
+    run_body["spec"]["publication"] = {"intake": {"evaluation_id": "e", "agent_name": "a"}}
+    with pytest.raises(ValidationError, match="set publication.intake.experiment"):
+        TasksetRunInput.model_validate(run_body)
+
+
+def test_publication_is_part_of_the_request_identity(run_body):
+    """The same idempotency_key with another Experiment is another request (409), not a replay."""
+    plain = request_digest(TasksetRunInput.model_validate(run_body))
+    digests = {
+        experiment: request_digest(
+            TasksetRunInput.model_validate(run_body | {"publication": {"intake": {"experiment": experiment}}})
+        )
+        for experiment in ("swe", "other")
+    }
+    assert len({plain, *digests.values()}) == 3
+
+
 def test_digest_hashes_the_exact_compact_json_projection(run_body):
     request = TasksetRunInput.model_validate(run_body)
     expected_body = {
@@ -291,7 +326,7 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
             "tasks": "default/sort-suite",
             "target": {
                 "kind": "harbor",
-                "source": {"name": "oracle", "model_name": None},
+                "source": {"name": "oracle", "model": None},
                 "agent_kwargs": {},
                 "env_secrets": {},
                 "env_vars": {},
@@ -312,9 +347,9 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
         },
         "execution": {
             "kind": "harbor-task-jobs",
-            "sandbox_policy": "harbor-standard",
             "dispatcher_profile": None,
             "max_concurrent_task_jobs": None,
+            "sandbox": None,
         },
         "timeout_seconds": None,
     }
@@ -342,6 +377,8 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
         phase=phase,
         result_state=result_state,
         accepted_at=accepted,
+        timeout_seconds=3600,
+        started_at=accepted if populated else None,
         execution_deadline_at=execution,
         finalization_deadline_at=finalization,
         idempotency_key="retry-1" if populated else None,
@@ -362,12 +399,15 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
         "phase": phase,
         "result_state": result_state,
         "accepted_at": accepted,
+        "timeout_seconds": 3600,
+        "started_at": accepted if populated else None,
         "execution_deadline_at": execution,
         "finalization_deadline_at": finalization,
         "idempotency_key": "retry-1" if populated else None,
         "cancel_requested_at": execution if populated else None,
         "error": "failed task" if populated else None,
         "created_by": "user:alice" if populated else None,
+        "progress": None,  # set by GET /runs/{id} only
     }
     wire = json.loads(status.model_dump_json())
     assert wire["accepted_at"] == "2026-10-12T12:00:00Z"
@@ -389,7 +429,8 @@ def test_status_projects_all_domain_fields_without_persistence_details(phase, re
 def test_status_schema_covers_every_run_domain_field():
     domain_fields = set(TasksetRunEntity.model_fields) - TasksetRunEntity.__base_fields__
     assert (
-        domain_fields == (set(TasksetRunStatus.model_fields) - {"run_id", "workspace", "created_by"}) | _INTERNAL_FIELDS
+        domain_fields
+        == (set(TasksetRunStatus.model_fields) - {"run_id", "workspace", "created_by", "progress"}) | _INTERNAL_FIELDS
     )
     assert _INTERNAL_FIELDS == {"plan_ref", "plan_digest", "request_digest"}
 
@@ -407,6 +448,7 @@ def test_status_rejects_unmapped_future_domain_fields():
         plan_digest="a" * 64,
         request_digest="b" * 64,
         accepted_at=now,
+        timeout_seconds=60,
         execution_deadline_at=now,
         finalization_deadline_at=now,
     )
@@ -417,7 +459,7 @@ def test_status_rejects_unmapped_future_domain_fields():
 @pytest.mark.parametrize("phase", list(MemberPhase))
 @pytest.mark.parametrize("with_details", [False, True])
 def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_details):
-    """Task DTOs rename task_job and expose only the five stored public fields."""
+    """Task DTOs rename task_job and expose only the seven stored public fields."""
     from nemo_evals.api.taskset_run_schemas import to_task
 
     member = TasksetRunMemberEntity(
@@ -426,7 +468,13 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         task_index=10,
         phase=phase,
         task_job="run-selected-task-10" if with_details else None,
+        job_status=HelixJobStatus.ACTIVE if with_details else None,
         error="verifier exited 1\nfull diagnostic" if with_details else None,
+        bundle_ref="default/run-selected-task-10#results" if with_details else None,
+        create_sent_at=datetime(2026, 10, 12, tzinfo=timezone.utc) if with_details else None,
+        publication=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="e", trial_count=2)
+        if with_details
+        else None,
     )
     member._parent = "taskset_run-parent"
     member._id = "taskset_run_member-identifier"
@@ -436,5 +484,16 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         "task_index": 10,
         "phase": phase,
         "job": "run-selected-task-10" if with_details else None,
+        "job_status": HelixJobStatus.ACTIVE if with_details else None,
         "error": "verifier exited 1\nfull diagnostic" if with_details else None,
+        "publication": {
+            "status": HelixJobStatus.COMPLETED,
+            "evaluation_id": "e",
+            "trial_count": 2,
+            "evaluator_result_count": 0,
+            "skipped": [],
+            "error": None,
+        }
+        if with_details
+        else None,
     }

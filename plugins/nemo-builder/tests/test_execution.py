@@ -50,7 +50,7 @@ def _spec(name: str | None = "main", *, repository: str | None = "team/app") -> 
 
 def _plan(*specs: BuildSpec, workspace: str = "default") -> BuildPlan:
     build_set = BuildSet(name="demo", revision=2, build_specs=list(specs) or [_spec()])
-    return BuildPlan.resolve(build_set, workspace=workspace)
+    return BuildPlan.resolve(build_set.with_default_platform("linux/amd64"), workspace=workspace)
 
 
 def test_the_deployment_runs_the_execution_backend() -> None:

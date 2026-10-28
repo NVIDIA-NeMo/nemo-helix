@@ -65,15 +65,24 @@ class LocalJobUsageReporter(JobUsageReporter):
 class HelixJobUsageReporter(JobUsageReporter):
     """Best-effort reporter backed by the Jobs status-details endpoint."""
 
-    def __init__(self, *, job_name: str, workspace: str, jobs_client: JobsClient) -> None:
+    def __init__(
+        self,
+        *,
+        job_name: str,
+        workspace: str,
+        jobs_client: JobsClient,
+        attempt_id: str,
+    ) -> None:
         self._job_name = job_name
+        self._attempt_id = attempt_id
         self._workspace = workspace
         self._jobs_client = jobs_client
 
     def _report(self, usage: JobTokenUsage) -> None:
         try:
-            self._jobs_client.update_status_details(
+            self._jobs_client.update_attempt_status_details(
                 self._job_name,
+                self._attempt_id,
                 workspace=self._workspace,
                 body=usage.model_dump(exclude_none=True),
             )

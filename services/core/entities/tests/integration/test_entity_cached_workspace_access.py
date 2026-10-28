@@ -23,7 +23,7 @@ async def test_entity_read_refreshes_stale_workspace_access(client_with_auth: As
 
     try:
         denied = await client_with_auth.get(url)
-        assert denied.status_code == 422
+        assert denied.status_code == 403
 
         # Writing through the repository models a grant committed by another replica.
         await repos["entity"].create_entity(

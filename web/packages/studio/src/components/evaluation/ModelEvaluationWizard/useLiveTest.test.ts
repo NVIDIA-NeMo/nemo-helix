@@ -10,7 +10,6 @@ import {
   type EvaluationFormValues,
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useLiveTest } from '@studio/components/evaluation/ModelEvaluationWizard/useLiveTest';
-import { getModelInferenceGatewayUrl } from '@studio/util/models';
 import { act, renderHook } from '@testing-library/react';
 
 vi.mock('@nemo/sdk/generated/evals/evals-plugin-live-evaluation-route', () => ({
@@ -64,10 +63,8 @@ describe('useLiveTest', () => {
     const [workspace, request, signal] = runLive.mock.calls[0];
     expect(workspace).toBe('ws');
     expect(request.dataset).toEqual([row]);
-    expect(request.target).toEqual({
-      url: getModelInferenceGatewayUrl('ws', 'ws/target-model'),
-      name: 'target-model',
-    });
+    // A ref the server resolves; a URL built here would carry the browser's origin.
+    expect(request.target).toBe('ws/target-model');
     expect(request.prompt_template).toEqual(composeGenerationPrompt(bindings));
     expect(request.field_mapping).toEqual({ input: 'question' });
     expect(request.params).toBeUndefined();

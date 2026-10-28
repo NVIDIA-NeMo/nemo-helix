@@ -49,6 +49,7 @@ def _evaluation_spec() -> EvaluationExecutionSpec:
         execution_number=4,
         runtime="sandbox_k8s",
         deadline_seconds=7200,
+        credentials={"openai": "team-a/openai-key"},
     )
 
 
@@ -98,12 +99,6 @@ def test_specs_and_deterministic_names() -> None:
 
 @pytest.mark.asyncio
 async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "platform_jobs_postgres_password_secret", "scaled-evals-postgres-password")
-    monkeypatch.setattr(
-        settings,
-        "platform_jobs_credentials_encryption_key_secret",
-        "scaled-evals-credentials-encryption-key",
-    )
     monkeypatch.setattr(settings, "platform_jobs_registry_auth_secret", "scaled-evals-registry-auth")
     monkeypatch.setattr(settings, "platform_jobs_opensandbox_api_key_secret", "scaled-evals-opensandbox-api-key")
     build = await TaskImageBuildJob.compile(
@@ -135,8 +130,6 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
     assert {
         item.name: item.from_secret.name if item.from_secret else None for item in build_step.environment or []
     } == {
-        "PGPASSWORD": "scaled-evals-postgres-password",
-        "CREDENTIALS_ENCRYPTION_KEY": "scaled-evals-credentials-encryption-key",
         "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
     }
     assert build_step.config == _build_spec().model_dump(mode="json")
@@ -149,9 +142,8 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
     assert {
         item.name: item.from_secret.name if item.from_secret else None for item in evaluation_step.environment or []
     } == {
-        "PGPASSWORD": "scaled-evals-postgres-password",
-        "CREDENTIALS_ENCRYPTION_KEY": "scaled-evals-credentials-encryption-key",
         "TASK_IMAGE_REGISTRY_AUTH_JSON": "scaled-evals-registry-auth",
+        "SCALED_EVALS_CREDENTIAL_OPENAI": "team-a/openai-key",
     }
     assert evaluation_step.executor.resources.requests.cpu == "50m"
     assert evaluation_step.executor.resources.limits.memory == "1Gi"
@@ -207,7 +199,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
     entities = MagicMock()
     entities.get.return_value.inputs = {"name": "eval"}
-    monkeypatch.setattr(evaluation_job_module, "platform_entities", lambda: entities)
+    monkeypatch.setattr(evaluation_job_module.entity_store, "entity_client", lambda: entities)
     spec = _evaluation_spec().model_copy(update={"inputs_workspace": "ws"})
     EvaluationExecutionJob().run(spec.model_dump())
     assert entities.get.call_args.args[1] == evaluation_execution_job_name("eval_1", 4)
@@ -234,7 +226,7 @@ async def test_benchmark_archive_job_claims_only_its_own_run(monkeypatch: pytest
     assert name != benchmark_archive_job_name("run_1", "fedcba9876543210", 1)
 
     repo = MagicMock()
-    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveRepository", lambda _conn: repo)
+    monkeypatch.setattr(benchmark_archive_job_module, "BenchmarkArchiveStore", lambda: repo)
     dispatcher = MagicMock(claim_timeout=30.0)
     monkeypatch.setattr(benchmark_archive_job_module, "Dispatcher", lambda: dispatcher)
     claimed = {"benchmark_run_id": "run_1", "status": "building", "claim_token": "t"}

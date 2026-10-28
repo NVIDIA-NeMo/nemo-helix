@@ -6,6 +6,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { Trash } from '@nemo/icons/icons';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
@@ -19,7 +20,6 @@ import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
 import { getNewFilesetRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
-import { Trash } from 'lucide-react';
 import { type FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -43,6 +43,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
 }) => {
   const {
     workspace,
+    hasSearchOrFilters,
     dataViewState,
     modalDataset,
     setModalDataset,
@@ -149,8 +150,9 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
             requestStatus: isFetching ? 'loading' : undefined,
           },
           DataViewTableContent: {
-            renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
-              hasFiltersApplied || hasSearchApplied ? (
+            // The hook's flag ignores the seeded default purposes, so an empty table is still "first use".
+            renderEmptyState: () =>
+              hasSearchOrFilters ? (
                 <EntityEmptyState
                   entity="filesets"
                   variant="no-results"

@@ -1,0 +1,106 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Fabric 0.5 Upgrade and Adapter Support"
+description: "Agent migration, telemetry compatibility and adapter installation for NeMo Helix 0.9."
+---
+
+NeMo Helix 0.9 locks Fabric to `0.5.0` and supports the package families
+`nemo-fabric>=0.5.0,<0.6.0` and Harbor `>=0.23,<0.24`.
+
+## Migrate agent registration
+
+`nemo agents create` was renamed to `nemo agents register`, with **no compatibility
+alias**. The old command fails with `No such command 'create'`. Update scripts
+and CI while preserving their arguments; replace Python
+`AgentsResource.create(...)` calls with `AgentsResource.register(...)`.
+
+```bash
+nemo agents register --name my-agent --agent-config ./agent.yaml
+```
+
+For Harbor, keep host and task-side Fabric versions identical. Exact
+`fabric_package` pin mismatches fail preflight; requirement ranges are left to
+the installer, not proven compatible. See
+[Harbor preflight and custom adapters](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#preflight-and-custom-adapters)
+for typed configs, descriptor inspection and `fabric_discovery_paths`.
+
+## Persisted Relay observability v3 to v4
+
+When preparing persisted registered-agent evaluations for Fabric, Harbor or Gym,
+Helix upgrades the known Fabric 0.4 `relay.observability.version: 3` shape to
+version 4 **in memory**. New translations use version 4; stored inputs are not
+rewritten and no bulk data migration is needed for this change.
+
+This recognizes version 3 only, not arbitrary incompatible schemas. Standalone
+`fabric_config` inputs must already validate against the installed Fabric, and
+the host/task version requirement still applies.
+
+## Telemetry routing through gateways
+
+Container deployments and registered-agent Harbor tasks rebase platform URLs
+onto the reachable gateway. Agent jobs similarly route Intake exports through
+their authentication proxy when one is used. The rewrite recognizes route
+paths, regardless of the original hostname:
+
+- Model URLs containing `/apis/inference-gateway/` use the gateway origin.
+- HTTP ATIF and OTLP trace/log/metric endpoints starting with `/apis/intake/`
+  use its scheme and host, retaining the Intake path and query.
+- ATOF endpoints follow the same rule; WebSocket URLs use `ws` for an HTTP
+  gateway and `wss` for HTTPS.
+- Independent collectors without those platform paths, file storage and S3
+  storage are left alone.
+
+Both authoring `telemetry` and translated `relay.observability` exporters are
+recognized; source files are not edited. Harbor's collected Relay files and
+Intake exports are separate delivery paths.
+
+For missing traces, check the **resolved execution config** and connectivity
+from inside the container, then the exporter protocol, workspace/agent name,
+Intake/ClickHouse health and logs. Check independent collectors separately.
+A ready deployment or a saved trial artifact does not prove Intake delivery.
+See [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces).
+
+## Adapter availability is not runtime installation
+
+Install harness runtimes on the platform host for subprocess execution or in
+the task/agent image for container execution—not only on the CLI machine.
+
+| Harness | Installation and release boundary |
+| --- | --- |
+| Mini-SWE-Agent 2.x | `nemo-helix[nemo-agents-plugin-mini-swe-agent]`; see the [lifecycle guide](/documentation/agents/mini-swe-agent). |
+| Pi | Shipped descriptor/image integration; **opt-in, not end-to-end release-gated** in Helix 0.9. Runtime prerequisites below. |
+
+### Pi packaging and prerequisites
+
+`kind: pi` and `kind: nvidia.fabric.pi` select `nvidia.fabric.pi`. The Python
+wheels ship a host-side `pi.fabric-adapter.json` under
+`share/nemo-fabric/adapters/pi/` for contract inspection, **not** the Node runner
+or Pi SDK. There is no `nemo-agents-plugin-pi` Python extra.
+
+For a Pi-selected config, [agent packaging](/documentation/agents/deploy-agents#build-and-publish-agent-images)
+installs Node 22 (Pi requires **Node >=22.19.0**),
+`nemo-fabric-adapters-pi@^0.5.0`, and the `pi-ai`, `pi-coding-agent` and `pi-mcp`
+SDK peers at `^1.0.0` under `@earendil-works`. It links the npm descriptor into
+Fabric discovery and adds Relay CLI 0.9 plus the Relay 0.9.0 Pi extension at
+`/opt/pi-relay-extension`. Subprocess hosts must provision these themselves.
+
+For startup failures, distinguish a readable host descriptor from an installed
+runner; inspect Node/npm and container logs. Relay-enabled execution also needs
+`harnesses.pi.settings.relay_extension_path` to resolve on that host. Unknown
+models require `models.default.extensions.api` matching the endpoint protocol.
+The descriptor declares native streaming, cancellation, updates and service
+capabilities false; the shared Agents API is not a guarantee of those Pi
+capabilities. Translation/template tests are not an end-to-end Pi release gate.
+
+## Release documentation coverage
+
+| Change | Guidance or rationale |
+| --- | --- |
+| Registration removal | [Migration](#migrate-agent-registration). |
+| Typed config, version pins and custom discovery | [Harbor preflight](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#preflight-and-custom-adapters). |
+| Relay compatibility and routing | [v3 to v4](#persisted-relay-observability-v3-to-v4), [gateway routing](#telemetry-routing-through-gateways). |
+| Mini-SWE lifecycle | [Run Mini-SWE-Agent](/documentation/agents/mini-swe-agent). |
+| Pi support boundary | [Prerequisites](#pi-packaging-and-prerequisites). |
+| Removed hidden improvement prototype | No current user documentation required; do not restore obsolete commands. |

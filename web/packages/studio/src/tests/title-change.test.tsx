@@ -18,6 +18,7 @@ const pathParams = {
   [RP.customizationJobName]: customizationJob1.name!,
   [RP.modelNamespace]: entityStorePromptTunedModel1.workspace!,
   [RP.modelName]: entityStorePromptTunedModel1.name!,
+  [RP.adapterName]: 'test-adapter',
   [RP.filesetId]: dataset1.id!,
   [RP.filesetName]: dataset1.name!,
   [RP.filePathEncoded]: '',

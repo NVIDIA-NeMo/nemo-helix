@@ -100,7 +100,14 @@ For complete, runnable bundles, including the judge model and an MCP-backed agen
 `switchyard` tests whether cheaper models can carry some of the agent's traffic. Give it the models
 you accept, most capable first, and the routing strategies to try. For every model pair and routing
 strategy, it creates a Switchyard [virtual model](/documentation/models-and-inference/virtual-models#route-across-models-with-switchyard)
-named `<agent>-<routing-strategy>-<pair-index>` and writes a copy of the agent config that uses it.
+named `<agent>-<digest>` and writes a copy of the agent config that uses it. The digest is a short
+hash of the routing strategy, the pair's models, and the middleware config. An exact rerun reuses
+the same virtual models; changed routing content produces new digest-based names alongside the old
+ones. Combinations whose routing content is unchanged keep their names.
+
+An existing virtual model with a matching name is reused only if its models and middleware config
+match the request. Otherwise, the run fails and asks you to delete the conflicting virtual model
+before rerunning.
 
 ```bash
 nemo agents optimize run-strategy --strategy switchyard --agent my-agent \
@@ -111,7 +118,9 @@ mkdir -p switchyard-results && tar -xzf switchyard.tar.gz -C switchyard-results 
 ```
 
 The results hold one `agent-<virtual-model>.yaml` per combination and `switchyard-result.json`, which
-maps each virtual model to its models and routing config.
+maps each virtual model to its models and routing config. Obtain generated names from
+`switchyard-result.json`, then use the corresponding `agent-<virtual-model>.yaml`; do not construct
+positional names such as `<agent>-<routing-strategy>-<pair-index>` in automation.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -174,7 +183,7 @@ You do not need traces or insights for all optimization strategies, but they can
 [generate Insights](/documentation/agents/traces-and-insights/insights-from-traces) from them:
 
 ```bash
-nemo insights analysis-runs create --agent my-agent --wait
+nemo compass analysis-runs create --agent my-agent --wait
 ```
 
 Each Insight names a recurring problem and the traces that show it, which points to a strategy: a
@@ -183,12 +192,14 @@ prompt problem to `config-tuning` or `prompt-master`, a cost or latency problem 
 ### 2. Generate Candidates
 
 Run a strategy, download its results, and register each candidate config as a new agent. The
-original stays untouched, so it remains your baseline.
+original stays untouched, so it remains your baseline. For Switchyard, pick a virtual model name
+from `switchyard-result.json`. The example below assumes the result contains `my-agent-3f2a9c1e`;
+replace it with the name from your run in both the registration command and evaluation target.
 
 ```bash
-nemo agents create \
-  --name my-agent-random-routing-1 \
-  --agent-config ./switchyard-results/agent-my-agent-random-routing-1.yaml
+nemo agents register \
+  --name my-agent-3f2a9c1e \
+  --agent-config ./switchyard-results/agent-my-agent-3f2a9c1e.yaml
 ```
 
 ### 3. Evaluate the Baseline and Candidates
@@ -197,7 +208,7 @@ Run the same tasks and metrics against every agent with
 [Agent Evaluation](/documentation/evaluate-models/agent-eval).
 
 - **Registered agents.** A Fabric target that names the agent, such as
-  `{"kind": "fabric", "source": {"agent": "my-agent-random-routing-1"}}`, runs the agent fresh for
+  `{"kind": "fabric", "source": {"agent": "my-agent-3f2a9c1e"}}`, runs the agent fresh for
   each task, so you do not need to deploy candidates. See
   [Evaluate with a NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner#evaluate-an-agent-registered-on-the-platform).
 - **Deployments.** To evaluate a running deployment, point an HTTP target at the Agents gateway:

@@ -33,6 +33,9 @@ evals = "nemo_evals.sdk.resources:evaluator_sdk_resources"
 "evals.agent-evaluate" = "nemo_evals.jobs.agent_evaluate:AgentEvalJob"
 "evals.retrieve-eval" = "nemo_evals.jobs.retrieve_eval:RetrieveEvalJob"
 
+[project.entry-points."nemo.inference_middleware"]
+nemo-evals-closed-book = "nemo_evals.closed_book:ClosedBookMiddleware"
+
 [project.entry-points."nemo.controllers"]
 evals-taskset-runs = "nemo_evals.taskset_runs.controller:EvaluatorRunController"
 

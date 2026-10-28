@@ -20,39 +20,23 @@ import type {
   HelixJobResponse,
   HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
-import { Flex, Tag } from '@nvidia/foundations-react-core';
+import { Flex } from '@nvidia/foundations-react-core';
 import {
-  HIDDEN_JOB_SOURCES,
+  getHiddenJobSources,
   JOB_SOURCE,
   SOURCE_OPTIONS,
 } from '@studio/components/dataViews/JobsDataView/constants';
+import {
+  getSourceDisplay,
+  getSourceTitle,
+} from '@studio/components/dataViews/JobsDataView/sourceDisplay';
+import { SourceTag } from '@studio/components/dataViews/JobsDataView/SourceTag';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { iconColorClass } from '@studio/routes/constants';
 import { keepPreviousData } from '@tanstack/react-query';
-import { ChartBar, Cog, LayoutList, Sliders, Sparkles } from 'lucide-react';
-import { ComponentProps, type ReactNode, useRef } from 'react';
-
-const SOURCE_DISPLAY: Record<string, { label: string; icon: ReactNode }> = {
-  [JOB_SOURCE.CUSTOMIZATION]: {
-    label: 'Fine-tuning',
-    icon: <Sliders className={iconColorClass} size={14} />,
-  },
-  [JOB_SOURCE.DATA_DESIGNER]: {
-    label: 'Data Designer',
-    icon: <LayoutList className={iconColorClass} size={14} />,
-  },
-  [JOB_SOURCE.SAFE_SYNTHESIZER]: {
-    label: 'Safe Synthesizer',
-    icon: <Sparkles className={iconColorClass} size={14} />,
-  },
-  [JOB_SOURCE.EVALUATOR_METRICS]: {
-    label: 'Evaluator',
-    icon: <ChartBar className={iconColorClass} size={14} />,
-  },
-};
+import { type ComponentProps, useRef } from 'react';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
 
@@ -70,9 +54,7 @@ export const JobsDataView = () => {
     delete userFilter.source;
   }
 
-  const hiddenJobSources = CUSTOMIZER_ENABLED
-    ? HIDDEN_JOB_SOURCES
-    : [...HIDDEN_JOB_SOURCES, JOB_SOURCE.CUSTOMIZATION];
+  const hiddenJobSources = getHiddenJobSources();
   const sourceFilterOptions = SOURCE_OPTIONS.filter(
     (option) => CUSTOMIZER_ENABLED || option.value !== JOB_SOURCE.CUSTOMIZATION
   );
@@ -127,7 +109,7 @@ export const JobsDataView = () => {
   const dynamicSourceOptions = [...seenSourcesRef.current]
     .filter((source) => !staticSourceValues.has(source) && !hiddenJobSources.includes(source))
     .sort()
-    .map((source) => ({ label: SOURCE_DISPLAY[source]?.label ?? source, value: source }));
+    .map((source) => ({ label: getSourceDisplay(source).label, value: source }));
   const mergedSourceOptions = [...sourceFilterOptions, ...dynamicSourceOptions];
 
   const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['makeColumns'] = ({
@@ -144,12 +126,7 @@ export const JobsDataView = () => {
       meta: {
         // The cell renders a label for the source; without this the OS tooltip falls back
         // to the raw accessor value and shows the API's own word for it instead.
-        title: (cell) => {
-          const value = cell.getValue();
-          return typeof value === 'string' && value
-            ? (SOURCE_DISPLAY[value]?.label ?? value)
-            : undefined;
-        },
+        title: (cell) => getSourceTitle(cell.getValue()),
         filter: {
           type: 'single-select' as const,
           label: 'Source',
@@ -159,22 +136,12 @@ export const JobsDataView = () => {
       cell: ({ row, column: col }) => {
         const sourceValue = row.original.source;
         if (!sourceValue) return '-';
-        const display = SOURCE_DISPLAY[sourceValue];
-        const icon = display?.icon ?? <Cog className={iconColorClass} size={14} />;
-        const label = display?.label ?? sourceValue;
         return (
-          <Tag
-            kind="outline"
-            color="gray"
-            density="compact"
+          <SourceTag
+            source={sourceValue}
             data-no-row-click
             onClick={() => col.setFilterValue(sourceValue)}
-          >
-            <Flex align="center" gap="density-sm">
-              {icon}
-              {label}
-            </Flex>
-          </Tag>
+          />
         );
       },
     }),

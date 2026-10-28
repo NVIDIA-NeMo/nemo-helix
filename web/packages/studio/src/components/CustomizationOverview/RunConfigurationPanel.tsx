@@ -3,12 +3,12 @@
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
+import { Cog } from '@nemo/icons/icons';
 import { Button, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { GrpoRunConfigPairs } from '@studio/components/CustomizationOverview/GrpoRunConfigPairs';
 import type { CustomizationTrainingTelemetry } from '@studio/types/customization';
 import { isGrpoJob, type CustomizationJob } from '@studio/util/customizationBackend';
 import { getBaseModel } from '@studio/util/customizations';
-import { Cog } from 'lucide-react';
 import type { FC } from 'react';
 
 interface Props {

@@ -14,6 +14,7 @@ import httpx
 import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.deployment import DeploymentParams, ToolCallParams
+from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.automodel.adapter import automodel_spec_to_compiler_output
@@ -32,6 +33,7 @@ from nhx.automodel.entities.values import CheckpointSelection, OutputNameType
 from nhx.automodel.images import get_tasks_image, get_training_image
 from nhx.common.entities.utils import get_random_id
 from nhx.common.jobs.exceptions import HelixJobCompilationError
+from nhx.customization_common.schemas.file_io import model_upload_lifecycle
 from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 
 
@@ -173,12 +175,21 @@ def test_compile_training_step_sets_shm_by_finetuning_type(
         training=SFTTraining(peft=peft, learning_rate=1e-4, batch_size=4, micro_batch_size=1, max_seq_length=2048),
         output=_output(output_type=output_type),
     )
-    from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
-
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     executor = step.executor
     assert isinstance(executor, (GPUExecutionProvider, DistributedGPUExecutionProvider))
     assert executor.resources.shm_size == shm_size
+
+
+def test_the_training_step_can_pause_within_the_configured_deadline() -> None:
+    """Pause is rejected for a step without a deadline, so training declares one."""
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.config import config
+
+    step = compile_training_step(_make_job_output(), base_env=[], me=_make_mock_model_entity())
+
+    assert step.lifecycle is not None
+    assert step.lifecycle.pause_deadline_seconds == config.training_pause_deadline_seconds > 0
 
 
 def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
@@ -495,6 +506,7 @@ async def test_platform_job_config_compiler_sft_lora(
     training_step = steps[1]
     training_name = training_step.name if hasattr(training_step, "name") else training_step["name"]
     assert training_name == "training"
+    assert steps[2]["lifecycle"] == model_upload_lifecycle()
     training_cmd = _executor_container(training_step).command
     assert "nhx.automodel.tasks.training" in " ".join(training_cmd)
     download_cmd = _executor_container(steps[0]).command

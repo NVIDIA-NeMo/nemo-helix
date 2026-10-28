@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Paperplane } from '@nemo/icons/icons';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { AgentBlockingInputFrameProps } from '@studio/components/agents/AgentBlockingInput/types';
-import { Send } from 'lucide-react';
 import type { FC } from 'react';
 
 const subduedButtonFocusClassName =
@@ -87,7 +87,7 @@ export const AgentBlockingInputFrame: FC<AgentBlockingInputFrameProps> = ({
           aria-label={submitLabel}
           onClick={() => void onSubmit()}
         >
-          <Send size={16} />
+          <Paperplane size="16" />
         </Button>
       </Flex>
     </Stack>

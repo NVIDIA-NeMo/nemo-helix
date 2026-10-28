@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import (
@@ -255,6 +257,10 @@ class TestImageSources:
         spec = BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "platform": "linux/arm64"})
         assert spec.source == ImageSource(image="ubuntu:24.04")
 
+    def test_a_spec_names_its_platform_as_buildkit_does(self) -> None:
+        spec = BuildSpec.model_validate({"source": {"image": "ubuntu:24.04"}, "platform": "linux/x86_64"})
+        assert spec.platform == "linux/amd64"
+
     def test_a_fileset_request_reads_and_serializes_as_before(self) -> None:
         """Its request digest must not change, or resubmitting an earlier request would conflict."""
         spec = BuildSpec.model_validate({"source": {"fileset": "fs-a"}})
@@ -268,3 +274,12 @@ class TestImageSources:
     def test_an_image_that_is_not_a_reference_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="image reference"):
             BuildSpec.model_validate({"source": {"image": "not a reference"}})
+
+
+@pytest.mark.parametrize("platform", ["linux/x86_64", "linux/x86-64", "Linux/AARCH64", "linux/arm64/v8"])
+def test_the_spec_schema_takes_every_spelling_a_spec_does(platform: str) -> None:
+    """A client validating against the published schema must not refuse what the API accepts."""
+    schema = BuildSpec.model_json_schema()["properties"]["platform"]
+    pattern = next(option["pattern"] for option in schema.get("anyOf", [schema]) if "pattern" in option)
+
+    assert re.fullmatch(pattern, platform)

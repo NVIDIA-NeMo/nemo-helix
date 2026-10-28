@@ -1,11 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from nemo_helix_plugin.integrations import IntegrationsSpec, MlflowIntegration, WandbIntegration
-from nhx.customization_common.integrations import IntegrationRuntimeContext, build_mlflow_config, build_wandb_config
+from nhx.customization_common.integrations import (
+    IntegrationRuntimeContext,
+    build_mlflow_config,
+    build_wandb_config,
+    find_mlflow_run_id,
+)
 from nhx.customization_common.service.context import NHXJobContext
 
 
@@ -208,3 +216,88 @@ class TestBuildWandbConfig:
 
         assert result is not None
         assert result["dir"] == "/var/run/scratch/job/ephemeral/wandb"
+
+
+class TestTrackerRunContinuity:
+    """A resume or rerun continues the job's tracker run instead of starting another."""
+
+    @pytest.fixture
+    def job_with_uid(self, job_ctx: NHXJobContext) -> NHXJobContext:
+        return dataclasses.replace(job_ctx, job_uid="platform-job-abc123")
+
+    def test_wandb_run_id_is_the_job_uid(self, job_with_uid: NHXJobContext, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("WANDB_API_KEY", "test-api-key")
+
+        config = build_wandb_config(_runtime_ctx(job_with_uid, wandb=WandbIntegration(project="p")))
+
+        assert config is not None
+        assert config["id"] == "platform-job-abc123"
+        assert config["resume"] == "allow"
+
+    def test_wandb_without_a_job_uid_starts_a_new_run(
+        self, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WANDB_API_KEY", "test-api-key")
+
+        config = build_wandb_config(_runtime_ctx(job_ctx, wandb=WandbIntegration(project="p")))
+
+        assert config is not None
+        assert "id" not in config and "resume" not in config
+
+    def test_mlflow_tags_the_job_uid_over_user_tags(self, job_with_uid: NHXJobContext) -> None:
+        mlflow = MlflowIntegration(tracking_uri="http://mlflow", tags={"job_uid": "from-user"})
+
+        config = build_mlflow_config(_runtime_ctx(job_with_uid, mlflow=mlflow))
+
+        assert config is not None
+        assert config["tags"]["job_uid"] == "platform-job-abc123"
+
+    def test_find_mlflow_run_id_returns_the_newest_tagged_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        searches: list[dict[str, Any]] = []
+
+        class _Client:
+            def __init__(self, tracking_uri: str) -> None:
+                assert tracking_uri == "http://mlflow"
+
+            def get_experiment_by_name(self, name: str) -> SimpleNamespace:
+                return SimpleNamespace(experiment_id=f"id-of-{name}")
+
+            def search_runs(self, experiment_ids: list[str], **kwargs: Any) -> list[SimpleNamespace]:
+                searches.append({"experiment_ids": experiment_ids, **kwargs})
+                return [SimpleNamespace(info=SimpleNamespace(run_id="run-1"))]
+
+        monkeypatch.setattr("mlflow.tracking.MlflowClient", _Client)
+
+        run_id = find_mlflow_run_id(
+            {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "platform-job-abc123"}}
+        )
+
+        assert run_id == "run-1"
+        assert searches[0]["experiment_ids"] == ["id-of-exp"]
+        assert searches[0]["filter_string"] == "tags.job_uid = 'platform-job-abc123'"
+        assert searches[0]["max_results"] == 1
+
+    @pytest.mark.parametrize(
+        "config",
+        [None, {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {}}],
+        ids=["mlflow-off", "no-job-uid"],
+    )
+    def test_find_mlflow_run_id_does_not_search_without_a_job_uid(
+        self, config: dict[str, Any] | None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail(*_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("MLflow should not be called")
+
+        monkeypatch.setattr("mlflow.tracking.MlflowClient", fail)
+
+        assert find_mlflow_run_id(config) is None
+
+    def test_find_mlflow_run_id_starts_a_new_run_when_the_lookup_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Client:
+            def __init__(self, tracking_uri: str) -> None:
+                raise ConnectionError("tracking server unavailable")
+
+        monkeypatch.setattr("mlflow.tracking.MlflowClient", _Client)
+
+        config = {"tracking_uri": "http://mlflow", "experiment_name": "exp", "tags": {"job_uid": "platform-job-abc123"}}
+        assert find_mlflow_run_id(config) is None

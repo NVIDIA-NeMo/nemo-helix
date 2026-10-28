@@ -9,7 +9,9 @@ accepted — the container pipeline expects a real fileset to download from.
 
 from __future__ import annotations
 
-from nhx.customization_common.contributor.transform import generated_output_name
+import re
+
+from nhx.customization_common.contributor.transform import generated_output_name, require_output_fileset_name
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
@@ -23,6 +25,18 @@ from nhx.rl.schemas import OutputResponse, RlJobOutput
 
 from nemo_rl_plugin.environment import check_environment_package
 from nemo_rl_plugin.schema import OutputRequest, RlJobInput
+
+
+def _resolved_output_name(requested: str | None, model: str, dataset: str, workspace: str) -> str:
+    """Use the requested name, or a generated fileset name with repeated hyphens collapsed.
+
+    An explicit name is validated as given. Only the generated path is normalized, because
+    joining two slugified names can produce ``--`` when one of them contains a character
+    slugify turns into a hyphen.
+    """
+    if requested is None:
+        requested = re.sub(r"-{2,}", "-", generated_output_name(model, dataset, workspace))
+    return require_output_fileset_name(requested)
 
 
 def _infer_output_type(input_spec: RlJobInput) -> OutputNameType:
@@ -65,7 +79,7 @@ async def transform_input_to_output(
         )
 
     output_request = input_spec.output or OutputRequest()
-    out_name = output_request.name or generated_output_name(input_spec.model, input_spec.dataset, workspace)
+    out_name = _resolved_output_name(output_request.name, input_spec.model, input_spec.dataset, workspace)
 
     output = OutputResponse(
         name=out_name,

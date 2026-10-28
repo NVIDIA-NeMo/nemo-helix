@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-function
-description: Creates NemoFunction HTTP surfaces for NeMo Helix plugins. Use when adding a function, declaring spec_schema, mounting function routes with add_function_routes, understanding the generated flat CLI command, or streaming NDJSON frames. Trigger keywords - function, NemoFunction, spec_schema, add_function_routes, nemo_helix_plugin.functions, streaming, NDJSON, FunctionContext.
+description: 'Creates NemoFunction HTTP surfaces for NeMo Helix plugins. Use when adding a function, declaring spec_schema, mounting function routes with add_function_routes, understanding the generated flat CLI command, or streaming NDJSON frames. Trigger keywords - function, NemoFunction, spec_schema, add_function_routes, nemo_helix_plugin.functions, streaming, NDJSON, FunctionContext.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Plugin Functions (NemoFunction)

@@ -1011,11 +1011,13 @@ def _published_host_ports(run_mock: MagicMock) -> list[int]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("host_bind_error", [False, True], ids=["port-allocated", "host-bind-address-in-use"])
 async def test_create_deployment_reallocates_port_after_docker_conflict(
     docker_backend: DockerDeploymentBackend,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
     free_host_ports: None,
+    host_bind_error: bool,
 ) -> None:
     """Docker's port reservations are invisible to the probe, so a publish can still lose a race."""
     first_port = docker_backend._executor_config.port_range_start
@@ -1023,7 +1025,15 @@ async def test_create_deployment_reallocates_port_after_docker_conflict(
     mock_entities.get.return_value = published_port_config()
     mock_docker_client.containers.get.side_effect = NotFound("missing")
     mock_docker_client.containers.create.return_value = server_container
-    server_container.start.side_effect = [_port_conflict_error(first_port), None]
+    conflict = (
+        APIError(
+            "failed to set up container networking: driver failed programming external connectivity on endpoint srv: "
+            f"failed to bind host port 0.0.0.0:{first_port}/tcp: address already in use"
+        )
+        if host_bind_error
+        else _port_conflict_error(first_port)
+    )
+    server_container.start.side_effect = [conflict, None]
 
     update = await docker_backend.create_deployment(
         workspace="default",
@@ -1069,17 +1079,19 @@ async def test_create_deployment_fails_after_repeated_port_conflicts(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_message", ["no such image", "listen tcp :8000: bind: address already in use"])
 async def test_create_deployment_does_not_retry_unrelated_start_failure(
     docker_backend: DockerDeploymentBackend,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
     free_host_ports: None,
+    error_message: str,
 ) -> None:
     server_container = MagicMock(id="abc123")
     mock_entities.get.return_value = published_port_config()
     mock_docker_client.containers.get.side_effect = NotFound("missing")
     mock_docker_client.containers.create.return_value = server_container
-    server_container.start.side_effect = APIError("no such image")
+    server_container.start.side_effect = APIError(error_message)
 
     update = await docker_backend.create_deployment(
         workspace="default",

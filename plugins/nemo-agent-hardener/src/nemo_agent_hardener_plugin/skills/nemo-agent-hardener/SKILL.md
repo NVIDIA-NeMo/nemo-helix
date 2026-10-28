@@ -48,7 +48,7 @@ they pick. Do not dump every path at them.
 
 > **Do not choose the target agent for the user.** Even when the request names a concrete goal
 > ("harden an example agent"), you must still ask *which* one in step 2 before any state-changing
-> command (`agents create`, `agents package`, `agent-hardener init`). Picking one yourself — because it
+> command (`agents register`, `agents package`, `agent-hardener init`). Picking one yourself — because it
 > is the default, the first listed, or the one you just built — is the single most common way this
 > skill goes wrong. Ask first, every time.
 
@@ -90,7 +90,7 @@ details (agent.yaml shape, Dockerfile contract): [references/agent-packaging.md]
 
 ```bash
 nemo agents package --agent agent.yaml --dockerfile ./Dockerfile --tag my-agent:v1
-nemo agents create --name my-agent --agent-config agent.yaml
+nemo agents register --name my-agent --agent-config agent.yaml
 nemo agents deploy --agent my-agent --image my-agent:v1   # optional, but init reads the port from it
 nemo agent-hardener init --agent my-agent --name my-agent
 ```

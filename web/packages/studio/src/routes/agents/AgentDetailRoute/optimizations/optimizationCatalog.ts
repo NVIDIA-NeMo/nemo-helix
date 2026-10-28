@@ -103,6 +103,66 @@ export const OPTIMIZATION_BUDGETS: OptimizationBudget[] = [
 export const budgetById = (id: BudgetId): OptimizationBudget =>
   OPTIMIZATION_BUDGETS.find((budget) => budget.id === id) ?? OPTIMIZATION_BUDGETS[1];
 
+/** Where a Fabric agent keeps its system prompt — the one prompt the form offers to rewrite. */
+export const SYSTEM_PROMPT_PATH = 'instructions.system.content';
+
+export interface PromptSearch {
+  /** Candidate prompts scored per generation. */
+  populationSize: number;
+  generations: number;
+  /** When the rewriter sees the judge's reasoning on the worst rows: once scores plateau. */
+  feedback: 'adaptive';
+  /** Rough wall-clock, at the same per-candidate pace as a numeric trial. */
+  estimatedMinutes: number;
+}
+
+/**
+ * The prompt phase's fixed search. The GA scores every member of the population once per
+ * generation and once more after the last, so this costs `populationSize × (generations + 1)`
+ * candidate runs — well under the backend's 24 × 15 default, which is sized for offline runs
+ * rather than a click in Studio.
+ */
+export const PROMPT_SEARCH: PromptSearch = {
+  populationSize: 4,
+  generations: 2,
+  feedback: 'adaptive',
+  estimatedMinutes: 18,
+};
+
+/** Candidate prompts the GA scores, each against every row. */
+export const PROMPT_CANDIDATES = PROMPT_SEARCH.populationSize * (PROMPT_SEARCH.generations + 1);
+
+export type PromptModeId = 'rewrite' | 'versions';
+
+export interface PromptMode {
+  id: PromptModeId;
+  title: string;
+  description: string;
+}
+
+/**
+ * How the system prompt joins the study. `rewrite` runs the GA as a second phase after the sweep;
+ * `versions` adds the user's prompts to the sweep itself as one categorical dimension, so it costs
+ * no extra runs but shares the budget's trials with the numeric parameters.
+ */
+export const PROMPT_MODES: PromptMode[] = [
+  {
+    id: 'rewrite',
+    title: 'Let a model rewrite it',
+    description:
+      'After the sweep, a model writes new versions of the system prompt from its best parameters and keeps the one that scores highest.',
+  },
+  {
+    id: 'versions',
+    title: 'Try my own versions',
+    description:
+      'Each sweep trial runs one of your versions alongside the parameters, and the best-scoring combination wins. Adds no extra runs.',
+  },
+];
+
+export const promptModeById = (id: PromptModeId): PromptMode =>
+  PROMPT_MODES.find((mode) => mode.id === id) ?? PROMPT_MODES[0];
+
 /** `0.0–1.0` for a float, `128–768` for an int — floats keep a decimal so the range does not read
  *  as an integer one the sampler would round into. */
 export const formatRange = (parameter: SearchParameter): string =>

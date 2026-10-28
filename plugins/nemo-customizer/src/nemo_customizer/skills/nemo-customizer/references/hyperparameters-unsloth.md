@@ -1,11 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-<!-- Unsloth job JSON reference. Index + integrations + source-of-truth: `hyperparameters.md`. Batch sizing (single GPU): `batch-sizing.md`. -->
+<!-- Unsloth job JSON reference. Index + integrations: `hyperparameters.md`. Batch sizing (single GPU): `batch-sizing.md`. -->
 
 # Unsloth job JSON
 
-Job JSON for `nemo customization unsloth --job-json` uses **`UnslothJobInput`** (`plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). The canonical post-transform shape lives in `services/unsloth/src/nhx/unsloth/schemas.py` (`UnslothJobOutput`) and is what the training driver consumes in the GPU container.
+Job JSON for `nemo customization unsloth --job-json` uses **`UnslothJobInput`**. Only fields in that schema are accepted (`extra="forbid"`).
 
 **Schema dump:**
 
@@ -89,7 +89,7 @@ Full template (every section, defaults inline):
     "gradient_accumulation_steps": 4
   },
   "optimizer": {
-    "learning_rate": 5e-5,
+    "learning_rate": 2e-4,
     "weight_decay": 0.0,
     "optim": "adamw_8bit",
     "adam_beta1": 0.9,
@@ -158,7 +158,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `rank` | `16` | Higher → more capacity, more VRAM. Cap at 32 if the adapter will deploy via default NIM / vLLM. |
+| `rank` | `16` | Higher → more capacity, more VRAM. Default vLLM and model-free NIM deployments load adapters only up to rank 16; above that the deployment needs a raised `--max-lora-rank` (`post-training-eval.md` § **LoRA rank limit**). |
 | `alpha` | `16` | LoRA scaling; common rule of thumb `alpha ≈ rank` or `2× rank`. |
 | `dropout` | `0.0` | LoRA dropout (0.0–<1.0). |
 | `target_modules` | Unsloth 7-module set: `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` | Full attention + MLP. Override with a subset like `["q_proj","v_proj"]` for a lighter touch. |
@@ -179,7 +179,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | Field | Default | Notes |
 |-------|---------|-------|
 | `epochs` | `1` | Full passes over the training data. Ignored when `max_steps` is set. |
-| `max_steps` | `null` | Total optimizer steps. When set, it overrides `epochs` and the trainer runs exactly this many steps. Setting both is valid. Use it for smoke tests; omit it for real runs so `epochs` controls duration. |
+| `max_steps` | `null` | Total optimizer steps. When set, it overrides `epochs` and the trainer runs exactly this many steps. Setting both is valid. |
 | `warmup_steps` | `0` | Linear warmup. Mutex with `warmup_ratio`. |
 | `warmup_ratio` | `null` | Fractional warmup over total steps. Mutex with `warmup_steps`. |
 | `lr_scheduler_type` | `"linear"` | `"linear"`, `"cosine"`, `"constant"`, `"constant_with_warmup"`, `"cosine_with_restarts"`. |
@@ -189,7 +189,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | `eval_steps` | `null` | If set with `validation_path`, eval every N steps. When `null` and `validation_path` is set, the training driver defaults to **one validation pass per effective epoch** at `max(1, effective_steps - 1)` (same effective-step cap as automodel's default `val_check_interval`). |
 | `seed` | `3407` | Trainer seed (`TrainingArguments.seed`). |
 
-**Hard mutex enforced by the schema:** `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time. `epochs` and `max_steps` are not mutually exclusive; keep both when a user sets both.
+**Hard mutex enforced by the schema:** `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time. `epochs` and `max_steps` are not mutually exclusive.
 
 ### Unsloth `batch`
 
@@ -204,7 +204,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `2e-4` (schema default; skill uses `5e-5` for LoRA SFT) | See LR table below. |
+| `learning_rate` | `2e-4` (LoRA); `2e-5` when `finetuning_type` is `all_weights` | Unsloth's guidance; see below. |
 | `weight_decay` | `0.0` | L2-style regularization. |
 | `optim` | `"adamw_8bit"` | `"adamw_torch"`, `"adamw_torch_fused"` (Hopper+), `"adamw_8bit"`, `"paged_adamw_8bit"`, `"sgd"`. `adamw_8bit` has the smallest optimizer state and is Unsloth's notebook default. |
 | `adam_beta1` | `0.9` | Adam/AdamW beta1. |
@@ -241,17 +241,9 @@ After `to_spec`, the canonical `OutputResponse` also carries `type` (`"adapter"`
 
 VRAM / batch tuning is in **`batch-sizing.md` § Batch sizing — unsloth**. Below covers non-batch fields.
 
-### Unsloth learning rate (LoRA SFT, starting points)
+### Unsloth learning rate
 
-Same scale as automodel (the underlying optimizer math is the same):
-
-| Model scale | Suggested `learning_rate` |
-|-------------|---------------------------|
-| ≤ 3B | `5e-5` – `1e-4` |
-| 3B – 8B | `2e-5` – `5e-5` |
-| > 8B | `1e-5` – `2e-5` |
-
-Schema default is `2e-4` (Unsloth notebook default — works for small adapters with `adamw_8bit`). Skill defaults are conservative `5e-5`.
+Leave `learning_rate` unset to get Unsloth's guidance: `2e-4` for LoRA, which suits small adapters with `adamw_8bit`, and `2e-5` for `all_weights`. If LoRA loss spikes or diverges, lower it toward `5e-5`.
 
 ### Unsloth LoRA rank / alpha
 
@@ -259,7 +251,7 @@ Schema default is `2e-4` (Unsloth notebook default — works for small adapters 
 |----------|--------|---------|
 | Default / balanced | 16 | 16 |
 | Lighter touch | 8 | 16 |
-| More capacity (inference-safe max on default NIM/vLLM) | 32 | 32 or 64 |
+| More capacity (deployment needs `--max-lora-rank 32`) | 32 | 32 or 64 |
 
 Drop `rank` before lowering batch when OOM. Higher `alpha/rank` ratios amplify adapter influence; Unsloth's defaults keep `alpha == rank`.
 

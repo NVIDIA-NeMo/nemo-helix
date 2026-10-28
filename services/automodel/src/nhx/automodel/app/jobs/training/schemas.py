@@ -372,6 +372,10 @@ class TrainingResult(BaseModel):
     """
 
     success: bool
+    paused: bool = Field(
+        default=False,
+        description="Training stopped for a pause after saving its checkpoint, so nothing was published.",
+    )
     error_message: Optional[str] = None
     checkpoint: Optional[CheckpointInfo] = None
     gpu_info: Optional[GPUInfo] = None

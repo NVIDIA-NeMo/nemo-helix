@@ -64,6 +64,13 @@ RUN if find /tmp/fastembed_cache/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+# Update each installed Python environment and rebuild embedded Go TLS clients.
+RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonly \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/update-python-trust.py,readonly \
+    --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
+    GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv run --no-project --python /app/.venv/bin/python \
         /usr/local/bin/collect-workspace-sdists.py \
@@ -108,6 +115,7 @@ ENV USERNAME=nvs \
     HOME=/home/nvs
 # DuckDB extension cache (aws, httpfs) for S3 log storage
 COPY --chown=1000:1000 --from=builder /root/.duckdb /home/nvs/.duckdb
+COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-api/ /usr/share/nemo-helix/source-distributions/nhx-api/
 ENV VIRTUAL_ENV=/app/.venv \

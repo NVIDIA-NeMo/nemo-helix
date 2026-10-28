@@ -36,6 +36,7 @@ def test_create_secret_serializes_real_value() -> None:
     body = HelixSecretCreateRequest(name="hf-token", value="nvapi-xyz")
     prepared = endpoints.create_secret(workspace="default", body=body)
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content == {"name": "hf-token", "value": "nvapi-xyz"}
 
@@ -84,6 +85,7 @@ def test_update_secret_excludes_unset_and_serializes_value() -> None:
     body = HelixSecretUpdateRequest(value="newvalue")
     prepared = endpoints.update_secret(workspace="default", name="hf-token", body=body)
 
+    assert isinstance(prepared.content, bytes)
     content = json.loads(prepared.content)
     assert content == {"value": "newvalue"}
     assert "description" not in content

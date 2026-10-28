@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-job
-description: Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shape, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, explain, NemoJobScheduler.
+description: 'Creates schedulable NemoJob surfaces for NeMo Helix plugins. Use when adding a job, declaring spec_schema / input_spec_schema / to_spec / compile, mounting job routes with add_job_routes, understanding generated job CLI shape, or running jobs in containers. Trigger keywords - job, NemoJob, spec_schema, input_spec_schema, to_spec, compile, add_job_routes, nemo_helix_plugin.jobs, generated job CLI, explain, NemoJobScheduler.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Plugin Jobs (NemoJob)
@@ -193,15 +195,17 @@ from nemo_helix_plugin.discovery import discover_jobs
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 job_cls = discover_jobs()["data-designer.generate"]
-result = NemoJobScheduler().run_local(
+result = NemoJobScheduler().submit_remote(
     job_cls,
     {"num_records": 10, "model": "gpt-oss-120b"},
+    base_url="http://localhost:8080",
 )
 ```
 
-`run_local` is synchronous. It drives `NemoJob.to_spec` once via
-`asyncio.run` to produce the canonical spec, then calls `run` directly.
-`KeyError` if no job is registered under the key.
+`submit_remote` is synchronous. It POSTs the spec to the plugin service's
+per-job submit route; the platform validates it, runs `to_spec`, and executes
+`run` in a job container. There is no in-process runner (`run_local` was
+removed). `KeyError` if no job is registered under the key.
 
 ## In Job Containers
 

@@ -44,9 +44,7 @@ SETUP_MOD = "nemo_helix_ext.cli.commands.setup"
 
 SECRETS_BASE = "/apis/secrets/v2/workspaces/default/secrets"
 PROVIDERS_BASE = "/apis/models/v2/workspaces/default/providers"
-# The gateway's ``{trailing_uri:path}`` segment is sent percent-encoded by the typed
-# client (its own endpoint tests pin that form); uvicorn decodes it before routing.
-PROBE_PATH = "/apis/inference-gateway/v2/workspaces/default/openai/-/v1%2Fchat%2Fcompletions"
+PROBE_PATH = "/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions"
 
 SECRET = {
     "name": "openai-api-key",
@@ -220,17 +218,17 @@ class TestAutoSetupWire:
         recorder = Recorder(
             [
                 httpx.Response(404, json={"detail": "not found"}),
-                httpx.Response(201, json={**SECRET, "name": "nvidia-build-api-key"}),
+                httpx.Response(201, json={**SECRET, "name": "openrouter-api-key"}),
                 httpx.Response(404, json={"detail": "not found"}),
-                httpx.Response(201, json=provider_json("nvidia-build", "https://integrate.api.nvidia.com")),
+                httpx.Response(201, json=provider_json("openrouter", "https://openrouter.ai/api/v1")),
             ]
         )
         clients = make_clients(recorder)
 
-        with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-secret"}, clear=True):
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-or-secret"}, clear=True):
             _auto_setup(clients, "default")
 
-        assert b"nvapi-secret" not in recorder.requests[3].content
+        assert b"sk-or-secret" not in recorder.requests[3].content
 
 
 class TestSampleSetupWire:

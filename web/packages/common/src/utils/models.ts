@@ -41,13 +41,14 @@ export const hasModelProvider = (model: ModelEntity): boolean =>
 
 /**
  * Returns true if the model is a base model, false otherwise. This is determined by
- * checking if the model has a base_model property.
+ * checking if the model has a base_model property. The API sends `null` for base models
+ * even though the generated type only allows `undefined`, so check for any empty value.
  *
  * @param model - The model to check.
  * @returns True if the model is a base model, false otherwise.
  */
 export const isBaseModel = (model: ModelEntity) => {
-  return model.base_model === undefined;
+  return !model.base_model;
 };
 
 /**
@@ -70,11 +71,11 @@ export const getBaseModelURN = (model: ModelEntity) => {
  *
  *     {base_name}&adapters/{adapter_workspace}/{adapter_name}
  *
- * The base segment is the **bare** entity name, not `{workspace}/{name}`: the
- * gateway splits the composite on `&adapters/` and looks up the VirtualModel by
- * `(workspace, base_name)`, with the workspace taken from the URL. The adapter
- * segment carries its own workspace because an adapter may live in a different one
- * from its base.
+ * The base segment is the **bare** entity name, not `{workspace}/{name}`: the URL
+ * carries only that base name (see `createChatCompletion`), since auth's route matcher
+ * rejects a `{name}` containing slashes, and the gateway looks up the VirtualModel by
+ * `(workspace, base_name)`. The adapter segment carries its own workspace because an
+ * adapter may live in a different one from its base.
  *
  * The gateway resolves the composite through the base model's VirtualModel — so an
  * adapter request inherits that VM's middleware (guardrails, Switchyard routing,
@@ -83,7 +84,7 @@ export const getBaseModelURN = (model: ModelEntity) => {
  *
  * @param model - The base model entity being served
  * @param adapter - The adapter to target, if any
- * @returns The value for the request's `model` field and URL name segment
+ * @returns The value for the request's `model` field
  */
 export const toInferenceModelName = (model: ModelEntity, adapter?: Adapter | null): string =>
   adapter ? `${model.name}&adapters/${adapter.workspace}/${adapter.name}` : model.name;

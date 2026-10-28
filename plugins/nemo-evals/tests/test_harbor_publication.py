@@ -422,3 +422,37 @@ async def test_discovered_views_with_runner_selected_reward(root, files, async_f
         prepared = prepare_task(task, files_client=files[0], workspace="default")
     assert prepared.spec.views == task.views
     assert prepared.spec.kind == "harbor"
+
+
+def test_describe_returns_what_publish_stores_without_any_remote_call(root, files):
+    from nemo_evals.harbor.publication import describe_harbor_task_archive
+
+    client, _ = files
+    published = publish_harbor_task_archive(root, files_client=client, fileset_ref="default/harbor-tasks")
+    described = describe_harbor_task_archive(root, fileset_ref="default/harbor-tasks")
+    assert described == published
+    (root / "tests/test.sh").write_text("exit 1")  # any file in the task changes the description
+    assert describe_harbor_task_archive(root, fileset_ref="default/harbor-tasks") != published
+
+
+def test_a_described_task_equals_the_stored_task_read_back(root):
+    """Submit compares a local description with ``tasks.retrieve``, which parses the API's JSON."""
+    from nemo_evals.api.schemas import Task
+    from nemo_evals.sdk.task_preparation import describe_harbor_task
+    from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
+
+    (source,) = discover_harbor_tasks(root)
+    expected = describe_harbor_task(source, workspace="default")
+    stored = Task.model_validate(
+        {
+            "id": "t",
+            "name": "t",
+            "workspace": "default",
+            "revision": 1,
+            "created_at": "2026-10-27T00:00:00Z",
+            "updated_at": "2026-10-27T00:00:00Z",
+            "spec": expected.spec.model_dump(mode="json"),
+            "metadata": [item.model_dump(mode="json") for item in expected.metadata],
+        }
+    )
+    assert stored.spec == expected.spec and stored.metadata == expected.metadata

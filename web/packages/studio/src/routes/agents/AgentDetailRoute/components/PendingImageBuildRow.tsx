@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Warning } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { JOBS_ENABLED } from '@studio/constants/environment';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
-import { TriangleAlert } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -22,7 +21,7 @@ export const PendingImageBuildRow: FC<PendingImageBuildRowProps> = ({ workspace,
   return (
     <Flex align="start" gap="2" className="px-4 py-3" data-testid="pending-image-build">
       {build.isStalled ? (
-        <TriangleAlert
+        <Warning
           className="mt-0.5 size-4 shrink-0 text-feedback-warning"
           aria-label="Image build not started"
         />
@@ -49,7 +48,7 @@ export const PendingImageBuildRow: FC<PendingImageBuildRowProps> = ({ workspace,
         <Badge kind="outline" color="gray" size="small">
           {deploymentModeLabel(build.mode)}
         </Badge>
-        {jobName && JOBS_ENABLED ? (
+        {jobName ? (
           <Button
             kind="tertiary"
             size="small"

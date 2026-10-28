@@ -62,6 +62,20 @@ class TestUnslothJobOutput:
         with pytest.raises(ValidationError):
             UnslothJobOutput.model_validate(payload)
 
+    @pytest.mark.parametrize(
+        ("training", "optimizer", "expected"),
+        [
+            ({"lora": {"rank": 8, "alpha": 16}}, {}, 2e-4),
+            ({"finetuning_type": "all_weights"}, {}, 2e-5),
+            ({"finetuning_type": "all_weights"}, {"learning_rate": 1e-4}, 1e-4),
+        ],
+    )
+    def test_learning_rate_default_matches_the_input_schema(
+        self, training: dict[str, object], optimizer: dict[str, float], expected: float
+    ) -> None:
+        payload = {**_canonical_dict(), "training": training, "optimizer": optimizer}
+        assert UnslothJobOutput.model_validate(payload).optimizer.learning_rate == expected
+
 
 class TestSubShapesIndependently:
     def test_dataset_path_required(self) -> None:

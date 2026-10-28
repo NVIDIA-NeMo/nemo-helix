@@ -55,6 +55,10 @@ logger = logging.getLogger(__name__)
 type MetricReadAuthorizer = Callable[[str, str], Awaitable[None]]
 
 
+class TaskExistsError(ValueError):
+    """Strict create found the name taken."""
+
+
 class _MetricService(Protocol):
     async def store_derived_metric(self, metric: MetricInline, *, workspace: str) -> MetricRef: ...
 
@@ -245,7 +249,9 @@ class TaskService:
         try:
             created = await self.entity_client.create(entity)
         except NemoEntityConflictError as exc:
-            raise ValueError(f"Task '{workspace}/{name}' already exists") from exc
+            raise TaskExistsError(f"Task '{workspace}/{name}' already exists") from exc
+        # A contended publish adopts the other publisher's version on ``created``; keep our own for the rollback.
+        created_db_version = created.db_version
         try:
             revision, head, published = await self._publish(created, tags=set(task_input.tags))
         except Exception:
@@ -254,7 +260,11 @@ class TaskService:
             # transaction, so roll the head back by hand rather than leaving a half-created task.
             logger.exception("Publishing revision 1 failed; rolling back the task record")
             try:
-                await self.entity_client.delete(TaskEntity, name=name, workspace=workspace)
+                # Only the head as we created it: a publisher whose create lost to ours may have
+                # published onto it since, and deleting by name alone would remove their task.
+                await self.entity_client.delete(
+                    TaskEntity, name=name, workspace=workspace, expected_db_version=created_db_version
+                )
             except Exception:
                 # Report the rollback failure, but re-raise the *original* error: replacing it
                 # would hide why the publish failed and leave the caller debugging the cleanup.
@@ -271,9 +281,12 @@ class TaskService:
         """Replace a task's content and publish the result, creating the task if absent.
 
         Algorithm:
-            - Delegate to strict creation when no head exists.
+            - Delegate to strict creation when no head exists; if another publisher's create lands
+              first, replace onto their task instead.
             - Normalize new content and publish the head and revision together.
-            - Persist non-versioned project changes when content publication is a no-op.
+            - Persist fields outside the digest when content publication is a no-op and they changed;
+              otherwise write nothing, so identical concurrent PUTs (one taskset submitted by many
+              users at once) never conflict.
 
         Upsert rather than 404-on-missing so a publisher can issue one idempotent call without
         first checking existence — checking then creating is both an extra round trip and a race
@@ -286,21 +299,27 @@ class TaskService:
         try:
             head = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
         except NemoEntityNotFoundError:
-            return await self.create_task(name, task_input, workspace=workspace, project=project)
+            try:
+                return await self.create_task(name, task_input, workspace=workspace, project=project)
+            except TaskExistsError:
+                head = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
 
+        stored = head.model_dump(mode="json")
         await self._apply_content(head, task_input, workspace=workspace)
         if project is not None:
             # Applied rather than ignored. ``project`` is a query parameter, so an omitted value
             # means "leave it alone" — only an explicit value moves the record.
             head.project = project
+        changed = head.model_dump(mode="json") != stored
         # Publish the staged content *without* committing the head first. Publishing already writes
         # the head (pointers and content together), so a pre-write would be a second round trip
         # whose only distinct effect is a window: if publishing then failed, the head would hold
         # content no revision covers and a plain GET would serve it.
         revision, published_head, published = await self._publish(head, tags=set(task_input.tags))
-        if not published:
+        if not published and changed:
             # Content matched a revision that is already tagged as requested, so publishing wrote
-            # nothing. Anything outside the digest — ``project`` — still has to be persisted.
+            # nothing. Anything outside the digest — ``project``, a Harbor ``config`` projection —
+            # still has to be persisted. Nothing changed: no write, so nothing to conflict with.
             published_head = await self.entity_client.update(published_head)
         logger.info(
             "Task replaced",

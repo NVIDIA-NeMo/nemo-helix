@@ -248,6 +248,22 @@ class TestPluginJobsFilter:
             ]
         }
 
+    def test_spec_bracket_dict_form_matches_per_path(self):
+        """``filter[spec][target][format]=x`` addresses ``spec.target.format``, not the whole spec."""
+        app, sdk = _build_app()
+        client = TestClient(app)
+        resp = client.get(
+            "/apis/widgets/v2/workspaces/default/jobs",
+            params={"filter[spec][target][format]": "generic"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert _forwarded_filter(sdk) == {
+            "$and": [
+                {"spec.target.format": {"$eq": "generic"}},
+                {"source": {"$eq": "widgets"}},
+            ]
+        }
+
     def test_spec_subpath_null_branch_survives_a_logical_root(self):
         """The exact shape the Model Evaluations table sends.
 
@@ -520,8 +536,10 @@ class _CreateCapturingSdk:
             stored = json.loads(self.body_json)
             job_resp = SimpleNamespace(
                 id="job-1",
+                attempt_id="attempt-1",
                 name=body.name or "job-1",
                 description=None,
+                project=None,
                 workspace=workspace,
                 created_at=None,
                 updated_at=None,

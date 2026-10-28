@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { LayoutDetail, Add, Sparkle } from '@nemo/icons/icons';
 import type { StartOption } from '@studio/components/CreateFilesetStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
 import { ADVANCED, BEGINNER, INTERMEDIATE } from '@studio/components/StartOptions/levels';
-import { LayoutTemplate, Plus, Sparkles } from 'lucide-react';
 
 /**
  * Example prompts offered as pills inside an empty prompt field. Each is a complete,
@@ -35,7 +35,7 @@ export const START_OPTIONS: StartOption[] = [
     title: 'Describe with AI',
     description:
       'Tell us what you need in plain language. AI drafts the columns and prompts — then you refine everything visually.',
-    icon: Sparkles,
+    icon: Sparkle,
     tag: BEGINNER,
     enabled: true,
   },
@@ -43,7 +43,7 @@ export const START_OPTIONS: StartOption[] = [
     id: 'template',
     title: 'Start from a template',
     description: 'Begin from a ready-made recipe and adjust it, instead of an empty canvas.',
-    icon: LayoutTemplate,
+    icon: LayoutDetail,
     tag: INTERMEDIATE,
     enabled: true,
   },
@@ -51,7 +51,7 @@ export const START_OPTIONS: StartOption[] = [
     id: 'scratch',
     title: 'Build from scratch',
     description: 'Open an empty canvas and add columns block by block, your way.',
-    icon: Plus,
+    icon: Add,
     tag: ADVANCED,
     enabled: true,
   },

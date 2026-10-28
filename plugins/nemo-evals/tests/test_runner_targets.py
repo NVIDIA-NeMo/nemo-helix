@@ -18,6 +18,7 @@ from nemo_evals.jobs.agent_spec import (
     GymPlacement,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
 )
 from nemo_evals.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
@@ -70,7 +71,9 @@ HARBOR_REJECTED_VALUES = {
 
 
 def test_harbor_configuration_survives_submission_without_local_storage(tmp_path, monkeypatch):
-    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES)
+    config = HarborRuntimeConfig.model_validate(
+        {"jobs_dir": tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES}
+    )
     runner = HarborAgentTaskRunner(config=config)
     # Conversion must not inspect the caller's filesystem or start Harbor.
     with monkeypatch.context() as scoped:
@@ -122,7 +125,7 @@ def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_p
     runner = HarborAgentTaskRunner(
         config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
     )
-    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="m"))
     with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
         runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 

@@ -16,7 +16,7 @@ import Mistral from '@nemo/common/src/svgs/model_icon_mistral.svg?react';
 import Nvidia from '@nemo/common/src/svgs/model_icon_nvidia.svg?react';
 import OpenAi from '@nemo/common/src/svgs/model_icon_openai.svg?react';
 import OpenRouter from '@nemo/common/src/svgs/model_icon_openrouter.svg?react';
-import { Unplug, Workflow } from 'lucide-react';
+import { LinkBreak, ChartFlow } from '@nemo/icons/icons';
 import { FC, SVGProps } from 'react';
 
 export type InferenceProviderPresetId =
@@ -88,7 +88,7 @@ export const CUSTOM_ROW = {
   id: 'custom' as const,
   label: 'OpenAI Compatible Endpoint',
   filterText: 'openai compatible endpoint custom',
-  Icon: Workflow,
+  Icon: ChartFlow,
 };
 
 export function getInferenceProviderPresetLabel(id: InferenceProviderPresetId): string {
@@ -98,5 +98,5 @@ export function getInferenceProviderPresetLabel(id: InferenceProviderPresetId): 
 
 export function getInferenceProviderPresetIcon(id: InferenceProviderPresetId) {
   if (id === 'custom') return CUSTOM_ROW.Icon;
-  return MODEL_PROVIDER_ROWS.find((r) => r.id === id)?.Icon ?? Unplug;
+  return MODEL_PROVIDER_ROWS.find((r) => r.id === id)?.Icon ?? LinkBreak;
 }

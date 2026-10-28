@@ -55,13 +55,22 @@ export const isNotFoundError = (error: unknown): boolean => {
   return candidate?.response?.status === 404 || candidate?.status === 404;
 };
 
+/** A 409 from the platform API, such as a create whose name is already taken. */
+export const isConflictError = (error: unknown): boolean => {
+  const candidate = error as { response?: { status?: number }; status?: number };
+  return candidate?.response?.status === 409 || candidate?.status === 409;
+};
+
 /** A 403 from the platform API — the caller is authenticated but lacks permission. */
 export const isForbiddenError = (error: unknown): boolean =>
   error instanceof AxiosError && error.response?.status === 403;
 
+export const isServerError = (error: unknown): boolean =>
+  error instanceof AxiosError && (error.response?.status ?? 0) >= 500;
+
 /**
  * Extracts a user-friendly error message from an error object.
- * Handles both ValidationError arrays and simple string errors from the backend.
+ * Handles validation arrays, JSON detail/message strings, and plain-text response bodies.
  *
  * @param error - The error object (typically from an API call)
  * @param fallbackMessage - Used only when the error carries no message of its own
@@ -93,6 +102,20 @@ export const getErrorMessage = (error: AxiosError | Error, fallbackMessage?: str
       if (typeof detail === 'string') {
         return detail;
       }
+    }
+
+    const data: unknown = error.response?.data;
+    if (typeof data === 'string' && data.trim()) {
+      return data;
+    }
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      'message' in data &&
+      typeof data.message === 'string' &&
+      data.message.trim()
+    ) {
+      return data.message;
     }
 
     // Handle network errors (no response received)

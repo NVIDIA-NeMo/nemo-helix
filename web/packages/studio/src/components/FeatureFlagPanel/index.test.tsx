@@ -54,8 +54,10 @@ describe('FeatureFlagPanel', () => {
 
   it('lists real flags with a control each', async () => {
     await openPanel();
-    expect(screen.getByText('tourEnabled')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'tourEnabled override' })).toBeInTheDocument();
+    expect(screen.getByText('traceGraphEnabled')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'traceGraphEnabled override' })
+    ).toBeInTheDocument();
   });
 
   it('shows no pending overrides on a clean profile', async () => {
@@ -67,7 +69,7 @@ describe('FeatureFlagPanel', () => {
   it('reflects an override already in storage', async () => {
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ tourEnabled: 'false' })
+      JSON.stringify({ traceGraphEnabled: 'false' })
     );
 
     await openPanel();
@@ -76,10 +78,10 @@ describe('FeatureFlagPanel', () => {
 
   it('filters by flag name', async () => {
     const user = await openPanel();
-    await user.type(screen.getByLabelText('Filter flags'), 'tourEnabled');
+    await user.type(screen.getByLabelText('Filter flags'), 'traceGraphEnabled');
 
-    expect(screen.getByText('tourEnabled')).toBeInTheDocument();
-    expect(screen.queryByText('agentsEnabled')).not.toBeInTheDocument();
+    expect(screen.getByText('traceGraphEnabled')).toBeInTheDocument();
+    expect(screen.queryByText('monitorEnabled')).not.toBeInTheDocument();
   });
 
   it('reports when no flag matches the filter', async () => {
@@ -97,10 +99,10 @@ describe('FeatureFlagPanel', () => {
     });
 
     const user = await openPanel();
-    await chooseOption(user, 'tourEnabled override', 'false');
+    await chooseOption(user, 'traceGraphEnabled override', 'false');
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
-    expect(readBlob()).toEqual({ tourEnabled: 'false' });
+    expect(readBlob()).toEqual({ traceGraphEnabled: 'false' });
     expect(reload).toHaveBeenCalledOnce();
   });
 
@@ -114,11 +116,11 @@ describe('FeatureFlagPanel', () => {
     });
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ tourEnabled: 'false' })
+      JSON.stringify({ traceGraphEnabled: 'false' })
     );
 
     const user = await openPanel();
-    await user.click(screen.getByRole('button', { name: 'Clear tourEnabled override' }));
+    await user.click(screen.getByRole('button', { name: 'Clear traceGraphEnabled override' }));
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
     expect(readBlob()).toBeNull();
@@ -146,7 +148,7 @@ describe('FeatureFlagPanel', () => {
 
     const blob = readBlob()!;
     expect(Object.values(blob).every((value) => value === 'false')).toBe(true);
-    expect(blob['tourEnabled']).toBe('false');
+    expect(blob['traceGraphEnabled']).toBe('false');
   });
 
   // The gate is excluded from the list, so a bulk action must not reach it —
@@ -174,11 +176,11 @@ describe('FeatureFlagPanel', () => {
     });
 
     const user = await openPanel();
-    await user.type(screen.getByLabelText('Filter flags'), 'tourEnabled');
+    await user.type(screen.getByLabelText('Filter flags'), 'traceGraphEnabled');
     await user.click(screen.getByRole('button', { name: 'All off' }));
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
-    expect(readBlob()).toEqual({ tourEnabled: 'false' });
+    expect(readBlob()).toEqual({ traceGraphEnabled: 'false' });
   });
 
   // "Reset all" removes overrides so flags fall back to the deployment default;
@@ -194,7 +196,7 @@ describe('FeatureFlagPanel', () => {
     // path runs; otherwise this would only assert that nothing happened.
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ tourEnabled: 'true' })
+      JSON.stringify({ traceGraphEnabled: 'true' })
     );
 
     const user = await openPanel();
@@ -220,7 +222,7 @@ describe('FeatureFlagPanel', () => {
     vi.spyOn(logger, 'warn').mockImplementation(() => {});
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ flagOverridesEnabled: 'false', tourEnabled: 'false' })
+      JSON.stringify({ flagOverridesEnabled: 'false', traceGraphEnabled: 'false' })
     );
 
     const user = await openPanel();
@@ -235,7 +237,7 @@ describe('FeatureFlagPanel', () => {
   it('reset all clears every pending override', async () => {
     window.localStorage.setItem(
       FEATURE_FLAG_OVERRIDES_KEY,
-      JSON.stringify({ tourEnabled: 'false' })
+      JSON.stringify({ traceGraphEnabled: 'false' })
     );
 
     const user = await openPanel();
@@ -270,7 +272,7 @@ describe('FeatureFlagPanel', () => {
     });
 
     const user = await openPanel();
-    await chooseOption(user, 'tourEnabled override', 'false');
+    await chooseOption(user, 'traceGraphEnabled override', 'false');
     await user.click(screen.getByRole('button', { name: 'Apply and reload' }));
 
     expect(screen.getByText(/Could not save/)).toBeInTheDocument();

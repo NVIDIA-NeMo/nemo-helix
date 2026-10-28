@@ -6,6 +6,7 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
+import { FolderOpen, InfoCircle } from '@nemo/icons/icons';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import {
   Button,
@@ -30,7 +31,6 @@ import { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useDatasetNavigator } from '@studio/hooks/useDatasetNavigator';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetDetailsRoute } from '@studio/routes/utils';
-import { FolderOpen, Info } from 'lucide-react';
 import { type FC, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -339,7 +339,7 @@ export const AddToFolderModal: FC<AddToFolderModalProps> = ({
             {showFolderDeletionWarning && (
               <Text fontSize="12" role="alert">
                 <Flex gap="density-xs" align="center">
-                  <Info />
+                  <InfoCircle />
                   {FOLDER_DELETION_WARNING}
                 </Flex>
               </Text>

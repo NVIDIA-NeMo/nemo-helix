@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
 from kubernetes import watch as k8s_watch
+from kubernetes.client.exceptions import ApiException
 from nemo_builder_plugin.run.utils import job_identity, read_step_config
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
 from nemo_helix_plugin.jobs.constants import job_storage_subpath
@@ -47,6 +48,14 @@ _POD_TIMEOUT_SECONDS = 60 * 60
 
 #: Enforced by the kubelet, so a sandbox ends even if this step is killed before it can delete it.
 _POD_DEADLINE_SECONDS = _POD_TIMEOUT_SECONDS + 5 * 60
+
+#: (status, text in the body) of the create errors a sandbox retries.
+_RETRYABLE_ERRORS = ((403, "exceeded quota"), (429, ""))
+_RETRY_ATTEMPTS = 60
+_RETRY_DEADLINE_SECONDS = 60 * 60
+_RETRY_MAX_DELAY_SECONDS = 60.0
+#: The client sets no timeout of its own, so a stalled create would outlast the retry deadline.
+_CREATE_TIMEOUT_SECONDS = 60.0
 
 #: This step's namespace, which Kubernetes mounts beside the ServiceAccount token.
 _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
@@ -216,9 +225,33 @@ def _delete_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> None:
         logger.warning("sandbox %s could not be deleted", sanitize_for_log(name), exc_info=True)
 
 
+def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> None:
+    """Create a sandbox, retrying `_RETRYABLE_ERRORS` with backoff until the attempts or the deadline run out.
+
+    ponytail: a waiting step keeps its pod's share of the quota; capping concurrent builds removes that.
+    """
+    deadline = time.monotonic() + _RETRY_DEADLINE_SECONDS
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
+        try:
+            # A (connect, read) tuple: kubernetes 29.x ignores a float timeout.
+            api.create_namespaced_pod(namespace=namespace, body=manifest, _request_timeout=(timeout, timeout))
+            return
+        except ApiException as exc:
+            remaining = deadline - time.monotonic()
+            retryable = any(exc.status == status and text in str(exc.body) for status, text in _RETRYABLE_ERRORS)
+            if not retryable or attempt == _RETRY_ATTEMPTS or remaining <= 0:
+                raise
+            delay = min(5.0 * 2 ** (attempt - 1), _RETRY_MAX_DELAY_SECONDS, remaining)
+            logger.warning(
+                "sandbox %s: %s; retrying in %.0fs", sanitize_for_log(name), sanitize_for_log(exc.reason), delay
+            )
+        time.sleep(delay)
+
+
 def _run_sandbox(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> tuple[str, str]:
     """Run one sandbox to its end, deleting it whatever happens. Returns its phase and its log."""
-    api.create_namespaced_pod(namespace=namespace, body=manifest)
+    _create_pod(api, name=name, manifest=manifest, namespace=namespace)
     try:
         phase = _await_pod(api, name=name, namespace=namespace)
         return phase, _read_pod_log(api, name=name, namespace=namespace)

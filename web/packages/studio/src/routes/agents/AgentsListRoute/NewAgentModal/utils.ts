@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
+import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import {
   AGENT_CONFIG_FILENAME,
   AGENT_SPEC_FILENAME,
@@ -51,7 +51,11 @@ export const selectionRootName = (picked: PickedFile[]): string => {
   return picked.every(({ relativePath }) => relativePath.startsWith(`${root}/`)) ? root : '';
 };
 
-/** The fileset holds the agent's own files, so a whole selection's shared root directory is stripped from every path. */
+/**
+ * The fileset holds the agent's own files, so a whole selection's shared root directory is stripped from every path.
+ * A top-level `agent.yml` is stored as `agent.yaml`, the only name the platform stages,
+ * unless the selection already holds an `agent.yaml`, which wins.
+ */
 export const collectAgentEntries = (picked: PickedFile[]): UploadAgentEntry[] => {
   const root = selectionRootName(picked);
   const entries: UploadAgentEntry[] = [];
@@ -60,6 +64,12 @@ export const collectAgentEntries = (picked: PickedFile[]): UploadAgentEntry[] =>
     const path = (root ? relativePath.split('/').slice(1).join('/') : relativePath) || file.name;
     if (!path || isIgnoredPath(path)) continue;
     entries.push({ path, file });
+  }
+
+  const aliasIndex = entries.findIndex((entry) => entry.path === 'agent.yml');
+  const alias = entries[aliasIndex];
+  if (alias && !entries.some((entry) => entry.path === AGENT_CONFIG_FILENAME)) {
+    entries[aliasIndex] = { ...alias, path: AGENT_CONFIG_FILENAME };
   }
 
   return entries.sort((left, right) => pathCollator.compare(left.path, right.path));
@@ -178,7 +188,7 @@ export const findNonUtf8Path = async (entries: UploadAgentEntry[]): Promise<stri
 
 export class AgentConfigParseError extends Error {}
 
-export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
+export const parseAgentConfig = (text: string): RegisterAgentRequestConfig => {
   let parsed: unknown;
   try {
     parsed = YAML.parse(text);
@@ -192,7 +202,7 @@ export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
     throw new AgentConfigParseError(`${AGENT_CONFIG_FILENAME} must contain a YAML mapping.`);
   }
 
-  const config = parsed as CreateAgentRequestConfig;
+  const config = parsed as RegisterAgentRequestConfig;
   const configFormat = config.config_format;
   if (configFormat !== FABRIC_CONFIG_FORMAT) {
     throw new AgentConfigParseError(

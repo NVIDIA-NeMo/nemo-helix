@@ -18,6 +18,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.sdk import AgentsResource, AsyncAgentsResource, agents_sdk_resources
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 _Handler = Callable[[httpx.Request], httpx.Response]
@@ -51,7 +52,7 @@ def _async_client(handler: _Handler, *, workspace: str | None = "team-a") -> Asy
     )
 
 
-def test_create_resolves_default_model_placeholder_before_post() -> None:
+def test_register_resolves_default_model_placeholder_before_post() -> None:
     captured: dict[str, Any] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -63,7 +64,7 @@ def test_create_resolves_default_model_placeholder_before_post() -> None:
     config = {"llms": {"llm": {"_type": "openai", "model_name": "${NEMO_DEFAULT_MODEL}"}}}
 
     with patch("nemo_agents_plugin.utils.get_default_model", return_value="team-a/nemotron"):
-        result = client.create(name="calc", config=config)
+        result = client.register(name="calc", config=config)
 
     assert result == {"name": "calc"}
     assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
@@ -71,7 +72,22 @@ def test_create_resolves_default_model_placeholder_before_post() -> None:
     assert config["llms"]["llm"]["model_name"] == "${NEMO_DEFAULT_MODEL}"
 
 
-def test_create_rejects_unresolved_default_model_placeholder() -> None:
+@pytest.mark.parametrize("typed", [False, True])
+def test_register_forwards_references_without_config(typed: bool) -> None:
+    reference = {"fileset": "team-a/agent-source", "container_image": "nvcr.io/my-org/agent:1.0"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = _read_json(req)
+        assert body == {"name": "calc", "reference": reference}
+        return httpx.Response(201, json=body)
+
+    client = AgentsResource(_client(handler))
+    result = client.register(name="calc", reference=ReferenceConfig.model_validate(reference) if typed else reference)
+
+    assert result["reference"] == reference
+
+
+def test_register_rejects_unresolved_default_model_placeholder() -> None:
     def handler(_req: httpx.Request) -> httpx.Response:
         raise AssertionError("should not POST unresolved agent config")
 
@@ -82,7 +98,16 @@ def test_create_rejects_unresolved_default_model_placeholder() -> None:
         patch("nemo_agents_plugin.utils.get_default_model", return_value=None),
         pytest.raises(ValueError, match="NEMO_DEFAULT_MODEL"),
     ):
-        client.create(name="calc", config=config)
+        client.register(name="calc", config=config)
+
+
+def test_register_rejects_conflicting_formats() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST conflicting config formats")
+
+    client = AgentsResource(_client(handler))
+    with pytest.raises(ValueError, match="config_format must match config.config_format"):
+        client.register(name="calc", config={"config_format": "nemo-agents-spec-v1"}, config_format="nat-workflow-v1")
 
 
 def test_agents_resource_uses_default_workspace_when_platform_workspace_is_unset() -> None:
@@ -90,11 +115,13 @@ def test_agents_resource_uses_default_workspace_when_platform_workspace_is_unset
 
     def handler(req: httpx.Request) -> httpx.Response:
         paths.append(req.url.path)
+        if req.url.path.endswith("/agents"):
+            assert _read_json(req) == {"name": "calc"}
         return httpx.Response(201, json={"name": "calc"})
 
     resource = AgentsResource(_client(handler, workspace=None))
 
-    resource.create(name="calc", config={})
+    resource.register(name="calc")
     resource.jobs.execute.create(spec={"agent": "calc", "input": "2+2"})
 
     assert paths == [
@@ -117,14 +144,18 @@ async def test_async_agents_resource_uses_default_workspace_when_platform_worksp
     assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute"]
 
 
+# Typed as Any, as an untyped caller's value would be: the runtime check is what's under test.
+_NOT_A_CLIENT: Any = object()
+
+
 def test_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
     with pytest.raises(TypeError, match="AgentsResource requires .*NemoClient"):
-        AgentsResource(object())  # type: ignore[arg-type]
+        AgentsResource(_NOT_A_CLIENT)
 
 
 def test_async_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
     with pytest.raises(TypeError, match="AsyncAgentsResource requires .*AsyncNemoClient"):
-        AsyncAgentsResource(object())  # type: ignore[arg-type]
+        AsyncAgentsResource(_NOT_A_CLIENT)
 
 
 def test_deployments_create_uses_client_workspace_by_default() -> None:
@@ -642,3 +673,72 @@ def test_default_headers_are_sent_on_every_request() -> None:
     client.compute_specs.delete("big")
 
     assert auth_headers == ["Bearer tok-123", "Bearer tok-123", "Bearer tok-123"]
+
+
+_EMPTY_PAGE = {
+    "data": [],
+    "pagination": {"page": 1, "page_size": 10, "current_page_size": 0, "total_pages": 1, "total_results": 0},
+}
+
+
+def test_register_sends_labels() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = _read_json(req)
+        return httpx.Response(201, json={"name": "calc"})
+
+    AgentsResource(_client(handler)).register(name="calc", labels={"helix-agents/managed-by": "insights"})
+
+    assert captured["body"]["labels"] == {"helix-agents/managed-by": "insights"}
+
+
+def test_list_filters_by_labels() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).list(labels={"helix-compass/target-agent": "team-a/bot", "team": "search"})
+
+    assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
+    assert json.loads(captured["filter"]) == {
+        "labels.helix-compass/target-agent": "team-a/bot",
+        "labels.team": "search",
+    }
+
+
+def test_execute_job_list_filters_by_agent_refs() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).jobs.execute.list(agents=["research/x", "team-a/y"])
+
+    assert captured["path"] == "/apis/agents/v2/workspaces/team-a/jobs/execute"
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x", "team-a/y"]}}
+
+
+async def test_async_execute_job_list_filters_by_agent_refs() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    await AsyncAgentsResource(_async_client(handler)).jobs.execute.list(agents=["research/x"])
+
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x"]}}
+
+
+def test_execute_job_list_rejects_unqualified_agent_ref() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not list with an unqualified ref")
+
+    with pytest.raises(ValueError, match="'workspace/name'"):
+        AgentsResource(_client(handler)).jobs.execute.list(agents=["x"])

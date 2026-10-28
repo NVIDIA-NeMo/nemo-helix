@@ -36,7 +36,6 @@ from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoun
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
-from nemo_helix_plugin.models.refs import ResolvedModelReference
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nhx_evals_sdk.values import FieldMapping, Model, ModelRef, RunConfig, RunConfigOnline, RunConfigOnlineModel
@@ -616,19 +615,13 @@ class TestEvaluatorSubmit:
             )
 
 
-def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: MockerFixture) -> None:
+def test_sync_executor_submit_sends_a_model_ref_target_for_the_server_to_resolve(mocker: MockerFixture) -> None:
+    """Resolving here would bake the caller's own platform URL into the job, which the job may not reach."""
     platform = _SyncHelix()
-    models_client = mocker.Mock(spec=ModelsClient)
-    models_client.resolve_model_reference.return_value = ResolvedModelReference(
-        url="https://igw.example.test/v1/chat/completions",
-        name="model-a",
-        host_url=None,
-    )
-    mocker.patch("nemo_evals.sdk._executor.ModelsClient.from_client", return_value=models_client)
+    resolve = mocker.patch.object(ModelsClient, "resolve_model_reference")
     executor = _SyncEvaluatorPluginExecutor(client=platform)
     expected_job = mocker.Mock(spec=EvaluatorJobResource)
     create = mocker.patch.object(executor, "create", return_value=expected_job)
-    resolved_model = Model(url="https://igw.example.test/v1/chat/completions", name="model-a")
     metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
     dataset = [{"expected": "a", "output": "a"}]
 
@@ -641,15 +634,16 @@ def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: Moc
     )
 
     assert job is expected_job
-    models_client.resolve_model_reference.assert_called_once_with("default/model-a")
+    resolve.assert_not_called()
     created_spec = create.call_args.kwargs["spec"]
-    assert created_spec.target == resolved_model
+    assert created_spec.target == ModelRef(root="default/model-a")
+    assert created_spec.model_dump(mode="json")["target"] == "default/model-a"
 
 
 def test_sync_executor_submit_requires_online_model_params_for_model_ref() -> None:
     executor = _SyncEvaluatorPluginExecutor(client=_SyncHelix())
 
-    with pytest.raises(TypeError, match="ModelRef target requires RunConfigOnlineModel"):
+    with pytest.raises(TypeError, match="model target requires RunConfigOnlineModel"):
         executor.submit(
             metric=ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}"),
             dataset=[{"expected": "a", "output": "a"}],
@@ -963,21 +957,14 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
 
 
 @pytest.mark.asyncio
-async def test_async_executor_submit_resolves_model_ref_before_creating_job(mocker: MockerFixture) -> None:
+async def test_async_executor_submit_sends_a_model_ref_target_for_the_server_to_resolve(
+    mocker: MockerFixture,
+) -> None:
     platform = _AsyncHelix()
-    models_client = mocker.Mock(spec=AsyncModelsClient)
-    models_client.resolve_model_reference = AsyncMock(
-        return_value=ResolvedModelReference(
-            url="https://igw.example.test/v1/chat/completions",
-            name="model-a",
-            host_url=None,
-        )
-    )
-    mocker.patch("nemo_evals.sdk._executor.AsyncModelsClient.from_client", return_value=models_client)
+    resolve = mocker.patch.object(AsyncModelsClient, "resolve_model_reference", new=AsyncMock())
     executor = _AsyncEvaluatorPluginExecutor(client=platform)
     expected_job = mocker.Mock(spec=AsyncEvaluatorJobResource)
     create = mocker.patch.object(executor, "create", new=AsyncMock(return_value=expected_job))
-    resolved_model = Model(url="https://igw.example.test/v1/chat/completions", name="model-a")
     metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
     dataset = [{"expected": "a", "output": "a"}]
 
@@ -990,9 +977,9 @@ async def test_async_executor_submit_resolves_model_ref_before_creating_job(mock
     )
 
     assert job is expected_job
-    models_client.resolve_model_reference.assert_awaited_once_with("default/model-a")
+    resolve.assert_not_awaited()
     created_spec = create.call_args.kwargs["spec"]
-    assert created_spec.target == resolved_model
+    assert created_spec.target == ModelRef(root="default/model-a")
 
 
 @pytest.mark.asyncio

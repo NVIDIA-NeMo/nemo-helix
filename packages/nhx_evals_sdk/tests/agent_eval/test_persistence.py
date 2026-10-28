@@ -49,7 +49,8 @@ def test_read_trials_loads_trial_and_keeps_valid_evidence_ref(tmp_path: Path) ->
     assert trial.task_id == "taskA" and trial.status == AgentEvalTrialStatus.COMPLETED
     assert trial.evidence is not None
     ws = trial.evidence.require("workspace")
-    assert ws.kind == "filesystem" and Path(ws.ref).is_dir()  # type: ignore[arg-type]
+    assert ws.ref is not None
+    assert ws.kind == "filesystem" and Path(ws.ref).is_dir()
 
 
 def test_read_trials_rebuilds_evidence_ref_for_a_moved_bundle(tmp_path: Path) -> None:
@@ -63,7 +64,8 @@ def test_read_trials_rebuilds_evidence_ref_for_a_moved_bundle(tmp_path: Path) ->
     (trial,) = read_trials(tmp_path)
     assert trial.evidence is not None
     ws = trial.evidence.require("workspace")
-    assert Path(ws.ref) == workspace and Path(ws.ref).is_dir()  # type: ignore[arg-type]
+    assert ws.ref is not None
+    assert Path(ws.ref) == workspace and Path(ws.ref).is_dir()
 
 
 def test_persist_run_writes_bundle_relative_refs_that_survive_a_move(tmp_path: Path) -> None:
@@ -90,7 +92,9 @@ def test_persist_run_writes_bundle_relative_refs_that_survive_a_move(tmp_path: P
     shutil.copytree(bundle, moved)
     (trial,) = read_trials(moved)
     assert trial.evidence is not None
-    resolved = Path(trial.evidence.require("workspace").ref)  # type: ignore[arg-type]
+    resolved_ref = trial.evidence.require("workspace").ref
+    assert resolved_ref is not None
+    resolved = Path(resolved_ref)
     assert resolved.is_dir() and resolved == moved / "evidence" / "fabric" / "r" / "000000-taskA" / "workspace"
 
 

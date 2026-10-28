@@ -40,7 +40,7 @@ uv run nemo inference providers create nvidia-inference --workspace default \
 #    the stored config. Use a model entity name from `nemo models list`, not a provider id.
 uv run nemo models list --workspace default | grep nemotron
 export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-5-lightning-30b-a3b   # example — use what you saw
-uv run nemo agents create --name react-agent \
+uv run nemo agents register --name react-agent \
   --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
 
 # 4. War-game it
@@ -232,7 +232,7 @@ Register an agent to attack. This example ships with the repo and needs no extra
 uv run nemo models list --workspace default | grep nemotron      # pick one
 export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-5-lightning-30b-a3b  # example — use what you saw
 
-uv run nemo agents create --name react-agent \
+uv run nemo agents register --name react-agent \
   --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
 ```
 
@@ -247,7 +247,7 @@ uv run nemo agents create --name react-agent \
 > ([T400119](https://phabricator.wikimedia.org/T400119)). Upstream, not agent-hardener. Its other tool,
 > `current_datetime`, needs no network and exercises the tool path fine.
 
-> `NEMO_DEFAULT_MODEL` must be set **when you run `agents create`** — the config references it as
+> `NEMO_DEFAULT_MODEL` must be set **when you run `agents register`** — the config references it as
 > `${NEMO_DEFAULT_MODEL}` and the platform resolves it into the stored agent. Register it unset and
 > the victim later starts with an unresolved model name. It is not needed afterwards; Agent Hardener
 > reads the already-resolved config.
@@ -354,6 +354,25 @@ uv run nemo agent-hardener synth-benign --manifest-id react-agent --yes    # int
 uv run nemo agent-hardener synth-benign --manifest-id react-agent --no-interactive   # CI: rules only
 ```
 
+### Victim port overrides
+
+Victim ports must be between 1 and 65535. A run-level port override updates both the
+probe destination and the listener's literal numeric `--port` argument and/or
+`agent.env.PORT`. `--port $PORT`, `--port=${PORT}`, and their double-quoted forms
+are supported when `agent.env.PORT` is declared: the command stays unchanged and
+only the environment value is updated. Generated Fabric commands are supported,
+including non-default original ports. Changing a listener port requires one of
+those conventions; ambiguous arguments, other shell expressions, and unsupported
+changes are rejected rather than silently probing a port where nothing listens.
+Quoted numeric YAML ports are normalized. When the routing port is unchanged, we
+try to repair stale listener/env declarations; if the command cannot be safely
+interpreted, only `agent.port` is normalized and the command and env are preserved.
+This also permits existing shell commands and externally supplied `$PORT` values
+to survive create, PATCH, refresh, and run materialization without a port change.
+Run-level overrides do not change the saved target. PATCH and Studio's
+**Save as default** synchronize the saved routing port, listener command, and PORT
+override together so subsequent runs use the same listener.
+
 ### War-game a local NAT project
 
 No deployed agent needed — point `init` at the project directory instead:
@@ -391,7 +410,7 @@ should list `agent-hardener` with a `bundleUrl`) and that the bundle is served
 
 **`Missing required secrets: <NAME>`.** The agent config references `${<NAME>}` and nothing provides
 it. Agent Hardener derives required secrets from the agent's *stored* config, so this means the variable
-was unset when the agent was registered. Export it and re-run `nemo agents create`, or supply it via
+was unset when the agent was registered. Export it and re-run `nemo agents register`, or supply it via
 `--env-file`. Its values are merged into the victim's `.env` and win over the operator environment.
 
 **The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a
@@ -404,7 +423,7 @@ stripped for you; anything else means the agent needs a real project, so pass `-
 isn't a model entity the platform knows. Entity names are lowercase letters, digits and hyphens —
 a provider id like `nvidia/nemotron-3.5-lightning-30b-a3b` is rejected for the slash. Check
 `nemo models list --workspace default`, then re-register the agent with that exact name (the value
-is baked in at `agents create` time).
+is baked in at `agents register` time).
 
 **`openshell status` says "connection refused" or "no compute driver" (macOS).** The gateway is up but
 has no driver — apply the Docker driver block above, then re-run `nemo agent-hardener setup` to

@@ -1,16 +1,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The MVP preparer over the real ``ImageBuildService``: check first, then one call that is ready or failed."""
+"""The MVP preparer over the real ``ImageBuildService``: check first, then one read that is ready or failed."""
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
-from nemo_evals.entities import TaskEntity, TaskRevisionEntity
+from nemo_evals.entities import TaskEntity
 from nemo_evals.harbor.remote import preparation
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparationUnavailableError,
@@ -19,13 +20,16 @@ from nemo_evals.harbor.remote.preparation import (
     TaskPreparation,
     prepare_task_images,
 )
-from nemo_evals.image_builds.models import BuildImage, BuildImageSource, TaskImageBuildEntity, build_job_name
+from nemo_evals.image_builds.models import (
+    BuildImage,
+    BuildImageSource,
+    ImageBuildRequest,
+    TaskImageBuildEntity,
+    build_entity_name,
+)
 from nemo_evals.image_builds.planning import TaskArchive
-from nemo_evals.image_builds.runner import TaskImageBuildSpec
 from nemo_evals.image_builds.service import BuildJob, ImageBuildForbiddenError, ImageBuildService
 from nemo_evals.jobs.agent_spec import ResolvedTask
-from nemo_evals.jobs.task_image_build import task_image_build_job_request
-from nemo_evals.revisions import get_revision
 from nemo_helix_plugin.client.errors import ConflictError, InternalServerError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -41,12 +45,8 @@ class _Jobs:
 
     def __init__(self) -> None:
         self.created: dict[str, CreateHelixJobRequest] = {}
-        self.statuses: dict[str, str] = {}
-        self.refuse: Exception | None = None
 
     async def create(self, request: CreateHelixJobRequest) -> None:
-        if self.refuse is not None:
-            raise self.refuse
         assert request.name is not None
         if request.name in self.created:
             raise ConflictError(httpx.Response(409, json={"detail": "job exists"}))
@@ -55,7 +55,7 @@ class _Jobs:
     async def get(self, name: str) -> BuildJob | None:
         if name not in self.created:
             return None
-        return BuildJob(status=self.statuses.get(name, "active"), custom_fields=self.created[name].custom_fields)
+        return BuildJob(status="active", custom_fields=self.created[name].custom_fields)
 
 
 class _Authorizer:
@@ -78,8 +78,20 @@ def authorizer() -> _Authorizer:
 
 
 @pytest.fixture
-def clients(entity_store, jobs, authorizer) -> PreparationClients:
+def builds(entity_store, jobs, authorizer) -> ImageBuildService:
+    """Starts builds for a test, as ``nemo evals runs submit`` does before it submits."""
+    return ImageBuildService(entity_store, jobs, authorizer)
+
+
+@pytest.fixture
+def clients(entity_store, jobs, authorizer, monkeypatch) -> PreparationClients:
+    """The preparer's clients: it reads the same builds through a service that must never start one."""
     service = ImageBuildService(entity_store, jobs, authorizer)
+
+    async def request_build(*args, **kwargs):
+        pytest.fail("the preparer must never request a build")
+
+    monkeypatch.setattr(service, "request_build", request_build)
     return PreparationClients(client=MagicMock(), files=MagicMock(), image_builds=lambda workspace: service)
 
 
@@ -115,12 +127,16 @@ async def prepare(resolved: ResolvedTask, clients, policy, recorded: TaskPrepara
     )
 
 
+async def build(builds: ImageBuildService, digest: str, *, platform: str | None = None, rebuild: bool = False) -> None:
+    """Start the next build attempt of ``sort-task`` (or return the one running)."""
+    await builds.request_build("default", "sort-task", digest, ImageBuildRequest(platform=platform, rebuild=rebuild))
+
+
 async def settle(entity_store, digest: str, attempt: int, status: str, *, images=(), error=None) -> None:
     """Record the outcome the task-builder Job would write on build ``attempt``."""
     head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-    revision = await get_revision(entity_store, TaskRevisionEntity, head, digest)
     build = await entity_store.get(
-        TaskImageBuildEntity, name=f"build.{attempt}", workspace="default", parent=revision.id
+        TaskImageBuildEntity, name=build_entity_name(digest, attempt), workspace="default", parent=head.id
     )
     build.status, build.images, build.error = status, list(images), error
     await entity_store.update(build)
@@ -137,18 +153,47 @@ def failure(result: TaskPreparation) -> tuple[str, str]:
     return result.error.code, result.error.detail
 
 
-async def test_a_task_without_a_build_starts_its_first_attempt(clients, store_task, sandbox_policy, jobs):
+READY = [image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
+
+
+async def test_a_task_without_a_build_is_refused_and_no_build_starts(clients, store_task, sandbox_policy, jobs):
     digest = await store_task(config=SEPARATE)
     code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable" and "image build 1 of default/sort-task" in detail and "pending" in detail
-    assert list(jobs.created) == [build_job_name("default/sort-task", digest, 1)]
+    assert (code, detail) == (
+        "image_unavailable",
+        f"default/sort-task#{digest} has no image build; build it first (`nemo evals runs submit` builds and waits)",
+    )
+    assert not jobs.created
 
 
-async def test_a_ready_build_gives_agent_and_verifier(clients, store_task, sandbox_policy, entity_store):
+@pytest.mark.parametrize("status", ["pending", "running"])
+async def test_a_build_in_flight_is_refused_and_left_alone(
+    clients, builds, store_task, sandbox_policy, entity_store, jobs, status
+):
     digest = await store_task(config=SEPARATE)
-    await prepare(task(digest), clients, sandbox_policy)
-    images = [image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
-    await settle(entity_store, digest, 1, "ready", images=images)
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, status)
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and f"image build 1 of default/sort-task#{digest} is {status}" in detail
+    assert len(jobs.created) == 1
+
+
+async def test_a_rebuild_in_flight_hides_the_older_ready_build(
+    clients, builds, store_task, sandbox_policy, entity_store
+):
+    """The newest attempt decides: the run waits for the rebuild instead of taking the images it replaces."""
+    digest = await store_task(config=SEPARATE)
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=READY)
+    await build(builds, digest, rebuild=True)
+    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
+    assert code == "image_unavailable" and "image build 2" in detail and "is pending" in detail
+
+
+async def test_a_ready_build_gives_agent_and_verifier(clients, builds, store_task, sandbox_policy, entity_store):
+    digest = await store_task(config=SEPARATE)
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=READY)
     result = await prepare(task(digest), clients, sandbox_policy)
     assert result.status == "ready" and result.environment is not None
     agent, verifier = result.environment.agent, result.environment.verifier
@@ -158,9 +203,19 @@ async def test_a_ready_build_gives_agent_and_verifier(clients, store_task, sandb
     assert result.images["agent"].source == "built"
 
 
-async def test_a_prebuilt_copy_is_marked_prebuilt(clients, store_task, sandbox_policy, entity_store):
+async def test_a_caller_who_may_not_build_still_gets_a_ready_build(
+    clients, builds, store_task, sandbox_policy, entity_store, authorizer
+):
+    digest = await store_task(config=SEPARATE)
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=READY)
+    authorizer.allowed = False
+    assert (await prepare(task(digest), clients, sandbox_policy)).status == "ready"
+
+
+async def test_a_prebuilt_copy_is_marked_prebuilt(clients, builds, store_task, sandbox_policy, entity_store):
     digest = await store_task(config={"environment": {"docker_image": "docker.io/library/ubuntu:24.04"}})
-    await prepare(task(digest), clients, sandbox_policy)
+    await build(builds, digest)
     await settle(entity_store, digest, 1, "ready", images=[image("main", digest_ref("c"), source="prebuilt")])
     result = await prepare(task(digest), clients, sandbox_policy)
     assert result.environment is not None and result.environment.verifier is None
@@ -168,73 +223,65 @@ async def test_a_prebuilt_copy_is_marked_prebuilt(clients, store_task, sandbox_p
 
 
 async def test_a_failed_build_fails_the_task_without_a_new_attempt(
-    clients, store_task, sandbox_policy, entity_store, jobs
+    clients, builds, store_task, sandbox_policy, entity_store, jobs
 ):
     digest = await store_task(config=SEPARATE)
-    await prepare(task(digest), clients, sandbox_policy)
+    await build(builds, digest)
     await settle(entity_store, digest, 1, "failed", error="Dockerfile step 3 failed")
     code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
     assert code == "build_failed" and detail.endswith("Dockerfile step 3 failed")
-    assert len(jobs.created) == 1  # a broken task doesn't start attempt after attempt
-
-
-async def test_a_running_build_is_reported_and_left_alone(clients, store_task, sandbox_policy, jobs):
-    digest = await store_task(config=SEPARATE)
-    await prepare(task(digest), clients, sandbox_policy)
-    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable" and "resubmit when it's ready" in detail
     assert len(jobs.created) == 1
 
 
-async def test_a_caller_who_may_not_build_still_learns_a_build_is_pending(
-    clients, store_task, sandbox_policy, authorizer
+@pytest.mark.parametrize("other", ["pending", "ready", "failed"])
+async def test_a_newer_build_for_another_platform_does_not_hide_the_ready_default_one(
+    clients, builds, store_task, sandbox_policy, entity_store, other
 ):
+    """Runs use the deployment's default platform, so another platform's newer build is no answer."""
     digest = await store_task(config=SEPARATE)
-    await prepare(task(digest), clients, sandbox_policy)  # someone else started it
-    authorizer.allowed = False
-    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable" and "is pending" in detail and "may not" not in detail
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=READY)
+    await build(builds, digest, platform="linux/arm64")
+    await settle(entity_store, digest, 2, other, images=[image("main", digest_ref("f"))] if other == "ready" else ())
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert result.environment.agent.image_ref == digest_ref("d")
 
 
-async def test_a_caller_who_may_not_build_cannot_start_one(clients, store_task, sandbox_policy, authorizer, jobs):
+async def test_a_default_build_older_than_a_page_of_other_platforms_builds_is_found(
+    clients, builds, store_task, sandbox_policy, entity_store, monkeypatch
+):
+    """A page holds 2 builds here: the default build is on the second page, behind other platforms' newer builds."""
+    monkeypatch.setattr("nemo_evals.image_builds.service._LOOKUP_PAGE_SIZE", 2)
     digest = await store_task(config=SEPARATE)
-    authorizer.allowed = False
-    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable" and "may not submit container image builds" in detail
-    assert not jobs.created
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=READY)
+    for attempt, platform in enumerate(("linux/arm64", "linux/amd64", "linux/riscv64"), start=2):
+        await build(builds, digest, platform=platform)
+        await settle(entity_store, digest, attempt, "failed", error="no base image for the platform")
+
+    result = await prepare(task(digest), clients, sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert result.environment.agent.image_ref == digest_ref("d")
 
 
-async def test_a_lost_build_job_is_created_again(clients, store_task, sandbox_policy, jobs):
+async def test_a_build_read_outage_is_retryable(clients, store_task, sandbox_policy, entity_store, monkeypatch):
     digest = await store_task(config=SEPARATE)
-    jobs.refuse = InternalServerError(httpx.Response(500, json={"detail": "jobs is down"}))
-    with pytest.raises(ImagePreparationUnavailableError, match="jobs is down"):
+
+    async def unavailable(*args, **kwargs):
+        raise InternalServerError(httpx.Response(503, json={"detail": "entity store is down"}))
+
+    monkeypatch.setattr(entity_store, "list", unavailable)
+    with pytest.raises(ImagePreparationUnavailableError, match="entity store is down"):
         await prepare(task(digest), clients, sandbox_policy)
-    jobs.refuse = None
-    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable" and list(jobs.created) == [build_job_name("default/sort-task", digest, 1)]
 
 
-async def test_a_build_whose_job_ended_without_a_result_is_replaced(clients, store_task, sandbox_policy, jobs):
+async def test_a_compose_service_image_is_not_supported(clients, builds, store_task, sandbox_policy, entity_store):
     digest = await store_task(config=SEPARATE)
-    await prepare(task(digest), clients, sandbox_policy)
-    jobs.statuses[build_job_name("default/sort-task", digest, 1)] = "error"
-    code, detail = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable" and "image build 2" in detail
-    assert len(jobs.created) == 2
-
-
-async def test_a_job_name_held_by_another_job_is_reported(clients, store_task, sandbox_policy, jobs):
-    digest = await store_task(config=SEPARATE)
-    name = build_job_name("default/sort-task", digest, 1)
-    other = TaskImageBuildSpec(workspace="default", task="other-task", revision_digest=digest, attempt=1)
-    jobs.created[name] = task_image_build_job_request(other, name=name)
-    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
-    assert code == "image_unavailable"
-
-
-async def test_a_compose_service_image_is_not_supported(clients, store_task, sandbox_policy, entity_store):
-    digest = await store_task(config=SEPARATE)
-    await prepare(task(digest), clients, sandbox_policy)
+    await build(builds, digest)
     images = [image("main", digest_ref("d")), image("db", digest_ref("f"))]
     await settle(entity_store, digest, 1, "ready", images=images)
     code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
@@ -249,9 +296,9 @@ async def test_a_task_or_revision_that_is_gone_is_invalid(clients, store_task, s
     assert code == "invalid_task_config"
 
 
-async def test_a_non_harbor_task_is_invalid(clients, store_task, sandbox_policy):
-    digest = await store_task(harbor=False)
-    code, _ = failure(await prepare(task(digest), clients, sandbox_policy))
+async def test_a_non_harbor_task_is_invalid(clients, sandbox_policy):
+    evaluator = ResolvedTask(id="answer", spec=ResolvedEvaluatorTaskDefinition(kind="evaluator", intent="Answer"))
+    code, _ = failure(await prepare(evaluator, clients, sandbox_policy))
     assert code == "invalid_task_config"
 
 

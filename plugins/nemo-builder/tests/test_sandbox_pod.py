@@ -277,13 +277,18 @@ class TestTheBuildScriptRuns:
 class _Api:
     """The pod calls a sandbox makes, failing where told to."""
 
-    def __init__(self, *, create: Exception | None = None, delete: Exception | None = None) -> None:
+    def __init__(
+        self, *, create: Exception | None = None, create_failures: int = -1, delete: Exception | None = None
+    ) -> None:
         self.created: list[str] = []
         self.deleted: list[str] = []
-        self._create, self._delete = create, delete
+        self.timeouts: list[tuple[float, float]] = []
+        self._create, self._create_failures, self._delete = create, create_failures, delete
 
-    def create_namespaced_pod(self, *, namespace: str, body: k8s.V1Pod) -> None:
-        if self._create:
+    def create_namespaced_pod(self, *, namespace: str, body: k8s.V1Pod, _request_timeout: tuple[float, float]) -> None:
+        self.timeouts.append(_request_timeout)
+        if self._create and self._create_failures != 0:
+            self._create_failures -= 1
             raise self._create
         self.created.append(body.metadata.name)
 
@@ -312,9 +317,44 @@ class TestEachSandboxFailsAlone:
         )
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        api = _Api(create=ApiException(status=403, reason="exceeded quota"))
+        sleeps: list[float] = []
+        monkeypatch.setattr(supervise.time, "sleep", sleeps.append)
+        api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
+        assert sleeps == []
+
+    def test_a_sandbox_the_quota_rejects_waits_for_room(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        now = [0.0]
+        sleeps: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        monkeypatch.setattr(supervise.time, "monotonic", lambda: now[0])
+        monkeypatch.setattr(supervise.time, "sleep", sleep)
+        quota = ApiException(status=403, reason="Forbidden")
+        quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
+        api = _Api(create=quota, create_failures=3)
+        assert self._build(monkeypatch, api) == 0
+        assert api.created == [self.NAME]
+        assert sleeps == [5.0, 10.0, 20.0]
+        assert api.timeouts == [(60.0, 60.0)] * 4
+
+        sleeps.clear()
+        monkeypatch.setattr(supervise, "_RETRY_ATTEMPTS", 2)
+        assert self._build(monkeypatch, _Api(create=ApiException(status=429, reason="Too Many Requests"))) == 2
+        assert sleeps == [5.0]
+
+        # The last wait is cut to the time left, and each create is bounded by it too.
+        sleeps.clear()
+        monkeypatch.setattr(supervise, "_RETRY_ATTEMPTS", 60)
+        monkeypatch.setattr(supervise, "_RETRY_DEADLINE_SECONDS", 12)
+        api = _Api(create=quota)
+        assert self._build(monkeypatch, api) == 2
+        assert sleeps == [5.0, 7.0]
+        assert api.timeouts == [(12.0, 12.0), (7.0, 7.0), (1.0, 1.0)]
 
     def test_a_log_that_cannot_be_read_fails_the_group_and_the_sandbox_is_still_deleted(
         self, monkeypatch: pytest.MonkeyPatch

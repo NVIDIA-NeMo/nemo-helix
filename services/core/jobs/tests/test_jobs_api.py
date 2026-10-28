@@ -16,8 +16,9 @@ from httpx import AsyncClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
-from nemo_helix_plugin.jobs.types import HelixJobTaskUpdate
+from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest
 from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.common.jobs.schemas import HelixJobStatus
@@ -28,6 +29,7 @@ from nhx.core.jobs.api.v2.jobs.endpoints import (
 )
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    HelixJobAttemptResponse,
     HelixJobResponse,
     HelixJobSortField,
     HelixJobStepsListFilter,
@@ -35,6 +37,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
 from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDispatcher,
+    JobHasNoAttemptError,
     JobOutputLocationError,
     JobSecretValidationError,
     JobStatusUpdateSkippedError,
@@ -47,6 +50,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobStepSpec,
 )
 from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.entities import HelixJobResult
 from pydantic import ValidationError
 from starlette.datastructures import QueryParams
 
@@ -113,6 +117,245 @@ async def test_create_job_using_typed_client(async_client: AsyncNemoClient):
     job_item = response.items[0]
     assert job_item.name == "test-job"
     assert len(job_item.platform_spec.steps) == 1
+
+
+@pytest.mark.asyncio
+async def test_attempt_and_update_api_roundtrip(
+    async_client: AsyncNemoClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    jobs = AsyncJobsClient.from_client(async_client)
+    created = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
+
+    attempts = (await jobs.list_job_attempts(workspace=DEFAULT_WORKSPACE, job=created.name)).page()
+    current = (
+        await jobs.get_job_attempt(
+            workspace=DEFAULT_WORKSPACE,
+            job=created.name,
+            attempt="current",
+        )
+    ).data()
+    updated = (
+        await jobs.update_job(
+            workspace=DEFAULT_WORKSPACE,
+            name=created.name,
+            body=UpdateHelixJobRequest(description="updated"),
+        )
+    ).data()
+
+    assert [attempt.id for attempt in attempts.items] == [created.attempt_id]
+    assert current.id == created.attempt_id
+    assert current.is_current is True
+    assert updated.description == "updated"
+
+
+@pytest.mark.asyncio
+async def test_update_job_without_current_attempt_returns_conflict(
+    test_client: AsyncClient,
+    mock_dispatcher: JobDispatcher,
+):
+    with patch.object(
+        mock_dispatcher,
+        "update_job",
+        new=AsyncMock(side_effect=JobHasNoAttemptError("Job 'not-run' has not run yet.")),
+    ):
+        response = await test_client.patch(
+            f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/not-run",
+            json={"description": "updated"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Job 'not-run' has not run yet."
+
+
+@pytest.mark.asyncio
+async def test_attempt_step_status_update_ignores_deleted_job_race(
+    test_client: AsyncClient,
+    mock_dispatcher: JobDispatcher,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    created = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    with patch.object(
+        mock_dispatcher,
+        "update_job_status_from_step",
+        new=AsyncMock(side_effect=JobStatusUpdateSkippedError("job deleted")),
+    ):
+        response = await test_client.patch(
+            f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{created.name}"
+            f"/attempts/{created.attempt_id}/steps/basic/status",
+            json={"status": "active"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["attempt_id"] == created.attempt_id
+
+
+def test_jobs_api_models_hide_entity_store_versions() -> None:
+    assert "db_version" not in HelixJobResponse.model_fields
+    assert "db_version" not in HelixJobAttemptResponse.model_fields
+    assert "expected_db_version" not in UpdateHelixJobRequest.model_fields
+
+
+@pytest.mark.asyncio
+async def test_job_update_validation_statuses(
+    test_client: AsyncClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    create_response = await test_client.post(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs",
+        json=sample_platform_job_request.model_dump(mode="json", exclude_none=True),
+    )
+    assert create_response.status_code == 201
+    created = create_response.json()
+    path = f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{created['name']}"
+
+    updated = await test_client.patch(
+        path,
+        json={"description": "updated"},
+    )
+    assert updated.status_code == 200
+
+    one_sided_spec = await test_client.patch(path, json={"spec": {"changed": True}})
+    assert one_sided_spec.status_code == 422
+
+    for removed_field, value in (
+        ("project", "project-a"),
+        ("ownership", {"user": "owner"}),
+        ("custom_fields", {"key": "value"}),
+        ("profile", "default"),
+        ("options", {"backend": {}}),
+    ):
+        response = await test_client.patch(path, json={"description": "ignored", removed_field: value})
+        assert response.status_code == 422
+
+    empty = await test_client.patch(path, json={})
+    assert empty.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_job_update_normalizes_and_validates_platform_spec(
+    test_client: AsyncClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    create_response = await test_client.post(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs",
+        json=sample_platform_job_request.model_dump(mode="json", exclude_none=True),
+    )
+    assert create_response.status_code == 201
+    path = f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{create_response.json()['name']}"
+
+    invalid_platform_spec = sample_platform_job_request.platform_spec.model_dump(mode="json")
+    invalid_platform_spec["steps"][0]["executor"]["profile"] = "missing-profile"
+    invalid = await test_client.patch(
+        path,
+        json={"spec": {"revision": 2}, "platform_spec": invalid_platform_spec},
+    )
+    assert invalid.status_code == 422
+
+    valid = await test_client.patch(
+        path,
+        json={
+            "spec": {"revision": 2},
+            "platform_spec": sample_platform_job_request.platform_spec.model_dump(mode="json"),
+        },
+    )
+    assert valid.status_code == 200
+    assert valid.json()["platform_spec"]["steps"][0]["executor"] == expected_translated_executor_dump()
+
+
+@pytest.mark.asyncio
+async def test_attempt_routes_reject_cross_job_selectors(
+    test_client: AsyncClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    first_response = await test_client.post(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs",
+        json=sample_platform_job_request.model_dump(mode="json", exclude_none=True),
+    )
+    assert first_response.status_code == 201
+    first = first_response.json()
+    second_response = await test_client.post(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs",
+        json=sample_platform_job_request.model_copy(update={"name": "second-job"}).model_dump(
+            mode="json", exclude_none=True
+        ),
+    )
+    assert second_response.status_code == 201
+    second = second_response.json()
+
+    attempt_response = await test_client.get(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{first['name']}/attempts/{second['attempt_id']}"
+    )
+    assert attempt_response.status_code == 404
+
+    logs_response = await test_client.get(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{first['name']}/logs",
+        params={"attempt_id": second["attempt_id"]},
+    )
+    assert logs_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_attempt_scoped_execution_tree_and_result_filter_roundtrip(
+    async_client: AsyncNemoClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    jobs = AsyncJobsClient.from_client(async_client)
+    created = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
+    attempt = created.attempt_id
+
+    step = (
+        await jobs.get_attempt_step(
+            workspace=DEFAULT_WORKSPACE,
+            job=created.name,
+            attempt=attempt,
+            name="basic",
+        )
+    ).data()
+    updated_step = (
+        await jobs.update_attempt_step_status(
+            workspace=DEFAULT_WORKSPACE,
+            job=created.name,
+            attempt=attempt,
+            name="basic",
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
+        )
+    ).data()
+    task = (
+        await jobs.update_attempt_step_task(
+            workspace=DEFAULT_WORKSPACE,
+            job=created.id,
+            attempt=attempt,
+            step="basic",
+            name="task-1",
+            body=HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE),
+        )
+    ).data()
+    result = (
+        await jobs.create_job_result(
+            workspace=DEFAULT_WORKSPACE,
+            job=created.name,
+            name="metrics",
+            body=HelixJobResultCreateRequest(
+                attempt_id=attempt,
+                artifact_url="default/test-fileset#metrics",
+                artifact_storage_type=FileStorageType.FILESET,
+            ),
+        )
+    ).data()
+    results = (
+        await jobs.list_job_results(
+            workspace=DEFAULT_WORKSPACE,
+            name=created.name,
+            query_params={"attempt_id": attempt},
+        )
+    ).data()
+
+    assert step.attempt_id == attempt
+    assert updated_step.status == HelixJobStatus.ACTIVE
+    assert task.step_id == step.id
+    assert result.attempt_id == attempt
+    assert [item.name for item in results.data] == ["metrics"]
 
 
 @pytest.mark.asyncio
@@ -1063,7 +1306,12 @@ async def test_job_paging(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_job_request: CreateHelixJobRequest):
+async def test_job_result_crud(
+    async_client: AsyncNemoClient,
+    test_client: AsyncClient,
+    mock_store,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
     jobs = AsyncJobsClient.from_client(async_client)
     job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     resp = (
@@ -1072,6 +1320,7 @@ async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_jo
             workspace=DEFAULT_WORKSPACE,
             job=job_resp.name,
             body=HelixJobResultCreateRequest(
+                attempt_id=job_resp.attempt_id,
                 artifact_url="default/test-fileset#myartifact",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -1079,12 +1328,14 @@ async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_jo
     ).data()
     assert resp.name == "result-name1"
     assert resp.job == job_resp.id
+    assert resp.attempt_id == job_resp.attempt_id
     resp2 = (
         await jobs.create_job_result(
             name="result-name2",
             workspace=DEFAULT_WORKSPACE,
             job=job_resp.name,
             body=HelixJobResultCreateRequest(
+                attempt_id=job_resp.attempt_id,
                 artifact_url="default/test-fileset#myartifact",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -1093,14 +1344,86 @@ async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_jo
     assert resp2.name == "result-name2"
     assert resp2.job == job_resp.id
 
+    await mock_store.add(
+        HelixJobResult(
+            name="existing-result",
+            workspace=DEFAULT_WORKSPACE,
+            job=job_resp.id,
+            artifact_url="default/test-fileset#existing",
+            artifact_storage_type=FileStorageType.FILESET,
+        )
+    )
+
     results = (await jobs.list_job_results(name=job_resp.name, workspace=DEFAULT_WORKSPACE)).data()
-    assert len(results.data) == 2
+    assert len(results.data) == 3
     result2 = next(r for r in results.data if "result-name2" == r.name)
 
+    for attempt_selector in (job_resp.attempt_id, "current"):
+        filtered = (
+            await jobs.list_job_results(
+                name=job_resp.name,
+                workspace=DEFAULT_WORKSPACE,
+                query_params={"attempt_id": attempt_selector},
+            )
+        ).data()
+        assert {result.name for result in filtered.data} == {"result-name1", "result-name2"}
+
     another_result_2 = (
-        await jobs.get_job_result(name=result2.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
+        await jobs.get_job_result(
+            name=result2.name,
+            workspace=DEFAULT_WORKSPACE,
+            job=job_resp.name,
+        )
     ).data()
     assert result2 == another_result_2
+    result_by_job_id = (
+        await jobs.get_job_result(
+            name=result2.name,
+            workspace=DEFAULT_WORKSPACE,
+            job=job_resp.id,
+        )
+    ).data()
+    assert result_by_job_id == result2
+    created_by_job_id = (
+        await jobs.create_job_result(
+            name="result-by-job-id",
+            workspace=DEFAULT_WORKSPACE,
+            job=job_resp.id,
+            body=HelixJobResultCreateRequest(
+                attempt_id=job_resp.attempt_id,
+                artifact_url="default/test-fileset#myartifact-by-id",
+                artifact_storage_type=FileStorageType.FILESET,
+            ),
+        )
+    ).data()
+    assert created_by_job_id.job == job_resp.id
+    job_get = await test_client.get(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job_resp.name}/results/{result2.name}"
+    )
+    assert job_get.status_code == 200
+    existing_get = await test_client.get(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job_resp.name}/results/existing-result"
+    )
+    assert existing_get.status_code == 200
+    assert "attempt_id" not in existing_get.json()
+    unfiltered = await test_client.get(f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job_resp.name}/results")
+    existing_list_item = next(item for item in unfiltered.json()["data"] if item["name"] == "existing-result")
+    assert "attempt_id" not in existing_list_item
+
+    missing_attempt = await test_client.get(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job_resp.name}/results",
+        params={"attempt_id": "missing-attempt"},
+    )
+    assert missing_attempt.status_code == 404
+    current_write = await test_client.post(
+        f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/{job_resp.name}/results/current-write",
+        json={
+            "attempt_id": "current",
+            "artifact_url": "default/test-fileset#current-write",
+            "artifact_storage_type": "fileset",
+        },
+    )
+    assert current_write.status_code == 422
     # The result's namespace is inherited from the parent job, not from the create request
     # Since the job uses the default namespace, the result should too
     assert result2.workspace == "default"
@@ -1111,7 +1434,6 @@ async def test_job_result_download(
     async_client: AsyncNemoClient,
     test_client: AsyncClient,
     sample_platform_job_request: CreateHelixJobRequest,
-    mock_result_manager,
     tmp_path: Path,
 ):
     # set up some mock files that the result manager will return
@@ -1120,9 +1442,6 @@ async def test_job_result_download(
     tmp_file = tmp_dir / "testfile.txt"
     testdata = "test data"
     tmp_file.write_text(testdata)
-    mock_result_manager._tmp_dir = tmp_dir
-    mock_result_manager._path = tmp_file
-
     jobs = AsyncJobsClient.from_client(async_client)
     job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     result = (
@@ -1131,6 +1450,7 @@ async def test_job_result_download(
             workspace=DEFAULT_WORKSPACE,
             job=job_resp.name,
             body=HelixJobResultCreateRequest(
+                attempt_id=job_resp.attempt_id,
                 artifact_url="default/test-fileset#result_name1",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -1138,13 +1458,13 @@ async def test_job_result_download(
     ).data()
 
     with patch(
-        "nemo_helix_plugin.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
-    ) as factory:
+        "nemo_helix_plugin.jobs.result_manager.download_artifact_from_url",
+        new=AsyncMock(return_value=TmpDirPath(path=tmp_file, tmp_dir=tmp_dir)),
+    ) as downloader:
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
         download_bytes = await download.read()
 
-    call_kwargs = factory.call_args.kwargs
-    assert call_kwargs["job_name"] == job_resp.name
+    call_kwargs = downloader.call_args.kwargs
     assert call_kwargs["workspace"] == DEFAULT_WORKSPACE
     assert isinstance(call_kwargs["files_client"], AsyncFilesClient)
     assert call_kwargs["files_client"]._http is test_client
@@ -1157,10 +1477,10 @@ async def test_job_result_download(
     # make the artifact a folder this time
     tmp_dir.mkdir()
     tmp_file.write_text(testdata)
-    mock_result_manager._tmp_dir = tmp_dir
-    mock_result_manager._path = tmp_dir
-
-    with patch("nemo_helix_plugin.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
+    with patch(
+        "nemo_helix_plugin.jobs.result_manager.download_artifact_from_url",
+        new=AsyncMock(return_value=TmpDirPath(path=tmp_dir, tmp_dir=tmp_dir)),
+    ):
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
         tar_content = await download.read()
 
@@ -1179,7 +1499,7 @@ async def test_job_result_download(
 
 
 @pytest.mark.asyncio
-async def test_job_status_details_crud(
+async def test_attempt_status_details_crud(
     test_client: AsyncClient,
     async_client: AsyncNemoClient,
     sample_platform_job_request: CreateHelixJobRequest,
@@ -1192,12 +1512,13 @@ async def test_job_status_details_crud(
     jobs = AsyncJobsClient.from_client(async_client)
     job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     job_name = job_resp.name  # API URLs use job name, not ID
+    attempt_id = job_resp.attempt_id
+    assert attempt_id is not None
+    status_details_path = f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/attempts/{attempt_id}/status-details"
 
     ### Test patching a job status details
     # Post a status update like we would from a job
-    resp = await test_client.patch(
-        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details", json=original_details
-    )
+    resp = await test_client.patch(status_details_path, json=original_details)
     assert resp.status_code == 200
 
     # Update the job step from created to active
@@ -1218,8 +1539,13 @@ async def test_job_status_details_crud(
     assert original_details == job_status_details
 
     # Patch the status details, and ensure they match the updated details
-    resp = await test_client.patch(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details", json=patch)
+    resp = await test_client.patch(status_details_path, json=patch)
     assert resp.status_code == 200
+    legacy_resp = await test_client.patch(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/status-details",
+        json=patch,
+    )
+    assert legacy_resp.status_code == 404
     resp = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
     assert resp.status_code == 200
     data = resp.json()
@@ -1234,11 +1560,17 @@ async def test_job_status_details_crud(
     assert step_status_details == {"message": "Step is now active"}
 
     # Now lets create a task associated with the step, and then update it's status
+    legacy_task_resp = await test_client.put(
+        f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/basic/tasks/task-1",
+        json={"status": "active"},
+    )
+    assert legacy_task_resp.status_code == 405
     task_resp = (
-        await jobs.update_job_step_task(
+        await jobs.update_attempt_step_task(
             name="task-1",
             workspace=DEFAULT_WORKSPACE,
             job=job_name,
+            attempt=attempt_id,
             step="basic",
             body=HelixJobTaskUpdate(
                 status=HelixJobStatus.ACTIVE,
@@ -1443,7 +1775,7 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["cancel", "pause", "resume"])
+@pytest.mark.parametrize("operation", ["cancel", "pause", "resume", "rerun"])
 @pytest.mark.parametrize(
     "error,expected_status",
     [
@@ -1677,6 +2009,7 @@ async def test_job_status_timestamps(
     jobs = AsyncJobsClient.from_client(async_client)
     job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     job_name = job_resp.name
+    assert job_resp.attempt_id is not None
 
     # Activate the step so the job is in a meaningful state
     response = await test_client.patch(
@@ -1687,10 +2020,11 @@ async def test_job_status_timestamps(
 
     # Create a task for the step
     task_resp = (
-        await jobs.update_job_step_task(
+        await jobs.update_attempt_step_task(
             name="task-1",
             workspace=DEFAULT_WORKSPACE,
             job=job_name,
+            attempt=job_resp.attempt_id,
             step="basic",
             body=HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE),
         )
@@ -1755,10 +2089,25 @@ async def test_create_job_without_name_for_source_ending_in_separator_is_admitte
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["bad--name", "a" * 52])
+@pytest.mark.parametrize("name", ["bad--name"])
 async def test_create_job_with_name_that_cannot_name_its_fileset_returns_422(test_client: AsyncClient, name: str):
     """An invalid caller-supplied name is rejected at request validation, not reported as a state conflict."""
     response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name=name))
 
     assert response.status_code == 422
     assert "conflicts with existing platform state" not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("length", [52, 63])
+async def test_create_job_with_full_length_name_submits_without_output_location(test_client: AsyncClient, length: int):
+    """A job name longer than the derived-fileset prefix budget now submits; the service derives a
+    length-safe fileset name instead of rejecting the request."""
+    name = "a" * length
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=_create_job_body(name=name))
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["name"] == name
+    # The derived artifact fileset name stays within the entity-name limit.
+    assert len(body["fileset"]) <= 63

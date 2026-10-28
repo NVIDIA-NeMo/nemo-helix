@@ -207,6 +207,7 @@ def load_agent_config(path: str | Path) -> AgentConfig:
     if not isinstance(data, dict):
         raise AgentConfigLoadError(f"Agent config {config_path} root must be a YAML mapping.")
 
+    data.pop("reference", None)
     try:
         return AgentConfig.model_validate(data)
     except ValidationError as error:

@@ -6,17 +6,20 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.fabric import session_manager
-from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricRuntimeResult
+from nemo_agents_plugin.fabric import server, session_manager
+from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricRuntimeResult, FabricRuntimeStream
 from nemo_agents_plugin.fabric.session_manager import FabricSessionManager
 from nemo_agents_plugin.fabric.session_registry import (
     FabricSessionNotFoundError,
     FabricSessionRegistry,
 )
+from nemo_agents_plugin.fabric.streaming import StreamingMethod
+from nemo_fabric import FabricConfigError, RunPlan
 
 
 class _FakeRuntime:
@@ -43,19 +46,41 @@ class _FakeFabricConfig:
 
 
 class _FakeFabric:
-    def __init__(self, runtime: _FakeRuntime) -> None:
+    def __init__(self, runtime: _FakeRuntime, *, method: StreamingMethod = StreamingMethod.RELAY) -> None:
         self.runtime = runtime
+        self.method = method
+        self.plan_calls: list[Any] = []
         self.start_calls: list[dict[str, Any]] = []
+
+    def plan(self, config: Any, *, base_dir: Path) -> RunPlan:
+        self.plan_calls.append(config)
+        return RunPlan.from_mapping(
+            {
+                "base_dir": str(base_dir),
+                "config": {
+                    "metadata": {"name": "test-agent"},
+                    "harness": {"adapter_id": "nvidia.fabric.custom"},
+                },
+                "adapter": {"adapter_id": "nvidia.fabric.custom", "adapter_kind": "python"},
+                "capabilities": {"streaming": self.method is StreamingMethod.OPENAI},
+                "adapter_descriptor": {
+                    "descriptor": {
+                        "telemetry": {"providers": {"relay": {}} if self.method is StreamingMethod.RELAY else {}},
+                        "capabilities": {"streaming": self.method is StreamingMethod.OPENAI},
+                    }
+                },
+            }
+        )
 
     async def start_runtime(self, config: Any, *, base_dir: Path, streaming: bool = False) -> _FakeRuntime:
         self.start_calls.append({"base_dir": base_dir, "config": config, "streaming": streaming})
         return self.runtime
 
 
-class _SequenceFabric:
+class _SequenceFabric(_FakeFabric):
     def __init__(self, runtimes: list[_FakeRuntime]) -> None:
+        super().__init__(runtimes[0])
         self.runtimes = iter(runtimes)
-        self.start_calls: list[dict[str, Any]] = []
 
     async def start_runtime(self, config: Any, *, base_dir: Path, streaming: bool = False) -> _FakeRuntime:
         self.start_calls.append({"base_dir": base_dir, "config": config, "streaming": streaming})
@@ -82,9 +107,11 @@ def _agent_config() -> AgentConfig:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(StreamingMethod))
 async def test_open_session_materializes_config_and_starts_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
     fabric_config = _FakeFabricConfig()
     translation_calls: list[AgentConfig] = []
@@ -95,7 +122,7 @@ async def test_open_session_materializes_config_and_starts_runtime(
 
     monkeypatch.setattr(session_manager, "translate_agent_config", translate)
     runtime = _FakeRuntime()
-    fabric = _FakeFabric(runtime)
+    fabric = _FakeFabric(runtime, method=method)
     registry = FabricSessionRegistry()
     agent_config = _agent_config()
     manager = FabricSessionManager(
@@ -114,13 +141,38 @@ async def test_open_session_materializes_config_and_starts_runtime(
     assert (tmp_path / "workspace").is_dir()
     assert len(fabric.start_calls) == 1
     assert fabric.start_calls[0]["base_dir"] == tmp_path
-    assert fabric.start_calls[0]["streaming"] is True
+    relay_streaming = method is StreamingMethod.RELAY
+    assert fabric.start_calls[0]["streaming"] is relay_streaming
     started_config = fabric.start_calls[0]["config"]
-    assert started_config is not fabric_config
-    assert started_config.copied is True
-    assert started_config.relay_enabled is True
+    assert started_config.copied is relay_streaming
+    assert started_config.relay_enabled is relay_streaming
+    assert fabric.plan_calls == [fabric_config]
+    assert fabric_config.relay_enabled is False
     assert session.runtime is runtime
+    assert session.streaming_method is method
     assert await registry.get(session.session_id) is session
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [FabricConfigError, session_manager.FabricError])
+async def test_open_session_reports_plan_failure_before_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
+    fabric = _FakeFabric(_FakeRuntime())
+
+    def fail_plan(config: Any, *, base_dir: Path) -> RunPlan:
+        raise error_type("adapter unavailable")
+
+    monkeypatch.setattr(fabric, "plan", fail_plan)
+    manager = FabricSessionManager(
+        _agent_config(), base_dir=tmp_path, session_registry=FabricSessionRegistry(), fabric=cast(Any, fabric)
+    )
+
+    with pytest.raises(session_manager.FabricSessionStartError, match="adapter unavailable"):
+        await manager.open_session()
+
+    assert fabric.start_calls == []
 
 
 @pytest.mark.asyncio
@@ -133,7 +185,9 @@ async def test_open_session_stops_runtime_when_registration_fails(
     fabric = _FakeFabric(runtime)
     registry = FabricSessionRegistry()
 
-    async def fail_registration(runtime: Any, *, session_id: str | None = None) -> None:
+    async def fail_registration(
+        runtime: Any, *, session_id: str | None = None, streaming_method: StreamingMethod
+    ) -> None:
         raise RuntimeError("registration failed")
 
     monkeypatch.setattr(registry, "register", fail_registration)
@@ -186,23 +240,25 @@ async def test_invoke_once_uses_unregistered_runtime(
 
 
 @pytest.mark.asyncio
-async def test_stream_once_uses_relay_enabled_unregistered_runtime(
+@pytest.mark.parametrize("method", list(StreamingMethod))
+async def test_stream_once_selects_runtime_streaming(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
     fabric_config = _FakeFabricConfig()
     monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: fabric_config)
-    captured: list[tuple[Any, Any]] = []
+    captured: list[tuple[Any, Any, StreamingMethod]] = []
     expected_stream = object()
 
     @asynccontextmanager
-    async def stream_fabric_agent_once(request: Any, *, fabric: Any) -> Any:
-        captured.append((request, fabric))
+    async def stream_fabric_agent_once(request: Any, *, fabric: Any, streaming_method: StreamingMethod) -> Any:
+        captured.append((request, fabric, streaming_method))
         yield expected_stream
 
     monkeypatch.setattr(session_manager, "stream_fabric_agent_once", stream_fabric_agent_once)
     registry = FabricSessionRegistry()
-    fabric = object()
+    fabric = _FakeFabric(_FakeRuntime(), method=method)
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -213,10 +269,13 @@ async def test_stream_once_uses_relay_enabled_unregistered_runtime(
     async with manager.stream_once(FabricInvocationRequest(input="hello")) as stream:
         assert stream is expected_stream
 
-    request, captured_fabric = captured[0]
-    assert request.fabric_config is not fabric_config
-    assert request.fabric_config.copied is True
-    assert request.fabric_config.relay_enabled is True
+    request, captured_fabric, streaming_method = captured[0]
+    assert streaming_method is method
+    relay_streaming = method is StreamingMethod.RELAY
+    assert request.fabric_config.copied is relay_streaming
+    assert request.fabric_config.relay_enabled is relay_streaming
+    assert fabric.plan_calls == [fabric_config]
+    assert fabric_config.relay_enabled is False
     assert request.input == "hello"
     assert captured_fabric is fabric
     assert await registry.count() == 0
@@ -583,12 +642,14 @@ async def test_invoke_session_refreshes_activity(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(StreamingMethod))
 async def test_stream_session_refreshes_activity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
     registry = FabricSessionRegistry()
-    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1", streaming_method=method)
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -597,7 +658,10 @@ async def test_stream_session_refreshes_activity(
     stream = object()
     refresh_calls: list[Any] = []
 
-    def stream_fabric_runtime(runtime: Any, request: FabricInvocationRequest) -> object:
+    def stream_fabric_runtime(
+        runtime: Any, request: FabricInvocationRequest, *, streaming_method: StreamingMethod
+    ) -> object:
+        assert streaming_method is method
         return stream
 
     async def refresh_activity(resolved_session: Any) -> None:
@@ -664,12 +728,15 @@ async def test_invoke_session_serializes_turns_for_same_runtime(
 
 
 @pytest.mark.asyncio
-async def test_stream_session_serializes_turns_for_same_runtime(
+@pytest.mark.parametrize("method", list(StreamingMethod))
+async def test_stream_session_holds_lock_until_cleanup_finishes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
+    monkeypatch.setattr(server, "_FABRIC_STREAM_CLEANUP_TIMEOUT_SECONDS", 0.01)
     registry = FabricSessionRegistry()
-    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1", streaming_method=method)
     manager = FabricSessionManager(
         _agent_config(),
         base_dir=tmp_path,
@@ -680,16 +747,25 @@ async def test_stream_session_serializes_turns_for_same_runtime(
     release_first = asyncio.Event()
     invocation_order: list[str] = []
 
-    def stream_fabric_runtime(runtime: Any, request: FabricInvocationRequest) -> object:
+    async def close_stream() -> None:
+        first_started.set()
+        await release_first.wait()
+
+    def stream_fabric_runtime(
+        runtime: Any, request: FabricInvocationRequest, *, streaming_method: StreamingMethod
+    ) -> FabricRuntimeStream:
+        assert streaming_method is method
         invocation_order.append(request.input)
-        return object()
+        return cast(FabricRuntimeStream, SimpleNamespace(aclose=close_stream))
 
     monkeypatch.setattr(session_manager, "stream_fabric_runtime", stream_fabric_runtime)
 
-    async def stream_first() -> None:
-        async with manager.stream_session(session, FabricInvocationRequest(input="first")):
-            first_started.set()
-            await release_first.wait()
+    async def stream_first() -> server._StreamingChatCompletionIterator:
+        context = manager.stream_session(session, FabricInvocationRequest(input="first"))
+        stream = await context.__aenter__()
+        iterator = server._iter_streaming_chat_completion(context, stream, completion_id="first", model="test-model")
+        await iterator.aclose()
+        return iterator
 
     async def stream_second() -> None:
         async with manager.stream_session(session, FabricInvocationRequest(input="second")):
@@ -698,14 +774,17 @@ async def test_stream_session_serializes_turns_for_same_runtime(
     first = asyncio.create_task(stream_first())
     await first_started.wait()
     second = asyncio.create_task(stream_second())
-    await asyncio.sleep(0)
+    iterator = await asyncio.wait_for(first, timeout=1)
 
     assert invocation_order == ["first"]
+    assert session.invocation_lock.locked()
 
     release_first.set()
-    await asyncio.gather(first, second)
+    assert iterator._close_task is not None
+    await asyncio.gather(iterator._close_task, second)
 
     assert invocation_order == ["first", "second"]
+    assert not session.invocation_lock.locked()
 
 
 @pytest.mark.asyncio
@@ -958,9 +1037,11 @@ async def test_one_shot_and_session_invocations_share_concurrency_limit(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("method", list(StreamingMethod))
 async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    method: StreamingMethod,
 ) -> None:
     monkeypatch.setattr(session_manager, "translate_agent_config", lambda config: _FakeFabricConfig())
     manager = FabricSessionManager(
@@ -968,6 +1049,7 @@ async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
         base_dir=tmp_path,
         session_registry=FabricSessionRegistry(),
         max_concurrent_invocations=1,
+        fabric=cast(Any, _FakeFabric(_FakeRuntime(), method=method)),
     )
     stream_started = asyncio.Event()
     release_stream = asyncio.Event()
@@ -975,11 +1057,14 @@ async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
     invocation_order: list[str] = []
 
     @asynccontextmanager
-    async def stream_fabric_agent_once(request: Any, *, fabric: Any) -> Any:
+    async def stream_fabric_agent_once(request: Any, *, fabric: Any, streaming_method: StreamingMethod) -> Any:
+        assert streaming_method is method
         invocation_order.append(request.input)
         try:
             yield object()
         finally:
+            stream_started.set()
+            await release_stream.wait()
             stream_cleaned_up.set()
 
     async def run_fabric_agent_once(request: Any, *, fabric: Any) -> FabricRuntimeResult:
@@ -992,8 +1077,7 @@ async def test_stream_once_holds_concurrency_limit_until_runtime_cleanup(
 
     async def consume_stream() -> None:
         async with manager.stream_once(FabricInvocationRequest(input="stream")):
-            stream_started.set()
-            await release_stream.wait()
+            pass
 
     streaming = asyncio.create_task(consume_stream())
     await stream_started.wait()

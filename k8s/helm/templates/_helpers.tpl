@@ -61,6 +61,11 @@ merged, a user's jobs.executors would drop them. A user's profile with the same 
 {{- $_ := set $jobs "executors" $executors -}}
 {{- $_ := set $config "jobs" $jobs -}}
 {{- end -}}
+{{- $auth := default (dict) $config.auth -}}
+{{- if empty (get $auth "policy_decision_point_base_url") -}}
+{{- $_ := set $auth "policy_decision_point_base_url" (get $config.platform "base_url") -}}
+{{- $_ := set $config "auth" $auth -}}
+{{- end -}}
 {{ tpl ($config | toYaml) . }}
 {{- end -}}
 
@@ -163,6 +168,14 @@ Internal API URL for pods that need to call the platform API service.
 */}}
 {{- define "nemo-helix.internalBaseUrl" -}}
 {{- printf "http://%s:%s" (include "nhx-api.api-servicename" .) (toString .Values.api.service.port) -}}
+{{- end -}}
+
+{{/*
+Effective platform API URL for pods and managed workloads.
+*/}}
+{{- define "nemo-helix.platformBaseUrl" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- get $config.platform "base_url" | trimSuffix "/" -}}
 {{- end -}}
 
 {{/*
@@ -580,6 +593,45 @@ Usage:
 {{- define "nemo-helix.multinodeNetworkingEnabled" -}}
 {{- if or .Values.multinodeNetworking.aws.enabled .Values.multinodeNetworking.azure.enabled .Values.multinodeNetworking.gcp.enabled .Values.multinodeNetworking.oci.enabled -}}
 true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether the chart's base platform config asks the jobs controller to create per-step ingress
+NetworkPolicies. The resolved flag, after platformConfig overrides, is stepNetworkPoliciesConfigured.
+*/}}
+{{- define "nemo-helix.jobStepNetworkPoliciesEnabled" -}}
+{{- if and .Values.networkPolicies.enabled .Values.networkPolicies.jobSteps.enabled -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Whether the calculated platform config enables per-step ingress NetworkPolicies on either executor.
+Reads jobs.executor_defaults.{kubernetes_job,volcano_job}.step_network_policies_enabled, so a
+platformConfig override turns the controller, its NetworkPolicy RBAC, and the ValidatingAdmissionPolicy
+on or off together.
+*/}}
+{{- define "nemo-helix.stepNetworkPoliciesConfigured" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $defaults := dig "jobs" "executor_defaults" dict $config -}}
+{{- if or (dig "kubernetes_job" "step_network_policies_enabled" false $defaults) (dig "volcano_job" "step_network_policies_enabled" false $defaults) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The ValidatingAdmissionPolicy API version served by the cluster: GA v1 (Kubernetes 1.30+) or
+v1beta1 (1.28 and 1.29, where the ValidatingAdmissionPolicy feature gate and API must be enabled).
+Fails on clusters serving neither.
+*/}}
+{{- define "nemo-helix.validatingAdmissionPolicyApiVersion" -}}
+{{- if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy" -}}
+admissionregistration.k8s.io/v1
+{{- else if .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1beta1/ValidatingAdmissionPolicy" -}}
+admissionregistration.k8s.io/v1beta1
+{{- else -}}
+{{- fail "jobs.executor_defaults step_network_policies_enabled requires ValidatingAdmissionPolicy: admissionregistration.k8s.io/v1 (Kubernetes 1.30+) or v1beta1 (Kubernetes 1.28+ with the feature enabled). Set networkPolicies.jobSteps.enabled=false, or override step_network_policies_enabled to false in platformConfig, or for offline rendering pass --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy." -}}
 {{- end -}}
 {{- end -}}
 

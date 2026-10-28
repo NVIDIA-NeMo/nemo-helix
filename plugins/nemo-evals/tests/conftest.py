@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import pickle
+import re
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
 from collections.abc import Set as AbstractSet
@@ -17,6 +19,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
+from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
@@ -47,7 +50,8 @@ from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
-from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError
+from nemo_helix_plugin.client.auth import StaticToken
+from nemo_helix_plugin.client.errors import ConflictError, InternalServerError, NemoHTTPError, PermissionDeniedError
 from nemo_helix_plugin.config import NemoHelixConfig, get_platform_config
 from nemo_helix_plugin.entities import (
     DEFAULT_WORKSPACE,
@@ -61,10 +65,12 @@ from nemo_helix_plugin.entities.types import DeleteResponse
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.in_memory_filter import InMemoryFilterRepository
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse, HelixJobStatus
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, EvaluationPatchRequest, EvaluationResponse
 from nhx.testing.files import InMemoryFilesService
 from nhx.testing.secrets import InMemorySecretsService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from pytest_httpserver import HTTPServer
+from werkzeug import Request, Response
 
 
 @pytest.fixture
@@ -189,6 +195,8 @@ class FakeEntityStore(EntityClient):
         key = self._key(entity_type, name, workspace, parent)
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
+        if expected_db_version is not None and self.entities[key]._db_version != expected_db_version:
+            raise NemoEntityConflictError(f"{workspace}/{name} was modified")
         deleted = self.entities.pop(key)
         return DeleteResponse(id=deleted.id)
 
@@ -301,16 +309,12 @@ SANDBOX_DOMAIN = "opensandbox.opensandbox-system.svc.cluster.local"
 
 def harbor_task_jobs_config(**overrides: object) -> HarborTaskJobsConfig:
     """An operator ``evals.runs.harbor`` block with the MVP's two profiles."""
-    resource_classes = {"cpu": {"template": "harbor-cpu", "dispatcher_profile": "k8s-cpu"}}
     data: dict[str, object] = {
         "dispatcher_image": DISPATCHER_IMAGE,
         "dispatcher_profiles": ["local-k8s", "k8s-cpu"],
         "sandbox_profiles": {
-            "harbor-standard": {"resource_classes": resource_classes, "egress_allow": ["igw.svc.cluster.local"]},
-            "harbor-open": {
-                "resource_classes": resource_classes,
-                "egress_allow": ["igw.svc.cluster.local", "inference-api.nvidia.com"],
-            },
+            "harbor-standard": {"egress_allow": ["igw.svc.cluster.local"]},
+            "harbor-open": {"egress_allow": ["igw.svc.cluster.local", "inference-api.nvidia.com"]},
         },
     }
     data.update(overrides)
@@ -340,7 +344,7 @@ def harbor_config() -> HarborTaskJobsConfig:
 
 @pytest.fixture
 def sandbox_policy() -> ResolvedHarborSandboxPolicy:
-    return resolve_sandbox_policy(harbor_task_jobs_config(), sandbox_platform_config(), "harbor-standard")
+    return resolve_sandbox_policy(harbor_task_jobs_config(), sandbox_platform_config())
 
 
 class FakePreparer:
@@ -442,57 +446,13 @@ def fake_preparer() -> FakePreparer:
 
 
 class FakeTaskJobs:
-    """In-memory ``TaskJobs``: Jobs keyed by name, with scripted failures.
-
-    - ``subprocess_profiles``: profiles Jobs would run as host subprocesses.
-    - ``refuse``: names whose create answers 409 before any Job exists (a missing secret).
-    - ``fail_create``: names whose create raises a 500 after saving the Job without its first step.
-    - ``lose_reply``: names whose create commits, then raises (a lost response).
-    """
+    """In-memory ``TaskJobs``: ``subprocess_profiles`` are the profiles Jobs would run as host subprocesses."""
 
     def __init__(self) -> None:
-        self.jobs: dict[str, HelixJobResponse] = {}
-        self.steps: dict[str, int] = {}
         self.subprocess_profiles: set[str] = set()
-        self.refuse: set[str] = set()
-        self.fail_create: set[str] = set()
-        self.lose_reply: set[str] = set()
-        self.created: list[CreateHelixJobRequest] = []
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         return profile in self.subprocess_profiles
-
-    async def create(self, workspace: str, request: CreateHelixJobRequest) -> None:
-        assert request.name is not None
-        if request.name in self.refuse:
-            raise _http_error(ConflictError, 409)
-        if request.name in self.jobs:
-            raise _http_error(ConflictError, 409)
-        self.jobs[request.name] = HelixJobResponse(
-            id=f"job-{len(self.jobs)}",
-            attempt_id=f"attempt-{len(self.jobs)}",
-            name=request.name,
-            workspace=workspace,
-            source=request.source,
-            spec=request.spec,
-            platform_spec=request.platform_spec,
-            fileset=f"{workspace}/{request.name}",
-            status=HelixJobStatus.CREATED,
-        )
-        if request.name in self.fail_create:
-            self.fail_create.discard(request.name)
-            raise _http_error(InternalServerError, 500)
-        self.steps[request.name] = len(request.platform_spec.steps)
-        self.created.append(request)
-        if request.name in self.lose_reply:
-            self.lose_reply.discard(request.name)
-            raise httpx.ReadTimeout("reply lost")
-
-    async def get(self, workspace: str, name: str) -> HelixJobResponse | None:
-        return self.jobs.get(name)
-
-    async def has_steps(self, workspace: str, name: str) -> bool:
-        return self.steps.get(name, 0) > 0
 
 
 def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT:
@@ -502,6 +462,58 @@ def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT
 @pytest.fixture
 def fake_task_jobs() -> FakeTaskJobs:
     return FakeTaskJobs()
+
+
+class FakeRunEvaluations:
+    """In-memory ``RunEvaluations``: Experiments by name, Evaluations by name, with scripted failures.
+
+    - ``fail``: operations ("experiment", "create", "get", "patch") that raise a 500, or
+      "create-denied" for a create that answers 403.
+    - ``deny_experiments``: the Experiment lookup answers 403.
+    """
+
+    def __init__(self) -> None:
+        self.experiments: dict[str, str] = {"swe-agent-tuning": "exp-1"}
+        self.evaluations: dict[str, EvaluationResponse] = {}
+        self.created: list[EvaluationCreateRequest] = []
+        self.patches: list[tuple[str, EvaluationPatchRequest]] = []
+        self.fail: set[str] = set()
+        self.deny_experiments = False
+
+    async def experiment_id(self, workspace: str, name: str) -> str | None:
+        if self.deny_experiments:
+            raise _http_error(PermissionDeniedError, 403)
+        if "experiment" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        return self.experiments.get(name)
+
+    async def create(self, workspace: str, body: EvaluationCreateRequest) -> None:
+        if "create" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        if "create-denied" in self.fail:
+            raise _http_error(PermissionDeniedError, 403)
+        if body.name in self.evaluations:
+            raise _http_error(ConflictError, 409)
+        self.created.append(body)
+        self.evaluations[body.name] = EvaluationResponse(
+            id=f"eval-{len(self.evaluations)}", workspace=workspace, **body.model_dump(exclude={"experiment_group_id"})
+        )
+
+    async def get(self, workspace: str, name: str) -> EvaluationResponse | None:
+        if "get" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        return self.evaluations.get(name)
+
+    async def patch(self, workspace: str, name: str, body: EvaluationPatchRequest) -> None:
+        if "patch" in self.fail:
+            raise _http_error(InternalServerError, 500)
+        self.patches.append((name, body))
+        self.evaluations[name] = self.evaluations[name].model_copy(update=body.model_dump(exclude_none=True))
+
+
+@pytest.fixture
+def fake_evaluations() -> FakeRunEvaluations:
+    return FakeRunEvaluations()
 
 
 def harbor_resolved_task(name: str = "sum-three", *, config: dict | None = None) -> ResolvedTask:
@@ -566,6 +578,7 @@ def harbor_run() -> TasksetRunEntity:
         request_digest="0" * 64,
         taskset_ref="default/debug#" + "e" * 64,
         accepted_at=accepted,
+        timeout_seconds=3600,
         execution_deadline_at=accepted + timedelta(hours=1),
         finalization_deadline_at=accepted + timedelta(hours=2),
     )
@@ -618,3 +631,51 @@ def store_task(entity_store, monkeypatch) -> StoreTask:
         return (await get_revision(entity_store, TaskRevisionEntity, head)).content_hash
 
     return store
+
+
+# ---- running as an authenticated job ---------------------------------------
+
+
+@pytest.fixture
+def job_identity(monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer) -> str:
+    """Run as a job with a workload identity whose platform is ``httpserver``; returns the job's access token."""
+    access_token = "job-access-token"
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setattr(
+        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken(access_token))
+    )
+    return access_token
+
+
+@pytest.fixture
+def serve_gateway_completion(httpserver: HTTPServer, job_identity: str) -> Callable[[str, str], list[str | None]]:
+    """Answer chat completions on a gateway route only for the job's identity.
+
+    Returns ``serve(route, content)``, which registers the route and returns the ``Authorization``
+    header of every request it receives.
+    """
+
+    def serve(route: str, content: str) -> list[str | None]:
+        authorizations: list[str | None] = []
+
+        def platform(request: Request) -> Response:
+            authorizations.append(request.headers.get("Authorization"))
+            if request.headers.get("Authorization") != f"Bearer {job_identity}":
+                return Response(status=401)
+            completion = {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "target",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+                ],
+            }
+            return Response(json.dumps(completion), content_type="application/json")
+
+        httpserver.expect_request(re.compile(re.escape(route) + ".*")).respond_with_handler(platform)
+        return authorizations
+
+    return serve

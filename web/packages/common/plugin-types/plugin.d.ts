@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
-import { ThreadMessageLike, ThreadPrimitive } from "@assistant-ui/react";
+import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { HelixJobLog, HelixJobStatus, PromptData } from "@nemo/sdk/generated/platform/schema";
 import { VariantProps } from "class-variance-authority";
 //#endregion
@@ -731,6 +731,8 @@ interface AssistantChatProps {
   };
   /** Overrides used when rendering Markdown inside chat messages. */
   messageContentProps?: AssistantChatMessageContentProps;
+  /** Renders reasoning and tool-call parts streamed by the model; omitted parts are hidden. */
+  toolCallPartComponent?: ToolCallMessagePartComponent;
   composerOverride?: ReactNode;
   /**
    * @default true
@@ -8826,15 +8828,6 @@ declare const filterFunctions: {
 //#endregion
 //#region src/components/DataView/internal/module-augmentation.d.ts
 type DataViewFilterFns = typeof filterFunctions;
-/**
- * Extends LucideProps so icons accept the `variant` prop used by the KUI design system.
- * The KUI runtime maps this to the appropriate icon styling.
- */
-declare module 'lucide-react' {
-  interface LucideProps {
-    variant?: 'fill' | 'line';
-  }
-}
 /**
  * Extends the ColumnMeta interface from react-table to include the filter definition and other
  * data-view-specific column meta fields.

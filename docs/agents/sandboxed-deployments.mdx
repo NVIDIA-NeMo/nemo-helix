@@ -72,7 +72,7 @@ export IMAGE_TAG="<accessible-agent-image>"
 ## Register and Deploy
 
 ```sh
-nemo agents create --name "$AGENT_NAME" \
+nemo agents register --name "$AGENT_NAME" \
   --agent-config "$AGENT_CONFIG" --workspace "$WORKSPACE"
 
 nemo agents deploy --agent "$AGENT_NAME" \

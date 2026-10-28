@@ -37,6 +37,8 @@ dependencies = [
   "sacrebleu>=2.5.1",
   "rouge_score==0.1.2",
   "ragas==0.4.3",
+  # ragas 0.4.3 imports langchain_community.chat_models.vertexai at module scope; 0.4.2 removed it.
+  "langchain-community>=0.3.31,<0.4",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
   "nemo-relay>=0.9.3,<0.10",
@@ -64,7 +66,7 @@ engine = []
 # the SDK and constructing Harbor configuration work without the extra; execution and result
 # adaptation do not.
 harbor = [
-  "harbor>=0.23,<0.24",
+  "harbor>=0.23,<0.25",
   "nemo-fabric[harbor]>=0.5.0,<0.6.0",
 ]
 # NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or

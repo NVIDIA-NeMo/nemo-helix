@@ -16,7 +16,7 @@ from nemo_evals.api.service.taskset_service import (
     TasksetService,
 )
 from nemo_evals.revisions import RevisionNotFoundError
-from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 
 class _FakeTaskService:
@@ -322,6 +322,43 @@ async def test_replace_without_project_leaves_it_unchanged(service: TasksetServi
     await service.create_taskset("ts-1", _taskset_input(), workspace="default", project="proj-a")
     replaced, _ = await service.replace_taskset("ts-1", _taskset_input(), workspace="default")
     assert replaced.project == "proj-a"
+
+
+async def test_replace_with_unchanged_content_writes_nothing_a_concurrent_writer_could_conflict_with(
+    service: TasksetService, entity_store
+) -> None:
+    """Many users submitting one taskset at once PUT it concurrently; a no-op must not lose a lock."""
+    await service.create_taskset("ts-1", _taskset_input(), workspace="default", project="proj-a")
+
+    async def _stale(entity, *, original_name=None):
+        raise NemoEntityConflictError("modified by another request")
+
+    entity_store.update = _stale
+
+    replaced, published = await service.replace_taskset("ts-1", _taskset_input(), workspace="default")
+    assert not published and replaced.revision == 1
+    with pytest.raises(NemoEntityConflictError):  # a real change still conflicts
+        await service.replace_taskset("ts-1", _taskset_input(), workspace="default", project="proj-b")
+
+
+async def test_replace_that_loses_the_create_race_republishes_onto_the_winners_taskset(
+    service: TasksetService, entity_store
+) -> None:
+    await service.create_taskset("ts-1", _taskset_input(), workspace="default")
+    real_get = entity_store.get
+    reads = 0
+
+    async def _before_the_winner(entity_type, *args, **kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == 1:  # our first read ran before the winner's create landed
+            raise NemoEntityNotFoundError("not found")
+        return await real_get(entity_type, *args, **kwargs)
+
+    entity_store.get = _before_the_winner
+
+    replaced, published = await service.replace_taskset("ts-1", _taskset_input(), workspace="default")
+    assert not published and replaced.revision == 1
 
 
 async def test_a_failed_member_cancels_its_siblings(existing_tasks: set[tuple[str, str]], entity_store) -> None:

@@ -1,25 +1,33 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Create one task Job per task of an accepted run, or adopt the one an earlier attempt created.
+"""Task Jobs of a run: the request each task's Job is created from, and how the run controller registers one.
 
-Run by submit right after acceptance. Every Job input comes from the stored plan, so a retry after a
-config change creates the remaining Jobs exactly as the first attempt would have.
-
-TODO(M4 story 4): the controller registers task Jobs instead.
+Every Job input comes from the stored plan, so a create after a config change is exactly what the first
+attempt would have sent. The controller registers a task in three steps: write the create
+intent (``task_job``) on its member, send one named create, then mark the member registered. A create whose
+outcome is unknown keeps its slot until the Job is found, or until ``create_grace`` proves none is coming.
 """
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Protocol
+from datetime import datetime, timedelta, timezone
+from enum import StrEnum
+from typing import Literal, Protocol
 
 from nemo_evals.jobs.harbor_task_dispatch import TASK_JOB_SOURCE, HarborTaskDispatchJob
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, build_task_job_input
-from nemo_evals.taskset_runs.entities import TasksetRunEntity
+from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity, TasksetRunMemberEntity
 from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
-from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_evals.taskset_runs.store import TasksetRunStore
+from nemo_helix_plugin.client.errors import (
+    BadRequestError,
+    ConflictError,
+    NemoHTTPError,
+    NotFoundError,
+    PermissionDeniedError,
+    UnprocessableEntityError,
+)
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
@@ -28,22 +36,10 @@ logger = logging.getLogger(__name__)
 
 
 class TaskJobs(Protocol):
-    """The Jobs operations fan-out and its submit checks need, acting as the run's caller."""
+    """The Jobs check submit needs, acting as the caller."""
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         """True when Jobs runs ``profile``'s CPU steps as host subprocesses."""
-        ...
-
-    async def create(self, workspace: str, request: CreateHelixJobRequest) -> None:
-        """Create the Job. Raises ``ConflictError`` on a 409 (name taken, or a secret missing)."""
-        ...
-
-    async def get(self, workspace: str, name: str) -> HelixJobResponse | None:
-        """The Job, or None when it doesn't exist."""
-        ...
-
-    async def has_steps(self, workspace: str, name: str) -> bool:
-        """True when the Job's current attempt has at least one step."""
         ...
 
 
@@ -56,31 +52,6 @@ class JobsServiceTaskJobs:
     async def is_subprocess_profile(self, profile: str) -> bool:
         profiles = (await self._jobs.get_execution_profiles()).data()
         return any(isinstance(item, SubprocessJobExecutionProfile) and item.profile == profile for item in profiles)
-
-    async def create(self, workspace: str, request: CreateHelixJobRequest) -> None:
-        await self._jobs.create_job(workspace=workspace, body=request)
-
-    async def get(self, workspace: str, name: str) -> HelixJobResponse | None:
-        try:
-            return (await self._jobs.get_job(workspace=workspace, name=name)).data()
-        except NotFoundError:
-            return None
-
-    async def has_steps(self, workspace: str, name: str) -> bool:
-        response = await self._jobs.list_steps(workspace=workspace, name=name, query_params={"page_size": 1})
-        return bool(response.page().items)
-
-
-@dataclass(frozen=True)
-class TaskJobsIncompleteError(Exception):
-    """Some task Jobs couldn't be created or adopted; a retry with the same idempotency_key completes them."""
-
-    run_id: str
-    missing: tuple[tuple[int, str], ...]  # (task index, reason)
-
-    def __str__(self) -> str:
-        detail = "; ".join(f"task {index}: {reason}" for index, reason in self.missing)
-        return f"task Jobs of run {self.run_id} not created ({detail})"
 
 
 async def task_job_request(
@@ -97,55 +68,6 @@ async def task_job_request(
     )
 
 
-async def create_task_jobs(
-    jobs: TaskJobs,
-    plan: TasksetRunPlan,
-    run: TasksetRunEntity,
-    environments: Sequence[PreparedHarborEnvironment | str],
-) -> list[str]:
-    """Create or adopt every task Job of ``run``; return their names in task order.
-
-    ``environments[i]`` is task i's prepared images, or why they couldn't be prepared.
-
-    A 409 is ours only when the existing Job has the same ``source``, ``spec`` and ``platform_spec``
-    and at least one step: Jobs also answers 409 for a missing secret before any Job exists, and it
-    saves a Job and its attempt before creating the first step, with no rollback.
-
-    Raises:
-        TaskJobsIncompleteError: Any task Job is missing; the others were created or adopted.
-    """
-    names: list[str] = []
-    missing: list[tuple[int, str]] = []
-    for index, environment in enumerate(environments):
-        name = task_job_name(run.name, index)
-        names.append(name)
-        if isinstance(environment, str):
-            missing.append((index, environment))
-            continue
-        body = await task_job_request(plan, run, index, environment)
-        try:
-            await jobs.create(run.workspace, body)
-            continue
-        except ConflictError:
-            pass
-        except Exception as exc:
-            logger.warning("Creating task Job %s failed", name, exc_info=True)
-            missing.append((index, f"create failed: {type(exc).__name__}"))
-            continue
-        try:
-            reason = await _adoption_refused(jobs, run.workspace, body)
-        except Exception as exc:
-            # Like a failed create: report the task missing so the other tasks still get their Jobs.
-            logger.warning("Inspecting existing task Job %s failed", name, exc_info=True)
-            missing.append((index, f"adoption check failed: {type(exc).__name__}"))
-            continue
-        if reason is not None:
-            missing.append((index, reason))
-    if missing:
-        raise TaskJobsIncompleteError(run.name, tuple(missing))
-    return names
-
-
 def runs_request(job: HelixJobResponse, body: CreateHelixJobRequest) -> bool:
     """True when ``job`` has ``body``'s ``source``, ``spec`` and ``platform_spec``: it runs what ``body`` asks for.
 
@@ -159,23 +81,176 @@ def runs_request(job: HelixJobResponse, body: CreateHelixJobRequest) -> bool:
     )
 
 
-async def _adoption_refused(jobs: TaskJobs, workspace: str, body: CreateHelixJobRequest) -> str | None:
-    """Why the Job already under ``body.name`` isn't this request's, or None when it is."""
-    assert body.name is not None
-    job = await jobs.get(workspace, body.name)
-    if job is None:
-        # A missing secret, or a create that failed before linking the attempt (AIRCORE-1379). Deleting frees the
-        # name only when no attempt was saved; otherwise the Job can't be cancelled or deleted.
-        return (
-            f"Jobs refused the create of {body.name}: a referenced secret may be missing or unreadable, or an earlier "
-            "create failed midway. If `nemo jobs delete` doesn't free the name, resubmit with a new idempotency_key"
+def past_grace(sent_at: datetime | None, now: datetime, grace: timedelta) -> bool:
+    """A 404 or stepless read of this create is conclusive: no POST of ours can still be saving.
+
+    Jobs keeps saving after the controller's client times out, and GET shows nothing until the Job's attempt
+    is linked, so only ``grace`` after the last POST with an unknown outcome does a missing Job prove anything.
+    """
+    if sent_at is None:
+        return True
+    return now >= _utc(sent_at) + grace
+
+
+def sent_at_after_refusal(overwritten: datetime | None, this_post: datetime) -> datetime:
+    """A refusal (400/403/404/409/422) started nothing: a retry writes back the value it overwrote; the first POST keeps its own."""
+    return overwritten or this_post
+
+
+class RegistrationJobs(Protocol):
+    """The Jobs calls registration needs: creates act for the run's creator, reads as the evals service."""
+
+    async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse: ...
+
+    async def get(self, name: str) -> HelixJobResponse | None: ...
+
+    async def has_steps(self, name: str) -> bool: ...
+
+
+async def adoption(
+    job: HelixJobResponse, request: CreateHelixJobRequest, jobs: RegistrationJobs
+) -> Literal["ours", "foreign", "stepless"]:
+    """Whether the Job under ``request.name`` is the one this request creates.
+
+    ``foreign`` when it runs something else (``runs_request``). ``stepless`` when it is ours but its current
+    attempt has no step yet: a create still saving, or one that failed midway and will never run (AIRCORE-1379).
+    """
+    if not runs_request(job, request):
+        return "foreign"
+    if not await jobs.has_steps(job.name):
+        return "stepless"
+    return "ours"
+
+
+class Registration(StrEnum):
+    """How one create of a member's task Job ended."""
+
+    REGISTERED = "registered"  # a Job of ours is under task_job (its id in job_id): created, or adopted on 409
+    FAILED = "failed"  # refused, or the name is lost: the member settled and gave its slot back
+    PENDING = "pending"  # a refused retry, or a 409 whose Job isn't visible yet: holds its slot until past_grace
+    AMBIGUOUS = "ambiguous"  # 401, 429, 5xx, timeout: the create may still be saving; ends this drain
+
+
+_REFUSALS: tuple[tuple[type[NemoHTTPError], str], ...] = (
+    (PermissionDeniedError, "job_forbidden"),
+    (BadRequestError, "job_spec_invalid"),
+    (NotFoundError, "job_spec_invalid"),
+    (UnprocessableEntityError, "job_spec_invalid"),
+)
+
+
+async def register_member(
+    member: TasksetRunMemberEntity,
+    run: TasksetRunEntity,
+    plan: TasksetRunPlan,
+    jobs: RegistrationJobs,
+    store: TasksetRunStore,
+    *,
+    now: datetime,
+    grace: timedelta,
+) -> tuple[Registration, TasksetRunMemberEntity]:
+    """Create ``member``'s task Job: write the intent, send one named create, then record what happened.
+
+    The intent (``task_job``, ``create_sent_at``) is written before the create, so the slot is counted from
+    the moment a create may happen until the Job's fate is known, across timeouts and crashes. The same call
+    retries a pending create: the member already holds its slot, and ``task_job`` never changes.
+
+    A refusal proves only that this POST saved nothing. The first POST's refusal fails the member at once; a
+    retry's refusal restores the earlier ``create_sent_at`` (that create may still be saving) and fails the
+    member only once that is ``past_grace``. A 409 is also a refusal: Jobs answers it before saving anything,
+    for a taken name and for a missing secret alike.
+
+    Returns:
+        The outcome and the member as last written.
+
+    Raises:
+        NemoEntityConflictError: A member write lost to another write; the next cycle re-reads it.
+        Exception: Member writes that fail; the member keeps its intent, so the next cycle resolves it.
+    """
+    request = await task_job_request(plan, run, member.task_index, plan.task_environments[member.task_index])
+    assert request.name is not None
+    first_post = member.task_job is None
+    overwritten = member.create_sent_at
+    member = await store.update_member(member, task_job=request.name, create_sent_at=now)
+    try:
+        created = await jobs.create(request)
+    except ConflictError as exc:
+        return await _after_conflict(
+            member, request, jobs, store, now=now, grace=grace, overwritten=overwritten, exc=exc
         )
-    if not runs_request(job, body):
-        return f"Job {body.name} exists and runs something else; delete it with `nemo jobs delete`"
-    if not await jobs.has_steps(workspace, body.name):
-        # Cancel leaves its attempt `created` and delete then answers 409, so the name stays taken (AIRCORE-1379).
-        return (
-            f"Job {body.name} was saved without its first step and will never run; Jobs can't cancel or delete it, "
-            "so resubmit with a new idempotency_key"
+    except NemoHTTPError as exc:
+        code = next((code for refused, code in _REFUSALS if isinstance(exc, refused)), None)
+        if code is None:
+            logger.warning("Creating task Job %s failed: %s", request.name, exc)
+            return Registration.AMBIGUOUS, member
+        error = f"{code}: {exc.detail}"
+        if first_post:
+            return Registration.FAILED, await store.update_member(member, phase=MemberPhase.FAILED, error=error)
+        return await _refused_retry(member, store, now=now, grace=grace, overwritten=overwritten, error=error)
+    except Exception as exc:
+        logger.warning("Creating task Job %s failed: %s", request.name, exc or type(exc).__name__)
+        return Registration.AMBIGUOUS, member
+    return Registration.REGISTERED, await store.update_member(
+        member, phase=MemberPhase.REGISTERED, job_id=created.id, job_status=created.status
+    )
+
+
+async def _after_conflict(
+    member: TasksetRunMemberEntity,
+    request: CreateHelixJobRequest,
+    jobs: RegistrationJobs,
+    store: TasksetRunStore,
+    *,
+    now: datetime,
+    grace: timedelta,
+    overwritten: datetime | None,
+    exc: ConflictError,
+) -> tuple[Registration, TasksetRunMemberEntity]:
+    """A 409: adopt our own Job, fail on someone else's, and wait out a Job that can't be seen yet."""
+    assert request.name is not None
+    try:
+        job = await jobs.get(request.name)
+        found = await adoption(job, request, jobs) if job is not None else None
+    except Exception as read_error:
+        logger.warning("Reading task Job %s after a 409 failed: %s", request.name, read_error)
+        # The 409 saved nothing, so this POST opens no window: restore the earlier create's, or the slot would
+        # outlive create_grace while the lookup keeps failing.
+        sent_at = sent_at_after_refusal(overwritten, now)
+        if sent_at != member.create_sent_at:
+            member = await store.update_member(member, create_sent_at=sent_at)
+        return Registration.AMBIGUOUS, member
+    if job is not None and found == "ours":
+        return Registration.REGISTERED, await store.update_member(
+            member, phase=MemberPhase.REGISTERED, job_id=job.id, job_status=job.status
         )
-    return None
+    if found == "foreign":
+        error = f"job_name_conflict: Job {request.name} exists and runs something else"
+        return Registration.FAILED, await store.update_member(member, phase=MemberPhase.FAILED, error=error)
+    # 404 or stepless: an earlier create of ours may still be saving, or the name is lost (AIRCORE-1379).
+    error = f"job_name_conflict: {exc.detail}"
+    return await _refused_retry(member, store, now=now, grace=grace, overwritten=overwritten, error=error)
+
+
+async def _refused_retry(
+    member: TasksetRunMemberEntity,
+    store: TasksetRunStore,
+    *,
+    now: datetime,
+    grace: timedelta,
+    overwritten: datetime | None,
+    error: str,
+) -> tuple[Registration, TasksetRunMemberEntity]:
+    """This POST saved nothing: restore the window an earlier create opened, then fail once it is past."""
+    sent_at = sent_at_after_refusal(overwritten, now)
+    if past_grace(sent_at, now, grace):
+        return Registration.FAILED, await store.update_member(
+            member, phase=MemberPhase.FAILED, error=error, create_sent_at=sent_at
+        )
+    if sent_at != member.create_sent_at:
+        member = await store.update_member(member, create_sent_at=sent_at)
+    return Registration.PENDING, member
+
+
+def _utc(value: datetime) -> datetime:
+    """Stored timestamps may come back naive; they are UTC."""
+    return value if value.utcoffset() is not None else value.replace(tzinfo=timezone.utc)

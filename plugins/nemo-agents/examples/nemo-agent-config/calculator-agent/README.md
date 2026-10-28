@@ -53,7 +53,7 @@ curl -fsS --connect-timeout 2 --max-time 5 \
 Create and deploy the basic calculator agent:
 
 ```bash
-nemo agents create \
+nemo agents register \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
 
@@ -79,7 +79,7 @@ so its ATOF events should contain no calculator tool call.
 Create and deploy the tool-enabled variant:
 
 ```bash
-nemo agents create \
+nemo agents register \
   --name calculator-agent-with-mcp \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent-with-mcp.yaml
 

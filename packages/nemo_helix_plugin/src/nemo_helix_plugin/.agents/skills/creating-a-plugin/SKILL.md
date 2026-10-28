@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: creating-a-plugin
-description: Creates a new NeMo plugin from scratch. Use when starting plugin development, setting up a plugin package, registering surfaces via entry points, or asking how plugins are discovered by the platform. Trigger keywords: create plugin, new plugin, plugin setup, entry-points, plugin structure, get started, plugin discovered, entry point.
+description: 'Creates a new NeMo plugin from scratch. Use when starting plugin development, setting up a plugin package, registering surfaces via entry points, or asking how plugins are discovered by the platform. Trigger keywords: create plugin, new plugin, plugin setup, entry-points, plugin structure, get started, plugin discovered, entry point.'
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Creating a NeMo Plugin
@@ -251,7 +253,7 @@ Hatchling requires `packages = ["src/nemo_my_plugin"]` — this is critical for 
 | Jobs | `"my-plugin.job-name"` | dot separator |
 | Functions | `"my-plugin.fn-name"` | dot separator |
 
-Jobs and functions use a dot separator so `discover_jobs()["my-plugin.job-name"]` and `discover_functions()["my-plugin.fn-name"]` resolve unambiguously across plugins. Programmatic job execution goes through `NemoJobScheduler.run_local(job_cls, config)`; functions are the runtime themselves — `await fn_cls().run(spec, ...)`.
+Jobs and functions use a dot separator so `discover_jobs()["my-plugin.job-name"]` and `discover_functions()["my-plugin.fn-name"]` resolve unambiguously across plugins. Programmatic job submission goes through `NemoJobScheduler().submit_remote(job_cls, spec, base_url=...)`; functions are the runtime themselves — `await fn_cls().run(spec, ...)`.
 
 ## Discovery & Fault Isolation
 

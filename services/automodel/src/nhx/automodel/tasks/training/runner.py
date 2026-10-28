@@ -16,14 +16,15 @@ from pathlib import Path
 from types import TracebackType
 
 import yaml
-from nhx.automodel.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
+from nhx.automodel.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME, PAUSE_SENTINEL_FILE_NAME
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.service.path_utils import remap_job_storage_path
+from nhx.customization_common.training.errors.classifier import classify_exception, failure_status_details
+from nhx.customization_common.training.pause import take_pause_marker
 
 from .backends.backend import AUTOMODEL_CONFIG_FILENAME, AutomodelBackend
 from .distributed import DistributedContext
-from .errors.converter import create_error_details
 from .progress import JobsServiceProgressReporter
 from .protocol import LibraryConfig
 from .schemas import (
@@ -93,20 +94,34 @@ class TrainingRunner:
         try:
             library_config = self._compile_config_phase()
             metrics = self._training_phase(library_config)
+            if self._pause_sentinel_path().exists():
+                # Every pod stops here and exits 75; there is nothing to synchronize or publish.
+                logger.info("Training stopped for a pause after saving its checkpoint; skipping publication")
+                # A resume reuses this attempt's barriers. A worker that starts before the resumed
+                # coordinator would take this run's config-ready marker and load the old config.
+                # If they cannot be removed, the pause fails, and a rerun starts a new attempt.
+                self._dist_ctx.clear_barriers()
+                result = TrainingResult(
+                    success=False,
+                    paused=True,
+                    gpu_info=gpu_info,
+                    training_duration_seconds=self._progress.training_duration_seconds,
+                )
+                return result
             self._dist_ctx.sync_point(BARRIER_TRAINING_COMPLETE)
             result = self._postprocess_phase(gpu_info, metrics, library_config)
 
         except Exception as e:
             logger.exception(f"Training failed: {e}")
-            error_details = create_error_details(e)
+            error = classify_exception(e)
             result = TrainingResult(
                 success=False,
-                error_message=error_details.get("message", str(e)),
+                error_message=error.message,
                 gpu_info=gpu_info,
                 training_duration_seconds=self._progress.training_duration_seconds,
             )
             if self._dist_ctx.is_coordinator:
-                self._progress.report_error(dict(error_details))
+                self._progress.report_error(dict(error.to_error_details()), failure_status_details(error))
         finally:
             self._write_result(result)
 
@@ -151,12 +166,21 @@ class TrainingRunner:
     def _get_library_config_path(self) -> Path:
         return self._workspace_path / AUTOMODEL_CONFIG_FILENAME
 
+    def _pause_sentinel_path(self) -> Path:
+        return self._workspace_path / PAUSE_SENTINEL_FILE_NAME
+
     def _compile_config_phase(self) -> LibraryConfig:
         config_path = self._get_library_config_path()
 
         if self._dist_ctx.is_coordinator:
+            # Take the previous run's pause marker before any pod starts training, so only a pause
+            # in this run can be mistaken for one. A marker makes this run a resume, which must
+            # restore a checkpoint, so its step goes to training in the config.
+            paused_step = take_pause_marker(self._pause_sentinel_path())
             self._progress.report_running(TrainingPhase.COMPILING_CONFIG)
             config_dict = self._backend.compile_config(self._config, self._workspace_path)
+            if paused_step is not None:
+                config_dict["_paused_at_step"] = paused_step
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "w") as f:
                 yaml.dump(config_dict, f, default_flow_style=False)

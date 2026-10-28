@@ -3,7 +3,8 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { useInsightsGetInsight } from '@nemo/sdk/generated/insights/insights-insights';
+import { ChartPerformance, ChartScatterplot, Pencil, Star, LayoutDetail } from '@nemo/icons/icons';
+import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insights';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import {
@@ -13,6 +14,7 @@ import {
   trendVisibilityStorageKey,
 } from '@studio/components/charts/ExperimentTrendChart/visibility';
 import { ExperimentDataView } from '@studio/components/dataViews/ExperimentDataView';
+import { ExperimentDeleteButton } from '@studio/components/ExperimentDeleteButton';
 import { ExperimentEditModal } from '@studio/components/ExperimentEditModal';
 import { OriginatingInsightLink } from '@studio/components/OriginatingInsightLink';
 import { OPTIMIZER_ENABLED } from '@studio/constants/environment';
@@ -23,15 +25,16 @@ import { ExperimentMetrics } from '@studio/routes/ExperimentDetailRoute/Experime
 import { getExperimentRoute } from '@studio/routes/utils';
 import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { ChartLine, ChartScatter, Pencil, Star, Table2 } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 
 export const ExperimentDetailRoute: FC = () => {
+  const navigate = useNavigate();
   const workspace = useWorkspaceFromPath();
   const { experimentName } = useRequiredPathParams([ROUTE_PARAMS.experimentName]);
   const { data: group, error } = useGetExperiment(workspace, experimentName);
   // The insight is a group-level concept, reached via the group's insight_id.
-  const { data: insight } = useInsightsGetInsight(workspace, group?.insight_id ?? '', {
+  const { data: insight } = useCompassGetInsight(workspace, group?.insight_id ?? '', {
     query: { enabled: OPTIMIZER_ENABLED && Boolean(group?.insight_id) },
   });
   const [editOpen, setEditOpen] = useState(false);
@@ -83,7 +86,7 @@ export const ExperimentDetailRoute: FC = () => {
             group?.is_favorite ? (
               <Flex align="center" gap="density-sm">
                 <Star
-                  size={24}
+                  size="24"
                   className="text-brand shrink-0"
                   fill="currentColor"
                   aria-label="Favorite"
@@ -96,10 +99,19 @@ export const ExperimentDetailRoute: FC = () => {
           }
           slotDescription={group?.description || undefined}
           slotActions={
-            <Button kind="secondary" disabled={!group} onClick={() => setEditOpen(true)}>
-              <Pencil />
-              Edit
-            </Button>
+            <Flex gap="density-sm">
+              <Button kind="secondary" disabled={!group} onClick={() => setEditOpen(true)}>
+                <Pencil />
+                Edit
+              </Button>
+              {group && (
+                <ExperimentDeleteButton
+                  workspace={workspace}
+                  name={group.name}
+                  onDeleted={() => navigate(getExperimentRoute(workspace))}
+                />
+              )}
+            </Flex>
           }
         />
         {error ? (
@@ -148,7 +160,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={trendVisible}
                       onClick={() => setTrendChoice({ visible: !trendVisible, flag: trendFlag })}
                     >
-                      <ChartLine width={12} height={12} className="text-brand" />
+                      <ChartPerformance width={12} height={12} className="text-brand" />
                       {trendVisible ? 'Hide over time' : 'Over time'}
                     </Button>
                     <Button
@@ -156,7 +168,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={paretoVisible}
                       onClick={() => setParetoVisible(!paretoVisible)}
                     >
-                      <ChartScatter width={12} height={12} className="text-brand" />
+                      <ChartScatterplot width={12} height={12} className="text-brand" />
                       {paretoVisible ? 'Hide Pareto' : 'Pareto view'}
                     </Button>
                     <Button
@@ -164,7 +176,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={compareVisible}
                       onClick={() => setCompareVisible(!compareVisible)}
                     >
-                      <Table2 width={12} height={12} className="text-brand" />
+                      <LayoutDetail width={12} height={12} className="text-brand" />
                       {compareVisible ? 'Hide scorecard' : 'Scorecard'}
                     </Button>
                   </>

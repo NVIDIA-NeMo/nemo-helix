@@ -9,6 +9,7 @@
  * without an express license agreement from NVIDIA CORPORATION or
  * its affiliates is strictly prohibited.
  */
+import { isAcceptedFileType } from '@nemo/common/src/utils/file';
 import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 
 /**
@@ -78,3 +79,16 @@ export const sanitizeFilenameForDatasetName = (filename: string): string => {
 
   return sanitized;
 };
+
+/**
+ * UploadFile adapter over {@link isAcceptedFileType}: existing files are checked by
+ * fileset path, new files by browser File name.
+ */
+export const isFileTypeAllowed = (
+  file: { type: 'existing' | 'new'; file: { path?: string; name?: string } },
+  acceptableFileTypes: string[] | undefined
+): boolean =>
+  isAcceptedFileType(
+    (file.type === 'existing' ? file.file.path : file.file.name) ?? '',
+    acceptableFileTypes
+  );

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ChevronDown, ChevronUp } from '@nemo/icons/icons';
 import {
   PanelContent,
   PanelHeader,
@@ -8,7 +9,6 @@ import {
   PanelIcon,
   PanelRoot,
 } from '@nvidia/foundations-react-core';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import {
   type ComponentProps,
   type FC,

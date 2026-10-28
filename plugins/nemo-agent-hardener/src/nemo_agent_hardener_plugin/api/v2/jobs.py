@@ -15,6 +15,7 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.spec import WarGameSpec
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob, SynthBenignSpec
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.client.adapter import AsyncHelixClient
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec, job_route_factory
@@ -39,12 +40,32 @@ async def _compile_war_game(
     )
 
 
+# Historical factory submissions persisted model_dump(mode="json"), including defaults:
+# war-game has stop_after_synth (even False); synth has interview. Driver and
+# manifest_id overlap and cannot identify a kind. Reject ambiguous/unknown shapes
+# rather than guess from names or schema validation (WarGame accepts synth fields).
+# Use the same predicate in SQL lists (before pagination) and named route checks.
+def _legacy_kind_filter(own_field: str, sibling_field: str) -> LogicalOperation:
+    return LogicalOperation(
+        operator=FilterOperator.AND,
+        operations=[
+            ComparisonOperation(operator=FilterOperator.HAS_KEY, field="spec", value=own_field),
+            LogicalOperation(
+                operator=FilterOperator.NOT,
+                operations=[ComparisonOperation(operator=FilterOperator.HAS_KEY, field="spec", value=sibling_field)],
+            ),
+        ],
+    )
+
+
 router = job_route_factory(
     service_name="agent-hardener",
     job_type="WarGame",
     job_input=WarGameSpec,
     platform_job_config_compiler=_compile_war_game,
     authz=scope.child("jobs"),
+    job_discriminator="war-game",
+    legacy_job_filter=_legacy_kind_filter("stop_after_synth", "interview"),
 )
 
 
@@ -75,4 +96,6 @@ synth_router = job_route_factory(
     job_input=SynthBenignSpec,
     platform_job_config_compiler=_compile_synth_benign,
     authz=scope.child("jobs"),
+    job_discriminator="synth-benign",
+    legacy_job_filter=_legacy_kind_filter("interview", "stop_after_synth"),
 )

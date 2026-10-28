@@ -29,7 +29,7 @@ NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 def request_body():
     return {
         "spec": {"tasks": "default/suite", "target": {"kind": "harbor"}},
-        "execution": {"sandbox_policy": "harbor-standard"},
+        "execution": {},
         "idempotency_key": "ci-run",
     }
 
@@ -70,7 +70,15 @@ def run_preparer(fake_preparer):
 
 @pytest.fixture
 def service(
-    run_store, entity_store, async_client, authorizer, run_config, run_preparer, fake_task_jobs, sandbox_platform
+    run_store,
+    entity_store,
+    async_client,
+    authorizer,
+    run_config,
+    run_preparer,
+    fake_task_jobs,
+    fake_evaluations,
+    sandbox_platform,
 ):
     return TasksetRunService(
         run_store,
@@ -82,6 +90,7 @@ def service(
         platform=sandbox_platform,
         preparer=run_preparer,
         task_jobs=fake_task_jobs,
+        evaluations=fake_evaluations,
     )
 
 
@@ -100,6 +109,7 @@ def seed_run(entity_store):
             "plan_digest": "b" * 64,
             "request_digest": "c" * 64,
             "accepted_at": NOW,
+            "timeout_seconds": 3600,
             "execution_deadline_at": NOW + timedelta(hours=1),
             "finalization_deadline_at": NOW + timedelta(hours=2),
         }
@@ -118,6 +128,8 @@ async def published(entity_store):
             "instruction": "Solve the task.",
             "source": {"fileset_ref": "default/harbor-tasks#task-1/task_archive", "files_hash": "a" * 64},
             "harbor_hash": {"digest": "b" * 64, "harbor_version": "0.20.0"},
+            # Sized, so submit's warnings don't include the default-resources notice.
+            "config": {"environment": {"cpus": 1, "memory_mb": 1024}},
         }
     )
     task = await entity_store.create(TaskEntity(name="task-1", workspace="default", spec=definition))

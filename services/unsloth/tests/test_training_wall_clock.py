@@ -1,54 +1,66 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unsloth's wall clock covers model load and training, and stops before save, which reports its own phase."""
+"""Unsloth's wall clock covers model load and training, and stops before save."""
 
 from __future__ import annotations
 
 import sys
+import threading
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nhx.customization_common.training.progress import JobsServiceProgressReporter
 from nhx.unsloth.schemas import DatasetSpec, ModelLoadSpec, OutputResponse, TrainingSpec, UnslothJobOutput
 from nhx.unsloth.tasks.training.backends import unsloth_sft
+from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
 
 
-class Clock:
+class RecordingReporter(JobsServiceProgressReporter):
+    """Records the task updates training sends, and closing, instead of calling the Jobs service."""
+
     def __init__(self, events: list[str]) -> None:
+        # No super().__init__: that builds a Jobs-service client this test never uses.
         self.events = events
+        self.training_duration_seconds = None
 
-    def __enter__(self) -> "Clock":
-        self.events.append("clock-start")
-        return self
+    def update_task(
+        self,
+        status: str = "active",
+        status_details: dict[str, Any] | None = None,
+        error_details: dict[str, Any] | None = None,
+    ) -> None:
+        details = status_details or {}
+        if status == "completed":
+            self.events.append("completed")
+        elif "phase" in details:
+            self.events.append(str(details["phase"]))
+        if "training_started_at" in details:
+            self.events.append("clock-start")
+        if "training_finished_at" in details:
+            self.events.append("clock-end")
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
-        self.events.append("clock-end")
-        return False
-
-
-class Reporter:
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-
-    def training_wall_clock(self) -> Clock:
-        return Clock(self.events)
-
-    def report_completed(self, message: str = "Completed") -> None:
-        self.events.append("completed")
-
-
-class Callback:
-    def __init__(self, events: list[str]) -> None:
-        self.reporter = Reporter(events)
-        self.events = events
-
-    def report_phase(self, phase: str) -> None:
-        self.events.append(phase)
+    def fetch_current_metrics(self) -> None:
+        return None
 
     def close(self) -> None:
         self.events.append("close")
+
+
+class _IdlePoller:
+    def __init__(self, job_ctx: object, service_name: str) -> None:
+        self.requested = threading.Event()
+
+    def __enter__(self) -> "_IdlePoller":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
 
 
 def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,7 +91,7 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
         def __init__(self, **kwargs: object) -> None:
             return None
 
-        def train(self) -> SimpleNamespace:
+        def train(self, resume_from_checkpoint: str | None = None) -> SimpleNamespace:
             events.append("train")
             return SimpleNamespace(training_loss=0.2)
 
@@ -102,6 +114,8 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
         "nhx.unsloth.tasks.training.backends.hf_trainer_callback.create_hf_trainer_progress_callback",
         lambda *args, **kwargs: object(),
     )
+    monkeypatch.setattr(unsloth_sft, "PausePoller", _IdlePoller)
+    monkeypatch.setattr(unsloth_sft, "create_pause_callback", lambda requested: SimpleNamespace(stopped=False))
 
     spec = UnslothJobOutput(
         model=ModelLoadSpec(name="meta/llama", load_in_4bit=False),
@@ -111,9 +125,14 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
     )
     result = unsloth_sft.train_sft(
         spec,
-        SimpleNamespace(job_id="", workspace="default"),  # type: ignore[arg-type]
+        JobContext(
+            workspace="default",
+            storage=StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent"),
+            results=LocalJobResults(tmp_path / "results"),
+        ),
         output_path=str(tmp_path / "output"),
-        progress_callback=Callback(events),  # type: ignore[arg-type]
+        checkpoint_path=str(tmp_path / "checkpoints"),
+        progress_callback=TrainingProgressCallback(RecordingReporter(events)),
     )
 
     assert events.index("clock-start") < events.index("load") < events.index("train") < events.index("clock-end")

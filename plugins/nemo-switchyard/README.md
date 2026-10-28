@@ -100,6 +100,27 @@ Judge calls are sent directly to the configured model provider with provider
 credentials from the Inference Gateway model cache. Caller authorization
 headers are never forwarded.
 
+## Classifier output token limits
+
+`max_output_tokens` is optional in both `llm_classifier`'s `config` and
+`stage_router`'s nested `config.classifier` object. Omit it or set it to JSON
+`null` to use the native Switchyard default: neither form passes a
+`max_output_tokens` argument to the native constructor. `null` does not mean
+unlimited output. An explicit integer, such as `64`, overrides that default.
+The limit applies to classifier judge output, not the routed backend response.
+
+For example, `"max_output_tokens": null` may be added alongside `base_threshold`
+in the capability-classifier config above. For a stage router, add
+`"classifier": {"base_threshold": 0.5, "max_output_tokens": 64}` inside `config`
+and add `"judge": ["workspace/judge"]` alongside `capable` and `efficient` in
+`config.models`. Enabling the stage-router classifier requires `models.judge`.
+Omitting only the nested `max_output_tokens`, or setting it to `null`, keeps the
+classifier enabled with its native token default. Omitting the entire
+`classifier` object leaves the stage router without a classifier.
+
+These are middleware configuration fields, not optimization strategy `--spec`
+fields. See the published [classifier configuration examples](https://docs.nvidia.com/nemo-helix/documentation/models-and-inference/virtual-models#classifier-output-token-limits).
+
 ## Optimization strategy
 
 The plugin also ships the `switchyard` strategy for `nemo agents optimize`.
@@ -139,7 +160,7 @@ uv run nemo agents optimize run-strategy --strategy switchyard --agent my-agent 
 uv run nemo jobs results download switchyard --job <job-name> -o switchyard.tar.gz
 mkdir -p switchyard-results && tar -xzf switchyard.tar.gz -C switchyard-results --strip-components=1
 # Pick a VirtualModel name from switchyard-result.json, e.g. my-agent-3f2a9c1e.
-uv run nemo agents create --name my-agent-3f2a9c1e \
+uv run nemo agents register --name my-agent-3f2a9c1e \
   --agent-config ./switchyard-results/agent-my-agent-3f2a9c1e.yaml
 ```
 

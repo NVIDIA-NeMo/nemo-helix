@@ -60,6 +60,35 @@ describe('FilesetFilePreviewContent', () => {
     expect(screen.queryByText('data.json')).toBeNull();
   });
 
+  it('keeps the breadcrumbs but drops the file actions menu when hideFileActions is true', () => {
+    const file = { type: 'file' as const, path: 'folder/data.json', size: 100, oid: 'oid-1' };
+    const { rerender } = render(
+      <TestProviders>
+        <FilesetFilePreviewContent
+          {...baseProps}
+          fileContent="content"
+          isLoading={false}
+          file={file}
+        />
+      </TestProviders>
+    );
+    expect(screen.getByRole('button', { name: 'Open file actions menu' })).toBeInTheDocument();
+
+    rerender(
+      <TestProviders>
+        <FilesetFilePreviewContent
+          {...baseProps}
+          fileContent="content"
+          isLoading={false}
+          file={file}
+          hideFileActions
+        />
+      </TestProviders>
+    );
+    expect(screen.getByText('data.json')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open file actions menu' })).toBeNull();
+  });
+
   it('shows the loading state', () => {
     render(
       <TestProviders>

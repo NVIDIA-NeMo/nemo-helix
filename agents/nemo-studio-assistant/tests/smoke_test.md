@@ -30,7 +30,7 @@ result can be verified:
 
 ```bash
 export NHX_BASE_URL=http://127.0.0.1:8080
-nemo agents create --name nemo-studio-assistant \
+nemo agents register --name nemo-studio-assistant \
   --agent-config agents/nemo-studio-assistant-ethos/agent.yaml
 nemo agents package \
   --agent agents/nemo-studio-assistant/agent.yaml \

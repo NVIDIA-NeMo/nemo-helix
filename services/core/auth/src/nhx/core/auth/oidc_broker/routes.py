@@ -220,14 +220,17 @@ def _decrypted_tokens(record: AccountCredentialRecord) -> dict[str, object]:
 
 
 async def _resolve_identity(
-    tokens: dict[str, object], identity_store: AccountIdentityStore
+    tokens: dict[str, object],
+    identity_store: AccountIdentityStore,
+    *,
+    bearer_token_source: BearerTokenSource,
 ) -> tuple[AccountIdentityRecord, dict[str, Any]]:
-    access_token = tokens.get("access_token")
-    if not isinstance(access_token, str):
+    bearer_token = tokens.get(bearer_token_source)
+    if not isinstance(bearer_token, str):
         raise HTTPException(status_code=502, detail="Identity provider token response was incomplete")
-    resolved = await resolve_bearer_token(get_auth_config(), access_token, skip_access_key_check=True)
+    resolved = await resolve_bearer_token(get_auth_config(), bearer_token, skip_access_key_check=True)
     if resolved is None or resolved.token_kind != "oidc_access_token":
-        raise HTTPException(status_code=401, detail="Identity provider returned an invalid access token")
+        raise HTTPException(status_code=401, detail=f"Identity provider returned an invalid {bearer_token_source}")
 
     claims = resolved.claims
     raw_claims = dict(claims.raw_claims)
@@ -261,7 +264,7 @@ async def _finish_token_authorization(
 ) -> RedirectResponse:
     client = _broker_client(_broker_client_name(payload["oidc_client"]))
     tokens = await _exchange_code(client, code, payload["verifier"])
-    identity, metadata = await _resolve_identity(tokens, identity_store)
+    identity, metadata = await _resolve_identity(tokens, identity_store, bearer_token_source=client.bearer_token_source)
     one_time = secrets.token_urlsafe(32)
     await credential_store.create(
         credential_type="token_authorization_code",
@@ -452,7 +455,9 @@ async def token_authorization_callback(
         raise HTTPException(status_code=400, detail="Login callback did not include an authorization code")
     selected_client = _broker_client(_broker_client_name(record.payload["oidc_client"]))
     tokens = await _exchange_code(selected_client, code, record.payload["verifier"])
-    identity, metadata = await _resolve_identity(tokens, identity_store)
+    identity, metadata = await _resolve_identity(
+        tokens, identity_store, bearer_token_source=selected_client.bearer_token_source
+    )
     session_id = secrets.token_urlsafe(32)
     await credential_store.create(
         credential_type="web_session",

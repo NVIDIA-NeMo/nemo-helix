@@ -24,29 +24,46 @@ The pages visible in your workspace depend on the installed plugins, enabled ser
 
 NeMo Studio is included with the platform. Follow the [Setup guide](/documentation/get-started) to start NeMo Helix, then access Studio at `/studio` on your running server.
 
+When you sign in through the direct OIDC flow, Studio attempts to create a workspace using your email prefix; see [Workspace creation on login](/documentation/get-started/core-concepts/workspaces#workspace-creation-on-login).
+
 ## Features
 
 ### Current Workspace Navigation
 
 The current sidebar groups related pages under expandable parents. Selecting a parent that has its own landing page, such as **Agents**, opens that page; when it has child entries, use its chevron to expand them. A parent without a landing page, such as **Models**, only expands its child entries.
 
-| Sidebar group | Current entry point | Purpose and availability |
-| --- | --- | --- |
-| **Observability** | **Insights** | Review optimization insights generated from observed agent sessions. Shown when optimization is enabled; see [NeMo Studio Insights](/documentation/studio/insights). |
-| **Observability** | **Traces** | Inspect ingested traces, spans, and session details; see [NeMo Studio Traces](/documentation/studio/traces). |
-| **Components** | **Agents** | Opens the agent list. Select an agent to access the Overview, Deployments, Logs, Chat, Evaluations, Optimizations, Insights, and Details tabs. Optimizations and Insights are enabled by default and can be hidden by their feature flags. |
-| **Components** | **Models** | Expands to **Model Catalog**, **Evaluations**, **Fine-tuning**, **Playground**, **Deployments**, and **Virtual Models**, when those capabilities are enabled. **Model Catalog** opens the base-model list. **Evaluations** opens the Model Evaluations page; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). **Fine-tuning** opens the fine-tuned models list; see [NeMo Studio Fine-tuning](/documentation/studio/customization). **Playground** is disabled by default. **Virtual Models** appears only when the Guardrails preview feature is enabled. |
-| **Evaluations** | **Experiments** | Group evaluations for comparison, drill into results, and compare runs side by side; see [NeMo Studio Experiments](/documentation/studio/experiments). |
-| **Data** | **Datasets > Anonymizer** | Detect and protect PII in a dataset. Enabled by default; see [NeMo Studio Anonymizer](/documentation/studio/anonymizer). |
-| **Data** | **Datasets > Data Designer** | Build and monitor synthetic-data jobs. Other installed data plugins can appear below **Datasets**. |
-| **Data** | **Datasets > Safe Synthesizer** | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default. |
-| **Governance** | **Guardrails** | Manage guardrail configurations. Disabled by default; see [Studio Guardrail Configs](/documentation/studio/guardrail-configs). |
-| **Governance** | **Agent Hardening** | Plugin-provided agent hardening UI. Appears only when the Agent hardening plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins). |
-| **System** | **Filesets** | Organize and manage files used by agents and jobs. |
-| **System** | **Jobs** | Monitor jobs across enabled platform capabilities. |
-| **System** | **Settings** | View workspace settings and open **Secrets** and inference provider management. Enabled by default. |
+| Sidebar group     | Current entry point             | Purpose and availability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Observability** | **Insights**                    | Review optimization insights generated from observed agent sessions. Shown when optimization is enabled; see [NeMo Studio Insights](/documentation/studio/insights).                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Observability** | **Traces**                      | Inspect ingested traces, spans, and session details; see [NeMo Studio Traces](/documentation/studio/traces).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Components**    | **Agents**                      | Opens the agent list. Select an agent to access the Overview, Deployments, Logs, Chat, Evaluations, Optimizations, Insights, and Details tabs. Optimizations and Insights are enabled by default and can be hidden by their feature flags.                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Components**    | **Models**                      | Expands to **Model Catalog**, **Evaluations**, **Fine-tuning**, **Playground**, **Deployments**, and **Virtual Models**, when those capabilities are enabled. **Model Catalog** opens the base-model list. **Evaluations** opens the Model Evaluations page; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). **Fine-tuning** opens the fine-tuned models list; see [NeMo Studio Fine-tuning](/documentation/studio/customization). **Playground** is disabled by default. **Virtual Models** appears when the Guardrails preview feature or agent optimizations are enabled, and is shown by default. |
+| **Evaluations**   | **Experiments**                 | Group evaluations for comparison, drill into results, and compare runs side by side; see [NeMo Studio Experiments](/documentation/studio/experiments).                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Data**          | **Datasets > Anonymizer**       | Detect and protect PII in a dataset. Enabled by default; see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Data**          | **Datasets > Data Designer**    | Build and monitor synthetic-data jobs. Other installed data plugins can appear below **Datasets**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Data**          | **Datasets > Safe Synthesizer** | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Governance**    | **Guardrails**                  | Manage guardrail configurations. Disabled by default; see [Studio Guardrail Configs](/documentation/studio/guardrail-configs).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Governance**    | **Agent Hardening**             | Plugin-provided agent hardening UI. Appears only when the Agent hardening plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins).                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **System**        | **Filesets**                    | Organize and manage files used by agents and jobs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **System**        | **Jobs**                        | Monitor jobs across enabled platform capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **System**        | **Settings**                    | View workspace settings and open **Secrets** and inference provider management. Enabled by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
-**Dashboard** appears above the sidebar groups and is shown by default. **Playground** and **Virtual Models** are disabled by default and appear only when an administrator enables their feature flags. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+**Dashboard** appears above the sidebar groups and is shown by default; see [Dashboard](#dashboard). **Playground** is disabled by default and appears only when an administrator enables its feature flag. **Virtual Models** is shown by default and is hidden only when both the Guardrails and agent optimizations feature flags are disabled. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+
+### Dashboard
+
+The workspace **Dashboard** includes a **Recent Jobs** list of jobs in progress and jobs that reached a terminal state in the last 48 hours. It is shown when jobs are enabled; an administrator can hide it by setting `studio.feature_flags.jobs_enabled: false` in the platform configuration and restarting Studio.
+
+The list shows newest jobs first, ten rows per page with pagination, in these columns:
+
+| Column           | Shows                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Name**         | The job's name.                                                                                                                                                      |
+| **Source**       | A badge for the service that created the job.                                                                                                                        |
+| **Status**       | A status badge; see the statuses under [Jobs](#jobs).                                                                                                                |
+| **Elapsed time** | Time since the job was created, including while it's pending. The value counts up live while the job is active, and stops at the job's last update once it finishes. |
+
+The list refreshes automatically, so there's no refresh button. Selecting a row opens the job's service-specific detail page, or the generic job detail view when that service isn't enabled. When no jobs match, the empty state offers a **Fine-tune** call to action if fine-tuning is enabled (`studio.feature_flags.customizer_enabled`).
 
 ### Agents
 
@@ -56,7 +73,7 @@ For the full workflow, see [Studio Agents](/documentation/studio/agents).
 
 ### Insights
 
-Use **Observability > Insights** to review optimization insights the analyst agent generates from observed agent sessions and traces, and drill into an insight's linked experiments and observed sessions. Use **Resolve** or **Delete** to close an open insight, and **Reopen** to restore a resolved or deleted one.
+Use **Observability > Insights** to review optimization insights Compass generates from observed agent sessions and traces, and drill into an insight's linked experiments and observed sessions. Use **Resolve** or **Delete** to close an open insight, and **Reopen** to restore a resolved or deleted one.
 
 For the full workflow, see [Studio Insights](/documentation/studio/insights).
 
@@ -76,7 +93,7 @@ For the full workflow, see [Studio Guardrail Configs](/documentation/studio/guar
 
 ### Virtual Models
 
-When the Guardrails preview feature is enabled, use **Models > Virtual Models** to inspect inference routes managed by the Inference Gateway. The list shows all user-created virtual models in the workspace — auto-provisioned passthrough routes are hidden. Select a row, or choose **View** from its row actions, to open the virtual model's detail page. The **Details** tab shows the default backend model when configured, and the ordered request, response, and post-response middleware pipelines attached to the route. The **Chat** tab sends test prompts through the virtual model. Row actions also include **Chat** and **Delete**.
+Use **Models > Virtual Models** to inspect inference routes managed by the Inference Gateway. The list shows all user-created virtual models in the workspace — auto-provisioned passthrough routes are hidden. Select a row, or choose **View** from its row actions, to open the virtual model's detail page. The **Details** tab shows the default backend model when configured, and the ordered request, response, and post-response middleware pipelines attached to the route. The **Chat** tab sends test prompts through the virtual model. Row actions also include **Chat** and **Delete**.
 
 Virtual models are created through the `nemo inference virtual-models` CLI or the Inference Gateway API.
 
@@ -90,6 +107,8 @@ The Model Catalog page supports searching by model name, filtering by creation o
 
 The model details side panel has **Model Details** and **Chat Playground** tabs. **Model Details** shows model metadata, parameters, and available actions, such as **Customize this Model** when fine-tuning is enabled. **Chat Playground** lets you chat with chat-capable models.
 
+In the chat, a model's streamed reasoning appears live in a collapsible **Thinking** block, which is relabeled **Thought process** when the response completes. After the response completes, its tool calls and reasoning collapse together into a single **View work** group, and the final answer stays visible. Expand **View work** to inspect them.
+
 ### Fine-tuning
 
 Select **Models > Fine-tuning** to open the fine-tuned models list, start a fine-tuning job against an eligible base model, and track job progress. Enabled by default; see [NeMo Studio Fine-tuning](/documentation/studio/customization).
@@ -102,19 +121,19 @@ Keep models and data organized in dedicated workspaces.
 
 Use **Filesets** to organize files by **purpose**, which determines which metadata fields are available. Purpose is chosen at creation time and can't be changed afterward.
 
-| Purpose | Use for |
-| ------- | ------- |
-| Generic | Files that don't fit the Dataset, Model, or Environment categories. Doesn't add purpose-specific metadata fields. |
-| Dataset | Default for new filesets. Training and evaluation data. Enables dataset-specific metadata, including schema information. Use built-in tools to transform data schemas with LLM assistance or create train/test splits. |
-| Model | Model weights and checkpoints. Enables model-specific metadata, including tool-calling and model configuration fields. |
-| Environment | Executable environment packages consumed by sandboxed workloads. |
+| Purpose     | Use for                                                                                                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Generic     | Files that don't fit the Dataset, Model, or Environment categories. Doesn't add purpose-specific metadata fields.                                                                                                      |
+| Dataset     | Default for new filesets. Training and evaluation data. Enables dataset-specific metadata, including schema information. Use built-in tools to transform data schemas with LLM assistance or create train/test splits. |
+| Model       | Model weights and checkpoints. Enables model-specific metadata, including tool-calling and model configuration fields.                                                                                                 |
+| Environment | Executable environment packages consumed by sandboxed workloads.                                                                                                                                                       |
 
 **Supported file formats:** JSON (`.json`), JSONL (`.jsonl`), CSV (`.csv`), and Parquet (`.parquet`). PDF, image, and other binary formats are not currently supported.
 
 You can upload any file type into a fileset. However, each service supports specific input file types:
 
-| Service | Supported File Types |
-| --------------------------------------------------- | ------------------------------------- |
+| Service                                               | Supported File Types                  |
+| ----------------------------------------------------- | ------------------------------------- |
 | [Data Designer](/documentation/design-synthetic-data) | `.json`, `.jsonl`, `.csv`, `.parquet` |
 
 ### Anonymizer
@@ -133,11 +152,11 @@ For the full workflow, see [Synthesize Safe Data](/documentation/synthesize-safe
 
 Studio provides separate agent, model, and workspace evaluation views:
 
-| Location | What it shows |
-| -------- | ------------- |
-| **Agents > select an agent > Evaluations** | In-progress and completed evaluations in one table, and experiments scoped to the selected agent. Start a new run with **Run Evaluation**. |
-| **Models > Evaluations** | The Model Evaluations page: start a model evaluation with **Run Evaluation**, and review job results and per-row scores. See [Studio Model Evaluations](/documentation/studio/model-evaluations). |
-| **Evaluations > Experiments** | Experiments and their evaluations across the workspace, evaluation drill-down, and side-by-side run comparison. See [Studio Experiments](/documentation/studio/experiments). |
+| Location                                   | What it shows                                                                                                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Agents > select an agent > Evaluations** | In-progress and completed evaluations in one table, and experiments scoped to the selected agent. Start a new run with **Run Evaluation**.                                                        |
+| **Models > Evaluations**                   | The Model Evaluations page: start a model evaluation with **Run Evaluation**, and review job results and per-row scores. See [Studio Model Evaluations](/documentation/studio/model-evaluations). |
+| **Evaluations > Experiments**              | Experiments and their evaluations across the workspace, evaluation drill-down, and side-by-side run comparison. See [Studio Experiments](/documentation/studio/experiments).                      |
 
 Use the agent's **Evaluations** tab when reviewing how a specific agent performed. Use **Experiments** for the broader workspace history.
 
@@ -157,18 +176,18 @@ Navigate to **Jobs** in the workspace sidebar to see all jobs in the current wor
 
 **Status tracking** — Each job displays its current status:
 
-| Status | Description |
-| ------ | ----------- |
-| Created | Job has been created but not yet scheduled |
-| Pending | Job is queued and waiting for resources |
-| Active | Job is currently running |
-| Completed | Job finished successfully |
-| Error | Job encountered an error |
-| Cancelled | Job was cancelled by a user |
-| Cancelling | Cancellation is in progress |
-| Paused | Job execution is paused |
-| Pausing | Job is transitioning to paused |
-| Resuming | Paused job is restarting |
+| Status     | Description                                |
+| ---------- | ------------------------------------------ |
+| Created    | Job has been created but not yet scheduled |
+| Pending    | Job is queued and waiting for resources    |
+| Active     | Job is currently running                   |
+| Completed  | Job finished successfully                  |
+| Error      | Job encountered an error                   |
+| Cancelled  | Job was cancelled by a user                |
+| Cancelling | Cancellation is in progress                |
+| Paused     | Job execution is paused                    |
+| Pausing    | Job is transitioning to paused             |
+| Resuming   | Paused job is restarting                   |
 
 **Service routing** — Clicking a job navigates to its service-specific detail view when one exists. Jobs from services that aren't enabled fall back to the generic job detail view.
 

@@ -14,7 +14,7 @@ export const useEvaluationJobResultV2 = (workspace: string, jobName: string) => 
     data: resultsPage,
     isLoading: isLoadingMetadata,
     error: metadataError,
-  } = useEvalsListEvaluateJobResults(workspace, jobName, {
+  } = useEvalsListEvaluateJobResults(workspace, jobName, undefined, {
     query: {
       enabled: !!workspace && !!jobName,
     },
