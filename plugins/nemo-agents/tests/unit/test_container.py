@@ -623,7 +623,8 @@ class TestRenderFabricDockerfile:
             ValueError,
             match=r"Harness 'analyst' uses Fabric adapter 'nvidia.fabric.insights-analyst', "
             r"which an image packaged without --pyproject doesn't install\. Run it with `nemo agents execute`, "
-            r"or package with --pyproject",
+            r"or package with --pyproject for a project that installs the adapter \(or --template for a Dockerfile "
+            r"that does\)",
         ):
             render_fabric_dockerfile(config)
 
@@ -637,6 +638,20 @@ class TestRenderFabricDockerfile:
 
         with pytest.raises(ValueError, match=r"Harness 'main' uses Fabric adapter 'nvidia.fabric.claud'"):
             render_fabric_dockerfile(config)
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_custom_template_may_supply_its_own_adapter(self, tmp_path: Path) -> None:
+        """A --template Dockerfile can install any adapter, so packaging can't know what the image holds."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: acme.custom.native\n")
+        custom = tmp_path / "Dockerfile.j2"
+        custom.write_text("FROM python:{{ python_version }}\nRUN uv pip install acme-agent\n")
+
+        result = render_fabric_dockerfile(config, template_path=str(custom))
+
+        assert "RUN uv pip install acme-agent" in result
 
     @pytest.mark.usefixtures("installed_adapter_manifests")
     def test_project_mode_may_supply_its_own_adapter(self, tmp_path: Path) -> None:

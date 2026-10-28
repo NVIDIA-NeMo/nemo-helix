@@ -45,7 +45,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
-from nemo_agents_plugin.fabric.adapters import UnknownAdapterError, validate_harness_kinds
+from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
 from nemo_agents_plugin.runner.deployments_backend import (
     image_entrypoint_unsupported_message,
     require_deployment_mode_available,
@@ -153,7 +153,7 @@ async def create_deployment(
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
     # A requested image may install adapters this server can't see; the container checks them itself.
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
-        body.image and is_container_deployment_mode(body.deployment_mode)
+        body.image.strip() and is_container_deployment_mode(body.deployment_mode)
     ):
         _validate_harness_kinds(merged.config)
 
@@ -210,8 +210,10 @@ def _resolve_deployment_config(agent: Agent, *, workspace: str) -> dict[str, Any
 def _validate_harness_kinds(config: dict[str, Any]) -> None:
     try:
         validate_harness_kinds(AgentConfig.model_validate(config))
-    except (ValidationError, UnknownAdapterError) as exc:
+    except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid agent config: {exc}") from exc
+    except UnknownAdapterError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent config: {exc} {CUSTOM_IMAGE_HINT}") from exc
 
 
 async def _resolve_deployment_environment(

@@ -281,4 +281,5 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text(json.dumps({"adapter_id": adapter_id}), encoding="utf-8")
     monkeypatch.setattr(adapters, "ADAPTER_MANIFEST_ROOT", root)
+    monkeypatch.delenv(adapters.ADAPTER_PYTHON_ENV, raising=False)
     return root

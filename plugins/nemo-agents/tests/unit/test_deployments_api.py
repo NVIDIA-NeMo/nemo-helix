@@ -647,6 +647,8 @@ class TestCreateDeployment:
             {"deployment_mode": "subprocess"},
             # A subprocess runs in the platform's own environment, whatever image the request names.
             {"deployment_mode": "subprocess", "image": "acme-agent:1"},
+            # A blank image names no image.
+            {"deployment_mode": "docker", "image": "   "},
         ],
     )
     @pytest.mark.usefixtures("installed_adapter_manifests")
@@ -664,6 +666,7 @@ class TestCreateDeployment:
 
         assert resp.status_code == 400
         assert "Harness 'hermes': Unsupported harness kind 'nvidia.fabric.hermess'" in resp.json()["detail"]
+        assert "accepted when the request names that image" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
     @pytest.mark.usefixtures("installed_adapter_manifests")

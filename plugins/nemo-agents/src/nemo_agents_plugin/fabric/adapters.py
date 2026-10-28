@@ -9,6 +9,9 @@ declared by an adapter manifest installed anywhere below the Python environment'
 installs ``adapters/compass/compass.fabric-adapter.json``), and Fabric discovers
 installed adapters from the same tree, so an ID accepted here is one Fabric can load.
 
+When ``ADAPTER_PYTHON`` names another interpreter, Fabric discovers adapters
+from that interpreter's environment, so its tree is scanned too.
+
 An adapter installed only in a custom agent image is invisible to the API
 server, so a deploy or job that names its own image skips this check at create.
 The check still runs inside the image, whose manifests are the ones Fabric loads.
@@ -19,6 +22,8 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
+import subprocess
 import sysconfig
 from pathlib import Path
 
@@ -41,6 +46,11 @@ HARNESS_ADAPTER_IDS = {
 ADAPTER_MANIFEST_ROOT = Path(sysconfig.get_path("data")) / "share" / "nemo-fabric"
 # The tree also holds workflow target descriptors (``*.fabric-target.json``), which are not adapters.
 ADAPTER_MANIFEST_PATTERN = "*.fabric-adapter.json"
+# Fabric's setting for an interpreter whose environment holds the adapters (our Hermes images use one).
+ADAPTER_PYTHON_ENV = "ADAPTER_PYTHON"
+
+#: Appended where naming an image is the fix: deploy and execute job create.
+CUSTOM_IMAGE_HINT = "An adapter installed only in a custom agent image is accepted when the request names that image."
 
 
 class UnknownAdapterError(ValueError):
@@ -50,16 +60,41 @@ class UnknownAdapterError(ValueError):
 def installed_adapter_ids(root: Path | None = None) -> frozenset[str]:
     """Return the ``adapter_id`` of every adapter manifest installed under ``root``.
 
-    ``root`` defaults to ``ADAPTER_MANIFEST_ROOT``. Each root is scanned once per
-    process: installing an adapter means installing a package, which already
-    takes a restart to load.
+    ``root`` defaults to ``ADAPTER_MANIFEST_ROOT`` plus, when ``ADAPTER_PYTHON`` is
+    set, that interpreter's tree. Each root is scanned once per process: installing
+    an adapter means installing a package, which already takes a restart to load.
 
     The ID comes from the manifest, not its directory (``compass/`` holds
     ``nvidia.fabric.insights-analyst``), and one directory may hold several
     manifests (``nooa/`` holds ``nooa`` and ``nooa-bench``). An unreadable
     manifest is skipped so one broken plugin can't block every other adapter.
     """
-    return _scan_adapter_manifests(root or ADAPTER_MANIFEST_ROOT)
+    if root is not None:
+        return _scan_adapter_manifests(root)
+    roots = [ADAPTER_MANIFEST_ROOT]
+    adapter_python_root = _adapter_python_manifest_root(os.environ.get(ADAPTER_PYTHON_ENV, ""))
+    if adapter_python_root is not None:
+        roots.append(adapter_python_root)
+    return frozenset().union(*(_scan_adapter_manifests(manifest_root) for manifest_root in roots))
+
+
+@functools.cache
+def _adapter_python_manifest_root(python: str) -> Path | None:
+    """Return the manifest tree of the environment ``python`` runs in, or ``None`` if unset or unusable."""
+    if not python:
+        return None
+    try:
+        result = subprocess.run(
+            [python, "-I", "-c", "import sysconfig; print(sysconfig.get_path('data'))"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        logger.warning("Can't find Fabric adapters for %s=%s: %s", ADAPTER_PYTHON_ENV, python, error)
+        return None
+    return Path(result.stdout.strip()) / "share" / "nemo-fabric"
 
 
 @functools.cache
@@ -96,8 +131,7 @@ def resolve_adapter_id(kind: str, root: Path | None = None) -> str:
         return kind
     raise UnknownAdapterError(
         f"Unsupported harness kind {kind!r}. Supported harness kinds: {', '.join(sorted(HARNESS_ADAPTER_IDS))}; "
-        f"or an installed Fabric adapter ID: {', '.join(sorted(accepted))}. An adapter installed only in a "
-        "custom agent image is accepted when the deployment or job names that image."
+        f"or an installed Fabric adapter ID: {', '.join(sorted(accepted))}."
     )
 
 

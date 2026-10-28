@@ -77,12 +77,13 @@ def is_plugin_managed(path: Path) -> bool:
 
 
 def resolve_fabric_harness_install(
-    agent_config: Path, *, python_version: str | None = None, installs_project: bool = False
+    agent_config: Path, *, python_version: str | None = None, installs_own_adapters: bool = False
 ) -> tuple[str, bool, bool]:
     """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag.
 
-    ``installs_project`` says the image installs the agent's own ``pyproject.toml``,
-    which may supply an adapter the Platform extras don't.
+    ``installs_own_adapters`` says the image installs the agent's own ``pyproject.toml``
+    or comes from a custom ``--template``, either of which may supply an adapter the
+    Platform extras don't.
 
     Raises:
         ValueError: A harness names an adapter the image can't install.
@@ -110,7 +111,7 @@ def resolve_fabric_harness_install(
             if isinstance(harnesses, Mapping) and isinstance(default_harness, str)
             else None
         )
-        if isinstance(harnesses, Mapping) and not installs_project:
+        if isinstance(harnesses, Mapping) and not installs_own_adapters:
             _reject_unpackageable_adapters(harnesses)
         kind = selected.get("kind") if isinstance(selected, Mapping) else None
         if not isinstance(kind, str):
@@ -127,8 +128,8 @@ def resolve_fabric_harness_install(
 def _reject_unpackageable_adapters(harnesses: Mapping[Any, Any]) -> None:
     """Fail packaging for a harness whose adapter the image won't install.
 
-    Only called when the image installs no project of the agent's own, so its
-    adapters come solely from the Platform extras. Every harness is checked, not
+    Only called when the image installs no project of the agent's own and uses the
+    built-in template, so its adapters come solely from the Platform extras. Every harness is checked, not
     just the default, since a deployment may select any of them. A kind naming no
     known adapter is rejected here too: ``--no-build`` and ``--skip-validation``
     skip the config translation that would otherwise report it.
@@ -142,7 +143,8 @@ def _reject_unpackageable_adapters(harnesses: Mapping[Any, Any]) -> None:
             raise ValueError(
                 f"Harness {name!r} uses Fabric adapter {adapter_id!r}, which an image packaged without "
                 "--pyproject doesn't install. Run it with `nemo agents execute`, or package with --pyproject "
-                "for a project that installs the adapter. Adapters available without --pyproject: "
+                "for a project that installs the adapter (or --template for a Dockerfile that does). "
+                "Adapters available without --pyproject: "
                 f"{', '.join(sorted(_IMAGE_ADAPTER_IDS))}."
             )
 
@@ -921,7 +923,7 @@ def render_fabric_dockerfile(
     platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(
         agent_config,
         python_version=shared.python_version,
-        installs_project=shared.has_pyproject,
+        installs_own_adapters=shared.has_pyproject or template_path is not None,
     )
     params = FabricRenderParams(
         **{f.name: getattr(shared, f.name) for f in fields(shared)},

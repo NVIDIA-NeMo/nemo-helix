@@ -386,7 +386,10 @@ async def test_to_spec_rejects_an_unknown_adapter_id_at_create_time() -> None:
     config = _agent_config()
     config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.hermess"
 
-    with pytest.raises(ValueError, match="Unsupported harness kind 'nvidia.fabric.hermess'"):
+    with pytest.raises(
+        ValueError,
+        match=r"Unsupported harness kind 'nvidia.fabric.hermess'.*accepted when the request names that image",
+    ):
         await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent=AgentInline(config=config, config_format="nemo-agents-spec-v1"), input="hello"),
             workspace="default",

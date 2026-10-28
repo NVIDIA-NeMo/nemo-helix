@@ -32,7 +32,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
-from nemo_agents_plugin.fabric.adapters import validate_harness_kinds
+from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
 from nemo_agents_plugin.fabric.invocation import (
     AgentConfigInvocationRequest,
     FabricDirectories,
@@ -383,7 +383,10 @@ class ExecuteAgentJob(NemoJob):
         # that selects a non-local Fabric environment. A requested image may
         # install adapters this server can't see, so the job checks harness
         # kinds inside that image instead.
-        _validate_agent_config(merged.config, check_adapters=not request.image)
+        try:
+            _validate_agent_config(merged.config, check_adapters=not request.image)
+        except UnknownAdapterError as error:
+            raise UnknownAdapterError(f"{error} {CUSTOM_IMAGE_HINT}") from error
 
         workdir = None
         if request.workdir is not None:

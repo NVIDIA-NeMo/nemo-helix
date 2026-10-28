@@ -255,8 +255,9 @@ harnesses:
 - The platform's Python environment, for subprocess deployments. If you installed NeMo Helix with
   `uv tool install`, add your package to that tool environment with `--with`.
 - The agent image, for Docker and Kubernetes deployments and execute jobs. Package with `--pyproject`
-  so the image installs your project; the `nemo agents package-agent` platform job cannot. Without
-  `--pyproject`, `nemo agents package` rejects an adapter the image doesn't install.
+  so the image installs your project, or with a `--template` Dockerfile that installs the adapter; the
+  `nemo agents package-agent` platform job can do neither. Without either flag, `nemo agents package`
+  rejects an adapter the image doesn't install.
 
 The platform checks each harness `kind` against the adapters installed in its own Python environment
 when you deploy the agent or create an execute job. When a Docker or Kubernetes deployment, or an

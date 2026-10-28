@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.fabric import adapters
 from nemo_agents_plugin.fabric.adapters import (
     HARNESS_ADAPTER_IDS,
     UnknownAdapterError,
@@ -109,3 +111,48 @@ def test_validate_harness_kinds_names_the_bad_harness() -> None:
 
     with pytest.raises(UnknownAdapterError, match="Harness 'spare': Unsupported harness kind 'cladue'"):
         validate_harness_kinds(config)
+
+
+def test_adapter_python_environment_is_scanned_too(
+    installed_adapter_manifests: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fabric discovers adapters from ADAPTER_PYTHON's environment, so the registry must as well."""
+    data_root = tmp_path / "adapter-env"
+    _write(
+        data_root / "share/nemo-fabric/adapters/acme/acme.fabric-adapter.json",
+        json.dumps({"adapter_id": "acme.isolated"}),
+    )
+    # Stands in for an interpreter: prints its environment's data path, as the real query does.
+    interpreter = tmp_path / "python"
+    interpreter.write_text(f"#!/bin/sh\necho {data_root}\n", encoding="utf-8")
+    interpreter.chmod(0o755)
+    monkeypatch.setenv(adapters.ADAPTER_PYTHON_ENV, str(interpreter))
+
+    assert installed_adapter_ids() == {
+        "acme.isolated",
+        "nvidia.fabric.insights-analyst",
+        "nvidia.fabric.nooa",
+        "nvidia.fabric.nooa.bench-agent",
+    }
+
+
+def test_unusable_adapter_python_is_skipped(
+    installed_adapter_manifests: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv(adapters.ADAPTER_PYTHON_ENV, str(tmp_path / "missing-python"))
+
+    with caplog.at_level(logging.WARNING):
+        assert "nvidia.fabric.insights-analyst" in installed_adapter_ids()
+
+    assert "Can't find Fabric adapters for ADAPTER_PYTHON" in caplog.text
+
+
+def test_unknown_kind_message_does_not_suggest_a_custom_image(tmp_path: Path) -> None:
+    """Naming an image only helps at deploy and job create, which add that hint themselves."""
+    with pytest.raises(UnknownAdapterError) as error:
+        resolve_adapter_id("acme.custom", tmp_path)
+
+    assert adapters.CUSTOM_IMAGE_HINT not in str(error.value)
