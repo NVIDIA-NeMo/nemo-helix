@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import socket
 import tempfile
 from collections.abc import Iterator
@@ -67,6 +68,13 @@ class Harness:
         self.calls.append(request)
         if self.status != 200:
             return httpx.Response(self.status, json={"detail": self.secret})
+        if request.url.path == "/apis/auth/v2/authz/has_permissions":
+            assert json.loads(request.content)["input"] == {
+                "principal_id": self.scope.principal_id,
+                "workspace": "helix-team",
+                "permissions": ["secrets.read"],
+            }
+            return httpx.Response(200, json={"result": {"allowed": True}})
         if "/apis/jobs/" in request.url.path:
             if request.url.path.endswith("/steps/run"):
                 return httpx.Response(
@@ -99,7 +107,7 @@ class Harness:
         assert "/workspaces/helix-team/secrets/service-token" in request.url.path
         payload = {"id": "secret-id", "name": "service-token", "workspace": "helix-team"}
         if request.url.path.endswith("/access"):
-            assert request.headers.get("X-NHX-Principal-On-Behalf-Of") == self.scope.principal_id
+            assert "X-NHX-Principal-On-Behalf-Of" not in request.headers
             payload["value"] = self.secret
         return httpx.Response(200, json=payload)
 
@@ -416,7 +424,7 @@ async def test_revoke_or_expiry_during_secret_read_wins(harness: Harness, change
     from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
 
     handle = harness.registry.register(harness.owner, await harness.issue())
-    original = harness.client.with_headers({"X-NHX-Principal-On-Behalf-Of": "user-1"}).access_secret
+    original = harness.client.access_secret
 
     async def access(**kwargs):
         response = await original(**kwargs)
@@ -551,3 +559,35 @@ async def test_deployment_binding_tracks_live_entity(harness: Harness, change: s
         else:
             with pytest.raises(RegistrationDenied):
                 await driver._require_active_workload(workload)
+
+
+@pytest.mark.asyncio
+async def test_standalone_expiry_after_final_registry_check_denies_response(harness: Harness) -> None:
+    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+
+    handle = harness.registry.register(harness.owner, await harness.issue())
+    claims = harness.registry.resolve(harness.owner, handle).claims
+    harness.now = claims.binding_expires_at - 1
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    checks = 0
+
+    async def advance(workload: GatewayWorkload | None) -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            harness.now += 2
+
+    with patch.object(driver, "_require_active_workload", side_effect=advance):
+        with pytest.raises(RegistrationDenied, match="cache lifetime"):
+            await driver._dispatch(
+                "ResolveCredentials",
+                {
+                    "credentials": [
+                        {
+                            **harness.owner.model_dump(),
+                            "request_id": "read",
+                            "handle": {"driver": "nemo", "handle": handle},
+                        }
+                    ]
+                },
+            )

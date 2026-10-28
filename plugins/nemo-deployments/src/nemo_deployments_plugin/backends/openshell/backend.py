@@ -440,6 +440,12 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 ),
             )
 
+        if provider_bindings and config.auth_proxy_sidecar:
+            try:
+                self._platform_proxy_upstream(config)
+            except ValueError as exc:
+                return BackendStatusUpdate(status="FAILED", status_message=str(exc))
+
         env: dict[str, str] = {}
         unresolved: list[str] = []
         for var in container.env:
@@ -790,18 +796,17 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         if not await self._marker_exists(sandbox_name, _LAUNCH_MARKER):
             failure = await self._deliver_config_files(sandbox_name, config.config_files)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_name)
+                await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
                 return failure
             command = list(container.command) + list(container.args)
             if config.gateway_providers and config.auth_proxy_sidecar:
                 from nemo_deployments_plugin.auth_proxy import auth_proxy_port
 
-                upstream = next((var.value for var in container.env if var.name == "NHX_BASE_URL"), None)
-                egress = self._executor_config.platform_egress
-                if not upstream or egress is None or urlsplit(upstream).hostname != egress.host:
-                    return BackendStatusUpdate(
-                        status="FAILED", status_message="Platform proxy upstream must match the executor egress host."
-                    )
+                try:
+                    upstream = self._platform_proxy_upstream(config)
+                except ValueError as exc:
+                    await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
+                    return BackendStatusUpdate(status="FAILED", status_message=str(exc))
                 command = [
                     "python",
                     "-m",
@@ -819,7 +824,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 ]
             failure = await self._launch_serve(sandbox_name, command)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_name)
+                await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
                 return failure
             return BackendStatusUpdate(status="STARTING", status_message="Serve command launched")
 
@@ -849,7 +854,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         try:
             endpoints = await self._expose_ports(sandbox_name, container)
         except grpc.RpcError as exc:
-            await self._delete_sandbox_best_effort(sandbox_name)
+            await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
             return BackendStatusUpdate(status="FAILED", status_message=f"ExposeService failed: {_rpc_detail(exc)}")
         if not endpoints:
             return BackendStatusUpdate(status="STARTING", status_message="Serve launched; awaiting endpoints")
@@ -937,17 +942,27 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             return BackendStatusUpdate(status="LOST", status_message=f"StartSandbox failed: {_rpc_detail(exc)}")
         return BackendStatusUpdate(status="STARTING", status_message=f"Sandbox {sandbox_name} was stopped; restarting")
 
-    async def _delete_sandbox_best_effort(self, sandbox_name: str) -> None:
-        """Best-effort DeleteSandbox to avoid leaking a partially-provisioned sandbox.
+    def _platform_proxy_upstream(self, config: DeploymentConfig) -> str:
+        upstream = next((var.value for var in config.containers[0].env if var.name == "NHX_BASE_URL"), None)
+        egress = self._executor_config.platform_egress
+        if not upstream or egress is None or urlsplit(upstream).hostname != egress.host:
+            raise ValueError("Platform proxy upstream must match the executor egress host.")
+        return upstream
 
-        Swallows all errors (including a NOT_FOUND, which makes this idempotent) so a
-        cleanup failure never masks the original provisioning failure.
-        """
+    async def _delete_sandbox_best_effort(self, sandbox_name: str, *, workspace: str) -> None:
+        """Delete a failed sandbox, then its providers; orphan reconciliation retries cleanup."""
         try:
-            await self._unary(
-                self._stub.DeleteSandbox,
-                pb.DeleteSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name),
-            )
+            try:
+                await self._unary(
+                    self._stub.DeleteSandbox,
+                    pb.DeleteSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name),
+                )
+            except grpc.RpcError as exc:
+                if _rpc_code(exc) != grpc.StatusCode.NOT_FOUND:
+                    raise
+            if self._executor_config.gateway_credentials is not None:
+                async with self._provider_provisioner() as provisioner:
+                    await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
         except Exception:
             logger.warning("Failed to clean up sandbox %s after provisioning failure", sandbox_name, exc_info=True)
 

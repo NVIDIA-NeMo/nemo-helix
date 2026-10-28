@@ -303,10 +303,15 @@ class ProviderProvisioner:
                 if (
                     any(existing.provider.metadata.labels.get(key) != value for key, value in labels.items())
                     or existing.provider.type != binding.profile
+                    or existing.provider.profile_workspace != approved.profile_workspace
                 ):
                     raise ProviderProvisioningError(
                         "Concurrent provider registration belongs to another binding."
                     ) from None
+                if existing.provider.config.get(_REVOKED):
+                    await self._finish_revocation(name, workload_id)
+                    revoked = True
+                    continue
             names.append(name)
         if revoked:
             raise ProviderAccessRevoked("Gateway provider access was removed. Start a new workload to restore access.")
