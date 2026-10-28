@@ -3,6 +3,8 @@
 
 """Driver bearer authentication and creator permission checks through real Auth/Secrets."""
 
+# ruff: noqa: E402 -- Check the optional SDK before imports.
+
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,9 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+
+pytest.importorskip("openshell")
+
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from nemo_deployments_plugin.backends.openshell.credential_driver import wire
