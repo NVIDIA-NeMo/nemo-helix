@@ -12,7 +12,7 @@ After polling reaches a **terminal** status (`completed`, `error`, or `cancelled
 - [ ] Every `WARN:` or `ALERT:` line the poll script printed is in **Notes**, with its value.
 - [ ] The output is registered: the adapter is listed under `nemo models get <model-entity>`, or the model entity `<output.name>` exists.
 - [ ] The tuned model answers through the gateway (`post-training-eval.md` § **3. Score the tuned model**).
-- [ ] Base and tuned were scored on the frozen test split, or the eval failure is reported on its own.
+- [ ] SFT and LoRA: base and tuned were scored on the frozen test split, or the eval failure is reported on its own.
 
 ## Result template
 

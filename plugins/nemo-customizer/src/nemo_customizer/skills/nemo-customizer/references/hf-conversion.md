@@ -50,24 +50,26 @@ def to_chat(ex):
     assistant = texts[labels.index(ex["answerKey"])]
     return {"messages": [{"role": "user", "content": user}, {"role": "assistant", "content": assistant}]}
 
-def to_sft(ex):
-    row = to_chat(ex)
+def to_sft(row):
     return {"prompt": row["messages"][0]["content"], "completion": row["messages"][1]["content"]}
 
-convert = to_chat if has_chat else to_sft
+train_format = (lambda row: row) if has_chat else to_sft
 
 ds = load_dataset(HF_DATASET)
 
 # Freeze a test split: about 10% of the training rows, at most 500, never trained on.
-train = [convert(ex) for ex in ds["train"]]
-random.Random(42).shuffle(train)
-n_test = min(500, len(train) // 10)
+rows = [to_chat(ex) for ex in ds["train"]]
+if len(rows) < 2:
+    raise SystemExit("Need at least two rows: one to train on and one to test.")
+random.Random(42).shuffle(rows)
+n_test = min(500, max(1, len(rows) // 10))
 splits = {
-    Path("/tmp/train-data/train.jsonl"): train[n_test:],
-    Path("/tmp/test-data/test.jsonl"): train[:n_test],   # its own directory and fileset
+    Path("/tmp/train-data/train.jsonl"): [train_format(row) for row in rows[n_test:]],
+    # CHAT rows whatever the training shape: the eval reads item.messages. Own directory and fileset.
+    Path("/tmp/test-data/test.jsonl"): rows[:n_test],
 }
 if "validation" in ds:
-    splits[Path("/tmp/train-data/validation.jsonl")] = [convert(ex) for ex in ds["validation"]]
+    splits[Path("/tmp/train-data/validation.jsonl")] = [train_format(to_chat(ex)) for ex in ds["validation"]]
 for path, rows in splits.items():
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
@@ -91,8 +93,7 @@ Only the **chat-template / `messages` (`to_chat`) output is backend-agnostic** â
 **Note:** Unsloth does **not** read the automodel SFT shape `{"prompt": ..., "completion": ...}`. If `has_chat` is False *and* the user picked unsloth, swap `to_sft` for a `to_text` that renders one `text` column. Sketch:
 
 ```python
-def to_text(ex):
-    row = to_chat(ex)
+def to_text(row):
     user, assistant = row["messages"][0]["content"], row["messages"][1]["content"]
     return {"text": f"{user}\n{assistant}"}
 ```

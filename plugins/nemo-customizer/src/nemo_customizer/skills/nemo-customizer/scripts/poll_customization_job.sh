@@ -25,8 +25,15 @@ run_nemo() {
 }
 
 JOB="${1:?usage: poll_customization_job.sh <plugin>-<id> [interval_seconds] [--continue-on-alert]}"
-INTERVAL="${2:-15}"
-CONTINUE_ON_ALERT="${3:-}"
+shift
+INTERVAL=15
+CONTINUE_ON_ALERT=false
+for arg in "$@"; do
+  case "$arg" in
+    --continue-on-alert) CONTINUE_ON_ALERT=true ;;
+    *) INTERVAL="$arg" ;;
+  esac
+done
 
 while true; do
   JSON=$(run_nemo jobs get-status "$JOB" -f json 2>/dev/null) || {
@@ -46,7 +53,7 @@ while true; do
       exit 1
       ;;
   esac
-  if [[ "$CONTINUE_ON_ALERT" != "--continue-on-alert" ]] && grep -q '^ALERT:' <<<"$HEALTH"; then
+  if [[ "$CONTINUE_ON_ALERT" != true ]] && grep -q '^ALERT:' <<<"$HEALTH"; then
     exit 3
   fi
   sleep "$INTERVAL"

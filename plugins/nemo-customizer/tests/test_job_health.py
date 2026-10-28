@@ -61,6 +61,11 @@ def test_latest_value_falls_back_to_the_history() -> None:
     assert "train_loss=1.5" in summary
 
 
+def test_null_top_level_value_falls_back_to_the_history() -> None:
+    _, findings = _report({"train_loss": None, "metrics": {"train_loss": _points(2.0, float("nan"))}})
+    assert len(findings) == 1 and findings[0].startswith("ALERT: train_loss is nan")
+
+
 def test_no_training_task_yet_reports_status_only() -> None:
     status = {"status": "active", "status_details": {"phase": "downloading"}, "steps": []}
     assert job_health.summary_line(status, job_health.training_details(status)) == "status=active phase=downloading"
@@ -91,10 +96,12 @@ def test_one_zero_variance_step_is_not_enough() -> None:
     assert findings == []
 
 
-def test_zero_variance_without_history_needs_a_few_steps() -> None:
+def test_zero_variance_without_history_only_warns() -> None:
+    """One reading cannot show a sustained run, so it must not stop the poll."""
     early = {"train_reward": 1.0, job_health.GRPO_MIXED_GROUPS: 0.0, "step": 1}
     assert _report(early)[1] == []
-    assert _report({**early, "step": job_health.RUN_LENGTH})[1][0].startswith("ALERT:")
+    findings = _report({**early, "step": job_health.RUN_LENGTH})[1]
+    assert [line.split(":")[0] for line in findings] == ["WARN"]
 
 
 def test_low_training_loss_warns_of_memorizing() -> None:
@@ -107,15 +114,22 @@ def test_rising_validation_loss_warns_of_overfitting() -> None:
     assert len(findings) == 1 and findings[0].startswith("WARN: val_loss rose")
 
 
-def _run_poll(tmp_path: Path, status: dict[str, Any], *args: str) -> subprocess.CompletedProcess[str]:
-    """Run the poll script against a fake ``nemo`` that always returns ``status``."""
-    (tmp_path / "status.json").write_text(json.dumps(status))
+def _run_poll(
+    tmp_path: Path, *statuses: dict[str, Any], args: tuple[str, ...] = ("0",)
+) -> subprocess.CompletedProcess[str]:
+    """Run the poll script against a fake ``nemo`` that returns ``statuses`` in turn, then the last one."""
+    for index, status in enumerate(statuses):
+        (tmp_path / f"status{index}.json").write_text(json.dumps(status))
     fake_nemo = tmp_path / "nemo"
-    fake_nemo.write_text(f'#!/usr/bin/env bash\ncat "{tmp_path / "status.json"}"\n')
+    fake_nemo.write_text(
+        "#!/usr/bin/env bash\n"
+        f'n=$(cat "{tmp_path}/calls" 2>/dev/null || echo 0); echo $((n + 1)) > "{tmp_path}/calls"\n'
+        f'cat "{tmp_path}/status$(( n < {len(statuses) - 1} ? n : {len(statuses) - 1} )).json"\n'
+    )
     fake_nemo.chmod(fake_nemo.stat().st_mode | stat.S_IEXEC)
     env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
     return subprocess.run(
-        ["bash", str(SCRIPTS / "poll_customization_job.sh"), "automodel-abc", "0", *args],
+        ["bash", str(SCRIPTS / "poll_customization_job.sh"), "automodel-abc", *args],
         capture_output=True,
         text=True,
         env=env,
@@ -131,6 +145,14 @@ def test_poll_stops_on_an_alert_while_the_job_runs(tmp_path: Path) -> None:
 
 
 def test_poll_exits_cleanly_when_the_job_completes(tmp_path: Path) -> None:
-    result = _run_poll(tmp_path, _status({"train_loss": 0.8}, state="completed"), "--continue-on-alert")
+    result = _run_poll(tmp_path, _status({"train_loss": 0.8}, state="completed"))
     assert result.returncode == 0
     assert "status=completed" in result.stdout and "train_loss=0.8" in result.stdout
+
+
+def test_poll_continues_past_an_alert_when_asked(tmp_path: Path) -> None:
+    """The flag works in either position, including with no interval before it."""
+    alert, done = _status({"train_loss": float("nan")}), _status({"train_loss": 0.8}, state="completed")
+    result = _run_poll(tmp_path, alert, done, args=("--continue-on-alert", "0"))
+    assert result.returncode == 0
+    assert "ALERT: train_loss is nan" in result.stdout and "status=completed" in result.stdout

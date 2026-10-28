@@ -61,8 +61,9 @@ def _number(value: Any) -> float | None:
 
 def latest(details: dict[str, Any], name: str) -> float | None:
     """The latest value of a metric: its top-level field, else the end of its history."""
-    if name in details:
-        return _number(details[name])
+    value = _number(details.get(name))
+    if value is not None:
+        return value
     history = series(details, name)
     return history[-1] if history else None
 
@@ -103,13 +104,16 @@ def findings(details: dict[str, Any]) -> list[str]:
 
     if is_grpo(details):
         mixed = series(details, GRPO_MIXED_GROUPS)
-        recent = mixed[-RUN_LENGTH:] if len(mixed) >= RUN_LENGTH else []
-        if (recent and all(value == 0 for value in recent)) or (
-            not mixed and latest(details, GRPO_MIXED_GROUPS) == 0 and (details.get("step") or 0) >= RUN_LENGTH
-        ):
+        if len(mixed) >= RUN_LENGTH and all(value == 0 for value in mixed[-RUN_LENGTH:]):
             lines.append(
                 "ALERT: every prompt group got the same reward for all its rollouts "
                 f"({GRPO_MIXED_GROUPS} is 0), so GRPO has no gradient to learn from."
+            )
+        elif not mixed and latest(details, GRPO_MIXED_GROUPS) == 0 and (details.get("step") or 0) >= RUN_LENGTH:
+            # One reading cannot show a sustained run, so this does not stop the poll.
+            lines.append(
+                f"WARN: {GRPO_MIXED_GROUPS} is 0 at this step. If it stays 0, every prompt group "
+                "gets the same reward and GRPO has no gradient to learn from."
             )
         return lines
 

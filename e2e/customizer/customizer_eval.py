@@ -5,6 +5,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,10 +65,13 @@ def _build_target(base_url: str, workspace: str, model_id: str):
     from nhx_evals_sdk.enums import ModelFormat
     from nhx_evals_sdk.values.models import Model
 
+    # The evaluator builds its own client. On an auth-enabled cluster it sends the e2e
+    # access token, read from the environment variable that api_key_secret names.
     return Model(
         url=openai_route_url(base_url, workspace),
         name=model_id,
         format=ModelFormat.OPEN_AI,
+        api_key_secret="NHX_ACCESS_TOKEN" if os.environ.get("NHX_ACCESS_TOKEN") else None,
     )
 
 

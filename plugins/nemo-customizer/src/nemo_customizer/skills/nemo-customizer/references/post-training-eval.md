@@ -16,7 +16,7 @@ The **nemo-evals** skill does the scoring; this file says what to hand it. GRPO 
 ## 1. Freeze a test split
 
 - Hold out about 10% of the rows, at most 500, chosen at random with a fixed seed, and remove them from `train.jsonl`. Use a split the dataset ships only when it has labels: many Hugging Face `test` splits do not (`tau/commonsense_qa` is one).
-- Write the rows in the training shape (**Format contract** below) to `test.jsonl`.
+- Write them to `test.jsonl` as CHAT rows (**Format contract** below), even when the training rows use another shape.
 - Upload `test.jsonl` to its **own** fileset, `<dataset-fileset>-test`, never to the training fileset. Kept apart, it cannot be trained on or used to pick a checkpoint.
 - Keep the file: base and tuned are scored on exactly these rows.
 
