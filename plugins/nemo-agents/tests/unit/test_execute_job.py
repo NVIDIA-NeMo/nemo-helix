@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -46,6 +47,12 @@ from nemo_agents_plugin.jobs.execute import (
     ResolvedAgentConfig,
     _configure_intake_telemetry,
     _log_agent_stderr,
+    _stage_stored_agent_ethos,
+)
+from nemo_agents_plugin.runner.fabric_artifact_staging import (
+    FabricArtifactStagingError,
+    FabricEthosFilesetNotFound,
+    stage_fabric_ethos_dir,
 )
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
@@ -69,6 +76,72 @@ requires_hermes_adapter = pytest.mark.skipif(
     find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
     reason="needs the hermes harness adapter, which is not installed on Python 3.14",
 )
+
+
+class _OpenedAsyncClient:
+    async def __aenter__(self) -> "_OpenedAsyncClient":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+def _sdk_opening_async_client() -> MagicMock:
+    sdk = MagicMock()
+    sdk.to_async.return_value = _OpenedAsyncClient()
+    return sdk
+
+
+@pytest.fixture(autouse=True)
+def _ethos_fileset_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing ``run()`` tests pass a ``MagicMock`` SDK and declare no skills.
+
+    They should keep seeing a missing ethos fileset: the real stager runs, the
+    download is not found, and validation passes. Tests that need a fileset
+    restore ``_stage_stored_agent_ethos`` and replace this download.
+    """
+
+    async def _missing(*_args: object, **_kwargs: object) -> None:
+        raise FabricEthosFilesetNotFound("missing fileset")
+
+    monkeypatch.setattr(
+        "nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset",
+        _missing,
+    )
+
+    def _stage(
+        sdk: object,
+        *,
+        workspace: str,
+        agent_name: str,
+        agent_config: AgentConfig,
+        base_dir: Path,
+    ) -> None:
+        del sdk
+
+        async def _run() -> None:
+            await stage_fabric_ethos_dir(
+                workspace=workspace,
+                agent_name=agent_name,
+                agent_config=agent_config.model_dump(mode="json"),
+                base_dir=base_dir,
+                files_client=AsyncMock(),
+            )
+
+        asyncio.run(_run())
+
+    monkeypatch.setattr("nemo_agents_plugin.jobs.execute._stage_stored_agent_ethos", _stage)
+
+
+def _use_real_ethos_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nemo_agents_plugin.jobs.execute._stage_stored_agent_ethos",
+        _stage_stored_agent_ethos,
+    )
+    monkeypatch.setattr(
+        "nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client",
+        lambda _client: AsyncMock(),
+    )
 
 
 class _TypedFilesResponse:
@@ -2415,3 +2488,144 @@ def test_wants_intake_atif_export_agrees_with_the_wiring_it_guards() -> None:
         config["telemetry"] = telemetry
         wired = intake_export.configure_intake_atif_export(config, workspace="default", base_url="http://platform:8080")
         assert wants_intake_atif_export({**config, "telemetry": telemetry}) is wired
+
+
+def _agent_with_probe_skill(*, name: str = "calc", workspace_dir: str | None = None) -> ResolvedAgentConfig:
+    agent = _resolved_agent(name=name)
+    agent.config["skills"] = {"paths": ["skills/probe-skill"]}
+    if workspace_dir is not None:
+        agent.config["environment"] = {"provider": "local", "workspace": workspace_dir}
+    return agent
+
+
+def _write_probe_skill(local_path: Path) -> None:
+    skill = local_path / "skills" / "probe-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# probe\n", encoding="utf-8")
+
+
+def test_run_stages_ethos_skills_before_invoke_and_keeps_workdir(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_real_ethos_stage(monkeypatch)
+    requested: list[str] = []
+
+    async def _download(
+        _files_client: object,
+        *,
+        workspace: str,
+        fileset_name: str,
+        local_path: Path,
+    ) -> None:
+        assert workspace == "default"
+        requested.append(fileset_name)
+        _write_probe_skill(local_path)
+
+    monkeypatch.setattr("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download)
+
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(
+            agent="calc",
+            input="hello",
+            workdir=AgentWorkdir(base_workdir="source#project/"),
+        ),
+        agent=_agent_with_probe_skill(),
+        workdir=AgentWorkdir(base_workdir="default/source#notes.txt"),
+    )
+
+    def _download_workdir(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client
+        assert ref == "default/source#notes.txt"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "notes.txt").write_text("from the workdir\n", encoding="utf-8")
+        return SimpleNamespace(path=local_dir / "notes.txt", tmp_dir=local_dir)
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        assert (request.base_dir / "skills" / "probe-skill" / "SKILL.md").read_text(encoding="utf-8") == "# probe\n"
+        assert (request.base_dir / "workspace" / "notes.txt").read_text(encoding="utf-8") == "from the workdir\n"
+        return FabricRuntimeResult(status="succeeded", response="done")
+
+    sdk = _sdk_opening_async_client()
+    with (
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
+        patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download_workdir),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+    ):
+        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
+
+    assert result["status"] == "completed"
+    assert requested == ["calc-ethos"]
+    assert (ctx.storage.persistent / "results" / "input_workdir" / "notes.txt").read_text(encoding="utf-8") == (
+        "from the workdir\n"
+    )
+    assert not (ctx.storage.persistent / "results" / "input_workdir" / "skills").exists()
+
+
+@pytest.mark.parametrize("sdk", ["client", None], ids=["missing-fileset", "no-sdk"])
+def test_run_rejects_declared_skills_when_ethos_cannot_be_staged(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch, sdk: str | None
+) -> None:
+    _use_real_ethos_stage(monkeypatch)
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_agent_with_probe_skill(),
+    )
+
+    with (
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", AsyncMock()) as invoke,
+        pytest.raises(FabricArtifactStagingError, match="skills/probe-skill"),
+    ):
+        ExecuteAgentJob().run(
+            spec.model_dump(mode="json"),
+            ctx=ctx,
+            sdk=None if sdk is None else _sdk_opening_async_client(),
+        )
+
+    invoke.assert_not_called()
+
+
+def test_run_keeps_workdir_when_workspace_is_the_fabric_base(ctx: JobContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_real_ethos_stage(monkeypatch)
+
+    async def _download(
+        _files_client: object,
+        *,
+        workspace: str,
+        fileset_name: str,
+        local_path: Path,
+    ) -> None:
+        del workspace, fileset_name
+        _write_probe_skill(local_path)
+
+    monkeypatch.setattr("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download)
+
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(
+            agent="calc",
+            input="hello",
+            workdir=AgentWorkdir(base_workdir="source#project/"),
+        ),
+        agent=_agent_with_probe_skill(workspace_dir="."),
+        workdir=AgentWorkdir(base_workdir="default/source#notes.txt"),
+    )
+
+    def _download_workdir(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client, ref
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "notes.txt").write_text("from the workdir\n", encoding="utf-8")
+        return SimpleNamespace(path=local_dir / "notes.txt", tmp_dir=local_dir)
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        assert (request.base_dir / "skills" / "probe-skill" / "SKILL.md").is_file()
+        assert (request.base_dir / "notes.txt").read_text(encoding="utf-8") == "from the workdir\n"
+        return FabricRuntimeResult(status="succeeded", response="done")
+
+    sdk = _sdk_opening_async_client()
+    with (
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
+        patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download_workdir),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+    ):
+        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
+
+    assert result["status"] == "completed"
