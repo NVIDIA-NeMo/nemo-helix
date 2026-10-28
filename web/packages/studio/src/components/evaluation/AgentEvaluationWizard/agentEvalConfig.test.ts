@@ -124,7 +124,7 @@ describe('buildAgentEvaluationSpec', () => {
       metrics: [expect.objectContaining({ metric_type: 'llm-judge' })],
     });
     expect(spec.metrics[0].payload.metric).toMatchObject({
-      model: { name: 'judge' },
+      model: 'ws/judge',
       prompt_template: { messages: [{ role: 'user', content: judge.judgePrompt }] },
     });
   });
