@@ -44,6 +44,34 @@ describe('AgentEvaluationDetailRoute', () => {
     expect(await screen.findByText('Evaluation not found')).toBeInTheDocument();
   });
 
+  it('links the deployment the run called, read from its target URL', async () => {
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+        () =>
+          HttpResponse.json({
+            ...completedJob,
+            spec: {
+              ...completedJob.spec,
+              target: {
+                kind: 'agent',
+                agent: {
+                  name: 'my-agent',
+                  url: `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${workspace}/deployments/my-agent-k8s/-/v1/chat/completions`,
+                },
+              },
+            },
+          })
+      )
+    );
+    renderDetail();
+
+    expect(await screen.findByRole('link', { name: 'my-agent-k8s' })).toHaveAttribute(
+      'href',
+      `/workspaces/${workspace}/agent-deployments/my-agent-k8s`
+    );
+  });
+
   describe('run outcome', () => {
     const failedJob = {
       ...completedJob,

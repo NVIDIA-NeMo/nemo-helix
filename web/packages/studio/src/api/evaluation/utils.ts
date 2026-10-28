@@ -11,6 +11,10 @@ import { isPlainObject } from '@studio/util/functions';
 
 export type EvalJobKind = 'task' | 'dataset';
 
+/** Which deployment a run called. `automatic` is the by-agent gateway route, where the gateway
+ *  picked a running deployment per request and nothing recorded which one. */
+export type EvalJobDeployment = { kind: 'deployment'; name: string } | { kind: 'automatic' };
+
 export interface EvalJobRow {
   id: string;
   name: string;
@@ -18,6 +22,8 @@ export interface EvalJobRow {
   created_at?: string;
   kind: EvalJobKind;
   agentName: string | null;
+  /** Null when the target is not an Agents gateway URL. */
+  deployment: EvalJobDeployment | null;
   configLabel: string | null;
   /** Intake Evaluation the run publishes to, when it asked to. The join key between a job and its
    *  published results — absent for a run submitted without `publication.intake`. */
@@ -51,6 +57,18 @@ export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
       : asNonEmptyString(target.name);
   if (!name) return null;
   return stripWorkspacePrefix(name, job.workspace);
+};
+
+const GATEWAY_ROUTE = /\/apis\/agents\/v2\/workspaces\/[^/]+\/(deployments|agents)\/([^/]+)\/-\//;
+
+export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null => {
+  const target = asRecord(asRecord(spec)?.target);
+  const endpoint = target?.kind === 'agent' ? asRecord(target.agent) : target;
+  const match = asNonEmptyString(endpoint?.url)?.match(GATEWAY_ROUTE);
+  if (!match) return null;
+  return match[1] === 'deployments'
+    ? { kind: 'deployment', name: decodeURIComponent(match[2]) }
+    : { kind: 'automatic' };
 };
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
@@ -98,6 +116,7 @@ export const toEvalJobRow = (job: HelixJobResponse): EvalJobRow => ({
   created_at: job.created_at,
   kind: evalJobKind(job),
   agentName: targetNameForEvalJob(job),
+  deployment: deploymentForEvalSpec(job.spec),
   configLabel: evalJobConfigLabel(job),
   evaluationName: publishedEvaluationName(job),
   outcome: evalRunOutcomeOf(job.status_details),

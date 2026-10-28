@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getMetricsAsList } from '@studio/api/evaluation/utils';
+import { deploymentForEvalSpec, getMetricsAsList } from '@studio/api/evaluation/utils';
 
 describe('getMetricsAsList', () => {
   it('returns empty array for undefined tasks', () => {
@@ -71,5 +71,43 @@ describe('getMetricsAsList', () => {
   it('skips metrics without scores', () => {
     const tasks = { t: { metrics: { m: {} } } };
     expect(getMetricsAsList(tasks as never)).toEqual([]);
+  });
+});
+
+describe('deploymentForEvalSpec', () => {
+  const gateway = 'https://helix.example.com/apis/agents/v2/workspaces/default';
+
+  it('reads the deployment from a task job, whose endpoint sits under target.agent', () => {
+    const spec = {
+      target: {
+        kind: 'agent',
+        agent: { url: `${gateway}/deployments/my-agent-k8s/-/v1/chat/completions` },
+      },
+    };
+    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'deployment', name: 'my-agent-k8s' });
+  });
+
+  it('reads the deployment from a dataset job, whose target is the endpoint itself', () => {
+    const spec = { target: { url: `${gateway}/deployments/my-agent-k8s/-/v1/chat/completions` } };
+    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'deployment', name: 'my-agent-k8s' });
+  });
+
+  it('decodes an encoded deployment name', () => {
+    const spec = { target: { url: `${gateway}/deployments/my%20agent/-/v1/chat/completions` } };
+    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'deployment', name: 'my agent' });
+  });
+
+  it('reports the by-agent route as automatic', () => {
+    const spec = { target: { url: `${gateway}/agents/my-agent/-/v1/chat/completions` } };
+    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'automatic' });
+  });
+
+  it('returns null for targets outside the Agents gateway', () => {
+    expect(deploymentForEvalSpec({ target: { url: 'http://127.0.0.1:8000/agent' } })).toBeNull();
+    expect(
+      deploymentForEvalSpec({ target: { kind: 'fabric', source: { agent: 'a' } } })
+    ).toBeNull();
+    expect(deploymentForEvalSpec({ target: 'default/my-model' })).toBeNull();
+    expect(deploymentForEvalSpec(undefined)).toBeNull();
   });
 });

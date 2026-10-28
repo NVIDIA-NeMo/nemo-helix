@@ -18,6 +18,11 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
+import {
+  AGENT_DEPLOYMENTS_URL,
+  agentDeployment,
+  agentDeploymentsHandler,
+} from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -88,6 +93,7 @@ const SOURCE: EvaluationResponse = {
 
 const mockLists = () => {
   server.use(
+    agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-subprocess`)]),
     http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), ({ request }) => {
       const name = new URL(request.url).searchParams.get('filter[name]');
       const experiments = [
@@ -200,5 +206,95 @@ describe('AgentEvaluationWizard parallel requests', () => {
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
+  });
+});
+
+describe('AgentEvaluationWizard deployment', () => {
+  const submittedUrl = () => {
+    const target = vi.mocked(evalsCreateEvaluateJob).mock.calls[0]?.[1]?.spec?.target;
+    return typeof target === 'object' && 'url' in target ? target.url : undefined;
+  };
+
+  const rerunBaseline = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(await screen.findByRole('combobox', { name: /evaluation to re-run/i }));
+    await user.click(await screen.findByRole('option', { name: 'baseline' }));
+    const name = await screen.findByLabelText('New Evaluation Name');
+    await user.clear(name);
+    await user.type(name, 'baseline-on-k8s');
+  };
+
+  const submit = async (user: ReturnType<typeof userEvent.setup>) => {
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+  };
+
+  beforeEach(() => {
+    server.use(
+      agentDeploymentsHandler([
+        agentDeployment(AGENT, `${AGENT}-subprocess`),
+        agentDeployment(AGENT, `${AGENT}-k8s`, { deployment_mode: 'k8s' }),
+        agentDeployment('other-agent', 'other-agent-subprocess'),
+      ])
+    );
+  });
+
+  it('calls the first running deployment unless another is picked', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await rerunBaseline(user);
+    expect(screen.getByRole('combobox', { name: 'Deployment' })).toHaveTextContent(
+      `${AGENT}-subprocess · Subprocess`
+    );
+    await submit(user);
+
+    expect(submittedUrl()).toContain(
+      `/workspaces/${DEFAULT_WORKSPACE}/deployments/${AGENT}-subprocess/-/v1/chat/completions`
+    );
+  });
+
+  it('calls the deployment the user picks', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await rerunBaseline(user);
+    await user.click(screen.getByRole('combobox', { name: 'Deployment' }));
+    expect(screen.queryByRole('option', { name: /other-agent/ })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('option', { name: `${AGENT}-k8s · Kubernetes` }));
+    await submit(user);
+
+    expect(submittedUrl()).toContain(`/deployments/${AGENT}-k8s/-/`);
+  });
+
+  it("asks the API for only the agent's running deployments", async () => {
+    const queries: URLSearchParams[] = [];
+    server.use(
+      http.get(AGENT_DEPLOYMENTS_URL, ({ request }) => {
+        queries.push(new URL(request.url).searchParams);
+        return HttpResponse.json({ data: [agentDeployment(AGENT, `${AGENT}-subprocess`)] });
+      })
+    );
+    renderWizard();
+
+    await waitFor(() => expect(queries.length).toBeGreaterThan(0));
+    expect(queries[0].get('filter[agent]')).toBe(AGENT);
+    expect(queries[0].get('filter[status]')).toBe('running');
+  });
+
+  it('holds the first step when the agent has no running deployment', async () => {
+    server.use(
+      agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-down`, { status: 'failed' })])
+    );
+    renderWizard();
+
+    expect(
+      await screen.findByText(`${AGENT} has no running deployment. Deploy it to run an evaluation.`)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 });

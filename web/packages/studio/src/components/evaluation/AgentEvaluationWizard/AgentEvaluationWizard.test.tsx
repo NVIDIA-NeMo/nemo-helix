@@ -6,8 +6,12 @@ import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluat
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
-import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
+import {
+  EVAL_CONFIG_FILESET_KEY,
+  evaluationConfigError,
+} from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
+import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
@@ -16,6 +20,12 @@ import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+
+// The fixture filesets hold no eval config, so the real check would report every run as unusable.
+vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
+  evaluationConfigError: vi.fn(),
+}));
 
 const AGENT = 'my-agent';
 
@@ -110,6 +120,11 @@ const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluation
   });
 
 describe('AgentEvaluationWizard', () => {
+  beforeEach(() => {
+    server.use(agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-subprocess`)]));
+    vi.mocked(evaluationConfigError).mockResolvedValue(null);
+  });
+
   it('starts by asking how to begin, and routes to the experiment form for a new experiment', async () => {
     mockLists();
     const user = userEvent.setup();

@@ -38,9 +38,10 @@ import {
   parseBundleRef,
 } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
-import { evalDurationMs } from '@studio/api/evaluation/utils';
+import { deploymentForEvalSpec, evalDurationMs } from '@studio/api/evaluation/utils';
 import { AgentEvalTaskResultsPanel } from '@studio/components/evaluation/AgentEvalTaskResultsPanel';
 import { EvalAggregateScoresTable } from '@studio/components/evaluation/EvalAggregateScoresTable';
+import { EvalDeploymentValue } from '@studio/components/evaluation/EvalDeploymentValue';
 import { EvalMetricCoverageTable } from '@studio/components/evaluation/EvalMetricCoverageTable';
 import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { StatusLogsContent } from '@studio/components/evaluation/Jobs/StatusLogsContent';
@@ -250,6 +251,16 @@ export const AgentEvaluationDetailRoute: FC = () => {
                 loading={isLoadingJob}
               />
               <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} loading={isLoadingJob} />
+              <KVPair
+                label="Deployment"
+                value={
+                  <EvalDeploymentValue
+                    workspace={workspace}
+                    deployment={deploymentForEvalSpec(job.spec)}
+                  />
+                }
+                loading={isLoadingJob}
+              />
               <KVPair
                 label="Tasks"
                 value={String(job.spec.tasks?.length ?? '-')}
