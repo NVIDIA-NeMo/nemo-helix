@@ -5,7 +5,7 @@ import { Banner } from '@nvidia/foundations-react-core';
 
 export const InsightsModelWarning = () => (
   <Banner kind="inline" status="warning">
-    Nemotron 3.5 Lightning 30B has known tool-calling failures in Compass. Try NVIDIA Nemotron 3.5
-    Super VL instead. You can continue with your selected model.
+    Nemotron 3.5 Lightning 30B has known tool-calling failures in Compass. Try Nemotron 3.5 Super VL
+    instead.
   </Banner>
 );

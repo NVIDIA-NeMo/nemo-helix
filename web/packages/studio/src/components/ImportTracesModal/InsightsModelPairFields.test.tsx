@@ -58,7 +58,9 @@ describe.each([
           {...{ [`${role}Model`]: lightning }}
         />
       );
-      expect(screen.getByText(/known tool-calling failures/)).toHaveTextContent('You can continue');
+      expect(screen.getByText(/known tool-calling failures/)).toHaveTextContent(
+        'Try Nemotron 3.5 Super VL instead.'
+      );
       expect(props.onDefaultModelChange).not.toHaveBeenCalled();
       expect(props.onFastModelChange).not.toHaveBeenCalled();
     }
