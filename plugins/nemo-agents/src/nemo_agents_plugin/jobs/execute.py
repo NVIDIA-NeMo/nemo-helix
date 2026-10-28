@@ -54,6 +54,7 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     routes_inference_through_gateway,
 )
 from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
+from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     materialize_agent_workdir,
@@ -512,6 +513,18 @@ class ExecuteAgentJob(NemoJob):
                 # so re-validate to carry it into what Fabric is handed.
                 agent_config = _validate_agent_config(step_config.agent.config)
 
+            # Stage the ethos fileset before the workdir. Staging clears every
+            # child of the Fabric base that is not a preserved runtime directory,
+            # and the default workspace is one of those children.
+            logger.info("Staging stored agent files for %s.", agent_ref)
+            _stage_stored_agent_ethos(
+                sdk,
+                workspace=step_config.agent.workspace,
+                agent_name=step_config.agent.name,
+                agent_config=agent_config,
+                base_dir=fabric_dirs.base,
+            )
+
             if step_config.workdir is not None and _has_workdir_inputs(step_config.workdir):
                 if sdk is None:
                     raise RuntimeError("sdk is required to stage workdir inputs.")
@@ -956,3 +969,41 @@ def _validate_agent_config(config: dict) -> AgentConfig:
         raise ValueError("agents.execute jobs only support local Fabric environments.")
 
     return agent_config
+
+
+def _stage_stored_agent_ethos(
+    sdk: NemoClient | None,
+    *,
+    workspace: str,
+    agent_name: str,
+    agent_config: AgentConfig,
+    base_dir: Path,
+) -> None:
+    """Download ``{agent}-ethos`` into the Fabric base before the workdir is materialized.
+
+    A missing fileset is not fatal on its own. ``stage_fabric_ethos_dir`` still
+    rejects a config whose ``skills.paths`` do not resolve in what was staged.
+    With no SDK there is nothing to download, and the same validation applies.
+    """
+
+    async def _stage() -> None:
+        config = agent_config.model_dump(mode="json")
+        if sdk is None:
+            await stage_fabric_ethos_dir(
+                workspace=workspace,
+                agent_name=agent_name,
+                agent_config=config,
+                base_dir=base_dir,
+                files_client=None,
+            )
+            return
+        async with sdk.to_async() as async_client:
+            await stage_fabric_ethos_dir(
+                workspace=workspace,
+                agent_name=agent_name,
+                agent_config=config,
+                base_dir=base_dir,
+                files_client=AsyncFilesClient.from_client(async_client),
+            )
+
+    asyncio.run(_stage())
