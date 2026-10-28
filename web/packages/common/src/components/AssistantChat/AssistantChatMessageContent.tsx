@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MessagePrimitive, useAuiState } from '@assistant-ui/react';
-import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
+import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
 import { Banner } from '@nvidia/foundations-react-core';
 
-// The raw failure text is already shown as the message body; the banner adds what it means and
-// what to do when a rule recognises it, and falls back to the generic line otherwise.
+// The message body above carries the human-readable explanation; the banner shows the raw error
+// (status and provider detail) for anyone who needs to look closer.
 const ChatErrorBanner = () => {
   const error = useAuiState((s) => {
     const status = s.message.status;
@@ -17,13 +17,10 @@ const ChatErrorBanner = () => {
       ? String(status.error ?? '')
       : '';
   });
-  const described = describeChatError(error);
 
   return (
     <Banner kind="inline" status="error" className="mt-density-sm">
-      {described
-        ? `${described.title} ${described.hint}`
-        : 'There was an error generating a response.'}
+      {error || GENERIC_CHAT_ERROR}
     </Banner>
   );
 };

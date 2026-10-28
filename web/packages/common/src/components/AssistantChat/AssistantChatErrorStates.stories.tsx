@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
+import { humanizeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { createChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { TooltipProvider } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
@@ -12,7 +13,7 @@ import { AssistantChat } from './index';
 
 // Walk through what a user sees when an agent chat fails. Each option replays the HTTP response
 // the platform returns for that failure through the same OpenAI client and chat runtime Studio
-// uses, so the title/hint wording comes from `describeChatError.ts` — edit the wording there and
+// uses, so the wording comes from `describeChatError.ts` — edit the wording there and
 // reload to review it. The code in each label is the model provider's status; the platform
 // itself answers HTTP 502 for all of them (the gateway flattens every agent failure).
 
@@ -143,8 +144,8 @@ const ErrorStatesStory = () => {
       content: [{ type: 'text', text: LOREM_IPSUM }],
     };
 
-    // Mirrors the runtime's own failure handling (useAssistantChatRuntime): the client's error
-    // message becomes the assistant message text and its error status.
+    // Mirrors the runtime's own failure handling (useAssistantChatRuntime): the human-readable
+    // copy becomes the assistant message text and the client's error message its error status.
     createChatCompletion({
       model: STORY_MODEL,
       baseURL: STORY_BASE_URL,
@@ -159,7 +160,7 @@ const ErrorStatesStory = () => {
           userMessage,
           {
             role: 'assistant',
-            content: [{ type: 'text', text: errorMessage }],
+            content: [{ type: 'text', text: humanizeChatError(errorMessage) }],
             status: { type: 'incomplete', reason: 'error', error: errorMessage },
           },
         ]);

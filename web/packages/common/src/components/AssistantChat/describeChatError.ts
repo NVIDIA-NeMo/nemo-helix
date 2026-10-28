@@ -97,3 +97,14 @@ export const describeChatError = (message: string): ChatErrorDescription | undef
 
   return undefined;
 };
+
+export const GENERIC_CHAT_ERROR = 'There was an error generating a response.';
+
+/**
+ * The message-body copy for a failed chat reply: the matching rule's title and hint, or the
+ * generic line. The raw error stays in the message status for the error banner.
+ */
+export const humanizeChatError = (message: string): string => {
+  const described = describeChatError(message);
+  return described ? `${described.title} ${described.hint}` : GENERIC_CHAT_ERROR;
+};

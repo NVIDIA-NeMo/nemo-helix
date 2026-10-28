@@ -29,6 +29,7 @@ import {
   COMPLETE_STATUS,
   RUNNING_STATUS,
 } from '@nemo/common/src/components/AssistantChat/constants';
+import { humanizeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import {
   appendMessageToThreadMessage,
   createTextMessage,
@@ -289,7 +290,7 @@ export const useAssistantChatRuntime = ({
         };
         updateAssistantMessage(
           assistantMessage.id!,
-          [{ type: 'text', text: errorMessage }],
+          [{ type: 'text', text: humanizeChatError(errorMessage) }],
           responseImages,
           status
         );
