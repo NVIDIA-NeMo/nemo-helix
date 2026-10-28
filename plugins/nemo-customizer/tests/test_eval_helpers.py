@@ -51,7 +51,32 @@ def test_adapter_composite_entity_name() -> None:
     )
 
 
-def test_build_platform_model_target_routes_lora_via_provider() -> None:
+@pytest.mark.parametrize(
+    ("served_models", "expected_name"),
+    [
+        # SGLang serves the base model for a bare adapter name, so the reconciler maps it to <base>:<adapter>.
+        (
+            [
+                {
+                    "model_entity_id": "default/qwen3-1.7b&adapters/default/my-lora",
+                    "served_model_name": "default/qwen3-1.7b:default--my-lora",
+                }
+            ],
+            "default/qwen3-1.7b:default--my-lora",
+        ),
+        ([], "default--my-lora"),
+    ],
+)
+def test_build_platform_model_target_routes_lora_via_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    served_models: list[dict[str, str]],
+    expected_name: str,
+) -> None:
+    def fake_get(url: str) -> dict:
+        assert url == "http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider"
+        return {"served_models": served_models}
+
+    monkeypatch.setattr(eval_helpers, "_platform_get_json", fake_get)
     target = eval_helpers.build_platform_model_target(
         base_url="http://localhost:8080",
         workspace="default",
@@ -61,7 +86,7 @@ def test_build_platform_model_target_routes_lora_via_provider() -> None:
     )
     assert "/provider/my-provider/-/v1" in target.url
     assert "/model/qwen3-1.7b/-/v1" not in target.url
-    assert target.name == "default--my-lora"
+    assert target.name == expected_name
 
 
 def test_build_platform_model_target_routes_base_via_model_entity() -> None:

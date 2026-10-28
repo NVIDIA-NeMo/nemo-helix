@@ -74,7 +74,8 @@ A deployment loads adapters up to a maximum rank and **refuses higher-rank adapt
 | Engine / image | Default max rank | Raise it on the deployment config |
 |---|---|---|
 | vLLM (`engine: vllm`, the default) | **16** | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
-| Model-free NIM (`vllm-model-free-nim`, `sglang-model-free-nim`; the default NIM image) | **16** | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Model-free NIM, vLLM (`vllm-model-free-nim`, the default NIM image) | **16** | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Model-free NIM, SGLang (`sglang-model-free-nim`) | Highest rank among adapters present at server start | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
 
 vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
@@ -108,7 +109,9 @@ The model-entity proxy path **always** resolves to the base VirtualModel. Settin
 | Target | Gateway route | URL pattern | Request `model` field |
 |--------|---------------|-------------|------------------------|
 | Base entity | **Model entity** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| LoRA adapter | **Provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>` |
+| LoRA adapter | **Provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>`; on the SGLang model-free NIM, `default/<model-entity>:default--<adapter-name>` |
+
+SGLang answers a bare adapter name with the **base** model, without an error. The provider's `served_models` (`nemo inference providers get <provider> --workspace default`) lists each adapter's served name; `eval_helpers.py` reads it from there.
 
 `eval_helpers.py` auto-discovers a READY provider that serves the base entity (or pass `--provider <name>`). LoRA adapter weights hot-reload on that deployment — no provider update per adapter. (Full SFT / merged outputs need a separate deployment — see above.)
 
@@ -170,7 +173,7 @@ When comparing adapters from **different backends** (automodel vs unsloth) or ba
 | Piece | LoRA adapter | Base model |
 |-------|--------------|------------|
 | HTTP base URL | `…/provider/<provider>/-/v1` | `…/model/<model-entity>/-/v1` |
-| `"model"` | `default--<adapter-name>` | `default/<model-entity>` |
+| `"model"` | `default--<adapter-name>` (SGLang model-free NIM: `default/<model-entity>:default--<adapter-name>`) | `default/<model-entity>` |
 | `messages` | `messages[:-1]` from the training row (exclude final assistant label) | Same |
 | Short-answer SFT (e.g. Nemotron 3.5 Lightning, Qwen3) | `"chat_template_kwargs": {"enable_thinking": false}` | Same |
 | `max_tokens` / `temperature` | `64` / `0` typical for short labels | Same |

@@ -212,6 +212,25 @@ def find_ready_provider_for_model_entity(
     return sorted(set(matches))[0]
 
 
+def provider_served_model_name(
+    *,
+    base_url: str,
+    workspace: str,
+    provider_name: str,
+    model_entity_id: str,
+) -> str | None:
+    """Return the ``model`` value a provider serves ``model_entity_id`` under, from its ``served_models``.
+
+    Adapter names differ by engine: ``{workspace}--{adapter}`` on vLLM, ``<base>:{workspace}--{adapter}``
+    on SGLang, which serves the base model for a bare adapter name.
+    """
+    url = f"{base_url.rstrip('/')}/apis/models/v2/workspaces/{workspace}/providers/{provider_name}"
+    for served in _platform_get_json(url).get("served_models") or []:
+        if served.get("model_entity_id") == model_entity_id:
+            return served.get("served_model_name")
+    return None
+
+
 @dataclass
 class JobAdapterInfo:
     job_name: str
@@ -353,9 +372,10 @@ def build_platform_model_target(
 
     Base weights use the **model-entity** proxy
     (``/model/{entity}/-/v1``). LoRA adapters must use the **provider** proxy
-    (``/provider/{name}/-/v1``) with ``model: {workspace}--{adapter}`` — the
-    model-entity path always routes to the base VirtualModel and ignores adapter
-    names in the request body.
+    (``/provider/{name}/-/v1``) with the adapter's served name from the provider's
+    ``served_models`` (see :func:`provider_served_model_name`) — the model-entity
+    path always routes to the base VirtualModel and ignores adapter names in the
+    request body.
     """
     from nhx_evals_sdk.values.models import Model
 
@@ -371,13 +391,22 @@ def build_platform_model_target(
         )
 
     if adapter_name:
+        adapter_entity = adapter_composite_entity_name(
+            model_entity=model_entity, workspace=workspace, adapter_name=adapter_name
+        )
+        name = provider_served_model_name(
+            base_url=base_url,
+            workspace=workspace,
+            provider_name=resolved_provider,
+            model_entity_id=f"{workspace}/{adapter_entity}",
+        ) or served_model_name(workspace=workspace, entity_or_adapter=adapter_name, finetuning="lora")
         return Model(
             url=provider_gateway_url(
                 base_url=base_url,
                 workspace=workspace,
                 provider_name=resolved_provider,
             ),
-            name=served_model_name(workspace=workspace, entity_or_adapter=adapter_name, finetuning="lora"),
+            name=name,
         )
 
     return Model(

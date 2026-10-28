@@ -203,7 +203,7 @@ The adapter `<output.name>` is registered on `default/<model-entity>`. Weights a
 | Target | Gateway path | OpenAI base URL | Request `"model"` field |
 |--------|--------------|-----------------|-------------------------|
 | **Base** weights | model-entity | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| **LoRA adapter** | **provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>` |
+| **LoRA adapter** | **provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>`; on the SGLang model-free NIM, `default/<model-entity>:default--<output.name>` |
 
 **Common mistake:** posting to the model-entity URL with `"model": "default--<output.name>"` still runs the **base** model. Base-vs-adapter eval will look identical until LoRA requests use the **provider** URL above. See `references/post-training-eval.md` § **Request routing (base vs LoRA)**.
 

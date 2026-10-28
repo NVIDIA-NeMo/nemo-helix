@@ -396,7 +396,7 @@ Omitting the `lora` block while setting `finetuning_type: "lora"` is fine — de
 
 ### Using the adapter
 
-The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`); the model-entity path always resolves to the base model.
+The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`, or `default/<model-entity>:default--<adapter>` on the SGLang model-free NIM); the model-entity path always resolves to the base model.
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 
