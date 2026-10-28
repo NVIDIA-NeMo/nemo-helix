@@ -32,6 +32,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
+from nemo_agents_plugin.fabric.adapters import validate_harness_kinds
 from nemo_agents_plugin.fabric.invocation import (
     AgentConfigInvocationRequest,
     FabricDirectories,
@@ -967,6 +968,7 @@ def _validate_agent_config(config: dict) -> AgentConfig:
     agent_config = AgentConfig.model_validate(config)
     if agent_config.environment.provider != "local":
         raise ValueError("agents.execute jobs only support local Fabric environments.")
+    validate_harness_kinds(agent_config)
 
     return agent_config
 

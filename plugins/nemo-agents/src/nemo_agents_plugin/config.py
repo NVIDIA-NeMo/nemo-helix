@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from nemo_helix_plugin.config import NemoConfig, nhx_user_data_dir
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ControllerConfig(BaseModel):
@@ -141,6 +141,33 @@ class AgentJobsConfig(BaseModel):
     )
 
 
+class AgentFabricConfig(BaseModel):
+    """Settings for the Fabric adapters an agent's harness may name."""
+
+    extra_adapter_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Fabric adapter IDs to accept in a harness kind in addition to the built-in harnesses and "
+            "the adapters installed with the platform. List adapters that are installed only in custom "
+            "agent images, such as ones built with `nemo agents package --pyproject`, so agents using "
+            "them can be registered, deployed, and executed. An entry ending in `*` accepts every ID "
+            "with that prefix (for example, `acme.*`)."
+        ),
+    )
+
+    @field_validator("extra_adapter_ids")
+    @classmethod
+    def _validate_extra_adapter_ids(cls, value: list[str]) -> list[str]:
+        for entry in value:
+            prefix = entry.removesuffix("*")
+            if not prefix.strip() or "*" in prefix:
+                raise ValueError(
+                    f"Invalid adapter ID {entry!r}: use an exact ID or a non-empty prefix followed by a single "
+                    "trailing '*'."
+                )
+        return value
+
+
 class AgentsConfig(NemoConfig):
     """Configuration for the Agents plugin."""
 
@@ -165,4 +192,8 @@ class AgentsConfig(NemoConfig):
     jobs: AgentJobsConfig = Field(
         default_factory=AgentJobsConfig,
         description="Containerized agent job settings.",
+    )
+    fabric: AgentFabricConfig = Field(
+        default_factory=AgentFabricConfig,
+        description="Fabric adapter settings.",
     )

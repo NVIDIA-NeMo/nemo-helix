@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -46,6 +47,43 @@ def test_nemo_agents_config_validation_rejects_invalid_payload() -> None:
 
     with pytest.raises(InvalidAgentConfigError, match="Invalid agent config"):
         validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+
+@pytest.mark.usefixtures("installed_adapter_manifests")
+def test_nemo_agents_config_validation_rejects_unknown_adapter_id() -> None:
+    config = _nemo_agents_config()
+    # A non-default harness is checked too: a deployment may select it.
+    config["harnesses"]["typo"] = {"kind": "nvidia.fabric.claud"}
+
+    with pytest.raises(InvalidAgentConfigError, match="Harness 'typo': Unsupported harness kind 'nvidia.fabric.claud'"):
+        validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+
+@pytest.mark.usefixtures("installed_adapter_manifests")
+def test_nemo_agents_config_validation_accepts_installed_adapter_id() -> None:
+    config = _nemo_agents_config()
+    config["harnesses"]["analyst"] = {"kind": "nvidia.fabric.insights-analyst"}
+
+    validated = validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+    assert validated["harnesses"]["analyst"]["kind"] == "nvidia.fabric.insights-analyst"
+
+
+@pytest.mark.usefixtures("installed_adapter_manifests")
+def test_nemo_agents_config_validation_accepts_operator_allowed_adapter_id(
+    extra_adapter_ids: Callable[[list[str]], None],
+) -> None:
+    """An adapter installed only in a custom agent image registers once an operator allows it."""
+    config = _nemo_agents_config()
+    config["harnesses"]["hermes"]["kind"] = "acme.custom.native"
+
+    with pytest.raises(InvalidAgentConfigError, match="Unsupported harness kind 'acme.custom.native'"):
+        validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+    extra_adapter_ids(["acme.*"])
+    validated = validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+    assert validated["harnesses"]["hermes"]["kind"] == "acme.custom.native"
 
 
 def test_unknown_config_format_is_rejected() -> None:

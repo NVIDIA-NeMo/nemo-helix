@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+from collections.abc import Callable
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -378,6 +379,66 @@ async def test_to_spec_rejects_non_local_fabric_environment() -> None:
             async_sdk=_sdk_with_files(),
             is_local=False,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_adapter_manifests")
+async def test_to_spec_rejects_an_unknown_adapter_id_at_create_time() -> None:
+    config = _agent_config()
+    config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.hermess"
+
+    with pytest.raises(ValueError, match="Unsupported harness kind 'nvidia.fabric.hermess'"):
+        await ExecuteAgentJob.to_spec(
+            ExecuteAgentJobConfig(agent=AgentInline(config=config, config_format="nemo-agents-spec-v1"), input="hello"),
+            workspace="default",
+            entity_client=AsyncMock(),
+            async_sdk=_sdk_with_files(),
+            is_local=False,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_adapter_manifests")
+async def test_to_spec_accepts_a_plugin_installed_adapter_id() -> None:
+    config = _agent_config()
+    config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.insights-analyst"
+
+    spec = await ExecuteAgentJob.to_spec(
+        ExecuteAgentJobConfig(agent=AgentInline(config=config, config_format="nemo-agents-spec-v1"), input="hello"),
+        workspace="default",
+        entity_client=AsyncMock(),
+        async_sdk=_sdk_with_files(),
+        is_local=False,
+    )
+
+    step_config = ExecuteAgentStepConfig.model_validate(spec)
+    assert step_config.agent.config["harnesses"]["hermes"]["kind"] == "nvidia.fabric.insights-analyst"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_adapter_manifests")
+async def test_to_spec_accepts_an_operator_allowed_adapter_in_a_custom_image(
+    extra_adapter_ids: Callable[[list[str]], None],
+) -> None:
+    """The API can't see a custom image's adapters, so the operator allowlist vouches for them."""
+    extra_adapter_ids(["acme.*"])
+    config = _agent_config()
+    config["harnesses"]["hermes"]["kind"] = "acme.custom.native"
+
+    spec = await ExecuteAgentJob.to_spec(
+        ExecuteAgentJobConfig(
+            agent=AgentInline(config=config, config_format="nemo-agents-spec-v1"),
+            input="hello",
+            image="registry.example.com/acme/agent:1",
+        ),
+        workspace="default",
+        entity_client=AsyncMock(),
+        async_sdk=_sdk_with_files(),
+        is_local=False,
+    )
+
+    step_config = ExecuteAgentStepConfig.model_validate(spec)
+    assert step_config.agent.config["harnesses"]["hermes"]["kind"] == "acme.custom.native"
 
 
 @pytest.mark.asyncio

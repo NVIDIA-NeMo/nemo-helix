@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -602,6 +603,69 @@ class TestRenderFabricDockerfile:
         else:
             with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
                 render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
+
+    @pytest.mark.parametrize(
+        "harnesses",
+        [
+            "  analyst:\n    kind: nvidia.fabric.insights-analyst\n",
+            # Not the default, but a deployment may still select it.
+            "  main:\n    kind: codex\n  analyst:\n    kind: nvidia.fabric.insights-analyst\n",
+        ],
+    )
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_plugin_installed_adapter_is_rejected(self, tmp_path: Path, harnesses: str) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        default = "analyst" if harnesses.startswith("  analyst") else "main"
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: {default}\nharnesses:\n{harnesses}")
+
+        with pytest.raises(
+            ValueError,
+            match=r"Harness 'analyst' uses Fabric adapter 'nvidia.fabric.insights-analyst', "
+            r"which an image packaged without --pyproject doesn't install\. Run it with `nemo agents execute`, "
+            r"or package with --pyproject",
+        ):
+            render_fabric_dockerfile(config)
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_operator_allowed_adapter_still_needs_a_project(
+        self, tmp_path: Path, extra_adapter_ids: Callable[[list[str]], None]
+    ) -> None:
+        """The allowlist says some image may carry the adapter, not that config-only images do."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        extra_adapter_ids(["acme.*"])
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: acme.custom.native\n")
+
+        with pytest.raises(ValueError, match="Harness 'acme' uses Fabric adapter 'acme.custom.native'"):
+            render_fabric_dockerfile(config)
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_project_mode_may_supply_its_own_adapter(self, tmp_path: Path) -> None:
+        """A --pyproject image installs the user's project, which may ship the adapter (Bring Your Own Harness)."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "acme"\nversion = "0.1.0"\n')
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: nvidia.fabric.insights-analyst\n")
+
+        result = render_fabric_dockerfile(config, tmp_path / "pyproject.toml")
+
+        assert '"nemo-helix[nemo-agents-plugin]==' in result
+
+    @pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa", "nvidia.fabric.remote-agent"])
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_adapters_shipped_by_fabric_wheels_are_packageable(self, tmp_path: Path, kind: str) -> None:
+        from nemo_agents_plugin.container.template import resolve_fabric_harness_install
+
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+
+        platform_extra, _, _ = resolve_fabric_harness_install(config)
+
+        assert platform_extra in {"nemo-agents-plugin", "nemo-agents-plugin-nooa"}
 
     @pytest.mark.parametrize("kind", ["nooa", "nvidia.fabric.nooa"])
     def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path, kind: str) -> None:
