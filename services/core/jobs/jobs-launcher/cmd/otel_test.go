@@ -24,3 +24,25 @@ func TestLauncherOTLPHTTPClientSkipsTCP(t *testing.T) {
 		t.Fatal("expected no custom HTTP client for TCP endpoint")
 	}
 }
+
+func TestBatchProcessorOptionsDefaultsAndOverrides(t *testing.T) {
+	t.Setenv(logExportIntervalEnv, "")
+	t.Setenv(logExportMaxBatchSizeEnv, "")
+	if got := len(batchProcessorOptions()); got != 3 {
+		t.Fatalf("expected 3 batch processor options, got %d", got)
+	}
+
+	if got := positiveIntEnv(logExportIntervalEnv); got != 0 {
+		t.Fatalf("expected unset env to yield 0, got %d", got)
+	}
+	t.Setenv(logExportIntervalEnv, "2500")
+	if got := positiveIntEnv(logExportIntervalEnv); got != 2500 {
+		t.Fatalf("expected 2500, got %d", got)
+	}
+	for _, bad := range []string{"abc", "0", "-5"} {
+		t.Setenv(logExportIntervalEnv, bad)
+		if got := positiveIntEnv(logExportIntervalEnv); got != 0 {
+			t.Fatalf("expected invalid value %q to yield 0, got %d", bad, got)
+		}
+	}
+}

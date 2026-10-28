@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,14 @@ const (
 
 	launcherOTLPLogsEndpointEnv = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
 	otlpHTTPLogExportTimeout    = 10 * time.Second
+
+	// Each OTLP export becomes at least one parquet file per job task in Files, so the
+	// export cadence directly drives file count (and tail-read latency) for long jobs.
+	// The OTEL SDK default of 1s/512 records produced thousands of tiny files per job.
+	logExportIntervalEnv     = "NHX_JOB_LOG_EXPORT_INTERVAL_MS"
+	logExportMaxBatchSizeEnv = "NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE"
+	defaultLogExportInterval = 3 * time.Second
+	defaultLogExportBatch    = 2048
 )
 
 var (
@@ -106,10 +115,44 @@ func newLoggerProvider(ctx context.Context, res *resource.Resource) (*log.Logger
 	}
 
 	loggerProvider := log.NewLoggerProvider(
-		log.WithProcessor(log.NewBatchProcessor(logExporter)),
+		log.WithProcessor(log.NewBatchProcessor(logExporter, batchProcessorOptions()...)),
 		log.WithResource(res),
 	)
 	return loggerProvider, nil
+}
+
+// batchProcessorOptions returns the batch processor tuning, overridable via env.
+// Remaining records are flushed on provider shutdown regardless of the interval.
+func batchProcessorOptions() []log.BatchProcessorOption {
+	interval := defaultLogExportInterval
+	if ms := positiveIntEnv(logExportIntervalEnv); ms > 0 {
+		interval = time.Duration(ms) * time.Millisecond
+	}
+	batchSize := defaultLogExportBatch
+	if n := positiveIntEnv(logExportMaxBatchSizeEnv); n > 0 {
+		batchSize = n
+	}
+	return []log.BatchProcessorOption{
+		log.WithExportInterval(interval),
+		log.WithExportMaxBatchSize(batchSize),
+		// The queue must be at least the batch size; keep headroom so bursts between
+		// exports are not dropped now that exports are less frequent.
+		log.WithMaxQueueSize(batchSize * 4),
+	}
+}
+
+// positiveIntEnv returns the env var as a positive int, or 0 if unset or invalid.
+func positiveIntEnv(key string) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		slog.Warn("ignoring invalid log export setting", "env", key, "value", raw)
+		return 0
+	}
+	return n
 }
 
 func newLogExporter(ctx context.Context) (log.Exporter, error) {
