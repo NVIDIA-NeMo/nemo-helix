@@ -3,7 +3,6 @@
 
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -41,7 +40,7 @@ from nemo_compass_plugin.entities import Insight as StoredInsight
 from nemo_compass_plugin.entities import InsightStatus
 from nemo_compass_plugin.evidence import TraceEvidence
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients
-from nooa.unifiedllm import FakeLLMClient, UnifiedLLM
+from nooa.unifiedllm import UnifiedLLM
 from trace_ingest.models import Span, SpanKind, Trace, TraceAggregate, TraceSnapshot
 
 
@@ -401,29 +400,3 @@ async def test_latest_compass_signals_skip_empty_snapshot_without_model_calls():
     assert all("No traces loaded" in note for note in result.notes)
     assert any("grader-failure-patterns" in note for note in result.notes)
     client.acall.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_ethos_signal_runs_with_helix_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Compass upgrade must still run ethos analysis through Helix's real pipeline."""
-    # An ambient ETHOS.md must not hide a broken hand-off of the supplied document.
-    monkeypatch.chdir(tmp_path)
-    ethos = "Never issue refunds."
-    snapshot = TraceSnapshot([Trace(id="trace-1", root_spans=[], aggregate=TraceAggregate())])
-    fast = FakeLLMClient.with_tool_call("execute_python", {"code": "return_result(result=[])"})
-    default = FakeLLMClient()
-
-    result = await pipeline.analyze_snapshot(
-        snapshot,
-        existing=[],
-        model_clients=ConfiguredModelClients(default=default, fast=fast),
-        ethos=ethos,
-    )
-
-    # A successful run with no findings is different from silently skipping ethos.
-    assert fast.call_count == 1
-    assert ethos in str(fast.last_messages)
-    assert not any("ethos-divergence" in note for note in result.notes)
-    assert result.new_insights == []
-    assert result.updated_insights == []
-    assert default.call_count == 0

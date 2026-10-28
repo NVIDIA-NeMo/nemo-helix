@@ -2020,8 +2020,8 @@ nemo-anonymizer==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwi
     # via
     #   nemo-anonymizer-plugin
     #   nemo-helix
-nemo-compass==0.1.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:6b50a6cc8b13991af5dce5469f5eb8e97103e77f3d59e6f2b90d8a9b4762a0a4
+nemo-compass==0.2.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:964a38caa7d618d158f4669bafb1f694aa7adb7689ce55ea6490d795d9bfabd6
     # via
     #   nemo-compass-plugin
     #   nemo-helix

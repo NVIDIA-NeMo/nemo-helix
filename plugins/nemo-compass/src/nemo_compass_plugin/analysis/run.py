@@ -128,7 +128,7 @@ async def run_compass_change_set(
         if exc.name not in {"compass", "trace_ingest"}:
             raise
         raise RuntimeError(
-            "Compass analysis requires nemo-compass==0.1.0 on Python 3.12 or 3.13. "
+            "Compass analysis requires nemo-compass==0.2.0 on Python 3.12 or 3.13. "
             "Reinstall nemo-helix[all] in the environment running Compass to restore its dependencies."
         ) from exc
 

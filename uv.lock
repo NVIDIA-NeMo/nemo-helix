@@ -4372,7 +4372,7 @@ provides-extras = ["service"]
 
 [[package]]
 name = "nemo-compass"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4391,7 +4391,7 @@ dependencies = [
     { name = "tokenizers" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/ee/76faf85ebcabc83d4234f135aeab6730e4c369b0e423697ec479596e12e4/nemo_compass-0.1.0-py3-none-any.whl", hash = "sha256:6b50a6cc8b13991af5dce5469f5eb8e97103e77f3d59e6f2b90d8a9b4762a0a4", size = 4597979, upload-time = "2026-10-19T23:44:39.516Z" },
+    { url = "https://files.pythonhosted.org/packages/94/d9/1fa09ce6ea6d25a2791a9615274d01fcc474d989ce14cddac8cd00ceb4e6/nemo_compass-0.2.0-py3-none-any.whl", hash = "sha256:964a38caa7d618d158f4669bafb1f694aa7adb7689ce55ea6490d795d9bfabd6", size = 4627291, upload-time = "2026-10-26T21:04:20.966Z" },
 ]
 
 [[package]]
@@ -4420,7 +4420,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14'", specifier = "==0.1.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14'", specifier = "==0.2.0" },
     { name = "nemo-fabric-adapter-contract", specifier = ">=0.5.0,<0.6.0" },
     { name = "nemo-fabric-adapters-common", specifier = ">=0.5.0,<0.6.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
@@ -6260,10 +6260,10 @@ requires-dist = [
     { name = "nemo-builder-plugin", marker = "extra == 'nemo-evals-plugin'", editable = "plugins/nemo-builder" },
     { name = "nemo-builder-plugin", marker = "extra == 'plugins'", editable = "plugins/nemo-builder" },
     { name = "nemo-builder-plugin", marker = "extra == 'services'", editable = "plugins/nemo-builder" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'all'", specifier = "==0.1.0" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'nemo-compass-plugin'", specifier = "==0.1.0" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = "==0.1.0" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'services'", specifier = "==0.1.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'all'", specifier = "==0.2.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'nemo-compass-plugin'", specifier = "==0.2.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = "==0.2.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'services'", specifier = "==0.2.0" },
     { name = "nemo-deployments-plugin", marker = "extra == 'all'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-claude'", editable = "plugins/nemo-deployments" },
