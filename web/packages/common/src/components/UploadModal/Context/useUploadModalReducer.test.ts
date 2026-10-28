@@ -137,7 +137,6 @@ describe('uploadModalReducer', () => {
         acceptableFileTypes: ['.jsonl', '.csv', '.parquet'],
         acceptableFileSize: 100 * 1024 * 1024,
         allowMultipleFileSelection: true,
-        filesetPurpose: null,
         files: [
           {
             id: 'file1',
@@ -160,7 +159,6 @@ describe('uploadModalReducer', () => {
       expect(resetState.acceptableFileTypes).toEqual(['.jsonl', '.csv', '.parquet']);
       expect(resetState.acceptableFileSize).toBe(100 * 1024 * 1024);
       expect(resetState.allowMultipleFileSelection).toBe(true);
-      expect(resetState.filesetPurpose).toBeNull();
 
       // But files and selections should be cleared
       expect(resetState.files).toHaveLength(0);

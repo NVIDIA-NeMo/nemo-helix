@@ -182,15 +182,13 @@ describe('AgentEvaluationWizard', () => {
     await user.click(
       within(
         await screen.findByRole('radiogroup', { name: 'Eval configuration source' })
-      ).getByRole('radio', { name: 'Use existing config' })
+      ).getByRole('radio', { name: 'Upload' })
     );
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
     );
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByText('string-check');
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByLabelText('Evaluation Name');
 
@@ -209,7 +207,7 @@ describe('AgentEvaluationWizard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    expect(await screen.findByRole('spinbutton', { name: 'Parallel requests' })).toHaveValue(1);
+    expect(await screen.findByRole('spinbutton', { name: 'Parallel Requests' })).toHaveValue(1);
   });
 
   it('will not advance past the experiment step without a name', async () => {
@@ -243,7 +241,6 @@ describe('AgentEvaluationWizard', () => {
     expect(await screen.findByText('Create experiment')).toBeInTheDocument();
     expect(screen.getByText('Begin')).toBeInTheDocument();
     expect(screen.getByText('Configuration')).toBeInTheDocument();
-    expect(screen.getByText('Metrics')).toBeInTheDocument();
     expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
   });
 

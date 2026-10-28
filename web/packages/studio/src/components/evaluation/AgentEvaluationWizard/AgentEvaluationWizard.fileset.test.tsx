@@ -24,6 +24,7 @@ import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import type { ReactNode } from 'react';
 
 vi.mock('@nemo/sdk/generated/evals/evals-plugin-jobs-routes', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/evals/evals-plugin-jobs-routes')>()),
@@ -54,6 +55,58 @@ vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOrigi
   ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
   createRunEvaluation: vi.fn(),
 }));
+
+vi.mock('@nemo/common/src/components/form/VariableTextArea', async (importOriginal) => {
+  const { forwardRef } = await import('react');
+  return {
+    ...(await importOriginal<typeof import('@nemo/common/src/components/form/VariableTextArea')>()),
+    VariableTextArea: forwardRef(function MockVariableTextArea(
+      {
+        value,
+        onChange,
+        attributes,
+      }: {
+        value: string;
+        onChange: (value: string) => void;
+        attributes?: { TextAreaElement?: { 'aria-label'?: string } };
+      },
+      ref: React.Ref<HTMLTextAreaElement>
+    ) {
+      return (
+        <textarea
+          ref={ref}
+          aria-label={attributes?.TextAreaElement?.['aria-label']}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      );
+    }),
+  };
+});
+
+vi.mock('@studio/components/evaluation/JudgeModelSelect', async () => {
+  const { useController } = await import('react-hook-form');
+  return {
+    JudgeModelSelect: ({
+      formFieldName,
+      slotLabel,
+    }: {
+      formFieldName: string;
+      slotLabel: ReactNode;
+    }) => {
+      const { field, fieldState } = useController({ name: formFieldName });
+      return (
+        <>
+          <label>
+            {slotLabel}
+            <input value={field.value} onChange={field.onChange} />
+          </label>
+          {fieldState.error ? <span>{fieldState.error.message}</span> : null}
+        </>
+      );
+    },
+  };
+});
 
 vi.mock('@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect', async () =>
   (await import('@studio/tests/util/mockDatasetPick')).datasetFileSelectMock()
@@ -155,11 +208,11 @@ const pickDataset = async (user: User, ref = DATASET_REF) => {
   await user.paste(ref);
 };
 
-const useExistingConfig = async (user: User) => {
+const chooseConfigKind = async (user: User, name: string) => {
   await user.click(
     within(await screen.findByRole('radiogroup', { name: 'Eval configuration source' })).getByRole(
       'radio',
-      { name: 'Use existing config' }
+      { name }
     )
   );
 };
@@ -180,12 +233,11 @@ const clickNextWhenReady = async (user: User) => {
 const leaveConfiguration = async (user: User) => {
   await clickNextWhenReady(user);
   await waitFor(() =>
-    expect(screen.queryByRole('spinbutton', { name: 'Parallel requests' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('spinbutton', { name: 'Parallel Requests' })).not.toBeInTheDocument()
   );
 };
 
-const leaveMetricsNameAndRun = async (user: User) => {
-  await clickNextWhenReady(user);
+const nameAndRun = async (user: User) => {
   await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
   await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 };
@@ -196,13 +248,6 @@ const submittedSpec = async () => {
 };
 
 const uploadedPaths = () => vi.mocked(filesUploadFile).mock.calls.map(([, , path]) => path);
-
-const selectOption = async (user: User, field: string, option: string) => {
-  await user.click(await screen.findByRole('combobox', { name: field }));
-  // Every select keeps its listbox mounted, so the option is looked up in this field's own.
-  const listbox = await screen.findByRole('listbox', { name: field });
-  await user.click(within(listbox).getByRole('option', { name: option }));
-};
 
 const renderWizard = () =>
   renderRoute(undefined, {
@@ -242,10 +287,10 @@ describe('AgentEvaluationWizard dataset', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
+    await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
     await leaveConfiguration(user);
-    await leaveMetricsNameAndRun(user);
+    await nameAndRun(user);
 
     expect(await submittedSpec()).toMatchObject({ dataset: DATASET_REF });
     expect(uploadedPaths()).toEqual(['eval-config.yaml']);
@@ -263,12 +308,12 @@ describe('AgentEvaluationWizard dataset', () => {
     await openConfigurationStep(user);
     await pickDataset(user);
     await user.click(
-      await screen.findByRole('checkbox', { name: 'Use all 2 Parquet files in output/' })
+      await screen.findByRole('checkbox', { name: 'Use All 2 Parquet Files in output/' })
     );
-    await useExistingConfig(user);
+    await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
     await leaveConfiguration(user);
-    await leaveMetricsNameAndRun(user);
+    await nameAndRun(user);
 
     expect(await submittedSpec()).toMatchObject({
       dataset: `${DEFAULT_WORKSPACE}/generated#output/*.parquet`,
@@ -283,12 +328,12 @@ describe('AgentEvaluationWizard dataset', () => {
     await openConfigurationStep(user);
     await pickDataset(user);
     expect(
-      await screen.findByRole('checkbox', { name: 'Use all 2 Parquet files in output/' })
+      await screen.findByRole('checkbox', { name: 'Use All 2 Parquet Files in output/' })
     ).not.toBeChecked();
-    await useExistingConfig(user);
+    await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
     await leaveConfiguration(user);
-    await leaveMetricsNameAndRun(user);
+    await nameAndRun(user);
 
     expect(await submittedSpec()).toMatchObject({ dataset: DATASET_REF });
   });
@@ -301,7 +346,7 @@ describe('AgentEvaluationWizard dataset', () => {
     await user.click(await screen.findByRole('button', { name: 'Next' }));
 
     expect(await screen.findByText('Select an input file.')).toBeVisible();
-    expect(screen.getByRole('spinbutton', { name: 'Parallel requests' })).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
   });
 
   it('holds Next and says why while the picked file is still being read', async () => {
@@ -339,30 +384,74 @@ describe('AgentEvaluationWizard dataset', () => {
   });
 });
 
+const ROW_PROMPT = 'prompt:\n{{ item.prompt }}\n\nexpected:\n{{ item.expected }}';
+
 describe('AgentEvaluationWizard guided eval config', () => {
-  it('builds the config from the form and passes its chat prompt to the agent whole', async () => {
+  it('sends every field as a text prompt and scores the response with one LLM judge', async () => {
     const user = userEvent.setup();
     renderWizard();
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await selectOption(user, 'Input', 'prompt');
-    await selectOption(user, 'Reference', 'expected');
+    expect(await screen.findByLabelText('Agent Prompt')).toHaveValue(ROW_PROMPT);
+    await user.type(screen.getByLabelText('Judge Model'), 'default/judge');
     await leaveConfiguration(user);
-    await user.click(await screen.findByRole('checkbox', { name: 'LLM-as-a-Judge' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Exact Match' }));
-    await leaveMetricsNameAndRun(user);
+    await nameAndRun(user);
 
     const spec = await submittedSpec();
     expect(spec).toMatchObject({
       dataset: DATASET_REF,
-      prompt_template: { messages: [{ role: 'user', content: '{{input}}' }] },
-      field_mapping: { input: 'prompt', reference: 'expected' },
-      target: { body: { messages: '{{ messages }}' } },
-      metrics: [{ metric_type: 'exact-match' }],
+      prompt_template: ROW_PROMPT,
+      target: { body: { messages: [{ role: 'user', content: '{{ prompt }}' }] } },
+      metrics: [
+        {
+          metric_type: 'llm-judge',
+          payload: {
+            metric: {
+              prompt_template: {
+                messages: [
+                  {
+                    role: 'user',
+                    content: `${ROW_PROMPT}\n\nResponse to evaluate:\n{{ sample.output_text }}`,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
     });
     expect(spec.metrics).toHaveLength(1);
+    expect(spec).not.toHaveProperty('field_mapping');
     expect(uploadedPaths()).toEqual(['eval-config.json']);
+  });
+
+  it('sends the agent prompt as edited', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    const prompt = await screen.findByLabelText('Agent Prompt');
+    await user.clear(prompt);
+    await user.paste('Q: {{ item.prompt }}');
+    await user.type(screen.getByLabelText('Judge Model'), 'default/judge');
+    await leaveConfiguration(user);
+    await nameAndRun(user);
+
+    expect(await submittedSpec()).toMatchObject({ prompt_template: 'Q: {{ item.prompt }}' });
+  });
+
+  it('will not leave Configuration without a judge model', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    await clickNextWhenReady(user);
+
+    expect(await screen.findByText('Select a judge model.')).toBeVisible();
+    expect(screen.getByRole('spinbutton', { name: 'Parallel Requests' })).toBeInTheDocument();
   });
 });
 
@@ -370,11 +459,7 @@ const configPicker = () =>
   within(screen.getByRole('group', { name: 'Eval configuration fileset' }));
 
 const pickFilesetConfig = async (user: User, path: string) => {
-  await user.click(
-    within(screen.getByRole('radiogroup', { name: 'Evaluator config source' })).getByRole('radio', {
-      name: 'Choose from a fileset',
-    })
-  );
+  await chooseConfigKind(user, 'Choose from Fileset');
   await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
   await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
   await user.click(await configPicker().findByRole('combobox', { name: 'File' }));
@@ -388,14 +473,14 @@ describe('AgentEvaluationWizard existing eval config', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
+    await chooseConfigKind(user, 'Upload');
     await uploadConfig(user);
-    await leaveConfiguration(user);
 
     expect(await screen.findByText('string-check')).toBeVisible();
-    expect(screen.queryByRole('checkbox', { name: 'LLM-as-a-Judge' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Judge Prompt')).not.toBeInTheDocument();
 
-    await leaveMetricsNameAndRun(user);
+    await leaveConfiguration(user);
+    await nameAndRun(user);
     expect(await submittedSpec()).toMatchObject({
       prompt_template: '{{ item.prompt }}',
       target: { body: { messages: [{ role: 'user', content: '{{ prompt }}' }] } },
@@ -408,7 +493,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
+    await chooseConfigKind(user, 'Upload');
     await uploadConfig(user, configReading('item.missing'));
 
     expect(
@@ -423,13 +508,7 @@ describe('AgentEvaluationWizard existing eval config', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
-    await user.click(
-      within(screen.getByRole('radiogroup', { name: 'Evaluator config source' })).getByRole(
-        'radio',
-        { name: 'Choose from a fileset' }
-      )
-    );
+    await chooseConfigKind(user, 'Choose from Fileset');
     await user.click(await configPicker().findByRole('combobox', { name: 'Fileset' }));
     await user.click(await screen.findByRole('option', { name: CONFIG_FILESET }));
     await user.click(await configPicker().findByRole('combobox', { name: 'File' }));
@@ -447,10 +526,9 @@ describe('AgentEvaluationWizard existing eval config', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
     await leaveConfiguration(user);
-    await leaveMetricsNameAndRun(user);
+    await nameAndRun(user);
 
     expect(await submittedSpec()).toMatchObject({ prompt_template: '{{ item.prompt }}' });
     expect(uploadedPaths()).toEqual(['eval-config.yaml']);
@@ -462,7 +540,6 @@ describe('AgentEvaluationWizard existing eval config', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
     await pickFilesetConfig(user, 'configs/strict.json');
 
     expect(await screen.findByText(/must contain a non-empty "metrics" array/)).toBeVisible();
@@ -474,14 +551,8 @@ describe('AgentEvaluationWizard existing eval config', () => {
 
     await openConfigurationStep(user);
     await pickDataset(user);
-    await useExistingConfig(user);
     await pickFilesetConfig(user, 'eval-config.yaml');
-    await user.click(
-      within(screen.getByRole('radiogroup', { name: 'Evaluator config source' })).getByRole(
-        'radio',
-        { name: 'Upload a file' }
-      )
-    );
+    await chooseConfigKind(user, 'Upload');
     await clickNextWhenReady(user);
 
     expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
