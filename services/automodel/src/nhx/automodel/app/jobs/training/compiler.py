@@ -147,6 +147,7 @@ def compile_training_step(
     base_env: list[EnvironmentVariable],
     me: ModelEntity,
     teacher_me: ModelEntity | None = None,
+    validation_path: str | None = None,
 ) -> HelixJobStep:
     """Compile job input to a HelixJobStep for training.
 
@@ -155,6 +156,7 @@ def compile_training_step(
         base_env: Base environment variables for the job step.
         me: The model entity being trained.
         teacher_me: Optional teacher model entity for knowledge distillation jobs.
+        validation_path: Where the download step put a separate validation dataset.
 
     """
     job_spec.validate_for_training()
@@ -185,6 +187,7 @@ def compile_training_step(
         ),
         dataset=TrainingStepConfig.DatasetConfig(
             path=DEFAULT_DATASET_PATH,
+            validation_path=validation_path,
             shuffle=training.shuffle,
         ),
         training=_translate_training_config(training, me, teacher_me=teacher_me, recipe=training_recipe),

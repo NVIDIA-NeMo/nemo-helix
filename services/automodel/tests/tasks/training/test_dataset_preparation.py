@@ -9,6 +9,8 @@ from nhx.automodel.tasks.training.datasets.preparation import (
     DatasetFormatError,
     discover_dataset_files,
     prepare_dataset,
+    select_dataset_files,
+    select_validation_files,
 )
 
 
@@ -64,3 +66,56 @@ def test_discover_requires_a_training_file(tmp_path: Path) -> None:
 
     with pytest.raises(DatasetFormatError, match="No training files found"):
         discover_dataset_files(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        (["train.jsonl", "validation.jsonl"], (["train.jsonl"], ["validation.jsonl"])),
+        (["/training/a.jsonl", "/val/b.jsonl", "README.md"], (["training/a.jsonl"], ["val/b.jsonl"])),
+        (["data.jsonl"], (["data.jsonl"], [])),
+        (["train.json", "training.jsonl"], (["training.jsonl"], [])),
+        (["nested/deep/train.jsonl", "train.jsonl"], (["train.jsonl"], [])),
+    ],
+)
+def test_select_dataset_files_picks_what_training_reads(
+    paths: list[str], expected: tuple[list[str], list[str]]
+) -> None:
+    assert select_dataset_files(paths) == expected
+
+
+def test_select_dataset_files_requires_training_files() -> None:
+    with pytest.raises(DatasetFormatError, match="No training files found"):
+        select_dataset_files(["validation.jsonl", "README.md"])
+
+
+@pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        (["validation.jsonl", "train.jsonl"], ["validation.jsonl"]),
+        (["dev/a.jsonl", "notes.md"], ["dev/a.jsonl"]),
+        (["data.jsonl", "nested/more.jsonl"], ["data.jsonl", "nested/more.jsonl"]),
+    ],
+)
+def test_select_validation_files_takes_val_files_else_every_jsonl(paths: list[str], expected: list[str]) -> None:
+    assert select_validation_files(paths) == expected
+
+
+def test_select_validation_files_requires_jsonl() -> None:
+    with pytest.raises(DatasetFormatError, match="No validation files found"):
+        select_validation_files(["README.md"])
+
+
+def test_prepare_dataset_validates_against_a_separate_fileset(tmp_path: Path) -> None:
+    train_dir, val_dir = tmp_path / "dataset", tmp_path / "validation_dataset"
+    train_dir.mkdir()
+    val_dir.mkdir()
+    _write_jsonl(train_dir / "train.jsonl", [{"prompt": f"t{i}", "completion": "a"} for i in range(4)])
+    _write_jsonl(train_dir / "validation.jsonl", [{"prompt": "in-training-fileset", "completion": "a"}])
+    _write_jsonl(val_dir / "data.jsonl", [{"prompt": "separate", "completion": "a"}] * 2)
+
+    prepared = prepare_dataset(train_dir, output_dir=tmp_path / "merged", validation_path=val_dir)
+
+    assert (prepared.train_samples, prepared.validation_samples) == (4, 2)
+    assert "separate" in prepared.validation_file.read_text()
+    assert "in-training-fileset" not in prepared.validation_file.read_text() + prepared.train_file.read_text()

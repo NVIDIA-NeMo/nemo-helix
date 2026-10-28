@@ -446,10 +446,6 @@ def _create_progress_callback(reporting: ProgressReportingConfig) -> TrainingPro
     )
 
 
-TRAIN_FILE = "train.jsonl"
-VAL_FILE = "validation.jsonl"
-
-
 def _resolve_local_data_files(
     path: str,
     *,
@@ -472,28 +468,26 @@ def _resolve_local_data_files(
     """
     from pathlib import Path
 
+    from nhx.unsloth.tasks.training.datasets.validation import (
+        TRAIN_FILE,
+        VAL_FILE,
+        DatasetFormatError,
+        select_data_files,
+    )
+
     p = Path(path).expanduser()
     if not p.is_dir():
         return str(p)
 
-    if split == "train":
-        train_file = p / TRAIN_FILE
-        if train_file.is_file():
-            return str(train_file)
-    elif split == "validation":
-        val_file = p / VAL_FILE
-        if val_file.is_file():
-            return str(val_file)
-
-    for pattern in ("*.jsonl", "*.json"):
-        files = sorted(str(f) for f in p.rglob(pattern))
-        if files:
-            return files
-
-    raise FileNotFoundError(
-        f"No .jsonl/.json files found under dataset directory {path!r}. "
-        "Ensure the dataset fileset contains a JSON or JSONL file.",
-    )
+    paths = [f.relative_to(p).as_posix() for f in p.rglob("*") if f.is_file()]
+    try:
+        files = select_data_files(paths, split)
+    except DatasetFormatError as e:
+        raise FileNotFoundError(f"{e} Searched dataset directory {path!r}.") from e
+    # The split's own file loads alone; anything else loads as a list of files.
+    if split is not None and files == [TRAIN_FILE if split == "train" else VAL_FILE]:
+        return str(p / files[0])
+    return [str(p / file) for file in files]
 
 
 def _load_training_dataset(

@@ -179,6 +179,38 @@ def test_spec_payload_leaves_unset_defaults_to_the_server() -> None:
     assert mutated.model_fields_set == {"model"}, "the caller's spec is left as it was"
 
 
+def test_jobs_resource_dry_run_posts_to_the_dry_run_route() -> None:
+    from nemo_helix_plugin.client.client import NemoClient
+    from nhx.customization_common.sdk.client import make_customization_sdk, make_customization_sdk_context
+
+    captured: list[httpx.Request] = []
+    report = {
+        "spec": {"model": "default/qwen"},
+        "steps": [{"name": "training", "provider": "gpu", "profile": "default", "image": "trainer:1"}],
+        "checks": [{"name": "training dataset", "passed": False, "message": "line 3 has no 'messages'"}],
+        "passed": False,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=report)
+
+    owner = NemoClient(
+        base_url="http://nhx.test",
+        workspace="team-a",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    Customization, _AsyncCustomization = make_customization_sdk("automodel")
+    resource = Customization(make_customization_sdk_context(owner))
+    result = resource.jobs.dry_run(spec=_Spec(model="default/qwen"), workspace="team-a", profile="gpu").data()
+
+    assert str(captured[0].url) == "http://nhx.test/apis/customization/v2/workspaces/team-a/automodel/jobs/dry-run"
+    assert json.loads(captured[0].content) == {"spec": {"model": "default/qwen"}, "profile": "gpu"}
+    assert result.passed is False
+    assert result.checks[0].message == "line 3 has no 'messages'"
+    assert result.steps[0].image == "trainer:1"
+
+
 def test_jobs_resource_get_status_uses_core_jobs_client() -> None:
     from nemo_helix_plugin.client.client import NemoClient
     from nhx.customization_common.sdk.client import make_customization_sdk, make_customization_sdk_context

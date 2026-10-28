@@ -91,7 +91,7 @@ class TestRouters:
 
 
 class TestCLI:
-    def test_cli_root_help_lists_submit_and_explain_only(self, contributor: CustomizationContributor) -> None:
+    def test_cli_root_help_lists_submit_explain_and_preflight(self, contributor: CustomizationContributor) -> None:
         try:
             cli = contributor.get_cli()
         except ImportError as exc:
@@ -105,7 +105,7 @@ class TestCLI:
         assert "explain" in plain
         # Match on the registered verbs, not the rendered text: the help prose
         # legitimately contains words like "runs".
-        assert {cmd.name for cmd in cli.registered_commands} == {"explain"}
+        assert {cmd.name for cmd in cli.registered_commands} == {"explain", "preflight"}
 
     def test_submit_help_shows_job_json_positional(self, contributor: CustomizationContributor) -> None:
         try:

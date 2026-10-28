@@ -99,7 +99,7 @@ class TestSubmitPath:
 
 
 class TestCommandRegistration:
-    def test_help_lists_submit_and_explain_only(self) -> None:
+    def test_help_lists_submit_explain_and_preflight(self) -> None:
         app = _build_app()
         runner = CliRunner()
         result = runner.invoke(app, ["--help"])
@@ -107,7 +107,7 @@ class TestCommandRegistration:
         plain = _plain(result.output)
         assert "--job-json" in plain
         assert "explain" in plain
-        assert {cmd.name for cmd in app.registered_commands} == {"explain"}
+        assert {cmd.name for cmd in app.registered_commands} == {"explain", "preflight"}
 
 
 class TestSubmitOverride:

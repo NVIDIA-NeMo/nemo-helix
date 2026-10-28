@@ -20,6 +20,21 @@ def test_adapter_sft() -> None:
     assert spec.dataset == "default/train"
 
 
+def test_adapter_keeps_the_validation_fileset() -> None:
+    base = {
+        "model": "meta/llama",
+        "training": {"training_type": "sft", "finetuning_type": "lora"},
+        "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+    }
+    with_validation = automodel_spec_to_compiler_output(
+        {**base, "dataset": {"training": "default/train", "validation": "default/val"}}
+    )
+    assert (with_validation.dataset, with_validation.validation_dataset) == ("default/train", "default/val")
+    assert (
+        automodel_spec_to_compiler_output({**base, "dataset": {"training": "default/train"}}).validation_dataset is None
+    )
+
+
 def test_adapter_plumbs_previously_dropped_fields() -> None:
     """CLI/SDK fields the adapter used to drop must now reach the v2 SFTTraining."""
     spec = automodel_spec_to_compiler_output(

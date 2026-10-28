@@ -252,6 +252,8 @@ class TrainingStepConfig(BaseModel):
 
     class DatasetConfig(BaseModel):
         path: str
+        # A separate validation dataset; when unset, validation files come from ``path``.
+        validation_path: Optional[str] = None
         prompt_template: Optional[str] = None
         add_bos: Optional[bool] = None
         add_eos: Optional[bool] = None

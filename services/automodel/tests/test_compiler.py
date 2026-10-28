@@ -27,6 +27,7 @@ from nhx.automodel.api.v2.jobs.schemas import (
     RetrievalParams,
     SFTTraining,
 )
+from nhx.automodel.app.constants import DEFAULT_VALIDATION_DATASET_PATH
 from nhx.automodel.app.jobs.compiler import _build_file_download_config
 from nhx.automodel.compile import platform_job_config_compiler
 from nhx.automodel.entities.values import CheckpointSelection, OutputNameType
@@ -549,6 +550,33 @@ async def test_platform_job_config_compiler_applies_profile_to_task_steps(
     spec = await platform_job_config_compiler(_make_job_output(), "default", platform_clients, profile="custom-gpu")
 
     assert [step.executor.profile for step in spec.steps] == ["custom-gpu"] * 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("validation", "separate"), [("default/my-val", True), ("my-dataset", False), (None, False)])
+async def test_a_separate_validation_fileset_is_downloaded_and_validated_against(
+    platform_clients: AsyncCustomizationHelixClients,
+    monkeypatch: pytest.MonkeyPatch,
+    validation: str | None,
+    separate: bool,
+) -> None:
+    monkeypatch.setattr(
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    job = _make_job_output().model_copy(update={"validation_dataset": validation})
+
+    spec = await platform_job_config_compiler(job, "default", platform_clients)
+
+    downloads = {item["dest"]: item["src"] for item in spec.steps[0].config["download"]}
+    training_dataset = spec.steps[1].config["dataset"]
+    if separate:
+        assert downloads[DEFAULT_VALIDATION_DATASET_PATH]["name"] == "my-val"
+        assert training_dataset["validation_path"] == DEFAULT_VALIDATION_DATASET_PATH
+    else:
+        # Unset, or the training fileset itself: training finds val* files in the training fileset.
+        assert DEFAULT_VALIDATION_DATASET_PATH not in downloads
+        assert training_dataset["validation_path"] is None
 
 
 def test_build_model_entity_config_forwards_inline_deployment_config() -> None:

@@ -51,7 +51,7 @@ def test_contributor_get_cli_exposes_flat_verbs() -> None:
     assert isinstance(cli, typer.Typer)
     assert cli.info.name == "automodel"
     assert not any(g.name == "jobs" for g in cli.registered_groups)
-    assert {cmd.name for cmd in cli.registered_commands} == {"explain"}
+    assert {cmd.name for cmd in cli.registered_commands} == {"explain", "preflight"}
 
 
 def test_contributor_exposes_sdk_resources() -> None:

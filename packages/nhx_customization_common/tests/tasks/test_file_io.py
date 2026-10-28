@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call, patch
 
 import httpx
 import pytest
+from nhx.customization_common.schemas.file_io import same_fileset
 from pydantic import ValidationError
 
 
@@ -540,3 +541,17 @@ class TestUploadRetry:
             runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
 
         assert fs.put.call_count == 3
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "same"),
+    [
+        ("data", "ws/data", True),
+        ("ws/data", "other/data", False),
+        ("ws/data#train", "ws/data#train/", True),
+        ("ws/data#train", "ws/data#val", False),
+        ("ws/data", "ws/data#val", False),
+    ],
+)
+def test_same_fileset_compares_workspace_name_and_path(a: str, b: str, same: bool) -> None:
+    assert same_fileset(a, b, workspace="ws") is same

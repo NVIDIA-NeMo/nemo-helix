@@ -85,6 +85,8 @@ from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
     HelixJobAttemptResponse,
     JobControl,
+    JobDryRunCheck,
+    JobDryRunStep,
     JobLogsQueryParams,
     JobName,
     ListAttemptsQueryParams,
@@ -226,6 +228,15 @@ class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
     created_at: datetime
     updated_at: datetime
     is_current: bool
+
+
+class BaseJobDryRun(BaseModel, Generic[JobConfigT]):
+    """What a job would run, and what was checked, without creating it."""
+
+    spec: JobConfigT = Field(description="The canonical spec the job would store, defaults resolved.")
+    steps: list[JobDryRunStep]
+    checks: list[JobDryRunCheck]
+    passed: bool = Field(description="Whether every check passed.")
 
 
 class BaseJobsSortField(StrEnum):
@@ -539,6 +550,7 @@ class JobRouteOption(StrEnum):
     CORE = auto()
     PAUSE_RESUME = auto()
     RERUN = auto()
+    DRY_RUN = auto()
 
 
 class HelixJobResultRoute(BaseModel):
@@ -578,6 +590,10 @@ InputToOutputTransformerAsync = Callable[
 
 # Job name generator: called when user doesn't provide a name
 JobNameGenerator = Callable[[], str]
+
+# Plugin checks a dry run adds after transform and compile.
+# Signature: (transformed_spec, workspace, async_client) -> checks
+DryRunChecks = Callable[[Any, str, AsyncNemoClient], Awaitable[list[JobDryRunCheck]]]
 
 
 def _unwrap_annotated_schema(obj: object) -> object:
@@ -883,6 +899,7 @@ def job_route_factory(
     jobs_list_filter: type[BaseJobsListFilter] | None = None,
     job_discriminator: str | None = None,
     legacy_job_filter: FilterOperation | None = None,
+    dry_run_checks: DryRunChecks | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -927,6 +944,8 @@ def job_route_factory(
             is generated. A field this model adds with a string default, such as
             ``backend: Literal["rl"] = "rl"``, is AND-ed into every list as
             ``spec.<field>``.
+        dry_run_checks: Plugin checks the ``DRY_RUN`` route runs after transform and compile,
+            such as reading a few dataset rows. The route always checks the execution profiles.
 
     Example with separate input/output types:
         ```python
@@ -1023,6 +1042,11 @@ def job_route_factory(
     TypedJobResponse = type(
         f"{job_type}Job",
         (BaseJob[BaseModel],),
+        {"__annotations__": {"spec": job_output}},
+    )
+    TypedJobDryRun = type(
+        f"{job_type}JobDryRun",
+        (BaseJobDryRun[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
     TypedJobUpdate = type(
@@ -1964,4 +1988,85 @@ def job_route_factory(
 
         _stamp(rerun_job, perm="rerun", write=True)
 
+    if JobRouteOption.DRY_RUN in route_options:
+
+        @router.post("/jobs/dry-run")
+        async def dry_run_job(
+            workspace: str,
+            request: TypedJobRequest,
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
+            entity_client: EntityClient = Depends(get_entity_client),
+        ) -> TypedJobDryRun:
+            f"""Validate and compile a {service_name} job as create would, then run its checks. Creates nothing."""
+
+            job_name = _resolve_job_name(request.name, generate_job_name)
+            input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
+            job_spec = await _transform_input_to_output(
+                input_to_output,
+                input_spec,
+                workspace,
+                entity_client,
+                job_name,
+                service_name,
+                async_client,
+            )
+            platform_spec = await _compile_platform_spec(
+                platform_job_config_compiler,
+                workspace,
+                input_spec,
+                job_spec,
+                entity_client,
+                job_name,
+                service_name,
+                async_client,
+                submit_controls=_SubmitControls(profile=request.profile, options=request.options),
+            )
+            steps = _dry_run_steps(platform_spec)
+            checks = [await _check_execution_profiles(steps, async_client)]
+            if dry_run_checks is not None:
+                checks.extend(await dry_run_checks(job_spec, workspace, async_client))
+            return TypedJobDryRun(
+                spec=cast(BaseModel, job_spec),
+                steps=steps,
+                checks=checks,
+                passed=all(check.passed for check in checks),
+            )
+
+        # A dry run needs the same permission as the create it stands in for.
+        _stamp(dry_run_job, perm="create", write=True)
+
     return router
+
+
+def _dry_run_steps(platform_spec: HelixJobSpec) -> list[JobDryRunStep]:
+    """The steps a compiled job would run, with the image and profile of each."""
+    steps = []
+    for step in platform_spec.steps:
+        container = getattr(step.executor, "container", None)
+        steps.append(
+            JobDryRunStep(
+                name=step.name,
+                provider=step.executor.provider,
+                profile=step.executor.profile,
+                image=getattr(container, "image", None),
+            )
+        )
+    return steps
+
+
+async def _check_execution_profiles(steps: list[JobDryRunStep], async_client: AsyncNemoClient) -> JobDryRunCheck:
+    """Check that every step's provider and profile is configured on the platform."""
+    profiles = await AsyncJobsClient.from_client(async_client).list_execution_profiles()
+    available = {(profile.provider, profile.profile) for profile in profiles}
+    missing = sorted(
+        {f"{step.provider}/{step.profile}" for step in steps if (step.provider, step.profile) not in available}
+    )
+    if missing:
+        configured = ", ".join(sorted(f"{provider}/{profile}" for provider, profile in available)) or "none"
+        return JobDryRunCheck(
+            name="execution profile",
+            passed=False,
+            message=f"Not configured on this platform: {', '.join(missing)}. Configured: {configured}.",
+        )
+    used = ", ".join(sorted({f"{step.provider}/{step.profile}" for step in steps}))
+    return JobDryRunCheck(name="execution profile", passed=True, message=f"Configured: {used}.")

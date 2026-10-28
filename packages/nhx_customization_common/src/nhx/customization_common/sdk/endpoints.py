@@ -13,6 +13,7 @@ from nhx.customization_common.sdk.types import (
     CustomizationHealthResponse,
     CustomizationJob,
     CustomizationJobCreateRequest,
+    CustomizationJobDryRun,
     ListCustomizationJobsQueryParams,
 )
 
@@ -30,6 +31,16 @@ def create_customization_job(
     backend: str,
     body: CustomizationJobCreateRequest,
 ) -> CustomizationJob: ...
+
+
+@post("/apis/customization/v2/workspaces/{workspace}/{backend}/jobs/dry-run")
+@abstractmethod
+def dry_run_customization_job(
+    *,
+    workspace: str | None = None,
+    backend: str,
+    body: CustomizationJobCreateRequest,
+) -> CustomizationJobDryRun: ...
 
 
 @get("/apis/customization/v2/workspaces/{workspace}/{backend}/jobs")

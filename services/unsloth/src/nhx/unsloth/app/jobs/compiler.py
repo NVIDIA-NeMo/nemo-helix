@@ -43,6 +43,7 @@ from nhx.customization_common.schemas.file_io import (
     FileSetRef,
     UploadItem,
     model_upload_lifecycle,
+    same_fileset,
 )
 from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
 from nhx.customization_common.service.platform_client import (
@@ -114,13 +115,6 @@ def _build_peft_config(spec: UnslothJobOutput) -> PEFTConfig | None:
     )
 
 
-def _same_fileset_ref(a: str, b: str, *, workspace: str) -> bool:
-    """Return True when two platform fileset refs denote the same fileset."""
-    ra = FileSetRef.model_validate(a)
-    rb = FileSetRef.model_validate(b)
-    return (ra.workspace or workspace) == (rb.workspace or workspace) and ra.name == rb.name
-
-
 def _resolve_validation_dataset_path(
     job_spec: UnslothJobOutput,
     workspace: str,
@@ -128,7 +122,7 @@ def _resolve_validation_dataset_path(
     """Map ``spec.dataset.validation_path`` to the local PVC path the download step uses."""
     if not job_spec.dataset.validation_path:
         return None
-    if _same_fileset_ref(
+    if same_fileset(
         job_spec.dataset.path,
         job_spec.dataset.validation_path,
         workspace=workspace,
@@ -167,7 +161,7 @@ def _build_file_download_config(
             dest=DEFAULT_DATASET_PATH,
         ),
     ]
-    if job_spec.dataset.validation_path and not _same_fileset_ref(
+    if job_spec.dataset.validation_path and not same_fileset(
         job_spec.dataset.path,
         job_spec.dataset.validation_path,
         workspace=workspace,

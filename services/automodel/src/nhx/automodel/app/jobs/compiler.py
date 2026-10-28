@@ -30,6 +30,7 @@ from nhx.automodel.app.constants import (
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
     DEFAULT_TEACHER_MODEL_PATH,
+    DEFAULT_VALIDATION_DATASET_PATH,
 )
 from nhx.automodel.app.jobs.training.compiler import (
     _extract_model_name,
@@ -54,6 +55,7 @@ from nhx.customization_common.schemas.file_io import (
     FileSetRef,
     UploadItem,
     model_upload_lifecycle,
+    same_fileset,
 )
 from nhx.customization_common.schemas.model_entity import (
     ModelEntityTaskConfig,
@@ -155,6 +157,7 @@ def _build_file_download_config(
     job_spec: CustomizationJobOutput,
     me: ModelEntity,
     teacher_me: ModelEntity | None = None,
+    validation_fileset: str | None = None,
 ) -> FileIOTaskConfig:
     """Build the configuration for the file_io task.
 
@@ -165,6 +168,7 @@ def _build_file_download_config(
         job_spec: The customization job output specification.
         me: The model entity being trained.
         teacher_me: Optional teacher model entity for knowledge distillation jobs.
+        validation_fileset: A validation fileset separate from the training dataset.
 
     Returns:
         FileIOTaskConfig with download items for any fileset refs found.
@@ -187,6 +191,12 @@ def _build_file_download_config(
         fileset_name=job_spec.dataset,
         dest=DEFAULT_DATASET_PATH,
         field_name="dataset",
+    )
+    _append_download_if_present(
+        downloads,
+        fileset_name=validation_fileset,
+        dest=DEFAULT_VALIDATION_DATASET_PATH,
+        field_name="validation_dataset",
     )
 
     if teacher_me is not None:
@@ -442,7 +452,13 @@ async def platform_job_config_compiler(
     if transformed_spec.deployment_config is not None:
         await _validate_deployment_config(workspace, transformed_spec, platform)
 
-    file_io_download_config = _build_file_download_config(transformed_spec, me, teacher_me)
+    # A validation fileset that names the training files adds nothing: training finds val* files there.
+    validation_fileset = transformed_spec.validation_dataset
+    if validation_fileset and same_fileset(transformed_spec.dataset, validation_fileset, workspace=workspace):
+        validation_fileset = None
+    file_io_download_config = _build_file_download_config(
+        transformed_spec, me, teacher_me, validation_fileset=validation_fileset
+    )
     training_recipe = _resolve_training_recipe(me, transformed_spec.training.recipe)
 
     # Embedding and ranking NIMs require ONNX, which cannot represent standalone LoRA adapters.
@@ -482,6 +498,7 @@ async def platform_job_config_compiler(
             base_env,
             me,
             teacher_me=teacher_me,
+            validation_path=DEFAULT_VALIDATION_DATASET_PATH if validation_fileset else None,
         ),
         # Step 3: Upload customized model
         HelixJobStep(

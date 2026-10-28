@@ -9725,6 +9725,7 @@ nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
+* `--dry-run`: Check the job without creating anything: the job JSON, the model and dataset references, the execution profile, and the first rows of the dataset. With --upload flags, checks the job JSON and the local dataset and uploads nothing.
 
 **Help:**
 
@@ -9748,6 +9749,7 @@ nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
+* `preflight`: Check the platform before preparing data: it is reachable...
 
 ##### nemo customization automodel explain
 
@@ -9762,6 +9764,24 @@ nemo customization automodel explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo customization automodel preflight
+
+Check the platform before preparing data: it is reachable and has a GPU execution profile this backend can use. Creates nothing.
+
+**Usage:**
+
+```shell
+nemo customization automodel preflight [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: GPU execution profile to check. Any GPU profile passes when omitted.
 
 **Help:**
 
@@ -9834,6 +9854,7 @@ nemo customization rl [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
+* `--dry-run`: Check the job without creating anything: the job JSON, the model and dataset references, the execution profile, and the first rows of the dataset. With --upload flags, checks the job JSON and the local dataset and uploads nothing.
 
 **Help:**
 
@@ -9857,6 +9878,7 @@ nemo customization rl [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
+* `preflight`: Check the platform before preparing data: it is reachable...
 
 ##### nemo customization rl explain
 
@@ -9871,6 +9893,24 @@ nemo customization rl explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo customization rl preflight
+
+Check the platform before preparing data: it is reachable and has a GPU execution profile this backend can use. Creates nothing.
+
+**Usage:**
+
+```shell
+nemo customization rl preflight [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: GPU execution profile to check. Any GPU profile passes when omitted.
 
 **Help:**
 
@@ -9940,6 +9980,7 @@ nemo customization unsloth [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
+* `--dry-run`: Check the job without creating anything: the job JSON, the model and dataset references, the execution profile, and the first rows of the dataset. With --upload flags, checks the job JSON and the local dataset and uploads nothing.
 
 **Help:**
 
@@ -9963,6 +10004,7 @@ nemo customization unsloth [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
+* `preflight`: Check the platform before preparing data: it is reachable...
 
 ##### nemo customization unsloth explain
 
@@ -9977,6 +10019,24 @@ nemo customization unsloth explain [OPTIONS]
 **Options:**
 
 * `--profile`: Annotate the bundle with this profile.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+##### nemo customization unsloth preflight
+
+Check the platform before preparing data: it is reachable and has a GPU execution profile this backend can use. Creates nothing.
+
+**Usage:**
+
+```shell
+nemo customization unsloth preflight [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: GPU execution profile to check. Any GPU profile passes when omitted.
 
 **Help:**
 

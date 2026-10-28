@@ -643,6 +643,11 @@ class _CustomizationJobBase(BaseModel):
     dataset: Annotated[str, AfterValidator(validate_fileset_uri)] = Field(
         description="Training dataset fileset as 'workspace/name' or 'name' (resolved in the job path workspace)."
     )
+    validation_dataset: Optional[Annotated[str, AfterValidator(validate_fileset_uri)]] = Field(
+        default=None,
+        description="Validation dataset fileset, same format as 'dataset'. When unset, validation files "
+        "in the training dataset are used, or a split of it.",
+    )
     training: TrainingMethod = Field(description="Training method and hyperparameters.")
     integrations: Optional[IntegrationsSpec] = Field(
         default=None,

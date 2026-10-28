@@ -214,7 +214,7 @@ def test_cli_submit_omits_studio_link_when_unavailable(monkeypatch: pytest.Monke
     assert '"name": "my-automodel-run"' in result.stdout
 
 
-def test_cli_help_lists_submit_and_explain_only() -> None:
+def test_cli_help_lists_submit_explain_and_preflight() -> None:
     automodel_cli = AutomodelContributor().get_cli()
     runner = CliRunner()
     result = runner.invoke(automodel_cli, ["--help"])
@@ -223,7 +223,7 @@ def test_cli_help_lists_submit_and_explain_only() -> None:
     assert "explain" in result.stdout
     # Match on the registered verbs, not the rendered text: the help prose
     # legitimately contains words like "runs".
-    assert {cmd.name for cmd in automodel_cli.registered_commands} == {"explain"}
+    assert {cmd.name for cmd in automodel_cli.registered_commands} == {"explain", "preflight"}
 
 
 def test_cli_expose_input_and_output_schemas() -> None:

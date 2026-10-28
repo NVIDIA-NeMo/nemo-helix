@@ -398,10 +398,12 @@ def _prepare_and_validate_dataset(
         if customizer_config.schedule.validation_split is None
         else {"val_split_ratio": customizer_config.schedule.validation_split}
     )
+    validation_path = customizer_config.dataset.validation_path
     prepared = prepare_dataset(
         dataset_path=Path(customizer_config.dataset.path),
         output_dir=workspace_dir / "dataset",
         seed=customizer_config.seed,
+        validation_path=Path(validation_path) if validation_path else None,
         **split_kwargs,
     )
     logger.info(

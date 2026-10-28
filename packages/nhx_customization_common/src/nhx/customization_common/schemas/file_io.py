@@ -115,6 +115,13 @@ class FileSetRef(BaseModel):
         return v
 
 
+def same_fileset(a: str, b: str, *, workspace: str) -> bool:
+    """Return True when two fileset references name the same files: same fileset, same ``#path``."""
+    ra = FileSetRef.model_validate(a)
+    rb = FileSetRef.model_validate(b)
+    return (ra.workspace or workspace, ra.name, ra.path) == (rb.workspace or workspace, rb.name, rb.path)
+
+
 class DownloadItem(BaseModel):
     """Configures a single download: fileset -> local path.
 

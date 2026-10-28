@@ -76,6 +76,35 @@ class NemoJobScheduler:
         body = self._build_submit_body(spec, profile=profile, options=options, metadata=metadata)
         return self._post_submit(url, body, http_client=http_client, headers=headers, timeout=timeout)
 
+    def dry_run_remote(
+        self,
+        job_cls: type["NemoJob"],
+        spec: dict,
+        *,
+        base_url: str | None = None,
+        workspace: str = "default",
+        profile: str | None = None,
+        options: dict | None = None,
+        http_client: httpx.Client | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 60.0,
+    ) -> dict:
+        """POST the job to the plugin service's dry-run route, which checks it and creates nothing.
+
+        Takes the same arguments as :meth:`submit_remote`; the plugin must mount the
+        ``DRY_RUN`` job route.
+
+        Returns:
+            The decoded dry-run report: the canonical spec, the steps, and the checks.
+
+        Raises:
+            ValueError: If no ``base_url`` is provided.
+            httpx.HTTPStatusError: On 4xx / 5xx responses, e.g. a spec that fails validation.
+        """
+        url = self._build_submit_url(job_cls, base_url=base_url, workspace=workspace) + "/dry-run"
+        body = self._build_submit_body(spec, profile=profile, options=options, metadata=None)
+        return self._post_submit(url, body, http_client=http_client, headers=headers, timeout=timeout)
+
     # ------------------------------------------------------------------ #
     # Schema discovery                                                   #
     # ------------------------------------------------------------------ #

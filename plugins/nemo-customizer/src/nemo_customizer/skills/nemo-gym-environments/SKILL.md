@@ -64,7 +64,7 @@ Each of these invalidates the work if it turns out false:
 
 | Check | How | If it fails |
 |---|---|---|
-| The platform can run GRPO at all | The **nemo-customizer** skill's `rl` runtime gate: execution profiles report `backend: kubernetes_job` or `volcano_job` | Stop; GRPO needs a Kubernetes-runtime platform |
+| The platform can run GRPO at all | `nemo customization rl preflight` passes: a GPU profile on `kubernetes_job` or `volcano_job` | Stop; GRPO needs a Kubernetes-runtime platform |
 | The cluster runs sandboxed Gym | Operator confirms `sandbox_cluster_capable` and the job-storage PVC claim (`../nemo-customizer/references/rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**) | Stop; submit fails and no package change helps |
 | Whether the sandbox has egress | Operator confirms `NHX_RL_SANDBOX_ALLOW_INTERNET` | Decides `native-v1` vs `wheels-v1`; settle it **before** the layout |
 | Which Gym agent runs the environment | A `verifiers` env runs `verifiers_agent`; a resources server usually runs `simple_agent` | Decides the format and every row's `agent_ref.name` |

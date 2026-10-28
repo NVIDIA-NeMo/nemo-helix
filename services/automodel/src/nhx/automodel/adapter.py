@@ -136,6 +136,7 @@ def automodel_spec_to_compiler_output(spec: dict[str, Any] | BaseModel) -> Custo
 
     dataset = data["dataset"]
     training_uri = dataset["training"] if isinstance(dataset, dict) else dataset
+    validation_uri = dataset.get("validation") if isinstance(dataset, dict) else None
 
     output = data["output"]
     if isinstance(output, dict):
@@ -151,6 +152,7 @@ def automodel_spec_to_compiler_output(spec: dict[str, Any] | BaseModel) -> Custo
     return CustomizationJobOutput(
         model=data["model"],
         dataset=training_uri,
+        validation_dataset=validation_uri,
         training=_build_training_block(data),
         integrations=_build_integrations(data),
         deployment_config=data.get("deployment_config"),
