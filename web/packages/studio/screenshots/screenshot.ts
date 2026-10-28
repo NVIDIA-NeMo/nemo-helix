@@ -58,6 +58,11 @@ const { values: args } = parseArgs({
   },
 });
 
+// Trailing slash so relative routes resolve under the base path (e.g. /studio/).
+const baseUrl = args['base-url'].replace(/\/*$/, '/');
+// The dev server uses a local mkcert certificate; keep TLS validation for any other host.
+const ignoreHTTPSErrors = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(baseUrl).hostname);
+
 const fail = (message: string): never => {
   console.error(`Error: ${message}\n${USAGE}`);
   process.exit(1);
@@ -72,9 +77,9 @@ const waitForEnter = (prompt: string) =>
     });
   });
 
-async function login(baseUrl: string) {
+async function login() {
   const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const context = await browser.newContext({ ignoreHTTPSErrors });
   await (await context.newPage()).goto(baseUrl);
   await waitForEnter('\nSign in, then press Enter to save the session...\n');
   fs.mkdirSync(path.dirname(args.auth), { recursive: true });
@@ -85,10 +90,13 @@ async function login(baseUrl: string) {
 
 async function capture(page: Page, outPath: string) {
   const timeout = Number(args.timeout);
-  const url = new URL(args.route!.replace(/^\//, ''), args['base-url']).href;
+  const url = new URL(args.route!.replace(/^\//, ''), baseUrl).href;
 
   console.log(`Navigating to ${url}`);
-  await page.goto(url, { waitUntil: 'networkidle', timeout: timeout * 2 });
+  const response = await page.goto(url, { waitUntil: 'networkidle', timeout: timeout * 2 });
+  if (response && !response.ok()) {
+    throw new Error(`${url} responded with HTTP ${response.status()}`);
+  }
   await page.addStyleTag({ content: HIDE_DEVTOOLS_CSS });
 
   for (const id of args.click) {
@@ -134,7 +142,7 @@ async function main() {
     return;
   }
   if (args.login) {
-    await login(args['base-url']);
+    await login();
     return;
   }
   if (!args.route) {
@@ -150,7 +158,7 @@ async function main() {
 
   const browser = await chromium.launch();
   const context = await browser.newContext({
-    ignoreHTTPSErrors: true,
+    ignoreHTTPSErrors,
     viewport: { width: Number(args.width), height: Number(args.height) },
     deviceScaleFactor: 2,
     storageState: fs.existsSync(args.auth) ? args.auth : undefined,
