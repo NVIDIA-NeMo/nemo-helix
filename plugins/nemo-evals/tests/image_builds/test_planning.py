@@ -422,6 +422,23 @@ services:
     ]
 
 
+def test_a_compose_service_platform_set_in_dot_env_is_pinned(tmp_path: Path) -> None:
+    """Planning pins the platform the parser resolved, with `.env`'s value filled in as Compose fills it."""
+    compose = "services:\n  cache:\n    image: redis:7\n    platform: ${TARGET_PLATFORM}\n"
+    environment = tmp_path / "sort-task" / "environment"
+    environment.mkdir(parents=True)
+    (environment / "docker-compose.yaml").write_text(compose, encoding="utf-8")
+    (environment / ".env").write_text("TARGET_PLATFORM=linux/arm64\n", encoding="utf-8")
+    archive = replace(
+        _archive("environment/Dockerfile", compose=compose),
+        compose_task=parse_compose(tmp_path / "sort-task", read_entrypoint=False),
+    )
+
+    images = plan_images({}, archive, allowed_registries=[])
+
+    assert {image.role: image.platform for image in images}["service/cache"] == "linux/arm64"
+
+
 def test_a_compose_service_naming_an_unreadable_platform_is_refused() -> None:
     compose = "services:\n  cache:\n    image: redis:7\n    platform: arm64\n"
 
