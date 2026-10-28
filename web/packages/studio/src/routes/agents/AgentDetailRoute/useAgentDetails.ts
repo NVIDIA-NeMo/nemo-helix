@@ -236,13 +236,14 @@ export const useAgentDetails = ({
   );
 
   // Any status is selectable (a failed deployment still has logs); without a pick, prefer a healthy one.
-  const selectedDeployment = useMemo(
-    () =>
-      agentDeployments.find((d) => d.name === selectedDeploymentName) ??
-      healthyDeployments[0] ??
-      agentDeployments[0],
-    [agentDeployments, healthyDeployments, selectedDeploymentName]
-  );
+  const selectedDeployment = useMemo(() => {
+    const named = agentDeployments.filter((d) => d.name);
+    return (
+      named.find((d) => d.name === selectedDeploymentName) ??
+      named.find((d) => d.status === 'running') ??
+      named[0]
+    );
+  }, [agentDeployments, selectedDeploymentName]);
 
   return {
     isDeploymentsLoading,
