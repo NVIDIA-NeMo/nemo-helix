@@ -9353,7 +9353,7 @@ nemo evals runs submit [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: &lt;url>@&lt;ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.
 * `--taskset`: Stored taskset, workspace/name#digest (from `nemo evals tasksets create`): uploads no tasks and requests no image builds; submit refuses a task whose image isn't built.
 * `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless --taskset, --harbor-dir, --harbor-hub or --harbor-git supplies the tasks.
 * `--dataset`: Intake dataset, NAME[@VERSION], for the run's Evaluation (with --taskset and --experiment); `tasksets create` prints it. --harbor-hub and --harbor-git set it themselves.

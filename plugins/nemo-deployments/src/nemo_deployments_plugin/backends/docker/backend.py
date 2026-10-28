@@ -975,7 +975,13 @@ class DockerDeploymentBackend(DeploymentBackend):
                 if created is not None:
                     await asyncio.to_thread(created.remove, force=True)
                 last_attempt = attempt == _PORT_CONFLICT_ATTEMPTS
-                if not host_ports or last_attempt or _PORT_CONFLICT_MARKER not in str(exc):
+                message = str(exc)
+                # Docker versions report host publish conflicts in two forms.
+                # Do not retry unrelated application-level address-in-use errors.
+                port_conflict = _PORT_CONFLICT_MARKER in message or (
+                    "failed to bind host port" in message and "address already in use" in message
+                )
+                if not host_ports or last_attempt or not port_conflict:
                     logger.exception("Failed to start container %s", name)
                     return None, host_ports, f"Failed to start container: {exc}"
 
