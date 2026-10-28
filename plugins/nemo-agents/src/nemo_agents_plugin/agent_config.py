@@ -17,7 +17,16 @@ from typing import Any, Literal, Self
 
 import yaml
 from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 
 class AgentConfigLoadError(ValueError):
@@ -50,6 +59,14 @@ class ModelConfig(BaseModel):
         if isinstance(value, float) and value.is_integer():
             return int(value)
         return value
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_extensions(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # Agent images built before `extensions` existed reject the key, so leave it out when empty.
+        data = handler(self)
+        if not data.get("extensions"):
+            data.pop("extensions", None)
+        return data
 
 
 class HarnessConfig(BaseModel):

@@ -40,6 +40,28 @@ def test_nemo_agents_config_validation_normalizes_payload() -> None:
     assert validated["environment"]["provider"] == "local"
 
 
+def test_nemo_agents_config_normalization_omits_empty_model_extensions() -> None:
+    config = _nemo_agents_config()
+    config["models"] = {"default": {"provider": "nvidia", "model": "m"}}
+    config["harnesses"]["hermes"]["model"] = {"provider": "nvidia", "model": "m", "extensions": {}}
+
+    resolved = resolve_agent_config_for_deployment(
+        NEMO_AGENTS_SPEC_CONFIG_FORMAT, config, workspace="default", agent_name="test-agent"
+    )
+
+    assert "extensions" not in resolved["models"]["default"]
+    assert "extensions" not in resolved["harnesses"]["hermes"]["model"]
+
+
+def test_nemo_agents_config_normalization_keeps_model_extensions() -> None:
+    config = _nemo_agents_config()
+    config["models"] = {"default": {"provider": "nvidia", "model": "m", "extensions": {"context_window": 8192}}}
+
+    validated = validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+    assert validated["models"]["default"]["extensions"] == {"context_window": 8192}
+
+
 def test_nemo_agents_config_validation_rejects_invalid_payload() -> None:
     config = _nemo_agents_config()
     config["default_harness"] = "missing"
