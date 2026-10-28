@@ -38,8 +38,8 @@ Run `nemo setup` to select default and fast Platform models, or supply
 `--default-model` and `--fast-model` when submitting analysis.
 
 For Compass analysis, use **NVIDIA Nemotron 3.5 Super VL** instead of Nemotron
-3.5 Lightning 30B, which has known tool-calling failures. Selecting this model produces a
-nonblocking warning; Helix keeps your selected model. The CLI and Studio recognize
+3.5 Lightning 30B, which has known tool-calling failures. Selecting Nemotron 3.5
+Lightning 30B produces a nonblocking warning; Helix keeps your selected model. The CLI and Studio recognize
 this model's full name in model references, including normalized Helix names. Jobs also check the resolved served-model names,
 so aliases are checked at runtime, with warnings in job logs and completed analysis reports.
 
