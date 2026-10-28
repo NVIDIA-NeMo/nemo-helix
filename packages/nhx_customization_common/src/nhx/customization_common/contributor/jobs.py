@@ -132,6 +132,10 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         """Validate platform refs, resolve naming, return the canonical spec."""
         del entity_client, is_local
         schema = cls._job_input_schema()
-        job_input = input_spec if isinstance(input_spec, schema) else schema.model_validate(input_spec.model_dump())
+        job_input = (
+            input_spec
+            if isinstance(input_spec, schema)
+            else schema.model_validate(input_spec.model_dump(exclude_unset=True))
+        )
         platform = async_customization_platform_clients_from_platform(async_sdk)
         return await cls._transform(job_input, workspace, platform)

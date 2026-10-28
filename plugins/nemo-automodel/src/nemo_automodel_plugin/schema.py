@@ -355,8 +355,9 @@ class OptimizerSpec(AutomodelSchema):
         default=5e-5,
         gt=0.0,
         description=(
-            "Peak learning rate. Left unset, it depends on the job: 5e-5 for LoRA, 5e-6 for "
-            "finetuning_type 'all_weights', 1e-5 for the bi_encoder recipe and 3e-6 for cross_encoder."
+            "Peak learning rate. Left unset, it depends on the job: the bi_encoder and cross_encoder "
+            "recipes use 1e-5 and 3e-6 whatever the finetuning_type; other recipes use 5e-5 for LoRA "
+            "and 5e-6 for finetuning_type 'all_weights'."
         ),
     )
     min_learning_rate: float | None = Field(

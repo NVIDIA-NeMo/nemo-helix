@@ -96,7 +96,9 @@ def make_async_customization_sdk_context(client: AsyncNemoClient) -> AsyncCustom
 
 def _spec_payload(spec: BaseModel | dict[str, Any]) -> dict[str, Any]:
     if isinstance(spec, BaseModel):
-        return spec.model_dump(mode="json")
+        # A default sent explicitly reads as the caller's choice, so the server would skip
+        # defaults that depend on other fields (learning_rate follows finetuning_type).
+        return spec.model_dump(mode="json", exclude_unset=True)
     return spec
 
 
