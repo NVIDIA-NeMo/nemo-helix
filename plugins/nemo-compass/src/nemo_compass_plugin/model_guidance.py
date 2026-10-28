@@ -9,7 +9,7 @@ import re
 def model_warning(model: str) -> str | None:
     """Recognize the tested 3.5 Lightning 30B model, including Helix slug names."""
     if re.search(
-        r"(?:^|/)(?:nvidia/|(?:nvidia[-_]){1,2})nemotron[-_]3[._-]5[-_]lightning[-_]30b$", model, re.IGNORECASE
+        r"(?:^|/)(?:nvidia/|(?:nvidia[-_]){1,2})nemotron[-_]3[._-]5[-_]lightning[-_]30b", model, re.IGNORECASE
     ):
         return (
             f"{model} has known tool-calling failures in Compass. "

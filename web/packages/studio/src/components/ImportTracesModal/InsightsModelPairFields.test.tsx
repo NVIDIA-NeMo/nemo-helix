@@ -12,6 +12,8 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
 
 describe.each([
   'default/nvidia-nvidia-nemotron-3-5-lightning-30b',
+  'default/nvidia-nemotron-3.5-lightning-30b-a3b',
+  'default/nvidia_nemotron_3_5_lightning_30b_custom',
   'default/nvidia_nemotron_3_5_lightning_30b',
   'default/nvidia_nvidia_nemotron_3_5_lightning_30b',
   'default/nvidia-nemotron_3.5-lightning_30b',
@@ -40,7 +42,7 @@ describe.each([
       rerender(
         <InsightsModelPairFields
           {...props}
-          {...{ [`${role}Model`]: 'default/nvidia_nemotron_3_5_lightning_30b_custom' }}
+          {...{ [`${role}Model`]: 'default/nvidia_nemotron_3_5_lightning_70b_custom' }}
         />
       );
       expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();
