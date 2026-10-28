@@ -31,6 +31,13 @@ _SPDX_FRONTMATTER = (
 )
 
 
+_EXAMPLE_CONTINUATION_RE = re.compile(r"^\s*(?:nemo\s|#\s)")
+
+# A CLI flag in prose. Fern's typographer turns a bare "--flag" into an em dash ("—flag"),
+# so copied commands fail; inline code keeps the two hyphens.
+_PROSE_FLAG_RE = re.compile(r"(?<![\w`-])--[A-Za-z0-9][\w-]*")
+
+
 def strip_rich_markup(text: str) -> str:
     """Remove Rich markup tags from text, converting to plain text or markdown.
 
@@ -175,7 +182,18 @@ def strip_rich_markup(text: str) -> str:
         normalized_lines.append("```")
         input_data_lines = []
 
-    for line in lines:
+    def next_line_continues_examples(idx: int) -> bool:
+        """Return True when the next non-blank line is another commented example or nemo command.
+
+        Docstrings separate examples with blank lines; without this lookahead only the
+        first example lands in the code block and the rest render as prose.
+        """
+        for following in lines[idx + 1 :]:
+            if following.strip():
+                return bool(_EXAMPLE_CONTINUATION_RE.match(following))
+        return False
+
+    for idx, line in enumerate(lines):
         # Strip excessive leading whitespace (4+ spaces) that would create code blocks
         # List items get their indentation reduced to 2 spaces to maintain list formatting
         if re.match(r"^    +[-*]\s", line):
@@ -206,6 +224,10 @@ def strip_rich_markup(text: str) -> str:
         # - new section starting with capital letter
         # - bold text (like **Required fields:**)
         # - section headers
+        # A blank line followed by another "# comment" or "nemo ..." line stays in the block.
+        if in_example_block and not line.strip() and next_line_continues_examples(idx):
+            example_lines.append("")
+            continue
         if in_example_block and (not line.strip() or re.match(r"^[A-Z]", line) or re.match(r"^\*\*[A-Z]", line)):
             flush_examples()
             in_example_block = False
@@ -647,7 +669,7 @@ def generate_docs(app: typer.Typer, name: str = "nemo") -> str:
 
 
 def _escape_mdx(text: str) -> str:
-    """Escape `{` and `<` outside fenced code blocks so MDX does not parse them as JSX."""
+    """Escape `{` and `<` outside fenced code blocks so MDX does not parse them as JSX, and code-format prose `--flags`."""
     lines = text.split("\n")
     in_code_fence = False
     escaped: list[str] = []
@@ -660,8 +682,16 @@ def _escape_mdx(text: str) -> str:
         if in_code_fence:
             escaped.append(line)
             continue
-        escaped.append(_escape_mdx_line(line))
+        escaped.append(_escape_mdx_line(_code_span_prose_command(line)))
     return "\n".join(escaped)
+
+
+def _code_span_prose_command(line: str) -> str:
+    """Render a whole ``nemo ...`` command left in prose as one inline code span."""
+    match = re.match(r"^(\s*)(nemo\s.*?)\s*$", line)
+    if match is None or "`" in line:
+        return line
+    return f"{match.group(1)}`{match.group(2)}`"
 
 
 def _escape_mdx_line(line: str) -> str:
@@ -685,6 +715,10 @@ def _escape_mdx_line(line: str) -> str:
                 # An unmatched delimiter is prose, not an inline code span.
                 out.append(delimiter)
                 i = delimiter_end
+            continue
+        if ch == "-" and (flag := _PROSE_FLAG_RE.match(line, i)) is not None:
+            out.append(f"`{flag.group(0)}`")
+            i = flag.end()
             continue
         if ch == "{":
             out.append("\\{")
