@@ -323,10 +323,10 @@ export const EVALUATION_FORM_DEFAULTS: EvaluationFormValues = {
   },
 };
 
-/** File types the model wizard maps. ``useDatasetPreview`` also reads Parquet
- *  (whole file), which the agent wizard accepts.
- *  ponytail: model wizard stays text-only; add '.parquet' here once its live
- *  test has been checked against a Parquet dataset. */
+/** Row-0 preview is read from an HTTP Range head, which cannot satisfy Parquet
+ *  (hyparquet needs the footer, and a truncated buffer fails silently to null).
+ *  ponytail: text formats only; add Parquet when row-0 preview can fetch a full
+ *  object, or when the backend exposes a row-preview endpoint. */
 export const MAPPABLE_FILE_TYPES = ['.json', '.jsonl', '.csv'] as const;
 
 /**
