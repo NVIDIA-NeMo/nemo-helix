@@ -123,7 +123,8 @@ describe('modelSupportsImageAttachments', () => {
 
 describe('getFailedReply', () => {
   it('keeps the raw error in the status and puts the explanation in the body', () => {
-    const raw = "APIStatusError: Error code: 429 - {'detail': 'slow down'}";
+    const raw =
+      "RuntimeError: internal error: APIStatusError: Error code: 429 - {'detail': 'slow down'}";
 
     const { parts, status } = getFailedReply(raw, describeChatError);
 

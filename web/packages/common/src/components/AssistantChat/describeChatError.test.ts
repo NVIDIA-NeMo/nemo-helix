@@ -83,6 +83,15 @@ describe('describeChatError', () => {
     expect(describeChatError("The user wrote 'Error code: 410' in the prompt")).toBeUndefined();
   });
 
+  it('ignores a status that only appears inside quoted detail', () => {
+    const quoted = 'Agent returned 502: {"detail":"log: APIStatusError: Error code: 401"}';
+    const wrapped =
+      "RuntimeError: internal error: ValueError: saw 'RuntimeError: internal error: APIStatusError: Error code: 401 - x' in a log";
+
+    expect(describeChatError(quoted)).toBeUndefined();
+    expect(describeChatError(wrapped)).toBeUndefined();
+  });
+
   it('returns nothing for messages it does not know', () => {
     expect(describeChatError('Something nobody mapped')).toBeUndefined();
     expect(describeChatError('Agent returned 502: {"detail":"boom"}')).toBeUndefined();

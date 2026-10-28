@@ -14,8 +14,9 @@ export const GENERIC_CHAT_ERROR = 'There was an error generating a response.';
 // Agent chat flattens every failure into one string: the platform returns 502 for any agent
 // failure and the model's HTTP status survives only inside the message. These rules read that
 // text back into something a user can act on. They match phrases our own code writes (the Fabric
-// server and the agents gateway) and the `APIStatusError: Error code: NNN` the openai SDK inside
-// the Fabric runtime produces, never provider-authored prose, which can change.
+// server and the agents gateway) and the envelope the Fabric runtime wraps an openai SDK failure
+// in (`RuntimeError: internal error: APIStatusError: Error code: NNN - ...`), never
+// provider-authored prose, which can change.
 //
 // ponytail: text matching until the platform returns a structured error code; replace these
 // rules with a switch on that code then.
@@ -25,7 +26,9 @@ export const GENERIC_CHAT_ERROR = 'There was an error generating a response.';
 const RUNTIME_START_FAILED = /^(?:\d{3} )?Fabric runtime startup failed/;
 const AGENT_UNREACHABLE = /^(?:\d{3} )?Could not connect to agent/;
 const NO_BODY = /^(\d{3}) status code \(no body\)$/;
-const UPSTREAM_STATUS = /APIStatusError: Error code: (\d{3})\b/;
+// Anchored to the whole envelope so a status that only appears inside quoted detail is ignored.
+const UPSTREAM_STATUS =
+  /^(?:\d{3} )?RuntimeError: internal error: APIStatusError: Error code: (\d{3}) - /;
 // The provider's message is Python-repr'd inside the error, so quotes may arrive backslash-escaped.
 const RETIRED_MODEL = /The model \\?'([^']+?)\\?' has reached its end of life/;
 
