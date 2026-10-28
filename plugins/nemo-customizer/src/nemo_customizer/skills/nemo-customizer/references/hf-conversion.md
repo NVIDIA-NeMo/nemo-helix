@@ -108,12 +108,6 @@ def example_images(ex):
         return [image]
     return list(ex.get("images") or [])
 
-def user_text(ex):
-    return ex["question"]  # same text to_chat would put on the user turn
-
-def assistant_text(ex):
-    return ex["answer"]  # one text part
-
 def to_multimodal_chat(image_urls, user, assistant):
     parts = [{"type": "image_url", "image_url": {"url": url}} for url in image_urls]
     parts.append({"type": "text", "text": user})
@@ -124,33 +118,46 @@ def to_multimodal_chat(image_urls, user, assistant):
         ]
     }
 
-out = Path("/tmp/train-data")
-images = out / "images"
-images.mkdir(exist_ok=True)
-for split in ("train", "validation"):
-    if split not in ds:
-        continue
-    with (out / f"{split}.jsonl").open("w") as f:
-        for index, ex in enumerate(ds[split]):
-            found = example_images(ex)
-            if not found:
-                f.write(json.dumps(to_chat(ex)) + "\n")
-                continue
-            urls = []
-            for image_index, image in enumerate(found):
-                relative = f"images/{split}_{index}_{image_index}.png"
-                image.save(images / f"{split}_{index}_{image_index}.png")
-                urls.append(relative)
-            # user / assistant come from the dataset, the same way to_chat builds them.
-            row = to_multimodal_chat(urls, user_text(ex), assistant_text(ex))
-            f.write(json.dumps(row) + "\n")
+def image_row(ex, split, index, images_dir):
+    found = example_images(ex)
+    chat = to_chat(ex)  # same user text and assistant label as a text row
+    if not found:
+        return chat
+    user, assistant = chat["messages"][0]["content"], chat["messages"][1]["content"]
+    urls = []
+    for image_index, image in enumerate(found):
+        name = f"{split}_{index}_{image_index}.png"
+        image.save(images_dir / name)
+        urls.append(f"images/{name}")
+    return to_multimodal_chat(urls, user, assistant)
+
+# Freeze a test split from train, the same rule as the text script above.
+train_examples = list(ds["train"])
+if len(train_examples) < 2:
+    raise SystemExit("Need at least two rows: one to train on and one to test.")
+random.Random(42).shuffle(train_examples)
+n_test = min(500, max(1, len(train_examples) // 10))
+held_out, train_examples = train_examples[:n_test], train_examples[n_test:]
+
+train_images = Path("/tmp/train-data/images")
+test_images = Path("/tmp/test-data/images")
+train_images.mkdir(parents=True, exist_ok=True)
+test_images.mkdir(parents=True, exist_ok=True)
+
+def write_jsonl(path, examples, split, images_dir):
+    with path.open("w") as f:
+        for index, ex in enumerate(examples):
+            f.write(json.dumps(image_row(ex, split, index, images_dir)) + "\n")
+
+write_jsonl(Path("/tmp/train-data/train.jsonl"), train_examples, "train", train_images)
+write_jsonl(Path("/tmp/test-data/test.jsonl"), held_out, "test", test_images)
+if "validation" in ds:
+    write_jsonl(Path("/tmp/train-data/validation.jsonl"), ds["validation"], "validation", train_images)
 ```
 
-Each `image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. A row with several images gets one `image_url` part per image, then the text part. Upload the directory, not only the JSONL, so `images/` lands beside `train.jsonl` in the fileset.
+Each `image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
 A Gym row that needs an image uses Responses API parts on `responses_create_params.input[].content`: `{type: input_image, image_url: "<string>"}` followed by `{type: input_text, text}`. A string `content` stays one text part. The automodel fileset stays `{type: image_url, image_url: {url}}`. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
-
-Then upload (see main skill). Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
 ## Mapping to job JSON
 

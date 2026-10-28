@@ -59,7 +59,7 @@ Give the **nemo-evals** skill these inputs, the same for base and tuned except t
 | Rows | The frozen `test.jsonl` |
 | Target | `Model(url="<gateway>/apis/inference-gateway/v2/workspaces/<ws>/openai/-/v1", name="<model ID>")`, where `<gateway>` is the platform URL the agent uses (`nemo inference get-url` prints the full route) |
 | Prompt template | `{"messages": "{{ item.messages[:-1] }}"}`; a model without a chat template uses **Models without a chat template** below |
-| Reference | `{{ item.messages[-1].content }}` |
+| Reference | `{{ item.messages[-1].content }}`. The assistant `content` is a string. |
 | Metric | Short answers: `F1Metric`. Exact labels: `ExactMatchMetric`. Tool calls: `ToolCallingMetric`. Open-ended answers: an LLM judge, chosen with nemo-evals' metric selection |
 | Inference | `temperature` 0; `max_tokens` 64 for short labels; for thinking models (Qwen3, Nemotron 3.5 Lightning) turn thinking off with `extra_body={"chat_template_kwargs": {"enable_thinking": false}}` |
 | Execution | A local SDK run, which reaches the gateway at the agent's platform URL. A platform eval job also works, but its container must reach that URL: true for a local Docker platform, not for `localhost` on Kubernetes |
@@ -109,7 +109,7 @@ Training and evaluation use the **same CHAT JSONL row shape**:
 
 The **final** turn is the label; every earlier turn is context. Send `messages[:-1]` and score against `messages[-1].content`. Do not flatten the rows to `prompt` / `expected`, and do not send the label turn; a model without a chat template gets its prompt from the completions template in **Hand-off to nemo-evals**.
 
-An image row keeps the part list on the user turn. Send `messages[:-1]` with those image parts intact. The assistant label stays one text part: a string, or a list of one `{type: text, text}`. The reference is that text, not the whole `content` list. A relative `image_url` is the fileset path the trainer reads. The inference gateway does not have that fileset, so a prompt sent there needs a `data:` URL or a URL the gateway can fetch.
+An image row keeps the part list on the user turn. Send `messages[:-1]` with those image parts intact. The assistant label is a string, so the reference stays `{{ item.messages[-1].content }}`. A relative `image_url` is the fileset path the trainer reads. The inference gateway does not have that fileset, so a prompt sent there needs a `data:` URL or a URL the gateway can fetch.
 
 ## Reading the result
 
