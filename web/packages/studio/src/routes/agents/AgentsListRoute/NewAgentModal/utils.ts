@@ -51,15 +51,18 @@ export const selectionRootName = (picked: PickedFile[]): string => {
   return picked.every(({ relativePath }) => relativePath.startsWith(`${root}/`)) ? root : '';
 };
 
-/** The fileset holds the agent's own files, so a whole selection's shared root directory is stripped from every path. */
+/**
+ * The fileset holds the agent's own files, so a whole selection's shared root directory is stripped from every path.
+ * A top-level `agent.yml` is stored as `agent.yaml`, the only name the platform stages.
+ */
 export const collectAgentEntries = (picked: PickedFile[]): UploadAgentEntry[] => {
   const root = selectionRootName(picked);
   const entries: UploadAgentEntry[] = [];
 
   for (const { file, relativePath } of picked) {
-    const path = (root ? relativePath.split('/').slice(1).join('/') : relativePath) || file.name;
-    if (!path || isIgnoredPath(path)) continue;
-    entries.push({ path, file });
+    const raw = (root ? relativePath.split('/').slice(1).join('/') : relativePath) || file.name;
+    if (!raw || isIgnoredPath(raw)) continue;
+    entries.push({ path: raw === 'agent.yml' ? AGENT_CONFIG_FILENAME : raw, file });
   }
 
   return entries.sort((left, right) => pathCollator.compare(left.path, right.path));

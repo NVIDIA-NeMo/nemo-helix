@@ -43,6 +43,16 @@ describe('collectAgentEntries', () => {
     expect(entries.map((item) => item.path)).toEqual(['agent.yaml', 'mcps/calculator.py']);
   });
 
+  it('stores a top-level agent.yml as agent.yaml', () => {
+    const entries = collectAgentEntries([
+      makeFile('calc/agent.yml'),
+      makeFile('calc/mcps/agent.yml'),
+    ]);
+
+    expect(entries.map((item) => item.path)).toEqual(['agent.yaml', 'mcps/agent.yml']);
+    expect(validateAgentEntries(entries)).toBeUndefined();
+  });
+
   it('drops build artifacts that the container path cannot stage', () => {
     const entries = collectAgentEntries([
       makeFile('agent/agent.yaml'),
