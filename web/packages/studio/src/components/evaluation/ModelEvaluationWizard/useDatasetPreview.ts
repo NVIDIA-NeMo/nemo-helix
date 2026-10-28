@@ -141,9 +141,7 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
    *  A head is only safe for line-delimited formats. A truncated JSON array
    *  cannot be parsed at all, and Parquet keeps its metadata in the footer, so
    *  both are read whole -- the same thing ``handleInferFromExisting`` does for
-   *  every format.
-   *  ponytail: whole-file Parquet download; switch to hyparquet range reads if
-   *  large Parquet datasets make the preview slow. */
+   *  every format. */
   const fileBytes = useMemo(() => {
     if (fileSize === undefined) return undefined;
     return format === 'json' || format === 'parquet' ? fileSize : Math.min(fileSize, HEAD_BYTES);
@@ -178,7 +176,6 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
       if (!buffer) {
         throw new Error('Could not read the selected file.');
       }
-      // Raw bytes, not decoded text: Parquet is binary and does not survive a UTF-8 round trip.
       const blob = new File([buffer], path);
       return {
         row: await getRowAtIndex(blob, format, rowIndex),

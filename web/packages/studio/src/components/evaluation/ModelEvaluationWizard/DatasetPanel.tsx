@@ -192,8 +192,9 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
           <Stack gap="density-sm" className="min-w-0">
             <Text kind="body/bold/lg">Field Mapping</Text>
             <Text kind="body/regular/md" className="text-secondary">
-              Choose which field holds the prompt to send, and which holds the answer to score the
-              response against. Reference is only needed by metrics that compare against it.
+              Choose which field holds the prompt to send to the model, and which holds the answer
+              to score its response against. Reference is only needed by metrics that compare
+              against it.
             </Text>
             <Flex align="start" gap="density-lg" className="min-w-0">
               {PRIMARY_CANONICAL_FIELDS.map(renderMappingSelect)}
