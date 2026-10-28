@@ -20,7 +20,26 @@ export interface InsightsModelPairFieldsProps {
   onFastModelChange: (value: string) => void;
   /** The stored pair a blank picker falls back to; makes each picker clearable. */
   stored?: { defaultModel?: string; fastModel?: string };
+  /** Disable when the warning is rendered separately outside collapsible fields. */
+  showWarning?: boolean;
 }
+
+export const InsightsModelPairWarning: FC<
+  Pick<InsightsModelPairFieldsProps, 'defaultModel' | 'fastModel' | 'stored'>
+> = ({ defaultModel, fastModel, stored }) => {
+  const lightning = [
+    defaultModel || stored?.defaultModel || '',
+    fastModel || stored?.fastModel || '',
+  ].some((model) =>
+    /(?:^|\/)(?:nvidia\/|(?:nvidia[-_]){1,2})nemotron[-_]3[._-]5[-_]lightning[-_]30b$/i.test(model)
+  );
+  return lightning ? (
+    <Banner kind="inline" status="warning">
+      Nemotron 3.5 Lightning 30B has known tool-calling failures in Compass. Try NVIDIA Nemotron 3.5
+      Super VL instead. You can continue with your selected model.
+    </Banner>
+  ) : null;
+};
 
 /**
  * A stored ref is shown even when it names another workspace, so it stays visible rather than
@@ -52,9 +71,6 @@ const fieldError = (label: string, value: string, storedRef?: string | null) => 
 const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
   const clearable = storedRef !== undefined;
   const error = fieldError(label, value, storedRef);
-  const lightning = /(?:^|\/)(?:nvidia\/|(?:nvidia-){1,2})nemotron-3[.-]5-lightning-30b$/i.test(
-    value || storedRef || ''
-  );
   return (
     <FormField slotLabel={label} slotError={error} status={error ? 'error' : undefined}>
       <Flex gap="density-sm" align="center">
@@ -75,12 +91,6 @@ const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, st
           </Button>
         ) : null}
       </Flex>
-      {lightning ? (
-        <Banner kind="inline" status="warning">
-          Nemotron 3.5 Lightning 30B has known tool-calling failures in Compass. Try NVIDIA Nemotron
-          3.5 Super VL instead. You can continue with your selected model.
-        </Banner>
-      ) : null}
     </FormField>
   );
 };
@@ -98,8 +108,12 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   onDefaultModelChange,
   onFastModelChange,
   stored,
+  showWarning = true,
 }) => (
   <Stack gap="density-md">
+    {showWarning && (
+      <InsightsModelPairWarning defaultModel={defaultModel} fastModel={fastModel} stored={stored} />
+    )}
     <Text className="text-secondary" kind="body/regular/xs">
       {unresolved
         ? 'The stored model pair could not be read, so both models are required for this run.'

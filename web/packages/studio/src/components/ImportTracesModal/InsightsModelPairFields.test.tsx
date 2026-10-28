@@ -10,11 +10,15 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
   ),
 }));
 
-describe('Compass model guidance', () => {
+describe.each([
+  'default/nvidia-nvidia-nemotron-3-5-lightning-30b',
+  'default/nvidia_nemotron_3_5_lightning_30b',
+  'default/nvidia_nvidia_nemotron_3_5_lightning_30b',
+  'default/nvidia-nemotron_3.5-lightning_30b',
+])('Compass model guidance for %s', (lightning) => {
   it.each(['default', 'fast'] as const)(
     'warns for the effective %s model and clears on override',
     (role) => {
-      const lightning = 'default/nvidia-nvidia-nemotron-3-5-lightning-30b';
       const props = {
         workspace: 'default',
         unresolved: false,
@@ -30,6 +34,13 @@ describe('Compass model guidance', () => {
         <InsightsModelPairFields
           {...props}
           {...{ [`${role}Model`]: 'default/nemotron-super-vl' }}
+        />
+      );
+      expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();
+      rerender(
+        <InsightsModelPairFields
+          {...props}
+          {...{ [`${role}Model`]: 'default/nvidia_nemotron_3_5_lightning_30b_custom' }}
         />
       );
       expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();

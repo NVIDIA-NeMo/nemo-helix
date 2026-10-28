@@ -39,7 +39,10 @@ import {
   readTraceFile,
   type SelectedTraceFile,
 } from '@studio/components/ImportTracesModal/ingestTraceFiles';
-import { InsightsModelPairFields } from '@studio/components/ImportTracesModal/InsightsModelPairFields';
+import {
+  InsightsModelPairFields,
+  InsightsModelPairWarning,
+} from '@studio/components/ImportTracesModal/InsightsModelPairFields';
 import { SelectedTraceFileTags } from '@studio/components/ImportTracesModal/SelectedTraceFileTags';
 import type { ImportMethod, ImportTraceResult } from '@studio/components/ImportTracesModal/types';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -341,6 +344,10 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                 </FormField>
               )}
 
+              {willRunInsights && (
+                <InsightsModelPairWarning defaultModel={defaultModel} fastModel={fastModel} />
+              )}
+
               {insightsAvailable && (
                 <AccordionRoot>
                   <AccordionItem value="settings" className="border-b-0">
@@ -366,6 +373,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                             fastModel={fastModel}
                             onDefaultModelChange={setDefaultModel}
                             onFastModelChange={setFastModel}
+                            showWarning={false}
                           />
                         )}
                       </Stack>

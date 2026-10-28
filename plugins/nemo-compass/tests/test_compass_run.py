@@ -313,12 +313,13 @@ async def test_ethos_reaches_the_compass_through_the_change_set_entry_point(
     assert build_kwargs["ethos"] == "# Ethos\n\nBe careful."
 
 
-async def test_resolved_lightning_model_warns_before_analysis_and_in_report(monkeypatch, caplog):
+@pytest.mark.parametrize("model", ["nvidia/nemotron-3.5-lightning-30b", "nvidia/nemotron_3_5_lightning_30b"])
+async def test_resolved_lightning_model_warns_before_analysis_and_in_report(monkeypatch, caplog, model):
     from nemo_compass_plugin.analysis.result import CompassResult
 
     seen = {}
     _stub_pipeline(monkeypatch, seen)
-    monkeypatch.setattr(FakeModelClient, "model", "nvidia/nemotron-3.5-lightning-30b")
+    monkeypatch.setattr(FakeModelClient, "model", model)
 
     async def analyze(*args, **kwargs):
         assert "NVIDIA Nemotron 3.5 Super VL" in caplog.text
