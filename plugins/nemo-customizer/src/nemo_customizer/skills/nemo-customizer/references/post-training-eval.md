@@ -58,11 +58,20 @@ Give the **nemo-evals** skill these inputs, the same for base and tuned except t
 |---|---|
 | Rows | The frozen `test.jsonl` |
 | Target | `Model(url="<gateway>/apis/inference-gateway/v2/workspaces/<ws>/openai/-/v1", name="<model ID>")`, where `<gateway>` is the platform URL the agent uses (`nemo inference get-url` prints the full route) |
-| Prompt template | `{"messages": "{{ item.messages[:-1] }}"}` |
+| Prompt template | `{"messages": "{{ item.messages[:-1] }}"}`; a model without a chat template uses **Models without a chat template** below |
 | Reference | `{{ item.messages[-1].content }}` |
 | Metric | Short answers: `F1Metric`. Exact labels: `ExactMatchMetric`. Tool calls: `ToolCallingMetric`. Open-ended answers: an LLM judge, chosen with nemo-evals' metric selection |
 | Inference | `temperature` 0; `max_tokens` 64 for short labels; for thinking models (Qwen3, Nemotron 3.5 Lightning) turn thinking off with `extra_body={"chat_template_kwargs": {"enable_thinking": false}}` |
 | Execution | A local SDK run, which reaches the gateway at the agent's platform URL. A platform eval job also works, but its container must reach that URL: true for a local Docker platform, not for `localhost` on Kubernetes |
+
+**Models without a chat template.** vLLM rejects chat requests for a model with no chat template, so score it through the completions endpoint, sending the text the model trained on. The SDK sends a completions request when the prompt template has `prompt` instead of `messages`. The rows stay in CHAT shape, and the reference is unchanged.
+
+| Trained on | Prompt template |
+|---|---|
+| Automodel `prompt` / `completion` rows | `{"prompt": "{{ item.messages[0].content }} "}`: Automodel joins prompt and completion with a space |
+| Unsloth `text` rows (`to_text` in `hf-conversion.md`) | `{"prompt": "{{ item.messages[0].content }}\n"}` |
+
+Leave out `chat_template_kwargs`; it only applies to chat requests.
 
 **Model IDs.** Every model is named by its entity ID on that one route:
 
@@ -98,7 +107,7 @@ Training and evaluation use the **same CHAT JSONL row shape**:
 }
 ```
 
-The **final** turn is the label; every earlier turn is context. Send `messages[:-1]` and score against `messages[-1].content`. Do not flatten rows to `prompt` / `expected`, and do not send the label turn.
+The **final** turn is the label; every earlier turn is context. Send `messages[:-1]` and score against `messages[-1].content`. Do not flatten the rows to `prompt` / `expected`, and do not send the label turn; a model without a chat template gets its prompt from the completions template in **Hand-off to nemo-evals**.
 
 ## Reading the result
 
