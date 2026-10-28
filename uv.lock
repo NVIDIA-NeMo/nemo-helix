@@ -5532,6 +5532,7 @@ nemo-deployments-plugin = [
     { name = "nemo-helix-plugin" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "sqlalchemy" },
 ]
 nemo-evals-plugin = [
     { name = "cloudpickle" },
@@ -5771,6 +5772,7 @@ plugins = [
     { name = "python-on-whales" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "sqlalchemy" },
     { name = "typer" },
     { name = "tzdata" },
     { name = "uvicorn" },
@@ -6788,7 +6790,9 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'core-service'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'entities-service'", specifier = ">=2.0.0" },
+    { name = "sqlalchemy", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'nhx-common'", specifier = ">=2.0.0" },
+    { name = "sqlalchemy", marker = "extra == 'plugins'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'services'", specifier = ">=2.0.0" },
     { name = "sqlmodel", marker = "extra == 'all'", specifier = ">=0.0.22" },
     { name = "sqlmodel", marker = "extra == 'core-service'", specifier = ">=0.0.22" },
