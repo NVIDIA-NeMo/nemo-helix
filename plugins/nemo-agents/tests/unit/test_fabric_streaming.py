@@ -9,10 +9,12 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStream
+from nemo_agents_plugin.fabric.serving_models import ChatCompletionStreamDelta
 from nemo_agents_plugin.fabric.streaming import (
     FabricStreamResultError,
+    extract_assistant_delta,
     extract_assistant_text_delta,
-    iter_fabric_assistant_text_deltas,
+    iter_fabric_assistant_deltas,
     iter_openai_chat_completion_sse,
 )
 
@@ -35,10 +37,10 @@ class _FakeFabricRuntimeStream(FabricRuntimeStream):
         return self._result
 
 
-async def _content_chunks() -> AsyncIterator[str]:
-    yield "hel"
-    yield ""
-    yield "lo"
+async def _deltas() -> AsyncIterator[ChatCompletionStreamDelta]:
+    yield ChatCompletionStreamDelta(content="hel")
+    yield ChatCompletionStreamDelta(reasoning_content="think")
+    yield ChatCompletionStreamDelta(content="lo")
 
 
 def _event_payload(event: str) -> dict[str, object]:
@@ -48,17 +50,17 @@ def _event_payload(event: str) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_iter_openai_chat_completion_sse_frames_content_chunks() -> None:
+async def test_iter_openai_chat_completion_sse_frames_deltas() -> None:
     events = [
         event
         async for event in iter_openai_chat_completion_sse(
             completion_id="chatcmpl-test",
-            content_chunks=_content_chunks(),
+            deltas=_deltas(),
             model="test-model",
         )
     ]
 
-    assert len(events) == 5
+    assert len(events) == 6
     assert events[-1] == "data: [DONE]\n\n"
 
     first_chunk = _event_payload(events[0])
@@ -71,9 +73,12 @@ async def test_iter_openai_chat_completion_sse_frames_content_chunks() -> None:
     assert second_chunk["choices"] == [{"index": 0, "delta": {"content": "hel"}}]
 
     third_chunk = _event_payload(events[2])
-    assert third_chunk["choices"] == [{"index": 0, "delta": {"content": "lo"}}]
+    assert third_chunk["choices"] == [{"index": 0, "delta": {"reasoning_content": "think"}}]
 
-    terminal_chunk = _event_payload(events[3])
+    fourth_chunk = _event_payload(events[3])
+    assert fourth_chunk["choices"] == [{"index": 0, "delta": {"content": "lo"}}]
+
+    terminal_chunk = _event_payload(events[4])
     assert terminal_chunk["choices"] == [{"index": 0, "delta": {}, "finish_reason": "stop"}]
 
 
@@ -164,7 +169,7 @@ def test_extract_assistant_text_delta_skips_non_assistant_records(record: dict[s
 
 
 @pytest.mark.asyncio
-async def test_iter_fabric_assistant_text_deltas_preserves_extracted_text_order() -> None:
+async def test_iter_fabric_assistant_deltas_preserves_extracted_text_order() -> None:
     stream = _FakeFabricRuntimeStream(
         [
             {"kind": "scope", "scope_category": "start", "name": "request"},
@@ -174,12 +179,12 @@ async def test_iter_fabric_assistant_text_deltas_preserves_extracted_text_order(
         ]
     )
 
-    assert [text async for text in iter_fabric_assistant_text_deltas(stream)] == ["hel", "lo"]
+    assert [delta.content async for delta in iter_fabric_assistant_deltas(stream)] == ["hel", "lo"]
     assert stream.result_awaited is True
 
 
 @pytest.mark.asyncio
-async def test_iter_fabric_assistant_text_deltas_skips_duplicate_turn_summary() -> None:
+async def test_iter_fabric_assistant_deltas_skips_duplicate_turn_summary() -> None:
     stream = _FakeFabricRuntimeStream(
         [
             {
@@ -206,25 +211,198 @@ async def test_iter_fabric_assistant_text_deltas_skips_duplicate_turn_summary() 
         ]
     )
 
-    assert [text async for text in iter_fabric_assistant_text_deltas(stream)] == ["hello"]
+    assert [delta.content async for delta in iter_fabric_assistant_deltas(stream)] == ["hello"]
 
 
 @pytest.mark.asyncio
-async def test_iter_fabric_assistant_text_deltas_falls_back_to_terminal_response() -> None:
+async def test_iter_fabric_assistant_deltas_falls_back_to_terminal_response() -> None:
     stream = _FakeFabricRuntimeStream(
         [{"kind": "scope", "scope_category": "start", "name": "request"}],
         result=FabricRuntimeResult(status="succeeded", response="terminal response"),
     )
 
-    assert [text async for text in iter_fabric_assistant_text_deltas(stream)] == ["terminal response"]
+    assert [delta.content async for delta in iter_fabric_assistant_deltas(stream)] == ["terminal response"]
 
 
 @pytest.mark.asyncio
-async def test_iter_fabric_assistant_text_deltas_raises_failed_terminal_result() -> None:
+async def test_iter_fabric_assistant_deltas_raises_failed_terminal_result() -> None:
     stream = _FakeFabricRuntimeStream(
         [{"data": {"choices": [{"delta": {"content": "partial"}}]}}],
         result=FabricRuntimeResult(status="failed", response="done", error={"message": "terminal failure"}),
     )
 
     with pytest.raises(FabricStreamResultError, match="terminal failure"):
-        _ = [text async for text in iter_fabric_assistant_text_deltas(stream)]
+        _ = [delta.content async for delta in iter_fabric_assistant_deltas(stream)]
+
+
+def _llm_end(data: object, *, annotated_response: dict[str, object] | None = None) -> dict[str, object]:
+    record: dict[str, object] = {
+        "kind": "scope",
+        "scope_category": "end",
+        "category": "llm",
+        "name": "model",
+        "data": data,
+    }
+    if annotated_response is not None:
+        record["category_profile"] = {"annotated_response": annotated_response, "model_name": "model"}
+    return record
+
+
+# Shape captured from Relay's LangChain middleware for an AIMessage with reasoning and a tool call.
+_LANGCHAIN_TOOL_TURN = _llm_end(
+    {
+        "__nemo_relay_integrations_langchain_model_response": {
+            "messages": [
+                {
+                    "type": "ai",
+                    "data": {
+                        "type": "ai",
+                        "additional_kwargs": {"reasoning_content": "Thinking about adding."},
+                        "content": [
+                            {"type": "reasoning", "reasoning": "I should add."},
+                            {"type": "text", "text": "Let me add."},
+                        ],
+                        "tool_calls": [{"args": {"a": 1, "b": 2}, "id": "call_1", "name": "add", "type": "tool_call"}],
+                    },
+                }
+            ]
+        }
+    },
+    annotated_response={
+        "finish_reason": "tool_use",
+        "message": "Let me add.",
+        "tool_calls": [{"arguments": {"a": 1, "b": 2}, "id": "call_1", "name": "add"}],
+    },
+)
+
+
+def test_extract_assistant_delta_from_relay_langchain_llm_scope() -> None:
+    delta = extract_assistant_delta(_LANGCHAIN_TOOL_TURN)
+
+    assert delta is not None
+    assert delta.model_dump(exclude_none=True) == {
+        "content": "Let me add.",
+        "reasoning_content": "Thinking about adding.",
+        "tool_calls": [
+            {
+                "index": 0,
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "add", "arguments": '{"a": 1, "b": 2}'},
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "reasoning_content": "plan",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {"name": "search", "arguments": '{"q":"x"}'},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
+            {
+                "reasoning_content": "plan",
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "search", "arguments": '{"q":"x"}'},
+                    }
+                ],
+            },
+        ),
+        (
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "hmm"},
+                    {"type": "text", "text": "Searching."},
+                    {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"q": "x"}},
+                ],
+            },
+            {
+                "content": "Searching.",
+                "reasoning_content": "hmm",
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "toolu_1",
+                        "type": "function",
+                        "function": {"name": "search", "arguments": '{"q": "x"}'},
+                    }
+                ],
+            },
+        ),
+    ],
+    ids=["openai", "anthropic"],
+)
+def test_extract_assistant_delta_from_provider_llm_scopes(data: dict[str, object], expected: dict[str, object]) -> None:
+    delta = extract_assistant_delta(_llm_end(data))
+
+    assert delta is not None
+    assert delta.model_dump(exclude_none=True) == expected
+
+
+def test_extract_assistant_delta_skips_tool_scopes() -> None:
+    record = {
+        "kind": "scope",
+        "scope_category": "end",
+        "category": "tool",
+        "name": "add",
+        "category_profile": {"tool_call_id": "call_1"},
+        "data": {"content": "3", "tool_call_id": "call_1", "type": "tool"},
+    }
+
+    assert extract_assistant_delta(record) is None
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_indexes_tool_calls_across_stream() -> None:
+    stream = _FakeFabricRuntimeStream(
+        [
+            _LANGCHAIN_TOOL_TURN,
+            _llm_end(
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_2", "name": "add", "input": {}}]}
+            ),
+            _llm_end({}, annotated_response={"message": "The answer is 3."}),
+        ],
+        result=FabricRuntimeResult(status="succeeded", response="The answer is 3."),
+    )
+
+    deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert [delta.content for delta in deltas] == ["Let me add.", None, "The answer is 3."]
+    assert [[call.index for call in delta.tool_calls or ()] for delta in deltas] == [[0], [1], []]
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_falls_back_to_response_after_tool_only_turns() -> None:
+    stream = _FakeFabricRuntimeStream(
+        [
+            _llm_end(
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "add", "input": {}}]}
+            )
+        ],
+        result=FabricRuntimeResult(status="succeeded", response="final"),
+    )
+
+    deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert [delta.content for delta in deltas] == [None, "final"]
