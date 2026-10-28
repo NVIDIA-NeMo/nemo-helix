@@ -694,8 +694,9 @@ fileset-seed-datasets = "data_designer_nemo.plugins:fileset_seed_datasets_plugin
 nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_exporter"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.agents.execute_extensions"]
-"insights.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
+[project.entry-points."nemo.agents.post_run_actions"]
+"agents.noop" = "nemo_agents_plugin.jobs.post_run_actions:NoopPostRunAction"
+"insights.analysis" = "nemo_compass_plugin.post_run_actions:CompassAnalysisAction"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli"]
