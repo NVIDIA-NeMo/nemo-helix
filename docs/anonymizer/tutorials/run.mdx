@@ -119,7 +119,22 @@ The run path rejects local file paths in `data.source` — use a fileset referen
 
 ## Step 4: Get Results
 
-Track the platform job first. The job is ready for artifact download when its status is `completed`:
+For the SDK job created in Step 3, wait for completion and download its artifacts before loading them. The job is ready for artifact download when its status is `completed`:
+
+```python
+from pathlib import Path
+from tempfile import mkdtemp
+
+output_dir = Path(mkdtemp(prefix="anonymizer-artifacts-"))
+job.wait_until_done()
+job.download_artifacts(path=output_dir)
+```
+
+`get_job_status()` reads the current status, `check_if_complete()` tests whether artifacts are ready, `wait_until_done()` blocks until a terminal state, and `download_artifacts()` downloads and extracts the result.
+
+### CLI equivalent
+
+If you submitted the job with the CLI instead, track the job using the name it printed:
 
 ```bash
 # Replace with the job name printed by `nemo anonymizer run`.
@@ -139,30 +154,17 @@ tar -xzf /tmp/anonymizer-artifacts.tar.gz -C /tmp/anonymizer-artifacts
 ls /tmp/anonymizer-artifacts/artifacts
 ```
 
-Then point `AnonymizerJobResults` at the extracted `artifacts` directory:
+### Load the Downloaded Results
+
+Both download methods produce an `artifacts` directory under the extraction root. The SDK flow above sets `output_dir` to a fresh directory. If you used only the CLI, set `output_dir` to the directory you extracted into, as shown in the comment below, before running this block:
 
 ```python
 from pathlib import Path
-
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
 
-results = AnonymizerJobResults(Path("/tmp/anonymizer-artifacts/artifacts"))
-
-dataset = results.load_dataset()
-trace   = results.load_trace()
-failed  = results.load_failed_records()
-```
-
-If you used the SDK, use the `AnonymizerJobResource` methods directly. `get_job_status()` reads the current status, `check_if_complete()` tests whether artifacts are ready, `wait_until_done()` blocks until a terminal state, and `download_artifacts()` downloads and extracts the result:
-
-```python
-job = anonymizer.run(request)
-
-status = job.get_job_status()
-is_done = job.check_if_complete()
-
-job.wait_until_done()
-results = job.download_artifacts()
+# CLI-only, after the shell download and extraction above:
+# output_dir = Path("/tmp/anonymizer-artifacts")
+results = AnonymizerJobResults(output_dir / "artifacts")
 
 dataset = results.load_dataset()
 trace   = results.load_trace()

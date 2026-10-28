@@ -125,10 +125,9 @@ nemo anonymizer preview \
 
 <Accordion title="Async client">
 
-`AsyncAnonymizerResource.preview` has the same signature and return type:
+`AsyncAnonymizerResource.preview` has the same signature and return type. In a notebook, use top-level `await` (the notebook already runs an event loop):
 
 ```python
-import asyncio
 from nemo_anonymizer_plugin.sdk.resources import AsyncAnonymizerResource
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
@@ -140,8 +139,10 @@ async def run_preview():
     finally:
         await async_client.close()
 
-preview = asyncio.run(run_preview())
+preview = await run_preview()
 ```
+
+In a standalone Python script, use `asyncio.run(run_preview())` instead (with `import asyncio`).
 
 </Accordion>
 
