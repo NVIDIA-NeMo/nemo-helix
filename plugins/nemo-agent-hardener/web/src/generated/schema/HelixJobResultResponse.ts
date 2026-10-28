@@ -13,6 +13,7 @@ export interface HelixJobResultResponse {
   job: string;
   workspace: string;
   project?: string;
+  attempt_id?: string;
   created_at?: string;
   updated_at?: string;
   artifact_url: string;

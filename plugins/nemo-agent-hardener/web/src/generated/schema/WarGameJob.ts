@@ -16,6 +16,7 @@ import type { WarGameSpec } from './WarGameSpec.ts';
 
 export interface WarGameJob {
   id?: string;
+  attempt_id?: string;
   name: string;
   description?: string;
   project?: string;

@@ -15,4 +15,7 @@ page_cursor?: string;
  * @exclusiveMinimum 0
  */
 tail?: number;
+attempt_id?: string;
+step_id?: string;
+task_id?: string;
 };
