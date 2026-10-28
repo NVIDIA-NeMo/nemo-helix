@@ -86,7 +86,7 @@ _DEFAULT_LIST_COLUMNS = [
     Column("created_at", None),
 ]
 
-_TRACE_FILTER_JSON_ONLY = "JSON-only fields:\n  started_at: {gte: str, lte: str}\n\n"
+_TRACE_FILTER_JSON_ONLY = "JSON-only fields:\n  started_at: {$gte: str, $lte: str}\n\n"
 _FILTER_HELP_PREFIX = (
     "Use --filter with JSON for complex/nested queries, or --filter.FIELD options for simple fields. "
     "Both can be combined, with field options taking precedence.\n"
@@ -758,7 +758,7 @@ def list_annotations(
             "--filter",
             metavar="FILTER_JSON",
             help=_FILTER_HELP_PREFIX
-            + "JSON-only fields:\n  created_at: {gte: str, lte: str}\n  value_numeric: {gte: float, lte: float}\n\n"
+            + "JSON-only fields:\n  created_at: {$gte: str, $lte: str}\n  value_numeric: {$gte: float, $lte: float}\n\n"
             + "Filter annotations by span_id, session_id, kind, name, created_by, and created_at range.",
             rich_help_panel="Filter Options",
         ),
@@ -987,7 +987,7 @@ def list_evaluator_results(
             "--filter",
             metavar="FILTER_JSON",
             help=_FILTER_HELP_PREFIX
-            + "JSON-only fields:\n  created_at: {gte: str, lte: str}\n  value: {gte: float, lte: float}\n\n"
+            + "JSON-only fields:\n  created_at: {$gte: str, $lte: str}\n  value: {$gte: float, $lte: float}\n\n"
             + "Filter evaluator results by span_id, session_id, name, data_type, created_by, value range, and created_at range.",
             rich_help_panel="Filter Options",
         ),

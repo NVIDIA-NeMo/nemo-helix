@@ -215,7 +215,7 @@ def list_virtual_models(
         typer.Option(
             "--filter",
             metavar="FILTER_JSON",
-            help="Use --filter with JSON for complex/nested queries, or --filter.FIELD options for simple fields. Both can be combined, with field options taking precedence.\nJSON-only fields:\n  created_at: {gte: str, lte: str}\n  updated_at: {gte: str, lte: str}\n\nFilter virtual models by workspace, project, name, default_model_entity, guardrail_config, created_at, and updated_at.",
+            help="Use --filter with JSON for complex/nested queries, or --filter.FIELD options for simple fields. Both can be combined, with field options taking precedence.\nJSON-only fields:\n  created_at: {$gte: str, $lte: str}\n  updated_at: {$gte: str, $lte: str}\n\nFilter virtual models by workspace, project, name, default_model_entity, guardrail_config, created_at, and updated_at.",
             rich_help_panel="Filter Options",
         ),
     ] = None,

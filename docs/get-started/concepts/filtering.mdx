@@ -226,6 +226,11 @@ either team. An operator placed directly on the field, such as `?filter[labels][
 or a plain value such as `?filter[labels]=agentic`, compares against the whole object and
 returns `400 Bad Request`.
 
+Any other field takes a plain value or an operator object. An object of plain keys, such as
+`{"name": {"first": "x"}}`, returns `400 Bad Request`, and so does an object that mixes operators
+with plain keys, such as `{"name": {"$eq": "x", "tier": "gold"}}`. In JSON filters, operators need
+the `$` prefix: write `{"created_at": {"$gte": "2025-01-01"}}`, not `{"created_at": {"gte": "2025-01-01"}}`.
+
 ## Common patterns
 
 ### Date range

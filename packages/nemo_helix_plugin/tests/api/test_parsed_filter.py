@@ -311,9 +311,10 @@ class TestNamespaceDictExpansion:
         assert "key/value pairs" in resp.json()["detail"]
 
     def test_non_namespace_dict_value_is_not_expanded(self):
+        # Only namespace fields get per-key expansion; an object elsewhere is rejected (see TestObjectValues).
         resp = self._get("/items", params={"filter": '{"name": {"first": "x"}}'})
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["operation"] == {"name": {"$eq": {"first": "x"}}}
+        assert resp.status_code == 400
+        assert "not an object" in resp.json()["detail"]
 
     def test_mixed_operator_and_subkey_rejected(self):
         resp = self._get("/items", params={"filter": '{"labels": {"team": {"$eq": "x", "lead": "y"}}}'})
@@ -324,3 +325,53 @@ class TestNamespaceDictExpansion:
         resp = self._get("/items", params={"filter": '{"labels": {}}'})
         assert resp.status_code == 400
         assert "key/value pairs" in resp.json()["detail"]
+
+
+class TestObjectValues:
+    """Comparing a non-namespace field to an object matched nothing or crashed the store; now a 400."""
+
+    @pytest.mark.parametrize(
+        ("params", "detail"),
+        [
+            ({"filter": '{"name": {"first": "x"}}'}, "not an object"),
+            ({"filter[name][first]": "x"}, "not an object"),
+            ({"filter": '{"name": {}}'}, "not an object"),
+            ({"filter": '{"name": {"$eq": {"first": "x"}}}'}, "not an object"),
+            ({"filter": '{"$or": [{"name": {"first": "x"}}, {"status": "a"}]}'}, "not an object"),
+            ({"filter": '{"created_at": {"gte": "2024-01-01"}}'}, "without '$'"),
+            ({"filter": '{"name": {"$in": [{"first": "x"}]}}'}, "not objects"),
+            ({"filter": '{"name": {"$nin": ["a", {"first": "x"}]}}'}, "not objects"),
+            ({"filter": '{"name": {"$eq": "x", "tier": "gold"}}'}, "mixes operators with sub-keys"),
+            (
+                {"filter[created_at][gte]": "2024-01-01", "filter[created_at][foo]": "x"},
+                "mixes operators with sub-keys",
+            ),
+        ],
+    )
+    def test_rejected(self, params, detail):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params=params)
+        assert resp.status_code == 400
+        assert detail in resp.json()["detail"]
+
+    def test_unprefixed_operator_hint_names_the_fix(self):
+        resp = TestClient(_make_app(SampleFilter)).get(
+            "/items", params={"filter": '{"created_at": {"gte": "2024-01-01"}}'}
+        )
+        assert "$gte" in resp.json()["detail"]
+
+    def test_elem_match_criteria_object_allowed(self):
+        resp = TestClient(_make_app(SampleFilter)).get(
+            "/items", params={"filter": '{"name": {"$elemMatch": {"key": "a", "value": "b"}}}'}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"name": {"$elemMatch": {"key": "a", "value": "b"}}}
+
+    def test_scalar_list_still_works(self):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params={"filter": '{"name": {"$in": ["a", "b"]}}'})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"name": {"$in": ["a", "b"]}}
+
+    def test_bracket_operator_alias_still_works(self):
+        resp = TestClient(_make_app(SampleFilter)).get("/items", params={"filter[created_at][gte]": "2024-01-01"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["operation"] == {"created_at": {"$gte": "2024-01-01"}}

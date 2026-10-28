@@ -334,6 +334,38 @@ def test_list_models_adapters_exists_preserves_relationship_field(client, mock_m
     assert parsed_filter.operation.to_dict() == {"adapters": {"$exists": True}}
 
 
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("filter[adapters]=true", {"adapters": {"$exists": True}}),
+        ("filter[adapters]=false", {"adapters": {"$exists": False}}),
+        ('filter={"adapters":false}', {"adapters": {"$exists": False}}),
+    ],
+)
+def test_list_models_adapters_boolean_becomes_relationship_exists(
+    client, mock_model_entity_service, sample_page, query, expected
+):
+    """Regression: the generic null check on the ``adapters`` relationship inverted true and false."""
+    mock_model_entity_service.list_model_entities.return_value = sample_page
+
+    response = client.get(f"/apis/models/v2/workspaces/nvidia/models?{query}")
+
+    assert response.status_code == 200, response.text
+    parsed_filter = mock_model_entity_service.list_model_entities.call_args.kwargs["parsed_filter"]
+    assert parsed_filter.operation.to_dict() == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["filter[adapters]=lora", "filter[adapters][finetuning_type]=lora", "filter[base_model][name]=llama-3"],
+)
+def test_list_models_rejects_unsupported_adapter_and_base_model_filters(client, mock_model_entity_service, query):
+    response = client.get(f"/apis/models/v2/workspaces/nvidia/models?{query}")
+
+    assert response.status_code == 400, response.text
+    mock_model_entity_service.list_model_entities.assert_not_called()
+
+
 def test_list_models_studio_custom_models_default_filter(client, mock_model_entity_service, sample_page):
     """Studio's default Custom Models filter: $or of has-base-model and has-adapters.
 

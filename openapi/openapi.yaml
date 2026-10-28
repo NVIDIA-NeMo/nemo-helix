@@ -10800,18 +10800,6 @@ components:
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
-    BaseModelFilter:
-      additionalProperties: false
-      description: Filter for base model properties.
-      properties:
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Filter by name of the base model.
-          title: Name
-      title: BaseModelFilter
-      type: object
     CPUExecutionProvider:
       properties:
         provider:
@@ -14227,16 +14215,6 @@ components:
       - grpo
       title: FinetuningType
       description: Finetuning types.
-    FinetuningTypeFilter:
-      additionalProperties: false
-      description: Filter for PEFT-related properties.
-      properties:
-        finetuning_type:
-          allOf:
-          - $ref: '#/components/schemas/FinetuningType'
-          description: Filter models with adapters with this fine-tuning type.
-      title: FinetuningTypeFilter
-      type: object
     FloatFilter:
       additionalProperties: false
       properties:
@@ -18320,18 +18298,16 @@ components:
           type: string
         base_model:
           anyOf:
-          - $ref: '#/components/schemas/BaseModelFilter'
           - type: boolean
           - type: string
           description: 'Filter by base model: true = has a base model, false = no
-            base model, { name: string } or string = match base model name.'
+            base model, string = match base model name.'
           title: Base Model
         adapters:
-          anyOf:
-          - $ref: '#/components/schemas/FinetuningTypeFilter'
-          - type: boolean
-          description: Filter models with Parameter Efficient Fine-tuning Adapters.
+          description: 'Filter by Parameter Efficient Fine-tuning adapters: true =
+            has at least one adapter, false = has none.'
           title: Adapters
+          type: boolean
         finetuning_type:
           anyOf:
           - $ref: '#/components/schemas/FinetuningType'

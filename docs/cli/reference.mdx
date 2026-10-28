@@ -1638,8 +1638,8 @@ nemo files filesets list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter filesets by name, description, purpose, storage_type, created_at, and updated_at.
 * `--filter.description`
@@ -2060,8 +2060,8 @@ nemo inference deployment-configs list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter deployment configs by workspace, project, model_entity_id, name, description, created_at, and updated_at.
 * `--filter.description`
@@ -2399,8 +2399,8 @@ nemo inference deployments list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter deployments by workspace, project, status, config, model_provider_id, name, status_message, created_at, and updated_at.
 * `--filter.config`
@@ -3504,8 +3504,8 @@ nemo inference prompts list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter prompts by workspace, project, name, description, created_at, and updated_at.
 * `--filter.description`
@@ -3722,8 +3722,8 @@ nemo inference providers list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter model providers by workspace, project, status, model_deployment_id, name, description, host_url, created_at, and updated_at.
 * `--filter.description`
@@ -4006,8 +4006,8 @@ nemo inference virtual-models list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter virtual models by workspace, project, name, default_model_entity, guardrail_config, created_at, and updated_at.
 * `--filter.default-model-entity`
@@ -4328,8 +4328,8 @@ nemo jobs list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter jobs by workspace, project, name, status, source, created_at, and updated_at.
 * `--filter.name`
@@ -5225,8 +5225,8 @@ nemo models list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter models by name, project, workspace, base_model, adapters, finetuning_type, prompt, lora_enabled, description, created_at, and updated_at.
 * `--filter.adapters`
@@ -8475,8 +8475,8 @@ nemo guardrail configs list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  updated_at: \{gte: str, lte: str}
+  created_at: \{$gte: str, $lte: str}
+  updated_at: \{$gte: str, $lte: str}
 
 Filter guardrail configs by name, description, project, created_at, and updated_at.
 * `--filter.description`
@@ -11043,8 +11043,8 @@ nemo intake annotations list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  value_numeric: \{gte: float, lte: float}
+  created_at: \{$gte: str, $lte: str}
+  value_numeric: \{$gte: float, $lte: float}
 
 Filter annotations by span_id, session_id, kind, name, created_by, and created_at range.
 * `--filter.created-by`
@@ -11182,8 +11182,8 @@ nemo intake evaluator-results list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  created_at: \{gte: str, lte: str}
-  value: \{gte: float, lte: float}
+  created_at: \{$gte: str, $lte: str}
+  value: \{$gte: float, $lte: float}
 
 Filter evaluator results by span_id, session_id, name, data_type, created_by, value range, and created_at range.
 * `--filter.created-by`
@@ -11528,7 +11528,7 @@ nemo intake spans list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  started_at: \{gte: str, lte: str}
+  started_at: \{$gte: str, $lte: str}
 
 Filter spans by session_id, trace_id, parent_span_id, project, evaluation_name, test_case_name, source, kind, status, model, tool_name, provider, agent_id, agent_name, and started_at. Every field takes one exact value, except started_at, which takes gte and lte.
 * `--filter.agent-id`
@@ -11673,7 +11673,7 @@ nemo intake spans groups list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  started_at: \{gte: str, lte: str}
+  started_at: \{$gte: str, $lte: str}
 
 Filter spans by the same fields as the span list endpoint, then group matching spans by the comma-separated fields in the by query parameter.
 * `--filter.agent-id`
@@ -11744,7 +11744,7 @@ nemo intake traces get-metrics [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  started_at: \{gte: str, lte: str}
+  started_at: \{$gte: str, $lte: str}
 
 Filter the traces the metrics are computed over. Accepts the same fields as the traces list, so agent_name scopes the rollup to one agent. Without a started_at lower bound the rollup covers the last 7 days.
 * `--filter.id`
@@ -11787,7 +11787,7 @@ nemo intake traces list [OPTIONS]
 
 * `--filter FILTER_JSON`: Use --filter with JSON for complex/nested queries, or --filter. FIELD options for simple fields. Both can be combined, with field options taking precedence.
 JSON-only fields:
-  started_at: \{gte: str, lte: str}
+  started_at: \{$gte: str, $lte: str}
 
 Filter root-span-backed traces by id, session_id, root status, root span started_at, evaluation_name, test_case_name, and agent_name.
 * `--filter.id`
