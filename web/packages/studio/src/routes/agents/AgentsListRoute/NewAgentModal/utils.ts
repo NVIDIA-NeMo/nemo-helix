@@ -66,9 +66,10 @@ export const collectAgentEntries = (picked: PickedFile[]): UploadAgentEntry[] =>
     entries.push({ path, file });
   }
 
-  const alias = entries.find((entry) => entry.path === 'agent.yml');
+  const aliasIndex = entries.findIndex((entry) => entry.path === 'agent.yml');
+  const alias = entries[aliasIndex];
   if (alias && !entries.some((entry) => entry.path === AGENT_CONFIG_FILENAME)) {
-    alias.path = AGENT_CONFIG_FILENAME;
+    entries[aliasIndex] = { ...alias, path: AGENT_CONFIG_FILENAME };
   }
 
   return entries.sort((left, right) => pathCollator.compare(left.path, right.path));
