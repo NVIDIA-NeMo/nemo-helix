@@ -4,7 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { Cog, Commit, Identification } from '@nemo/icons/icons';
+import { Cog, Commit, CopyDoc } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
@@ -78,7 +78,6 @@ export const AgentDetailRoute: FC = () => {
   const { [ROUTE_PARAMS.agentName]: agentName } = useParams<{ agentName: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | undefined>();
-  const [logsDeploymentName, setLogsDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
@@ -113,7 +112,7 @@ export const AgentDetailRoute: FC = () => {
     agentEvals,
     isAgentEvalsPending,
     agentJobs,
-    chatDeployment,
+    selectedDeployment,
     deleteDeploymentMutation,
     healthyDeployments,
     isDeploying,
@@ -170,7 +169,7 @@ export const AgentDetailRoute: FC = () => {
   };
 
   const viewLogs = (deployment: AgentDeployment) => {
-    setLogsDeploymentName(deployment.name);
+    setSelectedDeploymentName(deployment.name);
     setSelectedTab('logs');
   };
 
@@ -252,20 +251,6 @@ export const AgentDetailRoute: FC = () => {
     navigate,
   ]);
 
-  const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
-  const statusPillLabel =
-    healthyDeployments.length > 0
-      ? 'Healthy'
-      : status === 'pending' || status === 'starting'
-        ? 'Deploying'
-        : status === 'deleting'
-          ? 'Deleting'
-          : status === 'failed'
-            ? 'Failed'
-            : agentDeployments.length === 0
-              ? 'No deployments'
-              : (status ?? 'Unknown');
-
   const displayName = agent?.name ?? agentName ?? 'Agent details';
 
   const copyAgentId = async () => {
@@ -290,9 +275,8 @@ export const AgentDetailRoute: FC = () => {
               </Text>
               <Flex align="center" gap="3" className="shrink-0">
                 <HeaderDeploymentSelect
-                  healthyDeployments={healthyDeployments}
-                  selected={chatDeployment}
-                  statusLabel={statusPillLabel}
+                  deployments={agentDeployments}
+                  selected={selectedDeployment}
                   canCreate={!!agentName && !isDeploying && !isAgentPending}
                   onSelect={setSelectedDeploymentName}
                   onCreate={onDeploy}
@@ -305,7 +289,7 @@ export const AgentDetailRoute: FC = () => {
                     aria-label={`Copy agent ID ${agent.id}`}
                   >
                     <Badge kind="solid" color="gray" className="cursor-pointer">
-                      <Identification size="12" aria-hidden />
+                      <CopyDoc size="12" aria-hidden />
                       ID
                       <span className="max-w-0 overflow-hidden whitespace-nowrap transition-[max-width] duration-200 group-hover:max-w-96 group-focus-visible:max-w-96">
                         {agent.id}
@@ -443,12 +427,7 @@ export const AgentDetailRoute: FC = () => {
           </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="logs">
-            <DeploymentLogsView
-              workspace={workspace}
-              deployments={agentDeployments}
-              selectedDeploymentName={logsDeploymentName}
-              onSelectDeployment={setLogsDeploymentName}
-            />
+            <DeploymentLogsView workspace={workspace} deployment={selectedDeployment} />
           </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-hidden p-0 pt-6" value="chat">
@@ -456,12 +435,11 @@ export const AgentDetailRoute: FC = () => {
               <ChatPlaygroundContent
                 workspace={workspace}
                 agentName={agentName}
-                chatDeployment={chatDeployment}
-                healthyDeployments={healthyDeployments}
+                deployment={selectedDeployment}
+                hasHealthyDeployments={healthyDeployments.length > 0}
                 isDeploymentsLoading={isDeploymentsLoading}
                 isDeploying={isDeploying}
                 chatAreaRef={chatAreaRef}
-                onSelectDeployment={setSelectedDeploymentName}
                 onDeploy={onDeploy}
                 canDeploy={canDeploy}
                 isAgentPending={isAgentPending}

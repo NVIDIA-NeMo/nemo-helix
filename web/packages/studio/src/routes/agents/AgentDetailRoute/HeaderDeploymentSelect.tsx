@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { Check } from '@nemo/icons/icons';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
@@ -8,52 +9,58 @@ import {
   DropdownItem,
   DropdownRoot,
   DropdownTrigger,
+  Flex,
   MenuSection,
 } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 interface HeaderDeploymentSelectProps {
-  healthyDeployments: AgentDeployment[];
+  /** Every deployment of the agent, any status: unhealthy ones stay pickable for their logs. */
+  deployments: AgentDeployment[];
   selected?: AgentDeployment;
-  /** Shown in place of a deployment name when there is none to pick, e.g. "No deployments". */
-  statusLabel: string;
   canCreate: boolean;
   onSelect: (name: string) => void;
   onCreate: () => void;
 }
 
-/** Picks the healthy deployment the page talks to; falls back to the deployment status when none is healthy. */
+/** Picks the deployment the Chat and Logs tabs target. */
 export const HeaderDeploymentSelect: FC<HeaderDeploymentSelectProps> = ({
-  healthyDeployments,
+  deployments,
   selected,
-  statusLabel,
   canCreate,
   onSelect,
   onCreate,
 }) => {
-  const named = healthyDeployments.filter((d): d is AgentDeployment & { name: string } => !!d.name);
+  const named = deployments.filter((d): d is AgentDeployment & { name: string } => !!d.name);
 
   return (
     <DropdownRoot>
       <DropdownTrigger kind="secondary" size="small" aria-label="Deployment" className="font-bold">
-        {selected?.name ?? statusLabel}
+        {selected?.name ?? 'No deployments'}
+        {selected ? <StatusBadge status={selected.status} /> : null}
       </DropdownTrigger>
       <DropdownContent align="start" className="min-w-72">
-        <MenuSection slotHeading="Switch Deployments">
-          {named.length > 0 ? (
-            named.map((d) => (
+        {named.length > 0 ? (
+          <MenuSection slotHeading="Switch Deployments">
+            {named.map((d) => (
               <DropdownItem
                 key={d.name}
                 onSelect={() => onSelect(d.name)}
-                slotEnd={d.name === selected?.name ? <Check aria-hidden /> : undefined}
+                slotEnd={
+                  <Flex align="center" gap="2">
+                    <StatusBadge status={d.status} />
+                    <Check
+                      aria-hidden
+                      className={d.name === selected?.name ? undefined : 'invisible'}
+                    />
+                  </Flex>
+                }
               >
                 {d.name}
               </DropdownItem>
-            ))
-          ) : (
-            <DropdownItem disabled>No deployments available</DropdownItem>
-          )}
-        </MenuSection>
+            ))}
+          </MenuSection>
+        ) : null}
         <MenuSection>
           <DropdownItem disabled={!canCreate} onSelect={onCreate}>
             New Deployment

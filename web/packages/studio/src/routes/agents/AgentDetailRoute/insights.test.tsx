@@ -23,7 +23,7 @@ import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { act, renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -60,6 +60,8 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   let findings: InsightListItem[];
 
   const runButton = () => screen.findByRole('button', { name: 'Run analysis now' });
+  // The header's deployment picker carries its own status badge, so run statuses are read off the tab.
+  const tabPanel = () => within(screen.getByRole('tabpanel'));
   const nextPoll = (ms = JOB_POLLING_INTERVAL_MS) => act(() => vi.advanceTimersByTimeAsync(ms));
 
   beforeEach(() => {
@@ -98,7 +100,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     await user.click(await runButton());
     await user.click(await screen.findByRole('button', { name: 'Run insight analysis' }));
 
-    expect(await screen.findByText('Queued')).toBeInTheDocument();
+    expect(await tabPanel().findByText('Queued')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(await screen.findByText('Queued analysis run "analysis-run-1".')).toBeInTheDocument();
     await waitFor(async () => expect(await runButton()).toBeDisabled());
@@ -110,12 +112,12 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     latest = mockAnalysisRunWithJob('react-agent', 'created');
     renderDetail('?tab=insights');
 
-    expect(await screen.findByText('Queued')).toBeInTheDocument();
+    expect(await tabPanel().findByText('Queued')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
 
     latest = mockAnalysisRunWithJob('react-agent', 'active');
     await nextPoll();
-    expect(await screen.findByText('Running')).toBeInTheDocument();
+    expect(await tabPanel().findByText('Running')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
 
     findings = [
@@ -131,7 +133,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     await nextPoll();
 
     expect(await screen.findByText('Analysis complete: 1 new finding.')).toBeInTheDocument();
-    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(tabPanel().getByText('Completed')).toBeInTheDocument();
     expect(await runButton()).toBeEnabled();
     expect(screen.getByRole('button', { name: 'View job' })).toBeInTheDocument();
   });
@@ -141,7 +143,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     latest = mockAnalysisRunWithJob('react-agent', 'active');
     renderDetail('?tab=insights');
 
-    expect(await screen.findByText('Running')).toBeInTheDocument();
+    expect(await tabPanel().findByText('Running')).toBeInTheDocument();
 
     latest = mockAnalysisRunWithJob('react-agent', 'error');
     await nextPoll();
@@ -151,7 +153,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
         'Analysis run "analysis-run-1" failed. Open the run\'s job to read its logs.'
       )
     ).toBeInTheDocument();
-    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(tabPanel().getByText('Failed')).toBeInTheDocument();
     expect(await runButton()).toBeEnabled();
   });
 
@@ -165,7 +167,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     latest = mockAnalysisRunWithJob('react-agent', 'active');
     await nextPoll(LIST_POLL_MS);
 
-    expect(await screen.findByText('Running')).toBeInTheDocument();
+    expect(await tabPanel().findByText('Running')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
   });
 
@@ -183,7 +185,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
     latest = mockAnalysisRunWithJob('react-agent', 'completed');
     renderDetail('?tab=insights');
 
-    expect(await screen.findByText('Completed')).toBeInTheDocument();
+    expect(await tabPanel().findByText('Completed')).toBeInTheDocument();
     await nextPoll();
     expect(screen.queryByText(/Analysis complete/)).not.toBeInTheDocument();
   });

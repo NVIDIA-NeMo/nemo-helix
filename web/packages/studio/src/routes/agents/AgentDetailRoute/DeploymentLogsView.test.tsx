@@ -68,7 +68,7 @@ describe('DeploymentLogsView', () => {
   });
 
   it('streams deployment logs with server-session credentials and no stale bearer token', async () => {
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() => expect(withHelixBrowserAuthRequest).toHaveBeenCalled());
     await waitFor(() => expect(streamSse).toHaveBeenCalled());
@@ -83,7 +83,7 @@ describe('DeploymentLogsView', () => {
   it('logs an accurate setup failure when authentication request setup fails', async () => {
     mocks.withHelixBrowserAuthRequest.mockRejectedValue(new Error('discovery unavailable'));
 
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() =>
       expect(mocks.loggerWarn).toHaveBeenCalledWith(
