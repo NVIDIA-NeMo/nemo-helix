@@ -575,6 +575,11 @@ def compile_grpo_config(
         "precision": precision,
         "logprob_chunk_size": grpo_hp.logprob_chunk_size or 2048,
         "offload_optimizer_for_logprob": False,
+        # Required by upstream PolicyConfig. Refit offload is for non-colocated
+        # generation; this image colocates vLLM, so the lifecycle stays off.
+        # The optimizer flag is only read when that lifecycle runs.
+        "offload_policy_before_refit": False,
+        "offload_optimizer_for_refit": True,
         "max_grad_norm": grpo_hp.max_grad_norm,
         "automodel_cfg": _build_automodel_cfg(customizer_config, grpo_hp, lora_cfg),
         "megatron_cfg": _megatron_cfg_disabled(precision, grpo_hp.max_grad_norm),
