@@ -18,11 +18,8 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from nemo_helix_plugin.client.client import NemoClient
-
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_nb import (
     MarkdownToNotebookConverter,
     expand_includes,
@@ -38,7 +35,7 @@ TIMEOUT_SECONDS = 3600
 
 
 @contextmanager
-def cleanup_notebook_deployments(client: "NemoClient", workspace: str = "default") -> Generator[None, None, None]:
+def cleanup_notebook_deployments(client: NemoClient, workspace: str = "default") -> Generator[None, None, None]:
     """Remove deployments created by a notebook, including when execution fails.
 
     Use only on an isolated test backend: deployments that existed before the

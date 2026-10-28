@@ -71,24 +71,19 @@ Before you begin, here is a quick overview of the resources you will use:
 
 ## 1. Create a Workspace and Initialize the SDK
 
-Create a dedicated workspace for this tutorial to keep your resources isolated from other projects, and make it the default workspace for your current CLI context:
-
-```bash
-nemo workspaces create llm-as-judge-tutorial
-nemo config set --workspace llm-as-judge-tutorial
-```
-
-If the workspace already exists from a previous run, the create command reports a conflict; continue with the second command. To return to your original workspace after the tutorial, run `nemo config set --workspace default`.
-
-Create a client from your current CLI context. It connects to the deployment and workspace saved in the context, using the credentials from `nemo auth login`. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+Create a fresh, dedicated workspace for each run of this tutorial so cleanup never deletes resources in your current workspace. The client connects to the deployment saved in your CLI context, using the credentials from `nemo auth login`, then uses the new workspace without changing your CLI context. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ```python
+from uuid import uuid4
+
 from nemo_evals.sdk import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-# Create a NemoClient from the current CLI context.
 client = NemoClient.from_config()
-WORKSPACE = client.resolve_workspace()
+WORKSPACE = f"llm-as-judge-tutorial-{uuid4().hex[:12]}"
+client.workspaces.create_workspace(body=CreateWorkspaceRequest(name=WORKSPACE)).data()
+client = client.with_workspace(WORKSPACE)
 evaluator = Evaluator.from_client(client)
 
 # Verify evals plugin connectivity.
@@ -655,7 +650,7 @@ If your judge's distribution looks very different from humans, such as always sc
 
 ## 10. Clean Up
 
-To delete the workspace, you must first delete all resources within it. Delete jobs first, then filesets, secrets, and the workspace.
+Delete the tutorial's jobs first, then its fileset, secret, and dedicated workspace.
 
 ```python
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -686,7 +681,7 @@ print("Cleanup complete!")
 
 <Note>
 
-Workspaces cannot be deleted while they contain resources. The code above deletes resources in dependency order.
+Workspace deletion revokes access immediately and asynchronously cleans up remaining resources. The code above explicitly deletes the tutorial resources in dependency order before requesting workspace deletion.
 
 </Note>
 ---
@@ -713,12 +708,39 @@ Wait for all services to be healthy before running the tutorial. Check health st
 curl -s http://localhost:8080/health/ready
 ```
 
-### Workspace already exists
+### Re-running after an interrupted tutorial
 
-If you're re-running the tutorial and want to start fresh, delete the existing workspace first:
+The initialization cell creates a fresh workspace on each run. If a previous run stopped before cleanup, use the workspace name printed by that run to clean up its orphaned jobs, filesets, and secrets. Do not delete your current CLI workspace or any workspace you did not create for this tutorial.
+
+The following cell does nothing by default. After inspecting the previous run's workspace, set `interrupted_workspace` to its printed name and set `confirm_tutorial_ownership` to `True` only if you created that workspace exclusively for this tutorial. This deletes all jobs, filesets, and secrets in that workspace, then requests workspace deletion. It does not use the new run's `WORKSPACE` variable or change your CLI context.
 
 ```python
-client.workspaces.delete_workspace(name=WORKSPACE)
+import re
+
+from nemo_helix_plugin.client.client import NemoClient
+
+interrupted_workspace: str | None = None
+confirm_tutorial_ownership = False
+
+if interrupted_workspace is not None and confirm_tutorial_ownership:
+    cleanup_client = NemoClient.from_config()
+    if interrupted_workspace == cleanup_client.resolve_workspace():
+        raise ValueError("Refusing to delete the current CLI workspace")
+    if re.fullmatch(r"llm-as-judge-tutorial-[0-9a-f]{12}", interrupted_workspace) is None:
+        raise ValueError("Expected the generated workspace name printed by a previous tutorial run")
+    cleanup_client = cleanup_client.with_workspace(interrupted_workspace)
+
+    # Snapshot each workspace-scoped listing before deleting to avoid shifting pagination.
+    for orphaned_job in list(cleanup_client.jobs.list_jobs().items()):
+        cleanup_client.jobs.delete_job(name=orphaned_job.name).data()
+    for orphaned_fileset in list(cleanup_client.files.list_filesets().items()):
+        cleanup_client.files.delete_fileset(name=orphaned_fileset.name).data()
+    for orphaned_secret in list(cleanup_client.secrets.list_secrets().items()):
+        cleanup_client.secrets.delete_secret(name=orphaned_secret.name).data()
+    cleanup_client.workspaces.delete_workspace(name=interrupted_workspace).data()
+    print(f"Requested cleanup of interrupted tutorial workspace '{interrupted_workspace}'")
+else:
+    print("Interrupted-run cleanup disabled; no resources changed")
 ```
 
 ### Local NVIDIA Build authentication fails
@@ -753,12 +775,16 @@ REMOTE_JUDGE_MODEL = Model(
 
 ### Job stuck in "pending" or "running" for too long
 
-Check the job status from the job resource:
+Define a status helper, then call `describe_job_status(job_v1)` while that job still exists, before running cleanup. The troubleshooting cell does not query a job that the tutorial has already deleted:
 
 ```python
-status = job_v1.get_job_status()
-print(f"Status: {status.status}")
-print(f"Details: {status.status_details}")
+from nemo_evals.sdk.job_resources import EvaluatorJobResource
+
+
+def describe_job_status(job: EvaluatorJobResource) -> None:
+    status = job.get_job_status()
+    print(f"Status: {status.status}")
+    print(f"Details: {status.status_details}")
 ```
 
 Remote jobs can report `progress: 100.0` and all samples processed before the platform job status changes to `completed`. Wait for `job.wait_until_done()` to return before downloading results or treating the job as terminal.
@@ -789,31 +815,32 @@ If scores show `None` or the job fails with parsing errors:
 
 ### Hugging Face dataset access issues
 
-For gated or private datasets, create a secret with your Hugging Face token:
+For gated or private datasets, define this helper and call it with a client scoped to an existing workspace, your real Hugging Face token, and the dataset repository ID. Defining it does not create resources after the tutorial's cleanup:
 
 ```python
 from pydantic import SecretStr
 from nemo_helix_plugin.files.metadata import DatasetMetadataContent, FilesetMetadata
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
-from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.schema import SecretRef as PlatformSecretRef
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
-client.secrets.create_secret(
-    body=HelixSecretCreateRequest(name="hf-token", value=SecretStr("hf_your_token_here")),
-)
-client.files.create_fileset(
-    body=CreateFilesetRequest(
-        name="my-dataset",
-        purpose=FilesetPurpose.DATASET,
-        storage=HuggingfaceStorageConfig(
-            type=StorageConfigType.HUGGINGFACE,
-            repo_id="org/dataset",
-            repo_type="dataset",
-            token_secret=SecretRef(root="hf-token"),
+def register_private_dataset(client: NemoClient, hf_token: str, repo_id: str) -> None:
+    client.secrets.create_secret(
+        body=HelixSecretCreateRequest(name="hf-token", value=SecretStr(hf_token)),
+    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name="my-dataset",
+            purpose=FilesetPurpose.DATASET,
+            storage=HuggingfaceStorageConfig(
+                type=StorageConfigType.HUGGINGFACE,
+                repo_id=repo_id,
+                repo_type="dataset",
+                token_secret=PlatformSecretRef(root="hf-token"),
+            ),
         ),
-    ),
-)
+    )
 ```
 
 ---

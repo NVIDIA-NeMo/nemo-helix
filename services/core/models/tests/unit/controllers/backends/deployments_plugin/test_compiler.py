@@ -356,8 +356,9 @@ def test_nim_multi_llm_weighted_omits_ft_model_env() -> None:
     assert env["NIM_SERVED_MODEL_NAME"] == "nvidia/Llama-3.1-Nemotron-Nano-4B-v1.1"
 
 
-def test_nim_tool_call_plugin_adds_init_containers_and_env() -> None:
-    resolved = _resolved("nim")
+@pytest.mark.parametrize("engine", ["nim", "vllm"])
+def test_tool_call_plugin_mount_reaches_engine_config(engine: str) -> None:
+    resolved = _resolved(engine)
     resolved = ResolvedPluginDeployment(
         deployment=resolved.deployment,
         config=resolved.config,
@@ -366,10 +367,10 @@ def test_nim_tool_call_plugin_adds_init_containers_and_env() -> None:
             model_namespace="org",
             model_name="model",
             image_name="nvcr.io/nim/nvidia/llm-nim",
-            tool_call_config=SimpleNamespace(
+            tool_call_config=ToolCallConfig(
                 tool_call_plugin="test-ws/my-plugin-fileset",
-                tool_call_parser=None,
-                auto_tool_choice=None,
+                tool_call_parser="custom",
+                auto_tool_choice=True,
             ),
         ),
         weights_type=resolved.weights_type,
@@ -387,8 +388,15 @@ def test_nim_tool_call_plugin_adds_init_containers_and_env() -> None:
     pull_env = {item.name: item.value for item in pull.env}
     assert pull_env["HF_TOKEN"] == "service:models"
     assert pull_env["HF_ENDPOINT"] == resolved.files_hf_url
-    server_env = {item.name: item.value for item in compiled.server_config.containers[0].env}
-    assert server_env["NIM_TOOL_PARSER_PLUGIN"] == "/model-store/plugin/plugin.py"
+    server = compiled.server_config.containers[0]
+    if engine == "nim":
+        server_env = {item.name: item.value for item in server.env}
+        assert server_env["NIM_TOOL_PARSER_PLUGIN"] == "/model-store/plugin/plugin.py"
+    else:
+        assert server.args[server.args.index("--tool-parser-plugin") + 1] == "/model-store/plugin/plugin.py"
+        assert server.args[server.args.index("--tool-call-parser") + 1] == "custom"
+        assert "--enable-auto-tool-choice" in server.args
+        assert "test-ws/my-plugin-fileset" not in server.args
 
 
 def _model_free_resolved() -> ResolvedPluginDeployment:
