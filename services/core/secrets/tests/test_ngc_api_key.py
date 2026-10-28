@@ -8,6 +8,7 @@ from nhx.common.config import HelixConfig
 from nhx.core.secrets.api.v2.secrets.ngc_api_key import (
     get_default_ngc_api_key,
     is_default_ngc_api_key,
+    is_default_ngc_api_key_configured,
 )
 from nhx.core.secrets.entities import HelixSecret
 
@@ -35,6 +36,35 @@ class TestIsDefaultNgcApiKey:
 
     def test_returns_false_when_both_mismatch(self, platform_config: HelixConfig) -> None:
         assert is_default_ngc_api_key(platform_config, "default", "other-secret") is False
+
+
+class TestIsDefaultNgcApiKeyConfigured:
+    """Tests for is_default_ngc_api_key_configured."""
+
+    def test_returns_true_when_env_var_set(self, platform_config: HelixConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NGC_API_KEY", "test-ngc-key-value")
+        assert is_default_ngc_api_key_configured(platform_config) is True
+
+    def test_returns_false_when_env_var_unset(
+        self, platform_config: HelixConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("NGC_API_KEY", raising=False)
+        assert is_default_ngc_api_key_configured(platform_config) is False
+
+    def test_returns_false_when_env_var_empty(
+        self, platform_config: HelixConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NGC_API_KEY", "")
+        assert is_default_ngc_api_key_configured(platform_config) is False
+
+    def test_uses_config_env_var_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NGC_API_KEY", raising=False)
+        monkeypatch.setenv("CUSTOM_NGC_KEY", "custom-key")
+        config = HelixConfig(  # type: ignore[abstract]
+            ngc_api_key_secret="system/ngc-api-key",
+            ngc_api_key_env_var="CUSTOM_NGC_KEY",
+        )
+        assert is_default_ngc_api_key_configured(config) is True
 
 
 class TestGetDefaultNgcApiKey:
