@@ -289,15 +289,27 @@ async def test_failed_create_in_deleted_workspace_is_dropped(mock_client, cache)
 
 
 @pytest.mark.asyncio
-async def test_failed_update_of_missing_entity_is_dropped(mock_client, cache):
-    """An entity that no longer exists has nothing left to keep consistent."""
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(_status_error(404, "not found"), id="entity-gone"),
+        pytest.param(
+            _status_error(422, "Workspace 'ws' does not exist.", code=WORKSPACE_NOT_FOUND_CODE), id="workspace-gone"
+        ),
+    ],
+)
+async def test_failed_update_that_can_never_succeed_is_dropped(mock_client, cache, error):
+    """An update whose entity or workspace is gone has nothing left to keep consistent."""
     await _load(mock_client, cache, [_entity("ws", "m1", ["ws/p1"])])
-    _configure_models_client(mock_client, update_model=AsyncMock(side_effect=_status_error(404, "not found")))
+    client = _configure_models_client(mock_client, update_model=AsyncMock(side_effect=error))
 
     cache.stage_provider_unlink("ws", "m1", "ws/p1")
     await cache.flush()
-
     assert cache._pending == {}
+
+    # Dropped rather than retried: a later flush does not write again.
+    await cache.flush()
+    client.update_model.assert_awaited_once()
 
 
 @pytest.mark.asyncio

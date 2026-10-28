@@ -501,6 +501,20 @@ def test_update_model_entity_validation_error_returns_422(client, mock_model_ent
     assert "name must match pattern" in response.json()["detail"]
 
 
+def test_update_model_relays_entity_store_error_code(client, mock_model_entity_service, sample_model_entity):
+    """The entity store's code survives a Models API update, as it does a create."""
+    mock_model_entity_service.entity_client.get.return_value = Mock()
+    mock_model_entity_service.get_model_entity.return_value = sample_model_entity
+    mock_model_entity_service.update_model_entity.side_effect = EntityValidationError(
+        "Workspace 'nvidia' does not exist. Please create the workspace first.", code=WORKSPACE_NOT_FOUND_CODE
+    )
+
+    response = client.patch("/apis/models/v2/workspaces/nvidia/models/my-model", json={"description": "updated"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
+
+
 def test_update_model_default_verbose_false(client, mock_model_entity_service, sample_model_entity):
     """Test update model uses verbose=false by default."""
     mock_model_entity_service.entity_client.get.return_value = Mock()
