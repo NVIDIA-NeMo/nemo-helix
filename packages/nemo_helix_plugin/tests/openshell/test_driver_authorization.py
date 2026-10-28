@@ -44,7 +44,9 @@ def authorized_platform() -> Iterator[ClientContext]:
         auth_enabled=True,
         workspaces=["default", "driver-team"],
         service_configs={SecretsService: encryption},
-        auth_bundle_cache_seconds=0,
+        # Seeded grants stay fixed while this test enables bearer authentication.
+        auth_bundle_cache_seconds=3600,
+        auth_policy_data_refresh_interval=3600,
     ) as context:
         yield context
 
@@ -89,31 +91,37 @@ async def test_service_bearer_requires_signed_creator_permission(
         key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
     )
     auth = get_auth_config()
-    auth.token_signing = TokenSigningConfig(key_id="driver-test", private_key_file=str(key_file))
-    auth.oidc = OIDCConfig(
-        enabled=True, issuer="https://idp.example.test", workload=OIDCWorkloadConfig(client_id="driver-test")
-    )
-    token = await issue_service_workload_access_token_async(auth, service_name="deployments")
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=context.test_client.app)) as http:
-        async with AsyncSecretsClient(
-            base_url=str(context.test_client.base_url), http_client=http, auth=StaticToken(token)
-        ) as client:
-            driver = CredentialDriver(registry, client)
+    with (
+        patch.object(auth, "token_signing", TokenSigningConfig(key_id="driver-test", private_key_file=str(key_file))),
+        patch.object(
+            auth,
+            "oidc",
+            OIDCConfig(
+                enabled=True, issuer="https://idp.example.test", workload=OIDCWorkloadConfig(client_id="driver-test")
+            ),
+        ),
+    ):
+        token = await issue_service_workload_access_token_async(auth, service_name="deployments")
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=context.test_client.app)) as http:
+            async with AsyncSecretsClient(
+                base_url=str(context.test_client.base_url), http_client=http, auth=StaticToken(token)
+            ) as client:
+                driver = CredentialDriver(registry, client)
 
-            def request(identifier: str) -> dict[str, Any]:
-                return {
-                    "credentials": [
-                        {
-                            **owner.model_dump(),
-                            "request_id": "read",
-                            "handle": {"driver": "nemo", "handle": identifier},
-                        }
-                    ]
-                }
+                def request(identifier: str) -> dict[str, Any]:
+                    return {
+                        "credentials": [
+                            {
+                                **owner.model_dump(),
+                                "request_id": "read",
+                                "handle": {"driver": "nemo", "handle": identifier},
+                            }
+                        ]
+                    }
 
-            response = await driver._dispatch("ResolveCredentials", request(handle))
-            assert wire.data(response)["credentials"][0]["value"] == "synthetic-secret"
-            with patch("nhx.core.secrets.api.v2.secrets.endpoints.envelope_decrypt") as decrypt:
-                with pytest.raises(RegistrationDenied, match="creator"):
-                    await driver._dispatch("ResolveCredentials", request(denied_handle))
-                decrypt.assert_not_called()
+                response = await driver._dispatch("ResolveCredentials", request(handle))
+                assert wire.data(response)["credentials"][0]["value"] == "synthetic-secret"
+                with patch("nhx.core.secrets.api.v2.secrets.endpoints.envelope_decrypt") as decrypt:
+                    with pytest.raises(RegistrationDenied, match="creator"):
+                        await driver._dispatch("ResolveCredentials", request(denied_handle))
+                    decrypt.assert_not_called()
