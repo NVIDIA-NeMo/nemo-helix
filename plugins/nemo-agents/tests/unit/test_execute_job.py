@@ -12,7 +12,7 @@ from contextlib import nullcontext
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from urllib.parse import urlsplit
 
@@ -71,7 +71,7 @@ from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.routes import add_job_routes
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
 requires_hermes_adapter = pytest.mark.skipif(
@@ -1262,6 +1262,39 @@ def test_run_hands_the_post_run_action_the_create_time_agent_config(ctx: JobCont
     assert "127.0.0.1:9" in json.dumps(fabric_configs[0])
     assert "127.0.0.1:9" not in json.dumps(contexts[0].agent_config)
     assert contexts[0].agent_config == created_config
+
+
+def test_run_validates_the_post_run_action_config_against_the_image_before_invoking(ctx: JobContext) -> None:
+    """Create time validated against the API server's version of the action; the task
+    image's version may take a different config, which must not cost a full agent run.
+    """
+
+    class _ImageActionConfig(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+        destination: str
+
+    class _ImageAction:
+        config_model: ClassVar[type[BaseModel]] = _ImageActionConfig
+
+        def after_invoke(self, context: Any) -> None:
+            raise AssertionError("an action whose config was rejected must not run")
+
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+        post_run_action=PostRunActionConfig(kind="example.action", config={"target": "accepted-by-the-server"}),
+    )
+    invoke = AsyncMock()
+
+    with (
+        patch("nemo_agents_plugin.jobs.execute.resolve_post_run_action", return_value=_ImageAction),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", invoke),
+        pytest.raises(ValueError, match=r"agent was not invoked: Invalid config for post-run action 'example\.action'"),
+    ):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    invoke.assert_not_awaited()
 
 
 def test_run_names_a_post_run_action_that_fails_to_import(ctx: JobContext) -> None:

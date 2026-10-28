@@ -186,3 +186,12 @@ def test_listing_scans_the_installed_entry_points_once(monkeypatch: pytest.Monke
 
     assert [info.kind for info in list_post_run_actions()] == ["a.action", "b.action"]
     assert scans == [POST_RUN_ACTION_ENTRY_POINT_GROUP]
+
+
+def test_validating_against_an_already_resolved_action_skips_the_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The execute step validates against the class it already resolved from its own image."""
+    _install(monkeypatch)
+
+    validate_post_run_action_config("unregistered.action", {}, action=NoopPostRunAction)
+    with pytest.raises(ValueError, match="Invalid config for post-run action 'unregistered.action'"):
+        validate_post_run_action_config("unregistered.action", {"unexpected": True}, action=NoopPostRunAction)

@@ -77,13 +77,18 @@ def list_post_run_actions() -> list[PostRunActionInfo]:
     return infos
 
 
-def validate_post_run_action_config(kind: str, config: dict[str, Any]) -> None:
+def validate_post_run_action_config(
+    kind: str, config: dict[str, Any], *, action: type[PostRunAction] | None = None
+) -> None:
     """Reject a malformed post-run action config body.
 
-    Lenient by design: an action that declares no ``config_model`` is accepted
-    unvalidated rather than rejected.
+    Pass *action* when the kind is already resolved, to validate against that
+    class without looking it up again. Lenient by design: an action that
+    declares no ``config_model`` is accepted unvalidated rather than rejected.
     """
-    config_model = getattr(_load_post_run_action(kind), "config_model", None)
+    if action is None:
+        action = _load_post_run_action(kind)
+    config_model = getattr(action, "config_model", None)
     if config_model is None:
         return
     try:

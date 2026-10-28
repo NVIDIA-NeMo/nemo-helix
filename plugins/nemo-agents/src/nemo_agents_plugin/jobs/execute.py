@@ -522,12 +522,16 @@ class ExecuteAgentJob(NemoJob):
         agent_config = _validate_agent_config(step_config.agent.config)
         # Checked at create time, but against the API server's plugins: the task
         # image can differ, and a stored job can outlive the plugin that provided
-        # its action. Resolve it before the agent spends any time or tokens.
+        # its action. Resolve it, and validate its config against this image's
+        # version of the action, before the agent spends any time or tokens.
         try:
             post_run_action = resolve_post_run_action(step_config.post_run_action.kind)
+            validate_post_run_action_config(
+                step_config.post_run_action.kind, step_config.post_run_action.config, action=post_run_action
+            )
         except Exception as exc:
-            # Missing, conflicting, or installed but failing to import: all mean
-            # the action cannot run, so all get the same actionable message.
+            # Missing, conflicting, failing to import, or rejecting this config:
+            # all mean the action cannot run, so all get the same actionable message.
             raise ValueError(f"Cannot run this job's post-run action, so the agent was not invoked: {exc}") from exc
         # The action sees the config as resolved at create time. Per-run wiring
         # below (telemetry export through this invocation's loopback proxy)
