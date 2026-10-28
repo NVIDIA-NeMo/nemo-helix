@@ -237,22 +237,11 @@ class JobControl(BaseModel):
 
 
 class JobDryRunCheck(BaseModel):
-    """One check a dry run made before a job would be created."""
+    """One check a dry run made: create with ``?dry_run=true``, or a CLI preflight."""
 
     name: str = Field(description="What was checked.")
     passed: bool
     message: str = Field(description="What the check found; on failure, what to fix.")
-
-
-class JobDryRunStep(BaseModel):
-    """A step the job would run."""
-
-    name: str
-    provider: str = Field(description="Execution provider, e.g. 'gpu'.")
-    profile: str = Field(description="Execution profile within the provider.")
-    image: str | None = Field(
-        default=None, description="Container image. Unset when the execution profile supplies it."
-    )
 
 
 class HelixJobResponse(BaseModel):

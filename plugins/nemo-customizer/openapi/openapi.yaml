@@ -31,6 +31,21 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job as create would, and create nothing. Returns
+            200 with the job it would create, unsaved, and the checks in status_details.checks.
+            If a check fails, returns 422 whose detail has a message and every check,
+            passed and failed.
+          default: false
+          title: Dry Run
+        description: Check the job as create would, and create nothing. Returns 200
+          with the job it would create, unsaved, and the checks in status_details.checks.
+          If a check fails, returns 422 whose detail has a message and every check,
+          passed and failed.
       requestBody:
         required: true
         content:
@@ -108,38 +123,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AutomodelJobsJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/customization/v2/workspaces/{workspace}/automodel/jobs/dry-run:
-    post:
-      tags:
-      - Automodel Jobs
-      summary: Dry Run Job
-      operationId: dry_run_job_apis_customization_v2_workspaces__workspace__automodel_jobs_dry_run_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AutomodelJobsJobRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AutomodelJobsJobDryRun'
         '422':
           description: Validation Error
           content:
@@ -928,6 +911,21 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job as create would, and create nothing. Returns
+            200 with the job it would create, unsaved, and the checks in status_details.checks.
+            If a check fails, returns 422 whose detail has a message and every check,
+            passed and failed.
+          default: false
+          title: Dry Run
+        description: Check the job as create would, and create nothing. Returns 200
+          with the job it would create, unsaved, and the checks in status_details.checks.
+          If a check fails, returns 422 whose detail has a message and every check,
+          passed and failed.
       requestBody:
         required: true
         content:
@@ -1005,38 +1003,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RlJobsJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/customization/v2/workspaces/{workspace}/rl/jobs/dry-run:
-    post:
-      tags:
-      - Rl Jobs
-      summary: Dry Run Job
-      operationId: dry_run_job_apis_customization_v2_workspaces__workspace__rl_jobs_dry_run_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RlJobsJobRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RlJobsJobDryRun'
         '422':
           description: Validation Error
           content:
@@ -1643,6 +1609,21 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job as create would, and create nothing. Returns
+            200 with the job it would create, unsaved, and the checks in status_details.checks.
+            If a check fails, returns 422 whose detail has a message and every check,
+            passed and failed.
+          default: false
+          title: Dry Run
+        description: Check the job as create would, and create nothing. Returns 200
+          with the job it would create, unsaved, and the checks in status_details.checks.
+          If a check fails, returns 422 whose detail has a message and every check,
+          passed and failed.
       requestBody:
         required: true
         content:
@@ -1720,38 +1701,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnslothJobsJobsPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/customization/v2/workspaces/{workspace}/unsloth/jobs/dry-run:
-    post:
-      tags:
-      - Unsloth Jobs
-      summary: Dry Run Job
-      operationId: dry_run_job_apis_customization_v2_workspaces__workspace__unsloth_jobs_dry_run_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UnslothJobsJobRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UnslothJobsJobDryRun'
         '422':
           description: Validation Error
           content:
@@ -2782,31 +2731,6 @@ components:
       required:
       - data
       title: AutomodelJobsJobAttemptsPage
-    AutomodelJobsJobDryRun:
-      properties:
-        spec:
-          $ref: '#/components/schemas/AutomodelJobOutput'
-        steps:
-          items:
-            $ref: '#/components/schemas/JobDryRunStep'
-          type: array
-          title: Steps
-        checks:
-          items:
-            $ref: '#/components/schemas/JobDryRunCheck'
-          type: array
-          title: Checks
-        passed:
-          type: boolean
-          title: Passed
-          description: Whether every check passed.
-      type: object
-      required:
-      - spec
-      - steps
-      - checks
-      - passed
-      title: AutomodelJobsJobDryRun
     AutomodelJobsJobRequest:
       properties:
         name:
@@ -3917,51 +3841,6 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
-    JobDryRunCheck:
-      properties:
-        name:
-          type: string
-          title: Name
-          description: What was checked.
-        passed:
-          type: boolean
-          title: Passed
-        message:
-          type: string
-          title: Message
-          description: What the check found; on failure, what to fix.
-      type: object
-      required:
-      - name
-      - passed
-      - message
-      title: JobDryRunCheck
-      description: One check a dry run made before a job would be created.
-    JobDryRunStep:
-      properties:
-        name:
-          type: string
-          title: Name
-        provider:
-          type: string
-          title: Provider
-          description: Execution provider, e.g. 'gpu'.
-        profile:
-          type: string
-          title: Profile
-          description: Execution profile within the provider.
-        image:
-          title: Image
-          description: Container image. Unset when the execution profile supplies
-            it.
-          type: string
-      type: object
-      required:
-      - name
-      - provider
-      - profile
-      title: JobDryRunStep
-      description: A step the job would run.
     MlflowIntegration:
       properties:
         experiment_name:
@@ -5046,31 +4925,6 @@ components:
       required:
       - data
       title: RlJobsJobAttemptsPage
-    RlJobsJobDryRun:
-      properties:
-        spec:
-          $ref: '#/components/schemas/RlJobOutput'
-        steps:
-          items:
-            $ref: '#/components/schemas/JobDryRunStep'
-          type: array
-          title: Steps
-        checks:
-          items:
-            $ref: '#/components/schemas/JobDryRunCheck'
-          type: array
-          title: Checks
-        passed:
-          type: boolean
-          title: Passed
-          description: Whether every check passed.
-      type: object
-      required:
-      - spec
-      - steps
-      - checks
-      - passed
-      title: RlJobsJobDryRun
     RlJobsJobRequest:
       properties:
         name:
@@ -5764,31 +5618,6 @@ components:
       required:
       - data
       title: UnslothJobsJobAttemptsPage
-    UnslothJobsJobDryRun:
-      properties:
-        spec:
-          $ref: '#/components/schemas/UnslothJobOutput'
-        steps:
-          items:
-            $ref: '#/components/schemas/JobDryRunStep'
-          type: array
-          title: Steps
-        checks:
-          items:
-            $ref: '#/components/schemas/JobDryRunCheck'
-          type: array
-          title: Checks
-        passed:
-          type: boolean
-          title: Passed
-          description: Whether every check passed.
-      type: object
-      required:
-      - spec
-      - steps
-      - checks
-      - passed
-      title: UnslothJobsJobDryRun
     UnslothJobsJobRequest:
       properties:
         name:

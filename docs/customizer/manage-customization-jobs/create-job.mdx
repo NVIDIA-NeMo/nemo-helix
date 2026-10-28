@@ -176,12 +176,20 @@ See [Knowledge Distillation constraints](/documentation/customizer-reference/man
 
 ## Check a Job Before Submitting
 
-A dry run checks a job the way submit does, then stops before creating it. It validates and compiles the job, checks that its execution profile exists, reads the first 10 rows of every dataset file training would read and checks them with the backend's own validator, and reports the image each step would run. A dataset error comes back in seconds, with the file and line number, instead of after the job reaches a GPU. Nothing is created and nothing is downloaded to job storage.
+A dry run checks a job the way submit does, then stops before creating it. It validates and compiles the job, checks that its execution profile exists, and reads the first 10 rows of every dataset file training would read and checks them with the backend's own validator. A dataset error comes back in seconds, with the file and line number, instead of after the job reaches a GPU. Nothing is created and nothing is downloaded to job storage.
+
+Pass `dry_run=True` to `create`. It is the same call as a submit, with `?dry_run=true` on the request. When every check passes, it returns the job it would create, unsaved (no `id` or `status`), with the checks in `status_details["checks"]`. When a check fails, it raises `UnprocessableEntityError` (HTTP 422), whose body lists every check, passed and failed:
 
 ```python
-report = customization.automodel.jobs.dry_run(spec=spec, workspace="default").data()
-for check in report.checks:
-    print("OK  " if check.passed else "FAIL", check.name, check.message)
+from nemo_helix_plugin.client.errors import UnprocessableEntityError
+
+try:
+    job = customization.automodel.jobs.create(spec=spec, workspace="default", dry_run=True).data()
+    checks = job.status_details["checks"]
+except UnprocessableEntityError as error:
+    checks = error.body["detail"]["checks"]
+for check in checks:
+    print("OK  " if check["passed"] else "FAIL", check["name"], check["message"])
 ```
 
 From the CLI, add `--dry-run` to the submit command. It exits non-zero when a check fails:

@@ -10,10 +10,10 @@ from abc import abstractmethod
 from nemo_helix_plugin.client.endpoint import get, post
 from nemo_helix_plugin.client.types import Paginated
 from nhx.customization_common.sdk.types import (
+    CreateCustomizationJobQueryParams,
     CustomizationHealthResponse,
     CustomizationJob,
     CustomizationJobCreateRequest,
-    CustomizationJobDryRun,
     ListCustomizationJobsQueryParams,
 )
 
@@ -30,17 +30,8 @@ def create_customization_job(
     workspace: str | None = None,
     backend: str,
     body: CustomizationJobCreateRequest,
+    query_params: CreateCustomizationJobQueryParams | None = None,
 ) -> CustomizationJob: ...
-
-
-@post("/apis/customization/v2/workspaces/{workspace}/{backend}/jobs/dry-run")
-@abstractmethod
-def dry_run_customization_job(
-    *,
-    workspace: str | None = None,
-    backend: str,
-    body: CustomizationJobCreateRequest,
-) -> CustomizationJobDryRun: ...
 
 
 @get("/apis/customization/v2/workspaces/{workspace}/{backend}/jobs")

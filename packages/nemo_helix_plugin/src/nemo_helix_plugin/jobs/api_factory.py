@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Generic,
     Literal,
+    NamedTuple,
     Self,
     Type,
     TypeVar,
@@ -86,7 +87,6 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobAttemptResponse,
     JobControl,
     JobDryRunCheck,
-    JobDryRunStep,
     JobLogsQueryParams,
     JobName,
     ListAttemptsQueryParams,
@@ -228,15 +228,6 @@ class BaseJobAttempt(BaseModel, Generic[JobConfigT]):
     created_at: datetime
     updated_at: datetime
     is_current: bool
-
-
-class BaseJobDryRun(BaseModel, Generic[JobConfigT]):
-    """What a job would run, and what was checked, without creating it."""
-
-    spec: JobConfigT = Field(description="The canonical spec the job would store, defaults resolved.")
-    steps: list[JobDryRunStep]
-    checks: list[JobDryRunCheck]
-    passed: bool = Field(description="Whether every check passed.")
 
 
 class BaseJobsSortField(StrEnum):
@@ -550,6 +541,7 @@ class JobRouteOption(StrEnum):
     CORE = auto()
     PAUSE_RESUME = auto()
     RERUN = auto()
+    # Create takes ``?dry_run=true``: check the job as create would, and create nothing.
     DRY_RUN = auto()
 
 
@@ -944,8 +936,8 @@ def job_route_factory(
             is generated. A field this model adds with a string default, such as
             ``backend: Literal["rl"] = "rl"``, is AND-ed into every list as
             ``spec.<field>``.
-        dry_run_checks: Plugin checks the ``DRY_RUN`` route runs after transform and compile,
-            such as reading a few dataset rows. The route always checks the execution profiles.
+        dry_run_checks: Plugin checks a ``DRY_RUN`` create runs after transform and compile,
+            such as reading a few dataset rows. A dry run always checks the execution profiles.
 
     Example with separate input/output types:
         ```python
@@ -1042,11 +1034,6 @@ def job_route_factory(
     TypedJobResponse = type(
         f"{job_type}Job",
         (BaseJob[BaseModel],),
-        {"__annotations__": {"spec": job_output}},
-    )
-    TypedJobDryRun = type(
-        f"{job_type}JobDryRun",
-        (BaseJobDryRun[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
     TypedJobUpdate = type(
@@ -1276,6 +1263,7 @@ def job_route_factory(
 
     # Core job routes
     if JobRouteOption.CORE in route_options:
+        dry_run_dependency = _dry_run_query if JobRouteOption.DRY_RUN in route_options else _no_dry_run
 
         @router.post(
             "/jobs",
@@ -1284,6 +1272,8 @@ def job_route_factory(
         async def create_job(
             workspace: str,
             request: TypedJobRequest,
+            response: Response,
+            dry_run: bool = Depends(dry_run_dependency),
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
         ) -> TypedJobResponse:
@@ -1314,6 +1304,20 @@ def job_route_factory(
                     options=request.options,
                 ),
             )
+            if dry_run:
+                checks = await _dry_run_checks(platform_spec, job_spec, workspace, async_client, dry_run_checks)
+                response.status_code = status.HTTP_200_OK
+                return TypedJobResponse(
+                    # Without a generator, the Jobs service names the job at create; a dry run has no name.
+                    name=job_name or "",
+                    workspace=workspace,
+                    description=request.description,
+                    project=request.project,
+                    spec=cast(BaseModel, job_spec),
+                    ownership=request.ownership,
+                    custom_fields=request.custom_fields,
+                    status_details={"checks": [check.model_dump() for check in checks]},
+                )
 
             # Create the job through the typed Jobs client.
             # Build call kwargs, only including optional fields when they have values
@@ -1988,73 +1992,71 @@ def job_route_factory(
 
         _stamp(rerun_job, perm="rerun", write=True)
 
-    if JobRouteOption.DRY_RUN in route_options:
-
-        @router.post("/jobs/dry-run")
-        async def dry_run_job(
-            workspace: str,
-            request: TypedJobRequest,
-            async_client: AsyncNemoClient = Depends(get_nemo_client),
-            entity_client: EntityClient = Depends(get_entity_client),
-        ) -> TypedJobDryRun:
-            f"""Validate and compile a {service_name} job as create would, then run its checks. Creates nothing."""
-
-            job_name = _resolve_job_name(request.name, generate_job_name)
-            input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
-            job_spec = await _transform_input_to_output(
-                input_to_output,
-                input_spec,
-                workspace,
-                entity_client,
-                job_name,
-                service_name,
-                async_client,
-            )
-            platform_spec = await _compile_platform_spec(
-                platform_job_config_compiler,
-                workspace,
-                input_spec,
-                job_spec,
-                entity_client,
-                job_name,
-                service_name,
-                async_client,
-                submit_controls=_SubmitControls(profile=request.profile, options=request.options),
-            )
-            steps = _dry_run_steps(platform_spec)
-            checks = [await _check_execution_profiles(steps, async_client)]
-            if dry_run_checks is not None:
-                checks.extend(await dry_run_checks(job_spec, workspace, async_client))
-            return TypedJobDryRun(
-                spec=cast(BaseModel, job_spec),
-                steps=steps,
-                checks=checks,
-                passed=all(check.passed for check in checks),
-            )
-
-        # A dry run needs the same permission as the create it stands in for.
-        _stamp(dry_run_job, perm="create", write=True)
-
     return router
 
 
-def _dry_run_steps(platform_spec: HelixJobSpec) -> list[JobDryRunStep]:
-    """The steps a compiled job would run, with the image and profile of each."""
-    steps = []
-    for step in platform_spec.steps:
-        container = getattr(step.executor, "container", None)
-        steps.append(
-            JobDryRunStep(
-                name=step.name,
-                provider=step.executor.provider,
-                profile=step.executor.profile,
-                image=getattr(container, "image", None),
-            )
+_DRY_RUN_DESCRIPTION = (
+    "Check the job as create would, and create nothing. Returns 200 with the job it would create, "
+    "unsaved, and the checks in status_details.checks. If a check fails, returns 422 whose detail "
+    "has a message and every check, passed and failed."
+)
+
+
+def _dry_run_query(dry_run: bool = Query(default=False, description=_DRY_RUN_DESCRIPTION)) -> bool:
+    return dry_run
+
+
+def _no_dry_run(request: Request) -> bool:
+    # Undeclared, the flag would be ignored and a client asking for a dry run would get a real job.
+    if "dry_run" in request.query_params:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This job type does not support dry_run.")
+    return False
+
+
+class _DryRunStep(NamedTuple):
+    name: str
+    provider: str
+    profile: str
+    image: str | None
+
+
+async def _dry_run_checks(
+    platform_spec: HelixJobSpec,
+    job_spec: Any,
+    workspace: str,
+    async_client: AsyncNemoClient,
+    plugin_checks: DryRunChecks | None,
+) -> list[JobDryRunCheck]:
+    """Run a dry run's checks; raise 422 with all of them when any fails."""
+    checks = [await _check_execution_profiles(_dry_run_steps(platform_spec), async_client)]
+    if plugin_checks is not None:
+        checks.extend(await plugin_checks(job_spec, workspace, async_client))
+    failed = [check.name for check in checks if not check.passed]
+    if failed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "message": f"Dry run failed: {', '.join(failed)}. Nothing was created.",
+                "checks": [check.model_dump() for check in checks],
+            },
         )
-    return steps
+    return checks
 
 
-async def _check_execution_profiles(steps: list[JobDryRunStep], async_client: AsyncNemoClient) -> JobDryRunCheck:
+def _dry_run_steps(platform_spec: HelixJobSpec) -> list[_DryRunStep]:
+    """The steps a compiled job would run, with the image and profile of each."""
+    return [
+        _DryRunStep(
+            name=step.name,
+            provider=step.executor.provider,
+            profile=step.executor.profile,
+            image=getattr(getattr(step.executor, "container", None), "image", None),
+        )
+        for step in platform_spec.steps
+    ]
+
+
+async def _check_execution_profiles(steps: list[_DryRunStep], async_client: AsyncNemoClient) -> JobDryRunCheck:
     """Check that every step's provider and profile is configured on the platform."""
     profiles = await AsyncJobsClient.from_client(async_client).list_execution_profiles()
     available = {(profile.provider, profile.profile) for profile in profiles}

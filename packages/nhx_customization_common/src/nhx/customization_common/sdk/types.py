@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, NotRequired, Self, TypedDict
 
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.jobs.types import JobDryRunCheck, JobDryRunStep, validate_output_location
+from nemo_helix_plugin.jobs.types import validate_output_location
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -60,13 +60,8 @@ class CustomizationJob(BaseModel):
         return self
 
 
-class CustomizationJobDryRun(BaseModel):
-    """What a customization job would run, and what was checked, without creating it."""
-
-    spec: dict[str, Any] = Field(default_factory=dict)
-    steps: list[JobDryRunStep] = Field(default_factory=list)
-    checks: list[JobDryRunCheck] = Field(default_factory=list)
-    passed: bool
+class CreateCustomizationJobQueryParams(TypedDict, total=False):
+    dry_run: NotRequired[bool]
 
 
 class ListCustomizationJobsQueryParams(TypedDict, total=False):

@@ -79,6 +79,10 @@ class NemoHTTPError(NemoClientError):
             body = resp.json()
             if isinstance(body, dict) and isinstance(body.get("detail"), str):
                 return body["detail"]
+            # A structured detail, such as a dry run's {"message", "checks"}: the message reads; ``body`` has the rest.
+            if isinstance(body, dict) and isinstance(body.get("detail"), dict):
+                if isinstance(message := body["detail"].get("message"), str):
+                    return message
         except Exception:
             pass
         try:

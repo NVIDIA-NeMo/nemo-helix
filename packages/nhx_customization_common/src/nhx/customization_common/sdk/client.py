@@ -38,7 +38,6 @@ from nhx.customization_common.sdk import endpoints
 from nhx.customization_common.sdk.types import (
     CustomizationJob,
     CustomizationJobCreateRequest,
-    CustomizationJobDryRun,
     ListCustomizationJobsQueryParams,
 )
 from pydantic import BaseModel
@@ -47,7 +46,6 @@ from pydantic import BaseModel
 class _CustomizationMethods:
     get_customization_health = method(endpoints.get_customization_health)
     create_customization_job = method(endpoints.create_customization_job)
-    dry_run_customization_job = method(endpoints.dry_run_customization_job)
     list_customization_jobs = method(endpoints.list_customization_jobs)
     get_customization_job = method(endpoints.get_customization_job)
 
@@ -214,8 +212,16 @@ class JobsResource:
         ownership: dict[str, Any] | None = None,
         custom_fields: dict[str, Any] | None = None,
         output_location: str | None = None,
+        dry_run: bool = False,
     ) -> NemoResponse[CustomizationJob]:
-        """Submit a training job through the Customizer backend route."""
+        """Submit a training job through the Customizer backend route.
+
+        With ``dry_run=True``, the job is checked as submit would check it (validated and
+        compiled, its execution profile and the first rows of each dataset file) and
+        nothing is created. It returns the job unsaved, with the checks in
+        ``status_details["checks"]``; a failed check raises ``UnprocessableEntityError``,
+        whose ``body["detail"]["checks"]`` lists every check, passed and failed.
+        """
         body = _create_request(
             spec,
             name=name,
@@ -231,36 +237,7 @@ class JobsResource:
             workspace=workspace,
             backend=self.backend,
             body=body,
-        )
-
-    def dry_run(
-        self,
-        spec: BaseModel | dict[str, Any],
-        workspace: str | None = None,
-        *,
-        profile: str | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> NemoResponse[CustomizationJobDryRun]:
-        """Check a training job as :meth:`create` would, without creating it.
-
-        Validates and compiles the job, checks the execution profile, and checks the
-        first rows of each dataset file training would read.
-        """
-        body = _create_request(
-            spec,
-            name=None,
-            description=None,
-            project=None,
-            profile=profile,
-            options=options,
-            ownership=None,
-            custom_fields=None,
-            output_location=None,
-        )
-        return self._customization.dry_run_customization_job(
-            workspace=workspace,
-            backend=self.backend,
-            body=body,
+            query_params={"dry_run": True} if dry_run else None,
         )
 
     def list(
@@ -349,8 +326,16 @@ class AsyncJobsResource:
         ownership: dict[str, Any] | None = None,
         custom_fields: dict[str, Any] | None = None,
         output_location: str | None = None,
+        dry_run: bool = False,
     ) -> NemoResponse[CustomizationJob]:
-        """Submit a training job through the Customizer backend route."""
+        """Submit a training job through the Customizer backend route.
+
+        With ``dry_run=True``, the job is checked as submit would check it (validated and
+        compiled, its execution profile and the first rows of each dataset file) and
+        nothing is created. It returns the job unsaved, with the checks in
+        ``status_details["checks"]``; a failed check raises ``UnprocessableEntityError``,
+        whose ``body["detail"]["checks"]`` lists every check, passed and failed.
+        """
         body = _create_request(
             spec,
             name=name,
@@ -366,36 +351,7 @@ class AsyncJobsResource:
             workspace=workspace,
             backend=self.backend,
             body=body,
-        )
-
-    async def dry_run(
-        self,
-        spec: BaseModel | dict[str, Any],
-        workspace: str | None = None,
-        *,
-        profile: str | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> NemoResponse[CustomizationJobDryRun]:
-        """Check a training job as :meth:`create` would, without creating it.
-
-        Validates and compiles the job, checks the execution profile, and checks the
-        first rows of each dataset file training would read.
-        """
-        body = _create_request(
-            spec,
-            name=None,
-            description=None,
-            project=None,
-            profile=profile,
-            options=options,
-            ownership=None,
-            custom_fields=None,
-            output_location=None,
-        )
-        return await self._customization.dry_run_customization_job(
-            workspace=workspace,
-            backend=self.backend,
-            body=body,
+            query_params={"dry_run": True} if dry_run else None,
         )
 
     async def list(

@@ -3,8 +3,8 @@
 
 """``--dry-run`` and ``preflight`` for the Customizer backend commands.
 
-``--dry-run`` sends the job to the backend's dry-run route, which validates and compiles
-it as submit would, checks the execution profile and the first rows of the dataset, and
+``--dry-run`` submits the job with ``?dry_run=true``: the backend validates and compiles it
+as submit would, checks the execution profile and the first rows of the dataset, and
 creates nothing. ``preflight`` checks the platform before any data work: it is reachable,
 and has the execution profile the backend needs.
 """
@@ -50,7 +50,7 @@ def dry_run_remote(
         raise typer.Exit(code=1) from exc
     headers = resolve_submit_auth_headers(typer_ctx)
     try:
-        report = NemoJobScheduler().dry_run_remote(
+        job = NemoJobScheduler().submit_remote(
             job_cls,
             json.loads(spec_json),
             base_url=resolve_submit_base_url(typer_ctx),
@@ -58,14 +58,32 @@ def dry_run_remote(
             profile=profile,
             options=merged_options or None,
             headers=headers or None,
+            timeout=60.0,
+            dry_run=True,
         )
     except httpx.HTTPStatusError as exc:
-        print_http_status_error(exc, action=f"dry-run {backend} job")
-        raise typer.Exit(code=2) from exc
+        # A failed check is a 422 that lists every check; any other error is printed as submit would.
+        checks = _failed_checks(exc.response)
+        if checks is None:
+            print_http_status_error(exc, action=f"dry-run {backend} job")
+            raise typer.Exit(code=2) from exc
+        _report(typer_ctx, {"checks": checks, "passed": False})
     except httpx.RequestError as exc:
         print_http_request_error(exc, action=f"dry-run {backend} job")
         raise typer.Exit(code=2) from exc
-    _report(typer_ctx, report)
+    checks = (job.get("status_details") or {}).get("checks", [])
+    _report(typer_ctx, {"spec": job.get("spec"), "checks": checks, "passed": True})
+
+
+def _failed_checks(response: httpx.Response) -> list[dict[str, Any]] | None:
+    """The checks of a dry run's 422, or None for any other error."""
+    if response.status_code != 422:
+        return None
+    try:
+        detail = response.json().get("detail")
+    except ValueError:
+        return None
+    return detail.get("checks") if isinstance(detail, dict) else None
 
 
 def dry_run_local(
@@ -91,7 +109,6 @@ def dry_run_local(
             checks.append(JobDryRunCheck(name=training.name, passed=False, message=f"{path} does not exist."))
     report = {
         "spec": validated_spec,
-        "steps": [],
         "checks": [check.model_dump() for check in checks],
         "passed": all(check.passed for check in checks),
     }
@@ -108,9 +125,6 @@ def _report(typer_ctx: typer.Context, report: dict[str, Any], *, note: str | Non
     else:
         for check in report["checks"]:
             typer.echo(f"{'OK  ' if check['passed'] else 'FAIL'} {check['name']}: {check['message']}")
-        for step in report["steps"]:
-            image = step.get("image") or "set by the execution profile"
-            typer.echo(f"     step {step['name']}: {step['provider']}/{step['profile']}, image {image}")
         if note:
             typer.echo(note)
         typer.echo(f"Dry run {'passed' if report['passed'] else 'failed'}. Nothing was created.")
@@ -155,7 +169,6 @@ def add_preflight_command(group: typer.Typer, *, backend: str, kubernetes_only: 
             typer_ctx,
             {
                 "checks": [check.model_dump() for check in checks],
-                "steps": [],
                 "passed": all(check.passed for check in checks),
             },
         )
