@@ -81,9 +81,12 @@ policy_model:                      # instance — what every {type, name} ref po
 The converter writes it. For a hand-built package, generate it from the same helper the converter uses, so the two cannot drift:
 
 ```python
+from pathlib import Path
+
 import yaml
 from nhx.rl.tasks.environment.package import build_policy_model_yaml
 
+out_dir = Path("my-env")  # the package root, where nemo-environment.yaml lives
 (out_dir / "configs").mkdir(parents=True, exist_ok=True)
 (out_dir / "configs" / "policy_model.yaml").write_text(
     yaml.safe_dump(build_policy_model_yaml(), sort_keys=False), encoding="utf-8"

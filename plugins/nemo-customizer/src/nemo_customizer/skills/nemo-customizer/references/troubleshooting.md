@@ -9,14 +9,14 @@ Resolve the CLI and the platform URL first: `SKILL.md` § **Pre-flight**.
 
 ## Platform unreachable (connection error)
 
-`SKILL.md` § **Pre-flight** decides whether to start the platform. When the user agrees, run this from the **nemo-helix** git root in the **background**, then poll until healthy and retry the failed command:
+`SKILL.md` § **Pre-flight** decides whether to start the platform. When the user agrees, run this from the **nemo-helix** git root. It starts the platform in the background and logs to `nemo-services.log`; poll until healthy, then retry the failed command:
 
 ```bash
-nemo services run \
+nohup nemo services run \
   --host 0.0.0.0 \
   --port 8080 \
   --controllers jobs,entities,models \
-  --service-group all
+  --service-group all > nemo-services.log 2>&1 &
 ```
 
 Health check (repeat until success or ~2 min):

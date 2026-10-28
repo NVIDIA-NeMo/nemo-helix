@@ -70,7 +70,6 @@ Instead of steps 1 and 2, `--upload-model <local path or HF repo id>` and `--upl
   },
   "schedule": { "epochs": 1 },
   "batch": { "global_batch_size": 4, "micro_batch_size": 1 },
-  "optimizer": { "learning_rate": 5e-5, "weight_decay": 0.01, "warmup_steps": 0 },
   "parallelism": { "num_nodes": 1, "num_gpus_per_node": 1, "tensor_parallel_size": 1 },
   "output": { "name": "<output-name>" }
 }
@@ -117,7 +116,6 @@ Same substitutions as automodel. Steps 1 (dataset) and 2 (model entity) are iden
   },
   "schedule": { "epochs": 1, "warmup_ratio": 0.1 },
   "batch": { "per_device_train_batch_size": 2, "gradient_accumulation_steps": 4 },
-  "optimizer": { "learning_rate": 5e-5, "optim": "adamw_8bit" },
   "hardware": { "gpus": "0", "precision": "bf16" },
   "output": { "name": "<output-name>", "save_method": "lora" }
 }

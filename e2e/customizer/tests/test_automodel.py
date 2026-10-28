@@ -44,7 +44,7 @@ def test_automodel_sft_uplift(
             },
             "schedule": {"epochs": 1},
             "batch": {"global_batch_size": 8, "micro_batch_size": 1},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
+            # No learning_rate: the schema default for each finetuning_type is what this covers.
             "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},
             "output": {"name": output_name},
         }
@@ -52,6 +52,7 @@ def test_automodel_sft_uplift(
 
     job_name, final = jobs.submit_and_wait_customization_job(client, "automodel", spec, ws)
     assert final.status == "completed", jobs.get_job_failure_details(client, job_name, ws)
+    assert final.spec["optimizer"]["learning_rate"] == {"lora": 5e-5, "all_weights": 5e-6}[finetuning_type]
 
     if finetuning_type == "lora":
         deployment, config = jobs.deploy_vllm_model(client, ws, base_entity, lora_enabled=True)

@@ -244,7 +244,9 @@ def submit_and_wait_customization_job(
         .create_customization_job(
             workspace=workspace,
             backend=backend,
-            body=CustomizationJobCreateRequest(spec=spec.model_dump(mode="json"), name=name),
+            # exclude_unset: a default sent explicitly would count as set, and skip the
+            # server-side defaults that depend on other fields (e.g. learning_rate).
+            body=CustomizationJobCreateRequest(spec=spec.model_dump(mode="json", exclude_unset=True), name=name),
         )
         .data()
     )
