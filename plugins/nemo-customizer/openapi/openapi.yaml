@@ -4317,12 +4317,13 @@ components:
         policy_backend:
           allOf:
           - $ref: '#/components/schemas/PolicyBackend'
-          description: NeMo-RL policy worker that trains the model. `lora` requires
-            `automodel` (NeMo Automodel + Transformer Engine, Hopper or newer; the
-            only backend with expert parallelism and automodel_kwargs). `all_weights`
-            defaults to `dtensor` (stock HuggingFace on PyTorch FSDP2, also the pre-Hopper
-            option) and may be set to `automodel` for a consolidated HuggingFace export.
-            Omit it to get the default for the finetuning type.
+          description: NeMo-RL policy worker that trains the model. Both values compile
+            policy.automodel_cfg for AutomodelPolicyWorker. `lora` requires `automodel`
+            (NeMo Automodel + Transformer Engine, Hopper or newer; the backend that
+            accepts expert parallelism and automodel_kwargs). `all_weights` defaults
+            to `dtensor`, which compiles the same block and rejects LoRA, expert parallelism,
+            and automodel_kwargs at submit. Omit it to get the default for the finetuning
+            type.
         v4_compatible:
           type: boolean
           title: V4 Compatible
@@ -4564,10 +4565,10 @@ components:
           default: 64
         automodel_kwargs:
           title: Automodel Kwargs
-          description: 'Passed to policy.dtensor_cfg.automodel_kwargs; requires policy_backend=''automodel''.
-            {''force_hf'': true} loads the stock HuggingFace modules; a {''backend'':
-            {...}} block picks the Transformer-Engine / DeepEP MoE implementation.
-            Unset means Automodel auto-detects.'
+          description: 'Passed to policy.automodel_cfg.automodel_kwargs; requires
+            policy_backend=''automodel''. {''force_hf'': true} loads the stock HuggingFace
+            modules; a {''backend'': {...}} block picks the Transformer-Engine / DeepEP
+            MoE implementation. Unset means Automodel auto-detects.'
           additionalProperties: true
           type: object
         router_aux_loss_coef:
@@ -4603,7 +4604,7 @@ components:
           type: object
         moe_parallelizer:
           title: Moe Parallelizer
-          description: Merged over policy.dtensor_cfg.moe_parallelizer, which controls
+          description: Merged over policy.automodel_cfg.moe_parallelizer, which controls
             how MoE experts are sharded and checkpointed. The platform already sets
             ignore_router_for_ac when expert parallelism and activation checkpointing
             are both on; this reaches the rest.
@@ -4615,6 +4616,14 @@ components:
             of the policy's. Defaults to min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node).
           type: integer
           exclusiveMinimum: 0.0
+        vllm_expert_parallel_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Vllm Expert Parallel Size
+          description: Expert parallel size for the vLLM rollout engine, independent
+            of the policy's. Defaults to 1. Super VL recipes set this to 4 alongside
+            tensor_parallel_size 4.
+          default: 1
         vllm_gpu_memory_utilization:
           type: number
           maximum: 1.0
