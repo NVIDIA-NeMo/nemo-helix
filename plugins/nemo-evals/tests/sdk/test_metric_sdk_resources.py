@@ -17,11 +17,13 @@ from nemo_evals.sdk.metric_resources import (
     EvaluatorMetricsResource,
 )
 from nemo_evals.shared.metric_bundles.bundles import (
+    BundledMetricOutputSpec,
     MetricBundle,
     MetricBundlePackagerPolicyError,
     bundle_metric,
 )
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_helix_plugin.evals import types as client_types
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.protocol import Metric as RuntimeMetric
@@ -138,6 +140,11 @@ def _assert_optional_output_posted(request: httpx.Request) -> None:
     outputs = {output["name"]: output for output in _request_body(request)["outputs"]}
     assert "required" not in outputs["score"]
     assert outputs["confidence"]["required"] is False
+
+
+def test_client_output_spec_fields_match_service_bundle() -> None:
+    # The client DTO forbids extra fields, so any service field it lacks breaks metrics.create.
+    assert client_types.BundledMetricOutputSpec.model_fields.keys() == BundledMetricOutputSpec.model_fields.keys()
 
 
 # ---- sync ------------------------------------------------------------------
