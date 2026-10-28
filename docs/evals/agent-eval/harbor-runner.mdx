@@ -589,8 +589,17 @@ completed
 
   On the platform's `HarborRunnerTarget` these three are one field, `source`, so a spec names exactly
   one agent: `{"name": "oracle", "model": {"name": ...}}` for a built-in agent or
-  `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own. A built-in agent can
-  also take a gateway model, `{"ref": ...}`; see [Run a closed-book evaluation](#run-a-closed-book-evaluation).
+  `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own. The two shapes differ
+  on purpose: a built-in agent's `model` takes either a model slug, `{"name": ...}`, or a gateway
+  model, `{"ref": ...}` (see [Run a closed-book evaluation](#run-a-closed-book-evaluation)), while an
+  imported agent takes only a slug, as `model_name`.
+
+  <Note>
+  A built-in agent's flat `model_name`, the 0.9 spelling (`{"name": "oracle", "model_name": ...}`), is
+  deprecated and will be removed in 0.11. Until then it is still accepted and converted to
+  `model: {"name": ...}` with a warning; giving both `model_name` and `model` is an error. Use `model`
+  in new specs. The imported agent's `model_name` is not deprecated.
+  </Note>
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
   Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
@@ -638,8 +647,9 @@ the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `Ag
 ```text
 HarborRuntimeConfig  (on the platform, HarborRunnerTarget.source fills the three agent lines)
         │
+        ├─ agent_name          → Harbor AgentConfig.name
         ├─ agent_import_path   → Harbor AgentConfig.import_path
-        ├─ agent_model_name    → Harbor AgentConfig.model_name
+        ├─ agent_model_name    → Harbor AgentConfig.model_name   (source.model.name or source.model_name)
         ├─ agent_kwargs        → Harbor AgentConfig.kwargs
         └─ env_secrets/env_vars → Harbor AgentConfig.env ({NAME: "${<source var>}"} + literals)
                                        │
@@ -647,6 +657,10 @@ HarborRuntimeConfig  (on the platform, HarborRunnerTarget.source fills the three
                      Harbor AgentFactory constructs
                      FabricAgent(model_name=..., extra_env=..., **kwargs)
 ```
+
+A built-in agent given a gateway model (`source.model.ref`) has no slug to pass through: Evals sets
+the agent's model name, base URL and API key variables instead; see
+[Run a closed-book evaluation](#run-a-closed-book-evaluation).
 
 ### Standalone and submitted custom agents
 
