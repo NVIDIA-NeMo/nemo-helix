@@ -35,7 +35,7 @@ router = APIRouter()
 _AUDIT_SCOPE = scope.child("audit")
 _AUDIT_READ_PERMISSION = _AUDIT_SCOPE.permission(
     "read",
-    description="Read garak.audit jobs, including status, logs, and results",
+    description="Read auditor.audit jobs, including status, logs, and results",
 )
 
 # The individual result names published by AuditJob, in preferred archive order.

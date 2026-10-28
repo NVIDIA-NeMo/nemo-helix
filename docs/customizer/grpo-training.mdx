@@ -396,7 +396,7 @@ Omitting the `lora` block while setting `finetuning_type: "lora"` is fine — de
 
 ### Using the adapter
 
-The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`); the model-entity path always resolves to the base model.
+The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`, or `default/<model-entity>:default--<adapter>` on the SGLang model-free NIM); the model-entity path always resolves to the base model.
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 
@@ -416,7 +416,7 @@ Create the deployment config first and pass its name. This is the recommended pa
 }
 ```
 
-Or an object to have one created inline. It deploys with vLLM, the recommended engine for Customizer outputs. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM:
+Or an object to have one created inline. It deploys with vLLM, the recommended engine for Customizer outputs. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default model-free NIM:
 
 ```json
 {
@@ -432,10 +432,10 @@ Or an object to have one created inline. It deploys with vLLM, the recommended e
 | `engine`           | `vllm`                          | `vllm` or `nim`.                                                                                                                                                                                                  |
 | `gpu`              | `1`                             | GPUs the deployment requests.                                                                                                                                                                                     |
 | `lora_enabled`     | `true`                          | Whether the deployment can load LoRA adapters.                                                                                                                                                                    |
-| `image_name`       | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`.                                                                                 |
+| `image_name`       | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the model-free NIM, `nvcr.io/nim/nvidia/vllm-model-free-nim`.                                                                    |
 | `image_tag`        | platform default for the engine | Container image tag. For NIM, the default is `latest`.                                                                                                                                                            |
 | `disk_size`        | unset                           | Disk size for the deployment.                                                                                                                                                                                     |
-| `additional_envs`  | unset                           | Extra environment variables.                                                                                                                                                                                      |
+| `additional_envs`  | unset                           | Extra environment variables. The default NIM image, the model-free NIM, loads LoRA adapters up to rank 16 unless you set `NIM_PASSTHROUGH_ARGS` to `--max-lora-rank <rank>`.                                      |
 | `tool_call_config` | unset                           | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
 vLLM loads LoRA adapters up to rank 16. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.

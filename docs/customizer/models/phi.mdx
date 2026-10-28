@@ -8,6 +8,12 @@ description: ""
 <a id="model-catalog-phi"></a>
 This page provides detailed technical specifications for the Phi model family supported by NeMo Customizer. For information about supported features and capabilities, refer to [Tested Models](/documentation/customizer-reference/models/model-catalog).
 
+<Warning>
+
+Deployment configurations on this page that use the multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.15.5`) cannot serve merged LoRA checkpoints (`finetuning_type: lora_merged`). Deploy merged LoRA models with vLLM or the model-free NIM; see [Choose an Inference Engine](/documentation/models-and-inference/deploy-models#choose-an-inference-engine).
+
+</Warning>
+
 ## Microsoft Phi-4
 
 | Property | Value |

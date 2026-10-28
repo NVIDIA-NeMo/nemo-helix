@@ -9,6 +9,12 @@ description: ""
 
 This page provides detailed technical specifications for the Nemotron model family supported by NeMo Customizer. For information about supported features and capabilities, refer to [Tested Models](/documentation/customizer-reference/models/model-catalog).
 
+<Warning>
+
+Deployment configurations on this page that use the multi-LLM NIM (`nvcr.io/nim/nvidia/llm-nim:1.15.5`) cannot serve merged LoRA checkpoints (`finetuning_type: lora_merged`). Deploy merged LoRA models with vLLM or the model-free NIM; see [Choose an Inference Engine](/documentation/models-and-inference/deploy-models#choose-an-inference-engine).
+
+</Warning>
+
 <Note>
 
 Customizing Nemotron models is supported on NVIDIA Hopper or Blackwell era GPUs, such as H100, H200, B100, and B200. GPU counts on this page assume 80 GB GPUs. GPUs with more memory, such as B200, need fewer; set `expert_parallel_size` to the GPU count for MoE models.

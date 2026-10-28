@@ -65,6 +65,20 @@ After a customization job reaches **`completed`**, the platform registers the ad
 |-------------------------|----------------------------------|
 | A **READY** inference deployment for the **base** model entity with `lora_enabled: true` | Confirm adapter appears under `nemo models get <model-entity>` → `adapters` |
 | Gateway reachable at the provider URL below | Target the adapter by name in the eval request (see table) |
+| The deployment's maximum LoRA rank ≥ the adapter's `rank` (see below) | — |
+
+#### LoRA rank limit
+
+A deployment loads adapters up to a maximum rank and **refuses higher-rank adapters**. Defaults:
+
+| Engine / image | Default max rank | Raise it on the deployment config |
+|---|---|---|
+| vLLM (`engine: vllm`, the default) | **16** | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
+| Model-free NIM, vLLM (`vllm-model-free-nim`, the default NIM image) | **16** | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Model-free NIM, SGLang (`sglang-model-free-nim`) | **16** if the server starts with no adapters; otherwise the highest rank among adapters present at start | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
+
+vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
 
 ### Full SFT / merged checkpoints: deploy the output model
 
@@ -78,6 +92,14 @@ The fine-tuned weights live on a **new model entity** at `output.name` (`default
 | Deploy for inference | Create or update an inference deployment / provider that serves `default/<output.name>` |
 | Inference / eval route | **Model-entity** URL on `<output.name>` with `model: default/<output.name>` (not the base entity) |
 
+**Pick the engine.** Deploy with **`engine: vllm`** by default; it is also the default for an inline `deployment_config` on the job. Use `engine: nim` only when the user asks for NIM or has a model-specific NIM image for the model. When using NIM for a Hugging Face checkpoint:
+
+- Prefer the **model-free NIM** (`nvcr.io/nim/nvidia/vllm-model-free-nim`, the platform default NIM image, tag `latest`). It is the NIM 2.x successor to the multi-LLM NIM, not a rename, and the platform sets the configuration it reads. Supported models: [model-free NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim).
+- Use the NIM 1.x **multi-LLM NIM** (`nvcr.io/nim/nvidia/llm-nim`) only when the user asks for it. Supported architectures: [multi-LLM NIM list](https://docs.nvidia.com/nim/large-language-models/1.15.0/supported-architectures.html).
+- **The multi-LLM NIM cannot serve automodel `lora_merged` outputs.** The merge step saves `config.json` and the tokenizer with transformers 5; the multi-LLM NIM 1.15 ships transformers 4.56. Deploy merged LoRA outputs with vLLM or the model-free NIM, and warn the user if they ask for the multi-LLM NIM.
+
+The per-model deployment configurations in the docs still list `llm-nim:1.15.5`; the merged-LoRA limitation applies to them.
+
 Post-training eval for full models: compare against the base entity on its deployment, or eval the fine-tuned entity directly via `eval_helpers.py` is LoRA-oriented (`--adapter`); for full SFT, run generation eval against the **output** model entity's gateway URL.
 
 ### Request routing (base vs LoRA)
@@ -87,7 +109,9 @@ The model-entity proxy path **always** resolves to the base VirtualModel. Settin
 | Target | Gateway route | URL pattern | Request `model` field |
 |--------|---------------|-------------|------------------------|
 | Base entity | **Model entity** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| LoRA adapter | **Provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>` |
+| LoRA adapter | **Provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<adapter-name>`; on the SGLang model-free NIM, `default/<model-entity>:default--<adapter-name>` |
+
+SGLang answers a bare adapter name with the **base** model, without an error. The provider's `served_models` (`nemo inference providers get <provider> --workspace default`) lists each adapter's served name; `eval_helpers.py` reads it from there.
 
 `eval_helpers.py` auto-discovers a READY provider that serves the base entity (or pass `--provider <name>`). LoRA adapter weights hot-reload on that deployment — no provider update per adapter. (Full SFT / merged outputs need a separate deployment — see above.)
 
@@ -149,7 +173,7 @@ When comparing adapters from **different backends** (automodel vs unsloth) or ba
 | Piece | LoRA adapter | Base model |
 |-------|--------------|------------|
 | HTTP base URL | `…/provider/<provider>/-/v1` | `…/model/<model-entity>/-/v1` |
-| `"model"` | `default--<adapter-name>` | `default/<model-entity>` |
+| `"model"` | `default--<adapter-name>` (SGLang model-free NIM: `default/<model-entity>:default--<adapter-name>`) | `default/<model-entity>` |
 | `messages` | `messages[:-1]` from the training row (exclude final assistant label) | Same |
 | Short-answer SFT (e.g. Nemotron 3.5 Lightning, Qwen3) | `"chat_template_kwargs": {"enable_thinking": false}` | Same |
 | `max_tokens` / `temperature` | `64` / `0` typical for short labels | Same |
