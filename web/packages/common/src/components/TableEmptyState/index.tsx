@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { FolderOpen } from '@nemo/icons/icons';
 import { StatusMessage, Flex } from '@nvidia/foundations-react-core';
-import { FolderOpen } from 'lucide-react';
 import { FC } from 'react';
 
 interface Props {

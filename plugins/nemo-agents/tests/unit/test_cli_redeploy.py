@@ -22,12 +22,14 @@ and there is no update route. These tests pin the user-visible contract:
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import httpx
+import pytest
 from nemo_agents_plugin.cli import AgentsCLI
 from typer.testing import CliRunner
 
@@ -152,6 +154,71 @@ def test_redeploy_runs_steps_in_order(tmp_path: Path, make_cli_state) -> None:
 # ---------------------------------------------------------------------------
 # Fail-fast: bad config aborts before any teardown
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("fileset", "fileset_workspace", "status"),
+    [
+        ("source", "team-a", 200),
+        ("other/source", "other", 200),
+        ("source", "team-a", 403),
+        ("source", "team-a", 404),
+    ],
+)
+def test_redeploy_checks_fileset_before_teardown(
+    tmp_path: Path, make_cli_state, fileset: str, fileset_workspace: str, status: int
+) -> None:
+    config = _write_config(tmp_path)
+    config.write_text(config.read_text() + f"reference:\n  fileset: {fileset}\n")
+    rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
+    fileset_path = f"/apis/files/v2/workspaces/{fileset_workspace}/filesets/source"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == fileset_path:
+            rec.calls.append((req.method, req.url.path))
+            return httpx.Response(
+                status,
+                json={
+                    "id": "id-source",
+                    "name": "source",
+                    "workspace": fileset_workspace,
+                    "description": "",
+                    "purpose": "generic",
+                    "storage": {"type": "local", "path": "/data/source"},
+                    "metadata": {},
+                    "custom_fields": {},
+                    "project": "",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                },
+            )
+        if req.method == "POST" and req.url.path.endswith("/agents"):
+            assert json.loads(req.read())["reference"]["fileset"] == f"{fileset_workspace}/source"
+        return rec(req)
+
+    result = runner.invoke(
+        AgentsCLI().get_cli(),
+        [
+            "redeploy",
+            "--agent",
+            "my-agent",
+            "--agent-config",
+            str(config),
+            "--workspace",
+            "team-a",
+            "--yes",
+            "--no-wait",
+        ],
+        obj=make_cli_state(handler),
+    )
+
+    assert rec.calls[0] == ("GET", fileset_path)
+    if status == 200:
+        assert result.exit_code == 0, result.output
+        assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
+    else:
+        assert result.exit_code == 1, result.output
+        assert rec.calls == [("GET", fileset_path)]
 
 
 def test_redeploy_bad_config_aborts_before_teardown(tmp_path: Path, make_cli_state) -> None:
@@ -575,3 +642,98 @@ def test_redeploy_surfaces_real_delete_failure(tmp_path: Path, make_cli_state) -
     # It undeployed and attempted the delete, but did NOT proceed to recreate.
     assert rec.ordered_ops() == ["undeploy", "delete"]
     assert "already absent" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# Labels: kept unless --label replaces them
+# ---------------------------------------------------------------------------
+
+
+class _LabelsRecorder(_Recorder):
+    """Serves the existing agent's labels (or a 404) and captures the recreate body."""
+
+    def __init__(self, *, existing_labels: dict[str, str] | None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.existing_labels = existing_labels
+        self.created: dict[str, Any] | None = None
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if req.method == "GET" and re.search(r"/agents/[^/]+$", path):
+            self.calls.append((req.method, path))
+            if self.existing_labels is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(200, json={"name": "my-agent", "labels": self.existing_labels})
+        if req.method == "POST" and path.endswith("/agents"):
+            self.created = json.loads(req.content)
+        return super().__call__(req)
+
+
+def _redeploy(tmp_path: Path, make_cli_state, rec: _Recorder, *extra: str) -> Any:
+    with patch(f"{_PATCH_PREFIX}.sleep"):
+        return runner.invoke(
+            AgentsCLI().get_cli(),
+            [
+                "redeploy",
+                "--agent",
+                "my-agent",
+                "--agent-config",
+                str(_write_config(tmp_path)),
+                "--yes",
+                "--timeout",
+                "10",
+                *extra,
+            ],
+            obj=make_cli_state(rec),
+        )
+
+
+def test_redeploy_keeps_existing_labels_when_label_omitted(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support", "helix-agents/managed-by": "compass"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec)
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert rec.created["labels"] == {"team": "support", "helix-agents/managed-by": "compass"}
+
+
+def test_redeploy_label_replaces_existing_labels(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support", "tier": "1"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec, "--label", "team=billing")
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert rec.created["labels"] == {"team": "billing"}
+    # An explicit --label needs nothing from the old agent.
+    assert ("GET", "/apis/agents/v2/workspaces/default/agents/my-agent") not in rec.calls
+
+
+def test_redeploy_absent_agent_recreates_without_labels(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels=None, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec)
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert "labels" not in rec.created
+
+
+def test_redeploy_recovery_hint_carries_labels(tmp_path: Path, make_cli_state) -> None:
+    """After teardown a re-run can't read the old labels, so the hint must pass them explicitly."""
+    rec = _LabelsRecorder(existing_labels={"team": "support"}, deployments=[], create_agent_status=500)
+    result = _redeploy(tmp_path, make_cli_state, rec)
+    assert result.exit_code != 0
+    assert "--label team=support" in result.output
+
+
+def test_redeploy_clear_labels_recreates_without_labels(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec, "--clear-labels")
+    assert result.exit_code == 0, result.output
+    assert rec.created is not None
+    assert "labels" not in rec.created
+    assert ("GET", "/apis/agents/v2/workspaces/default/agents/my-agent") not in rec.calls
+
+
+def test_redeploy_clear_labels_conflicts_with_label(tmp_path: Path, make_cli_state) -> None:
+    rec = _LabelsRecorder(existing_labels={"team": "support"}, deployments=[])
+    result = _redeploy(tmp_path, make_cli_state, rec, "--clear-labels", "--label", "team=billing")
+    assert result.exit_code == 2
+    assert "--clear-labels cannot be combined with --label" in result.output
+    assert rec.calls == []

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { InfoCircle } from '@nemo/icons/icons';
 import { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import {
   Badge,
@@ -24,7 +25,6 @@ import {
   isPassingGrade,
 } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
 import { tooltipClassName } from '@studio/styles/common';
-import { Info } from 'lucide-react';
 import { FC } from 'react';
 
 interface DataPrivacyPanelProps {
@@ -112,7 +112,7 @@ export const DataPrivacyPanel: FC<DataPrivacyPanelProps> = ({
                         side="bottom"
                         className={tooltipClassName}
                       >
-                        <Info className="inline shrink-0" />
+                        <InfoCircle className="inline shrink-0" />
                       </Tooltip>
                     </Flex>
                   </TableDataCell>

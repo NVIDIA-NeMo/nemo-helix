@@ -44,7 +44,7 @@ def test_automodel_sft_uplift(
             },
             "schedule": {"epochs": 1},
             "batch": {"global_batch_size": 8, "micro_batch_size": 1},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
+            # No learning_rate: the schema default for each finetuning_type is what this covers.
             "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},
             "output": {"name": output_name},
         }
@@ -52,23 +52,26 @@ def test_automodel_sft_uplift(
 
     job_name, final = jobs.submit_and_wait_customization_job(client, "automodel", spec, ws)
     assert final.status == "completed", jobs.get_job_failure_details(client, job_name, ws)
+    assert final.spec["optimizer"]["learning_rate"] == {"lora": 5e-5, "all_weights": 5e-6}[finetuning_type]
 
     if finetuning_type == "lora":
         deployment, config = jobs.deploy_vllm_model(client, ws, base_entity, lora_enabled=True)
         try:
+            base_id = ceval.base_model_field(ws, base_entity)
+            jobs.wait_until_entity_routable(client, ws, base_id)
             base_score = ceval.score_rows(
                 squad_val_rows,
                 platform_base_url,
                 ws,
-                deployment,
-                ceval.base_model_field(ws, base_entity),
+                base_id,
             )
+            adapter_id = ceval.adapter_model_id(ws, base_entity, output_name)
+            jobs.wait_until_entity_routable(client, ws, adapter_id)
             tuned_score = ceval.score_rows(
                 squad_val_rows,
                 platform_base_url,
                 ws,
-                deployment,
-                ceval.lora_model_field(ws, output_name),
+                adapter_id,
             )
         finally:
             jobs.delete_deployment(client, ws, deployment, config)
@@ -101,12 +104,13 @@ def _deploy_and_score(
 ) -> float:
     deployment, config = jobs.deploy_vllm_model(client, workspace, entity, lora_enabled=False)
     try:
+        model_id = ceval.base_model_field(workspace, entity)
+        jobs.wait_until_entity_routable(client, workspace, model_id)
         return ceval.score_rows(
             rows,
             base_url,
             workspace,
-            deployment,
-            ceval.base_model_field(workspace, entity),
+            model_id,
         )
     finally:
         jobs.delete_deployment(client, workspace, deployment, config)

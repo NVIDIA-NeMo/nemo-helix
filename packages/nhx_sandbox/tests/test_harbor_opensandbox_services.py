@@ -33,6 +33,21 @@ def test_round_trips_through_the_extension_value() -> None:
     assert [s.role for s in spec.services] == ["sidecar", "run_once"]
 
 
+def test_services_timeout_is_optional_and_only_sent_when_set() -> None:
+    assert parse_compose_services(_spec()).services_timeout_sec is None
+    assert "services_timeout_sec" not in parse_compose_services(_spec()).to_json()
+    spec = parse_compose_services(_spec(services_timeout_sec=660))
+    assert spec.services_timeout_sec == 660
+    assert '"services_timeout_sec":660' in spec.to_json()
+    assert ComposeServices.model_validate_json(spec.to_json()) == spec
+
+
+@pytest.mark.parametrize("value", [0, -1, 3601, "660", 1.5])
+def test_services_timeout_is_a_whole_number_of_seconds_up_to_an_hour(value: Any) -> None:
+    with pytest.raises(ValidationError):
+        parse_compose_services(_spec(services_timeout_sec=value))
+
+
 @pytest.mark.parametrize(
     ("raw", "message"),
     [
@@ -74,6 +89,15 @@ def test_rejects_duplicate_mount_paths_within_a_container() -> None:
         parse_compose_services(_spec(service, volumes=["a", "b"]))
     with pytest.raises(ValidationError, match="main: mount_path '/data' is used by more than one"):
         parse_compose_services(_spec(volumes=["a", "b"], main={"volume_mounts": _mounts("a", "b")}))
+    # The server mounts /dev/shm for a service with `shm_size`, so a volume there would be a second mount.
+    service = {
+        "name": "db",
+        "image": "docker.io/x:1",
+        "shm_size": "1Gi",
+        "volume_mounts": _mounts("a", path="/dev/shm"),
+    }
+    with pytest.raises(ValidationError, match="db: mount_path '/dev/shm' is used by more than one"):
+        parse_compose_services(_spec(service, volumes=["a"]))
 
 
 def test_allows_the_same_mount_path_in_different_containers() -> None:

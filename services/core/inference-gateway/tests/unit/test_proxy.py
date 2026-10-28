@@ -582,6 +582,111 @@ async def test_virtual_model_proxy_injects_request_context_annotations_without_r
     assert body["guardrails_data"] == {"config_ids": ["ws/input-only"]}
 
 
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_original_request_snapshot_isolated_from_nested_mutation(
+    mock_proxy_client,
+    mock_proxy_response,
+):
+    # Regression: ctx.original_request is the frozen "as the client sent it" snapshot that
+    # later middleware trusts (e.g. nemo-guardrails reads ctx.original_request.body so a
+    # downstream plugin can't hide content by mutating the live body). A shallow copy of the
+    # body shares its NESTED objects (inner tool lists) with the live working request, so a
+    # plugin stripping tools in place would silently corrupt the snapshot. Assert the snapshot's
+    # nested tool list is unaffected by an in-place mutation of the live request's tool list.
+    captured: dict[str, Any] = {}
+
+    class _ToolStrippingPlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> InferenceRequest:
+            # Mutate the live request's nested tool list IN PLACE (the aliasing-prone pattern).
+            request.body["tools"].clear()
+            # Record what the frozen snapshot holds AFTER the in-place mutation.
+            captured["snapshot_tools"] = ctx.original_request.body.get("tools")
+            return request
+
+    mock_proxy_response.read = AsyncMock(
+        return_value=json.dumps(
+            {
+                "id": "raw",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "llama",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "raw"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ).encode()
+    )
+
+    workspace = "e2e-test"
+    vm_name = "tool-stripping-router"
+    model_entity_id = f"{workspace}/meta_llama-3.2-1b-instruct"
+    served_model_name = "meta/llama-3.2-1b-instruct"
+
+    model_cache = ModelCache()
+    model_cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="default",
+                name="nim",
+                host_url="http://nim.local",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id=model_entity_id,
+                        served_model_name=served_model_name,
+                    )
+                ],
+                status=ModelProviderStatus.READY,
+            )
+        )
+    )
+    model_cache.rebuild_model_entity_map()
+
+    registry = MiddlewareRegistry(plugins={"tool-plugin": _ToolStrippingPlugin()})
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="tool-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    await virtual_model_proxy(
+        request=request,
+        workspace=workspace,
+        vm_name=vm_name,
+        virtual_model=VirtualModel(
+            name=vm_name,
+            workspace=workspace,
+            default_model_entity=model_entity_id,
+        ),
+        trailing_uri="v1/chat/completions",
+        json_body={
+            "model": vm_name,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "hosted_search"}}],
+        },
+        http_client=mock_proxy_client,
+        model_cache=model_cache,
+        registry=registry,
+    )
+
+    # The snapshot's nested tool list must still hold the original tool, not the emptied
+    # live list — proving ctx.original_request does not alias the working request's nesting.
+    assert captured["snapshot_tools"] == [{"type": "function", "function": {"name": "hosted_search"}}]
+
+
 @pytest.mark.parametrize(
     "middleware_order",
     [

@@ -7,6 +7,7 @@ import { DatasetRowPager } from '@nemo/common/src/components/DatasetRowPager';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { PreviewBox } from '@nemo/common/src/components/PreviewBox';
 import { resolveKeyPath } from '@nemo/common/src/utils/file';
+import { CheckCircle, HelpCircle } from '@nemo/icons/icons';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Banner, Block, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import {
@@ -24,7 +25,6 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
 import { useMessagesBinding } from '@studio/components/evaluation/ModelEvaluationWizard/useMessagesBinding';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { CircleCheck, CircleHelp } from 'lucide-react';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -34,9 +34,9 @@ const asText = (value: unknown): string =>
 const Check: FC<{ ok: boolean; label: string }> = ({ ok, label }) => (
   <Flex align="center" gap="density-sm">
     {ok ? (
-      <CircleCheck className="text-feedback-success shrink-0" width={16} height={16} />
+      <CheckCircle className="text-feedback-success shrink-0" width={16} height={16} />
     ) : (
-      <CircleHelp className="text-secondary shrink-0" width={16} height={16} />
+      <HelpCircle className="text-secondary shrink-0" width={16} height={16} />
     )}
     <Text kind="body/regular/md">{label}</Text>
   </Flex>

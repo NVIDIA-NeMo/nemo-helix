@@ -37,10 +37,6 @@ const rowFor = (metricName: string): HTMLElement => {
   return cell;
 };
 
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 describe('EvalComparisonTable', () => {
   it('renders one row per metric and pins the metric and baseline columns', () => {
     render(<EvalComparisonTable evaluations={evaluations} />);
@@ -77,7 +73,6 @@ describe('EvalComparisonTable', () => {
 
     const safety = within(rowFor('safety')).getByLabelText('No change versus baseline');
     expect(safety).toHaveAttribute('data-delta', 'unchanged');
-    expect(within(safety).getByTestId('equal-icon')).toBeInTheDocument();
   });
 
   it('keeps column ids distinct for run ids that sanitize to the same string', () => {

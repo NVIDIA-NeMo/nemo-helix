@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
@@ -15,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import nemo_evals.cli as evaluator_cli
 import pytest
+from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.evaluate import (
@@ -46,6 +49,7 @@ from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evals.tasks.evaluate import main as evaluate_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.commands import add_job_commands
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
@@ -55,6 +59,7 @@ from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import ResolvedModelReference
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.backends.local.backend import LocalBackend
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -75,9 +80,11 @@ from nhx_evals_sdk.values import (
 from nhx_evals_sdk.values.models import ModelRef
 from nhx_evals_sdk.values.results import RowScore
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
+from pytest_httpserver import HTTPServer
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
+from werkzeug import Request, Response
 
 EXAMPLE_SPEC_PATHS = (
     Path("skills/nemo-evals-plugin/assets/specs/exact_match_metric.json"),
@@ -269,6 +276,8 @@ def _patch_async_model_reference_resolution(mocker: MockerFixture) -> None:
         "nemo_evals.jobs.metric_resolution.AsyncModelsClient.resolve_model_reference",
         resolve_model_reference,
     )
+    # Submit also reads the model as the caller before resolving it; this caller may.
+    mocker.patch.object(AsyncModelsClient, "get_model", AsyncMock())
 
 
 def _llm_judge_ref_metric() -> LLMJudgeMetric:
@@ -619,6 +628,85 @@ async def test_evaluate_job_resolves_metric_model_refs_before_sdk_run(
     assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
 
 
+def test_platform_resolved_judge_calls_the_gateway_as_the_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer
+) -> None:
+    """A judge resolved from a ``ModelRef`` on the API's platform URL is called with the job's identity (NVBug 6993181).
+
+    Submit resolved the route on an address the job does not use, with no credential. The job calls it through
+    its own platform URL, authenticated as itself.
+    """
+    route = "/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    submit_side_url = f"http://127.0.0.1:9{route}"  # discard port: nothing answers there
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setattr(
+        gateway_proxy, "resolve_workload_exchange_provider", MagicMock(return_value=StaticToken("job-access-token"))
+    )
+    authorizations: list[str | None] = []
+
+    def platform(request: Request) -> Response:
+        authorizations.append(request.headers.get("Authorization"))
+        if request.headers.get("Authorization") != "Bearer job-access-token":
+            return Response(status=401)
+        completion = {
+            "id": "c",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "judge",
+            "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": '{"quality": 1}'}, "finish_reason": "stop"}
+            ],
+        }
+        return Response(json.dumps(completion), content_type="application/json")
+
+    httpserver.expect_request(re.compile(re.escape(route) + ".*")).respond_with_handler(platform)
+    judge = LLMJudgeMetric(
+        model=Model(url=submit_side_url, name="judge"),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+    config = EvaluateSpec.model_validate(
+        {"metrics": [_bundle_payload(judge)], "dataset": [{"output_text": "hello"}], "params": RunConfig()}
+    ).model_dump(mode="json")
+
+    run_result = _run_evaluate_job(config, tmp_path)
+
+    payload = _load_artifact_payload(run_result)
+    assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
+    assert authorizations and set(authorizations) == {"Bearer job-access-token"}
+
+
+def test_platform_resolved_target_calls_the_gateway_as_the_job(
+    tmp_path: Path, job_identity: str, serve_gateway_completion: Callable[[str, str], list[str | None]]
+) -> None:
+    """A target resolved from a ``ModelRef`` is generated through the job's proxy, as itself; nothing transient is saved."""
+    route = "/apis/inference-gateway/v2/workspaces/default/model/target/-/v1"
+    stored_url = f"http://nemo-api.invalid{route}"  # nothing answers there
+    authorizations = serve_gateway_completion(route, "Paris")
+    config = EvaluateSpec.model_validate(
+        {
+            "metrics": [
+                _bundle_payload(ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}"))
+            ],
+            "dataset": [{"question": "Capital of France?", "expected": "Paris"}],
+            "target": Model(url=stored_url, name="target"),
+            "params": RunConfigOnlineModel(),
+            "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
+        }
+    ).model_dump(mode="json")
+    ctx = _make_job_context(tmp_path)
+
+    run_result = _run_evaluate_job(config, tmp_path, ctx=ctx)
+
+    payload = _load_artifact_payload(run_result)
+    assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
+    assert authorizations and set(authorizations) == {f"Bearer {job_identity}"}
+    assert config["target"]["url"] == stored_url
+    saved = "".join(path.read_text(errors="ignore") for path in ctx.storage.persistent.rglob("*") if path.is_file())
+    assert "127.0.0.1" not in saved and job_identity not in saved
+
+
 async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -629,6 +717,12 @@ async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     entity = SimpleNamespace(workspace="default", name="judge", model_providers=[])
     mocker.patch.object(
         AsyncModelsClient, "get_model", AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=entity)))
+    )
+    passthrough = SimpleNamespace(autoprovisioned=True, default_model_entity=f"{entity.workspace}/{entity.name}")
+    mocker.patch.object(
+        AsyncVirtualModelsClient,
+        "get_virtual_model",
+        AsyncMock(return_value=mocker.Mock(data=mocker.Mock(return_value=passthrough))),
     )
     inline_judge = LLMJudgeMetric(
         model=Model(url=f"http://localhost:9000{route}", name="sidecar"),
@@ -1141,7 +1235,8 @@ class TestEvaluateJobCompile:
         ],
     )
     async def test_rejects_wrong_online_param_type(self, target: Model | Agent, expected_message: str) -> None:
-        with pytest.raises(TypeError, match=expected_message):
+        # A validation error, so the submit route answers 422 rather than letting a TypeError escape as a 500.
+        with pytest.raises(ValidationError, match=expected_message):
             EvaluateSpec.model_validate(
                 {
                     **_exact_match_spec(),
@@ -1152,7 +1247,7 @@ class TestEvaluateJobCompile:
             )
 
     async def test_rejects_missing_online_params(self) -> None:
-        with pytest.raises(TypeError, match="model target requires RunConfigOnlineModel"):
+        with pytest.raises(ValidationError, match="model target requires RunConfigOnlineModel"):
             EvaluateSpec.model_validate(
                 {
                     **_exact_match_spec(),

@@ -18,6 +18,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.sdk import AgentsResource, AsyncAgentsResource, agents_sdk_resources
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 _Handler = Callable[[httpx.Request], httpx.Response]
@@ -69,6 +70,21 @@ def test_register_resolves_default_model_placeholder_before_post() -> None:
     assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
     assert captured["body"]["config"]["llms"]["llm"]["model_name"] == "team-a/nemotron"
     assert config["llms"]["llm"]["model_name"] == "${NEMO_DEFAULT_MODEL}"
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_register_forwards_references_without_config(typed: bool) -> None:
+    reference = {"fileset": "team-a/agent-source", "container_image": "nvcr.io/my-org/agent:1.0"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = _read_json(req)
+        assert body == {"name": "calc", "reference": reference}
+        return httpx.Response(201, json=body)
+
+    client = AgentsResource(_client(handler))
+    result = client.register(name="calc", reference=ReferenceConfig.model_validate(reference) if typed else reference)
+
+    assert result["reference"] == reference
 
 
 def test_register_rejects_unresolved_default_model_placeholder() -> None:
@@ -657,3 +673,72 @@ def test_default_headers_are_sent_on_every_request() -> None:
     client.compute_specs.delete("big")
 
     assert auth_headers == ["Bearer tok-123", "Bearer tok-123", "Bearer tok-123"]
+
+
+_EMPTY_PAGE = {
+    "data": [],
+    "pagination": {"page": 1, "page_size": 10, "current_page_size": 0, "total_pages": 1, "total_results": 0},
+}
+
+
+def test_register_sends_labels() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = _read_json(req)
+        return httpx.Response(201, json={"name": "calc"})
+
+    AgentsResource(_client(handler)).register(name="calc", labels={"helix-agents/managed-by": "insights"})
+
+    assert captured["body"]["labels"] == {"helix-agents/managed-by": "insights"}
+
+
+def test_list_filters_by_labels() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).list(labels={"helix-compass/target-agent": "team-a/bot", "team": "search"})
+
+    assert captured["path"] == "/apis/agents/v2/workspaces/team-a/agents"
+    assert json.loads(captured["filter"]) == {
+        "labels.helix-compass/target-agent": "team-a/bot",
+        "labels.team": "search",
+    }
+
+
+def test_execute_job_list_filters_by_agent_refs() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["path"] = req.url.path
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    AgentsResource(_client(handler)).jobs.execute.list(agents=["research/x", "team-a/y"])
+
+    assert captured["path"] == "/apis/agents/v2/workspaces/team-a/jobs/execute"
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x", "team-a/y"]}}
+
+
+async def test_async_execute_job_list_filters_by_agent_refs() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["filter"] = req.url.params.get("filter")
+        return httpx.Response(200, json=_EMPTY_PAGE)
+
+    await AsyncAgentsResource(_async_client(handler)).jobs.execute.list(agents=["research/x"])
+
+    assert json.loads(captured["filter"]) == {"spec.agent_ref": {"$in": ["research/x"]}}
+
+
+def test_execute_job_list_rejects_unqualified_agent_ref() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not list with an unqualified ref")
+
+    with pytest.raises(ValueError, match="'workspace/name'"):
+        AgentsResource(_client(handler)).jobs.execute.list(agents=["x"])

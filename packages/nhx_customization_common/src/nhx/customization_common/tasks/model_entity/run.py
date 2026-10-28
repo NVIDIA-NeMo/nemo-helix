@@ -37,6 +37,7 @@ from nemo_helix_plugin.models.types import (
     ListDeploymentConfigsQueryParams,
     ListDeploymentsQueryParams,
     Lora,
+    ModelDeployment,
     ModelDeploymentConfig,
     ModelDeploymentConfigModelSpec,
     ModelDeploymentStatus,
@@ -359,30 +360,41 @@ class ModelEntityRunner:
             return
 
         is_lora = config.peft is not None and config.peft.type == FinetuningType.LORA
-        if is_lora and self._has_active_deployment(me):
-            return
+        # A LoRA-enabled deployment of the base hot-loads the adapter. One without LoRA
+        # cannot, so a LoRA-enabled deployment is created alongside it.
+        alongside_deployment: ModelDeployment | None = None
+        if is_lora and (active := self._find_active_deployment(me)) is not None:
+            active_config, alongside_deployment = active
+            if active_config.model_spec.lora_enabled:
+                return
+            logger.info(
+                f"Base model {me.workspace}/{me.name} is served by deployment "
+                f"{me.workspace}/{alongside_deployment.name} without LoRA; "
+                "creating a LoRA-enabled deployment alongside it"
+            )
 
         if is_lora and isinstance(dc, DeploymentParams) and not dc.lora_enabled:
             logger.warning(f"Deployment requested but lora_enabled is false for a LoRA job: {dc}")
             return
 
-        # Set only when a template was bound: the derived config and its deployment are
-        # named after the template as well as the model, so two templates aimed at one
-        # model stay separate instead of overwriting each other.
+        # Set when a template was bound: the derived config and its deployment are named
+        # after the template as well as the model, so two templates aimed at one model
+        # stay separate instead of overwriting each other.
         #
-        # Never set for a LoRA adapter. ``me`` is the *base* model there, and the adapter
-        # is served from the base model's deployment -- one per base, shared by every
-        # adapter and every template. Scoping it per template would stand up a second
-        # copy of the same base model on another GPU, which is the resource waste the
-        # active-deployment guard above exists to prevent.
+        # For a LoRA adapter, ``me`` is the *base* model, and its deployment is shared by
+        # every adapter and every template, so it is not scoped per template. The
+        # exception is a named config next to a base served without LoRA: scoping the
+        # deployment to that config is what puts it alongside the existing one. Inline
+        # parameters stay unscoped, so they update a deployment an earlier job created.
         discriminator: str | None = None
 
         if isinstance(dc, str):
             logger.info(f"Resolving deployment config reference: {dc}")
             referenced = self._resolve_config_ref(dc, me.workspace)
-            if is_unbound_deployment_config(referenced):
-                if not is_lora:
-                    discriminator = template_discriminator(referenced.workspace, referenced.name)
+            unbound = is_unbound_deployment_config(referenced)
+            if alongside_deployment is not None or (unbound and not is_lora):
+                discriminator = template_discriminator(referenced.workspace, referenced.name)
+            if unbound:
                 deployment_config = self._bind_deployment_config(referenced, me, discriminator=discriminator)
             else:
                 deployment_config = referenced
@@ -392,8 +404,16 @@ class ModelEntityRunner:
 
         self._create_deployment(deployment_config, me, discriminator=discriminator)
 
-    def _has_active_deployment(self, me: ModelEntity) -> bool:
-        """Check if the model entity already has an active deployment."""
+    def _find_active_deployment(self, me: ModelEntity) -> tuple[ModelDeploymentConfig, ModelDeployment] | None:
+        """Find an active deployment of the model entity, preferring one with LoRA enabled.
+
+        A LoRA adapter hot-loads onto a LoRA-enabled deployment of its base model, so
+        such a deployment is returned as soon as it is seen. One without LoRA is
+        returned only when no LoRA-enabled deployment is active.
+
+        Each deployment is judged by the config version it is pinned to, which is older
+        than the listed (latest) version when the config was updated after deploying.
+        """
         config_query = ListDeploymentConfigsQueryParams(
             filter=json.dumps({"model_entity_id": f"{me.workspace}/{me.name}"})
         )
@@ -402,6 +422,7 @@ class ModelEntityRunner:
             query_params=config_query,
         ).items()
 
+        without_lora: tuple[ModelDeploymentConfig, ModelDeployment] | None = None
         for c in deployment_configs:
             deployment_query = ListDeploymentsQueryParams(
                 filter=json.dumps({"config": c.name, "workspace": me.workspace})
@@ -411,11 +432,21 @@ class ModelEntityRunner:
                 query_params=deployment_query,
             ).items()
             for d in deployments:
-                if d.status in ACTIVE_DEPLOYMENT_STATUSES:
-                    logger.info(f"Active deployment (status={d.status}) exists for config {c.name}, skipping")
-                    return True
+                if d.status not in ACTIVE_DEPLOYMENT_STATUSES:
+                    continue
+                pinned = c
+                if d.config_version != c.entity_version:
+                    pinned = self.models.get_deployment_config_version(
+                        workspace=me.workspace, config=c.name, name=str(d.config_version)
+                    ).data()
+                if pinned.model_spec.lora_enabled:
+                    logger.info(
+                        f"Active LoRA-enabled deployment (status={d.status}) exists for config {c.name}, skipping"
+                    )
+                    return pinned, d
+                without_lora = without_lora or (pinned, d)
 
-        return False
+        return without_lora
 
     def _resolve_config_ref(self, config_ref: str, me_workspace: str) -> ModelDeploymentConfig:
         """Resolve a ``name`` or ``workspace/name`` reference to a ``ModelDeploymentConfig``."""
@@ -560,10 +591,12 @@ class ModelEntityRunner:
             # Re-running the same model and template updates the derived config, which
             # creates a new version. A deployment pins the version it was created with,
             # so simply reusing this one would keep serving the old engine and executor
-            # settings and the template edit would silently not take effect.
-            logger.info(
-                f"Deployment {deployment_config.workspace}/{deployment_name} already exists, "
-                f"repointing it at {deployment_config.name} (latest version)"
+            # settings and the template edit would silently not take effect. Repointing
+            # restarts it, hence a warning.
+            logger.warning(
+                f"Deployment {deployment_config.workspace}/{deployment_name} already exists for model "
+                f"{me.workspace}/{me.name}; updating it to deployment config {deployment_config.name} "
+                "(latest version), which restarts it"
             )
             deployment = self.models.update_deployment(
                 workspace=deployment_config.workspace,

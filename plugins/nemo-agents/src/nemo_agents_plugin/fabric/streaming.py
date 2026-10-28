@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenAI-compatible SSE framing for Fabric-backed streaming responses.
+"""Transport selection and OpenAI-compatible SSE framing for Fabric responses.
 
 Server-Sent Events (SSE) stream newline-delimited HTTP frames. OpenAI Chat
 Completions streams encode each JSON chunk as ``data: <json>`` and terminate
@@ -12,8 +12,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterable, AsyncIterator, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from nemo_agents_plugin.fabric.runtime import (
+    FabricRuntimeResult,
+    FabricRuntimeStream,
+    StreamingMethod,
+    fabric_streaming_options,
+)
 from nemo_agents_plugin.fabric.serving_models import (
     ChatCompletionStreamChoice,
     ChatCompletionStreamDelta,
@@ -23,9 +29,7 @@ from nemo_agents_plugin.fabric.serving_models import (
     ChatCompletionStreamToolCall,
     ChatCompletionStreamToolCallFunction,
 )
-
-if TYPE_CHECKING:
-    from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult, FabricRuntimeStream
+from nemo_fabric import FabricConfig, RunPlan
 
 # Fabric streams raw ATOF records. ATOF's envelope tells us which records
 # represent completed LLM work; the payload remains producer-defined, so the
@@ -50,6 +54,33 @@ _TEXT_EVENT_TYPES = frozenset(
         "text_delta",
     }
 )
+
+
+def resolve_streaming_method(plan: RunPlan, config: FabricConfig) -> StreamingMethod:
+    """Prefer Relay, then native streaming, otherwise buffer the completion.
+
+    Inspect the plan before adding serving-owned Relay configuration. Selection
+    checks declared support and configuration without modifying either input.
+    Telemetry export settings do not control serving-owned Relay streaming.
+    Invalid Relay streaming configuration raises rather than falling back.
+    """
+    resolved = plan.get("adapter_descriptor")
+    if not isinstance(resolved, Mapping):
+        return StreamingMethod.BUFFERED
+    descriptor = resolved.get("descriptor", resolved)
+    if not isinstance(descriptor, Mapping):
+        return StreamingMethod.BUFFERED
+
+    telemetry = descriptor.get("telemetry")
+    providers = telemetry.get("providers") if isinstance(telemetry, Mapping) else None
+    if isinstance(providers, Mapping) and isinstance(providers.get("relay"), Mapping):
+        fabric_streaming_options(config)
+        return StreamingMethod.RELAY
+
+    capabilities = descriptor.get("capabilities")
+    if plan.capabilities.streaming and isinstance(capabilities, Mapping) and capabilities.get("streaming") is True:
+        return StreamingMethod.OPENAI
+    return StreamingMethod.BUFFERED
 
 
 class FabricStreamResultError(RuntimeError):
@@ -135,6 +166,26 @@ def openai_chat_completion_error_sse(error: BaseException) -> str:
     )
 
 
+async def iter_fabric_chat_completion_sse(
+    stream: FabricRuntimeStream, *, completion_id: str, model: str
+) -> AsyncIterator[str]:
+    """Preserve native chunks or frame Relay/buffered text as OpenAI SSE."""
+    if stream.streaming_method is StreamingMethod.OPENAI:
+        async for chunk in stream.records():
+            yield _to_sse_frame(chunk)
+        result = await stream.result()
+        if result.status != "succeeded":
+            raise FabricStreamResultError(result)
+        yield "data: [DONE]\n\n"
+    else:
+        async for event in iter_openai_chat_completion_sse(
+            completion_id=completion_id,
+            deltas=iter_fabric_assistant_deltas(stream),
+            model=model,
+        ):
+            yield event
+
+
 async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIterator[ChatCompletionStreamDelta]:
     """Yield assistant deltas and validate the terminal Fabric result.
 
@@ -156,12 +207,14 @@ async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIter
     result = await stream.result()
     if result.status != "succeeded":
         raise FabricStreamResultError(result)
+    if stream.streaming_method is StreamingMethod.BUFFERED and not isinstance(result.response, str):
+        raise ValueError("Fabric invocation did not return a text response.")
     if not emitted_text and isinstance(result.response, str) and result.response:
         yield ChatCompletionStreamDelta(content=result.response)
 
 
-def _to_sse_frame(chunk: ChatCompletionStreamResponse | ChatCompletionStreamErrorResponse) -> str:
-    data = chunk.model_dump(mode="json", exclude_none=True)
+def _to_sse_frame(chunk: ChatCompletionStreamResponse | ChatCompletionStreamErrorResponse | Mapping[str, Any]) -> str:
+    data = dict(chunk) if isinstance(chunk, Mapping) else chunk.model_dump(mode="json", exclude_none=True)
     return f"data: {json.dumps(data, separators=(',', ':'))}\n\n"
 
 

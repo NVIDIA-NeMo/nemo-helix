@@ -23,16 +23,25 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     ImagePullSecret as ImagePullSecret,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesConfigMapVolume as PluginKubernetesConfigMapVolume,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesEmptyDirVolume as KubernetesEmptyDirVolume,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobStorageConfig as PluginKubernetesJobStorageConfig,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesKeyToPath as PluginKubernetesKeyToPath,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesObjectMetadata as KubernetesObjectMetadata,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesPersistentVolumeClaim as KubernetesPersistentVolumeClaim,
+)
+from nemo_helix_plugin.jobs.execution_profiles import (
+    KubernetesSecretVolume as PluginKubernetesSecretVolume,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesVolume as PluginKubernetesVolume,
@@ -97,7 +106,7 @@ from nhx.core.jobs.controllers.backends.base import (
     validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.exceptions import FailedToScheduleError, JobStorageError
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -543,6 +552,33 @@ def classify_task_containers(pods: list[V1Pod]) -> tuple[bool, int | None]:
     return False, 0
 
 
+UNSTARTED_PAUSE_MESSAGE = "Job paused before its task started"
+
+
+def task_never_started(pods: list[V1Pod], *, workload_has_live_pods: bool) -> bool:
+    """Return whether no task container of a step has started, so it has no progress to save.
+
+    A pod waiting to be scheduled, pulling its image, or running init containers has
+    not started its task. When no pod is listed but the workload still reports a live
+    one, the list may have missed it, so the task counts as started until the next read.
+    """
+    if not pods:
+        return not workload_has_live_pods
+    for pod in pods:
+        statuses = pod.status.container_statuses if pod.status is not None else None
+        for status in statuses or []:
+            if status.name != NEMO_JOB_TASK_CONTAINER_NAME:
+                continue
+            state = status.state
+            if state is not None and (state.running is not None or state.terminated is not None):
+                return False
+            if status.last_state is not None and status.last_state.terminated is not None:
+                return False
+            if isinstance(status.restart_count, int) and status.restart_count > 0:
+                return False
+    return True
+
+
 def last_task_exit_time(pods: list[V1Pod]) -> datetime.datetime | None:
     """Return when the last task container exited.
 
@@ -962,25 +998,12 @@ def load_from_dict(data: dict, klass: str):
 # ``to_k8s()`` is available on nested volumes.
 
 
-class KubernetesKeyToPath(BaseModel):
-    """Kubernetes volume key-to-path mapping."""
-
-    key: str = Field(description="Source key to project from the volume source")
-    path: str = Field(description="Relative file path to write the key to")
-    mode: int | None = Field(default=None, description="Optional file mode for this key")
-
-    def to_k8s(self) -> client.V1KeyToPath:
-        """Convert to Kubernetes V1KeyToPath object."""
-        return client.V1KeyToPath(key=self.key, path=self.path, mode=self.mode)
+def _key_to_path(item: PluginKubernetesKeyToPath) -> client.V1KeyToPath:
+    return client.V1KeyToPath(key=item.key, path=item.path, mode=item.mode)
 
 
-class KubernetesSecretVolume(BaseModel):
+class KubernetesSecretVolume(PluginKubernetesSecretVolume):
     """Kubernetes Secret volume definition."""
-
-    secret_name: str = Field(description="Secret name to mount")
-    default_mode: int | None = Field(default=None, description="Optional default file mode")
-    optional: bool | None = Field(default=None, description="Whether the Secret is optional")
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional Secret keys to project")
 
     def to_k8s(self) -> client.V1SecretVolumeSource:
         """Convert to Kubernetes V1SecretVolumeSource object."""
@@ -988,17 +1011,12 @@ class KubernetesSecretVolume(BaseModel):
             secret_name=self.secret_name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
-class KubernetesConfigMapVolume(BaseModel):
+class KubernetesConfigMapVolume(PluginKubernetesConfigMapVolume):
     """Kubernetes ConfigMap volume definition."""
-
-    name: str = Field(description="ConfigMap name to mount")
-    default_mode: int | None = Field(default=None, description="Optional default file mode")
-    optional: bool | None = Field(default=None, description="Whether the ConfigMap is optional")
-    items: list[KubernetesKeyToPath] = Field(default_factory=list, description="Optional ConfigMap keys to project")
 
     def to_k8s(self) -> client.V1ConfigMapVolumeSource:
         """Convert to Kubernetes V1ConfigMapVolumeSource object."""
@@ -1006,7 +1024,7 @@ class KubernetesConfigMapVolume(BaseModel):
             name=self.name,
             default_mode=self.default_mode,
             optional=self.optional,
-            items=[item.to_k8s() for item in self.items] or None,
+            items=[_key_to_path(item) for item in self.items] or None,
         )
 
 
@@ -1029,16 +1047,6 @@ class KubernetesVolume(PluginKubernetesVolume):
 
     secret: KubernetesSecretVolume | None = Field(default=None, description="Secret Volume configuration")
     config_map: KubernetesConfigMapVolume | None = Field(default=None, description="ConfigMap Volume configuration")
-
-    @model_validator(mode="after")
-    def validate_self(self):
-        """Ensure that exactly one volume source is specified."""
-        sources = [self.persistent_volume_claim, self.empty_dir, self.secret, self.config_map]
-        if sum(source is not None for source in sources) != 1:
-            raise ValueError(
-                "Exactly one of 'persistent_volume_claim', 'empty_dir', 'secret', or 'config_map' must be specified."
-            )
-        return self
 
     def to_k8s(self) -> client.V1Volume:
         """Convert to Kubernetes V1Volume object."""
@@ -1290,7 +1298,7 @@ fi
                             ],
                             volume_mounts=[
                                 client.V1VolumeMount(
-                                    name="job-storage",
+                                    name=JOB_STORAGE_VOLUME_NAME,
                                     mount_path="/vol",
                                 )
                             ],
@@ -1298,7 +1306,7 @@ fi
                     ],
                     volumes=[
                         client.V1Volume(
-                            name="job-storage",
+                            name=JOB_STORAGE_VOLUME_NAME,
                             persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                                 claim_name=pvc_name,
                                 read_only=False,
@@ -1339,6 +1347,19 @@ def reclaim_job_persistent_storage(
     labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
+    # Providers may use the same profile name with different PVCs. A cleanup of one
+    # PVC must not count as completion of another. Inspect the mounted claim rather
+    # than adding a selector label, so existing cleanup Jobs remain discoverable.
+    cleanup_jobs = [
+        cleanup_job
+        for cleanup_job in cleanup_jobs
+        if any(
+            volume.name == JOB_STORAGE_VOLUME_NAME
+            and volume.persistent_volume_claim is not None
+            and volume.persistent_volume_claim.claim_name == pvc_name
+            for volume in cleanup_job.spec.template.spec.volumes or []
+        )
+    ]
     if not cleanup_jobs:
         cleanup_job_name, cleanup_job = _storage_cleanup_job(
             namespace=namespace,

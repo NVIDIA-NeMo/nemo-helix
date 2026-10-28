@@ -233,6 +233,26 @@ class TestAllWeightsFinetuneRules:
         assert spec.training.lora is None
 
 
+class TestLearningRateDefaults:
+    """Unsloth's guidance: 2e-4 for LoRA, a lower rate for full fine-tuning."""
+
+    def test_lora_defaults_to_unsloths_recommendation(self) -> None:
+        assert UnslothJobInput.model_validate(_minimal_payload()).optimizer.learning_rate == 2e-4
+
+    def test_all_weights_defaults_lower(self) -> None:
+        payload = _minimal_payload()
+        payload["model"]["load_in_4bit"] = False
+        payload["training"] = {"finetuning_type": "all_weights"}
+        assert UnslothJobInput.model_validate(payload).optimizer.learning_rate == 2e-5
+
+    def test_all_weights_keeps_an_explicit_rate(self) -> None:
+        payload = _minimal_payload()
+        payload["model"]["load_in_4bit"] = False
+        payload["training"] = {"finetuning_type": "all_weights"}
+        payload["optimizer"] = {"learning_rate": 1e-4}
+        assert UnslothJobInput.model_validate(payload).optimizer.learning_rate == 1e-4
+
+
 class TestWarmupMutex:
     def test_warmup_steps_and_ratio_rejected(self) -> None:
         payload = _minimal_payload()

@@ -69,8 +69,9 @@ exposes ``jobs`` only; agent CRUD, deployments, and ``invoke`` remain sync-only.
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TypeVar
 
 from nemo_agents_plugin.entities import (
@@ -89,10 +90,13 @@ from nemo_helix_plugin.agents.types import (
     CreateEnvironmentSpecRequest,
     InvokeAgentRequest,
     JsonMap,
+    ListAgentJobsQueryParams,
+    ListAgentsQueryParams,
+    ReferenceConfig,
     RegisterAgentRequest,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
+from nemo_helix_plugin.client.response import AsyncNemoPaginatedResponse, NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
@@ -112,7 +116,7 @@ def _json_map_from_response(response: NemoResponse[_ModelT]) -> JsonMap:
     return _json_map(body)
 
 
-def _json_map_from_page(response: NemoPaginatedResponse[_ModelT]) -> JsonMap:
+def _json_map_from_page(response: NemoPaginatedResponse[_ModelT] | AsyncNemoPaginatedResponse[_ModelT]) -> JsonMap:
     response.page()
     body: object = response.http_response.json()
     return _json_map(body)
@@ -193,7 +197,9 @@ class AgentsResource:
         name: str,
         config: Mapping[str, object] | None = None,
         description: str = "",
+        labels: Mapping[str, str] | None = None,
         config_format: str | None = None,
+        reference: ReferenceConfig | Mapping[str, object] | None = None,
         workspace: str | None = None,
     ) -> JsonMap:
         """Register an agent.
@@ -202,9 +208,12 @@ class AgentsResource:
             name: Unique agent name within the workspace.
             config: Optional agent config dict.
             description: Optional human-readable description.
+            labels: Optional key/value labels for filtering. Keys are
+                ``<name>`` or ``<prefix>/<name>`` with no dots.
             config_format: Config format identifier. Uses the config's format
                 when present; otherwise defaults to Fabric for an empty config
                 or NAT for a nonempty config. Conflicting formats are rejected.
+            reference: Optional fileset and container image references.
             workspace: Target workspace. Defaults to the workspace configured
                 on the platform client, or ``"default"`` when the client has no
                 workspace.
@@ -217,6 +226,8 @@ class AgentsResource:
         payload: JsonMap = {"name": name}
         if description:
             payload["description"] = description
+        if labels:
+            payload["labels"] = dict(labels)
         if config is not None:
             resolved_config = _json_map(inject_default_model(dict(config)))
             if _contains_default_model_placeholder(resolved_config):
@@ -228,15 +239,20 @@ class AgentsResource:
             payload["config"] = resolved_config
         if config_format is not None:
             payload["config_format"] = config_format
+        if reference is not None:
+            payload["reference"] = _spec_to_dict(reference)
         response = self._client.register_agent(
             workspace=workspace,
             body=RegisterAgentRequest.model_validate(payload),
         )
         return _json_map_from_response(response)
 
-    def list(self, workspace: str | None = None) -> JsonMap:
-        """List agents in *workspace*."""
-        return _json_map_from_page(self._client.list_agents(workspace=workspace))
+    def list(self, workspace: str | None = None, *, labels: Mapping[str, str] | None = None) -> JsonMap:
+        """List agents in *workspace*, optionally only those carrying every label in *labels*."""
+        query_params: ListAgentsQueryParams = {}
+        if labels:
+            query_params["filter"] = json.dumps({f"labels.{key}": value for key, value in labels.items()})
+        return _json_map_from_page(self._client.list_agents(workspace=workspace, query_params=query_params))
 
     def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get an agent by name."""
@@ -637,6 +653,15 @@ def _execute_job_body(
     return AgentJobRequest.model_validate(payload)
 
 
+def _execute_jobs_query(agents: Sequence[str] | None) -> ListAgentJobsQueryParams:
+    if not agents:
+        return {}
+    for ref in agents:
+        if ref.count("/") != 1:
+            raise ValueError(f"Agent ref {ref!r} must be a 'workspace/name' ref.")
+    return {"filter": json.dumps({"spec.agent_ref": {"$in": list(agents)}})}
+
+
 class _ExecuteJobsResource:
     """Sync ``client.agents.jobs.execute`` — the ``agents.execute`` job collection."""
 
@@ -663,6 +688,18 @@ class _ExecuteJobsResource:
         """Get one execute-agent job by name."""
         response = self._client.get_agent_job(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
+
+    def list(self, workspace: str | None = None, *, agents: Sequence[str] | None = None) -> JsonMap:
+        """List execute-agent jobs in *workspace*, optionally only runs of *agents*.
+
+        *agents* are ``workspace/name`` Agent refs. A job matches when it ran one
+        of them, including a job in *workspace* that ran another workspace's
+        agent. Jobs that ran an inline agent definition match no ref.
+        """
+        response = self._client.list_agent_jobs(
+            workspace=workspace, collection="execute", query_params=_execute_jobs_query(agents)
+        )
+        return _json_map_from_page(response)
 
     def list_results(self, name: str, workspace: str | None = None) -> JsonMap:
         """List the named results a finished execute-agent job saved."""
@@ -710,6 +747,13 @@ class _AsyncExecuteJobsResource:
         """Get one execute-agent job by name."""
         response = await self._client.get_agent_job(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
+
+    async def list(self, workspace: str | None = None, *, agents: Sequence[str] | None = None) -> JsonMap:
+        """List execute-agent jobs in *workspace*, optionally only runs of *agents*. See the sync resource."""
+        response = await self._client.list_agent_jobs(
+            workspace=workspace, collection="execute", query_params=_execute_jobs_query(agents)
+        )
+        return _json_map_from_page(response)
 
     async def list_results(self, name: str, workspace: str | None = None) -> JsonMap:
         """List the named results a finished execute-agent job saved."""

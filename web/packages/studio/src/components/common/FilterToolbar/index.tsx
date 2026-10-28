@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PaginationQueryState } from '@nemo/common/src/utils/useQueryFromSearchParams';
+import { Filter } from '@nemo/icons/icons';
 import {
   Dropdown,
   type DropdownEntry,
@@ -12,7 +13,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import { FilterTags } from '@studio/components/common/FilterToolbar/components/FilterTags';
 import { SearchBar } from '@studio/components/common/SearchBar';
-import { Filter } from 'lucide-react';
 import { ComponentProps, useMemo } from 'react';
 
 interface Props<K> {

@@ -15,7 +15,7 @@ from urllib.parse import quote
 import httpx
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -244,7 +244,9 @@ def submit_and_wait_customization_job(
         .create_customization_job(
             workspace=workspace,
             backend=backend,
-            body=CustomizationJobCreateRequest(spec=spec.model_dump(mode="json"), name=name),
+            # exclude_unset: a default sent explicitly would count as set, and skip the
+            # server-side defaults that depend on other fields (e.g. learning_rate).
+            body=CustomizationJobCreateRequest(spec=spec.model_dump(mode="json", exclude_unset=True), name=name),
         )
         .data()
     )
@@ -312,14 +314,14 @@ def deploy_vllm_model(
         body=CreateModelDeploymentRequest(name=deployment_name, config=deployment_config_name),
     )
     try:
-        _wait_for_deployment_ready(
+        wait_until_routable(
             client,
             workspace,
             deployment_name,
-            deployment_config_name=deployment_config_name,
-            timeout=ready_timeout,
+            deployment_config_name,
+            ready_timeout=ready_timeout,
+            gateway_timeout=gateway_timeout,
         )
-        _wait_for_gateway_ready(client, workspace, deployment_name, timeout=gateway_timeout)
     except BaseException:
         # Readiness helpers raise (pytest.fail) before we can return the names to the
         # caller, so the caller's try/finally never runs — clean up here to avoid
@@ -330,6 +332,53 @@ def deploy_vllm_model(
         raise
     logger.info("Deployment %s ready and routable", deployment_name)
     return deployment_name, deployment_config_name
+
+
+def wait_until_routable(
+    client: NemoClient,
+    workspace: str,
+    deployment_name: str,
+    deployment_config_name: str | None = None,
+    *,
+    ready_timeout: int = 3600,
+    gateway_timeout: int = 120,
+) -> None:
+    """Wait until a deployment is READY and the inference gateway routes to it."""
+    _wait_for_deployment_ready(
+        client,
+        workspace,
+        deployment_name,
+        deployment_config_name=deployment_config_name,
+        timeout=ready_timeout,
+    )
+    _wait_for_gateway_ready(client, workspace, deployment_name, timeout=gateway_timeout)
+
+
+def wait_until_entity_routable(
+    client: NemoClient,
+    workspace: str,
+    model_id: str,
+    *,
+    timeout: int = 600,
+    poll_interval: float = 5.0,
+) -> None:
+    """Wait until the gateway answers for ``model_id`` on the route users call.
+
+    A ready deployment is not enough: the gateway maps a model's entity ID, and a LoRA
+    adapter's composite ID, only once its reconciler has seen the served model.
+    """
+    gateway = InferenceGatewayClient.from_client(client)
+    body = JsonBody({"model": model_id, "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 1})
+    deadline = time.time() + timeout
+    while True:
+        try:
+            gateway.openai_post(trailing_uri="v1/chat/completions", workspace=workspace, body=body)
+            logger.info("Gateway routes %s", model_id)
+            return
+        except (NemoHTTPError, NemoTransportError) as error:
+            if time.time() >= deadline:
+                pytest.fail(f"Gateway did not route {model_id} within {timeout}s: {error}")
+            time.sleep(poll_interval)
 
 
 def delete_deployment(

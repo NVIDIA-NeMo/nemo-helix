@@ -11,15 +11,18 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
+from nemo_agents_plugin.jobs import gateway_proxy
 from nemo_evals.api.schemas import AgentRef, MetadataItem, MetricInline, TaskInputs, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.jobs import agent_evaluate
 from nemo_evals.jobs.agent_compiler import _environment
 from nemo_evals.jobs.agent_evaluate import (
     AGENT_BUNDLE_DIR,
@@ -39,6 +42,7 @@ from nemo_evals.jobs.agent_spec import (
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
     ModelTarget,
     RegisteredAgentSource,
@@ -56,12 +60,13 @@ from nemo_evals.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evals.jobs.run_outcome import STATUS_DETAILS_KEY
-from nemo_evals.jobs.secret_env import JobEnvSecretSource
+from nemo_evals.jobs.secret_env import JobEnvSecretSource, SecretEnvError
 from nemo_evals.metric_refs import MetricRef
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evals.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evals.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.commands import add_job_commands
@@ -108,10 +113,13 @@ from nhx_evals_sdk.agent_eval.trials import (
 from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
+from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.protocol import MetricOutput
+from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 from pydantic import JsonValue, ValidationError
+from pytest_httpserver import HTTPServer
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
@@ -302,6 +310,53 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
     runtime_task = _to_runtime_task(spec.tasks[0])
     assert runtime_task.inputs["gym_row"] == gym_row
     assert runtime_task.metadata["gym_row_extras"] == gym_row_extras
+
+
+def test_agent_eval_job_runs_gateway_judges_as_the_job_and_records_the_resolved_route(
+    tmp_path: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer
+) -> None:
+    """Taskset task Jobs run through this job too: a stored judge's gateway route is called as the job (NVBug 6993181)."""
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setattr(
+        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
+    )
+    resolved = "http://nemo-api:8080/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    judge = LLMJudgeMetric(
+        model=Model(url=resolved, name="judge"),
+        scores=[RangeScore(name="q", minimum=0, maximum=1, parser=JSONScoreParser(json_path="q"))],
+    )
+    task = _task_spec()
+    task.spec.metrics = [
+        MetricInline.model_validate(bundle_metric(judge, HybridMetricBundlePackager()).model_dump(mode="json"))
+    ]
+    urls_during_run: list[str] = []
+
+    class _RecordingEvaluator(_FakeEvaluator):
+        def run_sync(self, *, tasks: Sequence[AgentEvalTask], **kwargs: Any) -> AgentEvalResult:
+            urls_during_run.extend(
+                metric.model.url
+                for t in tasks
+                for metric in t.metrics
+                if isinstance(metric, LLMJudgeMetric) and isinstance(metric.model, Model)
+            )
+            return super().run_sync(tasks=tasks, **kwargs)
+
+    fake = _RecordingEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[task], target=_runner_target("openai/gpt-5.4")).model_dump(),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
+
+    [during] = urls_during_run
+    assert urlsplit(during).hostname == "127.0.0.1" and urlsplit(during).path == urlsplit(resolved).path
+    [recorded] = fake.received_tasks[0].metrics
+    assert isinstance(recorded, LLMJudgeMetric) and isinstance(recorded.model, Model)
+    assert recorded.model.url == resolved
 
 
 def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
@@ -630,7 +685,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     ctx = _job_context(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
-        source=HarborBuiltinAgentSource(name="oracle", model_name="openai/gpt-5.4"),
+        source=HarborBuiltinAgentSource(name="oracle", model=HarborModelName(name="openai/gpt-5.4")),
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         env_vars={"FABRIC_LOG": "debug"},
@@ -1173,6 +1228,31 @@ async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> Non
     assert isinstance(spec.tasks[0].spec.metrics[0], MetricInline)
     # Canonical metrics reconstruct to runtime instances.
     assert isinstance(_to_runtime_task(spec.tasks[0]).metrics[0], ExactMatchMetric)
+
+
+async def test_to_spec_refuses_a_gateway_key_another_secret_already_fills(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A taskset run compiles its task Jobs only after it is accepted, so the conflict must stop submission."""
+    monkeypatch.setattr(
+        agent_evaluate,
+        "add_gateway_key_placeholder",
+        MagicMock(side_effect=SecretEnvError("OPENAI_API_KEY is already sourced from a secret in this job")),
+    )
+    input_spec = AgentEvalInputSpec(
+        tasks=[
+            AgentEvalTaskInput(
+                id="task-1",
+                intent="Answer.",
+                inputs=_task_inputs(instruction="Reply DONE."),
+                metrics=[_inline_metric()],
+            )
+        ],
+        target=_runner_target("openai/gpt-5.4"),
+    )
+
+    with pytest.raises(SecretEnvError, match="already sourced from a secret"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+        )
 
 
 @pytest.mark.parametrize("task_id", ["", "   ", "\t\n"])

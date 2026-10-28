@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RlGRPOTrainingFinetuningType } from '@nemo/sdk/generated/customizer/schema';
-import { customizationJob1, customizationJob3 } from '@studio/mocks/customizer/customization-jobs';
+import {
+  customizationJob1,
+  customizationJob3,
+  grpoCustomizationJob,
+} from '@studio/mocks/customizer/customization-jobs';
 import {
   FORM_DEFAULTS,
   RL_DPO_TRAINING_DEFAULTS,
@@ -508,6 +512,49 @@ describe('jobToFormFields', () => {
     const fields = jobToFormFields(jobWithNulls);
     expect(fields.automodel.optimizer?.learning_rate).toBeUndefined();
   });
+
+  // A stored spec is the backend's output shape, and every backend's submit forbids extras.
+  it.each([
+    ['automodel', customizationJob1],
+    ['unsloth', customizationJob3],
+    ['rl', grpoCustomizationJob],
+  ] as const)('drops fields the %s submit schema does not accept', (backend, source) => {
+    const job = {
+      ...source,
+      spec: {
+        ...source.spec,
+        backend,
+        training: { ...source.spec.training, not_a_field: 1 },
+      },
+    } as unknown as typeof source;
+    const arm = jobToFormFields(job)[backend];
+    expect(arm).not.toHaveProperty('backend');
+    expect(arm.training).not.toHaveProperty('not_a_field');
+  });
+
+  it.each([
+    ['automodel', customizationJob1],
+    ['unsloth', customizationJob3],
+    ['rl', grpoCustomizationJob],
+  ] as const)(
+    'drops the same fields from a %s spec that fails to parse, without adding defaults',
+    (backend, source) => {
+      const job = {
+        ...source,
+        spec: {
+          ...source.spec,
+          name: 42,
+          backend,
+          training: { ...source.spec.training, not_a_field: 1 },
+        },
+      } as unknown as typeof source;
+      const arm = jobToFormFields(job)[backend];
+      expect(arm).not.toHaveProperty('backend');
+      expect(Object.keys(arm.training ?? {}).sort()).toEqual(
+        Object.keys(source.spec.training ?? {}).sort()
+      );
+    }
+  );
 });
 
 describe('getInitialFormValuesFromState', () => {

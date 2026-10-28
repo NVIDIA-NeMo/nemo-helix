@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
+import { ScaleBalance } from '@nemo/icons/icons';
 import { Anchor, Badge, Flex, RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
 import { LINK_EVAL_DOCS_METRICS } from '@studio/constants/links';
-import { Scale } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 const METRIC_TYPE_OPTIONS = [
@@ -55,7 +55,7 @@ export const MetricTypeSection: FC = () => {
               value={option.value}
               label={option.label}
               labelSide="left"
-              icon={<Scale className="size-4" aria-hidden />}
+              icon={<ScaleBalance className="size-4" aria-hidden />}
               description={
                 <Stack gap="density-xs">
                   <span>{option.description}</span>

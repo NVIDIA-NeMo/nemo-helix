@@ -21,7 +21,13 @@ from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 from nhx.customization_common.service.context import NHXJobContext
-from nhx.customization_common.training.pause import exit_paused
+from nhx.customization_common.training.pause import (
+    check_resumed_from_pause,
+    exit_paused,
+    pause_marker_path,
+    take_pause_marker,
+    write_pause_marker,
+)
 from nhx.rl.tasks.training.backends.nemo_rl.nemo_rl_logger import (
     GRPO_DEFAULT_TIME_SERIES_METRICS,
     NemoRLLogger,
@@ -170,6 +176,13 @@ def main() -> None:
         task_to_env = {"nemo_gym": nemo_gym}
         val_task_to_env = task_to_env
 
+        # setup() restored the newest complete checkpoint, or started from step 0 when it found none.
+        # A resume must not start over.
+        checkpoint_dir = Path(config.checkpointing["checkpoint_dir"])
+        check_resumed_from_pause(
+            take_pause_marker(pause_marker_path(checkpoint_dir)), grpo_state.total_steps, checkpoint_dir
+        )
+
         job_ctx = NHXJobContext.from_env()
         print(f"Job context loaded (job_id={job_ctx.job_id})")
         if job_ctx.jobs_url:
@@ -231,6 +244,7 @@ def main() -> None:
     if pause.stopped_training(grpo_state.total_steps, planned):
         # Before the checkpoint check: the run is not finished, so there is nothing to select yet.
         print(f"Training paused at step {grpo_state.total_steps}", flush=True)
+        write_pause_marker(pause_marker_path(checkpoint_dir), grpo_state.total_steps)
         exit_paused()
 
     if config.checkpointing["enabled"] and checkpointer.get_best_checkpoint_path() is None:

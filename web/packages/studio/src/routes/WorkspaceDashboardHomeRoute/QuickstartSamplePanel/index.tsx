@@ -10,7 +10,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { AGENTS_ENABLED } from '@studio/constants/environment';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { QuickstartSampleAgentRow } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSampleAgentRow';
 import {
@@ -70,7 +69,7 @@ export const QuickstartSamplePanel: FC<QuickstartSamplePanelProps> = ({
   footerText = 'Ready to start with your own assets?',
   footerActionLabel = 'Switch to Shared Workspace',
   onSwitchWorkspace,
-  agentsEnabled = AGENTS_ENABLED,
+  agentsEnabled = true,
   intakeEnabled,
   agentOptimizationsEnabled,
 }) => {

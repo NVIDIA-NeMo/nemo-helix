@@ -8,6 +8,7 @@ import {
   ROW_SELECTION_COLUMN_SIZE,
 } from '@nemo/common/src/components/DataView/StudioDataView';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { Cloud, Db } from '@nemo/icons/icons';
 import {
   FilesetPurpose,
   StorageConfigType,
@@ -23,7 +24,6 @@ import {
 } from '@studio/components/DatasetsTable/types';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
-import { Cloud, Database } from 'lucide-react';
 import { type ComponentProps, type Dispatch, type SetStateAction } from 'react';
 
 interface MakeDatasetsTableColumnsArgs {
@@ -97,7 +97,7 @@ export function makeDatasetsTableColumns({
           if (!backend) return null;
           const label = formatStorageBackendLabel(backend);
           const isLocal = backend === 'local';
-          const Icon = isLocal ? Database : Cloud;
+          const Icon = isLocal ? Db : Cloud;
           return (
             <Flex align="center" gap="density-sm" className="min-w-0">
               <Icon className="flex-none text-fg-subdued" size="16" strokeWidth={0} />

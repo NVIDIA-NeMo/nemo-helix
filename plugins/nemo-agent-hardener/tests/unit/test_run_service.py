@@ -1026,7 +1026,7 @@ def test_selected_defenders_match_agent_hardeners_own_defaults() -> None:
 
 
 def test_apply_manifest_overrides_applies_explicit_port_only() -> None:
-    manifest = {"agent": {"name": "x", "port": 8000, "workflow": "w"}, "backends": []}
+    manifest = {"agent": {"name": "x", "port": 8000, "env": {"PORT": "8000"}}, "backends": []}
     manifest_mod._apply_manifest_overrides(manifest, {"port": 9001})
     assert manifest["agent"]["port"] == 9001
     # No port in data → leave the resolver-derived port untouched.
@@ -1045,24 +1045,29 @@ def test_port_override_updates_generated_fabric_listener(original_port: int) -> 
     assert manifest["agent"]["start_command"] == fabric_start_command(9001)
 
 
-def test_port_override_preserves_byo_start_command() -> None:
+def test_port_override_updates_byo_numeric_listener() -> None:
     manifest = {"agent": {"port": 8000, "start_command": "python server.py --port 8000"}}
     manifest_mod._apply_manifest_overrides(manifest, {"port": 9001})
     assert manifest["agent"]["port"] == 9001
-    assert manifest["agent"]["start_command"] == "python server.py --port 8000"
+    assert manifest["agent"]["start_command"] == "python server.py --port 9001"
 
 
 def test_materialize_manifest_overlays_per_run_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.agent_resolver import fabric_start_command
+
     # Stored manifest config: standard intensity, port 8000. Override to thorough + port 9100 for this run only.
     record = SimpleNamespace(data={"agent": "default/clockbot", "attack_intensity": "standard", "port": 8000})
     sdk = SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **_k: record))
+    ctx = make_job_context(tmp_path)
+
     monkeypatch.setattr(
         manifest_mod,
         "resolve_agent_to_manifest",
-        lambda *_a, **_k: SimpleNamespace(manifest={"agent": {"name": "clockbot", "port": 8000}}, warnings=[]),
+        lambda *_a, **_k: SimpleNamespace(
+            manifest={"agent": {"name": "clockbot", "port": 8000, "start_command": fabric_start_command(8000)}},
+            warnings=[],
+        ),
     )
-    ctx = make_job_context(tmp_path)
-
     manifest_mod._materialize_manifest(sdk, "m1", ctx, {"attack_intensity": "thorough", "port": 9100})
 
     written = yaml.safe_load((tmp_path / "agent-hardener.yaml").read_text(encoding="utf-8"))

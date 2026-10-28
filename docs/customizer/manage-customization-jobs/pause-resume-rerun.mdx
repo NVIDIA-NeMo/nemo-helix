@@ -32,6 +32,8 @@ If training doesn't save its checkpoint and exit in time, the pause fails and th
 
 If training finishes before it acts on the pause, the job completes as usual.
 
+If training hasn't started yet, for example because it is still waiting for GPUs, the job pauses right away because there is no progress to save. Resuming it schedules training again.
+
 ## Resume a Paused Job
 
 ```bash

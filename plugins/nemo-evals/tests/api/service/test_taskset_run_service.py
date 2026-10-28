@@ -8,11 +8,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from nemo_evals.api.fields import TasksetRef
+from nemo_evals.api.fields import AgentRef, TasksetRef
 from nemo_evals.api.service.taskset_run_service import TasksetRunResolutionError, pin_taskset_ref
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TasksetRevisionEntity
+from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
+from nemo_evals.jobs.agent_spec import (
+    HarborBuiltinAgentSource,
+    HarborModelName,
+    HarborRunnerTarget,
+    RegisteredAgentSource,
+)
 from nemo_evals.revisions import RevisionContentMismatchError, publish_revision
 from nemo_evals.source_authorization import remember_allowed
 from nemo_evals.taskset_runs.entities import (
@@ -24,6 +31,7 @@ from nemo_evals.taskset_runs.entities import (
 )
 from nemo_evals.taskset_runs.store import PlanStorageError, RunRequestConflict
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
@@ -96,8 +104,11 @@ async def test_accept_freezes_resolved_harbor_content(
     assert result.status.phase == TasksetRunPhase.ACCEPTED
     assert result.status.result_state == ResultState.PENDING
     assert result.status.accepted_at == NOW
-    assert result.status.execution_deadline_at == NOW + timedelta(seconds=86_400)
-    assert result.status.finalization_deadline_at == NOW + timedelta(seconds=87_000)
+    # Until its first slot the run waits at most the queue timeout; its budget counts from that slot.
+    assert result.status.timeout_seconds == 86_400
+    assert result.status.started_at is None
+    assert result.status.execution_deadline_at == NOW + timedelta(seconds=172_800)
+    assert result.status.finalization_deadline_at == NOW + timedelta(seconds=172_800 + 1_800)
     run = await run_store.find("default", result.status.run_id)
     plan = await run_store.load_plan(run)
     assert plan.taskset_ref == f"default/suite#{published[1].content_hash}"
@@ -107,7 +118,7 @@ async def test_accept_freezes_resolved_harbor_content(
     assert plan.sandbox_policy.profile == "harbor-standard"
     assert plan.sandbox_policy.connection.domain == "opensandbox.opensandbox-system.svc.cluster.local"
     assert plan.dispatcher_profile == "local-k8s" and plan.dispatcher_image.endswith("1" * 64)
-    assert result.status.warnings == [f"task 0 (task-1): Job {result.status.run_id}-task-0"]
+    assert result.status.warnings == []
     assert len(files_service.filesets) == 1
     assert not (await entity_store.list(TasksetRunMemberEntity, workspace="default")).data
 
@@ -139,7 +150,7 @@ async def test_authorized_replay_preserves_original_run_without_resolution(
     assert replay.status.run_id == first.status.run_id
     assert replay.status.accepted_at == first.status.accepted_at
     assert replay.status.phase == TasksetRunPhase.COMPLETED
-    assert first.status.warnings and replay.status.warnings == []  # an ended run's task Jobs aren't touched
+    assert replay.status.warnings == []  # a replay returns the stored status only
     assert not [call for call in files_service.calls[len(before) :] if call[0] != "download"]
 
 
@@ -196,10 +207,7 @@ async def test_requests_with_new_keys_create_distinct_runs_and_warn(service, pub
     ]
     assert first.created and second.created
     assert first.status.run_id != second.status.run_id
-    assert second.status.warnings == [
-        f"{first.status.run_id} is already running {first.status.taskset_ref}",
-        f"task 0 (task-1): Job {second.status.run_id}-task-0",
-    ]
+    assert second.status.warnings == [f"{first.status.run_id} is already running {first.status.taskset_ref}"]
 
 
 async def test_warning_failure_preserves_acceptance(service, published, request_body, monkeypatch, caplog):
@@ -208,7 +216,7 @@ async def test_warning_failure_preserves_acceptance(service, published, request_
         TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
     )
     assert outcome.created
-    assert outcome.status.warnings == [f"task 0 (task-1): Job {outcome.status.run_id}-task-0"]
+    assert outcome.status.warnings == []
     assert "listing failed" in caplog.text
 
 
@@ -403,7 +411,10 @@ async def test_unreadable_metric_model_is_rejected_before_resolution(
     )
     bundle = bundle_metric(judge, HybridMetricBundlePackager())
     await _republish_task_metrics(entity_store, published, [MetricInline.model_validate_json(bundle.model_dump_json())])
-    authorizer.side_effect = _deny("/apis/models/v2/workspaces/private/models/judge")
+    authorizer.side_effect = _deny(
+        "/apis/models/v2/workspaces/private/models/judge",
+        "/apis/inference-gateway/v2/workspaces/private/virtual-models/judge",
+    )
     with pytest.raises(HTTPException) as exc:
         await service.submit(TasksetRunInput.model_validate(request_body), workspace="default", caller="user:bob")
     assert exc.value.status_code == 403
@@ -433,7 +444,7 @@ async def test_repeated_source_is_checked_once_but_denials_are_not_remembered():
     assert authorize.await_count == 3
 
 
-async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
+async def test_get_reads_stored_state_without_plan_or_source_resolution(
     service, run_store, seed_run, files_service, authorizer, monkeypatch
 ):
     """One stored run read preserves terminal/cancellation/result state even with an unavailable plan."""
@@ -447,7 +458,6 @@ async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
     find = AsyncMock(wraps=run_store.find)
     monkeypatch.setattr(run_store, "find", find)
     monkeypatch.setattr(run_store, "load_plan", AsyncMock(side_effect=AssertionError("plan read")))
-    monkeypatch.setattr(run_store, "list_members", AsyncMock(side_effect=AssertionError("member read")))
     status = await service.get("default", run.name)
     find.assert_awaited_once_with("default", run.name)
     assert status.model_dump(mode="json") == {
@@ -457,15 +467,60 @@ async def test_get_reads_stored_state_without_plan_members_or_source_resolution(
         "phase": "expired",
         "result_state": "ready",
         "accepted_at": "2026-10-14T12:00:00Z",
+        "timeout_seconds": 3600,
+        "started_at": None,
         "execution_deadline_at": "2026-10-14T13:00:00Z",
         "finalization_deadline_at": "2026-10-14T14:00:00Z",
         "cancel_requested_at": "2026-10-14T12:00:00Z",
         "error": "execution expired",
         "created_by": "user:alice",
         "idempotency_key": "original-key",
+        "progress": None,  # no members yet
     }
     assert not files_service.calls
     authorizer.assert_not_awaited()
+
+
+async def test_get_counts_progress_from_every_member_page_without_jobs(
+    service, run_store, entity_store, seed_run, fake_task_jobs, monkeypatch
+):
+    """``progress`` counts the run's members, across pages, on each read; Jobs is never called."""
+    run = await seed_run(phase=TasksetRunPhase.RUNNING)
+    states = [
+        (MemberPhase.IMAGE_READY, None, None),  # queued
+        (MemberPhase.IMAGE_READY, "intent", None),  # a create intent: holds a slot, not queued
+        (MemberPhase.REGISTERED, "job", HelixJobStatus.ACTIVE),
+        (MemberPhase.REGISTERED, "job", HelixJobStatus.ACTIVE),
+        (MemberPhase.REGISTERED, "job", HelixJobStatus.PENDING),
+        (MemberPhase.SUCCEEDED, "job", HelixJobStatus.COMPLETED),
+        (MemberPhase.FAILED, "job", HelixJobStatus.ERROR),
+    ]
+    for index, (phase, job, job_status) in enumerate(states):
+        member = TasksetRunMemberEntity(
+            name=f"task-{index}",
+            workspace="default",
+            task_index=index,
+            phase=phase,
+            task_job=f"{run.name}-task-{index}" if job else None,
+            job_status=job_status,
+        )
+        member._parent = run.id
+        await entity_store.create(member)
+    original = run_store.list_members
+
+    async def small_pages(run, *, phase, page, page_size):  # the store reads pages of 1,000; force several
+        return await original(run, phase=phase, page=page, page_size=3)
+
+    monkeypatch.setattr(run_store, "list_members", small_pages)
+    monkeypatch.setattr(fake_task_jobs, "is_subprocess_profile", AsyncMock(side_effect=AssertionError("Jobs call")))
+    status = await service.get("default", run.name)
+    assert status.progress is not None
+    assert status.progress.model_dump(mode="json") == {
+        "tasks": 7,
+        "members": {"image_ready": 2, "registered": 3, "succeeded": 1, "failed": 1},
+        "queued": 1,
+        "task_jobs": {"active": 2, "pending": 1},
+    }
 
 
 async def test_get_missing_and_cross_workspace_returns_none(service, seed_run):
@@ -547,6 +602,7 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
             task_index=index,
             phase=MemberPhase.FAILED,
             task_job=f"recorded-job-{index}",
+            job_status=HelixJobStatus.ERROR,
             error="saved diagnostic",
         )
         member._parent = run.id
@@ -563,7 +619,9 @@ async def test_list_tasks_preserves_stored_task_details_and_page_metadata(
             "task_index": 10,
             "phase": "failed",
             "job": "recorded-job-10",
+            "job_status": "error",
             "error": "saved diagnostic",
+            "publication": None,
         }
     ]
     assert result.pagination.model_dump() == {
@@ -593,3 +651,41 @@ async def test_read_service_propagates_storage_failures(service, seed_run, entit
             await service.list_runs("default", caller="user:alice")
         else:
             await service.list_tasks("default", "run-selected", phase=None, page=1, page_size=100)
+
+
+async def _no_network_spec(service, request, target):
+    pinned, spec = await service._resolve(request, "default")
+    task = spec.tasks[0]
+    config = {**task.spec.config, "environment": {**task.spec.config["environment"], "network_mode": "no-network"}}
+    spec.tasks = [task.model_copy(update={"spec": task.spec.model_copy(update={"config": config})})]
+    spec.target = target
+    return pinned, spec
+
+
+async def test_no_network_tasks_without_a_closed_book_route_are_refused_before_acceptance(
+    service, published, request_body, monkeypatch, entity_store
+):
+    request = TasksetRunInput.model_validate(request_body)
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
+
+    with pytest.raises(TasksetRunResolutionError, match=r"closed_book_required: no-network tasks \['task-1'\]"):
+        await service.submit(request, workspace="default", caller="user:alice")
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+
+
+async def test_a_refused_registered_agent_does_not_leave_its_files_snapshot(
+    service, published, request_body, monkeypatch, files_service
+):
+    request = TasksetRunInput.model_validate(request_body)
+    snapshot = FilesetRef("agents/request-snapshot")
+    files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("agents/coder"), files=snapshot),
+        agent_kwargs={"fabric_config": {"name": "coder"}},
+    )
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
+
+    with pytest.raises(TasksetRunResolutionError, match="closed_book_required"):
+        await service.submit(request, workspace="default", caller="user:alice")
+    assert ("agents", "request-snapshot") not in files_service.filesets

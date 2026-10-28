@@ -46,6 +46,7 @@ const SOURCE_CONFIG = {
 
 const TRIAL: Trial = {
   number: 4,
+  phase: 'numeric',
   state: 'COMPLETE',
   durationSeconds: 12,
   paretoOptimal: true,

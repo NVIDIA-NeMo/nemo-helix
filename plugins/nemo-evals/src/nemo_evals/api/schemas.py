@@ -178,27 +178,6 @@ def _has_member(value: object) -> FilterOperation:
     return ComparisonOperation(operator=FilterOperator.CONTAINS, field="data.tasks", value=ref)
 
 
-def _operator_operands(value: object) -> list[tuple[str, object]]:
-    if isinstance(value, dict) and value and all(str(key).startswith("$") for key in value):
-        return [(str(operator), operand) for operator, operand in value.items()]
-    return [(FilterOperator.EQ.value, value)]
-
-
-def _translate_metadata_comparison(op: ComparisonOperation) -> FilterOperation:
-    if op.field == _METADATA_FIELD:
-        if op.operator != FilterOperator.EQ or not isinstance(op.value, dict) or not op.value:
-            raise ValueError("'metadata' filters take key/value pairs, e.g. 'metadata.<key>' or 'metadata[<key>]'")
-        pairs: list[FilterOperation] = [
-            _translate_metadata_comparison(
-                ComparisonOperation(operator=FilterOperator(operator), field=f"{_METADATA_PREFIX}{key}", value=operand)
-            )
-            for key, value in op.value.items()
-            for operator, operand in _operator_operands(value)
-        ]
-        return pairs[0] if len(pairs) == 1 else LogicalOperation(operator=FilterOperator.AND, operations=pairs)
-    return _metadata_match(op.field.removeprefix(_METADATA_PREFIX), op.operator, op.value)
-
-
 def qualify_ref_filters(operation: FilterOperation | None, workspace: str) -> FilterOperation | None:
     """Qualify bare ``name`` refs in metric and member filters with ``workspace``."""
 
@@ -246,8 +225,8 @@ class RecordFilter(DataFilter):
     def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
         def _walk(op: FilterOperation) -> FilterOperation:
             if isinstance(op, ComparisonOperation):
-                if op.field == _METADATA_FIELD or op.field.startswith(_METADATA_PREFIX):
-                    return _translate_metadata_comparison(op)
+                if op.field.startswith(_METADATA_PREFIX):
+                    return _metadata_match(op.field.removeprefix(_METADATA_PREFIX), op.operator, op.value)
                 if op.field in cls._VALUE_MATCHERS:
                     return _one_or_any(op, cls._VALUE_MATCHERS[op.field])
             if isinstance(op, LogicalOperation):

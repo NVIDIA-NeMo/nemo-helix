@@ -26,7 +26,8 @@ Perform the following steps to troubleshoot configurations that use model endpoi
 
  # start-content-safety
 
- curl https://integrate.api.nvidia.com/v1/chat/completions \
+ NVIDIA_BASE_URL="${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}"
+ curl "${NVIDIA_BASE_URL%/}/chat/completions" \
 
    -H "Content-Type: application/json" \
 

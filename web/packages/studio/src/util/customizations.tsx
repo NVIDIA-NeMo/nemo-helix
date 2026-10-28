@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/components/StatTile';
+import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
+import { GraphNode, Gpu } from '@nemo/icons/icons';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
@@ -22,7 +24,6 @@ import {
 import { formatElapsedTime } from '@studio/util/date';
 import { formatStepDuration, GRPO_METRIC, medianValue, readSeries } from '@studio/util/grpoMetrics';
 import { getTextWithCount } from '@studio/util/strings';
-import { Circle /* TODO: replace with a proper icon (was Circle) */, Gpu } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
@@ -355,9 +356,13 @@ const TRAINING_PHASE_LABELS: Record<string, string> = {
   automodel_recipe_setup: 'Recipe Setup',
   training: 'Training',
   validation: 'Validation',
+  saving_checkpoint: 'Saving Checkpoint',
   checkpoint_saved: 'Checkpoint Saved',
   epoch_end: 'Epoch End',
+  merging_adapter: 'Merging Adapter',
+  finalizing_checkpoint: 'Finalizing Checkpoint',
   processing_checkpoint: 'Processing Checkpoint',
+  registering_model: 'Registering Model',
   completed: 'Completed',
 };
 
@@ -367,6 +372,150 @@ export const formatTrainingPhase = (phase: string): string =>
     .split('_')
     .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(' ');
+
+/** Short names for the pipeline steps, so the tile reads as a stage rather than a step id. */
+const STAGE_LABELS: Record<string, string> = {
+  'model-and-dataset-download': 'Downloading',
+  'model-dataset-environment-download': 'Downloading',
+  training: 'Training',
+  'grpo-training': 'Training',
+  'dpo-training': 'Training',
+  'model-upload': 'Uploading Model',
+  'model-entity-creation': 'Registering Model',
+};
+
+export interface JobStageTask {
+  status?: string;
+  updated_at?: string;
+  status_details?: Record<string, unknown>;
+}
+
+export interface JobStageStep {
+  name: string;
+  status: string;
+  created_at?: string;
+  tasks?: readonly JobStageTask[];
+}
+
+export interface CurrentStage {
+  label: string;
+  /** What the step is doing, when that says something the label doesn't. */
+  detail?: string;
+  /** Time since the step was created, so it includes waiting for a pod to schedule. */
+  elapsedSeconds?: number;
+  /** How much of the finished model has been sent, while the upload stage is running. */
+  upload?: UploadProgress;
+}
+
+export interface UploadProgress {
+  uploadedBytes: number;
+  totalBytes: number;
+}
+
+const TERMINAL_TASK_STATUSES: Record<string, true> = {
+  completed: true,
+  error: true,
+  cancelled: true,
+};
+
+/** Step statuses where the pod's own phase would be stale or wrong, so the status is the detail. */
+const STEP_STATUS_DETAILS: Record<string, string> = {
+  created: 'starting',
+  pending: 'starting',
+  resuming: 'resuming',
+  pausing: 'pausing',
+  paused: 'paused',
+  cancelling: 'cancelling',
+};
+
+/**
+ * Every pod gets its own task, so a retried step holds a dead pod's task beside the live one.
+ * Take the report from a live task, newest first.
+ */
+const getReportingTask = (tasks: readonly JobStageTask[] | undefined): JobStageTask | undefined => {
+  const reporting = (tasks ?? []).filter((task) => asNonEmptyString(task.status_details?.phase));
+  const live = reporting.filter((task) => !TERMINAL_TASK_STATUSES[task.status ?? '']);
+  return [...(live.length ? live : reporting)].sort((a, b) =>
+    (b.updated_at ?? '').localeCompare(a.updated_at ?? '')
+  )[0];
+};
+
+/** What the file-io task reports as `phase` while it uploads the finished model. */
+const UPLOADING_PHASE = 'uploading';
+
+/**
+ * Bytes sent so far, including the file in flight. `progress_pct` counts files, so one large
+ * weights file leaves it at 0% for hours; `uploaded_bytes` moves while it streams. The task
+ * reports nothing until the upload starts, so either number can be missing.
+ */
+const getUploadProgress = (task: JobStageTask | undefined): UploadProgress | undefined => {
+  const sent = task?.status_details?.uploaded_bytes;
+  const total = task?.status_details?.total_size;
+  if (
+    typeof sent !== 'number' ||
+    typeof total !== 'number' ||
+    !Number.isFinite(sent) ||
+    !Number.isFinite(total) ||
+    sent < 0 ||
+    total <= 0
+  ) {
+    return undefined;
+  }
+  return { uploadedBytes: Math.min(sent, total), totalBytes: total };
+};
+
+/**
+ * Seconds the step has been running, taken off the job's own live timer. `useLiveSeconds` locks
+ * its start date on first use and never resets, so a second hook could not follow the stage
+ * changing; the step's offset from the job start can.
+ */
+const getStepElapsedSeconds = (
+  steps: readonly JobStageStep[],
+  step: JobStageStep,
+  jobElapsedSeconds: number | undefined
+): number | undefined => {
+  const jobStart = utcToLocalDate(steps[0].created_at);
+  const stepStart = utcToLocalDate(step.created_at);
+  if (jobElapsedSeconds === undefined || !jobStart || !stepStart) return undefined;
+  return Math.max(0, jobElapsedSeconds - (stepStart.getTime() - jobStart.getTime()) / 1000);
+};
+
+const TAIL_PHASES: Record<string, true> = { merging_adapter: true, finalizing_checkpoint: true };
+
+/**
+ * The first step that has not completed is where the job is. The controller sets each step's
+ * status from its pod, so unlike the job-level `phase` this is never another step's value.
+ * The next step only exists once the previous one completes, so a job with every step
+ * completed is between stages rather than finished.
+ *
+ * @param jobElapsedSeconds The job's live timer, from `useLiveSeconds`, for the stage's own timer.
+ */
+export const getCurrentStage = (
+  steps: readonly JobStageStep[] | undefined,
+  jobElapsedSeconds?: number
+): CurrentStage | undefined => {
+  if (!steps?.length) return undefined;
+  const step = steps.find(({ status }) => status !== 'completed');
+  if (!step) return { label: 'Next Stage', detail: 'starting' };
+
+  const label = STAGE_LABELS[step.name] ?? formatTrainingPhase(step.name.replace(/-/g, '_'));
+  // A paused step is not running, so a timer counting up would read as progress.
+  const elapsedSeconds =
+    step.status === 'paused' ? undefined : getStepElapsedSeconds(steps, step, jobElapsedSeconds);
+  const statusDetail = STEP_STATUS_DETAILS[step.status];
+  if (statusDetail) return { label, detail: statusDetail, elapsedSeconds };
+
+  // Inside Training the phases (validation, checkpoint saves, epoch ends) flip too fast to read
+  // at a glance — that is what logs are for — and a pod's own `completed` is not the stage's.
+  // Only the post-training tail is worth naming: it is where a finished-looking job keeps running.
+  const task = getReportingTask(step.tasks);
+  const phase = asNonEmptyString(task?.status_details?.phase);
+  if (phase && TAIL_PHASES[phase]) {
+    return { label, detail: formatTrainingPhase(phase).toLowerCase(), elapsedSeconds };
+  }
+  const upload = phase === UPLOADING_PHASE ? getUploadProgress(task) : undefined;
+  return { label, elapsedSeconds, upload };
+};
 
 export interface JobDurationStep {
   created_at: string;
@@ -402,12 +551,40 @@ interface TrainingDiagnosticsContext {
   duration: string;
   /** Display name of the failing pipeline step, when the job errored. */
   failedAtStepLabel?: string;
+  currentStage?: CurrentStage;
 }
+
+/**
+ * The phase is the badge and the stage name sits underneath it. When the stage's label already
+ * says what it is doing, there is no separate phase, so the label takes the badge alone.
+ */
+const getStageTile = ({
+  label,
+  detail,
+  elapsedSeconds,
+  upload,
+}: CurrentStage): StatTileDiagnosticProps => {
+  const phase = detail ?? label;
+  const elapsed = formatTimeInSeconds(elapsedSeconds);
+  // Floored, so a transfer that is one byte short never reads as done.
+  const uploadHint = upload
+    ? `${formatFileSize(upload.uploadedBytes)} of ${formatFileSize(upload.totalBytes)} (${Math.floor((upload.uploadedBytes / upload.totalBytes) * 100)}%)`
+    : undefined;
+  return {
+    label: elapsed ? `Stage · ${elapsed}` : 'Stage',
+    value: (
+      <Badge color="gray" kind="solid">
+        {truncatePhase(phase.charAt(0).toUpperCase() + phase.slice(1))}
+      </Badge>
+    ),
+    hint: detail ? label : uploadHint,
+  };
+};
 
 /** Where the run ended up: failing step, total time once finished, or current stage while running. */
 const getRunStateTile = (
   telemetry: CustomizationTrainingTelemetry,
-  { isTerminal, duration, failedAtStepLabel }: TrainingDiagnosticsContext
+  { isTerminal, duration, failedAtStepLabel, currentStage }: TrainingDiagnosticsContext
 ): StatTileDiagnosticProps => {
   if (failedAtStepLabel) {
     return {
@@ -422,13 +599,11 @@ const getRunStateTile = (
   }
   return isTerminal
     ? { label: 'Duration', value: duration, hint: 'total run time' }
-    : {
-        label: 'Phase',
-        value: telemetry.phase
-          ? truncatePhase(formatTrainingPhase(telemetry.phase))
-          : NOT_AVAILABLE,
-        hint: 'current stage',
-      };
+    : currentStage
+      ? getStageTile(currentStage)
+      : telemetry.phase
+        ? getStageTile({ label: formatTrainingPhase(telemetry.phase) })
+        : { label: 'Stage', value: NOT_AVAILABLE };
 };
 
 export const getTrainingDiagnosticsTiles = (
@@ -634,7 +809,7 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
     const p = job.spec.parallelism;
     const badges: ReactNode[] = [
       badge('num_gpus_per_node', <Gpu />, getTextWithCount('GPU', p.num_gpus_per_node ?? 0)),
-      badge('num_nodes', <Circle />, getTextWithCount('Node', p.num_nodes ?? 0)),
+      badge('num_nodes', <GraphNode />, getTextWithCount('Node', p.num_nodes ?? 0)),
       badge(
         'tensor_parallel_size',
         <Gpu />,

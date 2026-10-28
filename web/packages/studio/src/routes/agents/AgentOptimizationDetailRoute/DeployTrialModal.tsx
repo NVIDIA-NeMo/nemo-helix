@@ -9,7 +9,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import { getAgentsListAgentsQueryKey, useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
-import { Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, CodeSnippet, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
 import { useCreateAgentFromTrial } from '@studio/api/agents/useCreateAgentFromTrial';
 import {
@@ -18,6 +18,7 @@ import {
   deployOnCreateFormSchema,
   useDeployOnCreate,
 } from '@studio/api/agents/useDeployOnCreate';
+import { isTextValue } from '@studio/components/dataViews/OptimizationJobsDataView/utils';
 import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
 import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import {
@@ -256,16 +257,31 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
         <Stack gap="2">
           <Text kind="label/semibold/md">Configuration from trial {trial.number}</Text>
           <Stack gap="1" data-testid="deploy-trial-params">
-            {deployedParams.map((param) => (
-              <Flex key={param.name} justify="between" align="center" gap="4">
-                <Text kind="body/regular/sm" className="text-secondary">
-                  {studyConfig?.searchSpace.get(param.name)?.path ?? param.name}
-                </Text>
-                <Text kind="body/regular/sm" className="tabular-nums">
-                  {param.value}
-                </Text>
-              </Flex>
-            ))}
+            {deployedParams.map((param) => {
+              const path = studyConfig?.searchSpace.get(param.name)?.path ?? param.name;
+              return isTextValue(param.value) ? (
+                <Stack key={param.name} gap="1">
+                  <Text kind="body/regular/sm" className="text-secondary">
+                    {path}
+                  </Text>
+                  <CodeSnippet
+                    value={param.value}
+                    language="markdown"
+                    kind="block"
+                    attributes={{ CodeSnippetCode: { className: 'max-h-48 overflow-auto' } }}
+                  />
+                </Stack>
+              ) : (
+                <Flex key={param.name} justify="between" align="center" gap="4">
+                  <Text kind="body/regular/sm" className="text-secondary">
+                    {path}
+                  </Text>
+                  <Text kind="body/regular/sm" className="tabular-nums">
+                    {param.value}
+                  </Text>
+                </Flex>
+              );
+            })}
           </Stack>
         </Stack>
       )}

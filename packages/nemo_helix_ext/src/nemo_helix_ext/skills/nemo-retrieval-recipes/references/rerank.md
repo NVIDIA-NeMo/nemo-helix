@@ -66,7 +66,7 @@ Stage 2:
 {
   "model": "default/llama-nemotron-rerank-1b-v2",
   "dataset": {
-    "training": "default/job-fileset-<job>#results/<attempt>/artifacts/"
+    "training": "default/<job-fileset>#results/<attempt>/artifacts/"
   },
   "training": {
     "recipe": "cross_encoder",
@@ -84,7 +84,7 @@ Stage 3 (two-stage):
 
 ```bash
 nemo evals retrieve-eval --spec '{
-  "dataset": "default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**",
+  "dataset": "default/<job-fileset>#results/<attempt>/artifacts/eval_beir/**",
   "target": {
     "embeddings": "default/llama-nemotron-embed-1b-v2",
     "reranker": "default/llama-nemotron-rerank-1b-v2-tuned",

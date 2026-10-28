@@ -8,15 +8,10 @@ import {
 import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
 import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
-  AGENTS_ENABLED,
   ANONYMIZER_ENABLED,
-  BASE_MODELS_ENABLED,
   ASSISTANT_STUDIO_ENABLED,
   CUSTOMIZER_ENABLED,
   DASHBOARD_ROUTE_ENABLED,
-  DATA_DESIGNER_ENABLED,
-  DATASETS_ENABLED,
-  DEPLOYMENTS_ENABLED,
   EVALS_BENCHMARKS_ENABLED,
   EVALS_ENABLED,
   EXPERIMENT_ENABLED,
@@ -24,16 +19,12 @@ import {
   GUARDRAILS_ENABLED,
   INFERENCE_PROVIDER_ENABLED,
   INTAKE_ENABLED,
-  JOBS_ENABLED,
   MEMBERS_ENABLED,
   MODEL_COMPARE_ENABLED,
   MODEL_DETAILS_ENABLED,
   MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
-  PLUGINS_ENABLED,
-  SAFE_SYNTHESIZER_ENABLED,
-  SECRETS_ENABLED,
-  SETTINGS_ENABLED,
+  VIRTUAL_MODELS_ROUTE_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
@@ -48,9 +39,6 @@ const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
   return Array.isArray(routes) ? routes : [routes];
 };
 
-export const gateBaseModelsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(BASE_MODELS_ENABLED, routes);
-
 export const gateCustomizationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(CUSTOMIZER_ENABLED, routes);
 
@@ -60,26 +48,11 @@ export const gateModelDetailsRoutes = (routes: RouteObject | RouteObject[]) =>
 export const gateDashboardRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(DASHBOARD_ROUTE_ENABLED, routes);
 
-export const gateDatasetsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(DATASETS_ENABLED, routes);
-
 export const gateFilesetDetailsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(FILESET_DETAILS_ENABLED, routes);
 
-export const gateJobsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(JOBS_ENABLED, routes);
-
-export const gateSettingsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(SETTINGS_ENABLED, routes);
-
 export const gateIntakeRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(INTAKE_ENABLED, routes);
-
-export const gateSafeSynthesizerRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(SAFE_SYNTHESIZER_ENABLED, routes);
-
-export const gateDataDesignerRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(DATA_DESIGNER_ENABLED, routes);
 
 export const gateAnonymizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ANONYMIZER_ENABLED, routes);
@@ -96,11 +69,11 @@ export const gateEvaluationBenchmarksRoutes = (routes: RouteObject | RouteObject
 export const gateExperimentRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EXPERIMENT_ENABLED, routes);
 
-export const gateSecretsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(SECRETS_ENABLED, routes);
-
 export const gateGuardrailsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(GUARDRAILS_ENABLED, routes);
+
+export const gateVirtualModelsRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(VIRTUAL_MODELS_ROUTE_ENABLED, routes);
 
 export const gateInferenceProviderRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(INFERENCE_PROVIDER_ENABLED, routes);
@@ -108,17 +81,8 @@ export const gateInferenceProviderRoutes = (routes: RouteObject | RouteObject[])
 export const gateMembersRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(MEMBERS_ENABLED, routes);
 
-export const agentsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(AGENTS_ENABLED, routes);
-
-export const gatePluginRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(PLUGINS_ENABLED, routes);
-
 export const gateAssistantStudioRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ASSISTANT_STUDIO_ENABLED, routes);
-
-export const gateDeploymentsRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(DEPLOYMENTS_ENABLED, routes);
 
 export const gateModelCompareRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(MODEL_COMPARE_ENABLED, routes);
@@ -154,10 +118,7 @@ export const getWorkspaceIndexRoute = (workspace: string) => {
 
 export const getWorkspaceDetailsDefaultRoute = (workspace: string) => {
   if (DASHBOARD_ROUTE_ENABLED) return getWorkspaceDashboardRoute(workspace);
-  if (AGENTS_ENABLED) return getAgentsListRoute(workspace);
-  if (BASE_MODELS_ENABLED) return getWorkspaceBaseModelsRoute(workspace);
-  if (JOBS_ENABLED) return getWorkspaceJobsRoute(workspace);
-  return getWorkspaceIndexRoute(workspace);
+  return getAgentsListRoute(workspace);
 };
 
 export const getWorkspaceDashboardRoute = (workspace: string) => {

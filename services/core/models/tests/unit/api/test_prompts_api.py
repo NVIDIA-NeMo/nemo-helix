@@ -99,7 +99,7 @@ def test_list_prompts_with_sort(client, mock_prompt_service, sample_page):
 def test_list_prompts_with_name_filter(client, mock_prompt_service, sample_page):
     mock_prompt_service.list_prompts.return_value = sample_page
 
-    response = client.get("/apis/models/v2/workspaces/default/prompts?filter[name][]=summarizer")
+    response = client.get("/apis/models/v2/workspaces/default/prompts?filter[name]=summarizer")
 
     assert response.status_code == 200
     assert mock_prompt_service.list_prompts.call_args.kwargs.get("filter_operation") is not None
@@ -108,7 +108,7 @@ def test_list_prompts_with_name_filter(client, mock_prompt_service, sample_page)
 def test_list_prompts_workspace_filter_cannot_override_path(client, mock_prompt_service, sample_page):
     mock_prompt_service.list_prompts.return_value = sample_page
 
-    response = client.get("/apis/models/v2/workspaces/default/prompts?filter[workspace][]=other")
+    response = client.get("/apis/models/v2/workspaces/default/prompts?filter[workspace]=other")
 
     assert response.status_code == 200
     assert mock_prompt_service.list_prompts.call_args.kwargs["workspace"] == "default"

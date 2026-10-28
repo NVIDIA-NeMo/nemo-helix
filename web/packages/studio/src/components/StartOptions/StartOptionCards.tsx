@@ -36,7 +36,7 @@ export const StartOptionCards: FC<StartOptionCardsProps> = ({
           value={option.id}
           label={option.title}
           description={option.description}
-          icon={<option.icon size={16} aria-hidden />}
+          icon={<option.icon size="16" aria-hidden />}
           slotEnd={
             option.tag ? (
               <Badge

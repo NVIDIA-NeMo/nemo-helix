@@ -14,6 +14,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Coroutine, Generator, Mapping, Protocol, TypeVar
+from unittest.mock import patch
 
 import httpx
 from fastapi import FastAPI
@@ -346,8 +347,19 @@ def _default_service_configs(tmp_dir: Path) -> dict[type[object], ServiceConfig]
                 },
             },
         ),
-        HelixConfig: HelixConfig(base_url=_IN_PROCESS_PLATFORM_BASE_URL),
+        HelixConfig: _default_platform_config(),
     }
+
+
+def _default_platform_config() -> HelixConfig:
+    """Build the test platform config without probing the host's Docker daemon.
+
+    ``HelixConfig`` validation pings Docker for the default ``docker`` runtime and downgrades
+    to ``none`` when it is unreachable. Assume it is reachable so tests see the production
+    default runtime on every host; ``NHX_RUNTIME`` in the environment still takes precedence.
+    """
+    with patch("nemo_helix_plugin.config.validate_docker_available", return_value=True):
+        return HelixConfig(base_url=_IN_PROCESS_PLATFORM_BASE_URL)
 
 
 class ServiceFactory(Protocol):

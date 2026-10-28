@@ -70,6 +70,8 @@ INSTALLED_AGENT_DIR = "/installed-agent"
 # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
 # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.
 RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer", AGENT_BUNDLE_CONTAINER})
+# The most services one sandbox pod runs besides ``main``.
+MAX_SERVICES = 16
 # Ports the sandbox pod already listens on: execd (44772), the egress DNS proxy (15353) and the
 # egress policy API (18080). Every container shares the pod network, so a service can't use them.
 RESERVED_PORTS = frozenset({44772, 15353, 18080})
@@ -129,7 +131,7 @@ _QUANTITY_SUFFIXES = {
 }
 
 
-def _quantity_value(quantity: str) -> Decimal:
+def quantity_value(quantity: str) -> Decimal:
     """The numeric value of a ``Quantity`` string, so ``500m`` and ``1Gi`` can be compared."""
     number = quantity.rstrip("mkKMGTi")
     return Decimal(number) * _QUANTITY_SUFFIXES[quantity[len(number) :]]
@@ -146,7 +148,7 @@ class Resources(_Strict):
         """Reject a request above its limit, which Kubernetes refuses when it creates the container."""
         for resource, request in (self.requests or {}).items():
             limit = (self.limits or {}).get(resource)
-            if limit is not None and _quantity_value(request) > _quantity_value(limit):
+            if limit is not None and quantity_value(request) > quantity_value(limit):
                 raise ValueError(f"{resource} request {request!r} exceeds its limit {limit!r}")
         return self
 
@@ -203,8 +205,11 @@ class ComposeServices(_Strict):
     """A profile's whole ``compose_services`` block: the services, the volumes they share, and ``main``."""
 
     volumes: list[Name] = Field(default_factory=list, max_length=16)
-    services: list[Service] = Field(min_length=1, max_length=16)
+    services: list[Service] = Field(min_length=1, max_length=MAX_SERVICES)
     main: Main = Field(default_factory=Main)
+    # How long ``NemoOpenSandboxEnvironment.start()`` waits for the services when the ``main`` container has no
+    # readiness check to carry its own ``timeout_sec``.
+    services_timeout_sec: int | None = Field(default=None, ge=1, le=3600)
 
     @model_validator(mode="after")
     def _check(self) -> ComposeServices:
@@ -225,8 +230,9 @@ class ComposeServices(_Strict):
             if mount.name not in self.volumes:
                 raise ValueError(f"{owner}: volume {mount.name!r} is not declared in volumes")
 
-        # Kubernetes requires a container's mount paths to be unique; separate containers may share one.
-        seen: set[tuple[str, str]] = set()
+        # Kubernetes requires a container's mount paths to be unique; separate containers may share one. A service
+        # with `shm_size` already has a mount at /dev/shm, which the server adds for it.
+        seen = {(s.name, "/dev/shm") for s in self.services if s.shm_size is not None}
         for owner, mount in mounts:
             if (owner, mount.mount_path) in seen:
                 raise ValueError(f"{owner}: mount_path {mount.mount_path!r} is used by more than one volume mount")

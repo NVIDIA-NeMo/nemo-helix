@@ -11,7 +11,7 @@ description: ""
 
 This tutorial demonstrates the fundamentals of Data Designer by generating a product review dataset.
 
-For more detail about column behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.5/tutorials/the-basics) of this tutorial.
+For more detail about column behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.7/tutorials/the-basics) of this tutorial.
 
 ## Prerequisites
 
@@ -23,17 +23,20 @@ Use the `data_designer.config` package to define your dataset schema. This confi
 
 ### Define Models
 
-Start by defining the models you want to use:
+Start by defining the models you want to use. Set `NVIDIA_MODEL` to override the example's default with a model served by your provider:
 
 ```python
+import os
+
 import data_designer.config as dd
 
+MODEL_ID = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 MODEL_ALIAS = "text"
 
 model_configs = [
     dd.ModelConfig(
         provider="system/nvidia-build",
-        model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
+        model=MODEL_ID,  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(
             temperature=1.0,
@@ -47,7 +50,7 @@ config_builder = dd.DataDesignerConfigBuilder(model_configs)
 
 ### Add Columns
 
-Define the columns for your dataset. The [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.5/tutorials/the-basics) explains these column types in detail.
+Define the columns for your dataset. The [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.7/tutorials/the-basics) explains these column types in detail.
 
 ```python
 # Product category sampler
@@ -286,5 +289,5 @@ analysis.to_report()
 ## Next Steps
 
 - **Seed data:** Learn how to use external datasets in the [seeding tutorial](/documentation/design-synthetic-data/tutorials/seeding-with-external-datasets)
-- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.5/concepts/columns)
-- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.5/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.5/concepts/validators)
+- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.7/concepts/columns)
+- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.7/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.7/concepts/validators)

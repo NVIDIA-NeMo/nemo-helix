@@ -14,7 +14,7 @@ Supported operators: ``$eq``, ``$like``, ``$lt``, ``$lte``, ``$gt``, ``$gte``,
 """
 
 import json
-from typing import Any, Dict, Sequence
+from typing import Any, Collection, Dict, Sequence
 
 # Re-export base types so callers can import everything from one place.
 from nemo_helix_plugin.filter_ops import ComparisonOperation as ComparisonOperation
@@ -94,7 +94,14 @@ def _parse_field_operation(field: str, op_dict: Dict[str, Any]) -> FilterOperati
         sub_operation = _parse_field_operation(field, op_dict["$not"])
         return LogicalOperation(operator=FilterOperator.NOT, operations=[sub_operation])
 
-    # Handle comparison operators
+    # Handle comparison operators. A plain key beside them would otherwise be dropped silently,
+    # broadening the results, so reject the mix instead.
+    plain_keys = [key for key in op_dict if not key.startswith("$")]
+    if plain_keys and len(plain_keys) < len(op_dict):
+        raise ValueError(
+            f"Filter on '{field}' mixes operators with sub-keys ({sorted(op_dict)}); "
+            "write each condition separately, combined with $and if needed"
+        )
     operations = [
         ComparisonOperation(
             operator=FilterOperator(op_str), field=field, value=_normalize_value(FilterOperator(op_str), op_value)
@@ -184,6 +191,76 @@ def _apply_implicit_eq(d: Dict[str, Any]) -> Dict[str, Any]:
         else:
             result[key] = {"$eq": value}
     return result
+
+
+def _namespace_pairs_error(field: str) -> ValueError:
+    return ValueError(f"'{field}' filters take key/value pairs, e.g. '{field}.<key>' or '{field}[<key>]'")
+
+
+def _expand_namespace_value(path: str, value: Any) -> list[FilterOperation]:
+    """Flatten a namespace sub-object into one comparison per leaf, keyed by dotted path."""
+    if not isinstance(value, dict):
+        return [ComparisonOperation(operator=FilterOperator.EQ, field=path, value=value)]
+    if any(str(key).startswith("$") for key in value):
+        return [_parse_field_operation(path, value)]
+    if not value:
+        raise _namespace_pairs_error(path)
+    return [op for key, sub_value in value.items() for op in _expand_namespace_value(f"{path}.{key}", sub_value)]
+
+
+def expand_namespace_filters(operation: FilterOperation, namespaces: Collection[str]) -> FilterOperation:
+    """Rewrite dict-valued ``$eq`` comparisons on namespace fields into dotted per-key comparisons.
+
+    The bracket form ``filter[labels][team]=x`` and the JSON form ``{"labels": {"team": "x"}}``
+    both parse to ``labels $eq {"team": "x"}``. On a namespace field that means "contains these
+    pairs", so it becomes ``labels.team $eq x`` (multiple keys are ANDed, nested operators such as
+    ``{"team": {"$in": [...]}}`` apply to their key).
+
+    Any other comparison on the bare namespace (a scalar ``$eq``, ``$hasKey``, ``$exists``, …) is
+    rejected: it would compare against the whole stored object, which matches nothing meaningful
+    and can crash the entity store.
+    """
+    if isinstance(operation, ComparisonOperation):
+        if operation.field not in namespaces:
+            return operation
+        if operation.operator != FilterOperator.EQ or not isinstance(operation.value, dict):
+            raise _namespace_pairs_error(operation.field)
+        return _wrap_operations(_expand_namespace_value(operation.field, operation.value))
+    if isinstance(operation, LogicalOperation):
+        return operation.model_copy(
+            update={"operations": [expand_namespace_filters(child, namespaces) for child in operation.operations]}
+        )
+    return operation
+
+
+def reject_object_values(operation: FilterOperation) -> None:
+    """Reject comparisons against an object, other than ``$elemMatch`` criteria.
+
+    ``{"name": {"first": "x"}}`` parses to ``name $eq {"first": "x"}``. The entity store can't
+    compare a field to an object: it matches nothing, or errors on a typed column. The same goes
+    for an object inside a list operand, as in ``{"name": {"$in": [{"first": "x"}]}}``. Run this
+    after ``expand_namespace_filters``, which turns such filters on namespace fields into per-key
+    ones.
+    """
+    if isinstance(operation, ComparisonOperation):
+        value = operation.value
+        if operation.operator == FilterOperator.ELEM_MATCH:
+            return
+        if isinstance(value, list) and any(isinstance(item, dict) for item in value):
+            raise ValueError(f"'{operation.field}' filters take a list of values, not objects")
+        if isinstance(value, dict):
+            unprefixed = sorted(key for key in value if key in _BRACKET_OPERATOR_ALIASES)
+            if unprefixed:
+                raise ValueError(
+                    f"Filter on '{operation.field}' uses operator names without '$' ({unprefixed}); "
+                    f"JSON filters need the prefix, e.g. {sorted('$' + key for key in unprefixed)}"
+                )
+            raise ValueError(
+                f"'{operation.field}' filters take a value or an operator such as $eq or $in, not an object"
+            )
+    elif isinstance(operation, LogicalOperation):
+        for child in operation.operations:
+            reject_object_values(child)
 
 
 def parse_bracket_filter(bracket_dict: Dict[str, Any]) -> FilterOperation:

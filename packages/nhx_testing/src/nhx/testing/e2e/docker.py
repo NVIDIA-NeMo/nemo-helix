@@ -20,10 +20,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+from docker.errors import APIError
 from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.docker.gpu_detection import detect_gpu_device_ids
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
+
+import docker
 
 from .base import E2EBackend
 
@@ -68,6 +71,31 @@ def _clickhouse_image() -> str:
 def _clickhouse_api_url() -> str:
     """Return the ClickHouse URL reachable from sibling containers in the E2E network."""
     return f"http://{NHX_CLICKHOUSE_NETWORK_ALIAS}:{CLICKHOUSE_CONTAINER_PORT}"
+
+
+def _create_test_network(network: Network) -> None:
+    """Recover exhausted CI pools without pruning application or active networks.
+
+    Our E2E job timeouts are shorter than 24 hours, so unused testcontainers
+    networks older than that are stale. Docker's prune operation protects networks
+    with attached containers, including those owned by concurrent jobs.
+    """
+    try:
+        network.create()
+    except APIError as exc:
+        if os.environ.get("GITHUB_ACTIONS") != "true" or "all predefined address pools" not in str(exc):
+            raise
+        logger.warning("Docker address pools exhausted; pruning unused testcontainers networks older than 24h")
+        client = docker.from_env()
+        try:
+            result = client.networks.prune(
+                filters={"label": ["org.testcontainers=true", "org.testcontainers.lang=python"], "until": "24h"}
+            )
+        finally:
+            client.close()
+        logger.info("Removed %d stale testcontainers networks", len(result.get("NetworksDeleted") or []))
+        # Retry exactly once. Permission failures and continued exhaustion remain errors.
+        network.create()
 
 
 class Docker(E2EBackend):
@@ -116,7 +144,7 @@ class Docker(E2EBackend):
         try:
             # Create a dedicated network for the test
             self.network = Network()
-            self.network.create()
+            _create_test_network(self.network)
 
             # Create temporary directory for /data persistence (sqlite + files)
             self._data_dir = Path(tempfile.mkdtemp(prefix="nhx-e2e-data-"))

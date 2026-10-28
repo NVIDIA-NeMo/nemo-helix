@@ -13,7 +13,7 @@ Route inference requests through the gateway using model entity routing, provide
 
 <Note>
 
-This tutorial assumes you have an external provider registered. The platform pre-configures a `system/nvidia-build` provider on startup, which most of the examples below use. To register your own provider, see [About Models and Inference](/documentation/models-and-inference#model-providers).
+The examples below require a running NIM deployment of `meta/llama-3.2-1b-instruct` named `llama-3-2-1b-deployment` in the `default` workspace. Configure its served-model ID as `default/meta-llama-3-2-1b-instruct` (`model_spec.model_namespace="default"`, `model_spec.model_name="meta-llama-3-2-1b-instruct"`); this platform routing ID is distinct from the vendor artifact path. Register the Model Entity `default/meta-llama-3-2-1b-instruct` with `model_providers=["default/llama-3-2-1b-deployment"]`. Deployment discovery publishes served-model mappings but does not create Model Entities. For a served Model Entity, the provider reconciler automatically creates a same-named passthrough VirtualModel with `default_model_entity="default/meta-llama-3-2-1b-instruct"`; no manual VirtualModel registration is needed. Wait for provisioning, verify the model appears in `nemo inference models list`, and check the model-entity route using the examples below. Deploy the model first using the [Model Deployment guide](/documentation/models-and-inference), or substitute your own served model and provider names throughout. Registering the external `system/nvidia-build` provider alone does not create this local deployment.
 
 </Note>
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
@@ -103,8 +103,7 @@ Run inference by passing the Model Entity.
 <Tab title="CLI">
 
 ```bash
-# Model entities are auto-discovered from deployments
-# Use the model entity name from 'nemo models list'
+# Use the registered model entity name from 'nemo models list'
 nemo chat -m meta-llama-3-2-1b-instruct 'Hello!' --max-tokens 100
 ```
 
@@ -112,12 +111,12 @@ nemo chat -m meta-llama-3-2-1b-instruct 'Hello!' --max-tokens 100
 <Tab title="Python SDK">
 
 ```python
-# Model entities are auto-discovered from deployments
+# Use the registered model entity linked to the deployment's provider
 response = InferenceGatewayClient.from_client(client).model_post(
     name="meta-llama-3-2-1b-instruct",
     trailing_uri="v1/chat/completions",
     body=JsonBody({
-        "model": "meta/llama-3.2-1b-instruct",
+        "model": "default/meta-llama-3-2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
     }),
@@ -172,7 +171,7 @@ Pass inference request using provider routing.
 
 ```bash
 # Provider name matches deployment name for auto-created providers
-nemo chat -m meta/llama-3.2-1b-instruct 'Hello!' \
+nemo chat -m default/meta-llama-3-2-1b-instruct 'Hello!' \
 --provider llama-3-2-1b-deployment \
 --max-tokens 100
 ```
@@ -186,7 +185,7 @@ response = InferenceGatewayClient.from_client(client).provider_post(
     name="llama-3-2-1b-deployment",
     trailing_uri="v1/chat/completions",
     body=JsonBody({
-        "model": "meta/llama-3.2-1b-instruct",
+        "model": "default/meta-llama-3-2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
         "max_tokens": 100,
     }),

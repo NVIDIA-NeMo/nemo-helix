@@ -3,6 +3,7 @@
 
 import {
   getErrorMessage,
+  isConflictError,
   isForbiddenError,
   isValidationErrorArray,
   swallowConflict,
@@ -43,7 +44,7 @@ describe('getErrorMessage', () => {
       response?: {
         status: number;
         statusText: string;
-        data?: { detail?: unknown };
+        data?: unknown;
       };
       config?: {
         method?: string;
@@ -197,6 +198,20 @@ describe('getErrorMessage', () => {
     });
   });
 
+  it.each([
+    ['message', { message: 'Server message' }, 'Server message'],
+    ['plain text', 'Plain-text error', 'Plain-text error'],
+    ['detail precedence', { detail: 'Detail', message: 'Message' }, 'Detail'],
+    ['non-string message', { message: { reason: 'invalid' } }, '500 Internal Server Error'],
+    ['blank message', { message: '   ' }, '500 Internal Server Error'],
+    ['blank body', '   ', '500 Internal Server Error'],
+  ])('handles %s response bodies', (_label, data, expected) => {
+    const error = createAxiosError({
+      response: { status: 500, statusText: 'Internal Server Error', data },
+    });
+    expect(getErrorMessage(error)).toBe(expected);
+  });
+
   describe('with network errors', () => {
     it('formats network error with code and message', () => {
       const error = createAxiosError({
@@ -307,18 +322,18 @@ describe('getErrorMessage', () => {
   });
 });
 
-describe('swallowConflict', () => {
-  const axiosErrorWithStatus = (status: number): AxiosError => {
-    const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
-    return new AxiosError('Request failed', undefined, config, undefined, {
-      status,
-      statusText: '',
-      data: {},
-      headers: {},
-      config,
-    });
-  };
+const axiosErrorWithStatus = (status: number): AxiosError => {
+  const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
+  return new AxiosError('Request failed', String(status), config, undefined, {
+    status,
+    statusText: '',
+    data: {},
+    headers: {},
+    config,
+  });
+};
 
+describe('swallowConflict', () => {
   it('resolves to the value when the promise succeeds', async () => {
     await expect(swallowConflict(Promise.resolve('created'))).resolves.toBe('created');
   });
@@ -341,25 +356,13 @@ describe('swallowConflict', () => {
 });
 
 describe('isForbiddenError', () => {
-  /** What axios raises for a response status; `isForbiddenError` tests `instanceof AxiosError`. */
-  const axiosStatus = (status: number) => {
-    const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
-    return new AxiosError('Request failed', String(status), config, undefined, {
-      status,
-      statusText: '',
-      data: {},
-      headers: {},
-      config,
-    });
-  };
-
   it('returns true for an axios 403', () => {
-    expect(isForbiddenError(axiosStatus(403))).toBe(true);
+    expect(isForbiddenError(axiosErrorWithStatus(403))).toBe(true);
   });
 
   it('returns false for other statuses', () => {
-    expect(isForbiddenError(axiosStatus(401))).toBe(false);
-    expect(isForbiddenError(axiosStatus(500))).toBe(false);
+    expect(isForbiddenError(axiosErrorWithStatus(401))).toBe(false);
+    expect(isForbiddenError(axiosErrorWithStatus(500))).toBe(false);
   });
 
   it('returns false for an axios error with no response', () => {
@@ -371,5 +374,22 @@ describe('isForbiddenError', () => {
     expect(isForbiddenError(new Error('network down'))).toBe(false);
     expect(isForbiddenError(undefined)).toBe(false);
     expect(isForbiddenError(null)).toBe(false);
+  });
+});
+
+describe('isConflictError', () => {
+  it('returns true for an axios 409', () => {
+    expect(isConflictError(axiosErrorWithStatus(409))).toBe(true);
+  });
+
+  it('returns true for a fetch-style error carrying the status itself', () => {
+    expect(isConflictError({ status: 409 })).toBe(true);
+  });
+
+  it('returns false for other statuses and non-HTTP errors', () => {
+    expect(isConflictError({ response: { status: 404 } })).toBe(false);
+    expect(isConflictError(new Error('network down'))).toBe(false);
+    expect(isConflictError(undefined)).toBe(false);
+    expect(isConflictError(null)).toBe(false);
   });
 });

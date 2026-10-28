@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, validate_agent_config
 from nemo_agents_plugin.api.v2._perms import AgentPerms
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.entities import Agent, AgentDeployment
 from nemo_agents_plugin.schema import (
@@ -24,14 +24,19 @@ from nemo_agents_plugin.schema import (
     AgentPage,
     RegisterAgentRequest,
 )
-from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.agents.types import ReferenceConfig
+from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
@@ -43,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_agent_filter_dep = make_filter_obj_dep(AgentFilter)
+_agent_filter_dep = make_filter_dep(AgentFilter)
 
 
 @router.post("/agents", response_model=Agent, status_code=201, tags=["Agents"])
@@ -56,16 +61,20 @@ async def register_agent(
     workspace: str,
     body: RegisterAgentRequest,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    files_client: AsyncFilesClient = Depends(get_files_client),
 ) -> Agent:
     """Register an agent."""
     config = _validate_agent_config_for_register(body)
+    reference = await _resolve_agent_reference(body.reference, workspace=workspace, files_client=files_client)
 
     agent = Agent(
         name=body.name,
         workspace=workspace,
         description=body.description,
+        labels=body.labels,
         config=config,
         config_format=body.config_format,
+        reference=reference,
     )
     try:
         saved = await entity_client.create(agent)
@@ -82,7 +91,15 @@ async def register_agent(
     return saved
 
 
-@router.get("/agents", response_model=AgentPage, tags=["Agents"])
+@router.get(
+    "/agents",
+    response_model=AgentPage,
+    tags=["Agents"],
+    openapi_extra=generate_openapi_extra_params(
+        filter_schema=AgentFilter,
+        filter_description="Filter agents by config_format and labels, e.g. `filter[labels.<key>]=<value>`.",
+    ),
+)
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL],
@@ -93,11 +110,13 @@ async def list_agents(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     sort: str = Query(default="-created_at"),
-    filter: AgentFilter = Depends(_agent_filter_dep),
+    parsed_filter: ParsedFilter = Depends(_agent_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentPage:
-    """List all agents in the workspace with pagination and filter support."""
-    filter_dict = filter if isinstance(filter, dict) else filter.model_dump(exclude_none=True)
+    """List all agents in the workspace with pagination and filter support.
+
+    Filter on a label with ``filter[labels.<key>]=<value>``.
+    """
     try:
         result = await entity_client.list(
             Agent,
@@ -105,7 +124,7 @@ async def list_agents(
             page=page,
             page_size=page_size,
             sort=sort,
-            filter_obj=filter_dict or None,
+            filter_operation=parsed_filter.operation,
         )
     except Exception as exc:
         logger.exception("Failed to list agents in workspace '%s'", workspace)
@@ -116,7 +135,7 @@ async def list_agents(
         data=result.data,
         pagination=pagination,
         sort=sort,
-        filter=filter,
+        filter=parsed_filter.to_response(),
     )
 
 
@@ -198,6 +217,23 @@ async def delete_agent(
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc
+
+
+async def _resolve_agent_reference(
+    reference: ReferenceConfig | None, *, workspace: str, files_client: AsyncFilesClient
+) -> ReferenceConfig | None:
+    """Check fileset access as the caller and qualify the stored reference."""
+    if reference is None or reference.fileset is None:
+        return reference
+    ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
+    qualified = FilesetRef(f"{ref.workspace}/{ref.name}")
+    try:
+        await files_client.get_fileset(workspace=ref.workspace, name=ref.name)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=400, detail=f"Fileset '{qualified}' not found.") from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(status_code=403, detail=f"Access denied to fileset '{qualified}'.") from exc
+    return reference.model_copy(update={"fileset": qualified})
 
 
 def _validate_agent_config_for_register(body: RegisterAgentRequest) -> dict[str, Any]:

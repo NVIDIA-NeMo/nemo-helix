@@ -1,0 +1,70 @@
+{
+  "skill": "nemo-gym-environments",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use the nemo-gym-environments skill to package my reward environment for GRPO.",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run nemo-gym-environments to convert a Prime Intellect environment into an environment fileset.",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "explicit",
+      "prompt": "With the nemo-gym-environments skill, validate my wheels-v1 environment package before I upload it.",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Convert the primeintellect/ascii-tree environment to a format the platform can train against.",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "implicit",
+      "prompt": "How do I package my own reward environment as adapter-wheels-v1 and upload it as a fileset?",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Turn my existing NeMo Gym resources server into a native-v1 environment package.",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "implicit",
+      "prompt": "What shape should the Gym rollout rows be for my reward environment's dataset?",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "contextual",
+      "prompt": "The environment fileset validation says prompt JSONL must not live in the environment package. How do I fix the layout?",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "contextual",
+      "prompt": "Spin-up of my gym environment fails with ServerRefNotFoundError: Available responses_api_models: (none). What is missing from the package?",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "contextual",
+      "prompt": "My cluster has no egress, so the native-v1 environment cannot install its requirements. How do I vendor the wheels instead?",
+      "expected_skill": "nemo-gym-environments"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Fine-tune Qwen3-1.7B with LoRA SFT on my chat dataset.",
+      "expected_skill_not": "nemo-gym-environments"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Run a DPO job on a preference dataset with nemo customization rl.",
+      "expected_skill_not": "nemo-gym-environments"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Attach guardrails middleware to my virtual model in the inference gateway.",
+      "expected_skill_not": "nemo-gym-environments"
+    }
+  ]
+}

@@ -98,6 +98,8 @@ def test_the_build_steps_profiles_and_config() -> None:
         assert profile.config.service_account_name == name.replace("build-", "nhx-build-")
         assert profile.config.storage.pvc_name == "nhx-build-work"
         assert profile.config.cleanup_completed_jobs_immediately is True
+        # A burst of builds queues each step behind the Jobs controller for longer than the 30-minute profile default.
+        assert profile.config.ttl_seconds_before_active == 60 * 60
     # Build pods run in another namespace, so the platform's URL must name its own.
     assert config["platform"]["base_url"] == "http://nemo-helix-api.nhx.svc:8080"
 

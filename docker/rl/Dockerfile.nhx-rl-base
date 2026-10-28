@@ -201,6 +201,9 @@ SKIP=(
     --no-install-package deep-gemm
     --no-install-package flash-attn
     --no-install-package transformer-engine-torch
+    # Optional transfer backend unused by RL; its wheel bundles Go/etcd libraries.
+    --no-install-package mooncake-transfer-engine
+    --no-install-package mooncake-transfer-engine-cuda13
 )
 uv venv --seed
 
@@ -284,6 +287,9 @@ SKIP=(
     --no-install-package deep-gemm
     --no-install-package flash-attn
     --no-install-package transformer-engine-torch
+    # Match the cache-warming sync: do not install this unused Go/etcd-bearing wheel.
+    --no-install-package mooncake-transfer-engine
+    --no-install-package mooncake-transfer-engine-cuda13
 )
 # Same wrapper prefetch_venvs.py writes, into the driver bin (on PATH) rather
 # than /usr/local/bin, which the build user cannot write.

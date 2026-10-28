@@ -19,8 +19,10 @@ from nemo_helix_plugin.api.filter import (
     FilterOperation,
     FilterOperator,
     LogicalOperation,
+    expand_namespace_filters,
     parse_bracket_filter,
     parse_json_filter,
+    reject_object_values,
 )
 from nemo_helix_plugin.api.text_filter import parse_text_filter
 from nemo_helix_plugin.jobs.openapi_utils import parse_deep_object
@@ -286,10 +288,17 @@ def make_filter_dep(
                 if bracket_dict:
                     operation = parse_bracket_filter(bracket_dict)
 
-            # Validate field names
+            # Split dict-valued namespace filters (filter[labels][team]=x) into per-key
+            # comparisons (labels.team $eq x) so they mean "contains", not "equals this object",
+            # and reject any other comparison on a bare namespace field.
+            if operation is not None and namespace_fields:
+                operation = expand_namespace_filters(operation, namespace_fields)
+
+            # Validate field names, and reject comparisons against an object the store can't match
             if operation is not None:
                 valid_fields = _get_valid_fields(filter_model)
                 _validate_fields(operation, valid_fields, namespace_fields)
+                reject_object_values(operation)
 
             # Translate field names for the entity store (e.g., purpose → data.purpose)
             translate = getattr(filter_model, "translate_operation", None)

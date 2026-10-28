@@ -44,6 +44,7 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    UNSTARTED_PAUSE_MESSAGE,
     BaseKubernetesExecutionProfileConfig,
     adopt_step_network_policy,
     build_event_field_selector,
@@ -64,6 +65,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     load_kubernetes_config,
     name_for_step,
     reclaim_job_persistent_storage,
+    task_never_started,
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
@@ -509,17 +511,27 @@ class VolcanoJobBackend(
 
         An exit counts when the task exited before the deadline, even if it is seen
         later. When the exit time is unreadable, the deadline is checked against now.
-        A missing job has nothing left to stop, so the step is paused.
+        A missing job has nothing left to stop, and a task that never started, for
+        example in pods that cannot be scheduled, has nothing to save, so either way
+        the step is paused, whatever the deadline.
         """
         if volcano_job is None:
             return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
 
-        phase = (volcano_job.get("status") or {}).get("state", {}).get("phase")
+        job_status = volcano_job.get("status") or {}
+        phase = job_status.get("state", {}).get("phase")
         pods = list_pods_by_labels(self._core_v1, self.namespace, common_labels_for_step(step))
         digest_details = image_digest_updates(step.status_details, first_task_image_id(pods))
         running, exit_code = classify_task_containers(pods)
         if not running and exit_code is None and phase in ("Completed", "Failed", "Terminated"):
             exit_code = 0 if phase == "Completed" else 1
+        live_pods = phase == "Running" or bool(job_status.get("running"))
+        if exit_code is None and task_never_started(pods, workload_has_live_pods=live_pods):
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.PAUSED, {}
+            )
+            self.terminate_job(volcano_job)
+            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": UNSTARTED_PAUSE_MESSAGE})
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
             status, message, error_details = describe_paused_exit(exit_code)
             update_tasks_with_pause_outcome(

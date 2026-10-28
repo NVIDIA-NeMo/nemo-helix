@@ -11,7 +11,7 @@ from typing import Any
 from nemo_evals.api.schemas import MetricInline, TasksetRef
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.jobs.agent_spec import AgentEvalInputSpec, GymPlacement
-from nemo_evals.jobs.evaluate import EvaluateInputSpec, TargetSpec
+from nemo_evals.jobs.evaluate import EvaluateInputSpec, SubmitTargetSpec, resolve_submit_params
 from nemo_evals.jobs.runner_targets import runner_to_target
 from nemo_evals.sdk.job_resources import (
     AgentEvaluatorJob,
@@ -29,21 +29,14 @@ from nemo_evals.shared.metric_bundles.bundles import (
     bundle_metric,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.evals.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
-from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
-from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentTaskRunner
 from nhx_evals_sdk.datasets.loader import prepare_dataset_rows
-from nhx_evals_sdk.execution.config import resolve_params
 from nhx_evals_sdk.execution.utils import is_metric, is_metric_sequence
 from nhx_evals_sdk.metrics.protocol import Metric
 from nhx_evals_sdk.values import (
-    Agent,
     FieldMapping,
-    Model,
-    ModelRef,
     RunConfig,
     RunConfigOnline,
     RunConfigOnlineModel,
@@ -52,8 +45,6 @@ from nhx_evals_sdk.values import (
 _DEFAULT_POLL_INTERVAL_SECONDS = 10.0
 _DEFAULT_JOB_TIMEOUT_SECONDS = 3600.0
 _DEFAULT_PENDING_TIMEOUT_SECONDS = 600.0
-
-SubmitTargetSpec = TargetSpec | ModelRef
 
 
 def create_job_payload(spec: EvaluateInputSpec) -> dict[str, dict[str, Any]]:
@@ -76,57 +67,6 @@ def _require_metric_bundle_packager(metric_bundle_packager: MetricBundlePackager
     return metric_bundle_packager
 
 
-def _submit_params(
-    params: RunConfig | RunConfigOnline | RunConfigOnlineModel | None,
-    target: SubmitTargetSpec | None,
-) -> RunConfig | RunConfigOnline | RunConfigOnlineModel:
-    if isinstance(target, ModelRef):
-        if not isinstance(params, RunConfigOnlineModel):
-            raise TypeError("ModelRef target requires RunConfigOnlineModel")
-        return params
-    return resolve_params(params, target)
-
-
-def _resolve_submit_target(
-    models_client: ModelsClient,
-    target: SubmitTargetSpec | None,
-) -> Model | Agent | None:
-    if isinstance(target, ModelRef):
-        workspace, name = parse_workspace_name_ref(
-            target.root, label="ModelRef", expected_format="workspace/model_name"
-        )
-        try:
-            resolved = models_client.resolve_model_reference(target.root)
-        except ClientNotFoundError as exc:
-            raise ValueError(
-                f"Model reference '{target.root}' not found. "
-                f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
-                "or use an inline model definition instead."
-            ) from exc
-        return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)
-    return target
-
-
-async def _resolve_submit_target_async(
-    models_client: AsyncModelsClient,
-    target: SubmitTargetSpec | None,
-) -> Model | Agent | None:
-    if isinstance(target, ModelRef):
-        workspace, name = parse_workspace_name_ref(
-            target.root, label="ModelRef", expected_format="workspace/model_name"
-        )
-        try:
-            resolved = await models_client.resolve_model_reference(target.root)
-        except ClientNotFoundError as exc:
-            raise ValueError(
-                f"Model reference '{target.root}' not found. "
-                f"Ensure the model entity '{name}' exists in workspace '{workspace}', "
-                "or use an inline model definition instead."
-            ) from exc
-        return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)
-    return target
-
-
 def _dataset_config(
     dataset: PluginDatasetInput,
     params: RunConfig | RunConfigOnline | RunConfigOnlineModel,
@@ -146,12 +86,15 @@ def _build_evaluate_spec(
     metrics: Metric | Sequence[Metric],
     dataset: PluginDatasetInput,
     params: RunConfig | RunConfigOnline | RunConfigOnlineModel,
-    target: TargetSpec | None = None,
+    target: SubmitTargetSpec | None = None,
     field_mapping: FieldMapping | None = None,
     prompt_template: str | dict[str, Any] | None = None,
     metric_bundle_packager: MetricBundlePackager | None = None,
 ) -> EvaluateInputSpec:
-    """Build the evals plugin input spec shared by local and remote execution."""
+    """Build the evals plugin input spec shared by local and remote execution.
+
+    A ``ModelRef`` target is sent as is: the server resolves it to an address the job can reach.
+    """
     effective_packager = _require_metric_bundle_packager(metric_bundle_packager)
     runtime_bundles = bundle_metrics_for_spec(metrics, metric_bundle_packager=effective_packager)
     spec = {
@@ -184,7 +127,6 @@ class _SyncEvaluatorPluginExecutor:
     ) -> None:
         """Store the sync service clients used for evaluator execution."""
         self._client = evaluator_client or EvaluatorClient.from_client(client)
-        self._models_client = ModelsClient.from_client(client)
         self._workspace = workspace
         self._poll_interval_seconds = poll_interval_seconds
         self._job_timeout_seconds = job_timeout_seconds
@@ -301,13 +243,12 @@ class _SyncEvaluatorPluginExecutor:
         metric_bundle_packager: MetricBundlePackager | None = None,
     ) -> EvaluatorJobResource:
         """Submit a remote evals plugin metric job and return the job resource."""
-        submit_params = _submit_params(params, target)
-        resolved_target = _resolve_submit_target(self._models_client, target)
+        submit_params = resolve_submit_params(params, target)
         spec = _build_evaluate_spec(
             metrics=metric,
             dataset=dataset,
             params=submit_params,
-            target=resolved_target,
+            target=target,
             field_mapping=field_mapping,
             prompt_template=prompt_template,
             metric_bundle_packager=metric_bundle_packager,
@@ -334,7 +275,6 @@ class _AsyncEvaluatorPluginExecutor:
     ) -> None:
         """Store the async service clients used for evaluator execution."""
         self._client = evaluator_client or AsyncEvaluatorClient.from_client(client)
-        self._models_client = AsyncModelsClient.from_client(client)
         self._workspace = workspace
         self._poll_interval_seconds = poll_interval_seconds
         self._job_timeout_seconds = job_timeout_seconds
@@ -443,13 +383,12 @@ class _AsyncEvaluatorPluginExecutor:
         metric_bundle_packager: MetricBundlePackager | None = None,
     ) -> AsyncEvaluatorJobResource:
         """Submit a remote evals plugin metric job and return the job resource."""
-        submit_params = _submit_params(params, target)
-        resolved_target = await _resolve_submit_target_async(self._models_client, target)
+        submit_params = resolve_submit_params(params, target)
         spec = _build_evaluate_spec(
             metrics=metric,
             dataset=dataset,
             params=submit_params,
-            target=resolved_target,
+            target=target,
             field_mapping=field_mapping,
             prompt_template=prompt_template,
             metric_bundle_packager=metric_bundle_packager,

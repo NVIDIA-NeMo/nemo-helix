@@ -13,7 +13,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_helix_plugin.jobs.types import JOB_FILESET_NAME_PREFIX, JobControl
+from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
@@ -147,6 +147,9 @@ operations_counter = create_counter(
 )
 
 _DELETE_PAGE_SIZE = 1000
+# IDs per store query when fetching the attempts and jobs of a page of steps. The IDs travel in the
+# query string of a GET, so the batch stays small enough for proxies and ingress URL limits.
+_ENRICHMENT_BATCH_SIZE = 100
 _JOB_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
 _JOB_RUN_TELEMETRY_TERMINAL_STATUSES = frozenset(
     {
@@ -361,7 +364,7 @@ class JobDispatcher:
                 fileset_name = job_req.output_location
             else:
                 try:
-                    fileset_request = CreateFilesetRequest(name=f"{JOB_FILESET_NAME_PREFIX}{job_name}")
+                    fileset_request = CreateFilesetRequest(name=derive_job_fileset_name(job_name, workspace))
                 except ValidationError as exc:
                     raise RuntimeError(f"job name '{job_name}' cannot name its artifact fileset") from exc
                 fileset_resp = await self.files.create_fileset(body=fileset_request, workspace=workspace)
@@ -840,14 +843,24 @@ class JobDispatcher:
         except EntityNotFoundError:
             return None
 
-    async def _gather_attempts(self, attempt_ids: set[str]) -> list[Optional[HelixJobAttempt]]:
-        """Fetch all attempts by ID concurrently using TaskGroup."""
-        if not attempt_ids:
-            return []
-        aid_list = list(attempt_ids)
-        async with asyncio.TaskGroup() as tg:
-            tasks = [tg.create_task(self.get_attempt(aid)) for aid in aid_list]
-        return [t.result() for t in tasks]
+    async def _list_by_ids(self, entity_type: type[EntityT], ids: set[str], workspace: str) -> dict[str, EntityT]:
+        """Fetch entities by ID, a page of IDs per store query, keyed by ID. IDs with no entity are absent.
+
+        One query per page replaces a request per ID. Each of those requests is an authorized call back
+        into the platform, so a page of N steps cost about 2N of them.
+        """
+        found: dict[str, EntityT] = {}
+        id_list = sorted(ids)
+        for start in range(0, len(id_list), _ENRICHMENT_BATCH_SIZE):
+            batch = id_list[start : start + _ENRICHMENT_BATCH_SIZE]
+            response = await self.store.list(
+                entity_type,
+                filter_operation=ComparisonOperation(field="id", operator=FilterOperator.IN, value=batch),
+                page_size=len(batch),
+                workspace=workspace,
+            )
+            found.update({entity.id: entity for entity in response.data})
+        return found
 
     async def _list_current_attempts(self, jobs: list[HelixJob], workspace: str) -> dict[str, HelixJobAttempt]:
         """Fetch the current attempt of every job in one store query, keyed by attempt ID."""
@@ -861,15 +874,6 @@ class JobDispatcher:
             workspace=workspace,
         )
         return {attempt.id: attempt for attempt in response.data}
-
-    async def _gather_jobs(self, job_ids: set[str]) -> list[Optional[HelixJob]]:
-        """Fetch all jobs by ID concurrently using TaskGroup."""
-        if not job_ids:
-            return []
-        jid_list = list(job_ids)
-        async with asyncio.TaskGroup() as tg:
-            tasks = [tg.create_task(self._get_job_by_id_optional(jid)) for jid in jid_list]
-        return [t.result() for t in tasks]
 
     async def get_current_attempt(self, job_name: str, workspace: str) -> Optional[HelixJobAttempt]:
         """Get the current attempt for a job."""
@@ -1062,12 +1066,8 @@ class JobDispatcher:
             operations_counter.add(1, attributes={"operation": "list_steps"})
             return [], total_count if use_store_pagination else 0
 
-        attempt_ids = {s.attempt_id for s in all_steps}
-        attempt_results = await self._gather_attempts(attempt_ids)
-        attempt_by_id = {aid: a for aid, a in zip(attempt_ids, attempt_results) if a is not None}
-        job_ids = {a.job for a in attempt_by_id.values()}
-        job_results = await self._gather_jobs(job_ids)
-        job_by_id = {jid: j for jid, j in zip(job_ids, job_results) if j is not None}
+        attempt_by_id = await self._list_by_ids(HelixJobAttempt, {s.attempt_id for s in all_steps}, workspace)
+        job_by_id = await self._list_by_ids(HelixJob, {a.job for a in attempt_by_id.values()}, workspace)
 
         result = []
         for step in all_steps:

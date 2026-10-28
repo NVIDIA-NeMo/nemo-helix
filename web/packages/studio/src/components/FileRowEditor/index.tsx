@@ -4,6 +4,7 @@
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Trash } from '@nemo/icons/icons';
 import { Button, Stack } from '@nvidia/foundations-react-core';
 import { makeDataFileColumns } from '@studio/components/FileRowEditor/columns';
 import { COLUMN_PINNING, DEFAULT_SORT } from '@studio/components/FileRowEditor/constants';
@@ -31,7 +32,6 @@ import {
   type DataFileColumn,
   type DataFileRow,
 } from '@studio/components/FileRowEditor/types';
-import { Trash } from 'lucide-react';
 import {
   type ChangeEvent,
   type FC,
@@ -326,7 +326,7 @@ export const FileRowEditor: FC<FileRowEditorProps> = ({
               color="danger"
               onClick={() => selectedRows.forEach((row) => deleteRowById(rowId(row)))}
             >
-              <Trash size={16} />
+              <Trash size="16" />
               Delete ({selectedRows.length})
             </Button>
           )}

@@ -10,7 +10,8 @@ import type { FC } from 'react';
 /**
  * Two vocabularies on purpose. "Deployed" describes the deployment itself, which is
  * what a top-level row has. An adapter never has its own deployment — it is loaded
- * into the one serving its base model — so it reads "Active" / "Not active".
+ * into the one serving its base model — so it reads "Active" / "Not active", or
+ * "Base not deployed" when there is no such deployment to load it into.
  *
  * No icons, matching `CustomizationStatusBadge` in this same table.
  */
@@ -24,8 +25,28 @@ const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
   failed: { label: 'Failed', color: 'red' },
   unavailable: { label: 'Unavailable', color: 'gray' },
   'not-deployed': { label: 'Not deployed', color: 'gray' },
+  'base-not-deployed': { label: 'Base not deployed', color: 'gray' },
   unknown: { label: 'Unknown', color: 'purple' },
 };
+
+function fromDeploymentStatus(status: ModelDeploymentStatus, isAdapter: boolean): string {
+  switch (status) {
+    case ModelDeploymentStatus.READY:
+      return isAdapter ? 'active' : 'deployed';
+    case ModelDeploymentStatus.CREATED:
+    case ModelDeploymentStatus.PENDING:
+      return 'deploying';
+    case ModelDeploymentStatus.DELETING:
+      return 'deleting';
+    case ModelDeploymentStatus.ERROR:
+      return 'failed';
+    case ModelDeploymentStatus.DELETED:
+    case ModelDeploymentStatus.LOST:
+      return 'unavailable';
+    default:
+      return 'unknown';
+  }
+}
 
 function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): string {
   switch (state.kind) {
@@ -33,9 +54,9 @@ function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): strin
       return 'not-active';
 
     case 'not-deployed':
-      // Nothing serves it. An adapter still has no deployment of its own, so it
-      // keeps the adapter vocabulary rather than switching to "Not deployed".
-      return isAdapter ? 'not-active' : 'not-deployed';
+      // Nothing serves it. For an adapter that means its base model, which is what
+      // needs deploying, so it is not reported like an adapter waiting to be loaded.
+      return isAdapter ? 'base-not-deployed' : 'not-deployed';
 
     case 'unknown':
       return 'unknown';
@@ -49,25 +70,14 @@ function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): strin
       // A deployment is expected but its status could not be read — a failed
       // request, or a response that omitted the optional field. Saying "Available"
       // here would report a green, confident status we never actually confirmed.
-      if (!state.status) return 'unknown';
+      return state.status ? fromDeploymentStatus(state.status, isAdapter) : 'unknown';
+    }
 
-      switch (state.status) {
-        case ModelDeploymentStatus.READY:
-          return isAdapter ? 'active' : 'deployed';
-        case ModelDeploymentStatus.CREATED:
-        case ModelDeploymentStatus.PENDING:
-          return 'deploying';
-        case ModelDeploymentStatus.DELETING:
-          return 'deleting';
-        case ModelDeploymentStatus.ERROR:
-          return 'failed';
-        case ModelDeploymentStatus.DELETED:
-        case ModelDeploymentStatus.LOST:
-          return 'unavailable';
-        case ModelDeploymentStatus.UNKNOWN:
-        default:
-          return 'unknown';
-      }
+    case 'not-serving': {
+      const { status } = state.deployment;
+      // READY yet not serving: the gateway hasn't picked it up, so it is still coming up.
+      if (status === ModelDeploymentStatus.READY) return 'deploying';
+      return status ? fromDeploymentStatus(status, isAdapter) : 'unknown';
     }
 
     default:

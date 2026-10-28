@@ -15,11 +15,17 @@ Uses the create_test_client pattern for fast in-memory testing.
 import uuid
 from unittest.mock import AsyncMock
 
-from nemo_helix_plugin.client.errors import ConflictError
+import pytest
+from nemo_helix_plugin.client.errors import ConflictError, UnprocessableEntityError
+from nemo_helix_plugin.entities import is_workspace_not_found
+from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.core.models.config import ControllerConfig, ModelsConfig
 from nhx.core.models.controllers.backends.registry import BackendRegistry
+from nhx.core.models.controllers.entity_cache import ModelEntityCache
 from nhx.testing import ClientContext
 
 # Default workspace for tests
@@ -45,6 +51,38 @@ def ensure_workspace_exists(test_clients: ClientContext, workspace_id: str) -> N
 # =============================================================================
 # Model Entity Tests
 # =============================================================================
+
+
+def test_model_create_in_missing_workspace_returns_workspace_not_found_code(test_clients: ClientContext):
+    """The entity store's workspace_not_found code reaches callers of the Models API.
+
+    The models controller drops a staged entity write on this code instead of
+    retrying it forever, so the code must survive the relay from the entity store.
+    """
+    workspace = f"missing-{uuid.uuid4().hex[:8]}"
+
+    response = test_clients.test_client.post(f"/apis/models/v2/workspaces/{workspace}/models", json={"name": "m1"})
+
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
+
+    with pytest.raises(UnprocessableEntityError) as exc_info:
+        ModelsClient.from_client(test_clients.client).create_model(
+            workspace=workspace, body=CreateModelEntityRequest(name="m1")
+        )
+    assert is_workspace_not_found(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_entity_cache_drops_create_for_missing_workspace(test_clients: ClientContext):
+    """A staged create for a workspace that is gone is dropped rather than retried."""
+    cache = ModelEntityCache(client=test_clients.async_client, emit_heartbeat=lambda: None)
+    await cache.refresh()
+
+    cache.stage_create(f"missing-{uuid.uuid4().hex[:8]}", "m1")
+    await cache.flush()
+
+    assert cache._pending == {}
 
 
 def test_model_crud_lifecycle(test_clients: ClientContext):

@@ -12,17 +12,26 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from harbor.agents.base import BaseAgent
+from harbor.agents.factory import AgentFactory
 from harbor.environments.factory import EnvironmentFactory
 from harbor.models.task.config import EnvironmentConfig, TaskConfig
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
+from harbor.models.trial.config import AgentConfig, ResourceMode
 from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
-from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, RegisteredAgentSource
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
+    HarborBuiltinAgentSource,
+    HarborGatewayModel,
+    HarborRunnerTarget,
+    RegisteredAgentSource,
+)
+from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.harbor_task_dispatch import (
     DISPATCH_COMMAND,
     OPENSANDBOX_ENVIRONMENT,
@@ -46,6 +55,7 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.values import ModelRef
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
 AGENT = PreparedImage(image_ref="registry.invalid/agent@sha256:" + "a" * 64, preparation_key="ka")
@@ -279,26 +289,60 @@ def _configured_with_setup_hosts(task_spec, tmp_path, hosts: tuple[str, ...], **
     return configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path, **runtime), ctx, spec)
 
 
-def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path):
+@pytest.mark.parametrize("agent", ["claude-code", "codex"])
+def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, tmp_path, agent):
     configured = _configured_with_setup_hosts(
-        task_spec, tmp_path, ("registry.npmjs.org",), agent_name="claude-code", agent_kwargs={"version": "2.1.0"}
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, agent_kwargs={"version": "2.1.0"}
     )
     assert configured.environment is not None
     assert configured.environment.kwargs["agent_setup_hosts"] == ["registry.npmjs.org"]
     assert configured.agent_import_path == SETUP_EGRESS_AGENT
     assert configured.agent_kwargs == {
         "version": "2.1.0",
-        INNER_AGENT_KWARG: "claude-code",
+        INNER_AGENT_KWARG: agent,
         SETUP_HOSTS_KWARG: ["registry.npmjs.org"],
     }
 
 
+def _harbor_setup_timeout_sec(configured: HarborRuntimeConfig) -> float:
+    """The setup timeout Harbor gives the trial: its agent class's default times the setup multiplier."""
+    agent_class = AgentFactory.get_agent_class_from_config(AgentConfig(import_path=configured.agent_import_path))
+    assert configured.agent_setup_timeout_multiplier is not None
+    return agent_class.DEFAULT_SETUP_TIMEOUT_SEC * configured.agent_setup_timeout_multiplier
+
+
+@pytest.mark.skipif(
+    not hasattr(BaseAgent, "DEFAULT_SETUP_TIMEOUT_SEC"), reason="Harbor 0.23 uses one setup timeout for every agent"
+)
+@pytest.mark.parametrize(
+    ("agent", "multipliers", "timeout_sec"),
+    [
+        ("codex", {}, 360.0),
+        ("hermes", {}, 1200.0),
+        ("hermes", {"agent_setup_timeout_multiplier": 2.0}, 2400.0),
+        ("hermes", {"timeout_multiplier": 0.5}, 600.0),
+        ("hermes", {"timeout_multiplier": 0.5, "agent_setup_timeout_multiplier": 3.0}, 3600.0),
+    ],
+)
+def test_a_wrapped_agent_keeps_its_own_setup_timeout(task_spec, tmp_path, agent, multipliers, timeout_sec):
+    """Harbor reads the setup timeout from the wrapper's class, so the dispatcher scales it to the inner agent's."""
+    configured = _configured_with_setup_hosts(
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, **multipliers
+    )
+    assert _harbor_setup_timeout_sec(configured) == pytest.approx(timeout_sec)
+
+
+def test_an_unwrapped_agent_keeps_the_callers_setup_multiplier(task_spec, tmp_path):
+    configured = _configured_with_setup_hosts(task_spec, tmp_path, (), agent_name="hermes")
+    assert configured.agent_setup_timeout_multiplier is None
+
+
 def test_setup_hosts_wrap_an_importable_custom_agent(task_spec, tmp_path):
     configured = _configured_with_setup_hosts(
-        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="nemo_evals.harbor.agents:SandboxedCodex"
+        task_spec, tmp_path, ("registry.npmjs.org",), agent_import_path="harbor.agents.installed.codex:Codex"
     )
     assert configured.agent_import_path == SETUP_EGRESS_AGENT
-    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "nemo_evals.harbor.agents:SandboxedCodex"
+    assert configured.agent_kwargs[INNER_AGENT_KWARG] == "harbor.agents.installed.codex:Codex"
 
 
 @pytest.mark.parametrize("agent", ["oracle", "nop"])
@@ -366,3 +410,50 @@ def test_bind_rejects_compose_tasks(tmp_path):
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
     with pytest.raises(ValueError, match="compose tasks"):
         bind_task_image(task, AGENT.image_ref)
+
+
+def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_spec, harbor_resolved_task, monkeypatch):
+    """Its sandbox would deny every call the agent makes to its gateway model, so no trial is worth starting."""
+    monkeypatch.setenv("OPEN_SANDBOX_DOMAIN", task_spec.sandbox_policy.connection.domain)
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+    spec = task_spec.spec.model_copy(
+        update={
+            "tasks": [harbor_resolved_task("offline", config={"environment": {"allow_internet": False}})],
+            "target": HarborRunnerTarget(
+                source=HarborBuiltinAgentSource(name="codex", model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+            ),
+        }
+    )
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    blocked = task_spec.model_copy(update={"spec": spec, "execution_deadline_at": future})
+
+    with pytest.raises(ValueError, match="gateway_unreachable"):
+        HarborTaskAgentEvalJob().run(blocked.model_dump(mode="json"), ctx=MagicMock(), async_client=MagicMock())
+
+
+async def test_a_task_job_for_a_gateway_model_carries_the_placeholder_key(task_spec):
+    """The agent reads it like any other key; the gateway checks none with platform auth off."""
+    target = HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="claude-code", model=HarborGatewayModel(ref=ModelRef("ws/cb-gpt")))
+    )
+    spec = task_spec.model_copy(update={"spec": task_spec.spec.model_copy(update={"target": target})})
+
+    compiled = await HarborTaskDispatchJob.compile(spec=spec, profile="k8s-cpu")
+
+    (step,) = compiled.steps
+    variables = {variable.name: variable for variable in step.environment or []}
+    assert variables["ANTHROPIC_API_KEY"].value == GATEWAY_PLACEHOLDER_KEY
+    assert variables["ANTHROPIC_API_KEY"].from_secret is None
+
+
+def test_every_sandbox_ends_at_the_runs_execution_deadline(task_spec, tmp_path):
+    """The deadline goes to the environment as an absolute time, so each create (a retry, a separate verifier)
+    gets the time left then, not a lifetime measured once when the dispatcher started."""
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec)
+    assert configured.environment is not None
+    kwargs = configured.environment.kwargs
+    assert kwargs["sandbox_timeout_sec"] == task_spec.sandbox_policy.max_sandbox_lifetime_s
+    expires_at = kwargs["sandbox_expires_at"]
+    assert isinstance(expires_at, str) and datetime.fromisoformat(expires_at) == task_spec.execution_deadline_at

@@ -72,7 +72,10 @@ paths:
       tags:
       - Agents
       summary: List Agents
-      description: List all agents in the workspace with pagination and filter support.
+      description: 'List all agents in the workspace with pagination and filter support.
+
+
+        Filter on a label with ``filter[labels.<key>]=<value>``.'
       operationId: list_agents_apis_agents_v2_workspaces__workspace__agents_get
       parameters:
       - name: workspace
@@ -105,6 +108,14 @@ paths:
           type: string
           default: -created_at
           title: Sort
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/AgentFilter'
+        description: Filter agents by config_format and labels, e.g. `filter[labels.<key>]=<value>`.
       responses:
         '200':
           description: Successful Response
@@ -2746,6 +2757,19 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
+        reference:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceConfigOutput'
+          description: Agent source and container references.
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Key/value labels for filtering and display, never for authorization.
+            Keys are '<name>' or '<prefix>/<name>' with no dots. Keys NeMo Helix plugins
+            define use the prefix 'helix-<plugin>', e.g. 'helix-agents/managed-by';
+            that prefix is a convention the API does not enforce.
         id:
           type: string
           title: Id
@@ -3351,6 +3375,22 @@ components:
         Entity type: ``agent_environment_spec``
 
         Referenced by an AgentEnvironment''s ``environment_spec`` (by name or inline).'
+    AgentFilter:
+      additionalProperties: false
+      description: Query filter for ``GET /v2/workspaces/{workspace}/agents``.
+      properties:
+        config_format:
+          description: Filter to agents with this config format.
+          title: Config Format
+          type: string
+        labels:
+          description: Filter on a label, e.g. `filter[labels.helix-agents/managed-by]=compass`.
+          title: Labels
+          additionalProperties:
+            type: string
+          type: object
+      title: AgentFilter
+      type: object
     AgentInline:
       properties:
         description:
@@ -4213,8 +4253,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4354,6 +4393,14 @@ components:
           type: string
           title: Input
           description: Prompt to pass to the agent.
+        context:
+          additionalProperties: true
+          type: object
+          title: Context
+          description: 'Per-run parameters handed to the agent as the top level of
+            the Fabric request context. The ''nemo_helix'' key is reserved for platform
+            fields. Stored on the job spec in plaintext: pass parameters here, not
+            secrets.'
         environment:
           anyOf:
           - type: string
@@ -4408,6 +4455,9 @@ components:
           $ref: '#/components/schemas/ExecuteAgentJobConfig'
         agent:
           $ref: '#/components/schemas/ResolvedAgentConfig'
+        agent_ref:
+          title: Agent Ref
+          type: string
         workdir:
           $ref: '#/components/schemas/AgentWorkdir'
         compute:
@@ -4565,8 +4615,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5410,8 +5459,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5641,6 +5689,40 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    ReferenceConfigInput:
+      properties:
+        fileset:
+          pattern: ^[\w\-.]+(/[\w\-.]+)?$
+          title: Fileset
+          description: Fileset containing agent source and supporting files, as name
+            or workspace/name.
+          type: string
+        container_image:
+          title: Container Image
+          description: Container image reference; accepts Docker shorthand, tags,
+            and SHA-256 digests.
+          type: string
+      additionalProperties: false
+      type: object
+      title: ReferenceConfigInput
+      description: Optional source and container references associated with an agent.
+    ReferenceConfigOutput:
+      properties:
+        fileset:
+          pattern: ^[\w\-.]+(/[\w\-.]+)?$
+          title: Fileset
+          description: Fileset containing agent source and supporting files, as name
+            or workspace/name.
+          type: string
+        container_image:
+          title: Container Image
+          description: Container image reference; accepts Docker shorthand, tags,
+            and SHA-256 digests.
+          type: string
+      additionalProperties: false
+      type: object
+      title: ReferenceConfigOutput
+      description: Optional source and container references associated with an agent.
     RegisterAgentRequest:
       properties:
         name:
@@ -5652,6 +5734,19 @@ components:
           title: Description
           description: Human-readable description.
           default: ''
+        reference:
+          allOf:
+          - $ref: '#/components/schemas/ReferenceConfigInput'
+          description: Agent source and container references.
+        labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Labels
+          description: Key/value labels for filtering and display, never for authorization.
+            Keys are '<name>' or '<prefix>/<name>' with no dots. Keys NeMo Helix plugins
+            define use the prefix 'helix-<plugin>', e.g. 'helix-agents/managed-by';
+            that prefix is a convention the API does not enforce.
         config:
           additionalProperties: true
           type: object

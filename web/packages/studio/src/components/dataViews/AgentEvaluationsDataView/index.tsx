@@ -20,6 +20,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { Trash } from '@nemo/icons/icons';
 import {
   getEvalsListAgentEvaluateJobsQueryKey,
   useEvalsDeleteAgentEvaluateJob,
@@ -40,7 +41,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentEvaluationDetailRoute, getFilesetRoute } from '@studio/routes/utils';
 import { getTextWithCount } from '@studio/util/strings';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { Trash } from 'lucide-react';
 import { ComponentProps, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 

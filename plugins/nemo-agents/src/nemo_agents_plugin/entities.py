@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_helix_plugin.agents.types import (
+    LABELS_DESCRIPTION,
+    Labels,
+    ReferenceConfig,
+)
+from nemo_helix_plugin.agents.types import (
     NAT_WORKFLOW_CONFIG_FORMAT as NAT_WORKFLOW_CONFIG_FORMAT,
 )
 from nemo_helix_plugin.agents.types import (
@@ -275,6 +280,9 @@ class Agent(NemoEntity, AgentInline, entity_type="agent"):
     are **not** stored on the entity because the paths are fully derivable
     from ``(workspace, name)``.
     """
+
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
+    labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
 
 
 class AgentDeployment(NemoEntity, entity_type="agent_deployment"):

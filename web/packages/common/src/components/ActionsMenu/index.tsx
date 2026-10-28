@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Sparkle } from '@nemo/icons/icons';
 import {
   Button,
   Divider,
@@ -11,7 +12,6 @@ import {
   DropdownTrigger,
   Flex,
 } from '@nvidia/foundations-react-core';
-import { Sparkles } from 'lucide-react';
 import React, { type FC, type ReactElement, type ReactNode } from 'react';
 
 export interface ActionMenuItem {
@@ -49,7 +49,7 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
   ariaLabel = 'Open actions menu',
   'data-testid': testId = 'actions-menu',
 }) => {
-  const triggerIcon = icon ?? (label ? <Sparkles /> : undefined);
+  const triggerIcon = icon ?? (label ? <Sparkle /> : undefined);
 
   return (
     <DropdownRoot>

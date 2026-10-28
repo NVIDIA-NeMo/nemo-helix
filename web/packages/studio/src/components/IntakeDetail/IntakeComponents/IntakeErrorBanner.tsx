@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Warning } from '@nemo/icons/icons';
 import { Banner } from '@nvidia/foundations-react-core';
-import { TriangleAlert } from 'lucide-react';
 import type { FC, ReactNode } from 'react';
 
 /**
@@ -18,7 +18,7 @@ export const IntakeErrorBanner: FC<{ heading: ReactNode; message?: ReactNode }> 
     status="error"
     kind="header"
     slotIcon={
-      <TriangleAlert
+      <Warning
         role="img"
         aria-hidden
         className="text-[color:var(--border-color-feedback-danger-subtle)]"

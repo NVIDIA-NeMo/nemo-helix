@@ -211,6 +211,26 @@ The equivalent REST call:
 ?filter[labels.eval_category]=agentic
 ```
 
+On fields that hold key/value data, such as an agent's `labels`, a task's `metadata`, or a job's
+`spec`, the bracket and nested JSON forms mean the same thing as the dotted form. Each key
+must match, and keys the filter does not name are ignored. These three filters are equivalent:
+
+```
+?filter[labels.eval_category]=agentic&filter[labels.team]=search
+?filter[labels][eval_category]=agentic&filter[labels][team]=search
+?filter={"labels": {"eval_category": "agentic", "team": "search"}}
+```
+
+An operator goes after the key it applies to: `?filter[labels][team][$in]=search,eval` matches
+either team. An operator placed directly on the field, such as `?filter[labels][$hasKey]=team`,
+or a plain value such as `?filter[labels]=agentic`, compares against the whole object and
+returns `400 Bad Request`.
+
+Any other field takes a plain value or an operator object. An object of plain keys, such as
+`{"name": {"first": "x"}}`, returns `400 Bad Request`, and so does an object that mixes operators
+with plain keys, such as `{"name": {"$eq": "x", "tier": "gold"}}`. In JSON filters, operators need
+the `$` prefix: write `{"created_at": {"$gte": "2025-01-01"}}`, not `{"created_at": {"gte": "2025-01-01"}}`.
+
 ## Common patterns
 
 ### Date range

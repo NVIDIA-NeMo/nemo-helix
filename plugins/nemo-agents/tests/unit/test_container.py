@@ -15,6 +15,8 @@ import typer
 import yaml
 from click.exceptions import Exit as ClickExit
 from nemo_agents_plugin.container.errors import AgentConfigValidationError, ManagedFileConflictError
+from nemo_agents_plugin.container.template import render_fabric_dockerfile
+from nemo_helix_plugin.sandbox import SandboxImageFile, SandboxImageProfile
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -694,7 +696,9 @@ class TestRenderFabricDockerfile:
             PI_ADAPTER_NPM_SPEC,
             PI_RELAY_EXTENSION_PATH,
             PI_RELAY_EXTENSION_REF,
+            PI_SDK_NPM_SPECS,
             PINNED_NODE_MAJOR,
+            _pi_sdk_package_names,
             get_contract_version,
             render_fabric_dockerfile,
         )
@@ -720,6 +724,36 @@ class TestRenderFabricDockerfile:
         assert "@earendil-works/pi-coding-agent@^1.0.0" in result
         assert "@earendil-works/pi-ai@^1.0.0" in result
         assert "@earendil-works/pi-mcp@^1.0.0" in result
+        # The Pi SDK peers must be installed into the ADAPTER'S OWN node_modules (not
+        # as flat siblings under the npm prefix), so the adapter's ESM `import()` —
+        # which walks up from the importing file and ignores NODE_PATH — resolves the
+        # SDK by climbing into its own node_modules. Regression guard for
+        # `pi_harness_unavailable` when the SDK was installed flat under the prefix.
+        # --omit=dev keeps the adapter's TS/build devDeps out of the image and
+        # --save-prod records the SDK as prod deps so a future --omit=dev can't drop
+        # them (the adapter declares the SDK as optional peers AND devDeps).
+        assert (
+            f'npm install --prefix "${{PI_ADAPTER_DIR}}" --save-prod --omit=dev '
+            f"--no-audit --no-fund {PI_SDK_NPM_SPECS}" in result
+        )
+        # PI_ADAPTER_DIR must be assigned BEFORE the SDK install uses it — otherwise the
+        # install would run with --prefix "" and land in the build cwd, not the adapter.
+        assert result.index('PI_ADAPTER_DIR="') < result.index('npm install --prefix "${PI_ADAPTER_DIR}"')
+        # Build-time fail-fast: resolve each SDK package from the adapter dir the same
+        # way the adapter's bare-specifier ESM import() does, so a bad install layout
+        # fails the image build instead of surfacing as a runtime pi_harness_unavailable.
+        # The probe is DERIVED from PI_SDK_NPM_SPECS, so assert every installed package
+        # name is actually probed — this catches drift if the spec list ever changes.
+        probe_names = _pi_sdk_package_names()
+        assert probe_names, "expected at least one SDK package to probe"
+        assert "node --input-type=module -e " in result
+        for name in probe_names:
+            assert f'await import("{name}")' in result
+        # The adapter itself is still installed globally (so its bin/PATH + descriptor
+        # staging work); the SDK specs must NOT ride along on that global install line.
+        global_install_line = next(line for line in result.splitlines() if "npm install -g" in line)
+        assert PI_ADAPTER_NPM_SPEC in global_install_line
+        assert "@earendil-works/pi-coding-agent" not in global_install_line
         # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
         assert "nemo-relay-cli-bin" in result
         assert "ca-certificates curl git" in result
@@ -862,6 +896,46 @@ class TestRenderFabricDockerfile:
 
         grant = result.index("RUN chgrp sandbox /workspace && chmod g+w /workspace")
         assert result.index("chown -R agent:agent /workspace") < grant < result.index("USER agent")
+
+    def test_fabric_sandbox_profile_copies_image_files(
+        self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profile = SandboxImageProfile(
+            name="openshell",
+            files=(SandboxImageFile(image="nhx-tasks-openshell", source="/tools/launcher", dest="/tools/launcher"),),
+        )
+
+        monkeypatch.delenv("NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY", raising=False)
+        monkeypatch.setenv("NEMO_AGENTS_SANDBOX_IMAGE_TAG", "1.2")
+        with patch(
+            "nemo_agents_plugin.container.sandbox.discover_sandbox_profiles", return_value={"openshell": profile}
+        ):
+            result = render_fabric_dockerfile(fabric_agent_config, sandbox_runtime="openshell")
+
+        assert (
+            "COPY --from=nvcr.io/nvidia/nemo-helix/nhx-tasks-openshell:1.2 /tools/launcher /tools/launcher\n" in result
+        )
+
+    def test_fabric_sandbox_image_tag_from_dev_version_names_the_override(
+        self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profile = SandboxImageProfile(
+            name="openshell",
+            files=(SandboxImageFile(image="nhx-tasks-openshell", source="/tools/launcher", dest="/tools/launcher"),),
+        )
+
+        monkeypatch.delenv("NEMO_AGENTS_SANDBOX_IMAGE_TAG", raising=False)
+        with (
+            patch(
+                "nemo_agents_plugin.container.sandbox.discover_sandbox_profiles", return_value={"openshell": profile}
+            ),
+            patch(
+                "nemo_agents_plugin.container.template.get_contract_version",
+                return_value="0.8.0.post268.dev0+8ae774310",
+            ),
+            pytest.raises(ValueError, match="NEMO_AGENTS_SANDBOX_IMAGE_TAG"),
+        ):
+            render_fabric_dockerfile(fabric_agent_config, sandbox_runtime="openshell")
 
     def test_config_outside_project_context_is_rejected(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile

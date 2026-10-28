@@ -2809,6 +2809,8 @@ components:
           title: Port
           description: Victim port (defaults to 8000).
           type: integer
+          maximum: 65535.0
+          minimum: 1.0
         secrets:
           title: Secrets
           description: Secrets the victim requires, each `NAME` or `NAME=[workspace/]secret`.
@@ -2875,6 +2877,8 @@ components:
           title: Port
           description: Victim port the war-game will target.
           type: integer
+          maximum: 65535.0
+          minimum: 1.0
         egress:
           title: Egress
           description: Allow-listed egress host[:port] entries the victim may reach.
@@ -3187,8 +3191,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3546,8 +3549,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -3708,6 +3710,8 @@ components:
         port:
           title: Port
           type: integer
+          maximum: 65535.0
+          minimum: 1.0
         defenders:
           title: Defenders
           items:

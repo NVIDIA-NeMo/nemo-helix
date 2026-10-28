@@ -9,7 +9,9 @@
 import type { AgentHardenerManifestAttackIntensity } from './AgentHardenerManifestAttackIntensity.ts';
 import type { AgentHardenerManifestBenignInterviewItem } from './AgentHardenerManifestBenignInterviewItem.ts';
 import type { AgentHardenerManifestBenignSuiteItem } from './AgentHardenerManifestBenignSuiteItem.ts';
+import type { AgentHardenerManifestDeployedSecretRefs } from './AgentHardenerManifestDeployedSecretRefs.ts';
 import type { AgentHardenerManifestEnv } from './AgentHardenerManifestEnv.ts';
+import type { AgentHardenerManifestSecretRefs } from './AgentHardenerManifestSecretRefs.ts';
 import type { AgentHardenerManifestSourceType } from './AgentHardenerManifestSourceType.ts';
 import type { WarGameModels } from './WarGameModels.ts';
 
@@ -39,6 +41,8 @@ export interface AgentHardenerManifest {
   project_fileset?: string;
   /** Fileset ref holding the agent package resolved from the agent — its config plus the Dockerfile that serves it. Empty on manifests created before targets were frozen; those re-resolve once, then store a ref. */
   agent_fileset?: string;
+  /** The agent's own timestamp when this manifest froze it. A run compares it with the agent's current one to warn that the frozen copy is stale. Empty on manifests created before it was recorded. */
+  agent_updated_at?: string;
   /** Path within the package to the Dockerfile the victim image is built from, so a manifest records which image it ran rather than only that it had one. */
   dockerfile?: string;
   /** In-container glob patterns scoping which processes may egress; agent-hardener requires them because the layout of an image it did not write cannot be inferred. */
@@ -49,9 +53,15 @@ export interface AgentHardenerManifest {
   port?: number;
   /** Secret names the victim agent requires. */
   secrets?: string[];
+  /** Secret names whose value a run reads from the platform Secrets store, as ``ENV_VAR -> workspace/secret``, set with ``--secrets NAME=workspace/secret``. Win over ``deployed_secret_refs``. Names without a ref take their value from the operator env or ``--env-file``. */
+  secret_refs?: AgentHardenerManifestSecretRefs;
+  /** Secret names the operator passed with ``--secrets``. Refresh keeps them even when the deployment they also came from drops them. */
+  declared_secrets?: string[];
+  /** The agent's running-deployment secret refs (``ENV_VAR -> workspace/secret``) when the manifest was resolved, so the victim gets the deployment's own secrets. Re-read on refresh. */
+  deployed_secret_refs?: AgentHardenerManifestDeployedSecretRefs;
   /** Allow-listed egress host[:port] entries the victim may reach. Config-only agents keep tool hosts in packaged code, so egress discovery can't find them; without these the victim's outbound calls are dropped. */
   egress?: string[];
-  /** Non-secret environment variables for the victim (agent-hardener's agent.env) — a host-backend URL, a feature flag. Stored in plaintext on this entity, so never put credentials here: those belong in `secrets`, which names them and resolves the values from the platform Secrets store at run time. */
+  /** Non-secret environment variables for the victim (agent-hardener's agent.env) — a host-backend URL, a feature flag. Stored in plaintext on this entity, so never put credentials here: those belong in `secrets`. */
   env?: AgentHardenerManifestEnv;
   /** Non-fatal notes from scaffolding. */
   warnings?: string[];

@@ -9,6 +9,7 @@ import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { LayoutColumns } from '@nemo/icons/icons';
 import type { Trace, TraceFilter, TraceSortField } from '@nemo/sdk/generated/platform/schema';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
 import {
@@ -22,7 +23,6 @@ import { makeIntakeTraceColumns } from '@studio/components/IntakeLists/intakeTra
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { Columns3 } from 'lucide-react';
 import { type FC, useState } from 'react';
 
 // Module-level so its identity is stable: DataView rebuilds columns, and remounts every cell,
@@ -118,7 +118,7 @@ const SeededIntakeTracesTable: FC<
           slotContent={<div aria-hidden className="h-0 w-[230px]" />}
         >
           <>
-            <Columns3 />
+            <LayoutColumns />
             <span className="hide-mobile">Columns</span>
           </>
         </EditColumnsMenu>

@@ -1,17 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { NvidiaGuiIconProps } from '@nemo/icons';
+import { Upload, Puzzle, Route, Sliders } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import { STUDIO_OPTIMIZE_STRATEGY } from '@studio/api/agents/useLaunchOptimizeStudy';
 import type { StartOption } from '@studio/components/StartOptions/types';
-import { FileUp, type LucideIcon, Puzzle, Route, SlidersHorizontal } from 'lucide-react';
+import type { FC } from 'react';
 
 /** The `run-strategy` name the Switchyard plugin registers its strategy under. */
 export const SWITCHYARD_STRATEGY = 'switchyard';
 
 /** Icons for the strategies Studio has a form for; every other strategy gets {@link Puzzle}. */
-const STRATEGY_ICONS: Record<string, LucideIcon> = {
-  [STUDIO_OPTIMIZE_STRATEGY]: SlidersHorizontal,
+const STRATEGY_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {
+  [STUDIO_OPTIMIZE_STRATEGY]: Sliders,
   [SWITCHYARD_STRATEGY]: Route,
 };
 
@@ -27,7 +29,7 @@ const UPLOAD_CONFIG_OPTION: StartOption = {
   title: 'Upload a config',
   description:
     'Bring your own optimize bundle, from your computer or a fileset: the config plus the dataset and any other files it references.',
-  icon: FileUp,
+  icon: Upload,
   enabled: true,
 };
 

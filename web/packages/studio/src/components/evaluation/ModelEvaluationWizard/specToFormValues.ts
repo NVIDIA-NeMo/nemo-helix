@@ -22,6 +22,17 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const asString = (value: unknown): string | undefined =>
   typeof value === 'string' && value ? value : undefined;
 
+/**
+ * The judge model as the select holds it, a ``workspace/name`` ref. Saved configs
+ * store that ref; ones saved before carry an inline ``{ url, name }`` with a bare
+ * name, re-qualified with the current workspace so they can be reopened and saved.
+ */
+const judgeModelRef = (model: unknown, workspace: string): string => {
+  if (typeof model === 'string') return model;
+  const name = asString(asRecord(model).name);
+  return name ? `${workspace}/${name}` : '';
+};
+
 /** The metric object a bundle carries, keyed by its declared type. */
 const metricOf = (bundle: InlineMetricBundle): Record<string, unknown> =>
   asRecord(bundle.payload?.metric);
@@ -99,7 +110,6 @@ export const specToFormValues = (
     fieldMapping[field] = asString(mapping[field]) ?? '';
   }
 
-  const judgeModelName = asString(asRecord(judge?.model).name);
   const judgeMessages = asRecord(judge?.prompt_template).messages;
   const judgePrompt = Array.isArray(judgeMessages)
     ? (asString(asRecord(judgeMessages[0]).content) ?? null)
@@ -121,9 +131,7 @@ export const specToFormValues = (
       scores: Array.isArray(judge?.scores)
         ? judge.scores.map(toPanelScore)
         : EVALUATION_FORM_DEFAULTS.body.scores,
-      // Re-qualified: the spec stores the bare model name, while the select
-      // holds a ``workspace/name`` ref.
-      judgeModel: judgeModelName ? `${workspace}/${judgeModelName}` : '',
+      judgeModel: judgeModelRef(judge?.model, workspace),
       judgePrompt,
       stringCheck: {
         operation: toOperation(

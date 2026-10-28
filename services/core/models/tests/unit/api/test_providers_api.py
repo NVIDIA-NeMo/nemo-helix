@@ -201,7 +201,7 @@ def test_list_providers_with_search(client, mock_model_provider_service, sample_
     """Test listing providers with search parameter."""
     mock_model_provider_service.list_model_providers.return_value = sample_page
 
-    response = client.get("/apis/models/v2/workspaces/default/providers?filter[name][]=openai")
+    response = client.get("/apis/models/v2/workspaces/default/providers?filter[name]=openai")
 
     assert response.status_code == 200
 
@@ -210,7 +210,7 @@ def test_list_providers_with_host_url_search(client, mock_model_provider_service
     """Test listing providers with host_url search."""
     mock_model_provider_service.list_model_providers.return_value = sample_page
 
-    response = client.get("/apis/models/v2/workspaces/default/providers?filter[host_url][]=api.openai.com")
+    response = client.get("/apis/models/v2/workspaces/default/providers?filter[host_url]=api.openai.com")
 
     assert response.status_code == 200
 
@@ -304,7 +304,7 @@ def test_list_providers_filters_and_search_combined(client, mock_model_provider_
     mock_model_provider_service.list_model_providers.return_value = sample_page
 
     response = client.get(
-        "/apis/models/v2/workspaces/production/providers?filter[workspace]=production&filter[name][]=openai"
+        "/apis/models/v2/workspaces/production/providers?filter[workspace]=production&filter[name]=openai"
     )
 
     assert response.status_code == 200

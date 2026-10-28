@@ -34,6 +34,13 @@ from typing import Any, Mapping
 
 import jinja2
 import yaml
+from nemo_agents_plugin.container.sandbox import (
+    render_apt_packages,
+    render_image_files,
+    render_user_setup,
+    render_workdir_setup,
+    resolve_sandbox_profile,
+)
 
 # Marker written as the first line of every plugin-generated ``.dockerignore``
 # / ``Dockerfile``.  ``render_dockerignore`` and the CLI no-build path only
@@ -112,6 +119,7 @@ _DEFAULTS: dict[str, str] = {
     "base_image_tag": "noble-20260217",
     "python_version": "3.13",
     "uv_version": "0.13.4",
+    "sandbox_image_registry": "nvcr.io/nvidia/nemo-helix",
     # Default NAT version — used ONLY as a last-resort fallback.  Callers are
     # expected to pass ``--nat-version`` (or set ``NAT_VERSION``) explicitly
     # so that image tags, labels, and the ``nvidia-nat[most]`` constraint
@@ -127,12 +135,18 @@ _DEFAULTS: dict[str, str] = {
     "nat_version": "1.8.0",
 }
 
+#: Registry and tag of the images sandbox profiles copy files from.
+SANDBOX_IMAGE_REGISTRY_ENV = "NEMO_AGENTS_SANDBOX_IMAGE_REGISTRY"
+SANDBOX_IMAGE_TAG_ENV = "NEMO_AGENTS_SANDBOX_IMAGE_TAG"
+
 _ENV_MAP: dict[str, str] = {
     "base_image_url": "NEMO_AGENTS_BASE_IMAGE_URL",
     "base_image_tag": "NEMO_AGENTS_BASE_IMAGE_TAG",
     "python_version": "NEMO_AGENTS_PYTHON_VERSION",
     "nat_version": "NAT_VERSION",
     "uv_version": "NEMO_AGENTS_UV_VERSION",
+    "sandbox_image_registry": SANDBOX_IMAGE_REGISTRY_ENV,
+    "sandbox_image_tag": SANDBOX_IMAGE_TAG_ENV,
 }
 
 #: Local nemo-helix wheel to install instead of resolving the pinned contract
@@ -158,6 +172,27 @@ PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.5.0"
 # Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.5.0 requires
 # ^1.0.0) so the explicitly-installed SDK matches what the adapter was built against.
 PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^1.0.0 @earendil-works/pi-coding-agent@^1.0.0 @earendil-works/pi-mcp@^1.0.0"
+
+
+def _pi_sdk_package_names(specs: str = PI_SDK_NPM_SPECS) -> list[str]:
+    """Package names (no version suffix) parsed from a space-separated npm spec list.
+
+    Each spec is ``<name>@<range>`` where ``<name>`` may itself be a scoped
+    ``@scope/pkg``. The version suffix is the LAST ``@`` that is not the scope's
+    leading ``@``, so split on ``rpartition('@')`` and keep the leading-``@`` case.
+    """
+    names: list[str] = []
+    for spec in specs.split():
+        head, sep, _version = spec.rpartition("@")
+        # ``head`` is empty only for a bare unscoped ``@`` at index 0 (no range) —
+        # then the whole token is the name; otherwise ``head`` is the name.
+        names.append(head if sep and head else spec)
+    return names
+
+
+# The build-time ESM resolution probe imports exactly these packages, derived from
+# PI_SDK_NPM_SPECS so the probe cannot drift from the installed set.
+_PI_SDK_IMPORT_PROBE = "; ".join(f'await import("{name}")' for name in _pi_sdk_package_names())
 # NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
 PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
 # The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the
@@ -293,6 +328,10 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
 # write the WORKDIR itself; the contents keep their ownership.
 RUN {{ sandbox_workdir_setup }}
 {% endif %}
+{% if sandbox_image_files %}
+# Files the {{ sandbox_runtime }} runtime needs from other images.
+{{ sandbox_image_files }}
+{% endif %}
 {% if not allow_root %}
 USER agent
 {% endif %}
@@ -374,7 +413,10 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     curl -fsSL https://deb.nodesource.com/setup_{{ pinned_node_major }}.x | bash - && \\
     apt-get install -y --no-install-recommends nodejs && \\
     rm -rf /var/lib/apt/lists/* && \\
-    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \\
+    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} && \\
+    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
+    npm install --prefix "${PI_ADAPTER_DIR}" --save-prod --omit=dev --no-audit --no-fund {{ pi_sdk_npm_specs }} && \\
+    (cd "${PI_ADAPTER_DIR}" && node --input-type=module -e '{{ pi_sdk_import_probe }}') && \\
     . /workspace/.venv/bin/activate && \\
     uv pip install --no-sources --prerelease=allow "{{ pi_relay_cli_spec }}" && \\
     git init --quiet /opt/pi-relay-src && \\
@@ -385,7 +427,6 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     cp -r "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" "{{ pi_relay_extension_path }}" && \\
     rm -rf /opt/pi-relay-src && \\
     chmod -R a+rX "{{ pi_relay_extension_path }}" && \\
-    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
     FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \\
     test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" && \\
     mkdir -p "${FABRIC_SHARE}" && \\
@@ -430,6 +471,10 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
 # The {{ sandbox_runtime }} supervisor requires its workload identity to be able to
 # write the WORKDIR itself; the contents keep their ownership.
 RUN {{ sandbox_workdir_setup }}
+{% endif %}
+{% if sandbox_image_files %}
+# Files the {{ sandbox_runtime }} runtime needs from other images.
+{{ sandbox_image_files }}
 {% endif %}
 {% if not allow_root %}
 USER agent
@@ -479,6 +524,7 @@ class SharedRenderParams:
     sandbox_apt_packages: str = ""
     sandbox_user_setup: str = ""
     sandbox_workdir_setup: str = ""
+    sandbox_image_files: str = ""
     agent_id: str = ""
     agent_name: str = ""
     agent_version: str = ""
@@ -515,17 +561,19 @@ class FabricRenderParams(SharedRenderParams):
 # -- Public API -------------------------------------------------------------
 
 
-def resolve_value(name: str, explicit: str | None = None) -> str:
+def resolve_value(name: str, explicit: str | None = None, *, default: str | None = None) -> str:
     """Return the first non-empty value from *explicit*, env var, or default.
+
+    *default* applies when the parameter has no static default.
 
     Raises ``ValueError`` for required parameters (those without a default)
     when no value can be resolved.
     """
-    value, _ = resolve_value_with_source(name, explicit)
+    value, _ = resolve_value_with_source(name, explicit, default=default)
     return value
 
 
-def resolve_value_with_source(name: str, explicit: str | None = None) -> tuple[str, str]:
+def resolve_value_with_source(name: str, explicit: str | None = None, *, default: str | None = None) -> tuple[str, str]:
     """Same as :func:`resolve_value` but also returns where the value came from.
 
     Returns:
@@ -539,7 +587,7 @@ def resolve_value_with_source(name: str, explicit: str | None = None) -> tuple[s
         env_val = os.environ.get(env_var, "")
         if env_val:
             return env_val, "env"
-    default = _DEFAULTS.get(name)
+    default = _DEFAULTS.get(name) or default
     if default:
         return default, "default"
     raise ValueError(
@@ -588,6 +636,7 @@ def _jinja_env() -> jinja2.Environment:
     template_globals["pinned_node_major"] = PINNED_NODE_MAJOR
     template_globals["pi_adapter_npm_spec"] = PI_ADAPTER_NPM_SPEC
     template_globals["pi_sdk_npm_specs"] = PI_SDK_NPM_SPECS
+    template_globals["pi_sdk_import_probe"] = _PI_SDK_IMPORT_PROBE
     template_globals["pi_relay_cli_spec"] = PI_RELAY_CLI_SPEC
     template_globals["pi_relay_extension_repo"] = PI_RELAY_EXTENSION_REPO
     template_globals["pi_relay_extension_ref"] = PI_RELAY_EXTENSION_REF
@@ -635,19 +684,25 @@ def resolve_shared_render_params(
     sandbox_apt_packages = ""
     sandbox_user_setup = ""
     sandbox_workdir_setup = ""
+    sandbox_image_files = ""
+    contract_version = get_contract_version()
     if sandbox_runtime:
-        from nemo_agents_plugin.container.sandbox import (
-            render_apt_packages,
-            render_user_setup,
-            render_workdir_setup,
-            resolve_sandbox_profile,
-        )
-
         profile = resolve_sandbox_profile(sandbox_runtime)
         sandbox_runtime_name = profile.name
         sandbox_apt_packages = render_apt_packages(profile)
         sandbox_user_setup = render_user_setup(profile)
         sandbox_workdir_setup = render_workdir_setup(profile, _IMAGE_WORKDIR)
+        # Sandbox images default to the release matching the installed nemo-helix.
+        tag, tag_source = resolve_value_with_source("sandbox_image_tag", default=contract_version)
+        try:
+            sandbox_image_files = render_image_files(profile, registry=resolve_value("sandbox_image_registry"), tag=tag)
+        except ValueError as exc:
+            if tag_source != "default":
+                raise
+            raise ValueError(
+                f"nemo-helix {tag} has no published sandbox images. Set {SANDBOX_IMAGE_TAG_ENV} "
+                f"(and {SANDBOX_IMAGE_REGISTRY_ENV} if needed) to the tag and registry holding them."
+            ) from exc
 
     if metadata is None:
         metadata = extract_agent_metadata(
@@ -669,7 +724,8 @@ def resolve_shared_render_params(
         sandbox_apt_packages=sandbox_apt_packages,
         sandbox_user_setup=sandbox_user_setup,
         sandbox_workdir_setup=sandbox_workdir_setup,
-        contract_version=get_contract_version(),
+        sandbox_image_files=sandbox_image_files,
+        contract_version=contract_version,
         agent_id=metadata["agent_id"],
         agent_name=metadata["agent_name"],
         agent_version=metadata["agent_version"],

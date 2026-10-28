@@ -8,6 +8,7 @@ import {
 } from '@nemo/common/src/components/ModelSelectV2';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { hasModelProvider, toInferenceModelName } from '@nemo/common/src/utils/models';
+import { Collapse, Trash } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
@@ -18,7 +19,6 @@ import {
   type PanelChatControls,
   type PanelState,
 } from '@studio/routes/ModelCompareRoute/types';
-import { Minimize2, Trash2 } from 'lucide-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
 
 interface ModelChatPanelProps extends PanelChatControls {
@@ -52,7 +52,15 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
   const selectedModel: ModelSelection | null = panel.modelURN
     ? { model: panel.modelURN, adapter: panel.adapter ?? undefined }
     : null;
-  const [inferenceParams, setInferenceParams] = useState<InferenceParams>(DEFAULT_INFERENCE_PARAMS);
+  const [inferenceParams, setInferenceParams] = useState<InferenceParams>(() => {
+    // The chat runtime only reads max_tokens, so fold a saved completion-token limit into it.
+    const { max_completion_tokens, ...saved } = panel.promptData?.inference_params ?? {};
+    return {
+      ...DEFAULT_INFERENCE_PARAMS,
+      ...saved,
+      max_tokens: max_completion_tokens ?? saved.max_tokens ?? DEFAULT_INFERENCE_PARAMS.max_tokens,
+    };
+  });
 
   const handleModelChange = useCallback(
     (selection: ModelSelection) => {
@@ -125,7 +133,7 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
               className="text-fg-subdued hover:text-fg-base cursor-pointer rounded p-1.5 hover:bg-surface-sunken"
               aria-label={`Collapse ${panel.roleLabel}`}
             >
-              <Minimize2 size={16} />
+              <Collapse size="16" />
             </button>
             {!hideRemove && (
               <button
@@ -133,7 +141,7 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
                 className="text-fg-subdued hover:text-fg-base cursor-pointer rounded p-1.5 hover:bg-surface-sunken"
                 aria-label={`Remove ${panel.roleLabel}`}
               >
-                <Trash2 size={16} />
+                <Trash size="16" />
               </button>
             )}
           </div>
@@ -174,7 +182,7 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
                   }
                 : undefined
           }
-          promptData={{ inference_params: inferenceParams }}
+          promptData={{ ...panel.promptData, inference_params: inferenceParams }}
           composerMode={composerMode}
           slotComposerEnd={slotComposerEnd}
           composerSeed={composerSeed}

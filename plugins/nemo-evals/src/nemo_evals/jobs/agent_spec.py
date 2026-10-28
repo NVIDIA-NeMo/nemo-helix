@@ -26,6 +26,7 @@ from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskR
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.jobs.gateway_agents import GatewayAgentEnv, gateway_agent_env, validate_gateway_env
 from nemo_evals.jobs.publication_spec import PublicationSpec
 from nemo_evals.metric_refs import MetricRefOrInline
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline
@@ -34,9 +35,9 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nhx_evals_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nhx_evals_sdk.agent_eval.tasks import SemanticView
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial
-from nhx_evals_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nhx_evals_sdk.values import Agent, Model, ModelRef, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nhx_evals_sdk.values.agents import AgentBase
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, JsonValue, Tag, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -212,13 +213,72 @@ class FabricRunnerTarget(BaseModel):
         return self.source.model if isinstance(self.source, FabricConfigSource) else None
 
 
+class HarborModelName(BaseModel):
+    """A model the agent calls by name, through whatever endpoint its environment gives it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Model slug passed to the agent as-is, e.g. `openai/gpt-5`.")
+
+
+class HarborGatewayModel(BaseModel):
+    """A model the Inference Gateway serves. Evals sets the agent's model name, base URL and API key variables."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: ModelRef = Field(
+        description="A model the Inference Gateway serves, as `workspace/name`: a model or a VirtualModel. The "
+        "agent must declare an OpenAI- or Anthropic-style model connection, or take its provider from the model "
+        "name, as `codex`, `claude-code`, `aider`, `goose` and `openhands` do; an agent of that last kind calls "
+        "the gateway's OpenAI-style route and is given the model as `openai/<name>`. Other agents are refused."
+    )
+
+
+def _harbor_model_kind(value: Any) -> str | None:
+    if isinstance(value, Mapping):
+        return "name" if "name" in value else "ref" if "ref" in value else None
+    return "name" if isinstance(value, HarborModelName) else "ref" if isinstance(value, HarborGatewayModel) else None
+
+
+#: How a built-in agent's model is given: by `name`, or as a gateway model `ref`.
+HarborAgentModel: TypeAlias = Annotated[
+    Annotated[HarborModelName, Tag("name")] | Annotated[HarborGatewayModel, Tag("ref")],
+    Discriminator(
+        _harbor_model_kind,
+        custom_error_type="harbor_agent_model",
+        custom_error_message="`model` takes either `name` or `ref`",
+    ),
+]
+
+
 class HarborBuiltinAgentSource(BaseModel):
     """One of Harbor's built-in agents, selected by name."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(description="Built-in Harbor agent to run, e.g. `oracle`.")
-    model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+    model: HarborAgentModel | None = Field(
+        default=None,
+        description='Optional model for the agent: `{"name": ...}` passes a model slug as-is, `{"ref": ...}` '
+        "calls a model the Inference Gateway serves.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_model_name(cls, data: Any) -> Any:
+        """Accept ``model_name`` for one release. Deprecated since 0.10; remove in 0.11."""
+        if not isinstance(data, dict) or "name" not in data or "model_name" not in data:
+            return data
+        if data.get("model") is not None:
+            raise ValueError("`model_name` is the deprecated spelling of `model.name`; give only `model`")
+        lifted = {key: value for key, value in data.items() if key != "model_name"}
+        if data["model_name"] is not None:
+            lifted["model"] = {"name": data["model_name"]}
+        logger.warning(
+            'HarborBuiltinAgentSource: `model_name` is deprecated; use `model: {"name": ...}`. '
+            "This shape stops being accepted in the release after 0.10."
+        )
+        return lifted
 
 
 class HarborImportedAgentSource(BaseModel):
@@ -233,8 +293,7 @@ class HarborImportedAgentSource(BaseModel):
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
 
 
-#: What Harbor runs in each task container. The three shapes share no required field, so a document is
-#: exactly one of them.
+#: What Harbor runs in each task container.
 HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource | RegisteredAgentSource
 
 #: The SDK's installed Fabric agent, which a registered agent runs as: it brings its own Python, so any
@@ -262,11 +321,11 @@ class HarborRunnerTarget(BaseModel):
     kind: Literal["harbor"] = "harbor"
     source: HarborAgentSource = Field(
         default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
-        description="The agent Harbor runs in each task container: a built-in agent by `name`, your own by "
-        "`import_path`, or a registered platform `agent` (with an optional `environment`). A registered agent is "
-        "resolved at submit into the SDK's installed Fabric agent with the agent's translated config in "
-        "`agent_kwargs.fabric_config`, so it runs as registered — identity, skills, MCP servers, and telemetry "
-        "included — and stays, qualified, as the run's provenance.",
+        description="The agent Harbor runs in each task container: a built-in agent by `name` (with an optional "
+        "`model`, by name or as a gateway model ref), your own by `import_path`, or a registered platform `agent` "
+        "(with an optional `environment`). A registered agent is resolved at submit into the SDK's installed Fabric "
+        "agent with the agent's translated config in `agent_kwargs.fabric_config`, so it runs as registered — "
+        "identity, skills, MCP servers, and telemetry included — and stays, qualified, as the run's provenance.",
     )
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
@@ -325,13 +384,16 @@ class HarborRunnerTarget(BaseModel):
             return data
         lifted = {key: value for key, value in data.items() if key not in _LEGACY_HARBOR_AGENT_FIELDS}
         model_name = data.get("agent_model_name")
-        with_model = {"model_name": model_name} if model_name is not None else {}
+        builtin_model = {"model": {"name": model_name}} if model_name is not None else {}
         if data.get("agent_import_path") is not None:
-            lifted["source"] = {"import_path": data["agent_import_path"], **with_model}
+            lifted["source"] = {
+                "import_path": data["agent_import_path"],
+                **({"model_name": model_name} if model_name is not None else {}),
+            }
         elif data.get("agent_name") is not None:
-            lifted["source"] = {"name": data["agent_name"], **with_model}
+            lifted["source"] = {"name": data["agent_name"], **builtin_model}
         elif model_name is not None:
-            lifted["source"] = {"name": "oracle", **with_model}
+            lifted["source"] = {"name": "oracle", **builtin_model}
         logger.warning(
             "HarborRunnerTarget: top-level `agent_name` / `agent_import_path` / `agent_model_name` are deprecated; "
             "select the agent under `source`. This shape stops being accepted in the release after 0.8."
@@ -347,6 +409,33 @@ class HarborRunnerTarget(BaseModel):
     def _env_vars_are_harbor_safe(self) -> Self:
         validate_harbor_env(self.env_vars, self.env_secrets)
         return self
+
+    @model_validator(mode="after")
+    def _gateway_agent_can_call_the_gateway(self) -> Self:
+        if self.gateway_model is None or not isinstance(self.source, HarborBuiltinAgentSource):
+            return self
+        env = gateway_agent_env(self.source.name)
+        if env is None:
+            raise ValueError(
+                f"Harbor agent {self.source.name!r} can't call a gateway model: it declares no model connection with "
+                'an OpenAI- or Anthropic-style provider. Give the model as `{"name": ...}` instead.'
+            )
+        validate_gateway_env(env, self.env_vars, self.env_secrets)
+        return self
+
+    @property
+    def gateway_model(self) -> ModelRef | None:
+        """The Inference Gateway model the agent calls, when the source names one."""
+        if isinstance(self.source, HarborBuiltinAgentSource) and isinstance(self.source.model, HarborGatewayModel):
+            return self.source.model.ref
+        return None
+
+    @property
+    def gateway_agent_env(self) -> GatewayAgentEnv | None:
+        """The variables the agent reads its gateway endpoint and key from, when it calls a gateway model."""
+        if self.gateway_model is None or not isinstance(self.source, HarborBuiltinAgentSource):
+            return None
+        return gateway_agent_env(self.source.name)
 
     @property
     def agent_name(self) -> str | None:
@@ -365,7 +454,15 @@ class HarborRunnerTarget(BaseModel):
     @property
     def agent_model_name(self) -> str | None:
         """The model slug handed to a built-in or imported agent."""
-        return None if isinstance(self.source, RegisteredAgentSource) else self.source.model_name
+        source = self.source
+        if isinstance(source, HarborImportedAgentSource):
+            return source.model_name
+        if not isinstance(source, HarborBuiltinAgentSource) or source.model is None:
+            return None
+        if isinstance(source.model, HarborModelName):
+            return source.model.name
+        env = gateway_agent_env(source.name)
+        return (env.model_prefix if env is not None else "") + source.model.ref.root.partition("/")[2]
 
 
 class GymAgentSource(BaseModel):
@@ -648,7 +745,7 @@ def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | Gym
     return source.files if source is not None else None
 
 
-def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
+def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) -> tuple[str | None, str | None]:
     """``(agent_name, model_name)`` derivable from a target, for publishing to Intake.
 
     Only targets that carry a real name yield one — nothing here invents an identity, because a
@@ -658,7 +755,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
 
     Accepts both unions: agent-eval passes its ``Target`` spec wrappers, while the dataset-driven
     eval's ``TargetSpec`` is the bare ``Model``/``Agent`` SDK value. Without the bare branches a row
-    target falls through to ``(None, None)`` and publishes under an empty agent name.
+    target falls through to ``(None, None)`` and publishes under an empty agent name. A submitted
+    ``ModelRef`` target is not resolved yet and names no agent, so it yields ``(None, None)`` too.
 
     Distinct from ``result_persistence._agent_target_fields``, which flattens the same targets to
     ``(kind, name, url)`` filter traits and folds runner *models* into its ``name`` slot.

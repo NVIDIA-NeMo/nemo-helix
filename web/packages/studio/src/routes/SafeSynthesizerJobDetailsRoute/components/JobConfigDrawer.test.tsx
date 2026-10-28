@@ -25,10 +25,6 @@ vi.mock('@nemo/common/src/components/CodeEditor', () => ({
 }));
 
 // Mock brand assets icons
-vi.mock('lucide-react', async () => {
-  return (await import('@nemo/testing/mocks/lucide')).mockLucideReact(await import('react'));
-});
-
 // Create a test wrapper with theme provider and toast provider
 const createWrapper = (theme: 'light' | 'dark' = 'light') => {
   return ({ children }: { children: React.ReactNode }) => (
@@ -79,7 +75,6 @@ describe('JobConfigDrawer', () => {
       });
 
       expect(screen.getByText('Job Configuration')).toBeInTheDocument();
-      expect(screen.getByTestId('cog-icon')).toBeInTheDocument();
     });
   });
 
@@ -104,7 +99,6 @@ describe('JobConfigDrawer', () => {
         });
 
         expect(screen.getByText('Job Configuration')).toBeInTheDocument();
-        expect(screen.getByTestId('cog-icon')).toBeInTheDocument();
       });
     });
   });

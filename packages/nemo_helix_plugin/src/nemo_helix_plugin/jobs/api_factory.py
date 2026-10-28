@@ -91,7 +91,6 @@ from nemo_helix_plugin.jobs.types import (
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     UpdateHelixJobRequest,
-    validate_job_name_fits_derived_fileset,
     validate_output_location,
 )
 from nemo_helix_plugin.jobs.types import (
@@ -176,7 +175,6 @@ class BaseJobRequest(BaseModel, Generic[JobConfigT]):
     output_location: str | None = None
 
     _validate_output_location = field_validator("output_location")(validate_output_location)
-    _validate_name_fits_derived_fileset = model_validator(mode="after")(validate_job_name_fits_derived_fileset)
 
 
 class BaseJob(BaseModel, Generic[JobConfigT]):

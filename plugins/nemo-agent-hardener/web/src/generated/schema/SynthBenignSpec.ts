@@ -11,6 +11,10 @@
  * Inputs for the benign-suite synthesis phase (the shape ``run()``/``compile()`` see).
  */
 export interface SynthBenignSpec {
+  /**
+     * @minLength 1
+     * @pattern \S
+     */
   manifest_id: string;
   driver?: string;
   env_file?: string;

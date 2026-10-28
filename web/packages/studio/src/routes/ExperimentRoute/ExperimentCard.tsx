@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
+import { Star } from '@nemo/icons/icons';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Anchor, Card, Text } from '@nvidia/foundations-react-core';
 import { MetricTrend } from '@studio/components/charts/MetricTrend';
+import { ExperimentDeleteButton } from '@studio/components/ExperimentDeleteButton';
 import {
   DELTA_COMPARISON_LABEL,
   formatTrendDelta,
@@ -15,7 +17,6 @@ import {
 import { Metric } from '@studio/routes/ExperimentRoute/Metric';
 import { UpdatedAt } from '@studio/routes/ExperimentRoute/UpdatedAt';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
-import { Star } from 'lucide-react';
 import { type FC, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
 
@@ -63,7 +64,7 @@ export const ExperimentCard: FC<ExperimentCardProps> = ({ group, workspace }) =>
         <div className="flex items-center gap-2">
           {group.is_favorite && (
             <Star
-              size={24}
+              size="24"
               className="text-brand shrink-0"
               fill="currentColor"
               aria-label="Favorite"
@@ -103,6 +104,7 @@ export const ExperimentCard: FC<ExperimentCardProps> = ({ group, workspace }) =>
           <Metric title="Evaluations" value={String(group.evaluation_count ?? 0)} />
         </div>
       )}
+      <ExperimentDeleteButton workspace={workspace} name={group.name} asMenu />
     </Card>
   );
 };

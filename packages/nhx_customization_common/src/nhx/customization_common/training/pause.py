@@ -6,11 +6,16 @@
 Pausing a job moves its running step to ``pausing``. Nothing is sent to the
 workload, so the training process has to notice on its own, write a checkpoint,
 and exit with ``PAUSE_EXIT_CODE``. :class:`PausePoller` is the part that notices.
+
+The paused run also leaves a marker naming the step it stopped at. Resume starts
+a new process that is otherwise told nothing, and the marker is how that process
+knows it must restore a checkpoint rather than start from scratch.
 """
 
 import logging
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from types import TracebackType
 from typing import NoReturn, Self
 
@@ -29,9 +34,71 @@ _POLL_READ_TIMEOUT_SECONDS = 10.0
 _POLL_TIMEOUT = httpx.Timeout(_POLL_READ_TIMEOUT_SECONDS, connect=5.0)
 
 
+#: Written when training stops for a pause; holds the step it stopped at.
+PAUSE_MARKER_FILE_NAME = "PAUSED"
+
+
+class ResumeCheckpointMissingError(RuntimeError):
+    """A resume found no checkpoint to continue from."""
+
+
 def exit_paused() -> NoReturn:
     """Exit with the code that tells the Jobs service the pause checkpoint is written."""
     raise SystemExit(PAUSE_EXIT_CODE)
+
+
+def pause_marker_path(checkpoint_dir: Path) -> Path:
+    """Where a pause is recorded: beside the checkpoint directory, so it outlives that directory."""
+    return checkpoint_dir.parent / PAUSE_MARKER_FILE_NAME
+
+
+def write_pause_marker(path: Path, step: int) -> None:
+    """Record that training stopped for a pause at ``step``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{step}\n", encoding="utf-8")
+
+
+def take_pause_marker(path: Path) -> int | None:
+    """Remove the marker an earlier run's pause left, and return the step it paused at.
+
+    None means that run did not pause, so this one is a first run or a rerun, not a
+    resume. A marker that holds no step was still left by a pause, so it reads as
+    step 0 and the resume still has to restore a checkpoint.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    path.unlink(missing_ok=True)
+    try:
+        return int(text.strip())
+    except ValueError:
+        logger.warning(f"Pause marker {path} holds no step: {text!r}")
+        return 0
+
+
+def check_resumed_from_pause(paused_step: int | None, restored_step: int, checkpoint_dir: object) -> None:
+    """Fail a resume that restored no checkpoint, before it trains from step 0.
+
+    Every backend starts from scratch when it finds no checkpoint, which is right for
+    a first run. After a pause it would discard the paused progress and the metric
+    history recorded for it. Restoring an older checkpoint than the pause saved is
+    fine: training repeats those steps.
+
+    Args:
+        paused_step: The step from :func:`take_pause_marker`, or None when this run is not a resume.
+        restored_step: The step the backend restored, 0 when it found no checkpoint.
+        checkpoint_dir: Where the backend looked, for the error message.
+
+    Raises:
+        ResumeCheckpointMissingError: This run resumes a pause and restored nothing.
+    """
+    if paused_step is None or restored_step > 0:
+        return
+    raise ResumeCheckpointMissingError(
+        f"Cannot resume: training paused at step {paused_step}, "
+        f"but no complete checkpoint was found in {checkpoint_dir}."
+    )
 
 
 class PausePoller:

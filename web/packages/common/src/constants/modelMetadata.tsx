@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Cube, NeuralNetwork, Toolbox } from '@nemo/icons/icons';
 import { FinetuningType } from '@nemo/sdk/generated/platform/schema';
-import { Box, Brain, Toolbox } from 'lucide-react';
 import { ReactNode } from 'react';
 
 import DeepSeek from '../svgs/model_icon_deepseek.svg?react';
@@ -20,7 +20,7 @@ export const tagToIcon = (tag: TagLabel): ReactNode => {
     case 'tool-calling':
       return <Toolbox />;
     case 'reasoning':
-      return <Brain />;
+      return <NeuralNetwork />;
     default:
       return null;
   }
@@ -46,7 +46,7 @@ export const creatorToIcon = (creator: string, props?: { className?: string }): 
     case 'qwen':
       return <Qwen {...props} />;
     default:
-      return <Box {...props} />;
+      return <Cube {...props} />;
   }
 };
 

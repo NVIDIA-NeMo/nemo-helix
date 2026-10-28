@@ -22,6 +22,7 @@ import type {
   VariableDef,
   VariableTextAreaHandle,
 } from '@nemo/common/src/components/form/VariableTextArea';
+import { ArrowDown, ArrowUp, ChevronDown, CopyGeneric, Trash } from '@nemo/icons/icons';
 import {
   Badge,
   Button,
@@ -32,7 +33,6 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useMemo, useRef } from 'react';
 import {
   type Control,
@@ -285,7 +285,7 @@ export function ChatCompletionInput<TFieldValues extends FieldValues = FieldValu
                           disabled={isDisabled}
                           onClick={onDuplicate}
                         >
-                          <Copy className="size-3" aria-hidden />
+                          <CopyGeneric className="size-3" aria-hidden />
                         </Button>
                       </Tooltip>
                     ) : null}
@@ -299,7 +299,7 @@ export function ChatCompletionInput<TFieldValues extends FieldValues = FieldValu
                           disabled={isDisabled || !allowRemove}
                           onClick={onRemove}
                         >
-                          <Trash2 className="size-3" aria-hidden />
+                          <Trash className="size-3" aria-hidden />
                         </Button>
                       </Tooltip>
                     ) : null}

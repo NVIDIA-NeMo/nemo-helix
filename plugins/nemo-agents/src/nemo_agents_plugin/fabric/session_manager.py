@@ -20,6 +20,7 @@ from nemo_agents_plugin.fabric.runtime import (
     FabricRuntimeResult,
     FabricRuntimeStartError,
     FabricRuntimeStream,
+    StreamingMethod,
     fabric_streaming_options,
     invoke_fabric_runtime,
     run_fabric_agent_once,
@@ -31,7 +32,9 @@ from nemo_agents_plugin.fabric.session_registry import (
     FabricSessionNotFoundError,
     FabricSessionRegistry,
 )
+from nemo_agents_plugin.fabric.streaming import resolve_streaming_method
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.fabric.validation import FabricValidationError, plan_fabric_config
 from nemo_fabric import Fabric, FabricConfig, FabricError
 
 logger = logging.getLogger(__name__)
@@ -88,22 +91,23 @@ class FabricSessionManager:
     async def open_session(self, *, session_id: str | None = None) -> FabricRuntimeSession:
         """Materialize a Fabric config, start its runtime, and register the session."""
         try:
-            fabric_config = await self._materialize_fabric_config(streaming=True)
+            fabric_config, method = await self._materialize_fabric_config(streaming=True)
         except FabricRuntimeStartError as error:
             raise FabricSessionStartError(str(error)) from error
         fabric = self._fabric or Fabric()
+        relay_streaming = method is StreamingMethod.RELAY
         try:
             runtime = await fabric.start_runtime(
                 fabric_config,
                 base_dir=self._base_dir,
-                streaming=True,
-                **fabric_streaming_options(fabric_config),
+                streaming=relay_streaming,
+                **(fabric_streaming_options(fabric_config) if relay_streaming else {}),
             )
         except (FabricError, FabricRuntimeStartError) as error:
             raise FabricSessionStartError(f"Fabric runtime startup failed: {error}") from error
 
         try:
-            return await self._session_registry.register(runtime, session_id=session_id)
+            return await self._session_registry.register(runtime, session_id=session_id, streaming_method=method)
         except BaseException:
             # A started runtime must not leak if registration fails or is cancelled.
             try:
@@ -140,15 +144,17 @@ class FabricSessionManager:
     async def invoke_once(self, request: FabricInvocationRequest) -> FabricRuntimeResult:
         """Run one request on an ephemeral runtime without registering a session."""
         async with self._invocation_slot():
-            one_shot_request = await self._to_one_shot_request(request, streaming=False)
+            one_shot_request, _ = await self._to_one_shot_request(request, streaming=False)
             return await run_fabric_agent_once(one_shot_request, fabric=self._fabric)
 
     @asynccontextmanager
     async def stream_once(self, request: FabricInvocationRequest) -> AsyncGenerator[FabricRuntimeStream, None]:
         """Stream one request from an ephemeral, unregistered runtime."""
         async with self._invocation_slot():
-            one_shot_request = await self._to_one_shot_request(request, streaming=True)
-            async with stream_fabric_agent_once(one_shot_request, fabric=self._fabric) as stream:
+            one_shot_request, method = await self._to_one_shot_request(request, streaming=True)
+            async with stream_fabric_agent_once(
+                one_shot_request, fabric=self._fabric, streaming_method=method
+            ) as stream:
                 yield stream
 
     async def invoke_session(
@@ -178,7 +184,7 @@ class FabricSessionManager:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
             try:
                 async with self._invocation_slot():
-                    yield stream_fabric_runtime(session.runtime, request)
+                    yield stream_fabric_runtime(session.runtime, request, streaming_method=session.streaming_method)
             finally:
                 await self._session_registry.refresh_activity(session)
 
@@ -254,29 +260,40 @@ class FabricSessionManager:
             except FabricError as error:
                 raise FabricSessionStopError(f"Fabric runtime shutdown failed: {error}") from error
 
-    async def _materialize_fabric_config(self, *, streaming: bool) -> FabricConfig:
+    async def _materialize_fabric_config(self, *, streaming: bool) -> tuple[FabricConfig, StreamingMethod]:
         try:
             fabric_config = translate_agent_config(self._agent_config)
         except FabricTranslationError as error:
             raise FabricRuntimeStartError(f"Fabric config translation failed: {error}") from error
 
         await asyncio.to_thread(ensure_local_workspace_dir, self._agent_config, self._base_dir)
-        return _prepare_serving_fabric_config(fabric_config) if streaming else fabric_config
+        if not streaming:
+            return fabric_config, StreamingMethod.BUFFERED
+        try:
+            plan = await plan_fabric_config(fabric_config, base_dir=self._base_dir, fabric=self._fabric)
+        except (FabricValidationError, FabricError) as error:
+            raise FabricRuntimeStartError(str(error)) from error
+        method = resolve_streaming_method(plan, fabric_config)
+        if method is StreamingMethod.RELAY:
+            fabric_config = fabric_config.model_copy(deep=True).enable_relay()
+        return fabric_config, method
 
     async def _to_one_shot_request(
         self,
         request: FabricInvocationRequest,
         *,
         streaming: bool,
-    ) -> FabricOneShotRequest:
-        return FabricOneShotRequest(
-            fabric_config=await self._materialize_fabric_config(streaming=streaming),
+    ) -> tuple[FabricOneShotRequest, StreamingMethod]:
+        fabric_config, method = await self._materialize_fabric_config(streaming=streaming)
+        one_shot_request = FabricOneShotRequest(
+            fabric_config=fabric_config,
             base_dir=self._base_dir,
             input=request.input,
             request_id=request.request_id,
             caller_context=request.caller_context,
             timeout_seconds=request.timeout_seconds,
         )
+        return one_shot_request, method
 
     @asynccontextmanager
     async def _invocation_slot(self) -> AsyncGenerator[None, None]:
@@ -285,8 +302,3 @@ class FabricSessionManager:
             return
         async with self._invocation_semaphore:
             yield
-
-
-def _prepare_serving_fabric_config(fabric_config: FabricConfig) -> FabricConfig:
-    """Enable serving-owned Relay support without mutating the translated config."""
-    return fabric_config.model_copy(deep=True).enable_relay()

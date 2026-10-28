@@ -9,6 +9,7 @@ import pytest
 from nemo_evals.jobs.agent_spec import (
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
+    HarborModelName,
     HarborRunnerTarget,
     target_agent_identity,
 )
@@ -32,7 +33,7 @@ def test_a_harbor_source_is_exactly_one_agent() -> None:
 
 def test_the_harbor_source_implies_what_harbor_is_handed() -> None:
     """The runtime translation reads three agent settings; each source shape fills them its own way."""
-    builtin = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model_name="m"))
+    builtin = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="m")))
     imported = HarborRunnerTarget(source=HarborImportedAgentSource(import_path="x:Y", model_name="m"))
     assert (builtin.agent_name, builtin.agent_import_path, builtin.agent_model_name) == ("codex", None, "m")
     assert (imported.agent_name, imported.agent_import_path, imported.agent_model_name) == (None, "x:Y", "m")
@@ -45,9 +46,12 @@ def test_the_legacy_flat_harbor_agent_fields_are_lifted_into_source_with_a_warni
 ) -> None:
     """One release of tolerance, with the precedence the flat fields had: an import path over a built-in name."""
     cases = [
-        ({"agent_name": "codex", "agent_model_name": "m"}, HarborBuiltinAgentSource(name="codex", model_name="m")),
+        (
+            {"agent_name": "codex", "agent_model_name": "m"},
+            HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="m")),
+        ),
         ({"agent_name": "codex", "agent_import_path": "x:Y"}, HarborImportedAgentSource(import_path="x:Y")),
-        ({"agent_model_name": "m"}, HarborBuiltinAgentSource(name="oracle", model_name="m")),
+        ({"agent_model_name": "m"}, HarborBuiltinAgentSource(name="oracle", model=HarborModelName(name="m"))),
         ({"agent_name": None}, HarborBuiltinAgentSource(name="oracle")),
     ]
     for legacy, source in cases:

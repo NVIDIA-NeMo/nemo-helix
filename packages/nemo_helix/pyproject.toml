@@ -95,7 +95,7 @@ core-service = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 data-designer-nemo = [
   "nemo-helix-plugin",
-  "data-designer==0.9.5",
+  "data-designer==0.9.7",
   "anyio>=4.0",
   "duckdb",
   "pydantic>=2",
@@ -183,7 +183,7 @@ guardrails-service = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 harbor = [
   "nemo-helix[nhx-evals-sdk]",
-  "harbor>=0.23,<0.24",
+  "harbor>=0.23,<0.25",
   "nemo-fabric[harbor]>=0.5.0,<0.6.0",
 ]
 
@@ -328,7 +328,7 @@ nemo-agents-plugin-nooa = [
 nemo-anonymizer-plugin = [
   "nemo-helix-plugin",
   "nemo-anonymizer==0.4.0",
-  "data-designer==0.9.5",
+  "data-designer==0.9.7",
   "data-designer-nemo",
   "httpx>=0.27",
   "fastapi",
@@ -359,7 +359,7 @@ nemo-builder-plugin = [
 nemo-compass-plugin = [
   "fastapi>=0.115",
   "httpx",
-  "nemo-compass==0.1.0; python_version < '3.14'",
+  "nemo-compass==0.2.0; python_version < '3.14'",
   "nemo-fabric-adapter-contract>=0.5.0,<0.6.0",
   "nemo-fabric-adapters-common>=0.5.0,<0.6.0",
   "nemo-helix-plugin",
@@ -384,7 +384,7 @@ nemo-customizer-plugin = [
 nemo-data-designer-plugin = [
   "nemo-helix-plugin",
   "nhx-customization-common",
-  "data-designer==0.9.5",
+  "data-designer==0.9.7",
   "data-designer-nemo",
   "httpx>=0.27",
   "fastapi",
@@ -454,6 +454,7 @@ nemo-helix-plugin = [
   "certifi>=2026.10.19",
   "fastapi>=0.115.4",
   "filesets",
+  "httpx>=0.27.0,<1",
   "jsonschema>=4.0.0",
   "lark>=1.1.0",
   "openai>=1.109.1",
@@ -580,6 +581,7 @@ nhx-evals-sdk = [
   "sacrebleu>=2.5.1",
   "rouge_score==0.1.2",
   "ragas==0.4.3",
+  "langchain-community>=0.3.31,<0.4",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
   "nemo-relay>=0.9.3,<0.10",
@@ -747,6 +749,7 @@ garak = "nemo_garak.docs:get_docs_path"
 [project.entry-points."nemo.inference_middleware"]
 nemo-guardrails = "nemo_guardrails_plugin.middleware:GuardrailsMiddleware"
 nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
+nemo-evals-closed-book = "nemo_evals.closed_book:ClosedBookMiddleware"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.jobs"]

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from nemo_deployments_plugin.backends.openshell.sandbox_profile import PROFILE
+from nemo_helix_plugin.jobs.constants import OPENSHELL_JOB_LAUNCHER_PATH, OPENSHELL_JOB_TASK_IMAGE
 
 
 def test_openshell_profile_shape() -> None:
@@ -18,6 +19,12 @@ def test_openshell_profile_shape() -> None:
     assert sandbox_users[0].resolved_home() == "/home/sandbox"
     # The supervisor refuses an image whose WORKDIR the sandbox identity cannot write.
     assert PROFILE.workdir_group == sandbox_users[0].resolved_group()
+
+
+def test_openshell_profile_carries_the_jobs_launcher() -> None:
+    assert [(f.image, f.source, f.dest) for f in PROFILE.files] == [
+        (OPENSHELL_JOB_TASK_IMAGE, OPENSHELL_JOB_LAUNCHER_PATH, OPENSHELL_JOB_LAUNCHER_PATH)
+    ]
 
 
 def test_openshell_profile_is_discoverable() -> None:

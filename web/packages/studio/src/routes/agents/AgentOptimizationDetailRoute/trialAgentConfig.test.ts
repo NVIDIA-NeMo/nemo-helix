@@ -14,6 +14,7 @@ import {
 
 const trial = (params: Record<string, string>): Trial => ({
   number: 3,
+  phase: 'numeric',
   state: 'COMPLETE',
   durationSeconds: 10,
   paretoOptimal: true,

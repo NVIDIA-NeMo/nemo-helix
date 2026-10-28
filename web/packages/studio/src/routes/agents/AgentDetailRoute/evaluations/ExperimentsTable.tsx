@@ -9,31 +9,21 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
-import {
-  deleteExperiment,
-  getListExperimentsQueryKey,
-} from '@nemo/sdk/generated/platform/experiments';
+import { ChartTree, Trash } from '@nemo/icons/icons';
+import { deleteExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Text } from '@nvidia/foundations-react-core';
+import { invalidateExperimentDeletion } from '@studio/api/evaluation/invalidateExperimentDeletion';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { EXPERIMENT_DELETE_DESCRIPTION } from '@studio/components/ExperimentDeleteButton';
 import type { AgentExperimentRow } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { getExperimentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { FolderTree, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 interface ExperimentsTableProps {
   workspace: string;
   experiments: AgentExperimentRow[];
 }
-
-/** Deleting an experiment cascades to the evaluations whose only membership was that group, so the
- *  confirmation says how many go with it. */
-const deleteTitle = (rows: AgentExperimentRow[]): string => {
-  const evaluations = rows.reduce((total, row) => total + row.evaluationCount, 0);
-  const experiments = `${rows.length} Experiment${rows.length !== 1 ? 's' : ''}`;
-  return `Delete ${experiments} and ${evaluations} Evaluation${evaluations !== 1 ? 's' : ''}`;
-};
 
 /** The agent's evaluations rolled up by the experiment they belong to. Selecting one opens the
  *  experiment's own route, which already lists the evaluations under it. */
@@ -61,10 +51,7 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
       const results = await Promise.allSettled(
         names.map((name) => deleteExperiment(workspace, name))
       );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: getListExperimentsQueryKey(workspace) }),
-        queryClient.invalidateQueries({ queryKey: getListEvaluationsQueryKey(workspace) }),
-      ]);
+      await invalidateExperimentDeletion(queryClient, workspace);
 
       const failed = rows.filter((_, index) => results[index]?.status === 'rejected');
       if (failed.length) {
@@ -133,7 +120,7 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
             renderEmptyState: () => (
               <TableEmptyState
                 className="py-density-3xl"
-                icon={<FolderTree className="size-16" />}
+                icon={<ChartTree className="size-16" />}
                 header="No experiments yet"
                 emptyMessage="An experiment appears here once one of its evaluations publishes results for this agent."
               />
@@ -146,7 +133,8 @@ export const ExperimentsTable: FC<ExperimentsTableProps> = ({ workspace, experim
         items={deleteRows}
         open={deleteRows.length > 0}
         onDelete={handleDelete}
-        title={() => deleteTitle(deleteRows)}
+        title={(count) => `Delete ${count} experiment${count !== 1 ? 's' : ''}?`}
+        description={EXPERIMENT_DELETE_DESCRIPTION}
         onClose={() => {
           setDeleteRows([]);
           dataViewState.rowSelection.set({});

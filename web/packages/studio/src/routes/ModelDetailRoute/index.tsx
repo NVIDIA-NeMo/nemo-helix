@@ -21,7 +21,6 @@ import {
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { ModelChatTab } from '@studio/components/ModelChatTab';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useModelLineage } from '@studio/hooks/useModelLineage';
@@ -29,7 +28,10 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { LogsTab } from '@studio/routes/CustomizationJobDetailsRoute/LogsTab';
+import { ChatTab } from '@studio/routes/ModelDetailRoute/ChatTab';
 import { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
+import { DeploymentTab } from '@studio/routes/ModelDetailRoute/DeploymentTab';
+import { DeploymentActions } from '@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions';
 import { DetailsTab } from '@studio/routes/ModelDetailRoute/DetailsTab';
 import { FilesTab } from '@studio/routes/ModelDetailRoute/FilesTab';
 import {
@@ -73,6 +75,7 @@ export const ModelDetailRoute: FC = () => {
     { value: ModelDetailTab.Details, label: 'Details' },
     { value: ModelDetailTab.Chat, label: 'Chat' },
     { value: ModelDetailTab.Files, label: 'Files' },
+    { value: ModelDetailTab.Deployment, label: 'Deployment' },
     ...(hasJobTabs
       ? [
           { value: ModelDetailTab.Training, label: 'Training', disabled: job.isLoading },
@@ -146,10 +149,18 @@ export const ModelDetailRoute: FC = () => {
           }
           slotDescription={(adapter ?? model).description}
           slotActions={
-            headerAction && (
-              <Button color="brand" asChild>
-                <Link to={headerAction.to}>{headerAction.label}</Link>
-              </Button>
+            selectedTab === ModelDetailTab.Deployment ? (
+              <DeploymentActions
+                model={model}
+                adapter={adapter}
+                deployment={lineage.baseDeployment}
+              />
+            ) : (
+              headerAction && (
+                <Button color="brand" asChild>
+                  <Link to={headerAction.to}>{headerAction.label}</Link>
+                </Button>
+              )
             )
           }
         />
@@ -175,9 +186,12 @@ export const ModelDetailRoute: FC = () => {
           </TabsContent>
 
           <TabsContent value={ModelDetailTab.Chat} className="flex min-h-0 flex-1 p-0 pt-6">
-            <Stack className="mx-auto h-full w-full max-w-[768px]">
-              <ModelChatTab model={model} adapter={adapter} />
-            </Stack>
+            <ChatTab
+              // The baseline panel is seeded once, so start over on another model or adapter.
+              key={`${model.workspace}/${model.name}:${adapter?.name ?? ''}`}
+              model={model}
+              adapter={adapter}
+            />
           </TabsContent>
 
           <TabsContent
@@ -185,6 +199,13 @@ export const ModelDetailRoute: FC = () => {
             className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
           >
             <FilesTab fileset={fileset} />
+          </TabsContent>
+
+          <TabsContent
+            value={ModelDetailTab.Deployment}
+            className="flex min-h-0 flex-1 flex-col items-stretch overflow-y-auto p-0 pt-6"
+          >
+            <DeploymentTab model={model} adapter={adapter} deployment={lineage.baseDeployment} />
           </TabsContent>
 
           {job.jobName && (

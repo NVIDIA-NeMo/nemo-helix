@@ -2765,8 +2765,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -4623,8 +4622,8 @@ components:
           description: 'Locale that determines the language and geographic location
             that a synthetic person will be sampled from. Must be a locale supported
             by a managed Nemotron Personas dataset. Managed datasets exist for the
-            following locales: en_US, en_IN, en_SG, fr_FR, hi_Deva_IN, hi_Latn_IN,
-            ja_JP, ko_KR, pt_BR.'
+            following locales: en_GB, de_DE, en_US, en_IN, en_SG, fr_FR, hi_Deva_IN,
+            hi_Latn_IN, ja_JP, ko_KR, pt_BR.'
           default: en_US
         sex:
           title: Sex
@@ -5112,8 +5111,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5564,8 +5562,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -5863,8 +5860,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string

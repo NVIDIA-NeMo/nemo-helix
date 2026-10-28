@@ -97,6 +97,68 @@ def _agent(name: str = "calc", workspace: str = "default", config_format: str = 
     return Agent(name=name, workspace=workspace, config=config, config_format=config_format)
 
 
+def test_run_passes_caller_context_with_platform_fields_under_reserved_key(ctx: JobContext) -> None:
+    caller_context = {"run_scope": {"since": "2026-10-01"}, "evaluation_id": "eval-1"}
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello", context=caller_context),
+        agent=_resolved_agent(workspace="research"),
+    )
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["context"] = request.caller_context
+        return FabricRuntimeResult(status="succeeded")
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert seen["context"] == {
+        **caller_context,
+        "nemo_helix": {"job_id": ctx.job_id, "job_workspace": ctx.workspace, "agent": "research/calc"},
+    }
+
+
+def test_run_without_caller_context_sends_only_platform_fields(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+    )
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["context"] = request.caller_context
+        return FabricRuntimeResult(status="succeeded")
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert seen["context"] == {
+        "nemo_helix": {"job_id": ctx.job_id, "job_workspace": ctx.workspace, "agent": "default/calc"},
+    }
+
+
+def test_job_config_rejects_reserved_context_key() -> None:
+    with pytest.raises(ValidationError, match="'nemo_helix' is reserved"):
+        ExecuteAgentJobConfig(agent="calc", input="hello", context={"nemo_helix": {"job_id": "spoofed"}})
+
+
+@pytest.mark.asyncio
+async def test_to_spec_keeps_caller_context_on_the_step_config() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _agent()
+
+    spec = await ExecuteAgentJob.to_spec(
+        ExecuteAgentJobConfig(agent="calc", input="hello", context={"evaluation_id": "eval-1"}),
+        workspace="default",
+        entity_client=entity_client,
+        async_sdk=_sdk_with_files(),
+        is_local=False,
+    )
+
+    step_config = ExecuteAgentStepConfig.model_validate(spec)
+    assert step_config.request.context == {"evaluation_id": "eval-1"}
+
+
 def _sdk_with_files(data: list[object] | None = None) -> MagicMock:
     sdk = MagicMock()
     sdk.files.list_files = AsyncMock(return_value=_TypedFilesResponse(data if data is not None else [object()]))
@@ -139,6 +201,7 @@ async def test_to_spec_resolves_bare_agent_against_route_workspace() -> None:
     step_config = ExecuteAgentStepConfig.model_validate(spec)
     assert step_config.agent.name == "calc"
     assert step_config.agent.workspace == "default"
+    assert step_config.agent_ref == "default/calc"
     assert step_config.request.input == "hello"
     assert step_config.request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
     assert step_config.workdir is None
@@ -154,7 +217,7 @@ async def test_to_spec_preserves_explicit_agent_workspace() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent(workspace="research")
 
-    await ExecuteAgentJob.to_spec(
+    spec = await ExecuteAgentJob.to_spec(
         ExecuteAgentJobConfig(agent="research/calc", input="hello"),
         workspace="default",
         entity_client=entity_client,
@@ -163,6 +226,8 @@ async def test_to_spec_preserves_explicit_agent_workspace() -> None:
     )
 
     entity_client.get.assert_awaited_once_with(Agent, name="calc", workspace="research")
+    # A job in one workspace that runs another workspace's agent is listed under that agent's ref.
+    assert ExecuteAgentStepConfig.model_validate(spec).agent_ref == "research/calc"
 
 
 @pytest.mark.asyncio
@@ -934,6 +999,7 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
         assert request.input == "hello"
         assert request.base_dir == ctx.storage.ephemeral / "fabric"
         assert request.timeout_seconds == DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS
+        assert request.observe_progress is True
         (request.base_dir / "workspace" / "answer.txt").write_text("done\n")
         (request.base_dir / "artifacts" / "trace.json").write_text("{}\n")
         return FabricRuntimeResult(
@@ -1359,6 +1425,8 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     assert body.spec["agent"]["name"] == "calc"
     assert body.spec["agent"]["workspace"] == "default"
     assert body.spec["agent"]["config_format"] == "nemo-agents-spec-v1"
+    # The stored job spec carries the qualified ref that ``filter[spec.agent_ref]`` matches.
+    assert body.spec["agent_ref"] == "default/calc"
     assert body.spec["agent"]["config"]["environment"] == {
         "provider": "local",
         "workspace": "./workspace",
@@ -1375,6 +1443,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     assert body.spec["request"] == {
         "agent": "calc",
         "input": "hello",
+        "context": {},
         "environment": None,
         "workdir": {"base_workdir": "source#project", "artifact_mounts": []},
         "timeout_seconds": DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
@@ -1471,6 +1540,8 @@ async def test_to_spec_resolves_an_inline_agent_without_touching_the_entity_stor
     assert step_config.agent.name == "calc"
     assert step_config.agent.workspace == "research"
     assert step_config.agent.config_format == "nemo-agents-spec-v1"
+    # Not an entity, so the job belongs to no agent's runs.
+    assert step_config.agent_ref is None
     entity_client.get.assert_not_awaited()
 
 

@@ -94,9 +94,27 @@ def make_async_customization_sdk_context(client: AsyncNemoClient) -> AsyncCustom
     )
 
 
+def _mark_mutated_defaults_set(model: BaseModel) -> None:
+    """Mark a field set when the caller changed a sub-model it got by default.
+
+    ``spec.optimizer.learning_rate = 2e-5`` on a spec built without ``optimizer`` sets the
+    field on the sub-model only, so ``exclude_unset`` would drop the whole sub-model.
+    """
+    for name in type(model).model_fields:
+        value = getattr(model, name)
+        if isinstance(value, BaseModel):
+            _mark_mutated_defaults_set(value)
+            if value.model_fields_set:
+                model.model_fields_set.add(name)
+
+
 def _spec_payload(spec: BaseModel | dict[str, Any]) -> dict[str, Any]:
     if isinstance(spec, BaseModel):
-        return spec.model_dump(mode="json")
+        # A default sent explicitly reads as the caller's choice, so the server would skip
+        # defaults that depend on other fields (learning_rate follows finetuning_type).
+        spec = spec.model_copy(deep=True)
+        _mark_mutated_defaults_set(spec)
+        return spec.model_dump(mode="json", exclude_unset=True)
     return spec
 
 

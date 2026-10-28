@@ -127,6 +127,10 @@ builder:
   # -- Namespace builds run in, which the chart creates. Empty is `<release namespace>-builds`. Each release needs its own,
   # and it can't be the release namespace.
   namespace: ""
+  # -- How long a build step may stay pending before Jobs fails it, in seconds: the build profiles'
+  # `ttl_seconds_before_active`. Longer than the 30-minute profile default: a burst of builds (113 for one DeepSWE run)
+  # queues steps behind the Jobs controller, and that queue time counts.
+  ttlSecondsBeforeActive: 3600
   # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
   namespaceLabels: {}
   # -- The work volume every build step and sandbox mounts.
@@ -248,6 +252,10 @@ networkPolicies:
         matchLabels:
           app: nemo-job
           nhx.nvidia.com/managed_by: jobs-controller
+    # -- Allow Models-controller weight-puller pods in the same namespace to reach the Files API. Model servers and sandbox pods are not included.
+    modelPullers:
+      # -- Enable ingress from Models-controller weight-puller pods.
+      enabled: true
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
@@ -619,7 +627,6 @@ baseHelixConfig: |
   auth:
     enabled: false
     policy_decision_point_provider: embedded
-    policy_decision_point_base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
     policy_data_refresh_interval: 5
     bundle_cache_seconds: 5
     admin_email: "admin@example.com"

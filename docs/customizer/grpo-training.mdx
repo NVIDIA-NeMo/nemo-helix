@@ -178,10 +178,13 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra convers
 .venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
+  --nemo-rl-root <nemo-rl-checkout> \
   --out-dir ./ascii-tree-pkg \
   --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
 ```
+
+`--nemo-rl-root` is a NeMo-RL checkout, submodules included, at the commit `NEMO_RL_REF` pins in `docker-bake.hcl`. The converter reads the training image's `nemo-gym`, `ray` and `openai` versions from it; without it, the package needs sandbox egress to start.
 
 <Note>
   Pin `--hub-version`. Left unset, the converter takes whatever the index offers
@@ -234,9 +237,10 @@ For `native-v1` only the server-type prefix is checked, so `responses_api_models
 Custom implementations need `{server_type}/{implementation}/` (with `app.py` and `requirements.txt`) in the FileSet for `native-v1` and `wheels-v1`. YAML under `configs/` does not replace that directory, and a directory without `requirements.txt` or `pyproject.toml` is not recognised as a server at all. Details: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages).
 
 <Note>
-  `pi-to-gym-conversion` currently only vendors wheels for `x86_64` today. On an
-  `arm64` cluster, build the closure yourself with the `pip download` command
-  above and pass it via `--wheels-dir`.
+  `pi-to-gym-conversion` supports `x86_64` only, and it also rejects `aarch64`
+  wheels passed with `--wheels-dir`. On an `arm64` cluster, build a `wheels-v1`
+  package instead, with the closure from
+  [Vendoring a wheel closure](#vendoring-a-wheel-closure) and `ARCH=aarch64`.
 </Note>
 
 ### Validate before uploading, whichever format you built
@@ -396,7 +400,7 @@ Omitting the `lora` block while setting `finetuning_type: "lora"` is fine — de
 
 ### Using the adapter
 
-The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`); the model-entity path always resolves to the base model.
+The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Send inference to the gateway's OpenAI-compatible route with the adapter's entity ID, `model: default/<base model>&adapters/default/<adapter>`; the gateway routes it through the base model's deployment.
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 
@@ -416,7 +420,7 @@ Create the deployment config first and pass its name. This is the recommended pa
 }
 ```
 
-Or an object to have one created inline. It deploys with vLLM, the recommended engine for Customizer outputs. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default multi-LLM NIM:
+Or an object to have one created inline. It deploys with vLLM, the recommended engine for Customizer outputs. Set `"engine": "nim"` only if you know that the NIM image you use supports the model, or that the model works with the default model-free NIM:
 
 ```json
 {
@@ -432,10 +436,10 @@ Or an object to have one created inline. It deploys with vLLM, the recommended e
 | `engine`           | `vllm`                          | `vllm` or `nim`.                                                                                                                                                                                                  |
 | `gpu`              | `1`                             | GPUs the deployment requests.                                                                                                                                                                                     |
 | `lora_enabled`     | `true`                          | Whether the deployment can load LoRA adapters.                                                                                                                                                                    |
-| `image_name`       | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the multi-LLM NIM, `nvcr.io/nim/nvidia/llm-nim`.                                                                                 |
+| `image_name`       | platform default for the engine | Container image. For vLLM, the default is `docker.io/vllm/vllm-openai`; for NIM, the model-free NIM, `nvcr.io/nim/nvidia/vllm-model-free-nim`.                                                                    |
 | `image_tag`        | platform default for the engine | Container image tag. For NIM, the default is `latest`.                                                                                                                                                            |
 | `disk_size`        | unset                           | Disk size for the deployment.                                                                                                                                                                                     |
-| `additional_envs`  | unset                           | Extra environment variables.                                                                                                                                                                                      |
+| `additional_envs`  | unset                           | Extra environment variables. The default NIM image, the model-free NIM, loads LoRA adapters up to rank 16 unless you set `NIM_PASSTHROUGH_ARGS` to `--max-lora-rank <rank>`.                                      |
 | `tool_call_config` | unset                           | Tool-calling overrides. Requires NIM: setting it without `engine` deploys with NIM, and it is rejected with `"engine": "vllm"`. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
 
 vLLM loads LoRA adapters up to rank 16. To serve a higher `rank`, reference a deployment config that sets `"additional_args": ["--max-lora-rank", "<rank>"]` in its `executor_config`.
@@ -447,6 +451,8 @@ Bad configurations fail before training starts, not after the run. These are rej
 - A string reference that does not resolve to a deployment config.
 - On a LoRA job, a referenced config with `lora_enabled: false`.
 - On a full-weight job, a referenced config that names a _different_ model. The output entity does not have to exist yet — a config may point forward at the model the run will produce — but a config built for some other model cannot serve it.
+
+If the base model is already deployed with `lora_enabled: true`, a LoRA job does not deploy it again; that deployment serves the adapter. If the base is served only with `lora_enabled: false`, the job creates a LoRA-enabled deployment alongside it. See [Deployment config validation](/documentation/customizer-reference/manage-customization-jobs/customization-job-reference#deployment-config-validation) for how that deployment is named and how to enable LoRA on the existing one instead.
 
 A deployment config that names no model — neither `model_entity_id` nor `model_spec.model_name` — is an **unbound template**. It carries only engine and executor settings, so it is accepted by any job: the trained model is stamped onto a copy of it at deploy time, leaving the template reusable for the next run. This is the only way to share engine/executor settings across full-weight jobs, whose output model does not exist when the job is submitted.
 

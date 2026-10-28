@@ -768,22 +768,22 @@ def test_model_deployment_lifecycle(
     logger.info("Model deployment lifecycle test complete (cleanup via fixture)")
 
 
-def test_model_deployment_huggingface_multi_llm(
+def test_model_deployment_huggingface_model_free_nim(
     client: NemoClient,
     workspace: str,
     model_deployment_cleanup: ModelDeploymentCleanup,
 ) -> None:
-    """Test HuggingFace model deployment using multi-LLM (default image, no image_name/image_tag).
+    """Test HuggingFace model deployment using the model-free NIM (default image, no image_name/image_tag).
 
     Creates a fileset pointing to the HuggingFace model at hf_repo_id, registers a model
-    entity, and deploys using the default multi-LLM NIM image. Validates READY, autodiscovery,
+    entity, and deploys using the default model-free NIM image. Validates READY, autodiscovery,
     and inference via the gateway.
     """
     hf_repo_id = "Qwen/Qwen2.5-1.5B-Instruct"
     fileset_name = "qwen-2-5-1-5b"
     model_entity_name = "qwen-2-5-1-5b"
-    md_config_name = "qwen-multillm-config"
-    md_name = "qwen-multillm-deployment"
+    md_config_name = "qwen-model-free-nim-config"
+    md_name = "qwen-model-free-nim-deployment"
 
     models = ModelsClient.from_client(client)
     logger.info("Creating HuggingFace fileset and model entity")
@@ -802,12 +802,12 @@ def test_model_deployment_huggingface_multi_llm(
     model_deployment_cleanup.register_model_entity(workspace, model_entity_name)
     model_deployment_cleanup.register_fileset(workspace, fileset_name)
 
-    logger.info("Creating ModelDeploymentConfig (multi-LLM: no image_name/image_tag)")
+    logger.info("Creating ModelDeploymentConfig (model-free NIM: no image_name/image_tag)")
     config = models.create_deployment_config(
         workspace=workspace,
         body=CreateModelDeploymentConfigRequest(
             name=md_config_name,
-            description="E2E HuggingFace + multi-LLM (default NIM image)",
+            description="E2E HuggingFace + model-free NIM (default NIM image)",
             engine=Engine.NIM,
             model_spec=ModelDeploymentConfigModelSpec(model_namespace=workspace, model_name=model_entity_name),
             executor_config=ContainerExecutorConfig(gpu=1),
@@ -837,7 +837,7 @@ def test_model_deployment_huggingface_multi_llm(
         pytest.fail("Deployment did not reach READY within timeout")
 
     _verify_igw_inference_routes(client, workspace, md_name, assert_model_entity_name=model_entity_name)
-    logger.info("HuggingFace multi-LLM deployment test complete (cleanup via fixture)")
+    logger.info("HuggingFace model-free NIM deployment test complete (cleanup via fixture)")
 
 
 @pytest.mark.skip(

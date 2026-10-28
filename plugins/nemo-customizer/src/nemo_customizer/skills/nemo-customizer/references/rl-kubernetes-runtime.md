@@ -18,21 +18,7 @@ Deployment model is the same as automodel/unsloth: **run the platform locally**
 What matters is that the platform's jobs backend is `kubernetes_job` and the job
 pods can reach the platform's APIs.
 
-## Step 1 — verify the connected platform qualifies (always do this first)
-
-```bash
-nemo jobs list-execution-profiles -f json
-```
-
-- `cpu` and `gpu` profiles report `backend: kubernetes_job` (or `volcano_job`) →
-  the platform is ready for rl. Proceed to submit.
-- They report `backend: docker` / `subprocess` → the platform is **not**
-  configured for rl. Do **not** reuse it and do **not** fall back to
-  automodel/unsloth (those are SFT/LoRA, not DPO). Instead, run the local
-  platform configured for the `kubernetes_job` backend pointed at a Kubernetes
-  GPU cluster (see **Configuring the local platform for rl** below). If **no**
-  Kubernetes cluster is available to point at, stop and tell the user rl needs
-  one.
+`SKILL.md` § **Plugin pick** (the **`rl` runtime gate**) sends you here when the execution profiles report `docker` or `subprocess`. Configure the local platform as below. If **no** Kubernetes cluster is available to point it at, stop and tell the user rl needs one.
 
 ## Configuring the local platform for rl
 
@@ -96,7 +82,7 @@ index needs the operator to open it:
 
 Cluster-private, node-local and metadata destinations stay denied either way. A
 complete `wheels-v1` closure avoids needing any of this — see
-`gym-environments.md` § **Dependency installation**.
+`../../nemo-gym-environments/references/dependencies.md`.
 
 ### Ingress to the training pod
 

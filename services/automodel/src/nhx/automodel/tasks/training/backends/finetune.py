@@ -31,7 +31,7 @@ from nhx.automodel.tasks.tqdm_logging import install_line_tqdm
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.callbacks import DatasetQualifier, TrainingProgressCallback
-from nhx.customization_common.training.pause import PausePoller
+from nhx.customization_common.training.pause import PausePoller, check_resumed_from_pause, write_pause_marker
 from nhx.customization_common.training.reporting import (
     DEFAULT_MIN_REPORT_INTERVAL_SECONDS,
     DIAGNOSTIC_TIME_SERIES,
@@ -183,6 +183,16 @@ def _reporting_block(recipe: AutomodelRecipe) -> Any:
     return cfg.get("_progress_reporting") if hasattr(cfg, "get") else None
 
 
+def _paused_at_step(recipe: AutomodelRecipe) -> int | None:
+    """The step the paused run stopped at, which the runner compiled in when this run resumes it.
+
+    None for a first run or a rerun, which may start from scratch.
+    """
+    cfg = getattr(recipe, "cfg", None)
+    value = cfg.get("_paused_at_step") if hasattr(cfg, "get") else None
+    return value if isinstance(value, int) else None
+
+
 def _resolve_time_series_metrics(recipe: AutomodelRecipe) -> tuple[str, ...] | list[str]:
     """Which metrics get a stored series, defaulting to the diagnostic set.
 
@@ -251,6 +261,9 @@ class AutomodelRecipeWrapper:
 
         self._recipe = recipe
         self._recipe.setup()
+        # setup() restored the newest complete checkpoint, or started from step 0 when it found none.
+        # A resume must not start over, and every rank checks so that none goes on to train alone.
+        check_resumed_from_pause(_paused_at_step(recipe), self._recipe.step_scheduler.step, self._checkpoint_dir())
 
         self.max_steps = self._recipe.step_scheduler.max_steps
         self.num_epochs = getattr(self._recipe.step_scheduler, "num_epochs", None) or 1
@@ -343,8 +356,7 @@ class AutomodelRecipeWrapper:
             # the checkpoint for a rerun instead.
             raise RuntimeError("Training stopped for a pause, but the config names no pause marker for the runner")
         if _is_global_rank_zero():
-            sentinel.parent.mkdir(parents=True, exist_ok=True)
-            sentinel.write_text(f"{self._recipe.step_scheduler.step}\n", encoding="utf-8")
+            write_pause_marker(sentinel, self._recipe.step_scheduler.step)
             logger.info(f"Training paused at step {self._recipe.step_scheduler.step}; wrote {sentinel}")
         # No rank exits before the marker exists. Runners on other nodes read it when their torchrun exits.
         _barrier()

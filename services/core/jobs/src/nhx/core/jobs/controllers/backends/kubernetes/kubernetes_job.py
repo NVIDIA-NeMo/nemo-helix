@@ -42,6 +42,7 @@ from nhx.core.jobs.controllers.backends.base import (
 )
 from nhx.core.jobs.controllers.backends.exceptions import SchedulingDeferred
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
+    UNSTARTED_PAUSE_MESSAGE,
     BaseKubernetesExecutionProfileConfig,
     adopt_step_network_policy,
     aggregate_pod_statuses_for_job_step,
@@ -64,6 +65,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     load_kubernetes_config,
     name_for_step,
     reclaim_job_persistent_storage,
+    task_never_started,
     update_all_tasks,
     update_tasks_with_pause_outcome,
 )
@@ -551,7 +553,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         Exit 75 is a pause. Exit 0 means training finished. Any other exit is an error.
         An exit counts when the task exited before the deadline, even if it is seen
         later. When the exit time is unreadable, the deadline is checked against now.
-        A missing Job has nothing left to stop, so the step is paused.
+        A missing Job has nothing left to stop, and a task that never started, for
+        example in a pod that cannot be scheduled, has nothing to save, so either
+        way the step is paused, whatever the deadline.
         """
         if job is None:
             return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": "Job is paused"})
@@ -561,6 +565,13 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         running, exit_code = classify_task_containers(pods)
         if not running and exit_code is None:
             exit_code = _job_object_pause_exit_code(job)
+        live_pods = job.status is not None and _positive_count(job.status.active)
+        if exit_code is None and task_never_started(pods, workload_has_live_pods=live_pods):
+            update_tasks_with_pause_outcome(
+                self._nemo_client, self._core_v1, self.namespace, step, pods, HelixJobStatus.PAUSED, {}
+            )
+            self.terminate_job(job)
+            return JobUpdate(status=HelixJobStatus.PAUSED, status_details={"message": UNSTARTED_PAUSE_MESSAGE})
         if not running and exit_code is not None and not pause_deadline_exceeded(step, now=last_task_exit_time(pods)):
             return _pause_exit_update(self, step, job, pods, exit_code, digest_details)
         if pause_deadline_exceeded(step):

@@ -29,7 +29,7 @@ The plugin is installed by default through the root workspace's `enabled-plugins
 uv tool install --python 3.13 "nemo-helix[all]"
 ```
 
-The `nemo-compass-plugin` extra includes `nemo-compass==0.1.0`, which bundles Compass's
+The `nemo-compass-plugin` extra includes `nemo-compass==0.2.0`, which bundles Compass's
 analysis code and `trace_ingest` loaders. Compass execution requires Python
 3.12 or 3.13; Compass does not yet support Python 3.14.
 

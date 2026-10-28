@@ -44,8 +44,13 @@ describe('checkPlatformHealth', () => {
     await expect(checkPlatformHealth()).resolves.toBe('unreachable');
   });
 
-  it('resolves "unreachable" on an unexpected non-200 status', async () => {
+  it('resolves "not-found" when the liveness endpoint answers 404', async () => {
     server.use(http.get(getPlatformHealthUrl(), () => new HttpResponse(null, { status: 404 })));
+    await expect(checkPlatformHealth()).resolves.toBe('not-found');
+  });
+
+  it('resolves "unreachable" on an unexpected non-200 status', async () => {
+    server.use(http.get(getPlatformHealthUrl(), () => new HttpResponse(null, { status: 500 })));
     await expect(checkPlatformHealth()).resolves.toBe('unreachable');
   });
 });

@@ -30,9 +30,9 @@ date_utc() {
 cutoff="$(date_utc "${STALE_HOURS} hours ago")"
 
 # GitHub's package version API exposes updated_at, not a separate last-pulled timestamp.
-# Containers use nightly-<timestamp>. Existing Helm charts use
-# <semver>-night-<timestamp>; the release workflow currently emits -nightly-.
-nightly_tag_pattern='^(nightly-[0-9]{14}|[0-9]+[.][0-9]+[.][0-9]+-(night|nightly)-[0-9]{14})$'
+# Match RC artifacts and the exact historical release formats still in GHCR.
+# Other timestamped tags keep their existing CI retention policy.
+release_tag_pattern='^((rc|nightly)-[0-9]{14}|[0-9]+[.][0-9]+[.][0-9]+-(rc|night|nightly)-[0-9]{14})$'
 
 # NGC metadata is required for each released container and chart. Its filename
 # is also the corresponding GHCR package name.
@@ -54,13 +54,13 @@ fi
 
 case "${CLEANUP_SCOPE:-ci}" in
   ci)
-    tag_filter="select(((.metadata.container.tags // []) | any(test(\"${nightly_tag_pattern}\"))) | not)"
+    tag_filter="select(((.metadata.container.tags // []) | any(test(\"${release_tag_pattern}\"))) | not)"
     ;;
-  nightly-release)
-    tag_filter="select((.metadata.container.tags // []) | any(test(\"${nightly_tag_pattern}\")))"
+  release)
+    tag_filter="select((.metadata.container.tags // []) | any(test(\"${release_tag_pattern}\")))"
     ;;
   *)
-    echo "cleanup_scope must be ci or nightly-release, got: ${CLEANUP_SCOPE}" >&2
+    echo "cleanup_scope must be ci or release, got: ${CLEANUP_SCOPE}" >&2
     exit 1
     ;;
 esac

@@ -156,7 +156,7 @@ Then set `global_batch_size` to a multiple of the new `micro_batch_size` (often 
 
 ### LoRA rank
 
-Higher rank uses more VRAM. If OOM at rank 16, drop to rank 8 before lowering batch; if headroom remains, rank 32 is fine for training (deploy rank ≤32 on default NIM/vLLM).
+Higher rank uses more VRAM. If OOM at rank 16, drop to rank 8 before lowering batch; if headroom remains, rank 32 is fine for training. Default vLLM and model-free NIM deployments load adapters only up to rank 16; a higher rank needs a raised `--max-lora-rank` on the deployment (`post-training-eval.md` § **LoRA rank limit**).
 
 ### Tuning loop
 

@@ -8,6 +8,6 @@
  */
 
 /**
- * Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets`, which names them and resolves the values from the Secrets store at run time.
+ * Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from the Secrets store at run time.
  */
 export type ManifestInitEnv = {[key: string]: string};

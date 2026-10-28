@@ -1274,12 +1274,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to create entities in the requested workspace.
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     get:
       tags:
       - Entity Store
@@ -1351,7 +1354,14 @@ paths:
         required: false
         schema:
           type: string
-          description: Sort field
+          description: 'Sort by id, workspace, entity_type, name, parent, project,
+            created_at, updated_at, created_by, updated_by, or db_version; or by a
+            dotted JSON path such as data.priority or data.owner.name. JSON path components
+            must be nonempty; missing paths are allowed and use the database''s native
+            null ordering. Prefix with a single ''-'' for descending order. Invalid
+            sort fields return HTTP 400. Equal values are ordered by id ascending.
+            Pagination uses offsets, not a snapshot: concurrent writes can cause rows
+            to be repeated or skipped between pages.'
           examples:
           - -created_at
           - created_at
@@ -1361,7 +1371,14 @@ paths:
           - name
           default: -created_at
           title: Sort
-        description: Sort field
+        description: 'Sort by id, workspace, entity_type, name, parent, project, created_at,
+          updated_at, created_by, updated_by, or db_version; or by a dotted JSON path
+          such as data.priority or data.owner.name. JSON path components must be nonempty;
+          missing paths are allowed and use the database''s native null ordering.
+          Prefix with a single ''-'' for descending order. Invalid sort fields return
+          HTTP 400. Equal values are ordered by id ascending. Pagination uses offsets,
+          not a snapshot: concurrent writes can cause rows to be repeated or skipped
+          between pages.'
       - name: count_by
         in: query
         required: false
@@ -1407,6 +1424,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EntitiesPage'
+        '403':
+          description: Not allowed to list entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1463,6 +1482,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to read entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -1526,12 +1547,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entity'
+        '403':
+          description: Not allowed to update entities in the requested workspace.
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Entity Store
@@ -1591,6 +1615,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Not allowed to delete entities in the requested workspace.
         '422':
           description: Validation Error
           content:
@@ -8279,11 +8305,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     get:
       tags:
       - Models
@@ -8397,11 +8424,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Adapter'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
   /apis/models/v2/workspaces/{workspace}/models/{model_name}/adapters/{adapter}:
     delete:
       tags:
@@ -8480,11 +8508,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Adapter'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
   /apis/models/v2/workspaces/{workspace}/models/{name}:
     get:
       tags:
@@ -8579,11 +8608,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Models
@@ -10776,18 +10806,6 @@ components:
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
-    BaseModelFilter:
-      additionalProperties: false
-      description: Filter for base model properties.
-      properties:
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Filter by name of the base model.
-          title: Name
-      title: BaseModelFilter
-      type: object
     CPUExecutionProvider:
       properties:
         provider:
@@ -11664,8 +11682,7 @@ components:
           pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         description:
           title: Description
           type: string
@@ -12719,6 +12736,23 @@ components:
           training_options:
             learning_rate: 0.01
         name: my-config
+    EntityErrorResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+        code:
+          title: Code
+          description: Set to workspace_not_found when the target workspace does not
+            exist.
+          nullable: true
+          type: string
+          const: workspace_not_found
+      type: object
+      required:
+      - detail
+      title: EntityErrorResponse
+      description: Error returned when an entity write is rejected by the entity store.
     EntityUpdate:
       properties:
         new_name:
@@ -12759,6 +12793,18 @@ components:
           target_id: llama-2-7b
           training_options:
             learning_rate: 0.02
+    EntityWriteValidationErrorResponse:
+      anyOf:
+      - $ref: '#/components/schemas/HTTPValidationError'
+      - $ref: '#/components/schemas/EntityErrorResponse'
+      title: EntityWriteValidationErrorResponse
+      description: 'Request validation error, or an entity write rejected by the entity
+        store.
+
+
+        Routes that write entities declare this for 422. Declaring any 422 model
+
+        replaces FastAPI''s request-validation schema, so the union keeps both shapes.'
     EnvironmentMetadataContent:
       properties:
         format:
@@ -14204,16 +14250,6 @@ components:
       - grpo
       title: FinetuningType
       description: Finetuning types.
-    FinetuningTypeFilter:
-      additionalProperties: false
-      description: Filter for PEFT-related properties.
-      properties:
-        finetuning_type:
-          allOf:
-          - $ref: '#/components/schemas/FinetuningType'
-          description: Filter models with adapters with this fine-tuning type.
-      title: FinetuningTypeFilter
-      type: object
     FloatFilter:
       additionalProperties: false
       properties:
@@ -18297,18 +18333,16 @@ components:
           type: string
         base_model:
           anyOf:
-          - $ref: '#/components/schemas/BaseModelFilter'
           - type: boolean
           - type: string
           description: 'Filter by base model: true = has a base model, false = no
-            base model, { name: string } or string = match base model name.'
+            base model, string = match base model name.'
           title: Base Model
         adapters:
-          anyOf:
-          - $ref: '#/components/schemas/FinetuningTypeFilter'
-          - type: boolean
-          description: Filter models with Parameter Efficient Fine-tuning Adapters.
+          description: 'Filter by Parameter Efficient Fine-tuning adapters: true =
+            has at least one adapter, false = has none.'
           title: Adapters
+          type: boolean
         finetuning_type:
           anyOf:
           - $ref: '#/components/schemas/FinetuningType'
@@ -19278,8 +19312,8 @@ components:
           title: Default Entrypoint
           description: Entrypoint for job steps that do not declare one. The OpenShell
             supervisor ignores the image ENTRYPOINT, so the sandbox command must name
-            the binary explicitly. When unset, defaults to the nhx-tasks entrypoint
-            (/app/.venv/bin/nemo-helix).
+            the binary explicitly. When unset, defaults to `nemo-helix`, resolved
+            on the PATH from the image ENV.
           items:
             type: string
           type: array

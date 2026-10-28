@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { PromptData } from '@nemo/sdk/generated/platform/schema';
 import { ModelChatPanel } from '@studio/components/ModelChatPanel';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render } from '@testing-library/react';
@@ -22,7 +23,11 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
   WorkspaceModelSelect: () => <div data-testid="mock-model-select" />,
 }));
 
-const renderPanel = (modelURN: string | null, adapter: string | null = null) => {
+const renderPanel = (
+  modelURN: string | null,
+  adapter: string | null = null,
+  promptData?: PromptData
+) => {
   return render(
     <TestProviders>
       <MemoryRouter>
@@ -36,6 +41,7 @@ const renderPanel = (modelURN: string | null, adapter: string | null = null) => 
             roleLabel: 'Baseline',
             isSinglePanel: true,
             locked: false,
+            promptData,
           }}
           fallbackWorkspace="route-workspace"
           onToggle={vi.fn()}
@@ -78,6 +84,44 @@ describe('ModelChatPanel — URN routing', () => {
     expect(modelChatSpy).not.toHaveBeenCalledWith(expect.objectContaining({ model: 'llama-70b' }));
     expect(modelChatSpy).toHaveBeenLastCalledWith(
       expect.objectContaining({ model: '', disabled: true })
+    );
+  });
+
+  it('starts from the saved system prompt and inference params of the panel', () => {
+    renderPanel('nvidia/llama-70b', null, {
+      system_prompt: 'Be terse.',
+      inference_params: { temperature: 0.1, max_tokens: 64 },
+    });
+
+    expect(modelChatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptData: {
+          system_prompt: 'Be terse.',
+          inference_params: { temperature: 0.1, max_tokens: 64 },
+        },
+      })
+    );
+  });
+
+  it('fills params missing from the saved prompt with the defaults', () => {
+    renderPanel('nvidia/llama-70b', null, { inference_params: { temperature: 0.1 } });
+
+    expect(modelChatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptData: { inference_params: { temperature: 0.1, max_tokens: 512 } },
+      })
+    );
+  });
+
+  it('prefers a saved max_completion_tokens over max_tokens', () => {
+    renderPanel('nvidia/llama-70b', null, {
+      inference_params: { max_completion_tokens: 256, max_tokens: 64 },
+    });
+
+    expect(modelChatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptData: { inference_params: { temperature: 0.7, max_tokens: 256 } },
+      })
     );
   });
 
