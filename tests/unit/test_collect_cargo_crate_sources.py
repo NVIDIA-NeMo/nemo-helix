@@ -53,14 +53,14 @@ def audit_section(packages: list[dict]) -> bytes:
 
 
 PACKAGES = [
-    {"name": "uv", "version": "0.11.26", "source": "local", "root": True},
+    {"name": "uv", "version": "0.13.4", "source": "local", "root": True},
     {"name": "anyhow", "version": "1.0.102", "source": "crates.io"},
     {"name": "serde", "version": "1.0.228", "source": "crates.io"},
 ]
 
 
 def cargo_lock(checksums: dict[str, str]) -> str:
-    entries = ['[[package]]\nname = "uv"\nversion = "0.11.26"\n']
+    entries = ['[[package]]\nname = "uv"\nversion = "0.13.4"\n']
     for name, version in [("anyhow", "1.0.102"), ("serde", "1.0.228")]:
         if name in checksums:
             entries.append(
@@ -123,8 +123,8 @@ def test_collects_each_audited_crates_io_crate_verified_against_cargo_lock(
 
     assert (output / "crates" / "anyhow-1.0.102.crate").read_bytes() == b"anyhow crate"
     assert (output / "crates" / "serde-1.0.228.crate").read_bytes() == b"serde crate"
-    assert not (output / "crates" / "uv-0.11.26.crate").exists()
-    assert (output / "manifests" / "local-cargo-crates.txt").read_text() == f"uv==0.11.26\t\t{tmp_path / 'uv'}\n"
+    assert not (output / "crates" / "uv-0.13.4.crate").exists()
+    assert (output / "manifests" / "local-cargo-crates.txt").read_text() == f"uv==0.13.4\t\t{tmp_path / 'uv'}\n"
     assert (output / "manifests" / "downloaded-cargo-crates.txt").read_text().splitlines() == [
         f"anyhow==1.0.102\tanyhow-1.0.102.crate\t{tmp_path / 'uv'}",
         f"serde==1.0.228\tserde-1.0.228.crate\t{tmp_path / 'uv'}",
