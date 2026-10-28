@@ -944,3 +944,10 @@ describe('isAcceptedFileType', () => {
     expect(isAcceptedFileType('README.md', undefined)).toBe(true);
   });
 });
+
+describe('getFileExtension casing', () => {
+  it('always returns the extension in lowercase so callers can compare against literals', () => {
+    expect(getFileExtension('DATA.CSV')).toBe('.csv');
+    expect(getFileExtension(new File(['x'], 'Notes.MD'))).toBe('.md');
+  });
+});

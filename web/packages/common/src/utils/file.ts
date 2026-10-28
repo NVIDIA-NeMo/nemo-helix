@@ -294,14 +294,15 @@ export function resolveKeyPath(row: Record<string, unknown>, path: string): unkn
 }
 
 /**
- * Returns the extension of a file, including the leading dot.
+ * Returns the extension of a file, including the leading dot, always lowercased so callers
+ * can compare it against literals like `'.csv'`.
  * @param file - A browser File or a path/file name.
- * @returns The extension, or null if there is none.
+ * @returns The lowercased extension, or null if there is none.
  */
 export const getFileExtension = (file: File | string): string | null => {
   const fileName = typeof file === 'string' ? file : file.name;
   if (!fileName.includes('.')) return null;
-  return fileName.substring(fileName.lastIndexOf('.'));
+  return fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
 };
 
 /**
@@ -313,6 +314,6 @@ export const isAcceptedFileType = (
   acceptedFileTypes: readonly string[] | undefined
 ): boolean => {
   if (!acceptedFileTypes || acceptedFileTypes.length === 0) return true;
-  const extension = getFileExtension(file)?.toLowerCase();
+  const extension = getFileExtension(file);
   return !!extension && acceptedFileTypes.some((type) => type.toLowerCase() === extension);
 };
