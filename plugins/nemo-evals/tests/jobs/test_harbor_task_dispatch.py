@@ -626,7 +626,7 @@ def test_a_compose_file_the_pod_cannot_run_fails_the_job_with_the_parsers_messag
     task = write_task(tmp_path / "t", "[environment]\n")
     (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
     (task / "environment" / "docker-compose.yaml").write_text(
-        "services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n"
+        "services:\n  odoo:\n    image: odoo:17\n    expose: ['44772']\n"
     )
     with pytest.raises(ComposeError, match="compose_reserved_port"):
         prepared_compose_services(task, COMPOSE_ENVIRONMENT)

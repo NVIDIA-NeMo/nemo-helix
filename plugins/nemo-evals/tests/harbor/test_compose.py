@@ -1364,9 +1364,9 @@ def test_build_context_must_stay_under_environment(tmp_path: Path, build: str) -
     ("compose", "code", "names"),
     [
         pytest.param(
-            "services:\n  odoo:\n    image: odoo:19\n    expose: ['8069', '18080']\n",
+            "services:\n  odoo:\n    image: odoo:19\n    expose: ['8069', '44772']\n",
             "compose_reserved_port",
-            "odoo.expose[1] = 18080",
+            "odoo.expose[1] = 44772",
             id="reserved-port-names-the-key",
         ),
         *(
@@ -1376,7 +1376,7 @@ def test_build_context_must_stay_under_environment(tmp_path: Path, build: str) -
                 port,
                 id=f"pod-port-{port}",
             )
-            for port in ("44772", "15353", "18080")
+            for port in ("44772", "15353")
         ),
         pytest.param("services:\n  egress:\n    image: redis\n", "compose_reserved_name", "egress", id="reserved-name"),
         # Names are Kubernetes labels, so a compose name with an underscore can't be used. Compose accepts both files.
@@ -1516,3 +1516,23 @@ def test_main_and_a_service_may_use_different_ports(tmp_path: Path) -> None:
 
     assert [port.port for port in task.main.ports] == [8080]
     to_compose_services(task)
+
+
+@pytest.mark.parametrize(
+    ("expose", "egress_api_port"),
+    [
+        ("['8069']", None),
+        # intrastat-meldung's odoo hard-codes 18080, so the egress policy API moves out of its way.
+        ("['18080']", 18081),
+        ("['18080', '18081']", 18082),
+    ],
+)
+def test_a_service_on_18080_moves_the_egress_api(tmp_path: Path, expose: str, egress_api_port: int | None) -> None:
+    spec = _spec(tmp_path, f"services:\n  odoo:\n    image: odoo:19\n    expose: {expose}\n")
+    assert spec.get("egress_api_port") == egress_api_port
+
+
+def test_main_on_18080_moves_the_egress_api(tmp_path: Path) -> None:
+    """`main` shares the pod's network too, so its ports count when choosing where the egress policy API goes."""
+    spec = _spec(tmp_path, "services:\n  main:\n    expose: ['18080']\n  db:\n    image: redis\n")
+    assert spec.get("egress_api_port") == 18081

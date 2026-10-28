@@ -21,7 +21,7 @@ from kubernetes.client import (
     V1Pod,
     V1PodStatus,
 )
-from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
+from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, move_egress_api, service_states
 from nhx_sandbox.harbor_opensandbox_services import ComposeServices, SandboxAgentBundle, parse_compose_services
 
 SERVICES = parse_compose_services(
@@ -140,6 +140,26 @@ def test_pod_gets_volumes_host_aliases_and_main_options() -> None:
     sandbox = pod_spec["containers"][0]
     assert sandbox["volumeMounts"] == [{"name": "nemo-vol-shared", "mountPath": "/shared", "readOnly": False}]
     assert sandbox["securityContext"]["capabilities"] == {"drop": ["NET_ADMIN"], "add": ["SYS_PTRACE"]}
+
+
+def test_the_egress_api_moves_with_its_port_and_probes_after_the_bundle() -> None:
+    pod_spec = stock_pod_spec()
+    # The bundle moves egress into the init containers first, copying its readiness probe as a startup probe.
+    add_agent_bundle(pod_spec, BUNDLE, "IfNotPresent")
+    egress = next(c for c in pod_spec["initContainers"] if c["name"] == "egress")
+    egress["ports"] = [{"name": "egress-api", "containerPort": 18080}]
+    egress["env"] = [{"name": "OPENSANDBOX_EGRESS_HTTP_ADDR", "value": ":18080"}]
+
+    assert move_egress_api(pod_spec, 18081)
+
+    assert egress["env"] == [{"name": "OPENSANDBOX_EGRESS_HTTP_ADDR", "value": ":18081"}]
+    assert egress["ports"] == [{"name": "egress-api", "containerPort": 18081}]
+    assert egress["readinessProbe"]["httpGet"]["port"] == 18081
+    assert egress["startupProbe"]["httpGet"]["port"] == 18081
+
+
+def test_a_sandbox_without_network_policy_has_no_egress_api_to_move() -> None:
+    assert not move_egress_api(stock_pod_spec(egress=False), 18081)
 
 
 def test_sandbox_without_network_policy_has_no_egress_to_move() -> None:

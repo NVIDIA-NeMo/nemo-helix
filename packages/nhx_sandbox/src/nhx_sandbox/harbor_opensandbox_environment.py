@@ -78,6 +78,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
     COMPOSE_MAIN_FEATURE,
+    EGRESS_PORT_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
@@ -483,6 +484,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=[self._as_written(argument) for argument in entrypoint] if entrypoint is not None else None,
+                egress_api_port=self._services.egress_api_port if self._services is not None else None,
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its
@@ -720,6 +722,17 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
                 "change main, or main's command and working directory; upgrade it to the version in "
+                "plugins/_temporary-scaled-evals/opensandbox_ext."
+            )
+        # An older extension would leave the egress API on 18080, so the service that needs that port couldn't start.
+        if (
+            self._services is not None
+            and self._services.egress_api_port is not None
+            and EGRESS_PORT_FEATURE not in features
+        ):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension is too old to move the egress policy API "
+                "off port 18080, which one of this task's services needs; upgrade it to the version in "
                 "plugins/_temporary-scaled-evals/opensandbox_ext."
             )
 

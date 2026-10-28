@@ -425,7 +425,7 @@ async def test_check_passes_a_compose_file_that_only_changes_main(clients, sandb
 @pytest.mark.parametrize(
     ("compose", "expected"),
     [
-        ("services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n", "compose_reserved_port"),
+        ("services:\n  odoo:\n    image: odoo:17\n    expose: ['44772']\n", "compose_reserved_port"),
         ("services:\n  db:\n    image: redis\n    privileged: true\n", "compose_unsupported"),
     ],
 )
