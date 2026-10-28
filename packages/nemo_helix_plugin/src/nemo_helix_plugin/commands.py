@@ -684,31 +684,28 @@ def _add_explain_command(
 
 
 def _load_spec(spec_str: str, spec_file: Path | None) -> dict:
-    """Load the spec dict from ``--spec`` JSON or ``--spec-file`` path.
+    """Load the spec dict from ``--spec-file`` (base) and ``--spec`` JSON (overlay).
 
-    ``--spec-file`` wins when both are provided. Supports YAML or JSON
-    (extension-driven). Raises :class:`typer.Exit` with a helpful error
-    message on malformed content **or** on top-level non-mapping
-    payloads (e.g. ``--spec '[]'``); the downstream
-    :func:`~nemo_helix_plugin._spec_flags.deep_merge` assumes a dict and
-    would otherwise fail with a raw ``TypeError`` after a per-field
-    overlay was applied.
+    ``--spec`` is deep-merged over ``--spec-file`` when both are provided.
+    The file supports YAML or JSON (extension-driven). Raises
+    :class:`typer.Exit` with a helpful error message on malformed content
+    **or** on top-level non-mapping payloads (e.g. ``--spec '[]'``); the
+    downstream :func:`~nemo_helix_plugin._spec_flags.deep_merge` assumes a
+    dict and would otherwise fail with a raw ``TypeError``.
     """
     try:
-        if spec_file is not None:
-            loaded = load_spec_file(spec_file)
-        else:
-            loaded = json.loads(spec_str)
+        base = load_spec_file(spec_file) if spec_file is not None else {}
+        overlay = json.loads(spec_str)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         typer.echo(f"Error: invalid spec — {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    if not isinstance(loaded, dict):
+    if not isinstance(overlay, dict):
         typer.echo(
-            f"Error: invalid spec — expected a JSON/YAML object, got {type(loaded).__name__}.",
+            f"Error: invalid spec — expected a JSON/YAML object, got {type(overlay).__name__}.",
             err=True,
         )
         raise typer.Exit(code=1)
-    return loaded
+    return deep_merge(base, overlay)
 
 
 def _merge_options_inputs(options: list[str], options_file: Path | None) -> dict:
