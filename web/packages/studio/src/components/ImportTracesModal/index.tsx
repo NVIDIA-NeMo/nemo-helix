@@ -373,18 +373,16 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                         <AccordionTrigger chevronPosition="start">
                           Insights options
                         </AccordionTrigger>
-                        <AccordionContent>
-                          <Stack gap="density-xs" className="pt-density-md">
-                            <InsightsModelPairFields
-                              workspace={workspace}
-                              agent={agent}
-                              unresolved={configFailed}
-                              defaultModel={defaultModel}
-                              fastModel={fastModel}
-                              onDefaultModelChange={setDefaultModel}
-                              onFastModelChange={setFastModel}
-                            />
-                          </Stack>
+                        <AccordionContent className="pt-density-md">
+                          <InsightsModelPairFields
+                            workspace={workspace}
+                            agent={agent}
+                            unresolved={configFailed}
+                            defaultModel={defaultModel}
+                            fastModel={fastModel}
+                            onDefaultModelChange={setDefaultModel}
+                            onFastModelChange={setFastModel}
+                          />
                         </AccordionContent>
                       </AccordionItem>
                     </AccordionRoot>
