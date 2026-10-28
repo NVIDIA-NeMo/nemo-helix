@@ -103,3 +103,16 @@ async def test_excluding_agents_keeps_model_and_offline_jobs(seeded_jobs: AsyncJ
 async def test_rejects_a_path_outside_a_declared_namespace(seeded_jobs: AsyncJobsClient):
     with pytest.raises(Exception, match="Unknown filter field"):
         await _list(seeded_jobs, {"platform_spec.steps": "step1"})
+
+
+@pytest.mark.asyncio
+async def test_nested_spec_object_matches_contained_paths(seeded_jobs: AsyncJobsClient):
+    """``{"spec": {"target": {"format": ...}}}`` means "has this path", not "spec equals this object"."""
+    assert await _list(seeded_jobs, {"spec": {"target": {"format": "generic"}}}) == {"agent-job"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("condition", [{"spec": {"$exists": True}}, {"spec": {"$hasKey": "target"}}, {"spec": "x"}])
+async def test_rejects_comparisons_on_the_bare_spec(seeded_jobs: AsyncJobsClient, condition: dict):
+    with pytest.raises(Exception, match="key/value pairs"):
+        await _list(seeded_jobs, condition)

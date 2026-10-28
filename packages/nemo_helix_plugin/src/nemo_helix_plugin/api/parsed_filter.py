@@ -19,6 +19,7 @@ from nemo_helix_plugin.api.filter import (
     FilterOperation,
     FilterOperator,
     LogicalOperation,
+    expand_namespace_filters,
     parse_bracket_filter,
     parse_json_filter,
 )
@@ -285,6 +286,12 @@ def make_filter_dep(
                 bracket_dict = parse_deep_object(name=param_name, params=request.query_params)
                 if bracket_dict:
                     operation = parse_bracket_filter(bracket_dict)
+
+            # Split dict-valued namespace filters (filter[labels][team]=x) into per-key
+            # comparisons (labels.team $eq x) so they mean "contains", not "equals this object",
+            # and reject any other comparison on a bare namespace field.
+            if operation is not None and namespace_fields:
+                operation = expand_namespace_filters(operation, namespace_fields)
 
             # Validate field names
             if operation is not None:
