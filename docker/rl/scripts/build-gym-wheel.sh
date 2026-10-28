@@ -40,8 +40,8 @@ if ! grep -qF '"**/*.yaml"' "${GYM_SRC}/pyproject.toml"; then
     exit 1
 fi
 
-# --no-config: uv would otherwise discover the platform workspace's `required-version` pin
-# (docker/rl/pyproject.workspace.toml, uv <0.10) and refuse to run as this image's uv 0.11.
+# --no-config: keep the platform workspace's uv settings and `required-version` pin
+# (docker/rl/pyproject.workspace.toml) from leaking into this standalone Gym build.
 build_log=$(mktemp)
 if ! uv build --no-config --wheel --out-dir "${OUT_DIR}" "${GYM_SRC}" >"${build_log}" 2>&1; then
     cat "${build_log}" >&2
