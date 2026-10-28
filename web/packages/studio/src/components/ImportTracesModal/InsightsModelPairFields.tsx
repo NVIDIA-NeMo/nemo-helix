@@ -3,13 +3,17 @@
 
 import { WorkspaceModelSelect } from '@nemo/common/src/components/ModelSelectV2';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { Banner, Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
+import { Button, Flex, FormField, Stack, Text } from '@nvidia/foundations-react-core';
 import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
+import { InsightsModelWarning } from '@studio/components/ImportTracesModal/InsightsModelWarning';
+import { isLightningModel } from '@studio/components/ImportTracesModal/modelGuidance';
 import type { FC } from 'react';
 
 export interface InsightsModelPairFieldsProps {
   /** Workspace whose model catalogue the dropdowns search. */
   workspace: string;
+  /** Hide inline warnings when the caller displays a warning above the fields. */
+  hideModelWarnings?: boolean;
   /** The agent whose stored config prefilled the pair, when exactly one is known. */
   agent?: string;
   /** True once the stored config lookup settled without producing a config. */
@@ -20,26 +24,7 @@ export interface InsightsModelPairFieldsProps {
   onFastModelChange: (value: string) => void;
   /** The stored pair a blank picker falls back to; makes each picker clearable. */
   stored?: { defaultModel?: string; fastModel?: string };
-  /** Disable when the warning is rendered separately outside collapsible fields. */
-  showWarning?: boolean;
 }
-
-export const InsightsModelPairWarning: FC<
-  Pick<InsightsModelPairFieldsProps, 'defaultModel' | 'fastModel' | 'stored'>
-> = ({ defaultModel, fastModel, stored }) => {
-  const lightning = [
-    defaultModel || stored?.defaultModel || '',
-    fastModel || stored?.fastModel || '',
-  ].some((model) =>
-    /(?:^|\/)(?:nvidia\/|(?:nvidia[-_]){1,2})nemotron[-_]3[._-]5[-_]lightning[-_]30b$/i.test(model)
-  );
-  return lightning ? (
-    <Banner kind="inline" status="warning">
-      Nemotron 3.5 Lightning 30B has known tool-calling failures in Compass. Try NVIDIA Nemotron 3.5
-      Super VL instead. You can continue with your selected model.
-    </Banner>
-  ) : null;
-};
 
 /**
  * A stored ref is shown even when it names another workspace, so it stays visible rather than
@@ -59,6 +44,7 @@ interface ModelFieldProps {
   value: string;
   onChange: (value: string) => void;
   storedRef?: string | null;
+  hideWarning?: boolean;
 }
 
 const fieldError = (label: string, value: string, storedRef?: string | null) => {
@@ -68,7 +54,14 @@ const fieldError = (label: string, value: string, storedRef?: string | null) => 
     : `The analysis config has no stored ${label.toLowerCase()}. Pick one for this run.`;
 };
 
-const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, storedRef }) => {
+const ModelField: FC<ModelFieldProps> = ({
+  workspace,
+  label,
+  value,
+  onChange,
+  storedRef,
+  hideWarning,
+}) => {
   const clearable = storedRef !== undefined;
   const error = fieldError(label, value, storedRef);
   return (
@@ -91,6 +84,7 @@ const ModelField: FC<ModelFieldProps> = ({ workspace, label, value, onChange, st
           </Button>
         ) : null}
       </Flex>
+      {!hideWarning && isLightningModel(value || storedRef || '') ? <InsightsModelWarning /> : null}
     </FormField>
   );
 };
@@ -108,12 +102,9 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
   onDefaultModelChange,
   onFastModelChange,
   stored,
-  showWarning = true,
+  hideModelWarnings,
 }) => (
   <Stack gap="density-md">
-    {showWarning && (
-      <InsightsModelPairWarning defaultModel={defaultModel} fastModel={fastModel} stored={stored} />
-    )}
     <Text className="text-secondary" kind="body/regular/xs">
       {unresolved
         ? 'The stored model pair could not be read, so both models are required for this run.'
@@ -126,6 +117,7 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
 
     <ModelField
       workspace={workspace}
+      hideWarning={hideModelWarnings}
       label="Default model"
       value={defaultModel}
       onChange={onDefaultModelChange}
@@ -133,6 +125,7 @@ export const InsightsModelPairFields: FC<InsightsModelPairFieldsProps> = ({
     />
     <ModelField
       workspace={workspace}
+      hideWarning={hideModelWarnings}
       label="Fast model"
       value={fastModel}
       onChange={onFastModelChange}

@@ -39,10 +39,9 @@ import {
   readTraceFile,
   type SelectedTraceFile,
 } from '@studio/components/ImportTracesModal/ingestTraceFiles';
-import {
-  InsightsModelPairFields,
-  InsightsModelPairWarning,
-} from '@studio/components/ImportTracesModal/InsightsModelPairFields';
+import { InsightsModelPairFields } from '@studio/components/ImportTracesModal/InsightsModelPairFields';
+import { InsightsModelWarning } from '@studio/components/ImportTracesModal/InsightsModelWarning';
+import { isLightningModel } from '@studio/components/ImportTracesModal/modelGuidance';
 import { SelectedTraceFileTags } from '@studio/components/ImportTracesModal/SelectedTraceFileTags';
 import type { ImportMethod, ImportTraceResult } from '@studio/components/ImportTracesModal/types';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -85,6 +84,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
   const [runInsights, setRunInsights] = useState(true);
   const [defaultModel, setDefaultModel] = useState('');
   const [fastModel, setFastModel] = useState('');
+  const [insightsOptions, setInsightsOptions] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,6 +97,12 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
    */
   const insightsAvailable = !!agent;
   const willRunInsights = insightsAvailable && runInsights;
+
+  const showModelWarning = willRunInsights && [defaultModel, fastModel].some(isLightningModel);
+
+  useEffect(() => {
+    if (open && showModelWarning) setInsightsOptions('settings');
+  }, [open, showModelWarning]);
 
   const { data: analysisConfig, isError: configFailed } = useCompassGetAnalysisConfig(
     workspace,
@@ -117,6 +123,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
   const reset = () => {
     setMethod('skill');
+    setInsightsOptions('');
     setFiles([]);
     setSource(DEFAULT_SPANS_SOURCE);
     setResults(null);
@@ -344,42 +351,47 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                 </FormField>
               )}
 
-              {willRunInsights && (
-                <InsightsModelPairWarning defaultModel={defaultModel} fastModel={fastModel} />
-              )}
-
               {insightsAvailable && (
-                <AccordionRoot>
-                  <AccordionItem value="settings" className="border-b-0">
-                    <AccordionTrigger chevronPosition="start">Advanced Options</AccordionTrigger>
-                    <AccordionContent>
-                      <Stack gap="density-xs" className="pt-density-md">
-                        <Checkbox
-                          checked={runInsights}
-                          onChange={(event) => setRunInsights(event.target.checked)}
-                          slotLabel="Run insights analysis after import"
-                        />
-                        <Text className="text-secondary" kind="body/regular/xs">
-                          Queues a Compass run for <strong>{agent}</strong>, which must already be
-                          enabled with <code>nemo compass analysis enable</code>.
-                        </Text>
+                <Stack gap="density-md">
+                  <Checkbox
+                    checked={runInsights}
+                    onChange={(event) => setRunInsights(event.target.checked)}
+                    slotLabel="Run insights analysis after import"
+                  />
+                  {showModelWarning && <InsightsModelWarning />}
+                  {runInsights && (
+                    <AccordionRoot
+                      collapsible
+                      value={insightsOptions}
+                      onValueChange={setInsightsOptions}
+                    >
+                      <AccordionItem value="settings" className="border-b-0">
+                        <AccordionTrigger chevronPosition="start">
+                          Insights options
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <Stack gap="density-xs" className="pt-density-md">
+                            <Text className="text-secondary" kind="body/regular/xs">
+                              Queues a Compass run for <strong>{agent}</strong>, which must already
+                              be enabled with <code>nemo compass analysis enable</code>.
+                            </Text>
 
-                        {runInsights && (
-                          <InsightsModelPairFields
-                            workspace={workspace}
-                            agent={agent}
-                            unresolved={configFailed}
-                            defaultModel={defaultModel}
-                            fastModel={fastModel}
-                            onDefaultModelChange={setDefaultModel}
-                            onFastModelChange={setFastModel}
-                            showWarning={false}
-                          />
-                        )}
-                      </Stack>
-                    </AccordionContent>
-                  </AccordionItem>
-                </AccordionRoot>
+                            <InsightsModelPairFields
+                              hideModelWarnings
+                              workspace={workspace}
+                              agent={agent}
+                              unresolved={configFailed}
+                              defaultModel={defaultModel}
+                              fastModel={fastModel}
+                              onDefaultModelChange={setDefaultModel}
+                              onFastModelChange={setFastModel}
+                            />
+                          </Stack>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </AccordionRoot>
+                  )}
+                </Stack>
               )}
 
               {results && (

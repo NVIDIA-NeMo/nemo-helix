@@ -1,12 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getCompassGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/compass/compass-analysis-configs';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import { ingestTraceFiles } from '@studio/components/ImportTracesModal/ingestTraceFiles';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { mockAnalysisConfig } from '@studio/mocks/handlers/insights';
-import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import { fireEvent, waitFor } from '@testing-library/react';
@@ -82,40 +80,6 @@ describe('ImportTracesModal', () => {
     expect(screen.getByRole('button', { name: /Import/ })).toBeDisabled();
     expect(screen.queryByText('Coding agent prompt')).not.toBeInTheDocument();
   });
-
-  it.each(['default_model', 'fast_model'] as const)(
-    'shows the %s Lightning warning with Advanced Options collapsed only while analysis is enabled',
-    async (role) => {
-      server.use(
-        http.get(mockApiUrl(getCompassGetAnalysisConfigQueryKey, ':workspace', ':agent'), () =>
-          HttpResponse.json({
-            ...mockAnalysisConfig,
-            [role]: `${workspace}/nvidia_nemotron_3_5_lightning_30b`,
-          })
-        )
-      );
-      const user = userEvent.setup();
-      renderModal();
-
-      await user.click(await screen.findByRole('tab', { name: 'Select files' }));
-      await choose(atifFile);
-
-      expect(await screen.findByText(/known tool-calling failures/)).toBeVisible();
-      expect(screen.getByRole('group')).not.toHaveAttribute('open');
-      expect(screen.getByRole('button', { name: /^Import$/ })).toBeEnabled();
-
-      await user.click(screen.getByText('Advanced Options'));
-      expect(screen.getByRole('group')).toHaveAttribute('open');
-      expect(screen.getAllByText(/known tool-calling failures/)).toHaveLength(1);
-      await user.click(screen.getByRole('checkbox', { name: /Run insights analysis/ }));
-      expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();
-
-      await user.click(screen.getByRole('checkbox', { name: /Run insights analysis/ }));
-      await user.click(screen.getByText('Advanced Options'));
-      expect(screen.getByRole('group')).not.toHaveAttribute('open');
-      expect(screen.getByText(/known tool-calling failures/)).toBeVisible();
-    }
-  );
 
   it('does not offer pasting trace JSON', async () => {
     const user = userEvent.setup();
@@ -204,6 +168,37 @@ describe('ImportTracesModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each(['default_model', 'fast_model'] as const)(
+    'opens options for %s Lightning and keeps its warning visible when collapsed',
+    async (role) => {
+      server.use(
+        http.get('*/analysis-configs/:agent', () =>
+          HttpResponse.json({
+            ...mockAnalysisConfig,
+            [role]: 'default/nvidia_nemotron_3_5_lightning_30b',
+          })
+        )
+      );
+      const user = userEvent.setup();
+      renderModal();
+      await user.click(await screen.findByRole('tab', { name: 'Select files' }));
+      const checkbox = screen.getByRole('checkbox', { name: /Run insights analysis/ });
+      expect(checkbox).toBeChecked();
+      expect(await screen.findByText(/known tool-calling failures/)).toBeVisible();
+      expect(screen.getAllByText(/known tool-calling failures/)).toHaveLength(1);
+      await waitFor(() => expect(screen.getByText('Default model')).toBeVisible());
+      await user.click(screen.getByText('Insights options'));
+      await waitFor(() => expect(screen.queryByText('Default model')).not.toBeVisible());
+      expect(screen.getByText(/known tool-calling failures/)).toBeVisible();
+      expect(checkbox).toBeVisible();
+      await user.click(checkbox);
+      expect(screen.queryByText(/known tool-calling failures/)).not.toBeInTheDocument();
+      expect(screen.queryByText('Insights options')).not.toBeInTheDocument();
+      await user.click(checkbox);
+      await waitFor(() => expect(screen.getByText('Default model')).toBeVisible());
+    }
+  );
+
   it('keeps the stored model pair after the modal is closed and reopened', async () => {
     const user = userEvent.setup();
 
@@ -227,7 +222,7 @@ describe('ImportTracesModal', () => {
     /** The model pair lives behind the accordion, so it has to be opened to be read. */
     const showModels = async () => {
       await user.click(await screen.findByRole('tab', { name: 'Select files' }));
-      await user.click(await screen.findByText('Advanced Options'));
+      await user.click(await screen.findByText('Insights options'));
     };
 
     await showModels();
@@ -254,7 +249,7 @@ describe('ImportTracesModal', () => {
       await user.click(await screen.findByRole('tab', { name: 'Select files' }));
 
       expect(await screen.findByRole('button', { name: 'Upload files' })).toBeInTheDocument();
-      expect(screen.queryByText('Advanced Options')).not.toBeInTheDocument();
+      expect(screen.queryByText('Insights options')).not.toBeInTheDocument();
       expect(
         screen.queryByRole('checkbox', { name: /Run insights analysis/ })
       ).not.toBeInTheDocument();
