@@ -9,6 +9,7 @@ import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { useEvalsCreateEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { EvaluateJobRequest, MetricInline } from '@nemo/sdk/generated/evals/schema';
 import { getGatewayProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
+import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { createEvalConfigFileset } from '@studio/api/evaluation/eval-config-fileset';
 import { evalConfigFilename } from '@studio/components/evaluation/experimentEvalConfig';
 import { buildEvaluationSpec } from '@studio/components/evaluation/ModelEvaluationWizard/buildEvaluationSpec';
@@ -48,10 +49,13 @@ export function useCreateEvaluation(selectedModel: string = '') {
    *  name. Built the same way `useChatCompletion` builds it for an adapter chat:
    *  route on the base model, and let the gateway read the adapter from the
    *  model field. Model targets no longer go near this -- the server resolves
-   *  their ref to a URL the job can reach, which a browser origin is not. */
-  const baseModelGatewayUrl = (modelUrn: string): string => {
-    const base = modelUrn.includes('/') ? modelUrn.split('/').slice(1).join('/') : modelUrn;
-    const [path] = getGatewayProxyGetQueryKey(workspace, base, 'v1/');
+   *  their ref to a URL the job can reach, which a browser origin is not.
+   *
+   *  Taken off the entity, not the page: the gateway finds the base VirtualModel
+   *  by the URL's workspace, and this is the same entity the composite name was
+   *  built from, so the two cannot disagree about which model it is. */
+  const baseModelGatewayUrl = (model: ModelEntity): string => {
+    const [path] = getGatewayProxyGetQueryKey(model.workspace, model.name, 'v1/');
     return `${PLATFORM_BASE_URL}${path}`;
   };
 
@@ -88,7 +92,7 @@ export function useCreateEvaluation(selectedModel: string = '') {
       return undefined;
     }
     return {
-      url: baseModelGatewayUrl(modelUrn),
+      url: baseModelGatewayUrl(parentModel),
       name: toInferenceModelName(parentModel, adapterEntity),
     };
   };

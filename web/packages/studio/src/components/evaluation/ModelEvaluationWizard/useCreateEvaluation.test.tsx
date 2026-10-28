@@ -182,10 +182,10 @@ describe('model evaluation target', () => {
   const submitted = () => {
     const specs: Record<string, unknown>[] = [];
     server.use(
-      http.get('*/apis/models/v2/workspaces/:workspace/models/:name', () =>
+      http.get('*/apis/models/v2/workspaces/:workspace/models/:name', ({ params }) =>
         HttpResponse.json({
           name: 'test-model',
-          workspace: DEFAULT_WORKSPACE,
+          workspace: params.workspace,
           // Deliberately no `model_providers`: an adapter rides whatever serves
           // its base model, so the target must not depend on one being listed.
           adapters: [{ name: 'my-lora', workspace: 'adapter-ws' }],
@@ -213,6 +213,21 @@ describe('model evaluation target', () => {
     // middleware and the run is attributed to the adapter, not to its base.
     expect(specs[0].target).toEqual({
       url: expect.stringContaining(`/workspaces/${DEFAULT_WORKSPACE}/model/test-model/-/v1`),
+      name: 'test-model&adapters/adapter-ws/my-lora',
+    });
+  });
+
+  it("routes on the base model's own workspace, not the page's", async () => {
+    const specs = submitted();
+    renderAt('other-ws/test-model::my-lora');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Run Evaluation' }));
+
+    await vi.waitFor(() => expect(specs).toHaveLength(1));
+    // The gateway finds the base VirtualModel by the URL's workspace, so routing
+    // on the page's would miss it -- or reach a same-named model there instead.
+    expect(specs[0].target).toEqual({
+      url: expect.stringContaining('/workspaces/other-ws/model/test-model/-/v1'),
       name: 'test-model&adapters/adapter-ws/my-lora',
     });
   });
