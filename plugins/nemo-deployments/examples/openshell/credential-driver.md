@@ -35,7 +35,7 @@ The test uses synthetic credentials to check registration, restart recovery, tok
 Use a private directory outside the checkout. It must contain two regular, non-symlink files:
 
 - `registration.key`: at least 32 random bytes. Share this exact key only with the trusted Helix controller. It signs registration tickets; it is not a service credential. Preserve it with the binding database.
-- `helix.token`: a Helix bearer token for the driver identity. That identity needs delegated Secrets access and read access to the relevant Jobs and deployment entities. No secret or workload mutation permission is needed.
+- `helix.token`: a platform-issued service workload access token accepted by the Auth policy-evaluation endpoint. Its identity needs Secrets value access and read access to the relevant Jobs and deployment entities. Ordinary user/access-key tokens are not sufficient. The driver checks the signed creator’s permission explicitly before reading a value; it does not impersonate the creator through request headers.
 
 Keep the source directory mode 0700 and both files mode 0600. The initializer creates private destination files and never prints their contents. It refuses to overwrite an existing signing key with different bytes. Token replacement is allowed and atomic.
 
@@ -48,6 +48,8 @@ export NEMO_DRIVER_HELIX_URL=https://helix.example
 export NEMO_DRIVER_GATEWAY_ID=docker-dev
 export NEMO_DRIVER_CACHE_LIFETIME_SECONDS=300
 ```
+
+`NEMO_DRIVER_GATEWAY_ID` is the registration-ticket audience shared by the Helix controller, driver and binding database. It does not configure OpenShell’s own gateway identity. The example’s separate JWT issuer setting, `openshell.gateway.gateway_jwt.gateway_id`, remains `docker-dev` in `gateway-credentials.toml`.
 
 The URL must be reachable from the driver container. `localhost` inside that container is not your host. The overlay adds `host.docker.internal` for a host endpoint; HTTPS with a trusted certificate is required. For a private CA, mount its PEM bundle read-only through an additional Compose overlay and set `SSL_CERT_FILE` in `credential-driver.environment`.
 

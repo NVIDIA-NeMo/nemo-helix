@@ -638,3 +638,34 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
 def test_reject_provider_secret_env_aliases(secret_env, env_names):
     with pytest.raises(ValueError):
         validate_provider_environment(binding(), workspace="team", secret_env=secret_env, env_names=env_names)
+
+
+@pytest.mark.parametrize("winner", ["active", "other-profile-workspace", "revoked"])
+async def test_concurrent_creation_checks_winner_before_attachment(setup, winner: str) -> None:
+    class AlreadyExists(grpc.RpcError):
+        def code(self) -> grpc.StatusCode:
+            return grpc.StatusCode.ALREADY_EXISTS
+
+    async def concurrent_call(method: str, request: Message) -> Message:
+        response = await setup.gateway.call(method, request)
+        if method == "CreateProvider":
+            assert isinstance(request, pb.CreateProviderRequest)
+            provider = setup.gateway.providers[request.provider.metadata.name]
+            if winner == "other-profile-workspace":
+                provider.profile_workspace = "another-team"
+            elif winner == "revoked":
+                provider.config["nemo-helix/revoked"] = "1"
+            raise AlreadyExists()
+        return response
+
+    setup.provisioner.client = ProviderGatewayClient(setup.gateway.channel(concurrent_call))
+    if winner == "active":
+        assert await setup.provisioner.prepare(binding(), **setup.kwargs) == list(setup.gateway.providers)
+    elif winner == "other-profile-workspace":
+        with pytest.raises(ProviderProvisioningError, match="another binding"):
+            await setup.provisioner.prepare(binding(), **setup.kwargs)
+        assert setup.gateway.providers  # Never delete another binding.
+    else:
+        with pytest.raises(ProviderAccessRevoked):
+            await setup.provisioner.prepare(binding(), **setup.kwargs)
+        assert not setup.gateway.providers

@@ -43,6 +43,7 @@ from nemo_deployments_plugin.backends.openshell.backend import (
     _serve_launch_script,
     _service_name,
 )
+from nemo_deployments_plugin.backends.openshell.config import HelixEgressConfig
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
 from nemo_deployments_plugin.entities import (
@@ -262,11 +263,18 @@ def test_registry_contains_openshell() -> None:
 
 
 @pytest.mark.parametrize("auth_enabled", [True, False])
-async def test_provider_created_before_sandbox_and_attached(openshell_backend, mock_entities, mock_stub, auth_enabled):
+@pytest.mark.parametrize("upstream", ["http://platform:8080", "http://wrong-host:8080", None])
+async def test_provider_created_before_sandbox_and_attached(
+    openshell_backend, mock_entities, mock_stub, auth_enabled, upstream
+):
     config = _config()
     config.gateway_providers = {
         "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
     }
+    config.auth_proxy_sidecar = True
+    config.auth_proxy_sidecar_on_behalf_of = "user-1"
+    if upstream is not None:
+        config.containers[0].env.append(EnvVar(name="NHX_BASE_URL", value=upstream))
     deployment = Deployment(name="srv", workspace="default", deployment_config="cfg1")
     deployment._id = "deployment-1"
     mock_entities.get.side_effect = [config, deployment]
@@ -277,9 +285,7 @@ async def test_provider_created_before_sandbox_and_attached(openshell_backend, m
         credential_refresh_verified=True,
         profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
     )
-    from nemo_deployments_plugin.backends.openshell.config import HelixEgressConfig
-
-    openshell_backend._executor_config.platform_egress = HelixEgressConfig()
+    openshell_backend._executor_config.platform_egress = HelixEgressConfig(host="platform")
     provisioner = AsyncMock()
     provisioner.prepare.return_value = ["owned-provider"]
     with (
@@ -297,6 +303,12 @@ async def test_provider_created_before_sandbox_and_attached(openshell_backend, m
             backend_config={},
             auth_context=AuthContext(principal_id="user-1") if auth_enabled else None,
         )
+    if upstream != "http://platform:8080":
+        assert result.status == "FAILED"
+        assert "upstream" in result.status_message
+        provisioner.prepare.assert_not_awaited()
+        mock_stub.CreateSandbox.assert_not_called()
+        return
     assert result.status == "STARTING"
     assert provisioner.prepare.await_args.kwargs["auth_enabled"] is auth_enabled
     request = mock_stub.CreateSandbox.call_args.args[0]
@@ -1732,3 +1744,39 @@ async def test_provider_channel_closes_when_operation_fails(openshell_backend, t
     connect.assert_called_once_with(openshell_backend._executor_config.grpc_target())
     channel.__aexit__.assert_awaited_once()
     assert channel.__aexit__.await_args.args[0] is RuntimeError
+
+
+@pytest.mark.parametrize("delete_fails", [False, True])
+async def test_changed_proxy_upstream_cleans_up_before_reporting_failure(
+    openshell_backend, mock_stub, mock_entities, delete_fails
+):
+    config = _config()
+    config.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
+    }
+    config.auth_proxy_sidecar = True
+    config.containers[0].env.append(EnvVar(name="NHX_BASE_URL", value="http://wrong-host:8080"))
+    mock_entities.get.return_value = config
+    mock_stub.ExecSandbox.return_value = _exec_events(1)
+    openshell_backend._executor_config.platform_egress = HelixEgressConfig(host="platform")
+    openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file=Path("/run/key"),
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    if delete_fails:
+        mock_stub.DeleteSandbox.side_effect = FakeRpcError(grpc.StatusCode.UNAVAILABLE, "unreachable")
+    provisioner = AsyncMock()
+    with patch.object(
+        openshell_backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)
+    ):
+        update = await openshell_backend._advance_provisioning(
+            _sandbox(pb.SANDBOX_PHASE_READY).sandbox, "sandbox-1", "default"
+        )
+    assert update.status == "FAILED"
+    assert "upstream" in update.status_message
+    mock_stub.DeleteSandbox.assert_called_once()
+    if delete_fails:
+        provisioner.cleanup.assert_not_awaited()
+    else:
+        provisioner.cleanup.assert_awaited_once_with(workload_workspace="default", workload_id="sandbox-1")

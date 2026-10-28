@@ -17,6 +17,8 @@ from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.iam.client import AsyncIAMClient
+from nemo_helix_plugin.iam.types import AuthzRequest
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.openshell.types import GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -81,6 +83,24 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
     def _require_auth_mode(self, principal_id: str | None) -> None:
         if self.auth_enabled != (principal_id is not None):
             raise RegistrationDenied("Binding authentication mode does not match this driver.")
+
+    async def _require_creator_access(self, principal_id: str | None, workspace: str) -> None:
+        if principal_id is None:
+            return  # Explicit auth-disabled bindings do not query the PDP.
+        if principal_id.startswith("service:"):
+            raise RegistrationDenied("A binding requires a user or service-account creator.")
+        response = await AsyncIAMClient.from_client(self.secrets_client).evaluate_authorization(
+            entrypoint="has_permissions",
+            body=AuthzRequest(
+                input={
+                    "principal_id": principal_id,
+                    "workspace": workspace,
+                    "permissions": ["secrets.read"],
+                }
+            ),
+        )
+        if response.data().result.get("allowed") is not True:
+            raise RegistrationDenied("The workload creator cannot use this secret.")
 
     async def _require_active_workload(self, workload: GatewayWorkload | None) -> None:
         if workload is None:
@@ -199,17 +219,16 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
             for item, binding in zip(requests, bindings, strict=True):
                 # A slow later read must not extend the lease of an earlier
                 # value in the batch. Start its lifetime before remote access.
-                deadlines.append(int(self.clock()) + self.cache_lifetime)
-                # Re-evaluate the creator's current Secrets permission on every
-                # resolution, rather than using the driver's authority alone.
-                scoped_secrets = self.secrets_client
-                if binding.claims.principal_id is not None:
-                    scoped_secrets = scoped_secrets.with_headers(
-                        {"X-NHX-Principal-On-Behalf-Of": binding.claims.principal_id}
-                    )
+                deadline = int(self.clock()) + self.cache_lifetime
+                if binding.claims.workload is None:
+                    deadline = min(deadline, binding.claims.binding_expires_at)
+                deadlines.append(deadline)
+                # The bearer token authenticates the driver. The signed creator
+                # is checked explicitly by the PDP, never through identity headers.
                 async with asyncio.timeout(15):
                     await self._require_active_workload(binding.claims.workload)
-                    response = await scoped_secrets.access_secret(
+                    await self._require_creator_access(binding.claims.principal_id, binding.claims.secret_workspace)
+                    response = await self.secrets_client.access_secret(
                         workspace=binding.claims.secret_workspace,
                         name=binding.claims.secret_name,
                     )
@@ -222,8 +241,6 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 self.registry.resolve(binding.owner, binding.handle)
                 async with asyncio.timeout(15):
                     await self._require_active_workload(binding.claims.workload)
-                if binding.claims.workload is None:
-                    deadline = min(deadline, binding.claims.binding_expires_at)
                 result["expiration_time"] = datetime.fromtimestamp(deadline, tz=timezone.utc).isoformat()
             if any(deadline <= int(self.clock()) for deadline in deadlines):
                 raise RegistrationDenied("Credential resolution exceeded its cache lifetime.")

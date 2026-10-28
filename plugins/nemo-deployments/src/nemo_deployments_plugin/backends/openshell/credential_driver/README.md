@@ -12,7 +12,7 @@ For environment bindings, controller configuration, renewal and feature limits, 
 1. Trusted Helix provisioning authorizes the workload and injection profile. `RegistrationTickets.issue` checks the creator's secret-access permission and secret metadata without fetching a value. With auth disabled, it checks existence only.
 2. The controller sends the signed ticket as the credential value in `CreateProvider` or `UpdateProvider`. Tickets never enter the sandbox environment or persisted user-visible workload specification.
 3. OpenShell calls `StoreCredential` with its provider identity. The driver verifies the ticket, persists the binding metadata and returns an opaque handle.
-4. `ResolveCredentials` validates provider ownership, auth mode, revocation and workload identity. It reads the secret as the signed creator, then rechecks workload state and local revocation before returning the value and expiry. The driver retains no value cache.
+4. `ResolveCredentials` validates provider ownership, auth mode, revocation and workload identity. It explicitly checks the signed creator's current `secrets.read` permission through Auth, reads the secret using the driver's identity, then rechecks workload state and local revocation before returning the value and expiry. The driver retains no value cache.
 5. `DeleteCredential` tombstones the binding without deleting the NeMo secret.
 
 Registration tickets expire within five minutes. Standalone bindings expire within one hour; workload bindings instead require the owning job attempt/step or deployment to remain active. Resolution rejects completed, cancelled, paused, deleted or replaced workloads. Returned credentials have a configurable lifetime of 300 seconds by default, capped by binding expiry for standalone bindings.
@@ -44,7 +44,7 @@ For an auth-disabled Helix installation, replace `--helix-token-file` with `--au
 
 The registration key must contain at least 32 random bytes and be shared only with trusted provisioning. Key/token files must be regular, non-symlink files owned by the driver user with no group/other permissions. The driver limits credential files to 64 KiB. State and socket directories require mode 0700; socket and database use 0600. Run the gateway and driver with the same trusted UID. These mounts must not be visible inside sandboxes.
 
-The driver rereads its bearer-token file for each NeMo call. Its identity needs delegated Secrets access and read access to the relevant Jobs and deployment entities, without mutation permissions. HTTPS is required by default; development HTTP requires `--allow-insecure-localhost` and a loopback URL.
+The driver rereads its bearer-token file for each NeMo call. Use a platform-issued service workload access token accepted by the Auth policy-evaluation endpoint. Its identity needs Secrets value access and read access to the relevant Jobs and deployment entities. Ordinary user/access-key tokens cannot perform the policy check and are rejected; the driver never impersonates a creator using identity headers. HTTPS is required by default; development HTTP requires `--allow-insecure-localhost` and a loopback URL.
 
 Configure OpenShell to connect to the running driver:
 

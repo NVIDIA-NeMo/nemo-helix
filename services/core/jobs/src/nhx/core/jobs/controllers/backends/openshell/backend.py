@@ -427,7 +427,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                     step_spec.gateway_providers,
                     workspace=step.workspace,
                     secret_env=secret_env,
-                    env_names={item.name for item in step_spec.environment or []},
+                    env_names=set(env),
                 )
                 policy = restricted_platform_policy(
                     self._policy,

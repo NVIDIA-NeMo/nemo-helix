@@ -220,13 +220,15 @@ class TestSchedule:
         assert (principal.id if principal else None) == ("user-1" if auth_enabled else None)
 
     @pytest.mark.parametrize("auth_enabled", [True, False])
+    @pytest.mark.parametrize("profile_env_collision", [True, False])
     def test_provider_attachment_uses_restricted_policy(
-        self, mock_nemo_client, mock_platform_config, test_step_pending, auth_enabled
+        self, mock_nemo_client, mock_platform_config, test_step_pending, auth_enabled, profile_env_collision
     ):
         backend = _backend(
             mock_nemo_client,
             mock_platform_config,
             launcher_tool_path="/app/bin/custom-jobs-launcher",
+            env={"API_TOKEN": "plaintext-collision"} if profile_env_collision else {},
             gateway_credentials={
                 "gateway_id": "gateway",
                 "registration_key_file": "/run/key",
@@ -242,6 +244,11 @@ class TestSchedule:
         backend._prepare_providers = AsyncMock(return_value=["owned-provider"])
         with patch.object(backend_module, "platform_auth_enabled", return_value=auth_enabled):
             result = backend.schedule(step.step_spec.executor, step)
+        if profile_env_collision:
+            assert result.status == HelixJobStatus.ERROR
+            backend._prepare_providers.assert_not_awaited()
+            backend._client.create.assert_not_called()
+            return
         assert result.status == HelixJobStatus.PENDING
         spec = _create_request(backend).spec
         assert list(spec.providers) == ["owned-provider"]

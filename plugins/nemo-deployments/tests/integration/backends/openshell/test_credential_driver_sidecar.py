@@ -76,7 +76,9 @@ assert read_private_file(Path('/run/nemo-driver-credentials/private/helix.token'
 """
 
 
-def test_compose_sidecar_registration_crash_recovery_and_token_rotation(tmp_path: Path) -> None:
+def test_compose_sidecar_registration_crash_recovery_and_token_rotation(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     image = os.environ.get("NEMO_HELIX_IMAGE")
     assert image, "Set NEMO_HELIX_IMAGE to the API image built from this checkout."
     credentials = tmp_path / "mounted-credentials"
@@ -111,63 +113,63 @@ def test_compose_sidecar_registration_crash_recovery_and_token_rotation(tmp_path
             pytest.fail(f"Compose {args[0]} failed ({result.returncode}):\n{result.stdout}\n{result.stderr}")
         return result
 
-    try:
-        run("up", "-d", "--wait", "--wait-timeout", "90", "credential-driver")
-        stored = json.loads(run("exec", "-T", "credential-driver", "python", "-", script=REGISTER).stdout)
-        before = json.loads(run("ps", "--format", "json", "credential-driver").stdout)["ID"]
+    # A teardown failure is reported separately from the original test failure.
+    # Only this disposable project's synthetic registration history is removed.
+    request.addfinalizer(lambda: run("down", "--volumes", "--remove-orphans"))
+    run("up", "-d", "--wait", "--wait-timeout", "90", "credential-driver")
+    stored = json.loads(run("exec", "-T", "credential-driver", "python", "-", script=REGISTER).stdout)
+    before = run("ps", "-q", "credential-driver").stdout.strip()
+    assert before and len(before.splitlines()) == 1, "Expected one credential-driver container."
 
-        def restart_count() -> int:
-            result = subprocess.run(
-                ["docker", "inspect", "--format", "{{.RestartCount}}", before],
-                env=env,
-                text=True,
-                capture_output=True,
-                check=True,
-                timeout=10,
-            )
-            return int(result.stdout)
+    def restart_count() -> int:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.RestartCount}}", before],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        return int(result.stdout)
 
-        restarts = restart_count()
-        # Compose's init process is PID 1. Kill its driver child to simulate a
-        # crash without Docker treating it as an explicit operator stop.
-        run(
+    restarts = restart_count()
+    # Compose's init process is PID 1. Kill its driver child to simulate a
+    # crash without Docker treating it as an explicit operator stop.
+    run(
+        "exec",
+        "-T",
+        "credential-driver",
+        "python",
+        "-c",
+        "import os, signal; from pathlib import Path; "
+        f"needle = {MODULE + '.server'!r}.encode(); "
+        "pids = [int(p.parent.name) for p in Path('/proc').glob('[0-9]*/cmdline') "
+        "if p.parent.name != '1' and needle in p.read_bytes().split(bytes([0]))]; "
+        "assert len(pids) == 1, pids; os.kill(pids[0], signal.SIGKILL)",
+        check=False,  # The crash may terminate this exec session too; verify RestartCount below.
+    )
+    deadline = time.monotonic() + 60
+    while True:
+        ready = run(
             "exec",
             "-T",
             "credential-driver",
             "python",
-            "-c",
-            "import os, signal; from pathlib import Path; "
-            f"needle = {MODULE + '.server'!r}.encode(); "
-            "pids = [int(p.parent.name) for p in Path('/proc').glob('[0-9]*/cmdline') "
-            "if p.parent.name != '1' and needle in p.read_bytes().split(bytes([0]))]; "
-            "assert len(pids) == 1, pids; os.kill(pids[0], signal.SIGKILL)",
-            check=False,  # The crash may terminate this exec session too; verify RestartCount below.
+            "-m",
+            f"{MODULE}.sidecar",
+            "healthcheck",
+            "--socket-path",
+            "/run/nemo-credential-driver/private/driver.sock",
+            check=False,
         )
-        deadline = time.monotonic() + 60
-        while True:
-            ready = run(
-                "exec",
-                "-T",
-                "credential-driver",
-                "python",
-                "-m",
-                f"{MODULE}.sidecar",
-                "healthcheck",
-                "--socket-path",
-                "/run/nemo-credential-driver/private/driver.sock",
-                check=False,
-            )
-            if ready.returncode == 0 and restart_count() > restarts:
-                break
-            if time.monotonic() > deadline:
-                pytest.fail(f"Sidecar did not recover after SIGKILL: {ready.stderr}")
-            time.sleep(0.5)
-        assert json.loads(run("ps", "--format", "json", "credential-driver").stdout)["ID"] == before
-        (credentials / "helix.token").write_bytes(b"synthetic-rotated-token")
-        run("run", "--rm", "--no-deps", "credential-init")
-        run("exec", "-T", "credential-driver", "python", "-c", VERIFY, json.dumps(stored))
-        run("up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "90", "credential-driver")
-        run("exec", "-T", "credential-driver", "python", "-c", VERIFY, json.dumps(stored))
-    finally:
-        # Only this disposable project's synthetic registration history is removed.
-        run("down", "--volumes", "--remove-orphans")
+        if ready.returncode == 0 and restart_count() > restarts:
+            break
+        if time.monotonic() > deadline:
+            pytest.fail(f"Sidecar did not recover after SIGKILL: {ready.stderr}")
+        time.sleep(0.5)
+    assert run("ps", "-q", "credential-driver").stdout.strip() == before
+    (credentials / "helix.token").write_bytes(b"synthetic-rotated-token")
+    run("run", "--rm", "--no-deps", "credential-init")
+    run("exec", "-T", "credential-driver", "python", "-c", VERIFY, json.dumps(stored))
+    run("up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "90", "credential-driver")
+    run("exec", "-T", "credential-driver", "python", "-c", VERIFY, json.dumps(stored))
