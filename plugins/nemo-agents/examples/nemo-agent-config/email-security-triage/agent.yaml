@@ -31,7 +31,7 @@
 #     --agent-config plugins/nemo-agents/examples/nemo-agent-config/email-security-triage/agent.yaml
 #   nemo agents deploy --agent email-security-triage
 #
-# NOTE: web/packages/studio/public/sample-agents/email-security-triage/agent.yml
+# NOTE: web/packages/studio/public/sample-agents/email-security-triage/agent.yaml
 # is an independent copy of this config. The two differ only in this paragraph;
 # keep everything below it identical, by hand.
 #

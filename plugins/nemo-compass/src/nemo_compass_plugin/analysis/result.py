@@ -4,7 +4,7 @@
 """Platform persistence contract for Compass's reconciled insights.
 
 The adapter translates package Insights into this change-set after validating
-their storage IDs. Both the CLI and the Fabric execute extension persist it
+their storage IDs. Both the CLI and the Compass post-run action persist it
 through the same backend.
 """
 

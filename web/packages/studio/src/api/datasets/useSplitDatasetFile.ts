@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { getFileExtension } from '@nemo/common/src/utils/file';
 import { isDefined } from '@nemo/common/src/utils/isDefined';
 import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
-import { getFileExtension, parseFileContent } from '@studio/util/files';
+import { parseFileContent } from '@studio/util/files';
 import { splitRandomDistribution, splitSequentialDistribution } from '@studio/util/list';
 import { useMutation, UseMutationOptions } from '@tanstack/react-query';
 import { useCallback } from 'react';

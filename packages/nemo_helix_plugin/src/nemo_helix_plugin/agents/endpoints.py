@@ -41,6 +41,7 @@ from nemo_helix_plugin.agents.types import (
     ListEnvironmentResourcesQueryParams,
     ListSessionsQueryParams,
     LogLine,
+    PostRunActionInfo,
     RegisterAgentRequest,
     SampleAgentStreamEvent,
 )
@@ -57,11 +58,17 @@ _COMPUTE_SPECS = f"{_PREFIX}/compute-specs"
 _EXECUTE_JOBS = f"{_PREFIX}/jobs/execute"
 _JOBS = f"{_PREFIX}/jobs/{{collection}}"
 _SAMPLE_AGENT = "/apis/agents/v2/sample-agent"
+_POST_RUN_ACTIONS = "/apis/agents/v2/post-run-actions"
 
 
 @post(_SAMPLE_AGENT)
 @abstractmethod
 def create_sample_agent(*, body: CreateSampleAgentRequest) -> Stream[SampleAgentStreamEvent]: ...
+
+
+@get(_POST_RUN_ACTIONS)
+@abstractmethod
+def list_post_run_actions() -> list[PostRunActionInfo]: ...
 
 
 # ---------------------------------------------------------------------------

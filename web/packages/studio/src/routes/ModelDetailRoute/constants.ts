@@ -5,6 +5,7 @@
 export enum ModelDetailTab {
   Details = 'details',
   Chat = 'chat',
+  Evaluations = 'evaluations',
   Files = 'files',
   Deployment = 'deployment',
   Training = 'training',

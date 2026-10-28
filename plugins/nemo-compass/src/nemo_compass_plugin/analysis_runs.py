@@ -47,7 +47,7 @@ from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-COMPASS_ANALYSIS_EXTENSION_KIND = "insights.analysis"
+COMPASS_ANALYSIS_ACTION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "compass-run-"
 
 router = APIRouter(tags=["Compass Analysis Runs"])
@@ -322,7 +322,7 @@ def build_execute_agent_job_config(
     request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
 ) -> JsonObject:
     """Translate a high-level Compass request into a generic execute-agent job config."""
-    extension_config: JsonObject = {
+    action_config: JsonObject = {
         "agent": request.agent,
         "workspace": workspace,
     }
@@ -330,9 +330,9 @@ def build_execute_agent_job_config(
         {
             "agent": _inline_compass(request, workspace=workspace, base_url=base_url),
             "input": _analysis_prompt(request.agent),
-            "extension": {
-                "kind": COMPASS_ANALYSIS_EXTENSION_KIND,
-                "config": extension_config,
+            "post_run_action": {
+                "kind": COMPASS_ANALYSIS_ACTION_KIND,
+                "config": action_config,
             },
         }
     )

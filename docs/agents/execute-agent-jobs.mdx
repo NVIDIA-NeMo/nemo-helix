@@ -112,12 +112,13 @@ print(job["name"], job["status"])
 | `timeout_seconds` | No | Maximum time to wait for a result. Defaults to 3600 (one hour). |
 | `auto_telemetry` | No | Automatically configures supported ATIF telemetry to export to Intake. Defaults to `true`. |
 | `image` | No | The [container image](#execution-image) to run the agent in. Defaults to the platform's task image. |
-| `extension` | No | A trusted [execute extension](#execute-extensions) contributed by an installed plugin. |
+| `post_run_action` | No | A [post-run action](#post-run-actions) contributed by an installed plugin. Defaults to `agents.noop`. |
 
 The CLI generates one flag per spec field (`--agent`, `--input`,
 `--environment`, `--workdir.base-workdir`, `--timeout-seconds`,
-`--auto-telemetry`, `--image`). Fields that do not reduce to a single flag — an
-inline agent, an inline environment, `context`, `workdir.artifact_mounts` — are supplied
+`--auto-telemetry`, `--image`, `--post-run-action.kind`). Fields that do not
+reduce to a single flag — an inline agent, an inline environment, `context`,
+`workdir.artifact_mounts`, `post_run_action.config` — are supplied
 with `--spec` (a JSON string) or `--spec-file` (a YAML or JSON file). Individual
 flags override values from the supplied spec.
 
@@ -245,6 +246,9 @@ Results download as gzipped tarballs of a directory, or as a single JSON file.
 | `fabric_run_result` | On a completed run | Fabric's run record: status, response, runtime and invocation IDs. |
 | `fabric_error` | When the invocation itself raised | The error type, message, and whether it was a timeout. |
 
+A [post-run action](#post-run-actions) can save results of its own alongside
+these.
+
 <Note>
 
 `output_workdir` and `output_artifacts` are saved on failure too, on a
@@ -258,7 +262,8 @@ downloads.
 
 An agent that reads and writes files needs somewhere to do it. `workdir` builds
 that directory from the [Files service](/documentation/get-started/core-concepts)
-before the agent starts.
+before the agent starts. Stored-agent skills come from the agent's ethos
+fileset, staged at the Fabric base before this directory is filled in.
 
 | Field | Description |
 | --- | --- |
@@ -374,19 +379,84 @@ The agent receives:
 `context` is stored on the job spec in plaintext. Use it for parameters, not
 secrets; bind secrets through an [environment](#environments-secrets-and-compute).
 
-<a id="execute-extensions"></a>
+<a id="post-run-actions"></a>
 
-## Execute Extensions
+## Post-Run Actions
 
-A plugin can register a trusted extension that runs after a successful
-invocation and turns the agent's output into something the plugin owns — for
-example, the Compass plugin's analysis runs attach an extension that saves an
-`analysis-report` result and files the insights it found.
+A post-run action is plugin-owned work that turns the agent's output into
+something the plugin owns — for example, the Compass plugin's analysis runs
+attach an action that saves an `analysis-report` result and files the insights
+it found.
 
-Extensions are named by `extension.kind` and configured by
-`extension.config`. Only kinds registered by an installed plugin are accepted;
-an unknown kind fails the create request. If you are using a feature built on
-execute jobs, its own commands set this for you.
+- **When it runs.** After the agent invocation succeeds, inside the job's
+  execute step. It does not run when the invocation fails, and it never runs
+  for `nemo agents invoke` or a deployed agent; only execute jobs have one.
+- **Failure.** If the action raises, the job fails, even though the agent
+  itself succeeded. `fabric_run_result` and the working-directory results are
+  saved before the action starts, so they are still available.
+- **Results.** Anything the action saves appears in the job's results next to
+  `fabric_run_result`.
+
+An action is named by `post_run_action.kind` and configured by
+`post_run_action.config`. Omitting `post_run_action` runs `agents.noop`, which
+does nothing. Only kinds installed on the platform are accepted, and the config
+is validated against the action's own schema; an unknown kind or a malformed
+config fails the create request rather than the run. The plugin that provides
+the action must also be installed in the job's [execution image](#execution-image);
+the job checks this when it starts, and fails before invoking the agent if the
+action is missing or that version of it rejects the config. If you are using a feature built on execute jobs, its own
+commands set this for you.
+
+List the actions installed on the platform:
+
+```bash
+nemo agents post-run-actions list
+```
+
+The same list is available from `GET /apis/agents/v2/post-run-actions`, which
+returns each action's `kind`, `title`, and `description`.
+
+### Write a Post-Run Action
+
+A plugin contributes an action by registering a class under the
+`nemo.agents.post_run_actions` entry-point group. The entry-point name is the
+action's `kind`:
+
+```toml
+[project.entry-points."nemo.agents.post_run_actions"]
+"my-plugin.publish" = "my_plugin.actions:PublishAction"
+```
+
+The class implements the `PostRunAction` protocol from
+`nemo_helix_plugin.agents.post_run_actions`, which does not depend on the
+Agents plugin:
+
+```python
+from typing import ClassVar
+
+from nemo_helix_plugin.agents.post_run_actions import PostRunActionContext
+from pydantic import BaseModel, ConfigDict
+
+
+class PublishActionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    destination: str
+
+
+class PublishAction:
+    title: ClassVar[str] = "Publish"
+    description: ClassVar[str] = "Publish the agent's answer to a destination."
+    config_model: ClassVar[type[PublishActionConfig]] = PublishActionConfig
+
+    def after_invoke(self, context: PostRunActionContext) -> None:
+        config = self.config_model.model_validate(context.config)
+        ...
+```
+
+`PostRunActionContext` carries the job context (`ctx`, for saving results), the
+action's `config`, the `agent_name`, the resolved `agent_config` the job ran (as
+snapshotted when the job was created), and Fabric's `fabric_result`.
 
 ## Requirements and Limits
 

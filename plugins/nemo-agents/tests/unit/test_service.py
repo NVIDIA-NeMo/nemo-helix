@@ -48,3 +48,7 @@ def test_session_routes_are_mounted() -> None:
     assert routes["/apis/agents/v2/workspaces/{workspace}/sessions"] == {"GET", "POST"}
     assert routes["/apis/agents/v2/workspaces/{workspace}/sessions/{name}"] == {"DELETE", "GET"}
     assert routes["/apis/agents/v2/workspaces/{workspace}/sessions/{name}/close"] == {"POST"}
+
+
+def test_post_run_actions_route_is_mounted_outside_any_workspace() -> None:
+    assert _mounted_routes()["/apis/agents/v2/post-run-actions"] == {"GET"}
