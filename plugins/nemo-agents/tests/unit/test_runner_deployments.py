@@ -1816,6 +1816,26 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_leaves_timed_out_teardown_failed() -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        return_value=Deployment(
+            name="hello-dep",
+            workspace="default",
+            deployment_config="hello-dep",
+            status="FAILED",
+            error_details={"reason": "deleting_timeout"},
+        )
+    )
+    backend._entities = entities
+
+    assert not await backend.delete_deployment("default", "hello-dep")
+    entities.update.assert_not_awaited()
+    entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_delete_returns_false_when_deployment_still_present() -> None:
     backend = _backend()
     entities = AsyncMock()

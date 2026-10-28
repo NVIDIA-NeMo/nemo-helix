@@ -601,6 +601,27 @@ async def test_delete_timeout_failure_is_not_re_evaluated(
 
 
 @pytest.mark.asyncio
+async def test_delete_reopened_after_timeout_retries_backend(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS + 120)
+    dep.status_history.append(StatusEvent(status="FAILED", message="stuck", timestamp=NOW.isoformat()))
+    # A user delete reopens a timed-out delete by setting status without a history event.
+    dep.status = "DELETING"
+    dep.error_details = {"reason": "deleting_timeout"}
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status_history[-1].status == "DELETING"
+    assert dep.status_history[-1].timestamp == NOW.isoformat()
+    assert dep.error_details is None
+    mock_entities.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_delete_timeout_before_boundary_stays_deleting(
     patch_reconciler_now,
     mock_entities: AsyncMock,

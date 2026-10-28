@@ -432,6 +432,10 @@ class Deployment(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT):
         self._auth_context = auth_context
         return self
 
+    def delete_timed_out(self) -> bool:
+        """True when the reconciler gave up deleting; it stays FAILED until a delete is requested again."""
+        return self.status == "FAILED" and (self.error_details or {}).get("reason") == "deleting_timeout"
+
 
 def _default_volume_access_modes() -> list[AccessMode]:
     return ["ReadWriteOnce"]

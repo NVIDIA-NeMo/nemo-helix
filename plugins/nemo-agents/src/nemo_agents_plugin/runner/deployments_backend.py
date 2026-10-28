@@ -955,12 +955,15 @@ class DeploymentsRunnerBackend(RunnerBackend):
         Returns ``True`` when the Deployment is gone and DeploymentConfig has
         been deleted (or was already absent) — the agents controller may then
         remove ``AgentDeployment``. Returns ``False`` when the Deployment is
-        still present so a later reconcile can finish cleanup.
+        still present so a later reconcile can finish cleanup. A timed-out
+        delete is left FAILED; only a new user delete reopens it.
         """
         entities = self._entity_client()
         deployment_present = False
         try:
             deployment = await entities.get(Deployment, name=name, workspace=workspace)
+            if deployment.delete_timed_out():
+                return False
             if deployment.status != "DELETING":
                 deployment.status = "DELETING"
                 deployment.desired_state = "STOPPED"
