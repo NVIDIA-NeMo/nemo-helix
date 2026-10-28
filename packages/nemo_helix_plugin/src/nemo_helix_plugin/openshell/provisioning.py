@@ -32,7 +32,6 @@ from nemo_helix_plugin.openshell.types import (
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
-from openshell._proto.openshell_pb2_grpc import OpenShellStub
 from pydantic import JsonValue
 
 _OWNER = "nemo-helix/provider-owner"
@@ -75,8 +74,8 @@ def _rpc_code(error: grpc.RpcError) -> grpc.StatusCode | None:
 class ProviderProvisioner:
     """Idempotent provisioning through the gateway's supported provider RPCs.
 
-    Uses the SDK-generated synchronous stub on worker threads, sharing the
-    caller's authenticated channel and RPC timeout. The caller owns the channel.
+    Uses the caller's async gRPC channel and RPC timeout. The caller creates
+    and closes the channel on the event loop running these operations.
 
     Ownership labels and a binding fingerprint prevent name collisions from
     borrowing another workload's provider. Cleanup discovers providers from
@@ -87,7 +86,7 @@ class ProviderProvisioner:
         self,
         config: GatewayCredentialConfig,
         workspace: str,
-        stub: OpenShellStub,
+        channel: grpc.aio.Channel,
         *,
         timeout: float = 30.0,
         tickets: RegistrationTickets | None = None,
@@ -95,7 +94,7 @@ class ProviderProvisioner:
     ) -> None:
         self.config = config
         self.workspace = workspace
-        self.client = ProviderGatewayClient(stub, timeout=timeout)
+        self.client = ProviderGatewayClient(channel, timeout=timeout)
         self.clock = clock
         self.tickets = tickets or RegistrationTickets(
             read_registration_key(config.registration_key_file), config.gateway_id
