@@ -233,8 +233,11 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
         if s.shm_size is not None
     )
 
-    # main is the stock sandbox container; it only gains mounts and the one allowed capability.
+    # main is the stock sandbox container; it only gains mounts, the one allowed capability and its working directory.
     sandbox = containers[0]
+    if services.main.working_dir is not None:
+        # The stock server sets none, so the image's WORKDIR applied; Compose's `working_dir` replaces it.
+        sandbox["workingDir"] = services.main.working_dir
     if services.main.volume_mounts:
         sandbox.setdefault("volumeMounts", []).extend(_mounts(services.main.volume_mounts))
     if services.main.add_capabilities:

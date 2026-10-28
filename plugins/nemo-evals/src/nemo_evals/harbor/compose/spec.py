@@ -38,8 +38,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
 
     The input comes from :func:`parse_compose` and still speaks Compose: services by name, ``entrypoint`` and
     ``command``, Compose healthcheck timings. OpenSandbox can't run Compose, so each service becomes an extra
-    container in the sandbox pod. The task Job passes the result to ``NemoOpenSandboxEnvironment`` as
-    ``compose_services``, and submit checks it early through :func:`check_compose_task`.
+    container in the sandbox pod. A file that only changes ``main`` gives a spec with no services. The task Job
+    passes the result to ``NemoOpenSandboxEnvironment`` as ``compose_services``, and submit checks it early through
+    :func:`check_compose_task`.
 
     Args:
         task: The parsed compose file.
@@ -47,15 +48,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
             entry runs by its normalized tag; a built service needs one.
 
     Raises:
-        ComposeError: The file defines only ``main``, a service has no image, or the spec breaks a rule of
-            ``ComposeServices`` (``compose_unsupported``: the parser has already refused what Compose itself would).
+        ComposeError: A service has no image, or the spec breaks a rule of ``ComposeServices``
+            (``compose_unsupported``: the parser has already refused what Compose itself would).
     """
-    if not task.services:
-        raise ComposeError(
-            "compose_override_only",
-            "the file defines only `main`, which Harbor already provides; there are no services to run",
-            compose_path=task.compose_path,
-        )
     _check_reserved(task)
 
     # One wait budget covers every service, since the sandbox waits for them together.
@@ -227,6 +222,10 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: 
     spec: dict[str, Any] = {}
     if main.entrypoint:
         spec["entrypoint"] = main.entrypoint
+    if main.command:
+        spec["command"] = main.command
+    if main.working_dir:
+        spec["working_dir"] = main.working_dir
     if main.env:
         spec["env"] = main.env
     if main.volume_mounts:

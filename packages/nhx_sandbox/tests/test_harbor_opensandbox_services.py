@@ -169,3 +169,26 @@ def test_sandbox_entrypoint_keeps_main_alive() -> None:
         "-c",
         "sleep infinity",
     ]
+
+
+def test_main_s_command_follows_its_entrypoint_in_place_of_the_keep_alive() -> None:
+    assert keep_alive_entrypoint(["/bin/bash", "-l", "-c"], ["/app/tests/run.sh"]) == [
+        "/bin/bash",
+        "-l",
+        "-c",
+        "/app/tests/run.sh",
+    ]
+    # Without an entrypoint the command runs on its own, as Docker runs it.
+    assert keep_alive_entrypoint(None, ["/app/run.sh"]) == ["/app/run.sh"]
+
+
+def test_a_spec_may_have_no_services_and_then_needs_the_main_settings_feature() -> None:
+    only_main = parse_compose_services({"main": {"command": ["/app/run.sh"], "working_dir": "/app"}})
+    assert only_main.services == [] and only_main.uses_main_settings()
+    assert only_main.sandbox_entrypoint(["/bin/bash", "-l", "-c"]) == ["/bin/bash", "-l", "-c", "/app/run.sh"]
+    assert not parse_compose_services(_spec()).uses_main_settings()
+
+
+def test_main_s_working_dir_must_be_absolute() -> None:
+    with pytest.raises(ValidationError):
+        parse_compose_services(_spec(main={"working_dir": "app"}))

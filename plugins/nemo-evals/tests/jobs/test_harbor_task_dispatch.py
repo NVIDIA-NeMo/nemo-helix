@@ -574,6 +574,33 @@ def test_a_recorded_main_image_leaves_its_entrypoint_to_the_sandbox(tmp_path):
     assert spec is not None and "main" not in spec
 
 
+def write_main_only_task(root: Path) -> Path:
+    """A task whose compose file only changes how ``main`` starts, as swe-lancer's do."""
+    task = write_task(root, "[environment]\n", compose=True)
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n"
+    )
+    return task
+
+
+def test_a_main_only_task_runs_main_s_command_after_its_recorded_entrypoint(tmp_path):
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    spec = prepared_compose_services(
+        write_main_only_task(tmp_path / "t"), ENVIRONMENT.model_copy(update={"agent": agent})
+    )
+    assert spec is not None
+    # The sandbox restores the ENTRYPOINT from image_entrypoints, so the spec carries only the compose settings.
+    assert spec["main"] == {"command": ["/app/tests/run.sh"], "working_dir": "/app"}
+    assert spec.get("services", []) == []
+
+
+def test_a_main_command_whose_entrypoint_is_unknown_is_refused(tmp_path):
+    """Without Builder's record, main's command would run without the ENTRYPOINT its image may inherit."""
+    with pytest.raises(ComposeError, match="compose_entrypoint_unknown"):
+        prepared_compose_services(write_main_only_task(tmp_path / "t"), ENVIRONMENT)
+
+
 def test_a_single_container_task_has_no_compose_services(tmp_path):
     task = write_task(tmp_path / "t", "[environment]\n")
     assert prepared_compose_services(task, ENVIRONMENT) is None

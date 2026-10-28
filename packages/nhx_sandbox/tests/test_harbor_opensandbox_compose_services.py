@@ -334,6 +334,57 @@ async def test_compose_main_without_its_own_entrypoint_starts_with_its_image_s(
     assert server.creates[-1]["entrypoint"] == ["/bin/bash", "-l", "-c", "sh", "-c", "sleep infinity"]
 
 
+# A compose file that only changes `main`, as swe-lancer's do.
+MAIN_ONLY: dict[str, Any] = {"main": {"command": ["/app/tests/run.sh"], "working_dir": "/app"}}
+
+
+async def test_a_compose_file_that_only_changes_main_starts_it_as_harbor_would(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    extension.features = ["compose-services", "agent-bundle", "compose-main"]
+    environment = _environment(
+        _task(tmp_path),
+        server,
+        compose_services=MAIN_ONLY,
+        image_entrypoints={"registry.example/task:1": ["/bin/bash", "-l", "-c"]},
+    )
+
+    await environment._create_sandbox()
+
+    create = server.creates[-1]
+    assert create["entrypoint"] == ["/bin/bash", "-l", "-c", "/app/tests/run.sh"]
+    assert ComposeServices.model_validate_json(create["extensions"][EXTENSION_KEY]).main.working_dir == "/app"
+
+
+async def test_an_extension_without_main_settings_is_refused_before_any_sandbox(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    environment = _environment(_task(tmp_path), server, compose_services=MAIN_ONLY)
+
+    with pytest.raises(RuntimeError, match="only change main"):
+        await environment._create_sandbox()
+
+    assert server.creates == []
+
+
+async def test_commands_run_in_main_s_working_dir_unless_the_task_names_one(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _environment(_task(tmp_path), server, compose_services=MAIN_ONLY)
+    environment._sandbox = SimpleNamespace(id="sbx-1")
+    directories: list[str | None] = []
+
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> SimpleNamespace:
+        directories.append(kwargs["cwd"])
+        return SimpleNamespace(stdout="", stderr="", exit_code=0)
+
+    monkeypatch.setattr(environment._driver, "run", run)
+    await environment.exec("pwd")
+    await environment.exec("pwd", cwd="/tmp")
+
+    assert directories == ["/app", "/tmp"]
+
+
 def test_compose_task_without_services_is_still_rejected(tmp_path: Path, server: Server) -> None:
     with pytest.raises(ValueError, match="docker-compose"):
         _environment(_task(tmp_path), server, compose_services=None)

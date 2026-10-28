@@ -77,6 +77,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
+    COMPOSE_MAIN_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
@@ -694,11 +695,19 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
             )
 
+        features = response.json().get("features") or []
         # An extension from before agent bundles answers the health check too, but would drop the bundle.
-        if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in (response.json().get("features") or []):
+        if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in features:
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
                 "the version in plugins/_temporary-scaled-evals/opensandbox_ext."
+            )
+        # An extension from before them would refuse a spec with no services, or main's command or working directory.
+        if self._services is not None and self._services.uses_main_settings() and COMPOSE_MAIN_FEATURE not in features:
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
+                "change main, or main's command and working directory; upgrade it to the version in "
+                "plugins/_temporary-scaled-evals/opensandbox_ext."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
@@ -923,7 +932,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         timeout_sec: int | None = None,
         user: str | int | None = None,
     ) -> ExecResult:
-        """Run a command; explicit ``cwd``, then the task's workdir, then the image's WORKDIR."""
+        """Run a command; explicit ``cwd``, then the task's workdir, then ``main``'s compose ``working_dir``, then the image's WORKDIR."""
         sandbox = self._require_sandbox()
         requested_uid = self._numeric_uid(self._resolve_user(user))
         # Learn the image's uid before the first root command, so it can be mapped below.
@@ -932,12 +941,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         result = await self._driver.run(
             sandbox,
             command,
-            cwd=cwd or self.task_env_config.workdir or None,
+            cwd=cwd or self.task_env_config.workdir or self._compose_working_dir() or None,
             env=self._merge_env(env),
             timeout_sec=timeout_sec,
             uid=self._uid_for(requested_uid),
         )
         return ExecResult(stdout=result.stdout, stderr=result.stderr, return_code=result.exit_code)
+
+    def _compose_working_dir(self) -> str | None:
+        """``main``'s ``working_dir`` from the compose file, or None."""
+        return self._services.main.working_dir if self._services is not None else None
 
     def _numeric_uid(self, user: str | int | None) -> int | None:
         """The uid execd should switch to: integers, digit strings and ``root``; ``None`` for anything else.

@@ -417,10 +417,14 @@ async def test_check_passes_a_compose_task_the_pod_can_run(clients, sandbox_poli
     assert await check(clients, sandbox_policy) is None
 
 
+async def test_check_passes_a_compose_file_that_only_changes_main(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n")
+    assert await check(clients, sandbox_policy) is None
+
+
 @pytest.mark.parametrize(
     ("compose", "expected"),
     [
-        ("services:\n  main:\n    environment: {A: b}\n", "compose_override_only"),
         ("services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n", "compose_reserved_port"),
         ("services:\n  db:\n    image: redis\n    privileged: true\n", "compose_unsupported"),
     ],

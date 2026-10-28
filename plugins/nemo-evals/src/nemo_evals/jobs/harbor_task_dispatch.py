@@ -27,6 +27,7 @@ from nemo_evals.harbor.agent_setup_egress import (
     SETUP_HOSTS_KWARG,
     setup_timeout_multiplier,
 )
+from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.spec import compose_services_kwarg
 from nemo_evals.harbor.remote.profile import resource_defaults
 from nemo_evals.jobs.agent_compiler import _environment_stage_step, _secret_refs, _staged_fileset
@@ -203,13 +204,24 @@ def prepared_compose_services(task_dir: Path, environment: PreparedHarborEnviron
     ``docker_image``, which makes the parser skip the Dockerfile.
 
     Raises:
-        ComposeError: The task's compose file can't run as a pod.
+        ComposeError: The task's compose file can't run as a pod, or ``main`` sets a command whose image's
+            ``ENTRYPOINT`` isn't known.
         ValueError: The prepared images are not for the task's services.
     """
     images = {name: image.image_ref for name, image in environment.compose_images.items()}
     spec = compose_services_kwarg(task_dir, images, read_entrypoint=environment.agent.runtime_config is None)
 
-    services = {service["name"] for service in spec["services"]} if spec is not None else set()
+    main = spec.get("main", {}) if spec is not None else {}
+    if main.get("command") and "entrypoint" not in main and environment.agent.runtime_config is None:
+        # The command runs after the image's ENTRYPOINT, which isn't known for an image Builder didn't record.
+        raise ComposeError(
+            "compose_entrypoint_unknown",
+            "`main` sets a command, which runs after its image's ENTRYPOINT, but Builder built the image before it "
+            "recorded image ENTRYPOINTs, so it can't be started as Harbor would start it",
+            compose_path=f"{task_dir.name}/environment/docker-compose.yaml",
+        )
+
+    services = {service["name"] for service in spec.get("services", [])} if spec is not None else set()
     if services != set(images):
         raise ValueError(
             f"the task's compose services {sorted(services)} are not the services the run prepared images for "
