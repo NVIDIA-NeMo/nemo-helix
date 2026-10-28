@@ -237,10 +237,9 @@ describe('AgentEvaluationWizard', () => {
 
     await user.click(screen.getByRole('radio', { name: /Create a new experiment/ }));
 
-    // The new-experiment path gains its own steps, and all of them are named up front.
+    // The new-experiment path gains its own step, and all three are named up front.
     expect(await screen.findByText('Create experiment')).toBeInTheDocument();
     expect(screen.getByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Configuration')).toBeInTheDocument();
     expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
   });
 
