@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
-import { humanizeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
+import { AssistantChat } from '@nemo/common/src/components/AssistantChat';
+import {
+  describeChatError,
+  humanizeChatError,
+} from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { createChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { TooltipProvider } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { http, HttpResponse } from 'msw';
 import { useEffect, useState } from 'react';
-
-import { AssistantChat } from './index';
 
 // Walk through what a user sees when an agent chat fails. Each option replays the HTTP response
 // the platform returns for that failure through the same OpenAI client and chat runtime Studio
@@ -160,7 +162,7 @@ const ErrorStatesStory = () => {
           userMessage,
           {
             role: 'assistant',
-            content: [{ type: 'text', text: humanizeChatError(errorMessage) }],
+            content: [{ type: 'text', text: humanizeChatError(errorMessage, describeChatError) }],
             status: { type: 'incomplete', reason: 'error', error: errorMessage },
           },
         ]);
@@ -201,6 +203,7 @@ const ErrorStatesStory = () => {
             baseURL={STORY_BASE_URL}
             assistantName="Agent"
             initialMessages={messages}
+            describeError={describeChatError}
           />
         ) : null}
       </div>

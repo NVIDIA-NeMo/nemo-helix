@@ -64,6 +64,7 @@ type UseAssistantChatRuntimeOptions = Pick<
   | 'broadcast'
   | 'stopCount'
   | 'disabled'
+  | 'describeError'
   | 'initialMessages'
   | 'model'
   | 'onError'
@@ -84,6 +85,7 @@ export const useAssistantChatRuntime = ({
   tools,
   disabled = false,
   initialMessages = [],
+  describeError,
   onError,
   onMessageComplete,
   onRunningChange,
@@ -290,7 +292,7 @@ export const useAssistantChatRuntime = ({
         };
         updateAssistantMessage(
           assistantMessage.id!,
-          [{ type: 'text', text: humanizeChatError(errorMessage) }],
+          [{ type: 'text', text: humanizeChatError(errorMessage, describeError) }],
           responseImages,
           status
         );
@@ -305,6 +307,7 @@ export const useAssistantChatRuntime = ({
     [
       baseURL,
       createChatCompletion,
+      describeError,
       disabled,
       model,
       onError,

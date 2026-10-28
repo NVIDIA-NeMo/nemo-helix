@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MessagePrimitive } from '@assistant-ui/react';
-import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
@@ -16,7 +15,7 @@ const ChatErrorBanner = () => {
 
   return (
     <Banner kind="inline" status="error" className="mt-density-sm">
-      {error || GENERIC_CHAT_ERROR}
+      {error}
     </Banner>
   );
 };

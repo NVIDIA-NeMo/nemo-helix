@@ -32,6 +32,7 @@ interface ModelChatProps extends Pick<
   | 'initialMessages'
   | 'emptyState'
   | 'onError'
+  | 'describeError'
   | 'composerMode'
   | 'broadcast'
   | 'stopCount'

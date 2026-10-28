@@ -15,28 +15,48 @@ export const MESSAGE_ACTIONS_CLASS =
 
 const COPIED_DURATION_MS = 3000;
 
+interface CopyErrorActionProps {
+  error: string;
+}
+
+type CopyState = 'idle' | 'copied' | 'failed';
+
 // A failed reply's body holds the human-readable explanation, so its copy button copies the raw
 // error (status and provider detail) instead; that is what gets pasted into a bug report.
-const CopyErrorAction = ({ error }: { error: string }) => {
-  const [copied, setCopied] = useState(false);
+// Writing can fail: `navigator.clipboard` is missing on pages that are not a secure context
+// (plain http outside localhost) and `writeText` rejects when the browser denies clipboard access
+// or the document is not focused. A failure is shown in the tooltip instead of a false check mark.
+const CopyErrorAction = ({ error }: CopyErrorActionProps) => {
+  const [copyState, setCopyState] = useState<CopyState>('idle');
 
   useEffect(() => {
-    if (!copied) return undefined;
-    const timeout = setTimeout(() => setCopied(false), COPIED_DURATION_MS);
+    if (copyState === 'idle') return undefined;
+    const timeout = setTimeout(() => setCopyState('idle'), COPIED_DURATION_MS);
     return () => clearTimeout(timeout);
-  }, [copied]);
+  }, [copyState]);
+
+  const copyError = async () => {
+    try {
+      await navigator.clipboard.writeText(error);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+  };
 
   return (
-    <Tooltip slotContent="Copy error">
+    <Tooltip
+      slotContent={
+        copyState === 'failed' ? 'Could not copy: clipboard access was blocked' : 'Copy error'
+      }
+    >
       <button
         type="button"
         aria-label="Copy error"
         className={ACTION_BUTTON_CLASS}
-        onClick={() => {
-          void navigator.clipboard.writeText(error).then(() => setCopied(true));
-        }}
+        onClick={() => void copyError()}
       >
-        {copied ? <Check size="16" /> : <CopyGeneric size="16" />}
+        {copyState === 'copied' ? <Check size="16" /> : <CopyGeneric size="16" />}
       </button>
     </Tooltip>
   );
