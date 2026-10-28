@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from nemo_evals.harbor.compose.models import ComposePort, ComposeProblems, ComposeReadiness, ComposeVolumeMount
+from nhx_sandbox.harbor_opensandbox_services import quantity_value
 
 _CONDITIONS = ("service_started", "service_healthy", "service_completed_successfully")
 
@@ -28,8 +29,22 @@ _HEALTHCHECK_KEYS = frozenset({"test", "interval", "timeout", "retries", "start_
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
 _DURATION_UNIT_SECONDS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
 
+# The strings Compose reads as a boolean, in any case: `"true"`, which a variable fills in as, is True.
+_TRUE_STRINGS = frozenset({"true", "yes", "y", "on"})
+_FALSE_STRINGS = frozenset({"false", "no", "n", "off"})
+
 # Compose sizes are binary (`512m` is 512 MiB), so they map to Kubernetes' binary suffixes, not `M` or `G`.
 _MEMORY_SUFFIXES = {None: "", "b": "", "k": "Ki", "kb": "Ki", "m": "Mi", "mb": "Mi", "g": "Gi", "gb": "Gi"}
+
+
+def parse_boolean(value: Any, path: str, problems: ComposeProblems) -> bool | None:
+    """Read a compose boolean as Compose does: ``true`` or a string like ``"yes"``; None when it isn't set."""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in _TRUE_STRINGS | _FALSE_STRINGS:
+        return value.lower() in _TRUE_STRINGS
+    problems.invalid(path, f"not a boolean: {value!r}")
+    return None
 
 
 def _scalar(value: Any) -> str | None:
@@ -283,13 +298,21 @@ def parse_ports(raw_service: Mapping[str, Any], path: str, problems: ComposeProb
     return ports
 
 
-def parse_memory_quantity(value: Any, path: str, problems: ComposeProblems) -> str | None:
-    """Read a compose size as a Kubernetes quantity: ``"512m"`` is ``"512Mi"``, ``"1gb"`` is ``"1Gi"``, ``1024`` is ``"1024"``."""
+def parse_memory_quantity(
+    value: Any, path: str, problems: ComposeProblems, *, strings_only: bool = False
+) -> str | None:
+    """Read a compose size as a Kubernetes quantity: ``"512m"`` is ``"512Mi"``, ``"1gb"`` is ``"1Gi"``, ``1024`` is ``"1024"``.
+
+    ``strings_only`` is for ``deploy.resources``, where Compose refuses a number.
+    """
     if isinstance(value, bool) or value is None:
         return None
-    # A whole-number float such as `2.0` is written as `2`, so the quantity doesn't carry a needless decimal point.
-    if isinstance(value, float) and value == int(value):
-        value = int(value)
+    if strings_only and isinstance(value, (int, float)):
+        problems.invalid(path, "must be a string")
+        return None
+    # Compose ignores a float `mem_limit` or `shm_size` (`2.0`, `.inf` and `.nan` alike) as if it weren't set.
+    if isinstance(value, float):
+        return None
 
     match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(b|k|kb|m|mb|g|gb)?", str(value).strip().lower())
     if match is None:
@@ -315,7 +338,8 @@ def _cpu_quantity(value: Any, path: str, problems: ComposeProblems) -> str | Non
 
     try:
         number = float(value)
-    except ValueError:
+    # An integer too large for a float, which Compose refuses as out of range, raises OverflowError.
+    except (ValueError, OverflowError):
         problems.invalid(path, f"not a number: {value!r}")
         return None
     if not math.isfinite(number) or number <= 0:
@@ -343,7 +367,9 @@ def _resource_section(value: Any, path: str, problems: ComposeProblems) -> dict[
     quantities: dict[str, str] = {}
     if (cpu := _cpu_quantity(value.get("cpus"), f"{path}.cpus", problems)) is not None:
         quantities["cpu"] = cpu
-    if (memory := parse_memory_quantity(value.get("memory"), f"{path}.memory", problems)) is not None:
+    if (
+        memory := parse_memory_quantity(value.get("memory"), f"{path}.memory", problems, strings_only=True)
+    ) is not None:
         quantities["memory"] = memory
     return quantities
 
@@ -381,7 +407,15 @@ def parse_resources(
         return limits, requests
 
     resources = resources or {}
-    limits.update(_resource_section(resources.get("limits"), f"{path}.deploy.resources.limits", problems))
+    deploy_limits = _resource_section(resources.get("limits"), f"{path}.deploy.resources.limits", problems)
+    # Compose refuses a `cpus` or `mem_limit` that differs from `deploy.resources.limits`; the same value twice is fine.
+    for resource, key, deploy_key in (("cpu", "cpus", "cpus"), ("memory", "mem_limit", "memory")):
+        limit, deploy_limit = limits.get(resource), deploy_limits.get(resource)
+        if limit is not None and deploy_limit is not None and quantity_value(limit) != quantity_value(deploy_limit):
+            problems.invalid(
+                f"{path}.{key}", f"can't set distinct values on '{key}' and 'deploy.resources.limits.{deploy_key}'"
+            )
+    limits.update(deploy_limits)
     requests.update(_resource_section(resources.get("reservations"), f"{path}.deploy.resources.reservations", problems))
     return limits, requests
 
@@ -412,7 +446,16 @@ def _mount_entry(
         if entry.get("type", "volume") != "volume":
             problems.unsupported(f"{path}: {entry.get('type')} mount")
             return None
-        source, target, read_only = entry.get("source"), entry.get("target"), bool(entry.get("read_only"))
+        source, target = entry.get("source"), entry.get("target")
+        read_only = bool(parse_boolean(entry.get("read_only"), f"{path}.read_only", problems))
+        # A pod's volume starts empty, as `nocopy` asks; any other option, such as `subpath`, would mount something else.
+        options = entry.get("volume") or {}
+        if not isinstance(options, dict):
+            problems.invalid(f"{path}.volume", "expected a mapping")
+        else:
+            for option in options:
+                if option != "nocopy":
+                    problems.unsupported(f"{path}.volume.{option}")
     else:
         problems.invalid(path, "expected a string or a mapping")
         return None

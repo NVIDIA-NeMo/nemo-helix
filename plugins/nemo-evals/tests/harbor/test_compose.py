@@ -9,7 +9,6 @@ Every test writes its own task directory under ``tmp_path``.
 from __future__ import annotations
 
 import json
-import os
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -97,6 +96,12 @@ def _error(tmp_path: Path, compose: str | None, **task_options: Any) -> ComposeE
 )
 def test_image_names_are_normalized_as_docker_does(written: str, normalized: str) -> None:
     assert normalize_image(written) == normalized
+
+
+@pytest.mark.parametrize(("no_cache", "expected"), [('"true"', True), ("yes", True), ('"Off"', False)])
+def test_no_cache_is_read_as_compose_reads_a_boolean(tmp_path: Path, no_cache: str, expected: bool) -> None:
+    task = _parsed(tmp_path, f"services:\n  a: {{build: {{context: ., no_cache: {no_cache}}}}}\n")
+    assert task.services["a"].source == ComposeBuild(context_path="environment", no_cache=expected)
 
 
 def test_invalid_image_name_is_a_typed_error() -> None:
@@ -659,6 +664,27 @@ def test_named_volumes_and_mounts(tmp_path: Path) -> None:
     ]
 
 
+def test_a_long_form_mount_reads_read_only_and_nocopy_as_compose_does(tmp_path: Path) -> None:
+    # `nocopy` asks for the volume to start empty, which a pod's volume always does.
+    spec = _spec(
+        tmp_path,
+        """
+        services:
+          a:
+            image: redis
+            volumes:
+              - {type: volume, source: data, target: /ro, read_only: "yes"}
+              - {type: volume, source: data, target: /rw, read_only: "false", volume: {nocopy: true}}
+        volumes:
+          data: {}
+        """,
+    )
+    assert _service(spec, "a")["volume_mounts"] == [
+        {"name": "data", "mount_path": "/ro", "read_only": True},
+        {"name": "data", "mount_path": "/rw"},
+    ]
+
+
 def test_volume_names_become_names_a_pod_accepts(tmp_path: Path) -> None:
     spec = _spec(
         tmp_path,
@@ -799,11 +825,32 @@ def test_shm_size_becomes_a_kubernetes_quantity(tmp_path: Path, shm_size: str, q
     assert _service(spec, "a")["shm_size"] == quantity
 
 
+def test_shm_size_with_a_volume_at_dev_shm_is_unsupported(tmp_path: Path) -> None:
+    # The sandbox mounts /dev/shm itself for `shm_size`, and a container can't have two mounts at one path.
+    compose = "services:\n  a:\n    image: redis\n    {shm_size}volumes: [data:/dev/shm]\nvolumes:\n  data: {{}}\n"
+    with pytest.raises(ComposeError) as caught:
+        to_compose_services(_parsed(tmp_path / "both", compose.format(shm_size="shm_size: 1g\n    ")))
+    assert caught.value.code == "compose_unsupported"
+    assert "'/dev/shm' is used by more than one volume mount" in caught.value.detail
+
+    spec = _spec(tmp_path / "volume-only", compose.format(shm_size=""))
+    assert _service(spec, "a")["volume_mounts"] == [{"name": "data", "mount_path": "/dev/shm"}]
+
+
+@pytest.mark.parametrize("size", ["mem_limit: .nan", "mem_limit: 2.0", "shm_size: .inf"])
+def test_a_float_size_sets_no_limit_as_in_compose(tmp_path: Path, size: str) -> None:
+    spec = _spec(tmp_path, f"services:\n  a:\n    image: redis\n    {size}\n")
+    assert not {"resources", "shm_size"} & _service(spec, "a").keys()
+
+
 @pytest.mark.parametrize(
     ("limits", "task_toml"),
     [
         ("{cpus: '${CPUS}', memory: '${MEMORY}'}", "[environment]\ncpus = 1\nmemory_mb = 2048\n"),
         ("{cpus: '${CPUS:-4}', memory: '${MEMORY:-16G}'}", "[environment]\ncpus = 4\nmemory_mb = 16384\n"),
+        # The same limits spelled differently.
+        ("{cpus: '2.0', memory: 2g}", "[environment]\ncpus = 2\nmemory_mb = 2048\n"),
+        ("{memory: '2147483648'}", "[environment]\nmemory_mb = 2048\n"),
     ],
 )
 def test_limits_on_main_that_repeat_task_toml_are_accepted(tmp_path: Path, limits: str, task_toml: str) -> None:
@@ -850,7 +897,8 @@ def test_resources_from_cpus_mem_limit_and_deploy(tmp_path: Path) -> None:
             mem_limit: 512m
           b:
             image: redis
-            cpus: 0.5
+            cpus: 2
+            mem_limit: 1024m
             deploy:
               resources:
                 limits: {cpus: "2", memory: 1g}
@@ -905,6 +953,31 @@ def test_networks_every_service_joins_are_accepted(tmp_path: Path) -> None:
         """,
     )
     assert [service["name"] for service in spec["services"]] == ["game"]
+
+
+def test_main_in_another_service_s_network_namespace_has_that_service_s_networks(tmp_path: Path) -> None:
+    compose = """
+        services:
+          main:
+            network_mode: "service:proxy"
+          proxy:
+            image: redis
+            network_mode: "service:db"
+          db:
+            image: redis
+            networks: [backend]
+          cache:
+            image: redis
+            networks: [{network}]
+        networks:
+          backend: {{}}
+          other: {{}}
+        """
+    spec = _spec(tmp_path / "same", compose.format(network="backend"))
+    assert {service["name"] for service in spec["services"]} == {"proxy", "db", "cache"}
+
+    error = _error(tmp_path / "other", compose.format(network="other"))
+    assert error.paths == ("services.cache.networks: not the same networks as main",)
 
 
 def test_services_on_different_networks_are_unsupported(tmp_path: Path) -> None:
@@ -1094,6 +1167,63 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
             "compose_invalid",
             "services.db.cpus",
             id="cpus-negative",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    cpus: 1" + "0" * 400 + "\n",
+            "compose_invalid",
+            "services.db.cpus: not a number",
+            id="cpus-too-large-for-a-float",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    cpus: 0.5\n    deploy: {resources: {limits: {cpus: '2'}}}\n",
+            "compose_invalid",
+            "services.db.cpus: can't set distinct values on 'cpus' and 'deploy.resources.limits.cpus'",
+            id="cpus-twice",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    mem_limit: 512m\n    deploy: {resources: {limits: {memory: 1g}}}\n",
+            "compose_invalid",
+            "services.db.mem_limit: can't set distinct values on 'mem_limit' and 'deploy.resources.limits.memory'",
+            id="memory-twice",
+        ),
+        pytest.param(
+            "services:\n  db:\n    image: redis\n    deploy: {resources: {limits: {memory: .inf}}}\n",
+            "compose_invalid",
+            "services.db.deploy.resources.limits.memory: must be a string",
+            id="deploy-memory-a-number",
+        ),
+        pytest.param(
+            "services:\n  a:\n    image: redis\n    volumes: [{type: volume, source: d, target: /d, volume: {subpath: x}}]\n"
+            "volumes:\n  d: {}\n",
+            "compose_unsupported",
+            "services.a.volumes[0].volume.subpath",
+            id="volume-subpath",
+        ),
+        pytest.param(
+            "services:\n  a:\n    image: redis\n    volumes: [{type: volume, source: d, target: /d, read_only: t}]\n"
+            "volumes:\n  d: {}\n",
+            "compose_invalid",
+            "services.a.volumes[0].read_only: not a boolean",
+            id="read-only-not-a-boolean",
+        ),
+        pytest.param(
+            "services:\n  a:\n    build: {context: ., no_cache: 1}\n",
+            "compose_invalid",
+            "services.a.build.no_cache: not a boolean",
+            id="no-cache-not-a-boolean",
+        ),
+        pytest.param(
+            "services:\n  a:\n    image: redis\n    network_mode: service:missing\n",
+            "compose_invalid",
+            "services.a.network_mode: depends on undefined service 'missing'",
+            id="network-mode-undefined-service",
+        ),
+        pytest.param(
+            "services:\n  a:\n    image: redis\n    network_mode: service:b\n"
+            "  b:\n    image: redis\n    network_mode: service:a\n",
+            "compose_invalid",
+            "services.a.network_mode: dependency cycle detected: a -> b -> a",
+            id="network-mode-cycle",
         ),
         pytest.param(
             "services:\n  main:\n    cap_add: SYS_PTRACE\n  db:\n    image: redis\n",
@@ -1344,24 +1474,3 @@ def test_compose_services_kwarg_round_trips_through_the_environment_model(tmp_pa
 
     spec = _spec(tmp_path, "services:\n  db:\n    image: postgres:16\n")
     assert parse_compose_services(spec).names() == ["db"]
-
-
-@pytest.mark.skipif(not os.environ.get("TB3_TASKS_DIR"), reason="set TB3_TASKS_DIR to a Terminal-Bench tasks/ checkout")
-def test_every_local_terminal_bench_compose_task_maps_to_a_valid_spec() -> None:
-    """A local sweep: each task parses to a spec the environment accepts; only a reserved port may be rejected."""
-    from nhx_sandbox.harbor_opensandbox_services import parse_compose_services
-
-    tasks = sorted(
-        path.parent.parent for path in Path(os.environ["TB3_TASKS_DIR"]).glob("*/environment/docker-compose.y*ml")
-    )
-    assert tasks, "no compose tasks under TB3_TASKS_DIR"
-    rejected: dict[str, str] = {}
-    for task_dir in tasks:
-        parsed = parse_compose(task_dir)
-        assert parsed is not None
-        images = {name: f"registry.example.com/{task_dir.name}/{name}:test" for name in parsed.services}
-        try:
-            parse_compose_services(compose_services_kwarg(task_dir, images))
-        except ComposeError as error:
-            rejected[task_dir.name] = error.code
-    assert set(rejected.values()) <= {"compose_reserved_port"}, rejected

@@ -53,7 +53,7 @@ from nemo_evals.harbor.compose.service_options import (
     parse_resources,
     parse_volume_mounts,
 )
-from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, MAX_SERVICES
+from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, MAX_SERVICES, quantity_value
 
 _COMPLETED = "service_completed_successfully"
 _HEALTHY = "service_healthy"
@@ -266,11 +266,14 @@ class ServiceParser:
         would be silently ignored, so they are unsupported.
         """
         limits, requests = parse_resources(raw_main, path, self._problems)
-        # Read `task.toml`'s values the same way, so `2048M` and `memory_mb = 2048` compare equal.
+        # Read `task.toml`'s values the same way and compare by value, so `2g` matches `memory_mb = 2048`.
         expected, _ = parse_resources(task_limits, path, self._problems)
         if requests:
             self._problems.unsupported(f"{path}.deploy.resources.reservations")
-        if any(expected.get(resource) != quantity for resource, quantity in limits.items()):
+        if any(
+            resource not in expected or quantity_value(expected[resource]) != quantity_value(quantity)
+            for resource, quantity in limits.items()
+        ):
             self._problems.unsupported(f"{path}: resource limits {limits} differ from task.toml's {expected}")
 
     def _environment(self, raw_service: Mapping[str, Any], path: str) -> dict[str, str]:
@@ -360,6 +363,7 @@ def _check_networks(
             if (option, value) not in (("driver", "bridge"), ("internal", False)) and option != "name":
                 problems.unsupported(f"networks.{network}.{option}")
 
+    owners = _network_namespace_owners(raw_services, problems)
     network_sets: dict[str, frozenset[str]] = {}
     for name, raw_service in raw_services.items():
         # A service in another's network namespace has no networks of its own.
@@ -370,10 +374,46 @@ def _check_networks(
             problems.invalid(f"services.{name}.networks", f"network {network!r} is not declared")
         network_sets[name] = networks
 
-    reference = network_sets.get(MAIN_SERVICE, frozenset({"default"}))
+    # `main` in another service's namespace has that service's networks.
+    reference = network_sets.get(owners.get(MAIN_SERVICE, MAIN_SERVICE), frozenset({"default"}))
     for name, networks in network_sets.items():
         if networks != reference:
             problems.unsupported(f"services.{name}.networks: not the same networks as main")
+
+
+def _network_namespace_owners(
+    raw_services: Mapping[str, Mapping[str, Any]], problems: ComposeProblems
+) -> dict[str, str]:
+    """Map each service to the one whose network namespace it runs in, following ``network_mode: service:`` links.
+
+    ``{a: {network_mode: "service:b"}, b: {}}`` gives ``{"a": "b", "b": "b"}``. As in Compose, a link to an undefined
+    service and a loop of links are invalid; a service in a loop gets no owner.
+    """
+    links: dict[str, str] = {}
+    for name, raw_service in raw_services.items():
+        if _shares_a_network_namespace(raw_service):
+            target = raw_service["network_mode"].removeprefix("service:")
+            if target in raw_services:
+                links[name] = target
+            else:
+                problems.invalid(f"services.{name}.network_mode", f"depends on undefined service {target!r}")
+
+    order = list(raw_services)
+    owners: dict[str, str] = {}
+    for name in raw_services:
+        chain = [name]
+        while chain[-1] in links and links[chain[-1]] not in chain:
+            chain.append(links[chain[-1]])
+        if chain[-1] not in links:
+            owners[name] = chain[-1]
+            continue
+        # The chain looped back. Report the loop once, from its first service in the file.
+        loop = chain[chain.index(links[chain[-1]]) :]
+        if name == min(loop, key=order.index):
+            problems.invalid(
+                f"services.{name}.network_mode", f"dependency cycle detected: {' -> '.join([*loop, name])}"
+            )
+    return owners
 
 
 def _service_networks(name: str, value: Any, problems: ComposeProblems) -> frozenset[str]:
