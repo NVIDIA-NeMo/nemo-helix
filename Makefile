@@ -590,7 +590,11 @@ test-agents-hermes: ## Run Hermes adapter integration tests with its isolated ha
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the [openshell] extra installed
 	$(UV) run --frozen --all-packages --extra openshell \
-		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/
+		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/ \
+		packages/nemo_helix_plugin/tests/client/test_openshell_provider_client.py
+	$(UV) run --frozen --all-packages --extra openshell --group typecheck ty check \
+		packages/nemo_helix_plugin/src/nemo_helix_plugin/openshell/provider_client.py \
+		packages/nemo_helix_plugin/tests/client/test_openshell_typing.py
 
 .PHONY: test-jobs-openshell
 test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the [openshell] extra installed
