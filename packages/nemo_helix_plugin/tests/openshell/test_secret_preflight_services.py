@@ -33,7 +33,9 @@ def platform(request):
         auth_enabled=auth_enabled,
         service_configs={SecretsService: config},
         workspaces=["private-bindings"],
-        auth_bundle_cache_seconds=0,
+        # The test changes secret metadata, not the seeded permission grants.
+        auth_bundle_cache_seconds=3600,
+        auth_policy_data_refresh_interval=3600,
     ) as context:
         yield context, auth_enabled
 
