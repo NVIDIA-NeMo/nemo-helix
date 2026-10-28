@@ -182,7 +182,7 @@ def test_list_deployment_configs_with_search(client, mock_deployment_config_serv
     """Test listing deployment configs with search parameter."""
     mock_deployment_config_service.list_deployment_configs.return_value = sample_page
 
-    response = client.get("/v2/workspaces/default/deployment-configs?filter[name][]=test")
+    response = client.get("/v2/workspaces/default/deployment-configs?filter[name]=test")
 
     assert response.status_code == 200
 
