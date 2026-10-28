@@ -21,6 +21,7 @@ import click
 import httpx
 import typer
 from pydantic import ValidationError
+from rich.markup import escape
 
 REMOTE_ERROR_EXIT_CODE = 3
 
@@ -147,10 +148,10 @@ def _format_api_target(error: object) -> str | None:
 def _print_api_request_context(console, error: object) -> None:
     request = _format_api_request(error)
     if request:
-        console.print(f"[bold]Request:[/] {request}")
+        console.print(f"[bold]Request:[/] {escape(request)}")
     target = _format_api_target(error)
     if target:
-        console.print(f"[bold]Target:[/] {target}")
+        console.print(f"[bold]Target:[/] {escape(target)}")
 
 
 def _format_not_found_hint(ctx: click.Context | None, prog: str) -> str:
@@ -243,12 +244,12 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
             param_name = error.param.name.upper() if error.param.name else "VALUE"
             console.print("[bold red]Error:[/] Missing required argument:")
             if param_help:
-                console.print(f"  [yellow]<{param_name}>[/]  {param_help}")
+                console.print(f"  [yellow]<{param_name}>[/]  {escape(param_help)}")
             else:
                 console.print(f"  [yellow]<{param_name}>[/]")
         else:
             error_msg = str(error.format_message())
-            console.print(f"[bold red]Error:[/] {error_msg}")
+            console.print(f"[bold red]Error:[/] {escape(error_msg)}")
             if isinstance(error, click.NoSuchOption) and error.option_name == "--name" and error_ctx is not None:
                 console.print(
                     f"[yellow]Hint:[/] [cyan]--name[/] is now a positional argument. Use: [cyan]{prog} {cmd_path} <name>[/]"
@@ -257,53 +258,53 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         raise SystemExit(2)
 
     if isinstance(error, click.ClickException):
-        console.print(f"[bold red]Error:[/] {error.message}")
+        console.print(f"[bold red]Error:[/] {escape(error.message)}")
         raise typer.Exit(code=error.exit_code)
 
     if isinstance(error, typer.Exit):
         # Re-raise typer.Exit with its original exit code (don't treat Exit(0) as error)
         raise error
     if isinstance(error, plugin_errors.AuthenticationError):
-        console.print(f"[bold red]Authentication error:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Authentication error:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         console.print(
             "[yellow]Hint:[/] Run [cyan]'nemo auth login'[/] or set the token manually "
             "with [cyan]nemo config set --access-token <token>[/], or use [cyan]NHX_ACCESS_TOKEN[/]."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.PermissionDeniedError):
-        console.print(f"[bold red]Permission denied:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Permission denied:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         console.print(
             "[yellow]Hint:[/] Your current credentials do not have access to perform this operation. "
             "Contact your administrator to request access."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NotFoundError):
-        console.print(f"[bold red]Not found:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Not found:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         _print_api_request_context(console, error)
         console.print(f"[yellow]Hint:[/] {_format_not_found_hint(ctx, prog)}")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.BadRequestError):
-        console.print(f"[bold red]Bad request:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Bad request:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         console.print("[yellow]Hint:[/] Check your input values. Run with [cyan]--help[/] to see required options.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.ConflictError):
-        console.print(f"[bold red]Conflict:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Conflict:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         console.print(
             "[yellow]Hint:[/] This can mean a resource with that name already exists (try a different name or delete the existing one), "
             "or a concurrent update conflicted (retry the operation)."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.UnprocessableEntityError):
-        console.print(f"[bold red]Invalid input:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Invalid input:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         console.print("[yellow]Hint:[/] Check your input values. Run with [cyan]--help[/] to see required options.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.RateLimitError):
-        console.print(f"[bold red]Rate limit exceeded:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]Rate limit exceeded:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         console.print("[yellow]Hint:[/] Too many requests. Wait a moment and try again.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.InternalServerError):
         formatted = _format_api_error(error)
-        console.print(f"[bold red]Server error:[/] ({error.status_code}) {formatted}")
+        console.print(f"[bold red]Server error:[/] ({error.status_code}) {escape(formatted)}")
         list_cmd = _build_list_cmd(ctx, prog) if ("404" in formatted or "not found" in formatted.lower()) else None
         if list_cmd:
             console.print(f"[yellow]Hint:[/] {_format_not_found_hint(ctx, prog)}")
@@ -311,34 +312,34 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
             console.print("[yellow]Hint:[/] This is a server-side issue. Try again later or contact support.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoTransportError) and isinstance(error.error, httpx.TimeoutException):
-        console.print(f"[bold red]Timeout error:[/] {_format_api_error(error)}")
+        console.print(f"[bold red]Timeout error:[/] {escape(_format_api_error(error))}")
         _print_api_request_context(console, error)
         console.print("[yellow]Hint:[/] The request timed out. The server may be busy - try again later.")
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoTransportError):
-        console.print(f"[bold red]Connection error:[/] {_format_api_error(error)}")
+        console.print(f"[bold red]Connection error:[/] {escape(_format_api_error(error))}")
         _print_api_request_context(console, error)
         console.print(
             "[yellow]Hint:[/] Check your network connection and verify that [cyan]base-url[/] you configured is correct."
         )
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoHTTPError):
-        console.print(f"[bold red]API error:[/] ({error.status_code}) {_format_api_error(error)}")
+        console.print(f"[bold red]API error:[/] ({error.status_code}) {escape(_format_api_error(error))}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoResponseValidationError):
-        console.print(f"[bold red]API response error:[/] {_format_api_error(error)}")
+        console.print(f"[bold red]API response error:[/] {escape(_format_api_error(error))}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, plugin_errors.NemoClientError):
-        console.print(f"[bold red]API error:[/] {_format_api_error(error)}")
+        console.print(f"[bold red]API error:[/] {escape(_format_api_error(error))}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
     elif isinstance(error, ValidationError):
         console.print("[bold red]Invalid input:[/]")
         for detail in error.errors():
             location = ".".join(str(part) for part in detail.get("loc", ())) or "input"
-            console.print(f"  [yellow]{location}[/]  {detail.get('msg', 'invalid value')}")
+            console.print(f"  [yellow]{escape(location)}[/]  {escape(str(detail.get('msg', 'invalid value')))}")
         console.print("[yellow]Hint:[/] Check your input values. Run with [cyan]--help[/] to see required options.")
         raise typer.Exit(code=2)
     elif isinstance(error, ValueError) and _is_missing_workspace_error(error):
@@ -360,7 +361,7 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
             metavar = field.upper().replace("_", "-")
             help_text = error.field_help.get(field, "")
             if help_text:
-                console.print(f"  [cyan]{opt_name}[/] [yellow]<{metavar}>[/]  {help_text}")
+                console.print(f"  [cyan]{opt_name}[/] [yellow]<{metavar}>[/]  {escape(help_text)}")
             else:
                 console.print(f"  [cyan]{opt_name}[/] [yellow]<{metavar}>[/]")
         console.print()
@@ -370,15 +371,15 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         console.print(f"[bold bright_green]Usage:[/] {prog} [GLOBAL OPTIONS] {error.command_name} [OPTIONS]")
         console.print(f"Try [cyan]{prog} {error.command_name} --help[/] for help.")
         console.print()
-        console.print(f"[bold red]Error:[/] Unknown input fields: {', '.join(error.unknown_fields)}")
-        console.print(f"[yellow]Hint:[/] Accepted fields: {', '.join(error.known_fields)}.")
+        console.print(f"[bold red]Error:[/] Unknown input fields: {escape(', '.join(error.unknown_fields))}")
+        console.print(f"[yellow]Hint:[/] Accepted fields: {escape(', '.join(error.known_fields))}.")
         raise typer.Exit(code=2)
     elif isinstance(error, InvalidSearchPatternError):
         if error.parse_error:
-            console.print(f"[bold red]Error:[/] Invalid filter JSON: {error.parse_error}")
-            console.print(f"Your input: {error.value!r}")
+            console.print(f"[bold red]Error:[/] Invalid filter JSON: {escape(error.parse_error)}")
+            console.print(f"Your input: {escape(repr(error.value))}")
         else:
-            console.print(f"[bold red]Error:[/] Invalid filter value {error.value!r}.")
+            console.print(f"[bold red]Error:[/] Invalid filter value {escape(repr(error.value))}.")
         console.print()
         console.print("Provide [cyan]--filter[/] as a text expression or JSON, or use [cyan]--filter.FIELD[/] options.")
         console.print()
@@ -391,6 +392,6 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         console.print("[yellow]Hint:[/] Use [cyan]--help[/] to see available filter fields.")
         raise typer.Exit(code=2)
     else:
-        console.print(f"[bold red]Unexpected error:[/] {error}")
+        console.print(f"[bold red]Unexpected error:[/] {escape(str(error))}")
         console.print("[yellow]Hint:[/] Run with [cyan]--verbose[/] for more details.")
         raise typer.Exit(code=1)
