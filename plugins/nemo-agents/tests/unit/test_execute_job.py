@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
+from contextlib import nullcontext
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -1227,6 +1228,61 @@ def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
     assert "post_run_action" not in result
     assert resolved == ["example.action"]
     assert len(contexts) == 1
+
+
+def test_run_hands_the_post_run_action_the_create_time_agent_config(ctx: JobContext) -> None:
+    """Per-run wiring edits the step's config in place; the action must see neither
+    that wiring (it points at a proxy that dies with the invocation) nor share the dict.
+    """
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+        post_run_action=PostRunActionConfig(kind="example.action"),
+    )
+    created_config = json.loads(json.dumps(spec.agent.config))
+    fabric_configs: list[dict[str, Any]] = []
+    contexts: list[Any] = []
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        fabric_configs.append(request.agent_config.model_dump(mode="json"))
+        return FabricRuntimeResult(status="succeeded", output={"answer": "done"})
+
+    with (
+        patch("nemo_agents_plugin.jobs.execute.wants_intake_atif_export", return_value=True),
+        patch("nemo_agents_plugin.jobs.execute.supports_intake_atif_export", return_value=True),
+        patch(
+            "nemo_agents_plugin.jobs.execute.optional_platform_auth_proxy", lambda: nullcontext("http://127.0.0.1:9")
+        ),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+        _patch_post_run_action(contexts.append),
+    ):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    # The real wiring did point the run at its proxy, so the test exercises the case it guards.
+    assert "127.0.0.1:9" in json.dumps(fabric_configs[0])
+    assert "127.0.0.1:9" not in json.dumps(contexts[0].agent_config)
+    assert contexts[0].agent_config == created_config
+
+
+def test_run_names_a_post_run_action_that_fails_to_import(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+        post_run_action=PostRunActionConfig(kind="broken.action"),
+    )
+    invoke = AsyncMock()
+
+    with (
+        patch(
+            "nemo_agents_plugin.jobs.execute.resolve_post_run_action",
+            side_effect=ImportError("No module named 'broken_plugin'"),
+        ),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", invoke),
+        pytest.raises(ValueError, match=r"agent was not invoked: No module named 'broken_plugin'"),
+    ):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    invoke.assert_not_awaited()
 
 
 def test_run_skips_post_run_action_for_failed_fabric_result(ctx: JobContext) -> None:

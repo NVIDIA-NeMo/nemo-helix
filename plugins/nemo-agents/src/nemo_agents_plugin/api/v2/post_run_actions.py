@@ -22,6 +22,8 @@ router = APIRouter()
 @router.get("/post-run-actions", response_model=list[PostRunActionInfo], tags=["Agent Post-Run Actions"])
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[])
-async def list_post_run_actions() -> list[PostRunActionInfo]:
+def list_post_run_actions() -> list[PostRunActionInfo]:
     """List every installed post-run action an execute-agent job can set as ``post_run_action.kind``."""
+    # Sync on purpose: scanning entry points and importing plugin modules blocks,
+    # so FastAPI runs this in its threadpool rather than on the event loop.
     return _list_installed_post_run_actions()

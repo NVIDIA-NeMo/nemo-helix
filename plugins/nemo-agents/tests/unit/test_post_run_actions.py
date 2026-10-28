@@ -173,3 +173,16 @@ def test_listing_falls_back_when_an_action_declares_no_display_metadata(monkeypa
     _install(monkeypatch, _entry_point("legacy.action", _OTHER_TARGET))
 
     assert list_post_run_actions() == [PostRunActionInfo(kind="legacy.action", title="legacy.action", description="")]
+
+
+def test_listing_scans_the_installed_entry_points_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    scans: list[str] = []
+
+    def _entry_points(group: str) -> list[EntryPoint]:
+        scans.append(group)
+        return [_entry_point("a.action", _NOOP_TARGET), _entry_point("b.action", _NOOP_TARGET)]
+
+    monkeypatch.setattr(post_run_actions, "entry_points", _entry_points)
+
+    assert [info.kind for info in list_post_run_actions()] == ["a.action", "b.action"]
+    assert scans == [POST_RUN_ACTION_ENTRY_POINT_GROUP]

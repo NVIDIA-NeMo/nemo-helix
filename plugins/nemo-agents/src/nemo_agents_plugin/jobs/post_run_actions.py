@@ -58,10 +58,11 @@ def list_post_run_actions() -> list[PostRunActionInfo]:
     that fails to import — is logged and left out rather than failing the whole
     listing; creating a job with that kind still reports the real error.
     """
+    registered = _registered_entry_points()
     infos: list[PostRunActionInfo] = []
-    for kind in sorted(_registered_entry_points()):
+    for kind in sorted(registered):
         try:
-            action_cls = _load_post_run_action(kind)
+            action_cls = _load_registered_post_run_action(kind, registered)
         except Exception:
             logger.exception("Skipping post-run action %r: it could not be loaded.", kind)
             continue
@@ -100,7 +101,10 @@ def _registered_entry_points() -> dict[str, list[EntryPoint]]:
 
 
 def _load_post_run_action(kind: str) -> type[PostRunAction]:
-    registered = _registered_entry_points()
+    return _load_registered_post_run_action(kind, _registered_entry_points())
+
+
+def _load_registered_post_run_action(kind: str, registered: dict[str, list[EntryPoint]]) -> type[PostRunAction]:
     matches = registered.get(kind)
     if not matches:
         installed = ", ".join(sorted(registered)) or "none"

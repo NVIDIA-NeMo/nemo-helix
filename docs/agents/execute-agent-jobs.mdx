@@ -455,8 +455,8 @@ class PublishAction:
 ```
 
 `PostRunActionContext` carries the job context (`ctx`, for saving results), the
-action's `config`, the `agent_name`, the resolved `agent_config` the job ran,
-and Fabric's `fabric_result`.
+action's `config`, the `agent_name`, the resolved `agent_config` the job ran (as
+snapshotted when the job was created), and Fabric's `fabric_result`.
 
 ## Requirements and Limits
 

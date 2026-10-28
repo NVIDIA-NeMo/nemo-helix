@@ -58,8 +58,10 @@ class PostRunActionContext:
     ctx: JobContext
     config: dict[str, Any]
     agent_name: str
-    # The agent config the job actually ran: resolved from the Agent entity or
-    # inline definition and merged with its AgentEnvironment's spec.
+    # The resolved agent config the job ran: from the Agent entity or inline
+    # definition, merged with its AgentEnvironment's spec, as snapshotted when
+    # the job was created. Excludes per-run wiring such as the telemetry proxy
+    # address, and is the action's own copy.
     agent_config: dict[str, Any]
     fabric_result: FabricRuntimeResult
 

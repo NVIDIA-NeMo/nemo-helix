@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -524,8 +525,15 @@ class ExecuteAgentJob(NemoJob):
         # its action. Resolve it before the agent spends any time or tokens.
         try:
             post_run_action = resolve_post_run_action(step_config.post_run_action.kind)
-        except ValueError as exc:
+        except Exception as exc:
+            # Missing, conflicting, or installed but failing to import: all mean
+            # the action cannot run, so all get the same actionable message.
             raise ValueError(f"Cannot run this job's post-run action, so the agent was not invoked: {exc}") from exc
+        # The action sees the config as resolved at create time. Per-run wiring
+        # below (telemetry export through this invocation's loopback proxy)
+        # edits ``step_config.agent.config`` in place, and an action must neither
+        # see addresses that die with the invocation nor alter the step's state.
+        post_run_agent_config = copy.deepcopy(step_config.agent.config)
 
         fabric_dirs = FabricDirectories.create(agent_config, ctx.storage.ephemeral)
 
@@ -648,7 +656,7 @@ class ExecuteAgentJob(NemoJob):
                             ctx=ctx,
                             config=step_config.post_run_action.config,
                             agent_name=step_config.agent.name,
-                            agent_config=step_config.agent.config,
+                            agent_config=post_run_agent_config,
                             fabric_result=result,
                         )
                     )
