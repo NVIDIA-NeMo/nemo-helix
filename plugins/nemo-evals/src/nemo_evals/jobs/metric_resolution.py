@@ -273,7 +273,9 @@ def _rebind_models(metric: MetricWithModels, models: dict[str, Model]) -> None:
 
 
 @contextmanager
-def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
+def gateway_metric_models_as_job(
+    metrics: Sequence[Metric], *, target: Model | None = None, target_model_ref: ModelRef | None = None
+) -> Generator[Model | None]:
     """Call Inference Gateway from the metrics' models as this job, for the duration of the block.
 
     A stored metric's ``ModelRef`` is resolved at submit to a gateway route on the API's own
@@ -282,20 +284,25 @@ def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
     auth proxy, which forwards to the job's platform URL with its identity and refreshes workload
     tokens. Afterwards the original models are restored, so results record the resolved route.
 
-    Does nothing when no metric calls the gateway, or when the job has no identity to forward
-    (an auth-disabled platform), which is how those models were called before.
+    A target with ``target_model_ref`` was resolved by the server and uses the same proxy;
+    the bound target is yielded without mutating the canonical spec. Inline targets are never
+    rebound. When the job has no identity to forward (an auth-disabled platform), resolved
+    models retain their server-selected, job-reachable URLs.
     """
     bound = [
         (metric, models)
         for metric in metrics
         if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
     ]
-    if not bound:
-        yield
+    # Only server-resolved model references carry target provenance. Inline model URLs
+    # (including gateway-like paths) must remain exactly as their owner configured them.
+    bind_target = target is not None and target_model_ref is not None
+    if not bound and not bind_target:
+        yield target
         return
     with platform_auth_proxy() as origin:
         if origin is None:
-            yield
+            yield target
             return
         proxy = urlsplit(origin)
         try:
@@ -311,7 +318,13 @@ def gateway_metric_models_as_job(metrics: Sequence[Metric]) -> Generator[None]:
                         for field, model in models.items()
                     },
                 )
-            yield
+            yield (
+                target.model_copy(
+                    update={"url": urlsplit(target.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()}
+                )
+                if bind_target and target is not None
+                else target
+            )
         finally:
             for metric, models in bound:
                 _rebind_models(metric, models)

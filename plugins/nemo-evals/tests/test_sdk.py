@@ -616,7 +616,7 @@ class TestEvaluatorSubmit:
             )
 
 
-def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: MockerFixture) -> None:
+def test_sync_executor_submit_defers_model_ref_until_server_preparation(mocker: MockerFixture) -> None:
     platform = _SyncHelix()
     models_client = mocker.Mock(spec=ModelsClient)
     models_client.resolve_model_reference.return_value = ResolvedModelReference(
@@ -624,7 +624,7 @@ def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: Moc
         name="model-a",
         host_url=None,
     )
-    mocker.patch("nemo_evals.sdk._executor.ModelsClient.from_client", return_value=models_client)
+    model_factory = mocker.patch.object(ModelsClient, "from_client", return_value=models_client)
     executor = _SyncEvaluatorPluginExecutor(client=platform)
     expected_job = mocker.Mock(spec=EvaluatorJobResource)
     create = mocker.patch.object(executor, "create", return_value=expected_job)
@@ -641,9 +641,12 @@ def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: Moc
     )
 
     assert job is expected_job
-    models_client.resolve_model_reference.assert_called_once_with("default/model-a")
+    model_factory.assert_not_called()
+    models_client.resolve_model_reference.assert_not_called()
     created_spec = create.call_args.kwargs["spec"]
-    assert created_spec.target == resolved_model
+    assert created_spec.target is None
+    assert created_spec.target_model_ref == ModelRef(root="default/model-a")
+    assert resolved_model.url not in created_spec.model_dump_json()
 
 
 def test_sync_executor_submit_requires_online_model_params_for_model_ref() -> None:
@@ -963,7 +966,7 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
 
 
 @pytest.mark.asyncio
-async def test_async_executor_submit_resolves_model_ref_before_creating_job(mocker: MockerFixture) -> None:
+async def test_async_executor_submit_defers_model_ref_until_server_preparation(mocker: MockerFixture) -> None:
     platform = _AsyncHelix()
     models_client = mocker.Mock(spec=AsyncModelsClient)
     models_client.resolve_model_reference = AsyncMock(
@@ -973,7 +976,7 @@ async def test_async_executor_submit_resolves_model_ref_before_creating_job(mock
             host_url=None,
         )
     )
-    mocker.patch("nemo_evals.sdk._executor.AsyncModelsClient.from_client", return_value=models_client)
+    model_factory = mocker.patch.object(AsyncModelsClient, "from_client", return_value=models_client)
     executor = _AsyncEvaluatorPluginExecutor(client=platform)
     expected_job = mocker.Mock(spec=AsyncEvaluatorJobResource)
     create = mocker.patch.object(executor, "create", new=AsyncMock(return_value=expected_job))
@@ -990,9 +993,12 @@ async def test_async_executor_submit_resolves_model_ref_before_creating_job(mock
     )
 
     assert job is expected_job
-    models_client.resolve_model_reference.assert_awaited_once_with("default/model-a")
+    model_factory.assert_not_called()
+    models_client.resolve_model_reference.assert_not_awaited()
     created_spec = create.call_args.kwargs["spec"]
-    assert created_spec.target == resolved_model
+    assert created_spec.target is None
+    assert created_spec.target_model_ref == ModelRef(root="default/model-a")
+    assert resolved_model.url not in created_spec.model_dump_json()
 
 
 @pytest.mark.asyncio

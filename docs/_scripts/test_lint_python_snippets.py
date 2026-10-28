@@ -175,6 +175,47 @@ value = 1
     assert syntax_check(extract_python_snippets(doc)) == []
 
 
+@pytest.mark.parametrize("annotation", ["int", "str"])
+@pytest.mark.parametrize("imports", ["", "from __future__ import annotations\nfrom math import *\n"])
+@pytest.mark.parametrize("earlier_cell", ["", "```python\ninitial = 1\n```\n\n"])
+def test_run_type_check_handles_notebook_await_without_hiding_type_errors(
+    tmp_path: Path, annotation: str, imports: str, earlier_cell: str
+) -> None:
+    doc = tmp_path / "notebook.mdx"
+    doc.write_text(
+        f"# Notebook\n\n{earlier_cell}```python\n{imports}async def read() -> int:\n    return 1\n```\n\n"
+        f"```python\nvalue: {annotation} = await read()\n```\n",
+        encoding="utf-8",
+    )
+    snippets = extract_python_snippets(doc)
+    assert syntax_check(snippets) == []
+
+    results = run_type_check({doc: snippets}, project_root=Path(__file__).resolve().parents[2], timeout_seconds=120)
+
+    if annotation == "int":
+        assert results[doc] == ()
+    else:
+        assert len(results[doc]) == 1
+        line = 9 + imports.count("\n") + earlier_cell.count("\n")
+        assert f"{doc}:{line}:14: error[invalid-assignment]" in results[doc][0]
+
+
+def test_run_type_check_maps_module_import_error_with_notebook_await(tmp_path: Path) -> None:
+    doc = tmp_path / "notebook.mdx"
+    doc.write_text(
+        "```python\nfrom __future__ import annotations\nfrom _missing_notebook_module import *\n"
+        "async def read() -> int:\n    return 1\nvalue = await read()\n```\n",
+        encoding="utf-8",
+    )
+
+    results = run_type_check(
+        {doc: extract_python_snippets(doc)}, project_root=Path(__file__).resolve().parents[2], timeout_seconds=120
+    )
+
+    assert len(results[doc]) == 1
+    assert f"{doc}:3:6: error[unresolved-import]" in results[doc][0]
+
+
 def test_prepare_type_check_file_preserves_line_mapping(tmp_path: Path) -> None:
     doc = tmp_path / "page.mdx"
     doc.write_text(

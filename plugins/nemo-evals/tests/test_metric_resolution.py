@@ -156,6 +156,48 @@ def test_gateway_models_point_at_the_job_proxy_for_the_block_and_are_restored(
     assert ragas._llm_model is not None and ragas._llm_model["base_url"].startswith("http://nemo-api:8080/")
 
 
+def test_server_resolved_target_uses_refreshing_job_identity_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+    httpserver: HTTPServer,
+) -> None:
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", "/job/proof-token")
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    monkeypatch.setattr(
+        gateway_proxy, "resolve_workload_exchange_provider", Mock(return_value=StaticToken("job-access-token"))
+    )
+    httpserver.expect_request(
+        JUDGE_ROUTE + "/models", headers={"Authorization": "Bearer job-access-token"}
+    ).respond_with_json({"data": []})
+    target = Model(url=f"http://nemo-api:8080{JUDGE_ROUTE}", name="judge")
+    with gateway_metric_models_as_job([], target=target, target_model_ref=ModelRef("default/judge")) as bound:
+        assert bound is not None
+        assert urlsplit(bound.url).hostname == "127.0.0.1"
+        assert urlsplit(bound.url).path == JUDGE_ROUTE
+        assert httpx.get(bound.url + "/models").json() == {"data": []}
+    assert target.url == f"http://nemo-api:8080{JUDGE_ROUTE}"
+    httpserver.check_assertions()
+
+
+@pytest.mark.parametrize("url", [f"http://localhost:33364{JUDGE_ROUTE}", "https://external.example/v1"])
+@pytest.mark.parametrize("with_secret", [True, False])
+def test_inline_target_never_uses_job_auth_proxy(url: str, with_secret: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    proxy = Mock(side_effect=AssertionError("Inline targets must not receive job identity"))
+    monkeypatch.setattr("nemo_evals.jobs.metric_resolution.platform_auth_proxy", proxy)
+    target = Model(url=url, name="custom", api_key_secret="default/user-key" if with_secret else None)
+    with gateway_metric_models_as_job([], target=target) as bound:
+        assert bound is target
+    proxy.assert_not_called()
+
+
+def test_anonymous_resolved_target_keeps_server_runtime_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    target = Model(url=f"http://nemo-api:8080{JUDGE_ROUTE}", name="judge")
+    with gateway_metric_models_as_job([], target=target, target_model_ref=ModelRef("default/judge")) as bound:
+        assert bound is target
+
+
 def test_a_failed_rebind_still_restores_the_metrics_already_moved(
     monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer
 ) -> None:

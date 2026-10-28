@@ -50,6 +50,7 @@ from nemo_evals.tasks.evaluate import main as evaluate_task_main
 from nemo_evals.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.commands import add_job_commands
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
@@ -583,6 +584,139 @@ def test_metric_bundle_validation_strips_payload_kind_before_payload_validation(
     )
 
     assert isinstance(bundle.payload, _StrictMetricPayload)
+
+
+@pytest.mark.parametrize("server_base", ["http://nhx-quickstart:8080", "http://127.0.0.1:8080"])
+async def test_target_model_ref_resolves_on_server_before_compile(
+    server_base: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nhx-quickstart:8080")
+    monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
+    requested: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "id": "base-id",
+                "name": "base",
+                "workspace": "default",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        )
+
+    payload = {
+        **_exact_match_spec(),
+        "params": RunConfigOnlineModel(),
+        "target_model_ref": "default/base",
+        "prompt_template": {"messages": "{{item.messages}}"},
+    }
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        async with AsyncNemoClient(base_url=server_base, http_client=http) as client:
+            canonical = await EvaluateJob.to_spec(
+                EvaluateInputSpec.model_validate(payload),
+                workspace="default",
+                entity_client=object(),
+                async_sdk=client,
+                is_local=False,
+            )
+    assert requested == [f"{server_base}/apis/models/v2/workspaces/default/models/base"]
+    assert isinstance(canonical, EvaluateSpec)
+    assert canonical.target_model_ref == ModelRef("default/base")
+    assert isinstance(canonical.target, Model)
+    assert canonical.target.url == (
+        "http://nhx-quickstart:8080/apis/inference-gateway/v2/workspaces/default/model/base/-/v1"
+    )
+    compiled = await EvaluateJob.compile(
+        spec=canonical,
+        workspace="default",
+        entity_client=object(),
+        job_name="ref-eval",
+        async_sdk=None,
+    )
+    assert "localhost:33364" not in compiled.model_dump_json()
+    assert "nhx-quickstart:8080" in compiled.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "url", ["https://external.example/v1", "http://localhost:33364/apis/inference-gateway/v2/model/custom/-/v1"]
+)
+async def test_inline_target_url_and_credentials_are_not_reinterpreted(url: str) -> None:
+    target = Model(url=url, name="external", api_key_secret=SecretRef("default/user-key"))
+    payload = {**_exact_match_spec(), "params": RunConfigOnlineModel(), "target": target}
+    canonical = await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(payload),
+        workspace="default",
+        entity_client=object(),
+        async_sdk=None,
+        is_local=False,
+    )
+    assert isinstance(canonical, EvaluateSpec)
+    assert canonical.target == target
+    assert canonical.target_model_ref is None
+
+
+@pytest.mark.parametrize("params", [None, RunConfig(), RunConfigOnline()])
+def test_input_model_ref_requires_online_model_params(params) -> None:
+    payload = {**_exact_match_spec(), "params": params, "target_model_ref": "default/base"}
+    with pytest.raises(ValueError, match="ModelRef target requires RunConfigOnlineModel"):
+        EvaluateInputSpec.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "status,error_type,message",
+    [
+        (403, PermissionDeniedError, "caller cannot read this model"),
+        (404, ValueError, "Ensure the model entity 'private-model' exists in workspace 'private'"),
+    ],
+)
+async def test_target_model_ref_retains_caller_auth_and_actionable_errors(
+    status: int,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Authorization"] == "Bearer synthetic-caller-token"
+        return httpx.Response(status, json={"detail": "caller cannot read this model"})
+
+    payload = {
+        **_exact_match_spec(),
+        "params": RunConfigOnlineModel(),
+        "target_model_ref": "private/private-model",
+    }
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        async with AsyncNemoClient(
+            base_url="https://platform.example.test",
+            auth=StaticToken("synthetic-caller-token"),
+            http_client=http,
+        ) as client:
+            with pytest.raises(error_type, match=message):
+                await EvaluateJob.to_spec(
+                    EvaluateInputSpec.model_validate(payload),
+                    workspace="default",
+                    entity_client=object(),
+                    async_sdk=client,
+                    is_local=False,
+                )
+    assert len(requests) == 1
+    assert requests[0].url.path == "/apis/models/v2/workspaces/private/models/private-model"
+
+
+def test_input_rejects_ambiguous_target_and_model_ref() -> None:
+    payload = {
+        **_exact_match_spec(),
+        "params": RunConfigOnlineModel(),
+        "target": Model(url="https://external.example/v1", name="external"),
+        "target_model_ref": "default/base",
+    }
+    with pytest.raises(ValueError, match="either target or target_model_ref"):
+        EvaluateInputSpec.model_validate(payload)
 
 
 async def test_evaluate_job_resolves_metric_model_refs_before_sdk_run(

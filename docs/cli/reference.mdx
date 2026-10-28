@@ -9395,6 +9395,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
+* `--target-model-ref.root`: Reference to a model (format: workspace/name).
 * `--prompt-template`: Optional prompt template for online target generation. This flag accepts the string form only; use --spec or --spec-file for the other union form(s).
 * `--publication.intake.evaluation-id`: Name of the existing Evaluation to publish under. Must already exist; the job does not create it.
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
