@@ -9408,7 +9408,7 @@ nemo evals tasksets create [OPTIONS]
 
 * `--harbor-dir <PATH>`: Local Harbor dataset directory.
 * `--harbor-hub`: Harbor Hub dataset, org/name@ref.
-* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: &lt;url>@&lt;ref> reads tasks/ at that ref. For another directory, use a GitHub tree URL: https://github.com/&lt;org>/&lt;repo>/tree/&lt;ref>/&lt;dir>.
+* `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--list-tasks`: Print the selectable tasks and exit.
 * `--workspace`: Workspace for the tasks and the taskset; default: the configured workspace.
@@ -10046,7 +10046,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--batch.sequence-packing`: Override `batch.sequence_packing` in the spec.
 * `--batch.sequence-packing-max-samples <INTEGER>`: Samples analyzed to estimate the optimal pack size when packing is enabled.
 * `--batch.packed-sequence-size <INTEGER>`: Pin the packed sequence length instead of estimating it. Requires sequence_packing.
-* `--optimizer.learning-rate <FLOAT>`: Override `optimizer.learning_rate` in the spec.
+* `--optimizer.learning-rate <FLOAT>`: Peak learning rate. Left unset, it depends on the job: the bi_encoder and cross_encoder recipes use 1e-5 and 3e-6 whatever the finetuning_type; other recipes use 5e-5 for LoRA and 5e-6 for finetuning_type 'all_weights'.
 * `--optimizer.min-learning-rate <FLOAT>`: Minimum learning rate for the cosine decay schedule.
 * `--optimizer.weight-decay <FLOAT>`: Override `optimizer.weight_decay` in the spec.
 * `--optimizer.adam-beta1 <FLOAT>`: Adam optimizer beta1.
@@ -10236,7 +10236,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--schedule.seed <INTEGER>`: Override `schedule.seed` in the spec.
 * `--batch.per-device-train-batch-size <INTEGER>`: Override `batch.per_device_train_batch_size` in the spec.
 * `--batch.gradient-accumulation-steps <INTEGER>`: Override `batch.gradient_accumulation_steps` in the spec.
-* `--optimizer.learning-rate <FLOAT>`: Override `optimizer.learning_rate` in the spec.
+* `--optimizer.learning-rate <FLOAT>`: Peak learning rate. Left unset, it follows Unsloth's guidance: 2e-4 for LoRA and a lower 2e-5 for finetuning_type 'all_weights'.
 * `--optimizer.weight-decay <FLOAT>`: Override `optimizer.weight_decay` in the spec.
 * `--optimizer.adam-beta1 <FLOAT>`: Adam/AdamW beta1.
 * `--optimizer.adam-beta2 <FLOAT>`: Adam/AdamW beta2.

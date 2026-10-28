@@ -194,6 +194,8 @@ def test_metric_filter_passes_validation_and_503s_without_rollups(client: TestCl
         {"filter[cost_usd.mean][gte]": "0.5"},
         {"filter[latency_ms.p95][lte]": "1000"},
         {"filter[evaluators.harbor.verifier.mean][gte]": "0.8"},
+        {"filter[cost_usd][mean][gte]": "0.5"},
+        {"filter[evaluators][harbor.verifier][mean][gte]": "0.8"},
         {"filter[run_count][gte]": "5"},
     ):
         response = client.get(EVALUATIONS, params=param)

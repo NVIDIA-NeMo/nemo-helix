@@ -28,7 +28,7 @@ describe('specDefaults', () => {
   it('reads scalar defaults out of the generated SDK', () => {
     expect(numberDefault(GRPO_SPEC_DEFAULTS, 'max_seq_length')).toBe(2048);
     expect(numberDefault(GRPO_SPEC_DEFAULTS, 'batch_size')).toBe(32);
-    expect(numberDefault(GRPO_SPEC_DEFAULTS, 'learning_rate')).toBe(0.0001);
+    expect(numberDefault(GRPO_SPEC_DEFAULTS, 'learning_rate')).toBe(0.000005);
     expect(numberDefault(GRPO_SPEC_DEFAULTS, 'adam_beta1')).toBe(0.9);
     expect(numberDefault(GRPO_SPEC_DEFAULTS, 'keep_top_k')).toBe(1);
   });

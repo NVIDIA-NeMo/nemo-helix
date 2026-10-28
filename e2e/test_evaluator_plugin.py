@@ -51,11 +51,13 @@ from nhx.testing.utils import ensure_passthrough_virtual_model
 from nhx_evals_sdk import (
     ExactMatchMetric,
     InferenceParams,
+    Model,
     ModelRef,
     RunConfig,
     RunConfigOnlineModel,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
+from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
@@ -649,7 +651,8 @@ def test_online_evaluate_job_uses_mock_provider(
         name=model_name,
         mock_response_body=_chat_completion("Paris"),
     )
-    # A ref is resolved by the server to the in-cluster gateway, as Studio submits it.
+    # A ref is resolved by the server to the in-cluster gateway, as Studio submits it; an inline model
+    # names that route directly.
     target = (
         ModelRef(root=f"{evaluator_workspace}/{model_name}")
         if use_model_ref

@@ -2896,7 +2896,10 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Learning Rate
-          default: 5.0e-06
+          description: 'Peak learning rate. Left unset, it depends on the job: the
+            bi_encoder and cross_encoder recipes use 1e-5 and 3e-6 whatever the finetuning_type;
+            other recipes use 5e-5 for LoRA and 5e-6 for finetuning_type ''all_weights''.'
+          default: 5.0e-05
         min_learning_rate:
           title: Min Learning Rate
           description: Minimum learning rate for the cosine decay schedule.
@@ -3977,8 +3980,8 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Learning Rate
-          description: Peak learning rate.
-          default: 0.0001
+          description: Peak learning rate. DPO uses a low one.
+          default: 5.0e-06
         min_learning_rate:
           title: Min Learning Rate
           description: Minimum LR for cosine decay.
@@ -4166,8 +4169,9 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Learning Rate
-          description: Peak learning rate.
-          default: 0.0001
+          description: Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights'
+            and 1e-5 for 'lora'.
+          default: 5.0e-06
         min_learning_rate:
           title: Min Learning Rate
           description: Minimum LR for cosine decay.
@@ -5869,6 +5873,8 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Learning Rate
+          description: 'Peak learning rate. Left unset, it follows Unsloth''s guidance:
+            2e-4 for LoRA and a lower 2e-5 for finetuning_type ''all_weights''.'
           default: 0.0002
         weight_decay:
           type: number

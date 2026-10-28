@@ -65,7 +65,6 @@ def test_rl_dpo_uplift(
                 "epochs": 1,
                 "batch_size": 32,
                 "micro_batch_size": 1,
-                "learning_rate": 5e-6,
                 "max_seq_length": 1024,
                 "ref_policy_kl_penalty": 0.05,
                 "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},

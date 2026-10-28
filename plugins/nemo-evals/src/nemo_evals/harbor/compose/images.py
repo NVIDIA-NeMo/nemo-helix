@@ -15,9 +15,9 @@ from typing import Any
 from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference
 from nemo_evals.harbor.compose.models import ComposeBuild, ComposeError, ComposeImage, ComposeProblems
 from nemo_evals.harbor.compose.resolve import ENVIRONMENT_DIR, Interpolator, path_in_environment, read_data_file
-from nemo_evals.harbor.compose.service_options import parse_environment
+from nemo_evals.harbor.compose.service_options import parse_boolean, parse_environment
 
-_BUILD_KEYS = frozenset({"context", "dockerfile", "args", "target"})
+_BUILD_KEYS = frozenset({"context", "dockerfile", "args", "target", "no_cache"})
 
 # A build context that names a URL or a git remote instead of a directory.
 _REMOTE_CONTEXT = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://|^git@")
@@ -116,6 +116,7 @@ def parse_build_source(
             parse_environment(build.get("args"), f"{path}.args", problems), f"{path}.args"
         ),
         target=target if isinstance(target, str) else None,
+        no_cache=bool(parse_boolean(build.get("no_cache"), f"{path}.no_cache", problems)),
     )
 
 

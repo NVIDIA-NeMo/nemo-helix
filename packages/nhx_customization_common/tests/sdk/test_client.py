@@ -156,6 +156,29 @@ def test_jobs_resource_create_delegates_to_typed_customization_client() -> None:
     }
 
 
+def test_spec_payload_leaves_unset_defaults_to_the_server() -> None:
+    from nhx.customization_common.sdk.client import _spec_payload
+
+    class _Optimizer(BaseModel):
+        learning_rate: float = 5e-5
+        weight_decay: float = 0.01
+
+    class _SpecWithDefaults(BaseModel):
+        model: str
+        optimizer: _Optimizer = _Optimizer()
+
+    assert _spec_payload(_SpecWithDefaults(model="default/qwen")) == {"model": "default/qwen"}
+    assert _spec_payload(_SpecWithDefaults(model="default/qwen", optimizer=_Optimizer(learning_rate=2e-5))) == {
+        "model": "default/qwen",
+        "optimizer": {"learning_rate": 2e-5},
+    }
+
+    mutated = _SpecWithDefaults(model="default/qwen")
+    mutated.optimizer.learning_rate = 2e-5
+    assert _spec_payload(mutated) == {"model": "default/qwen", "optimizer": {"learning_rate": 2e-5}}
+    assert mutated.model_fields_set == {"model"}, "the caller's spec is left as it was"
+
+
 def test_jobs_resource_get_status_uses_core_jobs_client() -> None:
     from nemo_helix_plugin.client.client import NemoClient
     from nhx.customization_common.sdk.client import make_customization_sdk, make_customization_sdk_context

@@ -156,17 +156,19 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra convers
 .venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
+  --nemo-rl-root <nemo-rl-checkout> \
   --out-dir ./ascii-tree-pkg \
   --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
 ```
 
-Pin `--hub-version` so the vendored release is reproducible.
+Pin `--hub-version` so the vendored release is reproducible. `--nemo-rl-root` is a NeMo-RL checkout, submodules included, at the commit `NEMO_RL_REF` pins in `docker-bake.hcl`. The converter reads the training image's `nemo-gym`, `ray` and `openai` versions from it; without it, the package needs sandbox egress to start.
 
 | Flag | Purpose |
 |---|---|
 | `--hub-id` | Required for conversion (not for `--validate-only`) |
 | `--hub-version` | Hub package version |
+| `--nemo-rl-root` | NeMo-RL checkout at `NEMO_RL_REF`; supplies the image's `nemo-gym`, `ray` and `openai` pins |
 | `--out-dir` / `--dataset-dir` | Environment package and Gym JSONL |
 | `--vf-env-id` / `--vf-env-args` | Verifiers load id (default: last segment of the hub slug) and JSON object of loader kwargs |
 | `--dataset-size` / `--validation-fraction` | Row cap (`-1` = all); split in `[0, 1)` (`0` = train only) |
@@ -175,7 +177,7 @@ Pin `--hub-version` so the vendored release is reproducible.
 | `--upload` | Create both FileSets. Requires `NHX_BASE_URL`; the converter does not read your CLI context. Default names: `<slug>-env` and `<slug>-env-dataset` |
 
 <Note>
-`pi-to-gym-conversion` vendors wheels for `x86_64` today. On an `arm64` cluster, build the closure yourself with the `pip download` command above and pass it via `--wheels-dir`.
+`pi-to-gym-conversion` supports `x86_64` only, and it also rejects `aarch64` wheels passed with `--wheels-dir`. On an `arm64` cluster, build a [`wheels-v1`](#wheels-v1) package instead, with `ARCH=aarch64`.
 </Note>
 
 ```text

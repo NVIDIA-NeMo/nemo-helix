@@ -48,13 +48,14 @@ def test_unsloth_sft_uplift(
             },
             "training": {"finetuning_type": finetuning_type},
             "schedule": {"epochs": 1},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
+            # No learning_rate: the schema default for each finetuning_type is what this covers.
             "output": output,
         }
     )
 
     job_name, final = jobs.submit_and_wait_customization_job(client, "unsloth", spec, ws)
     assert final.status == "completed", jobs.get_job_failure_details(client, job_name, ws)
+    assert final.spec["optimizer"]["learning_rate"] == {"lora": 2e-4, "all_weights": 2e-5}[finetuning_type]
 
     if finetuning_type == "lora":
         deployment, config = jobs.deploy_vllm_model(client, ws, base_entity, lora_enabled=True)

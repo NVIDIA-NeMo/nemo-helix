@@ -26,7 +26,7 @@ vi.mock('@studio/routes/ModelDetailRoute/DeploymentTab', () => ({
 vi.mock('@studio/routes/ModelDetailRoute/DeploymentTab/DeploymentActions', () => ({
   DeploymentActions: () => <button type="button">deployment actions</button>,
 }));
-vi.mock('@studio/components/ModelChatTab', () => ({ ModelChatTab: () => <div /> }));
+vi.mock('@studio/routes/ModelDetailRoute/ChatTab', () => ({ ChatTab: () => <div /> }));
 vi.mock('@studio/components/CustomizationOverview', () => ({
   CustomizationOverview: () => <div>training content</div>,
 }));
