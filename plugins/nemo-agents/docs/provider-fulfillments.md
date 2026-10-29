@@ -34,16 +34,16 @@ Compilation rejects missing aliases, duplicate slots, plaintext env conflicts, a
 
 ## Runtime behavior
 
-1. The Helix controller checks the profile approval and secret access, then creates a dedicated OpenShell provider for each workload binding using a signed registration ticket.
+1. The Jobs backend checks profile approval and secret access, then creates a dedicated OpenShell provider for each workload binding. It sends a registration ticket: a signed request naming the provider slot, Helix secret, creator and workload, with time limits and no secret value.
 2. The credential driver validates the ticket and stores reference and ownership metadata in a persistent registry. Registration does not fetch the secret value.
 3. On credential resolution, the driver checks the owning job attempt/step and reads the secret. With platform auth enabled, it checks the signed creator's current permission through Auth, then reads using the driver's service identity. OpenShell receives the value; the sandbox receives a placeholder.
-4. Controllers attach providers before launch and remove them after sandbox deletion. Ownership labels support retries and cleanup after controller restarts; an orphan sweep reclaims unattached providers after a ten-minute grace period.
+4. The Jobs backend attaches providers before launch and removes them after sandbox deletion. Ownership labels support retries and cleanup after controller restarts; an orphan sweep reclaims providers whose sandboxes are missing after a ten-minute creation grace period.
 
 Provider-bearing sandboxes have a restricted platform REST allowlist enforced by OpenShell. It permits required workload operations, declared filesets, inference and telemetry, while excluding secret reads, entity access, token minting and new job submission. The gateway's network policy, TLS inspection and attachment authorization must remain enforced. Gateway administrators are trusted.
 
 ## Operator configuration
 
-Run the [credential-driver sidecar](../../nemo-deployments/examples/openshell/credential-driver.md) beside a dedicated gateway. Add this block inside the OpenShell job execution profile `config`:
+Run the Helix credential driver beside a dedicated gateway. Add this block inside the OpenShell job execution profile `config`:
 
 ```yaml
 gateway_credentials:
@@ -76,7 +76,7 @@ With platform auth enabled, the creator's permission is required at both provisi
 
 The driver has no value cache. OpenShell is trusted to hold resolved credentials for the advertised lifetime: 300 seconds by default, configurable from 1–3600 seconds with `--cache-lifetime-seconds`. Controller polling and propagation must fit within that lifetime. Rotation takes effect on a successful resolution and propagation; old values may remain usable during that interval. Retain overlapping source tokens when possible.
 
-In Helix renewal mode, confirmed permission denial or a missing secret records cleanup intent, then detaches and deletes the affected provider. Cleanup retries after failure or controller restart. Restoring permission does not undo recorded cleanup or recreate a missing provider during renewal; start a new workload to restore access. Other providers remain independently renewable. Temporary outages retry without extending existing expiry.
+In Helix renewal mode, confirmed permission denial or a missing secret records cleanup intent, then detaches and deletes the affected provider. Cleanup retries after failure or controller restart. Restoring permission does not undo recorded cleanup or recreate a missing provider during renewal; start a new workload to restore access. After successful revocation cleanup, renewal continues for the remaining providers. Other failures end that pass and retry on the next reconciliation without extending existing expiry.
 
 Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Removing a provider leaves the underlying Helix secret intact. Source-service token revocation is separate. The Jobs controller retains responsibility for job lifecycle.
 

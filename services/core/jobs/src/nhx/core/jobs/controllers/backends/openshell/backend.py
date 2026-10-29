@@ -93,6 +93,7 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
 _OPENSHELL_IMPORT_ERROR: ImportError | None = None
 try:
     import grpc
+    from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
     from nhx.core.jobs.controllers.backends.openshell.sandbox_client import JobsSandboxClient
     from openshell import SandboxError, TlsConfig
     from openshell._proto import openshell_pb2 as pb
@@ -406,11 +407,6 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
 
         if step_spec.gateway_providers:
             try:
-                from nemo_helix_plugin.openshell.isolation import (
-                    restricted_platform_policy,
-                    validate_provider_environment,
-                )
-
                 if (
                     self._executor_config.gateway_credentials is None
                     or egress is None
