@@ -25,16 +25,13 @@ pytestmark = pytest.mark.skipif(
 EXAMPLE = Path(__file__).resolve().parents[4] / "examples" / "openshell"
 MODULE = "nemo_deployments_plugin.backends.openshell.credential_driver"
 
-# Executed in the actual API image. Permission/metadata checks are mocked; Store uses
+# Executed in the actual API image. A synthetic signed scope is registered through
 # the sidecar's real UDS gRPC server. No real token or service credential is used.
 REGISTER = """
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 import grpc
-import httpx
-from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_deployments_plugin.backends.openshell.credential_driver import wire
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
 from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import BindingScope, RegistrationTickets
@@ -42,12 +39,9 @@ from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import
 async def run():
     tickets = RegistrationTickets(Path('/run/nemo-driver-credentials/private/registration.key').read_bytes(), 'sidecar-smoke')
     owner = ProviderOwner(workspace='gateway-test', provider='smoke', provider_id='smoke-id', credential_key='API_TOKEN')
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={'id': 'token-id', 'name': 'token', 'workspace': 'test'}))
-    async with AsyncSecretsClient(base_url='https://test.invalid', http_client=httpx.AsyncClient(transport=transport), owns_http_client=True) as client:
-        with patch('nemo_helix_plugin.openshell.authorization._require_creator_permission', new=AsyncMock()):
-            ticket = await tickets.issue(BindingScope(gateway_id='sidecar-smoke', gateway_workspace=owner.workspace,
-                provider=owner.provider, credential_key=owner.credential_key, secret_workspace='test', secret_name='token',
-                job_id='smoke-job', principal_id='smoke-user'), requester_secrets=client)
+    ticket = tickets.sign(BindingScope(gateway_id='sidecar-smoke', gateway_workspace=owner.workspace,
+        provider=owner.provider, credential_key=owner.credential_key, secret_workspace='test', secret_name='token',
+        job_id='smoke-job', principal_id='smoke-user'))
     async with grpc.aio.insecure_channel('unix:/run/nemo-credential-driver/private/driver.sock') as channel:
         request_name, response_name = wire.METHODS['StoreCredential']
         call = channel.unary_unary('/'+wire.SERVICE+'/StoreCredential',

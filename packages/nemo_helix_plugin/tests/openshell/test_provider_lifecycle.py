@@ -18,6 +18,8 @@ from google.protobuf.message import Message
 grpc = pytest.importorskip("grpc")
 pytest.importorskip("openshell")
 
+from nemo_deployments_plugin.backends.openshell import authorization as deployment_authorization
+from nemo_deployments_plugin.backends.openshell import provisioning as deployment_provisioning
 from nemo_deployments_plugin.backends.openshell.credential_driver import wire
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
 from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
@@ -30,8 +32,7 @@ from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
 from nemo_helix_plugin.openshell.provider_client import ProviderGatewayClient
-from nemo_helix_plugin.openshell.provisioning import ProviderProvisioner, ProviderProvisioningError
-from nemo_helix_plugin.openshell.registration import RegistrationTickets
+from nemo_helix_plugin.openshell.registration import RegistrationDenied, RegistrationTickets
 from nemo_helix_plugin.openshell.types import (
     GatewayCredentialConfig,
     GatewayProviderBinding,
@@ -39,6 +40,8 @@ from nemo_helix_plugin.openshell.types import (
     ProviderAccessRevoked,
 )
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nhx.core.jobs.controllers.backends.openshell import authorization as job_authorization
+from nhx.core.jobs.controllers.backends.openshell import provisioning as job_provisioning
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
 
@@ -206,14 +209,24 @@ class Gateway:
         raise AssertionError(method)
 
 
-@pytest.fixture
-async def setup(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("nemo_helix_plugin.openshell.authorization._require_creator_permission", AsyncMock())
+@pytest.fixture(params=["job", "deployment"])
+async def setup(tmp_path: Path, monkeypatch, request):
+    kind = request.param
+    authorization = job_authorization if kind == "job" else deployment_authorization
+    provisioning = job_provisioning if kind == "job" else deployment_provisioning
+    provisioner_type = (
+        job_provisioning.JobProviderProvisioner
+        if kind == "job"
+        else deployment_provisioning.DeploymentProviderProvisioner
+    )
+    monkeypatch.setattr(authorization, "platform_auth_enabled", lambda: True)
     requests = []
 
     def http(request):
         requests.append(request)
         assert not request.url.path.endswith("/access"), "Provisioning must never fetch a secret value"
+        if request.url.path.endswith("/has_permissions"):
+            return httpx.Response(200, json={"result": {"allowed": True}})
         assert request.url.path.endswith("/secrets/token")
         return httpx.Response(200, json={"id": "token-id", "name": "token", "workspace": "team"})
 
@@ -231,17 +244,29 @@ async def setup(tmp_path: Path, monkeypatch):
             credential_refresh_verified=True,
             profiles={"service-read": {"workspaces": {"team"}, "credential_keys": {"API_TOKEN"}}},
         )
-        provisioner = ProviderProvisioner(config, "gateway-team", gateway.channel(), tickets=tickets)
+        provisioner = provisioner_type(config, "gateway-team", gateway.channel(), tickets=tickets)
         kwargs = dict(
             workload_workspace="team",
             workload_id="sandbox-1",
-            workload=GatewayWorkload(kind="deployment", workspace="team", name="agent", id="deployment-1"),
+            workload=GatewayWorkload(
+                kind=kind,
+                workspace="team",
+                name="agent",
+                id="workload-1",
+                attempt_id="attempt-1" if kind == "job" else None,
+                step_name="run" if kind == "job" else None,
+            ),
             auth_context=AuthContext(principal_id="user-1"),
             secrets_client=client,
             platform_host="helix.example",
         )
         yield SimpleNamespace(
-            provisioner=provisioner, gateway=gateway, registry=registry, requests=requests, kwargs=kwargs
+            provisioner=provisioner,
+            gateway=gateway,
+            registry=registry,
+            requests=requests,
+            kwargs=kwargs,
+            error_type=provisioning.ProviderProvisioningError,
         )
 
 
@@ -274,7 +299,7 @@ async def test_auth_disabled_provisioning_renewal_and_cleanup(setup):
 async def test_prepare_retry_cleanup_stores_only_reference_metadata(setup):
     names = await setup.provisioner.prepare(binding(), **setup.kwargs)
     assert await setup.provisioner.prepare(binding(), **setup.kwargs) == names
-    assert len(setup.requests) == 1
+    assert len(setup.requests) == 2
     provider = setup.gateway.providers[names[0]]
     assert not provider.credentials
     owner = ProviderOwner(
@@ -283,14 +308,12 @@ async def test_prepare_retry_cleanup_stores_only_reference_metadata(setup):
     handle = provider.credential_handles["API_TOKEN"].handle
     grant = setup.registry.resolve(owner, handle)
     assert grant.claims.principal_id == "user-1"
-    assert grant.claims.workload.id == "deployment-1"
+    assert grant.claims.workload == setup.kwargs["workload"]
     assert grant.claims.secret_name == "token"
     await setup.provisioner.cleanup(workload_workspace="other", workload_id="sandbox-1")
     assert names[0] in setup.gateway.providers
     await setup.provisioner.cleanup(workload_workspace="team", workload_id="sandbox-1")
     assert not setup.gateway.providers
-    from nemo_helix_plugin.openshell.registration import RegistrationDenied
-
     with pytest.raises(RegistrationDenied):
         setup.registry.resolve(owner, handle)
 
@@ -310,7 +333,7 @@ async def test_reject_unsupported_bindings_before_registration(setup, change):
         setup.kwargs["auth_context"] = None
     else:
         bindings["service"] = GatewayProviderBinding(profile="unknown", credentials={"API_TOKEN": "team/token"})
-    with pytest.raises(ProviderProvisioningError):
+    with pytest.raises(setup.error_type):
         await setup.provisioner.prepare(bindings, **setup.kwargs)
     assert not setup.gateway.providers
     assert not setup.requests
@@ -322,7 +345,7 @@ async def test_recreated_workload_gets_distinct_provider_and_cannot_borrow_exist
     recreated = await setup.provisioner.prepare(binding(), **setup.kwargs)
     assert original != recreated
     setup.gateway.providers[recreated[0]].metadata.labels["nemo-helix/provider-binding"] = "different-owner"
-    with pytest.raises(ProviderProvisioningError, match="does not belong"):
+    with pytest.raises(setup.error_type, match="does not belong"):
         await setup.provisioner.prepare(binding(), **setup.kwargs)
 
 
@@ -350,7 +373,7 @@ async def test_renewal_survives_controller_restart_without_fetching_values(setup
     for advance, updates in [(9, 0), (1, 1), (2, 1), (7, 1), (1, 2), (10, 3)]:
         now[0] += advance
         # A fresh controller reads durable timing and ownership from the gateway.
-        restarted = ProviderProvisioner(
+        restarted = type(provisioner)(
             provisioner.config,
             provisioner.workspace,
             setup.gateway.channel(),
@@ -362,7 +385,7 @@ async def test_renewal_survives_controller_restart_without_fetching_values(setup
     current = setup.gateway.providers[names[0]]
     assert current.metadata.id == original.metadata.id
     assert current.credential_handles["API_TOKEN"] != original.credential_handles["API_TOKEN"]
-    assert len(setup.requests) == 4  # Only metadata authorization, never /access.
+    assert len(setup.requests) == 8  # Creator permission and metadata, never /access.
     owner = ProviderOwner(
         workspace=current.metadata.workspace,
         provider=names[0],
@@ -372,8 +395,6 @@ async def test_renewal_survives_controller_restart_without_fetching_values(setup
     claims = setup.registry.resolve(owner, current.credential_handles["API_TOKEN"].handle).claims
     assert claims.workload == setup.kwargs["workload"]
     assert claims.principal_id == "user-1"
-    from nemo_helix_plugin.openshell.registration import RegistrationDenied
-
     with pytest.raises(RegistrationDenied):
         setup.registry.resolve(owner, original.credential_handles["API_TOKEN"].handle)
 
@@ -426,7 +447,7 @@ async def test_renewal_prefers_config_timestamp_and_preserves_unrelated_config(s
     assert updated.config[marker] == "1010"
     assert updated.config["service-option"] == "preserved"
     assert updated.metadata.labels[marker] == "1000"  # Gateway leaves labels untouched.
-    restarted = ProviderProvisioner(
+    restarted = type(provisioner)(
         provisioner.config,
         provisioner.workspace,
         setup.gateway.channel(),
@@ -464,7 +485,7 @@ async def test_failed_renewal_never_recreates_or_advances_committed_state(setup,
             return await setup.gateway.call(method, request)
 
         provisioner.client = ProviderGatewayClient(setup.gateway.channel(fail_update))
-    with pytest.raises((ProviderProvisioningError, ProviderAccessRevoked, grpc.RpcError)):
+    with pytest.raises((setup.error_type, ProviderAccessRevoked, grpc.RpcError)):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert provider.config["nemo-helix/renewed"] == "1000"
     assert provider.credential_handles["API_TOKEN"].handle == original_handle
@@ -493,14 +514,14 @@ async def test_denied_provider_is_detached_deleted_and_never_renewed(setup, deni
         if denial is PermissionError
         else denial(httpx.Response(403 if denial is PermissionDeniedError else 404))
     )
-    original_issue = provisioner.tickets.issue
-    provisioner.tickets.issue = AsyncMock(side_effect=error)
+    original_issue = provisioner._issue_ticket
+    provisioner._issue_ticket = AsyncMock(side_effect=error)
     with pytest.raises(ProviderAccessRevoked):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert set(names) == setup.gateway.detached_providers
     assert not setup.gateway.providers
     assert not setup.gateway.updates[0].provider.credentials  # Intent update never sends redactions or values.
-    provisioner.tickets.issue = original_issue
+    provisioner._issue_ticket = original_issue
     with pytest.raises(ProviderAccessRevoked):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert not setup.gateway.providers
@@ -514,7 +535,7 @@ async def test_revocation_retries_after_restart(setup, failure):
     names = await provisioner.prepare(binding(), **setup.kwargs)
     setup.gateway.attached.add("sandbox-1")
     provisioner.clock = lambda: 1010
-    provisioner.tickets.issue = AsyncMock(side_effect=PermissionError)
+    provisioner._issue_ticket = AsyncMock(side_effect=PermissionError)
 
     async def failing_call(method: str, request: Message) -> Message:
         if method == failure:
@@ -527,14 +548,15 @@ async def test_revocation_retries_after_restart(setup, failure):
     assert names[0] in setup.gateway.providers
     # After intent was committed, restoring permission cannot cancel cleanup.
     if failure != "UpdateProvider":
-        provisioner.tickets.issue = AsyncMock(side_effect=AssertionError("must not authorize a revoked provider"))
-    restarted = ProviderProvisioner(
+        provisioner._issue_ticket = AsyncMock(side_effect=AssertionError("must not authorize a revoked provider"))
+    restarted = type(provisioner)(
         provisioner.config,
         provisioner.workspace,
         setup.gateway.channel(),
         tickets=provisioner.tickets,
         clock=lambda: 1011,
     )
+    restarted._issue_ticket = provisioner._issue_ticket
     with pytest.raises(ProviderAccessRevoked):
         await restarted.prepare(binding(), **setup.kwargs, renew=True)
     assert not setup.gateway.providers
@@ -548,14 +570,14 @@ async def test_secret_outage_does_not_remove_provider_and_recovers(setup):
     names = await provisioner.prepare(binding(), **setup.kwargs)
     setup.gateway.attached.add("sandbox-1")
     provisioner.clock = lambda: 1010
-    original_issue = provisioner.tickets.issue
-    provisioner.tickets.issue = AsyncMock(side_effect=TimeoutError)
+    original_issue = provisioner._issue_ticket
+    provisioner._issue_ticket = AsyncMock(side_effect=TimeoutError)
     with pytest.raises(TimeoutError):
         await provisioner.prepare(binding(), **setup.kwargs, renew=True)
     assert names[0] in setup.gateway.providers
     assert not setup.gateway.detached_providers
     assert not setup.gateway.updates
-    provisioner.tickets.issue = original_issue
+    provisioner._issue_ticket = original_issue
     assert await provisioner.prepare(binding(), **setup.kwargs, renew=True) == names
 
 
@@ -573,14 +595,14 @@ async def test_denied_provider_does_not_prevent_other_provider_renewal(setup):
     }
     names = await provisioner.prepare(bindings, **setup.kwargs)
     setup.gateway.attached.add("sandbox-1")
-    original_issue = provisioner.tickets.issue
+    original_issue = provisioner._issue_ticket
 
     async def issue(scope, **kwargs):
         if scope.credential_key == "OTHER_TOKEN":
             raise PermissionError
         return await original_issue(scope, **kwargs)
 
-    provisioner.tickets.issue = issue
+    provisioner._issue_ticket = issue
     provisioner.clock = lambda: 1010
     with pytest.raises(ProviderAccessRevoked):
         await provisioner.prepare(bindings, **setup.kwargs, renew=True)
@@ -662,10 +684,19 @@ async def test_concurrent_creation_checks_winner_before_attachment(setup, winner
     if winner == "active":
         assert await setup.provisioner.prepare(binding(), **setup.kwargs) == list(setup.gateway.providers)
     elif winner == "other-profile-workspace":
-        with pytest.raises(ProviderProvisioningError, match="another binding"):
+        with pytest.raises(setup.error_type, match="another binding"):
             await setup.provisioner.prepare(binding(), **setup.kwargs)
         assert setup.gateway.providers  # Never delete another binding.
     else:
         with pytest.raises(ProviderAccessRevoked):
             await setup.provisioner.prepare(binding(), **setup.kwargs)
         assert not setup.gateway.providers
+
+
+async def test_backend_rejects_other_workload_kind_before_registration(setup):
+    kind = "job" if setup.kwargs["workload"].kind == "deployment" else "deployment"
+    setup.kwargs["workload"] = setup.kwargs["workload"].model_copy(update={"kind": kind})
+    with pytest.raises(setup.error_type, match="Expected a"):
+        await setup.provisioner.prepare(binding(), **setup.kwargs)
+    assert not setup.gateway.providers
+    assert not setup.requests

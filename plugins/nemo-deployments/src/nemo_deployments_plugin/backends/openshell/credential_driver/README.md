@@ -9,7 +9,7 @@ For environment bindings, controller configuration, renewal and feature limits, 
 
 ## Credential lifecycle
 
-1. Trusted Helix provisioning authorizes the workload and injection profile. `RegistrationTickets.issue` checks the creator's secret-access permission and secret metadata without fetching a value. With auth disabled, it checks existence only.
+1. The owning Jobs or Deployments backend authorizes the workload and injection profile, checks the creator's secret-access permission and secret metadata without fetching a value, then signs a registration ticket. With auth disabled, it checks existence only.
 2. The controller sends the signed ticket as the credential value in `CreateProvider` or `UpdateProvider`. Tickets never enter the sandbox environment or persisted user-visible workload specification.
 3. OpenShell calls `StoreCredential` with its provider identity. The driver verifies the ticket, persists the binding metadata and returns an opaque handle.
 4. `ResolveCredentials` validates provider ownership, auth mode, revocation and workload identity. It explicitly checks the signed creator's current `secrets.read` permission through Auth, reads the secret using the driver's identity, then rechecks workload state and local revocation before returning the value and expiry. The driver retains no value cache.

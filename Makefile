@@ -593,7 +593,6 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 		pytest -v plugins/nemo-deployments/tests/unit/backends/openshell/ \
 		packages/nemo_helix_plugin/tests/client/test_openshell_provider_client.py \
 		plugins/nemo-deployments/tests/unit/test_credential_driver.py \
-		plugins/nemo-deployments/tests/unit/test_credential_provisioning.py \
 		packages/nemo_helix_plugin/tests/openshell/
 	$(UV) run --frozen --all-packages --extra openshell --group typecheck ty check \
 		packages/nemo_helix_plugin/src/nemo_helix_plugin/openshell/provider_client.py \
