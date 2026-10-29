@@ -4478,6 +4478,10 @@ components:
             $ref: '#/components/schemas/GatewayProviderBinding'
           type: object
           title: Providers
+        stage_ethos_fileset:
+          type: boolean
+          title: Stage Ethos Fileset
+          default: true
         post_run_action:
           $ref: '#/components/schemas/PostRunActionConfig'
       type: object
