@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from nemo_agent_hardener_plugin.config import (
@@ -31,13 +31,68 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     CATEGORY_PROVISIONING,
     AgentHardenerRunError,
 )
+from nemo_agent_hardener_plugin.jobs.openshell_gateway import register_openshell_gateway
 from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, ExecutorSpec, SubprocessExecutionProviderSpec
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.executor import resolve_task_executor
 from nemo_helix_plugin.secrets.client import SecretsClient
 
 logger = logging.getLogger(__name__)
+
+TASK_IMAGE = "nhx-agent-hardener-tasks"
+# The subprocess executor forwards only PATH/VIRTUAL_ENV, but on the host `setup` provisioned, openshell reads
+# its gateway registration from $HOME/.config/openshell (or $XDG_CONFIG_HOME) and reaches Docker via $DOCKER_HOST.
+_HOST_ENVVARS = ("HOME", "DOCKER_HOST", "XDG_CONFIG_HOME")
+# Task pods get no platform config file, so the job reads these from NEMO_AGENT_HARDENER_* env instead.
+_CONFIG_ENV_PREFIX = "NEMO_AGENT_HARDENER_"
+_TASK_POD_CONFIG_FIELDS = (
+    "inference_secret_name",
+    "openshell_gateway_endpoint",
+    "openshell_ca_secret",
+    "openshell_client_cert_secret",
+    "openshell_client_key_secret",
+)
+
+
+async def task_step_executor(
+    task_module: str, *, step: str, profile: str | None, async_sdk: object
+) -> tuple[ExecutorSpec, list[EnvironmentVariable]]:
+    """The executor and env for a job step: the provisioned host's venv locally, :data:`TASK_IMAGE` on Helm."""
+    executor = await resolve_task_executor(
+        profile=profile or "default",
+        async_sdk=cast(AsyncNemoClient, async_sdk),
+        image=TASK_IMAGE,
+        entrypoint=["python", "-m"],
+        command=[task_module],
+        step=step,
+    )
+    environment = [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
+    if isinstance(executor, SubprocessExecutionProviderSpec):
+        environment += [
+            EnvironmentVariable(name=name, value=value) for name in _HOST_ENVVARS if (value := os.environ.get(name))
+        ]
+        return executor, environment
+
+    plugin_config = AgentHardenerConfig.get()
+    if not plugin_config.container_jobs:
+        raise HelixJobCompilationError(
+            f"The agent-hardener {step} step cannot run on this deployment yet: it registers no subprocess "
+            "profile, and container jobs are off because OpenShell 0.1.0 and later create sandboxes only from a "
+            "registry image while agent-hardener still builds the victim from a Dockerfile. Run it from a host "
+            "provisioned with `nemo agent-hardener setup`."
+        )
+    environment += [
+        EnvironmentVariable(name=f"{_CONFIG_ENV_PREFIX}{field.upper()}", value=str(value))
+        for field in _TASK_POD_CONFIG_FIELDS
+        if (value := getattr(plugin_config, field))
+    ]
+    return executor, environment
 
 
 def require_provisioned(plugin_config: AgentHardenerConfig) -> None:
@@ -131,11 +186,40 @@ def resolve_model_key(sdk: Any, api_key_secret: str | None, *, workspace: str) -
         # Explicitly chosen: a failure here is the user's to see, so it is not swallowed.
         return _resolve_secret(sdk, api_key_secret, workspace)
     config = AgentHardenerConfig.get()
-    try:
-        provisioned = _resolve_secret(sdk, config.inference_secret_name, workspace)
-    except Exception:  # absent secret / unreachable store — expected, the dotenv is the fallback
-        provisioned = None
+    provisioned = _optional_secret(sdk, config.inference_secret_name, workspace)
     return provisioned or build_subprocess_env(config).get(INFERENCE_API_KEY_ENVVAR)
+
+
+def _optional_secret(sdk: Any, name: str, workspace: str) -> str | None:
+    try:
+        return _resolve_secret(sdk, name, workspace)
+    except Exception:  # absent secret / unreachable store — callers fall back or report it themselves
+        return None
+
+
+_MTLS_PURPOSE = "the OpenShell mTLS bundle"
+
+
+def job_runtime_env(
+    plugin_config: AgentHardenerConfig, *, sdk: Any, workspace: str, openshell_home: Path
+) -> dict[str, str]:
+    """Env a job adds for what `nemo agent-hardener setup` would otherwise have left on the host.
+
+    agent-hardener's own inference key is the one :func:`resolve_model_key` picks, so the run uses the
+    credential its preflight validated; a configured OpenShell gateway is registered under *openshell_home*.
+    """
+    env: dict[str, str] = {}
+    key = resolve_model_key(sdk, None, workspace=workspace)
+    if key:
+        env[INFERENCE_API_KEY_ENVVAR] = key
+    env.update(
+        register_openshell_gateway(
+            plugin_config,
+            resolve_secret=lambda name: resolve_secret_refs(sdk, {_MTLS_PURPOSE: name}, workspace)[_MTLS_PURPOSE],
+            config_home=openshell_home,
+        )
+    )
+    return env
 
 
 def build_model_env(models: WarGameModels | None, *, sdk: Any, workspace: str) -> dict[str, str]:
@@ -185,8 +269,11 @@ def _apply_group(
             env[name] = choice.base_url
     if choice.api_key_secret:
         value = _resolve_secret(sdk, choice.api_key_secret, workspace)
-        if value:
-            env[key_envvar] = value
+        if not value:
+            raise AgentHardenerRunError(
+                CATEGORY_MISSING_CREDENTIAL, f"secret {workspace}/{choice.api_key_secret} is missing or empty."
+            )
+        env[key_envvar] = value
 
 
 def materialize_victim_env_file(manifest: str, env: dict[str, str], dest_dir: Path) -> str | None:

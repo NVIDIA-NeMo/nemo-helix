@@ -56,7 +56,7 @@ the selected workflow.
 | Type | IDs |
 | --- | --- |
 | Wheels | `nemo-helix`, `nemo-helix-plugin` |
-| Containers | `nhx-api`, `nhx-tasks`, `nhx-tasks-openshell`, `nhx-gym-tasks`, `nhx-gym-host`, `nhx-customizer-tasks`, `nhx-automodel-training`, `nhx-unsloth-training`, `nhx-rl-training`, `nhx-garak-tasks`, `nhx-safe-synthesizer-tasks`, `nhx-builder-tasks`, `nhx-kaniko` |
+| Containers | `nhx-api`, `nhx-tasks`, `nhx-tasks-openshell`, `nhx-gym-tasks`, `nhx-gym-host`, `nhx-agent-hardener-tasks`, `nhx-customizer-tasks`, `nhx-automodel-training`, `nhx-unsloth-training`, `nhx-rl-training`, `nhx-garak-tasks`, `nhx-safe-synthesizer-tasks`, `nhx-builder-tasks`, `nhx-kaniko` |
 | Helm chart | `nemo-helix` |
 
 For every selected wheel, the workflow checks that its package configuration

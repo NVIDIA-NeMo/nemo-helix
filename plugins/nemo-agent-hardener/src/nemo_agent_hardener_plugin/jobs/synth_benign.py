@@ -17,7 +17,8 @@ suite on the manifest entity.
 from __future__ import annotations
 
 import logging
-import os
+import tempfile
+from pathlib import Path
 from typing import Any, ClassVar
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -43,12 +44,9 @@ from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
-    EnvironmentVariable,
     HelixJobSpec,
     HelixJobStep,
-    SubprocessExecutionProviderSpec,
 )
-from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -75,30 +73,23 @@ class AgentHardenerSynthBenignJob(NemoJob):
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
-        """A single subprocess step running the synth task on the provisioned host (mirrors the war-game).
+        """A single step running the synth task, placed like the war-game's.
 
         The ``service`` driver's HITL is relayed through the platform attempt's ``status_details``, so it must run
         as a submitted job attempt (``ctx.job_id`` and ``ctx.attempt_id`` set). The run record is created at
         runtime by ``_run_service_driven`` (as the war-game ``stop_after_synth`` path does), so no pre-creation
         is needed here.
         """
-        del workspace, entity_client, job_name, async_sdk, profile, options
+        del workspace, entity_client, job_name, options
         synth = SynthBenignSpec.model_validate(spec)
-        environment = [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
-        # The subprocess executor forwards only PATH/VIRTUAL_ENV; the sandbox reads its gateway registration
-        # from $HOME/.config/openshell and reaches Docker via $DOCKER_HOST (same as the war-game step).
-        for name in ("HOME", "DOCKER_HOST", "XDG_CONFIG_HOME"):
-            value = os.environ.get(name)
-            if value:
-                environment.append(EnvironmentVariable(name=name, value=value))
+        executor, environment = await _common.task_step_executor(
+            "nemo_agent_hardener_plugin.tasks.synth_benign", step="synth", profile=profile, async_sdk=async_sdk
+        )
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
                     name="synth",
-                    executor=SubprocessExecutionProviderSpec(
-                        provider="subprocess",
-                        command=["python", "-m", "nemo_agent_hardener_plugin.tasks.synth_benign"],
-                    ),
+                    executor=executor,
                     config=synth.model_dump(mode="json"),
                     environment=environment,
                 ),
@@ -108,7 +99,8 @@ class AgentHardenerSynthBenignJob(NemoJob):
     def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Run synthesis, classifying any failure into an operator-facing error result."""
         try:
-            return self._execute(config, ctx=ctx, sdk=sdk)
+            with tempfile.TemporaryDirectory(prefix="agent-hardener-openshell-") as openshell_home:
+                return self._execute(config, ctx=ctx, sdk=sdk, openshell_home=Path(openshell_home))
         except Exception as exc:
             failure = classify_exception(exc)
             logger.exception("agent-hardener synth-benign failed [%s]: %s", failure.category, failure.message)
@@ -122,7 +114,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
                 },
             }
 
-    def _execute(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
+    def _execute(self, config: dict, *, ctx: JobContext, openshell_home: Path, sdk: Any = None) -> dict:
         SynthBenignSpec.model_validate(config)
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
@@ -133,16 +125,22 @@ class AgentHardenerSynthBenignJob(NemoJob):
         # Synthesis probes the live victim, so it needs the manifest's declared secrets: from the operator env,
         # the manifest's Secrets-store refs and any --env-file. Either way the victim's .env gets written.
         _common.warn_shadowed_operator_env(plugin_config)
+        runtime_env = _common.job_runtime_env(
+            plugin_config, sdk=sdk, workspace=ctx.workspace, openshell_home=openshell_home
+        )
         env, env_file = _common.prepare_victim_env(
             manifest,
-            _build_native_subprocess_env(plugin_config),
+            _build_native_subprocess_env(plugin_config, runtime_env),
             config.get("env_file"),
             _manifest_secret_values(sdk, manifest_id, ctx),
         )
         _reject_platform_auth_sources(manifest, env_file)
         _common.check_victim_secrets(manifest, env, env_file)
         # The manifest's model choice applies to both drivers, as it does for the war-game.
-        model_env = _common.build_model_env(_effective_models(sdk, config, ctx), sdk=sdk, workspace=ctx.workspace)
+        model_env = {
+            **runtime_env,
+            **_common.build_model_env(_effective_models(sdk, config, ctx), sdk=sdk, workspace=ctx.workspace),
+        }
 
         if config.get("driver") == "service":
             return self._run_service(

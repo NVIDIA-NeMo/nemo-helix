@@ -24,26 +24,17 @@ from typing import Any, ClassVar
 import yaml
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_helix_plugin.agents.validation import require_registered_agent_config
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
-    ContainerSpec,
-    CPUExecutionProviderSpec,
-    ExecutorSpec,
     HelixJobSpec,
-    SubprocessExecutionProviderSpec,
 )
-from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
-    HelixJobDependencyUnavailableError,
 )
-from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.executor import resolve_task_executor
 from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN,
     FilesetRef,
@@ -142,7 +133,14 @@ class OptimizeJob(NemoJob):
             steps=[
                 HelixJobStep(
                     name="optimize",
-                    executor=await _resolve_executor(profile=profile or "default", async_sdk=async_sdk),
+                    executor=await resolve_task_executor(
+                        profile=profile or "default",
+                        async_sdk=async_sdk,
+                        image=OPTIMIZE_TASK_IMAGE,
+                        entrypoint=OPTIMIZE_ENTRYPOINT,
+                        command=OPTIMIZE_COMMAND,
+                        step="optimize",
+                    ),
                     config=spec_dict,
                     environment=[
                         EnvironmentVariable(
@@ -184,56 +182,6 @@ class OptimizeJob(NemoJob):
 
         published = _publish_results(spec.output, workspace=spec.workspace, ctx=ctx, sdk=sdk)
         return result if published is None else {**result, "output": published}
-
-
-def _profiles_unavailable(profile: str) -> HelixJobDependencyUnavailableError:
-    """A retryable failure while resolving the backend for *profile*."""
-    return HelixJobDependencyUnavailableError(
-        f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
-        "unavailable.  Retry the submission."
-    )
-
-
-async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> ExecutorSpec:
-    """Pick the executor for *profile* from the backends the platform actually registered.
-
-    Optimize prefers ``subprocess``: a study drives Fabric trials that may need the host's
-    Docker daemon and a venv carrying the agent's harness adapters.  Deployments that do not
-    register a subprocess backend (Helm / Minikube) get the ``cpu`` provider instead, which the
-    platform maps to whichever backend it registered for that profile (docker or kubernetes_job).
-    """
-    try:
-        profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
-    except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
-        raise _profiles_unavailable(profile) from exc
-
-    if any(
-        isinstance(candidate, SubprocessJobExecutionProfile) and candidate.profile == profile for candidate in profiles
-    ):
-        return SubprocessExecutionProviderSpec(
-            provider="subprocess",
-            profile=profile,
-            command=[*OPTIMIZE_ENTRYPOINT, *OPTIMIZE_COMMAND],
-        )
-
-    # Jobs keys execution profiles by (provider, profile); "cpu" is whatever container backend
-    # the deployment registered under that name.
-    if any(candidate.provider == "cpu" and candidate.profile == profile for candidate in profiles):
-        return CPUExecutionProviderSpec(
-            provider="cpu",
-            profile=profile,
-            container=ContainerSpec(
-                image=get_qualified_image(OPTIMIZE_TASK_IMAGE),
-                entrypoint=OPTIMIZE_ENTRYPOINT,
-                command=OPTIMIZE_COMMAND,
-            ),
-        )
-
-    available = sorted({f"{candidate.provider}/{candidate.profile}" for candidate in profiles})
-    raise HelixJobCompilationError(
-        f"No 'subprocess' or 'cpu' execution profile named {profile!r} is registered, so the "
-        f"optimize step has nowhere to run.  Available profiles: {available or ['<none>']}."
-    )
 
 
 @contextlib.contextmanager

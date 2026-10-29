@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nhx-agent-hardener-tasks"
+version = "0.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "nvidia-agent-hardener==0.0.17",
+]
+
+[tool.uv]
+prerelease = "allow"
+required-version = ">=0.13.4"
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]

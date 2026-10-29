@@ -28,7 +28,6 @@ from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from prompt_master_plugin.jobs import optimize as optimize_module
 from prompt_master_plugin.jobs.optimize import OPTIMIZED_AGENT_FILENAME, RESULT_NAME, PromptMasterOptimizeJob
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -131,8 +130,8 @@ async def test_the_router_dispatches_compile_to_this_job(
     agents_client.get_agent = AsyncMock(return_value=MagicMock())
     agents_client.get_agent.return_value.data.return_value = SimpleNamespace(config=source_agent)
     with (
-        patch.object(optimize_module, "client_from_platform", return_value=jobs_client),
         patch("nemo_helix_plugin.agents.validation.client_from_platform", return_value=agents_client),
+        patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=jobs_client),
     ):
         compiled = await _compile_through_router(spec, workspace="staging")
 
