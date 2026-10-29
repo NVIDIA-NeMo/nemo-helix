@@ -254,6 +254,7 @@ class ServiceParser:
             add_capabilities=parse_capabilities(raw_main, path, self._problems),
             volume_mounts=self._volume_mounts(raw_main, path),
             entrypoint=entrypoint,
+            ports=parse_ports(raw_main, path, self._problems),
             platform=parse_platform(raw_main.get("platform"), f"{path}.platform", self._problems),
         )
         return settings, build
