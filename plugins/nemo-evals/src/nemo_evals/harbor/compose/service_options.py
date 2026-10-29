@@ -646,18 +646,18 @@ def parse_security(raw_service: Mapping[str, Any], path: str, problems: ComposeP
     return None if security == ComposeSecurity() else security
 
 
+# Options an ``emptyDir`` already behaves as. Its mode is 0777, which lacks only ``1777``'s sticky bit.
+_TMPFS_NO_OP_OPTIONS = frozenset({"rw", "exec", "suid", "dev", "mode=777", "mode=0777", "mode=1777", "mode=01777"})
+
+
 def _tmpfs_entry(
     entry: Any, path: str, security: ComposeSecurity | None, problems: ComposeProblems
 ) -> ComposeTmpfs | None:
     """Read one ``tmpfs`` entry, ``/path[:option,...]``, as a mount a pod can make; None when it can't.
 
-    A pod's memory-backed ``emptyDir`` takes a size and nothing else, so each option is read for what it would change:
-
-    * ``size=`` becomes the size limit. ``rw``, ``exec``, ``suid`` and ``dev`` are how an ``emptyDir`` behaves anyway.
-    * ``mode=1777`` and ``mode=777`` are accepted: an ``emptyDir`` is 0777, which lacks only the sticky bit.
-    * ``nosuid`` is accepted when the service sets ``no-new-privileges``, so a setuid program raises no privileges,
-      and ``nodev`` when it drops ``MKNOD`` (or ``ALL``), so it can't create a device file to open.
-    * Anything else (``noexec``, ``ro``, ``uid=``, a narrower ``mode``) would be silently lost, so it's unsupported.
+    A pod's memory-backed ``emptyDir`` takes a size and nothing else. ``size=`` becomes its limit, and options it
+    already behaves as are accepted. ``nosuid`` and ``nodev`` are accepted when the service already guarantees them
+    another way; any other option (``noexec``, ``ro``, ``uid=``, a narrower ``mode``) would be lost, so it's unsupported.
     """
     if not isinstance(entry, str):
         problems.invalid(path, "expected a path with optional options, such as /tmp:size=64m")
@@ -668,24 +668,23 @@ def _tmpfs_entry(
         problems.invalid(path, f"{mount_path!r} is not an absolute path")
         return None
 
-    drops_mknod = security is not None and bool({"ALL", "MKNOD"} & set(security.cap_drop))
+    # Each mount option a pod can't set, what makes it hold anyway, and whether the service does that. With
+    # no-new-privileges a setuid program raises no privileges; without MKNOD nothing can create a device file.
+    drops = set(security.cap_drop) if security is not None else set()
+    guards = {
+        "nosuid": ("security_opt: [no-new-privileges]", security is not None and security.no_new_privileges),
+        "nodev": ("cap_drop: [MKNOD] or [ALL]", bool({"ALL", "MKNOD"} & drops)),
+    }
+
     size = None
     for option in filter(None, (option.strip() for option in options.split(","))):
-        name, _, value = option.partition("=")
-        if option in ("rw", "exec", "suid", "dev"):
-            continue
-        if name == "size":
-            size = parse_memory_quantity(value, f"{path}.size", problems)
-        elif name == "mode" and value.lstrip("0") in ("777", "1777"):
-            continue
-        elif option == "nosuid" and security is not None and security.no_new_privileges:
-            continue
-        elif option == "nodev" and drops_mknod:
-            continue
-        elif option in ("nosuid", "nodev"):
-            requirement = "security_opt: [no-new-privileges]" if option == "nosuid" else "cap_drop: [MKNOD] or [ALL]"
-            problems.unsupported(f"{path}: {option} without {requirement}")
-        else:
+        if option.startswith("size="):
+            size = parse_memory_quantity(option.removeprefix("size="), f"{path}.size", problems)
+        elif option in guards:
+            requirement, holds = guards[option]
+            if not holds:
+                problems.unsupported(f"{path}: {option} without {requirement}")
+        elif option not in _TMPFS_NO_OP_OPTIONS:
             problems.unsupported(f"{path}: {option}")
     return ComposeTmpfs(mount_path=mount_path, size=size)
 
