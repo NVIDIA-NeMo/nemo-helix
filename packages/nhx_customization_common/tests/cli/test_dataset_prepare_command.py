@@ -92,14 +92,15 @@ def test_preference_pairs_use_the_same_file_names_and_hold_out_no_test_by_defaul
     assert uploaded["dpo-data"]["train.jsonl"][0].keys() == {"prompt", "chosen", "rejected"}
 
 
-def test_preference_pairs_need_a_validation_split(tmp_path: Path) -> None:
+def test_no_validation_split_writes_only_the_training_file(tmp_path: Path) -> None:
+    """Training holds out its own validation rows when the dataset has no validation file."""
     source = _parquet(tmp_path / "data.parquet", _PREFERENCE)
 
     result, uploaded = _run(str(source), "--name", "dpo-data", "--format", "preference", "--val-fraction", "0")
 
-    assert result.exit_code == 1
-    assert "DPO needs a validation split" in result.output
-    assert uploaded == {}
+    assert result.exit_code == 0, result.output
+    assert sorted(uploaded["dpo-data"]) == ["train.jsonl"]
+    assert json.loads(result.stdout)["rows"]["validation"] == 0
 
 
 def test_the_same_seed_writes_the_same_split(tmp_path: Path) -> None:
