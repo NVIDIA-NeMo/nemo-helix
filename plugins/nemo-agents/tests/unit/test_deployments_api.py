@@ -32,6 +32,7 @@ from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntr
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -928,3 +929,48 @@ class TestListDeploymentModes:
                 without_image = client.post("/apis/agents/v2/workspaces/default/deployments", json=request)
                 expected = 400 if availability["requires_image"] else 201
                 assert without_image.status_code == expected, (mode, without_image.text)
+
+
+@pytest.mark.parametrize("error_type,status_code", [(PluginClientNotFoundError, 404), (PermissionDeniedError, 403)])
+def test_provider_secret_admission_preserves_status_without_response_details(
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[PluginClientNotFoundError] | type[PermissionDeniedError],
+    status_code: int,
+) -> None:
+    _configure_deployments(
+        monkeypatch, executors={"sandboxes": "openshell"}, openshell_executor="sandboxes", default_image="agent:test"
+    )
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _make_agent()
+    error = error_type(httpx.Response(status_code, json={"detail": "sensitive upstream detail"}))
+    secrets_client = AsyncMock(spec=deployments_router_module.AsyncSecretsClient)
+    secrets_client.get_secret.side_effect = error
+    with patch.object(deployments_router_module.AsyncSecretsClient, "from_client", return_value=secrets_client):
+        response = _test_client(entity_client).post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={
+                "agent": "fabric-agent",
+                "name": "fabric-dep",
+                "deployment_mode": "openshell",
+                "environment": {
+                    "environment_spec": {
+                        "secrets": {"SERVICE_SECRET": "default/service-token"},
+                        "settings": {
+                            "openshell": {
+                                "providers": {
+                                    "service": {
+                                        "profile": "service-read",
+                                        "credentials": {"API_TOKEN": "SERVICE_SECRET"},
+                                    }
+                                }
+                            }
+                        },
+                    }
+                },
+            },
+        )
+    secrets_client.get_secret.assert_awaited_once_with(workspace="default", name="service-token")
+    assert response.status_code == status_code
+    assert "provider secret" in response.json()["detail"]
+    assert "sensitive upstream" not in response.text
+    entity_client.create.assert_not_awaited()
