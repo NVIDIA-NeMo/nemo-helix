@@ -430,6 +430,31 @@ def test_grpo_download_includes_environment() -> None:
     assert len(cfg.download) == 3
 
 
+def test_grpo_training_step_copies_recorded_vision_traits(sandbox_capable: None) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.customization_common.schemas.checkpoint import traits_from_model_spec
+
+    spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        has_audio_tower=True,
+        num_experts=16,
+        num_nextn_predict_layers=1,
+        checkpoint_model_name="NemotronH_Omni",
+        head_type="causal_lm",
+    )
+    sc = _build_training_step_config(
+        _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),
+        trust_remote_code=False,
+        traits=traits_from_model_spec(spec),
+    )
+
+    assert sc.model.has_vision_tower is True
+    assert sc.model.has_audio_tower is True
+    assert sc.model.num_experts == 16
+    assert sc.model.num_nextn_predict_layers == 1
+    assert sc.model.checkpoint_model_name == "NemotronH_Omni"
+
+
 def test_grpo_training_step_config_sandboxed(sandbox_capable: None) -> None:
     sc = _build_training_step_config(
         _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),

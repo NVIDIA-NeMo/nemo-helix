@@ -322,6 +322,63 @@ def test_compile_training_step_applies_retrieval_defaults_after_auto_resolution(
     assert cfg["optimizer"]["warmup_steps"] == 5
 
 
+def test_compile_training_step_copies_recorded_vision_traits() -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    me = _make_mock_model_entity()
+    me.spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        has_audio_tower=False,
+        num_experts=None,
+        num_nextn_predict_layers=None,
+        checkpoint_model_name="Qwen2_5_VLForConditionalGeneration",
+        head_type="causal_lm",
+        chat_template=None,
+        moe_config=None,
+        family="qwen2_5_vl",
+        is_chat=True,
+        is_embedding_model=False,
+    )
+    job_output = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(recipe="sft"),
+        output=_output(output_type=OutputNameType.MODEL),
+    )
+
+    step = compile_training_step(job_output, base_env=[], me=me)
+    cfg = step.config if hasattr(step, "config") else step["config"]
+
+    assert cfg["model"]["has_vision_tower"] is True
+    assert cfg["model"]["checkpoint_model_name"] == "Qwen2_5_VLForConditionalGeneration"
+
+
+def test_compile_training_step_rejects_distillation_on_a_vision_checkpoint() -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    me = _make_mock_model_entity()
+    me.spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        has_audio_tower=False,
+        num_experts=None,
+        head_type="causal_lm",
+        chat_template=None,
+        moe_config=None,
+        is_embedding_model=False,
+    )
+    job_output = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=DistillationTraining.model_validate({"recipe": "sft", "teacher_model": "default/teacher"}),
+        output=_output(output_type=OutputNameType.MODEL),
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="distillation"):
+        compile_training_step(job_output, base_env=[], me=me)
+
+
 def test_compile_training_step_auto_defaults_keep_explicit_lr() -> None:
     from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
