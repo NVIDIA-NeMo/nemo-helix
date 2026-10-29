@@ -139,8 +139,6 @@ export interface SubmitSelections {
   evaluationId?: string;
   /** Rows sent to the agent at once. Omitted means {@link DEFAULT_PARALLELISM}. */
   parallelism?: number;
-  /** Deployment the run calls. Omitted means the gateway picks the agent's first running one,
-   *  and the job records only the agent. */
   deployment?: string;
 }
 
@@ -162,7 +160,6 @@ const jobName = (selections: SubmitSelections) => {
 export const bareName = (value: string): string =>
   value.includes('/') ? (value.split('/').pop() ?? value) : value;
 
-/** The Agents gateway route a run calls. The URL is the only record of the deployment on the job. */
 const gatewayRoute = ({ agent, deployment }: TargetSelections) =>
   deployment
     ? `deployments/${encodeURIComponent(deployment)}`
