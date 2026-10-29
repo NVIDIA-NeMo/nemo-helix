@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import tempfile
@@ -12,6 +13,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -378,7 +380,28 @@ async def test_real_grpc_registration_resolution_and_delete(
             assert caps["supports_expires_at"] is True
             owner = harness.owner.model_dump()
             ticket = await harness.issue()
-            stored = await call("StoreCredential", {**owner, "value": ticket.get_secret_value()})
+            entered = Event()
+            register = harness.registry.register
+
+            def blocked_registration(*args, **kwargs):
+                entered.set()
+                return register(*args, **kwargs)
+
+            # A writer waiting for SQLite must not prevent other RPCs from running.
+            with patch.object(harness.registry, "register", side_effect=blocked_registration):
+                try:
+                    with harness.registry._session(write=True):
+                        storing = asyncio.create_task(
+                            call("StoreCredential", {**owner, "value": ticket.get_secret_value()})
+                        )
+                        assert await asyncio.to_thread(entered.wait, 2)
+                        await call(
+                            "GetCapabilities",
+                            {"gateway": {"protocol_version": {"major": 1}, "supported_capabilities": [CAPABILITY]}},
+                        )
+                        assert not storing.done()
+                finally:
+                    stored = await storing
             handle = stored["handle"]
             lookup = {**owner, "handle": handle, "request_id": "read-1"}
             result = await call("ResolveCredentials", {"credentials": [lookup]})
