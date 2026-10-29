@@ -24,6 +24,11 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: ingress_http
+                # Normalize before route matching so encoded paths (/apis/auth/ext%2Dauthz)
+                # cannot slip past the ext-authz prefix fence.
+                normalize_path: true
+                merge_slashes: true
+                path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT
                 route_config:
                   name: local_route
                   virtual_hosts:
