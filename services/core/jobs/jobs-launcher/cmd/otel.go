@@ -43,6 +43,13 @@ const (
 	logExportMaxBatchSizeEnv = "NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE"
 	defaultLogExportInterval = 3 * time.Second
 	defaultLogExportBatch    = 2048
+	// Cap on the env-provided batch size; the queue is 4x this.
+	maxLogExportBatch = 8192
+
+	// OTEL SDK batch processor env vars, honored when no NHX_JOB_LOG_EXPORT_* override is set.
+	otelBLRPScheduleDelayEnv      = "OTEL_BLRP_SCHEDULE_DELAY"
+	otelBLRPMaxExportBatchSizeEnv = "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE"
+	otelBLRPMaxQueueSizeEnv       = "OTEL_BLRP_MAX_QUEUE_SIZE"
 )
 
 var (
@@ -121,24 +128,33 @@ func newLoggerProvider(ctx context.Context, res *resource.Resource) (*log.Logger
 	return loggerProvider, nil
 }
 
-// batchProcessorOptions returns the batch processor tuning, overridable via env.
-// Remaining records are flushed on provider shutdown regardless of the interval.
+// batchProcessorOptions returns the batch processor tuning. Each NHX_JOB_LOG_EXPORT_* setting
+// wins when set; otherwise an explicit OTEL_BLRP_* value is left for the SDK to read, and only
+// then do our low-file-count defaults apply. Remaining records are flushed on provider
+// shutdown regardless of the interval.
 func batchProcessorOptions() []log.BatchProcessorOption {
-	interval := defaultLogExportInterval
+	var opts []log.BatchProcessorOption
+
 	if ms := positiveIntEnv(logExportIntervalEnv); ms > 0 {
-		interval = time.Duration(ms) * time.Millisecond
+		opts = append(opts, log.WithExportInterval(time.Duration(ms)*time.Millisecond))
+	} else if os.Getenv(otelBLRPScheduleDelayEnv) == "" {
+		opts = append(opts, log.WithExportInterval(defaultLogExportInterval))
 	}
-	batchSize := defaultLogExportBatch
-	if n := positiveIntEnv(logExportMaxBatchSizeEnv); n > 0 {
-		batchSize = n
+
+	if n := min(positiveIntEnv(logExportMaxBatchSizeEnv), maxLogExportBatch); n > 0 {
+		opts = append(opts, log.WithExportMaxBatchSize(n))
+		// The queue must be at least the batch size; keep headroom so bursts between exports
+		// are not dropped now that exports are less frequent.
+		if os.Getenv(otelBLRPMaxQueueSizeEnv) == "" {
+			opts = append(opts, log.WithMaxQueueSize(n*4))
+		}
+	} else if os.Getenv(otelBLRPMaxExportBatchSizeEnv) == "" {
+		opts = append(opts, log.WithExportMaxBatchSize(defaultLogExportBatch))
+		if os.Getenv(otelBLRPMaxQueueSizeEnv) == "" {
+			opts = append(opts, log.WithMaxQueueSize(defaultLogExportBatch*4))
+		}
 	}
-	return []log.BatchProcessorOption{
-		log.WithExportInterval(interval),
-		log.WithExportMaxBatchSize(batchSize),
-		// The queue must be at least the batch size; keep headroom so bursts between
-		// exports are not dropped now that exports are less frequent.
-		log.WithMaxQueueSize(batchSize * 4),
-	}
+	return opts
 }
 
 // positiveIntEnv returns the env var as a positive int, or 0 if unset or invalid.

@@ -28,6 +28,9 @@ func TestLauncherOTLPHTTPClientSkipsTCP(t *testing.T) {
 func TestBatchProcessorOptionsDefaultsAndOverrides(t *testing.T) {
 	t.Setenv(logExportIntervalEnv, "")
 	t.Setenv(logExportMaxBatchSizeEnv, "")
+	t.Setenv(otelBLRPScheduleDelayEnv, "")
+	t.Setenv(otelBLRPMaxExportBatchSizeEnv, "")
+	t.Setenv(otelBLRPMaxQueueSizeEnv, "")
 	if got := len(batchProcessorOptions()); got != 3 {
 		t.Fatalf("expected 3 batch processor options, got %d", got)
 	}
@@ -44,5 +47,22 @@ func TestBatchProcessorOptionsDefaultsAndOverrides(t *testing.T) {
 		if got := positiveIntEnv(logExportIntervalEnv); got != 0 {
 			t.Fatalf("expected invalid value %q to yield 0, got %d", bad, got)
 		}
+	}
+}
+
+func TestBatchProcessorOptionsDefersToOTELEnv(t *testing.T) {
+	t.Setenv(logExportIntervalEnv, "")
+	t.Setenv(logExportMaxBatchSizeEnv, "")
+	t.Setenv(otelBLRPScheduleDelayEnv, "7000")
+	t.Setenv(otelBLRPMaxExportBatchSizeEnv, "256")
+	t.Setenv(otelBLRPMaxQueueSizeEnv, "1024")
+	if got := len(batchProcessorOptions()); got != 0 {
+		t.Fatalf("expected OTEL_BLRP_* to be left to the SDK, got %d options", got)
+	}
+
+	// An explicit NHX override still applies; a configured OTEL queue size is not reduced.
+	t.Setenv(logExportMaxBatchSizeEnv, "100")
+	if got := len(batchProcessorOptions()); got != 1 {
+		t.Fatalf("expected only the batch size option, got %d", got)
 	}
 }

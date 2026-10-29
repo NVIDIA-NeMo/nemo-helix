@@ -41,6 +41,8 @@ NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR = "NHX_JOB_LOG_EXPORT_INTERVAL_MS"
 NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR = "NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE"
 DEFAULT_LOG_EXPORT_INTERVAL_MS = 5_000
 DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE = 2048
+# The batch size comes from the job env but the logger runs in the controller; the queue is 4x this.
+MAX_LOG_EXPORT_MAX_BATCH_SIZE = 8192
 SERVICE_JOBS_BEARER_HEADERS = {"Authorization": "Bearer service:jobs"}
 
 
@@ -260,7 +262,10 @@ def create_otel_logger(
     )
     logger_provider = LoggerProvider(resource=resource)
     export_interval_ms = _positive_int_env(env, NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR, DEFAULT_LOG_EXPORT_INTERVAL_MS)
-    max_batch_size = _positive_int_env(env, NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR, DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE)
+    max_batch_size = min(
+        _positive_int_env(env, NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR, DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE),
+        MAX_LOG_EXPORT_MAX_BATCH_SIZE,
+    )
     logger_provider.add_log_record_processor(
         BatchLogRecordProcessor(
             _build_otlp_log_exporter(env, endpoint),

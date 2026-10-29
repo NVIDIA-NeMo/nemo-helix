@@ -14,6 +14,7 @@ from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     DEFAULT_LOG_EXPORT_INTERVAL_MS,
     DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE,
+    MAX_LOG_EXPORT_MAX_BATCH_SIZE,
     NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
     NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
     NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR,
@@ -235,6 +236,13 @@ def test_create_otel_logger_batching_is_configurable_via_env():
     assert kwargs["schedule_delay_millis"] == 1500
     assert kwargs["max_export_batch_size"] == 100
     assert kwargs["max_queue_size"] >= 100
+
+
+def test_create_otel_logger_clamps_oversized_batch_size_env():
+    kwargs = _create_logger_capturing_batch_kwargs({NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "1000000000"})
+
+    assert kwargs["max_export_batch_size"] == MAX_LOG_EXPORT_MAX_BATCH_SIZE
+    assert kwargs["max_queue_size"] == MAX_LOG_EXPORT_MAX_BATCH_SIZE * 4
 
 
 @pytest.mark.parametrize("bad_value", ["abc", "0", "-5", "  "])
