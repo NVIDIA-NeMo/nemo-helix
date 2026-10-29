@@ -78,6 +78,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
     COMPOSE_MAIN_FEATURE,
+    COMPOSE_SECURITY_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
@@ -720,6 +721,17 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
                 "change main, or main's command and working directory; upgrade it to the version in "
+                "plugins/_temporary-scaled-evals/opensandbox_ext."
+            )
+        # An extension from before them would refuse the spec's `security` and `tmpfs` as unknown fields.
+        if (
+            self._services is not None
+            and self._services.uses_security_settings()
+            and COMPOSE_SECURITY_FEATURE not in features
+        ):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension doesn't support a compose file's user, "
+                "read_only, cap_drop, security_opt or tmpfs; upgrade it to the version in "
                 "plugins/_temporary-scaled-evals/opensandbox_ext."
             )
 

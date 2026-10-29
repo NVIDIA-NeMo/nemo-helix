@@ -840,7 +840,7 @@ def test_shm_size_with_a_volume_at_dev_shm_is_unsupported(tmp_path: Path) -> Non
     with pytest.raises(ComposeError) as caught:
         to_compose_services(_parsed(tmp_path / "both", compose.format(shm_size="shm_size: 1g\n    ")))
     assert caught.value.code == "compose_unsupported"
-    assert "'/dev/shm' is used by more than one volume mount" in caught.value.detail
+    assert "'/dev/shm' is used by more than one mount" in caught.value.detail
 
     spec = _spec(tmp_path / "volume-only", compose.format(shm_size=""))
     assert _service(spec, "a")["volume_mounts"] == [{"name": "data", "mount_path": "/dev/shm"}]
