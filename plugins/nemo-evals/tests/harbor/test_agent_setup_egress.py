@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from harbor.agents.factory import AgentFactory
-from harbor.agents.installed.base import NetworkConnectionError
+from harbor.agents.installed.base import NetworkConnectionError, NonZeroAgentExitCodeError
 from harbor.agents.nop import NopAgent
 from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
@@ -285,6 +285,31 @@ async def test_a_setup_that_keeps_failing_on_the_network_gives_up_after_the_retr
     with pytest.raises(NetworkConnectionError, match="Could not resolve host"):
         await _agent(tmp_path).setup(_WindowEnvironment(events))
     assert events.count("setup") == 3 and events[-1] == "close"
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        # Seen on dev-blue: nvm installed Node, then its version index came back empty during a DNS timeout.
+        "Checksums matched!\nVersion '22' not found - try `nvm ls-remote` to browse available versions.",
+        "urllib.error.URLError: <urlopen error [Errno -5] No address associated with hostname>",
+    ],
+    ids=["nvm-index", "urllib"],
+)
+async def test_a_network_failure_harbor_does_not_classify_is_retried(tmp_path, monkeypatch, output):
+    events: list[str] = []
+    failure = NonZeroAgentExitCodeError(f"Command failed (exit 3): install codex\nstdout: None\nstderr: {output}")
+    _failing_setup(monkeypatch, events, [failure])
+    await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close", "open", "setup", "close"]
+
+
+async def test_a_failed_command_for_another_reason_is_not_retried(tmp_path, monkeypatch):
+    events: list[str] = []
+    _failing_setup(monkeypatch, events, [NonZeroAgentExitCodeError("Command failed (exit 1): apt-get: no space left")])
+    with pytest.raises(NonZeroAgentExitCodeError):
+        await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close"]
 
 
 async def test_a_setup_that_fails_for_another_reason_is_not_retried(tmp_path, monkeypatch):

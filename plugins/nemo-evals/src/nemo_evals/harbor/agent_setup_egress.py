@@ -14,14 +14,15 @@ the task's policy through Harbor's ``set_network_policy()`` for the duration of 
 the processes setup left holding an outside connection are killed. Elsewhere, setup runs under the task's
 own policy.
 
-A setup that fails on the network (Harbor's :class:`NetworkConnectionError`, or a window whose hosts don't
-resolve yet) is retried in a freshly opened window, after a short wait. Harbor's setup timeout covers every
+A setup that fails on the network (Harbor's :class:`NetworkConnectionError`, a failed command whose output
+matches :data:`NETWORK_FAILURE_OUTPUT`, or a window whose hosts don't resolve yet) is retried in a freshly opened window, after a short wait. Harbor's setup timeout covers every
 attempt together, so retrying never makes a trial take longer than its setup budget.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -31,7 +32,7 @@ from typing import Any, ClassVar
 from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
 from harbor.agents.installed.acp_registry import is_acp_registry_shorthand, registry_spec_from_agent_name
-from harbor.agents.installed.base import NetworkConnectionError
+from harbor.agents.installed.base import NetworkConnectionError, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
@@ -45,6 +46,14 @@ SETUP_HOSTS_KWARG = "agent_setup_egress_hosts"
 SETUP_RETRY_DELAYS_SEC = (5.0, 15.0)
 """The wait before each retry of a setup that failed on the network; one retry per entry."""
 NETWORK_SETUP_ERRORS = (NetworkConnectionError, SetupEgressNotReadyError)
+NETWORK_FAILURE_OUTPUT = re.compile(r"urlopen error|Version '[^']+' not found - try `nvm ls-remote`")
+"""Network failures Harbor doesn't classify: Python's urllib, and nvm when its remote version index didn't download."""
+
+
+def _is_network_failure(exc: Exception) -> bool:
+    if isinstance(exc, NETWORK_SETUP_ERRORS):
+        return True
+    return isinstance(exc, NonZeroAgentExitCodeError) and NETWORK_FAILURE_OUTPUT.search(str(exc)) is not None
 
 
 @cache
@@ -202,8 +211,8 @@ def _with_setup_egress(agent_class: type[BaseAgent], hosts: tuple[str, ...]) -> 
                 try:
                     await _setup_in_window(inner_setup, environment, hosts)
                     return
-                except NETWORK_SETUP_ERRORS as exc:
-                    if delay is None:
+                except Exception as exc:
+                    if delay is None or not _is_network_failure(exc):
                         raise
                     self.logger.warning(
                         "Agent setup failed on the network (attempt %d): %s; retrying in %.0f s",
