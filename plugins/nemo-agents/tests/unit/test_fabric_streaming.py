@@ -522,6 +522,22 @@ async def test_iter_fabric_assistant_deltas_skips_subagent_llm_steps() -> None:
 
 
 @pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_resolves_primary_agent_after_unscoped_llm_step() -> None:
+    stream = _FakeFabricRuntimeStream(
+        [
+            _llm_end({}, annotated_response={"message": "Plan ready."}),
+            _scope_start("orchestrator", "agent", None),
+            _llm_end({}, annotated_response={"message": "Final answer."}, parent_uuid="orchestrator"),
+        ],
+        result=FabricRuntimeResult(status="succeeded", response="Final answer."),
+    )
+
+    deltas = [delta.model_dump(exclude_none=True) async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert deltas == [{"content": "Plan ready."}, {"content": "\n\nFinal answer."}]
+
+
+@pytest.mark.asyncio
 async def test_iter_fabric_assistant_deltas_separates_consecutive_llm_steps() -> None:
     stream = _FakeFabricRuntimeStream(
         [

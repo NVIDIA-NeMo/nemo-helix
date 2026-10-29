@@ -244,14 +244,14 @@ async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIter
 class _PrimaryAgentScopes:
     """Track ATOF scope nesting to tell the primary agent's LLM steps from a subagent's.
 
-    The primary agent is the nearest ``agent`` scope of the first LLM step, since
-    a subagent only runs after the primary agent delegates to it.
+    The primary agent is the nearest ``agent`` scope of the first agent-scoped LLM
+    step, since a subagent only runs after the primary agent delegates to it.
+    LLM steps outside any agent scope are always treated as primary.
     """
 
     def __init__(self) -> None:
         self._scopes: dict[str, tuple[Any, Any]] = {}
         self._primary_agent: str | None = None
-        self._primary_resolved = False
 
     def observe(self, record: Mapping[str, Any]) -> None:
         uuid = record.get("uuid")
@@ -260,8 +260,9 @@ class _PrimaryAgentScopes:
 
     def is_primary(self, record: Mapping[str, Any]) -> bool:
         agent = self._nearest_agent(record.get("parent_uuid"))
-        if not self._primary_resolved:
-            self._primary_resolved = True
+        if agent is None:
+            return True
+        if self._primary_agent is None:
             self._primary_agent = agent
         return agent == self._primary_agent
 
