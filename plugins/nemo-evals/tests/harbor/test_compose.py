@@ -1123,6 +1123,12 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
             id="mains-empty-command",
         ),
         pytest.param(
+            "services:\n  main:\n    command: null\n",
+            "compose_unsupported",
+            "services.main.command: null",
+            id="mains-null-command",
+        ),
+        pytest.param(
             "services:\n  main:\n    working_dir: app\n",
             "compose_unsupported",
             "services.main.working_dir: a relative working directory",

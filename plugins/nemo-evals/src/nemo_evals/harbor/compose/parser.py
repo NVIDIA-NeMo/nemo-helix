@@ -237,8 +237,11 @@ class ServiceParser:
         command = None
         if raw_main.get("command") != harbor_main.get("command"):
             command = parse_argument_list(raw_main.get("command"), f"{path}.command", self._problems)
-            if command == []:
-                # Docker would fall back to the image's own CMD, which isn't known here.
+            # `command: null` and `command: []` both mean Docker runs the image's own CMD, which isn't known here.
+            # Accepting them would run the sandbox's keep-alive instead, and the CMD's process would never start.
+            if raw_main.get("command") is None:
+                self._problems.unsupported(f"{path}.command: null")
+            elif command == []:
                 self._problems.unsupported(f"{path}.command: an empty command")
 
         environment = self._environment(raw_main, path)
