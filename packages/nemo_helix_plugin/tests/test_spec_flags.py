@@ -28,6 +28,7 @@ from nemo_helix_plugin._spec_flags import (
     make_field_param,
     walk_spec_leaves,
 )
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import BaseModel, Field, RootModel
 
 
@@ -223,6 +224,16 @@ class TestRootModelFields:
         leaves = walk_spec_leaves(_WithAgent, unavailable=unavailable)
         assert [(leaf.flag, leaf.python_type, leaf.partial) for leaf in leaves] == [("--agent", str, True)]
         assert unavailable == ["agent (other union forms)"]
+
+    def test_metavar_falls_back_to_root_annotation(self) -> None:
+        class _WrappedRef(RootModel[FilesetRef]):
+            pass
+
+        class _WithRef(BaseModel):
+            ref: _WrappedRef
+
+        leaf = walk_spec_leaves(_WithRef)[0]
+        assert (leaf.flag, leaf.python_type, leaf.metavar) == ("--ref", str, "FILESET_REF")
 
     def test_root_model_of_submodel_recurses_at_field_path(self) -> None:
         class _Wrapped(RootModel[_Inner]):

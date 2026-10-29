@@ -29,9 +29,10 @@ unification is mechanical):
 - Supported leaf types: ``str``, ``int``, ``float``, ``bool``, plus
   ``Optional`` of any of those (``str | None`` syntax included).
 - Nested ``BaseModel`` fields recurse with a dotted prefix.
-- A ``RootModel`` field is classified by its ``root`` annotation at the
-  field's own path (``--dataset``, not ``--dataset.root``), so the
-  overlay carries the bare root value that the model validates.
+- A bare or ``Optional`` ``RootModel`` field is classified by its
+  ``root`` annotation at the field's own path (``--dataset``, not
+  ``--dataset.root``), so the overlay carries the bare root value
+  that the model validates.
 - Same-base scalar union arms collapse to one flag of the shared
   base (``AgentRef | EndpointURL | None`` → one ``str`` flag); the
   runtime resolver disambiguates by shape, the wire format stays
@@ -54,7 +55,7 @@ import logging
 import types
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Union, cast, get_args, get_origin
+from typing import Any, NamedTuple, Optional, Union, cast, get_args, get_origin
 
 import typer
 from pydantic import BaseModel, RootModel
@@ -173,8 +174,7 @@ def _walk(
 ) -> None:
     for name, info in model.model_fields.items():
         path = (*prefix, name)
-        annotation = info.annotation
-        unwrapped, is_partial, description = _resolve_field_type(info)
+        unwrapped, is_partial, description, metavar = _resolve_field_type(info)
         if unwrapped is None:
             logger.debug(
                 "Skipping field %s on %s: unsupported union or unannotated.",
@@ -239,29 +239,39 @@ def _walk(
                 default=_extract_default(info),
                 description=description,
                 required=_is_required(info),
-                metavar=_derive_metavar(annotation, info),
+                metavar=metavar,
                 partial=is_partial,
             )
         )
 
 
-def _resolve_field_type(info: FieldInfo) -> tuple[Any | None, bool, str]:
-    """Return ``(type, partial, description)`` for a spec field.
+class _ResolvedField(NamedTuple):
+    type_: Any | None
+    partial: bool
+    description: str
+    metavar: str | None
 
-    Like :func:`_strip_optional`, but a ``RootModel`` resolves to its
-    ``root`` annotation: a ``RootModel`` serializes as the bare root
-    value, so the field is a leaf (or submodel) at its own path rather
-    than an object with a ``root`` key. The field's description wins;
-    the root field's description is the fallback.
+
+def _resolve_field_type(info: FieldInfo) -> _ResolvedField:
+    """Resolve the CLI-renderable type, help text, and metavar for a spec field.
+
+    Like :func:`_strip_optional`, but a bare or ``Optional`` ``RootModel``
+    resolves to its ``root`` annotation: a ``RootModel`` serializes as
+    the bare root value, so the field is a leaf (or submodel) at its own
+    path rather than an object with a ``root`` key. A ``RootModel`` that
+    is one arm of a wider union is not unwrapped. The field's description
+    and metavar win; the root field's are the fallback.
     """
     unwrapped, is_partial = _strip_optional(info.annotation)
     description = info.description or ""
+    metavar = _derive_metavar(info.annotation, info)
     while isinstance(unwrapped, type) and issubclass(unwrapped, RootModel):
         root_info = unwrapped.model_fields["root"]
         description = description or root_info.description or ""
+        metavar = metavar or _derive_metavar(root_info.annotation, root_info)
         unwrapped, root_partial = _strip_optional(root_info.annotation)
         is_partial = is_partial or root_partial
-    return unwrapped, is_partial, description
+    return _ResolvedField(unwrapped, is_partial, description, metavar)
 
 
 def _strip_optional(annotation: Any) -> tuple[Any | None, bool]:
