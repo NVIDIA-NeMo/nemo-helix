@@ -217,24 +217,24 @@ def find_conflicts(
     dataset: bool,
     environment: bool,
 ) -> list[str]:
-    """Return the job JSON fields that a flag would overwrite.
+    """Return the job JSON fields that a flag would overwrite, each with that flag.
 
     A reference given in both places is a contradiction, not an override: the
     two name different resources and only one can be right. The caller refuses
     rather than silently picking one.
     """
-    checks: list[tuple[bool, tuple[str, ...] | None]] = [
-        (model, refs.model),
-        (dataset, refs.dataset),
-        (environment, refs.environment),
+    checks: list[tuple[str, bool, tuple[str, ...] | None]] = [
+        ("--upload-model", model, refs.model),
+        ("--upload-dataset", dataset, refs.dataset),
+        ("--upload-environment", environment, refs.environment),
     ]
     conflicts = []
-    for requested, path in checks:
+    for flag, requested, path in checks:
         if not requested or path is None:
             continue
         existing = _read_spec(spec, path)
         if existing is not None:
-            conflicts.append(f"{'.'.join(path)} ({existing})")
+            conflicts.append(f"{'.'.join(path)} ({existing}), which {flag} would replace")
     return conflicts
 
 

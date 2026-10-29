@@ -52,6 +52,7 @@ Instead of steps 1 and 2, `--upload-model <local path or HF repo id>` and `--upl
 - **`--upload-environment` uploads a Gym package, it does not build one**; the **nemo-gym-environments** skill builds and validates it. automodel and unsloth reject the flag.
 - **Names come from the source** (`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` → `nvidia-nemotron-3-5-lightning-30b-a3b-bf16`, `sft-data/` → `sft-data`). A name the platform would reject gets a `model-`/`dataset-` prefix (`2024-train.jsonl` → `dataset-2024-train`).
 - **`--exist-ok` applies to whichever sources were passed**, with the same stale-files risk as SKILL.md step 2. The CLI prints `Reused <ref>, which already existed.` when it reuses one.
+- **`--dry-run` with `--upload-model`, `--upload-dataset` or `--upload-environment` uploads nothing.** It checks the job JSON and, with `--upload-dataset`, the first 10 rows of the local dataset. The model and dataset references and the execution profile do not exist yet, so submit checks them after the upload.
 
 **3. Job JSON** — write `/tmp/job.json`. `model` is the **registered model entity** (`default/<model-entity>`), not an HF repo id or dataset fileset. The block below holds the 1-GPU defaults for a small dense model. For a named model, take the values from its recipe in `references/recipes.md`. Full hyperparameter reference: `references/hyperparameters-automodel.md`.
 

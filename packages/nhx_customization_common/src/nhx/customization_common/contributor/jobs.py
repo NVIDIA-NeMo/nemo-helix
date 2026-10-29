@@ -11,13 +11,16 @@ call convention, schema validation, profile resolution) and stays per-backend.
 
 from __future__ import annotations
 
-from typing import ClassVar, Generic, TypeVar
+from typing import ClassVar, Generic, TypeVar, cast
 
 from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.config import NemoHelixConfig, Runtime
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
+from nemo_helix_plugin.jobs.types import JobDryRunCheck
+from nhx.customization_common.dry_run import DatasetRows, check_dataset_rows
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -135,3 +138,22 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         job_input = input_spec if isinstance(input_spec, schema) else schema.model_validate(input_spec.model_dump())
         platform = async_customization_platform_clients_from_platform(async_sdk)
         return await cls._transform(job_input, workspace, platform)
+
+    @classmethod
+    def _dry_run_datasets(cls, spec: JobOutputT, workspace: str) -> list[DatasetRows]:
+        """The datasets *spec* trains on, with training's own file picker and row validator. Per backend."""
+        del spec, workspace
+        return []
+
+    @classmethod
+    async def dry_run_checks(
+        cls,
+        spec: BaseModel,
+        *,
+        platform_spec: HelixJobSpec,
+        workspace: str,
+        async_sdk: AsyncNemoClient,
+    ) -> list[JobDryRunCheck]:
+        """Check the first rows of every file training would read."""
+        del platform_spec
+        return await check_dataset_rows(cls._dry_run_datasets(cast(JobOutputT, spec), workspace), workspace, async_sdk)

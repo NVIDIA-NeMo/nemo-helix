@@ -73,6 +73,8 @@ from nemo_helix_plugin._base import _NamedPlugin
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
+from nemo_helix_plugin.jobs.types import JobDryRunCheck
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -306,6 +308,33 @@ class NemoJob(_NamedPlugin):
                 remote-incapable jobs fail loudly at submit time.
         """
         raise NotImplementedError(f"{cls.__name__} must override compile() to be remote-capable.")
+
+    @classmethod
+    async def dry_run_checks(
+        cls,
+        spec: BaseModel,
+        *,
+        platform_spec: HelixJobSpec,
+        workspace: str,
+        async_sdk: AsyncNemoClient,
+    ) -> list[JobDryRunCheck]:
+        """This job's checks in a dry run (create with ``?dry_run=true``), after :meth:`to_spec` and :meth:`compile`.
+
+        Every dry run already checks that each step's execution profile is configured.
+        Override to catch what else would fail only once the job runs, such as reading a
+        few rows of the job's data. Checks must not create or change anything.
+
+        Args:
+            spec: Canonical :attr:`spec_schema` instance, as :meth:`compile` received it.
+            platform_spec: The compiled job: its steps, their images and execution profiles.
+            workspace: Workspace scope.
+            async_sdk: The request-scoped :class:`AsyncNemoClient`.
+
+        Returns:
+            One entry per check. The default adds none.
+        """
+        del spec, platform_spec, workspace, async_sdk
+        return []
 
     # ------------------------------------------------------------------ #
     # Progress reporting (virtual; default = log only)                   #

@@ -31,6 +31,30 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job and the checks
+            in status_details.checks. If a check fails, returns 422 with detail.message
+            naming the failed checks and detail.checks listing all of them. Errors
+            before the checks, such as an invalid spec or a missing reference, are
+            the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job and the checks in status_details.checks.
+          If a check fails, returns 422 with detail.message naming the failed checks
+          and detail.checks listing all of them. Errors before the checks, such as
+          an invalid spec or a missing reference, are the same as create's.
       requestBody:
         required: true
         content:
@@ -44,12 +68,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AutomodelJobsJob'
-        '422':
-          description: Validation Error
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/AutomodelJobsJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
     get:
       tags:
       - Automodel Jobs
@@ -896,6 +926,30 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job and the checks
+            in status_details.checks. If a check fails, returns 422 with detail.message
+            naming the failed checks and detail.checks listing all of them. Errors
+            before the checks, such as an invalid spec or a missing reference, are
+            the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job and the checks in status_details.checks.
+          If a check fails, returns 422 with detail.message naming the failed checks
+          and detail.checks listing all of them. Errors before the checks, such as
+          an invalid spec or a missing reference, are the same as create's.
       requestBody:
         required: true
         content:
@@ -909,12 +963,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RlJobsJob'
-        '422':
-          description: Validation Error
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/RlJobsJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
     get:
       tags:
       - Rl Jobs
@@ -1579,6 +1639,30 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job and the checks
+            in status_details.checks. If a check fails, returns 422 with detail.message
+            naming the failed checks and detail.checks listing all of them. Errors
+            before the checks, such as an invalid spec or a missing reference, are
+            the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job and the checks in status_details.checks.
+          If a check fails, returns 422 with detail.message naming the failed checks
+          and detail.checks listing all of them. Errors before the checks, such as
+          an invalid spec or a missing reference, are the same as create's.
       requestBody:
         required: true
         content:
@@ -1592,12 +1676,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnslothJobsJob'
-        '422':
-          description: Validation Error
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/UnslothJobsJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
     get:
       tags:
       - Unsloth Jobs
@@ -3805,6 +3895,65 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    JobDryRunCheck:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: What was checked.
+        passed:
+          type: boolean
+          title: Passed
+        message:
+          type: string
+          title: Message
+          description: What the check found; on failure, what to fix.
+      type: object
+      required:
+      - name
+      - passed
+      - message
+      title: JobDryRunCheck
+      description: One check a dry run (create with ``?dry_run=true``) made.
+    JobDryRunFailure:
+      properties:
+        detail:
+          $ref: '#/components/schemas/JobDryRunFailureDetail'
+      type: object
+      required:
+      - detail
+      title: JobDryRunFailure
+      description: The 422 body of a dry run whose checks fail.
+    JobDryRunFailureDetail:
+      properties:
+        message:
+          type: string
+          title: Message
+          description: The checks that failed.
+        checks:
+          items:
+            $ref: '#/components/schemas/JobDryRunCheck'
+          type: array
+          title: Checks
+          description: Every check the dry run made, passed and failed.
+      type: object
+      required:
+      - message
+      - checks
+      title: JobDryRunFailureDetail
+      description: What a dry run whose checks fail returns in ``detail``.
+    JobDryRunValidationErrorResponse:
+      anyOf:
+      - $ref: '#/components/schemas/HTTPValidationError'
+      - $ref: '#/components/schemas/JobDryRunFailure'
+      title: JobDryRunValidationErrorResponse
+      description: 'Request validation error, or a dry run whose checks fail.
+
+
+        Create routes that take ``?dry_run=true`` declare this for 422. Declaring
+        any 422 model
+
+        replaces FastAPI''s request-validation schema, so the union keeps both shapes.'
     MlflowIntegration:
       properties:
         experiment_name:

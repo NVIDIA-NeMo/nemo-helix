@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import get_origin
+from typing import Any, get_origin
 
 import httpx
+import pytest
 from nemo_helix_plugin.client.types import Paginated, PreparedRequest
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from pydantic import BaseModel
@@ -177,6 +179,61 @@ def test_spec_payload_leaves_unset_defaults_to_the_server() -> None:
     mutated.optimizer.learning_rate = 2e-5
     assert _spec_payload(mutated) == {"model": "default/qwen", "optimizer": {"learning_rate": 2e-5}}
     assert mutated.model_fields_set == {"model"}, "the caller's spec is left as it was"
+
+
+def _dry_run_resource(handler: Callable[[httpx.Request], httpx.Response]) -> Any:
+    from nemo_helix_plugin.client.client import NemoClient
+    from nhx.customization_common.sdk.client import make_customization_sdk, make_customization_sdk_context
+
+    owner = NemoClient(
+        base_url="http://nhx.test",
+        workspace="team-a",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    Customization, _AsyncCustomization = make_customization_sdk("automodel")
+    return Customization(make_customization_sdk_context(owner))
+
+
+def test_jobs_resource_create_dry_run_sends_the_flag_and_returns_the_unsaved_job() -> None:
+    captured: list[httpx.Request] = []
+    checks = [{"name": "training dataset", "passed": True, "message": "The first 10 rows match."}]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200, json={"name": "j", "spec": {"model": "default/qwen"}, "status_details": {"checks": checks}}
+        )
+
+    job = (
+        _dry_run_resource(handler)
+        .jobs.create(spec=_Spec(model="default/qwen"), workspace="team-a", profile="gpu", dry_run=True)
+        .data()
+    )
+
+    assert captured[0].url.path == "/apis/customization/v2/workspaces/team-a/automodel/jobs"
+    assert dict(captured[0].url.params) == {"dry_run": "true"}
+    assert json.loads(captured[0].content) == {"spec": {"model": "default/qwen"}, "profile": "gpu"}
+    assert job.id is None
+    assert job.status_details == {"checks": checks}
+
+
+def test_jobs_resource_create_dry_run_failure_raises_with_every_check() -> None:
+    from nemo_helix_plugin.client.errors import UnprocessableEntityError
+
+    detail = {
+        "message": "Dry run failed: training dataset. Nothing was created.",
+        "checks": [
+            {"name": "execution profile", "passed": True, "message": "Configured: gpu/default."},
+            {"name": "training dataset", "passed": False, "message": "line 3 has no 'messages'"},
+        ],
+    }
+    resource = _dry_run_resource(lambda request: httpx.Response(422, json={"detail": detail}))
+
+    with pytest.raises(UnprocessableEntityError) as caught:
+        resource.jobs.create(spec=_Spec(model="default/qwen"), workspace="team-a", dry_run=True)
+
+    assert caught.value.detail == detail["message"]
+    assert caught.value.body == {"detail": detail}
 
 
 def test_jobs_resource_get_status_uses_core_jobs_client() -> None:
