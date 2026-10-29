@@ -1166,6 +1166,23 @@ async def test_proxy_request_streaming_closes_connection(mock_proxy_client, mock
 
 
 @pytest.mark.asyncio
+async def test_build_next_request_invalid_auth_header_format_returns_422(mock_request):
+    """A stored auth_header_format that fails validation is a 422, not an unhandled 500."""
+    with pytest.raises(HTTPException) as exc_info:
+        await build_next_request(
+            mock_request,
+            "http://example.com",
+            "api",
+            auth_token="s3cret",
+            auth_header_format="Authorization: {{ 7*7 }}",
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "s3cret" not in str(exc_info.value.detail)
+    assert "7*7" not in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_build_next_request_with_default_extra_body(mock_request):
     """Test that default_extra_body provides defaults that can be overridden by request."""
     # Request body has some fields
