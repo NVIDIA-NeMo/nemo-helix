@@ -205,6 +205,10 @@ strings of at most 256 characters, and 2 KiB as JSON. A component that reads
 them must verify the key's signature itself, so they're never trusted from an
 unsigned token.
 
+Every Scoped Access Key token is limited to 7 KiB, so it fits the 8 KiB header
+line many proxies allow by default. A request whose key would be larger gets
+`400`; shorten its name, description, scope or `service_attributes`.
+
 The issuer defaults to `<platform.base_url>/apis/auth` when
 `auth.token_signing.issuer` is unset. Use an externally reachable issuer URL
 when a gateway validates Scoped Access Keys before forwarding requests to

@@ -46,6 +46,8 @@ ACCESS_KEY_TOKEN_TYPE = "access_key"
 ACCESS_KEY_TOKEN_TYPE_CLAIM = "nhx_token_type"
 ACCESS_KEY_METADATA_CLAIM = "nhx_access_key"
 ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM = "nhx_service_attributes"
+# Keys travel in an Authorization header; 7 KiB leaves room under the 8 KiB header line many proxies allow by default.
+ACCESS_KEY_TOKEN_MAX_BYTES = 7 * 1024
 ACCESS_KEY_JWKS_PATH = "/apis/auth/jwks"
 ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
@@ -99,7 +101,6 @@ class _AccessKeyTokenPayload:
     created_at: datetime
     expires_at: datetime | None
     scope: list[str] = field(default_factory=list)
-    service_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def clear_access_key_signing_key_cache() -> None:
@@ -448,7 +449,6 @@ def _build_access_key_token_payload(
         issuer=issuer,
         audiences=audiences,
         scope=resolved_scope,
-        service_attributes=dict(service_attributes or {}),
         created_at=datetime.fromtimestamp(issued_at, tz=UTC),
         expires_at=expires_at,
     )
@@ -464,6 +464,11 @@ def _access_key_response_from_payload(
         algorithm="RS256",
         headers={"kid": signing_key.kid},
     )
+    if len(token) > ACCESS_KEY_TOKEN_MAX_BYTES:
+        raise AccessKeyValidationError(
+            f"The Scoped Access Key token would be {len(token)} bytes, over the {ACCESS_KEY_TOKEN_MAX_BYTES}-byte "
+            "limit; shorten its name, description, scope or service_attributes"
+        )
     return AccessKeyCreateResponse(
         jti=payload.jti,
         name=payload.name,
@@ -476,7 +481,7 @@ def _access_key_response_from_payload(
         issuer=payload.issuer,
         audiences=payload.audiences,
         scope=payload.scope,
-        service_attributes=payload.service_attributes,
+        service_attributes=payload.claims.get(ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM, {}),
         created_at=payload.created_at,
         expires_at=payload.expires_at,
     )

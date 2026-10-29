@@ -17,7 +17,7 @@ from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
 from nhx.common.api.common import PaginatedResult, PaginationData
-from nhx.common.auth.access_keys import AccessKeyValidationError
+from nhx.common.auth.access_keys import ACCESS_KEY_TOKEN_MAX_BYTES, AccessKeyValidationError
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
@@ -2293,6 +2293,38 @@ def test_attributes_that_dont_fit_a_token_claim_are_refused(client, attributes):
         response = client.post("/v2/access-keys", json={"name": "k", "service_attributes": attributes})
 
     assert response.status_code == 422
+
+
+def test_a_key_with_every_field_at_its_limit_fits_a_token(client):
+    attributes = {"x": "v" * 256, **{f"k{i}": "v" * 100 for i in range(16)}}
+    with _acting_as(_for_alice("evals")):
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "n" * 128,
+                "description": "d" * 1024,
+                "scope": ["inference"],
+                "service_attributes": attributes,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["token"]) <= ACCESS_KEY_TOKEN_MAX_BYTES
+
+
+def test_a_key_whose_token_would_be_too_large_is_refused(client):
+    """Keys travel in a header, so one a proxy would drop is refused at mint time instead."""
+    principal = Principal(
+        id="alice@example.com",
+        email="alice@example.com",
+        groups=[f"group-with-a-long-name-{i:04d}" for i in range(250)],
+    )
+    with _acting_as(principal):
+        response = client.post("/v2/access-keys", json={"name": "k"})
+
+    assert response.status_code == 400
+    assert str(ACCESS_KEY_TOKEN_MAX_BYTES) in response.json()["detail"]
+    assert client.app.dependency_overrides[get_access_key_registry]().keys == {}
 
 
 def test_with_auth_off_no_caller_counts_as_a_service(client):
