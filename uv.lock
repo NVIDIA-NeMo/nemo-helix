@@ -4629,6 +4629,7 @@ dependencies = [
     { name = "nemo-helix-plugin" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-sandbox" },
+    { name = "opentelemetry-proto" },
     { name = "pydantic" },
     { name = "typer" },
 ]
@@ -4656,6 +4657,7 @@ requires-dist = [
     { name = "nhx-evals-sdk", extras = ["harbor"], editable = "packages/nhx_evals_sdk" },
     { name = "nhx-evals-sdk", extras = ["harbor"], marker = "extra == 'harbor'", editable = "packages/nhx_evals_sdk" },
     { name = "nhx-sandbox", editable = "packages/nhx_sandbox" },
+    { name = "opentelemetry-proto", specifier = ">=1.27.0" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "typer", specifier = ">=0.20.0" },
 ]
@@ -5558,6 +5560,7 @@ nemo-evals-plugin = [
     { name = "nemo-builder-plugin" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
+    { name = "opentelemetry-proto" },
     { name = "pydantic" },
     { name = "typer" },
 ]
@@ -5781,6 +5784,7 @@ plugins = [
     { name = "nvidia-nat-langchain" },
     { name = "nvidia-nat-opentelemetry" },
     { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-proto" },
     { name = "opentelemetry-sdk" },
     { name = "optuna" },
     { name = "pandas" },
@@ -6624,7 +6628,9 @@ requires-dist = [
     { name = "opentelemetry-proto", marker = "extra == 'files-service'", specifier = ">=1.28.2" },
     { name = "opentelemetry-proto", marker = "extra == 'harbor'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'intake-service'", specifier = ">=1.27.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'nemo-evals-plugin'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'nhx-evals-sdk'", specifier = ">=1.27.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'plugins'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.28.2" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.27.0,<2.0.0" },

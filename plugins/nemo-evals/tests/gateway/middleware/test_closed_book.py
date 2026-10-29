@@ -4,7 +4,9 @@
 import logging
 import re
 import typing
+from collections.abc import Mapping
 from importlib.metadata import entry_points
+from typing import Any
 from unittest.mock import MagicMock
 
 import anthropic.types as anthropic_types
@@ -12,16 +14,20 @@ import anthropic.types.beta as anthropic_beta
 import openai.types.chat as openai_chat
 import openai.types.responses as openai_responses
 import pytest
-from nemo_evals.closed_book import (
+from nemo_evals.gateway.middleware.closed_book import (
     CONFIG_TYPE,
     MIDDLEWARE_NAME,
     REMOVED_TOOLS_STATE_KEY,
     ClosedBookConfig,
     ClosedBookMiddleware,
+    RouterCredentialCheck,
     client_tool_label,
     is_self_searching_model,
     strip_hosted_tools,
 )
+from nemo_evals.gateway.policy import ModelAccess
+from nemo_evals.gateway.tokens import RouterKeyClaims, TrialTokenReader, unsigned_token
+from nemo_helix_plugin.client.oidc import decode_jwt_claims, generate_unsigned_jwt
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareCacheAccessor,
     InferenceMiddlewareContext,
@@ -281,12 +287,14 @@ def _target(
     served_model_name: str,
     default_extra_body: dict[str, object] | None = None,
     required_extra_body: dict[str, object] | None = None,
+    outbound_headers: dict[str, str] | None = None,
 ) -> ModelProviderInferenceTarget:
     return ModelProviderInferenceTarget(
         model_provider_gateway_url="http://igw/provider",
         served_model_name=served_model_name,
         default_extra_body=default_extra_body or {},
         required_extra_body=required_extra_body or {},
+        outbound_headers=outbound_headers or {},
     )
 
 
@@ -380,7 +388,13 @@ async def test_workspace_name_does_not_make_a_model_self_searching() -> None:
 
 
 @pytest.mark.parametrize(
-    "history", [{"previous_response_id": "resp_1"}, {"conversation": "conv_1"}, {"conversation": {"id": "conv_1"}}]
+    "history",
+    [
+        {"previous_response_id": "resp_1"},
+        {"conversation": "conv_1"},
+        {"conversation": {"id": "conv_1"}},
+        {"input": [{"role": "user", "content": "hi"}, {"type": "item_reference", "id": "msg_1"}]},
+    ],
 )
 async def test_provider_stored_history_is_refused(history: dict[str, object]) -> None:
     """Stored history may hold hosted search output from outside this route, and the middleware cannot read it."""
@@ -501,10 +515,13 @@ async def test_refusal_is_logged_with_its_reason(
     body = {"model": model, "input": "hi", "previous_response_id": "resp_1"}
     ctx, request = _request("v1/responses", body)
 
-    with caplog.at_level(logging.WARNING, logger="nemo_evals.closed_book"), pytest.raises(InferenceMiddlewareError):
+    with (
+        caplog.at_level(logging.WARNING, logger="nemo_evals.gateway.middleware.closed_book"),
+        pytest.raises(InferenceMiddlewareError),
+    ):
         await _middleware(targets).process_request(ctx, request, ClosedBookConfig())
 
-    (record,) = [r for r in caplog.records if r.name == "nemo_evals.closed_book"]
+    (record,) = [r for r in caplog.records if r.name == "nemo_evals.gateway.middleware.closed_book"]
     assert record.levelno == logging.WARNING
     assert (record.__dict__["reason"], record.__dict__["model"], record.__dict__["request_id"]) == (reason, model, "r1")
 
@@ -598,3 +615,62 @@ def test_no_tool_type_is_both_client_and_provider_executed() -> None:
     assert not {
         t for t in sdk_types if client_tool_label({"type": t}) is None and _PROVIDER_EXECUTED_TOOL_FAMILY.match(t)
     }
+
+
+CLOSED_ROUTER_KEY = unsigned_token(RouterKeyClaims(model_access=ModelAccess.CLOSED, models=("ws/cb-strong",)))
+OPEN_ROUTER_KEY = unsigned_token(RouterKeyClaims(model_access=ModelAccess.OPEN))
+PLATFORM_KEY = generate_unsigned_jwt("user:alice")
+
+
+class _Signed:
+    """Stands in for the platform's signature check: trusts the claims of exactly the tokens it was given."""
+
+    def __init__(self, *tokens: str) -> None:
+        self._tokens = set(tokens)
+        self.asked = 0
+
+    async def __call__(self, token: str) -> Mapping[str, Any] | None:
+        self.asked += 1
+        return decode_jwt_claims(token) if token in self._tokens else None
+
+
+def _router_check(signed: _Signed) -> RouterCredentialCheck:
+    return RouterCredentialCheck(TrialTokenReader(signed), signed)
+
+
+@pytest.mark.parametrize(
+    ("headers", "signed", "refused"),
+    [
+        pytest.param({"Authorization": "Bearer nvapi-provider-key"}, (), False, id="a model provider's own key"),
+        pytest.param({}, (), False, id="no credential"),
+        pytest.param({"Authorization": f"Bearer {CLOSED_ROUTER_KEY}"}, (CLOSED_ROUTER_KEY,), False, id="a closed key"),
+        pytest.param({"x-api-key": CLOSED_ROUTER_KEY}, (CLOSED_ROUTER_KEY,), False, id="a closed key as x-api-key"),
+        pytest.param({"Authorization": f"Bearer {OPEN_ROUTER_KEY}"}, (OPEN_ROUTER_KEY,), True, id="an open key"),
+        pytest.param({"Authorization": f"Bearer {CLOSED_ROUTER_KEY}"}, (), True, id="a closed key nobody signed"),
+        pytest.param({"Authorization": f"Bearer {PLATFORM_KEY}"}, (PLATFORM_KEY,), True, id="a plain platform key"),
+    ],
+)
+async def test_a_provider_calling_back_into_the_gateway_needs_a_closed_router_key(
+    headers: dict[str, str], signed: tuple[str, ...], refused: bool
+) -> None:
+    """Closed-book can't see the calls a router makes back through the gateway, so the router's key must keep them closed."""
+    middleware = _middleware({"ws/routed": _target("route", outbound_headers=headers)})
+    middleware._router_check = _router_check(_Signed(*signed))
+    ctx, request = _request("v1/responses", {"model": "ws/routed", "input": "hi"})
+
+    if refused:
+        with pytest.raises(InferenceMiddlewareError) as exc_info:
+            await middleware.process_request(ctx, request, ClosedBookConfig())
+        assert exc_info.value.status_code == 403
+    else:
+        assert await middleware.process_request(ctx, request, ClosedBookConfig()) is request
+
+
+async def test_whether_a_provider_key_is_a_platform_key_is_remembered() -> None:
+    signed = _Signed()
+    check = _router_check(signed)
+
+    for _ in range(3):
+        assert await check.refusal({"Authorization": "Bearer nvapi-provider-key"}, "ws/model") is None
+
+    assert signed.asked == 1
