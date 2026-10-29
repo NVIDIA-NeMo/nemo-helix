@@ -104,7 +104,6 @@ import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityN
 import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
-import { useEvaluationJob } from '@studio/routes/EvaluationDetailRoute/useEvaluationJob';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
@@ -448,8 +447,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
-  const { control, setValue, getFieldState, handleSubmit, clearErrors, trigger, formState } =
-    methods;
+  const { control, setValue, handleSubmit, clearErrors, trigger, formState } = methods;
   const { errors } = formState;
 
   const mode = useWatch({ control, name: 'mode' }) as EvaluationMode;
@@ -491,34 +489,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     refetchInterval: step === 'start' || step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
   });
   const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
-
-  const sourceJob = useEvaluationJob(
-    workspace,
-    mode === MODE_EXPERIMENT ? evaluationName : '',
-    selectedEvaluation
-  );
-  const sourceDeployment =
-    sourceJob.job?.deployment?.kind === 'deployment' ? sourceJob.job.deployment.name : undefined;
-  const defaultDeployment = runningDeployments.some((d) => d.name === sourceDeployment)
-    ? sourceDeployment
-    : runningDeployments[0]?.name;
-  const isDeploymentPending =
-    isDeploymentsLoading || (!deployment && mode === MODE_EXPERIMENT && sourceJob.isLoading);
+  const firstRunningDeployment = runningDeployments[0]?.name;
 
   useEffect(() => {
-    if (!getFieldState('deployment').isDirty) {
-      setValue('deployment', '');
-    }
-  }, [evaluationName, getFieldState, setValue]);
-
-  useEffect(() => {
-    if (!deployment && !isDeploymentPending && defaultDeployment) {
-      setValue('deployment', defaultDeployment);
-    }
-  }, [deployment, isDeploymentPending, defaultDeployment, setValue]);
+    if (!deployment && firstRunningDeployment) setValue('deployment', firstRunningDeployment);
+  }, [deployment, firstRunningDeployment, setValue]);
 
   const deploymentIssue = (() => {
-    if (!selectedAgent || isDeploymentPending) return undefined;
+    if (!selectedAgent || isDeploymentsLoading) return undefined;
     if (isDeploymentsUnavailable) {
       return `Couldn't load the deployments of ${bareName(selectedAgent)}. Retrying...`;
     }
@@ -910,10 +888,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (step === 'evaluation' && mode === MODE_EXPERIMENT) {
       if (hasNoEvaluations) return NO_EVALUATIONS_MESSAGE;
       if (isValidatingEvaluation) return 'Checking the saved eval config...';
-      if (evaluationConfigIssue) return evaluationConfigIssue;
-    }
-    if (step === 'evaluation' && isDeploymentPending) {
-      return 'Loading deployments...';
+      return evaluationConfigIssue ?? undefined;
     }
     return undefined;
   };
@@ -939,7 +914,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     // isJudgeModelsLoading blocks too: invalidModelRefs is empty while the list is in flight, so
     // submitting inside that window would skip the check entirely.
     if (hasNameConflict) return;
-    if (isDeploymentPending || deploymentIssue) return;
+    if (isDeploymentsLoading || deploymentIssue) return;
     if (mode === MODE_DEFAULT && !uploads) {
       setStep('configuration');
       return;
@@ -1018,7 +993,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
       continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
       continueLoading={isPending}
-      canContinue={onLastStep ? !isDeploymentPending && !deploymentIssue : !blocker}
+      canContinue={onLastStep ? !isDeploymentsLoading && !deploymentIssue : !blocker}
       onContinue={handleContinue}
     >
       <FormProvider {...methods}>
@@ -1226,7 +1201,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               <ControlledSelect
                 useControllerProps={{ control, name: 'deployment' }}
                 items={deploymentItems}
-                loading={isDeploymentPending}
+                loading={isDeploymentsLoading}
                 disabled={isPending}
                 placeholder="Select a deployment"
                 formFieldProps={{

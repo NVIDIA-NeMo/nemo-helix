@@ -9,8 +9,7 @@ import {
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
-import type { EvaluationResponse, HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
-import { fetchEvaluatorJobs } from '@studio/api/evaluation/evaluator-jobs';
+import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import {
   createRunEvaluation,
@@ -42,11 +41,6 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   filesUploadFile: vi.fn(),
   filesDownloadFile: vi.fn(),
   filesDeleteFileset: vi.fn(),
-}));
-
-vi.mock('@studio/api/evaluation/evaluator-jobs', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@studio/api/evaluation/evaluator-jobs')>()),
-  fetchEvaluatorJobs: vi.fn(),
 }));
 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
@@ -148,7 +142,6 @@ beforeEach(() => {
   vi.mocked(evaluationConfigError).mockResolvedValue(null);
   vi.mocked(findEvalConfigFile).mockResolvedValue('eval-config.yaml' as never);
   vi.mocked(filesDownloadFile).mockResolvedValue(new Blob([STORED_EVAL_CONFIG]) as never);
-  vi.mocked(fetchEvaluatorJobs).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -259,32 +252,6 @@ describe('AgentEvaluationWizard deployment', () => {
     expect(submittedUrl()).toContain(
       `/workspaces/${DEFAULT_WORKSPACE}/deployments/${AGENT}-subprocess/-/v1/chat/completions`
     );
-  });
-
-  it('re-runs against the deployment the source run called', async () => {
-    const sourceJob = {
-      name: 'baseline-job',
-      workspace: DEFAULT_WORKSPACE,
-      spec: {
-        publication: { intake: { evaluation_id: 'baseline' } },
-        target: {
-          url: `https://helix.example.com/apis/agents/v2/workspaces/${DEFAULT_WORKSPACE}/deployments/${AGENT}-k8s/-/v1/chat/completions`,
-        },
-      },
-    } as unknown as HelixJobResponse;
-    vi.mocked(fetchEvaluatorJobs).mockResolvedValue([sourceJob]);
-    const user = userEvent.setup();
-    renderWizard();
-
-    await rerunBaseline(user);
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Deployment' })).toHaveTextContent(
-        `${AGENT}-k8s · Kubernetes`
-      )
-    );
-    await submit(user);
-
-    expect(submittedUrl()).toContain(`/deployments/${AGENT}-k8s/-/`);
   });
 
   it('calls the deployment the user picks', async () => {
