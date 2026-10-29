@@ -82,28 +82,28 @@ export const useAgentDetails = ({
     query: { enabled: !!agentName && !!workspace },
   });
 
-  const { data: deploymentsResponse, isLoading: isDeploymentsLoading } = useAgentsListDeployments(
-    workspace,
-    undefined,
-    {
-      query: {
-        enabled: !!agentName,
-        // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
-        // so the panel reflects controller-side progress; fall back to the long interval
-        // otherwise to match the agents table.
-        refetchInterval: (query) => {
-          const deployments = query.state.data?.data ?? [];
-          const transitional = deployments.some(
-            (d) =>
-              d.agent === agentName &&
-              (d.status === 'pending' || d.status === 'starting' || d.status === 'deleting')
-          );
-          if (transitional) return JOB_POLLING_INTERVAL_MS;
-          return pollDeployments ? JOB_POLLING_INTERVAL_LONG : false;
-        },
+  const {
+    data: deploymentsResponse,
+    isLoading: isDeploymentsLoading,
+    refetch: refetchDeployments,
+  } = useAgentsListDeployments(workspace, undefined, {
+    query: {
+      enabled: !!agentName,
+      // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
+      // so the panel reflects controller-side progress; fall back to the long interval
+      // otherwise to match the agents table.
+      refetchInterval: (query) => {
+        const deployments = query.state.data?.data ?? [];
+        const transitional = deployments.some(
+          (d) =>
+            d.agent === agentName &&
+            (d.status === 'pending' || d.status === 'starting' || d.status === 'deleting')
+        );
+        if (transitional) return JOB_POLLING_INTERVAL_MS;
+        return pollDeployments ? JOB_POLLING_INTERVAL_LONG : false;
       },
-    }
-  );
+    },
+  });
 
   const deploymentsData = deploymentsResponse?.data;
 
@@ -248,6 +248,7 @@ export const useAgentDetails = ({
 
   return {
     isDeploymentsLoading,
+    refetchDeployments,
     agent,
     isAgentLoading,
     isAgentPending,

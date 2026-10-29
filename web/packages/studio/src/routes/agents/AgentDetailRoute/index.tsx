@@ -117,6 +117,7 @@ export const AgentDetailRoute: FC = () => {
     healthyDeployments,
     isDeploying,
     isDeploymentsLoading,
+    refetchDeployments,
   } = useAgentDetails({
     workspace,
     agentName,
@@ -126,6 +127,10 @@ export const AgentDetailRoute: FC = () => {
   });
   const { data: specFileset } = useAgentSpecFileset(workspace, agentName);
   const specSource = agentSpecSource(specFileset);
+
+  useEffect(() => {
+    if (selectedTab === 'chat' && agentName) void refetchDeployments({ cancelRefetch: false });
+  }, [selectedTab, agentName, refetchDeployments]);
 
   useBreadcrumbs({
     items: [
