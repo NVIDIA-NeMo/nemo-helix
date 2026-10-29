@@ -532,11 +532,11 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         try:
             await self._unary(self._stub.CreateSandbox, request)
         except grpc.RpcError as exc:
-            # A timed-out CreateSandbox can have succeeded. Leave its providers
-            # intact until the normal delete/reconciliation path resolves it.
+            # The request may have succeeded remotely; preserve cleanup intent.
             return BackendStatusUpdate(
-                status="FAILED",
+                status="DELETING" if provider_names else "FAILED",
                 status_message=f"CreateSandbox failed: {_rpc_detail(exc)}",
+                error_details={"reason": "provider_cleanup_pending"} if provider_names else None,
             )
 
         # Return as soon as the sandbox is created. Provisioning (wait for READY, launch
@@ -636,7 +636,11 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
                 pass
             else:
-                return BackendStatusUpdate(status="FAILED", status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}")
+                return BackendStatusUpdate(
+                    status="DELETING" if needs_provider_cleanup else "FAILED",
+                    status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}",
+                    error_details={"reason": "provider_cleanup_pending"} if needs_provider_cleanup else None,
+                )
         if needs_provider_cleanup:
             try:
                 async with self._provider_provisioner() as provisioner:
@@ -808,15 +812,15 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         if not await self._marker_exists(sandbox_name, _LAUNCH_MARKER):
             failure = await self._deliver_config_files(sandbox_name, config.config_files)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
-                return failure
+                return await self._cleanup_provisioning_failure(sandbox_name, workspace, config, failure)
             command = list(container.command) + list(container.args)
             if config.gateway_providers and config.auth_proxy_sidecar:
                 try:
                     upstream = self._platform_proxy_upstream(config)
                 except ValueError as exc:
-                    await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
-                    return BackendStatusUpdate(status="FAILED", status_message=str(exc))
+                    return await self._cleanup_provisioning_failure(
+                        sandbox_name, workspace, config, BackendStatusUpdate(status="FAILED", status_message=str(exc))
+                    )
                 virtual_env = next(
                     (var.value for var in container.env if var.name == "VIRTUAL_ENV"),
                     self._executor_config.serve_virtual_env,
@@ -838,8 +842,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 ]
             failure = await self._launch_serve(sandbox_name, command)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
-                return failure
+                return await self._cleanup_provisioning_failure(sandbox_name, workspace, config, failure)
             return BackendStatusUpdate(status="STARTING", status_message="Serve command launched")
 
         # Never expose a port to a workload that is not demonstrably running. The launch
@@ -868,8 +871,12 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         try:
             endpoints = await self._expose_ports(sandbox_name, container)
         except grpc.RpcError as exc:
-            await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
-            return BackendStatusUpdate(status="FAILED", status_message=f"ExposeService failed: {_rpc_detail(exc)}")
+            return await self._cleanup_provisioning_failure(
+                sandbox_name,
+                workspace,
+                config,
+                BackendStatusUpdate(status="FAILED", status_message=f"ExposeService failed: {_rpc_detail(exc)}"),
+            )
         if not endpoints:
             return BackendStatusUpdate(status="STARTING", status_message="Serve launched; awaiting endpoints")
         return BackendStatusUpdate(status="READY", status_message="Sandbox serving", endpoints=endpoints)
@@ -963,8 +970,10 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             raise ValueError("Platform proxy upstream must match the executor egress host.")
         return upstream
 
-    async def _delete_sandbox_best_effort(self, sandbox_name: str, *, workspace: str) -> None:
-        """Delete a failed sandbox, then its providers; orphan reconciliation retries cleanup."""
+    async def _cleanup_provisioning_failure(
+        self, sandbox_name: str, workspace: str, config: DeploymentConfig, failure: BackendStatusUpdate
+    ) -> BackendStatusUpdate:
+        """Delete failed resources, retaining cleanup intent when provider cleanup is incomplete."""
         try:
             try:
                 await self._unary(
@@ -974,11 +983,18 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             except grpc.RpcError as exc:
                 if _rpc_code(exc) != grpc.StatusCode.NOT_FOUND:
                     raise
-            if self._executor_config.gateway_credentials is not None:
+            if config.gateway_providers:
                 async with self._provider_provisioner() as provisioner:
                     await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
         except Exception:
             logger.warning("Failed to clean up sandbox %s after provisioning failure", sandbox_name, exc_info=True)
+            if config.gateway_providers:
+                return BackendStatusUpdate(
+                    status="DELETING",
+                    status_message=f"{failure.status_message} Retrying sandbox and provider cleanup.",
+                    error_details={"reason": "provider_cleanup_pending"},
+                )
+        return failure
 
     async def _try_get_sandbox(self, sandbox_name: str) -> pb.Sandbox | None:
         try:

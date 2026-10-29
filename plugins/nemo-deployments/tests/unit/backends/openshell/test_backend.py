@@ -263,9 +263,12 @@ def test_registry_contains_openshell() -> None:
 
 
 @pytest.mark.parametrize("auth_enabled", [True, False])
-@pytest.mark.parametrize("upstream", ["http://platform:8080", "http://wrong-host:8080", None])
+@pytest.mark.parametrize(
+    "upstream,create_fails",
+    [("http://platform:8080", False), ("http://platform:8080", True), ("http://wrong-host:8080", False), (None, False)],
+)
 async def test_provider_created_before_sandbox_and_attached(
-    openshell_backend, mock_entities, mock_stub, auth_enabled, upstream
+    openshell_backend, mock_entities, mock_stub, auth_enabled, upstream, create_fails
 ):
     config = _config()
     config.gateway_providers = {
@@ -293,6 +296,8 @@ async def test_provider_created_before_sandbox_and_attached(
     external.endpoints[0].port = 443
     provisioner = AsyncMock()
     provisioner.prepare.return_value = ["owned-provider"]
+    if create_fails:
+        mock_stub.CreateSandbox.side_effect = FakeRpcError(grpc.StatusCode.DEADLINE_EXCEEDED, "response lost")
     with (
         patch.object(openshell_backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)),
         patch("nemo_deployments_plugin.backends.openshell.backend.get_async_nemo_client") as client,
@@ -314,7 +319,10 @@ async def test_provider_created_before_sandbox_and_attached(
         provisioner.prepare.assert_not_awaited()
         mock_stub.CreateSandbox.assert_not_called()
         return
-    assert result.status == "STARTING"
+    assert result.status == ("DELETING" if create_fails else "STARTING")
+    if create_fails:
+        assert result.error_details == {"reason": "provider_cleanup_pending"}
+        provisioner.cleanup.assert_not_awaited()
     assert provisioner.prepare.await_args.kwargs["auth_enabled"] is auth_enabled
     request = mock_stub.CreateSandbox.call_args.args[0]
     assert list(request.spec.providers) == ["owned-provider"]
@@ -1780,7 +1788,9 @@ async def test_changed_proxy_upstream_cleans_up_before_reporting_failure(
         update = await openshell_backend._advance_provisioning(
             _sandbox(pb.SANDBOX_PHASE_READY).sandbox, "sandbox-1", "default"
         )
-    assert update.status == "FAILED"
+    assert update.status == ("DELETING" if delete_fails else "FAILED")
+    if delete_fails:
+        assert update.error_details == {"reason": "provider_cleanup_pending"}
     assert "upstream" in update.status_message
     mock_stub.DeleteSandbox.assert_called_once()
     if delete_fails:
@@ -1790,8 +1800,9 @@ async def test_changed_proxy_upstream_cleans_up_before_reporting_failure(
 
 
 @pytest.mark.parametrize("with_providers", [False, True])
+@pytest.mark.parametrize("sandbox_delete_fails", [False, True])
 async def test_delete_only_waits_for_provider_cleanup_when_bound(
-    openshell_backend, mock_stub, mock_entities, with_providers
+    openshell_backend, mock_stub, mock_entities, with_providers, sandbox_delete_fails
 ):
     config = _config()
     if with_providers:
@@ -1807,6 +1818,8 @@ async def test_delete_only_waits_for_provider_cleanup_when_bound(
     )
     provisioner = AsyncMock()
     provisioner.cleanup.side_effect = RuntimeError("gateway unavailable")
+    if sandbox_delete_fails:
+        mock_stub.DeleteSandbox.side_effect = FakeRpcError(grpc.StatusCode.UNAVAILABLE, "unreachable")
     with patch.object(
         openshell_backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)
     ) as connect:
@@ -1814,13 +1827,15 @@ async def test_delete_only_waits_for_provider_cleanup_when_bound(
         if with_providers:
             assert update.status == "DELETING"
             assert update.error_details == {"reason": "provider_cleanup_pending"}
+            if sandbox_delete_fails:
+                provisioner.cleanup.assert_not_awaited()
             provisioner.cleanup.side_effect = None
             mock_stub.DeleteSandbox.side_effect = _not_found()
             update = await openshell_backend.delete_deployment("default", "srv")
-            assert provisioner.cleanup.await_count == 2
+            assert provisioner.cleanup.await_count == (1 if sandbox_delete_fails else 2)
         else:
             connect.assert_not_called()
-        assert update.status == "SUCCEEDED"
+        assert update.status == ("FAILED" if sandbox_delete_fails and not with_providers else "SUCCEEDED")
 
 
 @pytest.mark.parametrize("virtual_env", [None, "/opt/custom env"])

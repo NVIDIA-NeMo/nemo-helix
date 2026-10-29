@@ -432,7 +432,7 @@ class DeploymentReconciler:
         )
 
     def _check_deleting_timeout(self, deployment: Deployment) -> BackendStatusUpdate | None:
-        # The sandbox is gone; credential cleanup must remain retryable after restart.
+        # Provider-backed resource cleanup must remain retryable after restart.
         if deployment.error_details and deployment.error_details.get("reason") == "provider_cleanup_pending":
             return None
         timeout = self._controller_config.deleting_timeout_seconds
