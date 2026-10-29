@@ -19,12 +19,13 @@ from jsonschema import FormatChecker
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator, validator_for
 from referencing import Registry
-from referencing.exceptions import Unresolvable
 
 # RFC 3339 ``date-time``. jsonschema only checks this format when the optional
 # ``rfc3339-validator`` package is installed and otherwise passes every string,
 # so the platform checks it itself: this pattern for the shape, then
-# ``datetime`` for the ranges (no month 13, no February 30).
+# ``datetime`` for the ranges (no month 13, no February 30). ``datetime`` has
+# no second 60, so an RFC 3339 leap second is rejected; accepted as too rare
+# to special-case.
 _RFC3339_DATE_TIME = re.compile(
     r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})",
     re.ASCII,
@@ -32,11 +33,16 @@ _RFC3339_DATE_TIME = re.compile(
 
 _FORMAT_CHECKER = FormatChecker()
 
-# The schema is caller-supplied, and without a registry jsonschema fetches any
-# remote ``$ref`` over HTTP while validating - a request to whatever host the
-# caller names, made from the server. An empty registry resolves only
-# references within the schema itself (and the bundled JSON Schema
-# metaschemas, which jsonschema always adds), so a remote one is unresolvable.
+# A context schema describes a handful of run parameters, so references buy
+# little reuse, and they bring every way a reference can go wrong: one that
+# points nowhere, one that loops back on itself (which recurses until
+# RecursionError), and a remote one jsonschema would fetch over HTTP from the
+# server. Rejecting these keywords up front makes ``check_context_schema``
+# complete; allowing them later would break no one.
+_REFERENCE_KEYWORDS = frozenset({"$ref", "$dynamicRef", "$recursiveRef"})
+
+# A backstop should a schema with a reference ever reach validation: an empty
+# registry resolves nothing remote, so the server never fetches one.
 _NO_REMOTE_REFS = Registry()
 
 
@@ -52,7 +58,7 @@ def _is_date_time(value: object) -> bool:
 
 
 def check_context_schema(schema: dict[str, Any]) -> None:
-    """Raise ``ValueError`` if *schema* is not a valid JSON Schema.
+    """Raise ``ValueError`` if *schema* is not a valid JSON Schema, or uses a reference.
 
     Checked against the dialect the schema names in ``$schema``, defaulting to
     Draft 2020-12.
@@ -62,19 +68,37 @@ def check_context_schema(schema: dict[str, Any]) -> None:
         validator_cls.check_schema(schema)
     except SchemaError as exc:
         raise ValueError(f"context_schema is not a valid JSON Schema: {exc.message}") from exc
+    references = sorted(_reference_locations(schema, "context_schema"))
+    if references:
+        raise ValueError(f"context_schema does not support $ref; found at {', '.join(references)}.")
+
+
+def _reference_locations(node: object, location: str) -> list[str]:
+    """Return where *node* uses a reference keyword, at any depth.
+
+    Walks every key rather than only schema positions, so a property literally
+    named ``$ref`` is rejected too; a context key by that name is not worth a
+    schema-aware walk.
+    """
+    if isinstance(node, list):
+        return [
+            found for index, item in enumerate(node) for found in _reference_locations(item, f"{location}[{index}]")
+        ]
+    if not isinstance(node, dict):
+        return []
+    found: list[str] = []
+    for key, value in node.items():
+        if key in _REFERENCE_KEYWORDS:
+            found.append(f"{location}[{key!r}]")
+        found.extend(_reference_locations(value, f"{location}[{key!r}]"))
+    return found
 
 
 def validate_context(context: dict[str, Any], schema: dict[str, Any]) -> None:
     """Raise ``ValueError`` listing every way *context* violates *schema*."""
     validator_cls = validator_for(schema, default=Draft202012Validator)
     validator = validator_cls(schema, format_checker=_FORMAT_CHECKER, registry=_NO_REMOTE_REFS)
-    try:
-        errors = sorted(validator.iter_errors(context), key=lambda error: [str(part) for part in error.absolute_path])
-    except Unresolvable as exc:
-        raise ValueError(
-            f"context_schema has a $ref that cannot be resolved: {exc.ref!r}. "
-            "Only references within the schema are supported."
-        ) from exc
+    errors = sorted(validator.iter_errors(context), key=lambda error: [str(part) for part in error.absolute_path])
     if not errors:
         return
     messages = "; ".join(f"{_location(error.absolute_path)}: {error.message}" for error in errors)

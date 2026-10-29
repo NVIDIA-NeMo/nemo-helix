@@ -1,57 +1,68 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reference resolution in caller-supplied context schemas."""
+"""References in caller-supplied context schemas."""
 
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from nemo_agents_plugin.context_schema import check_context_schema, validate_context
-
-_REMOTE_REF = "http://169.254.169.254/latest/meta-data/schema.json"
-
-
-def _urlopen() -> MagicMock:
-    # Records calls rather than raising: ``referencing`` wraps any error a
-    # retrieval raises as ``Unresolvable``, which would hide an assertion here.
-    return MagicMock(side_effect=OSError("network disabled in tests"))
-
-
-@pytest.mark.parametrize("ref", [_REMOTE_REF, "https://example.com/schema.json", "file:///etc/passwd"])
-def test_a_remote_ref_is_rejected_without_being_fetched(ref: str) -> None:
-    """A caller-supplied schema must not make the server request a host the caller names."""
-    schema = {"type": "object", "properties": {"since": {"$ref": ref}}}
-    check_context_schema(schema)
-
-    with (
-        patch("urllib.request.urlopen", _urlopen()) as urlopen,
-        pytest.raises(ValueError, match=r"context_schema has a \$ref that cannot be resolved"),
-    ):
-        validate_context({"since": "2026-10-01T00:00:00Z"}, schema)
-    urlopen.assert_not_called()
+from referencing.exceptions import Unresolvable
 
 
 @pytest.mark.parametrize(
-    "schema",
+    ("schema", "location"),
     [
+        pytest.param({"$ref": "#"}, "context_schema['$ref']", id="root-refers-to-itself"),
         pytest.param(
-            {"$defs": {"timestamp": {"type": "string"}}, "properties": {"since": {"$ref": "#/$defs/timestamp"}}},
-            id="draft-2020-12-defs",
+            {"properties": {"since": {"$ref": "http://169.254.169.254/latest/meta-data/schema.json"}}},
+            "context_schema['properties']['since']['$ref']",
+            id="remote",
         ),
         pytest.param(
-            {
-                "$schema": "http://json-schema.org/draft-07/schema#",
-                "definitions": {"timestamp": {"type": "string"}},
-                "properties": {"since": {"$ref": "#/definitions/timestamp"}},
-            },
-            id="draft-07-definitions",
+            {"$defs": {"t": {"type": "string"}}, "properties": {"since": {"$ref": "#/$defs/t"}}},
+            "context_schema['properties']['since']['$ref']",
+            id="local-defs",
+        ),
+        pytest.param(
+            {"properties": {"ids": {"type": "array", "prefixItems": [{"$dynamicRef": "#node"}]}}},
+            "context_schema['properties']['ids']['prefixItems'][0]['$dynamicRef']",
+            id="dynamic-ref-in-a-list",
+        ),
+        pytest.param(
+            {"$schema": "https://json-schema.org/draft/2019-09/schema", "$recursiveRef": "#"},
+            "context_schema['$recursiveRef']",
+            id="recursive-ref",
         ),
     ],
 )
-def test_a_ref_within_the_schema_still_resolves(schema: dict[str, Any]) -> None:
-    with patch("urllib.request.urlopen", _urlopen()) as urlopen:
-        validate_context({"since": "2026-10-01T00:00:00Z"}, schema)
-        with pytest.raises(ValueError, match=r"context\['since'\]: 5 is not of type 'string'"):
-            validate_context({"since": 5}, schema)
+def test_a_reference_is_rejected_with_its_location(schema: dict[str, Any], location: str) -> None:
+    with pytest.raises(ValueError, match=r"context_schema does not support \$ref") as excinfo:
+        check_context_schema(schema)
+
+    assert location in str(excinfo.value)
+
+
+def test_a_schema_without_references_is_accepted() -> None:
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"since": {"type": "string", "format": "date-time"}},
+        "additionalProperties": False,
+    }
+
+    check_context_schema(schema)
+    validate_context({"since": "2026-10-01T00:00:00Z"}, schema)
+
+
+def test_validation_never_fetches_a_remote_reference() -> None:
+    """The backstop for a schema that skipped ``check_context_schema``: unresolvable, never requested."""
+    # Records calls rather than raising: ``referencing`` wraps any error a
+    # retrieval raises as ``Unresolvable``, which would hide an assertion here.
+    urlopen = MagicMock(side_effect=OSError("network disabled in tests"))
+    schema = {"properties": {"since": {"$ref": "http://169.254.169.254/latest/meta-data/schema.json"}}}
+
+    with patch("urllib.request.urlopen", urlopen), pytest.raises(Unresolvable):
+        validate_context({"since": "x"}, schema)
     urlopen.assert_not_called()

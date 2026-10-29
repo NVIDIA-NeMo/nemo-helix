@@ -620,9 +620,18 @@ async def test_to_spec_validates_an_omitted_context_against_the_schema() -> None
         await _step_config_for(_agent(context_schema=schema), input="hello")
 
 
-def test_job_config_rejects_an_inline_agent_with_an_invalid_context_schema() -> None:
-    with pytest.raises(ValidationError, match="context_schema is not a valid JSON Schema"):
-        ExecuteAgentJobConfig(agent=_inline_agent(context_schema={"type": "objekt"}), input="hello")
+@pytest.mark.parametrize(
+    ("context_schema", "message"),
+    [
+        pytest.param({"type": "objekt"}, "context_schema is not a valid JSON Schema", id="invalid"),
+        pytest.param({"$ref": "#"}, r"context_schema does not support \$ref", id="reference"),
+    ],
+)
+def test_job_config_rejects_an_inline_agent_with_a_bad_context_schema(
+    context_schema: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        ExecuteAgentJobConfig(agent=_inline_agent(context_schema=context_schema), input="hello")
 
 
 @pytest.mark.asyncio

@@ -30,18 +30,12 @@ pytestmark = pytest.mark.integration
 
 _NOOP_TARGET = "nemo_agents_plugin.jobs.post_run_actions:NoopPostRunAction"
 
-# Uses the keywords a real schema reaches for, including ``$``-prefixed ones a
-# document store might treat specially.
+# Includes ``$``-prefixed keywords a document store might treat specially.
 _CONTEXT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$defs": {"timestamp": {"type": "string", "format": "date-time"}},
+    "$comment": "Run parameters for the analyst.",
     "type": "object",
-    "properties": {
-        "since": {"$ref": "#/$defs/timestamp"},
-        # Never fetched: only a job whose context sets ``remote`` reaches it, and
-        # then it is rejected as unresolvable rather than requested.
-        "remote": {"$ref": "http://169.254.169.254/latest/meta-data/schema.json"},
-    },
+    "properties": {"since": {"type": "string", "format": "date-time"}},
     "required": ["since"],
     "additionalProperties": False,
 }
@@ -117,6 +111,16 @@ def test_an_agent_without_declarations_allows_only_noop(ctx: ClientContext) -> N
     assert "'insights.analysis' is not one this agent declares" in str(error)
 
 
+def test_register_rejects_a_context_schema_with_a_reference(ctx: ClientContext) -> None:
+    schema = {"properties": {"since": {"$ref": "http://169.254.169.254/latest/meta-data/schema.json"}}}
+
+    with pytest.raises(NemoHTTPError) as excinfo:
+        _register(ctx, "analyst", context_schema=schema)
+
+    assert excinfo.value.status_code == 400
+    assert "context_schema does not support $ref" in str(excinfo.value)
+
+
 def test_register_rejects_an_uninstalled_post_run_action(ctx: ClientContext) -> None:
     with pytest.raises(NemoHTTPError) as excinfo:
         _register(ctx, "calc", post_run_actions={"acme.missing"})
@@ -147,11 +151,6 @@ def test_a_job_that_omits_input_stores_and_reads_back_the_default(ctx: ClientCon
         ),
         pytest.param({"context": {"since": "yesterday"}}, "is not a 'date-time'", id="malformed-date-time"),
         pytest.param({"context": {}}, "'since' is a required property", id="missing-required-key"),
-        pytest.param(
-            {"context": {"since": "2026-10-01T00:00:00Z", "remote": "x"}},
-            "context_schema has a $ref that cannot be resolved",
-            id="remote-ref",
-        ),
     ],
 )
 def test_a_context_that_does_not_match_the_schema_fails_job_create(

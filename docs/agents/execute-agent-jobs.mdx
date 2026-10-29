@@ -446,7 +446,9 @@ RFC 3339 timestamp, and is rejected if it misspells a key such as `sinse`.
 
 Registration checks that `context_schema` is a valid JSON Schema (Draft 2020-12
 unless it names another dialect in `$schema`) and that every kind in
-`post_run_actions` is installed.
+`post_run_actions` is installed. A `context_schema` cannot use references
+(`$ref`, `$dynamicRef`, or `$recursiveRef`); write each property's constraints
+in place.
 
 A job that omits `post_run_action` gets one from the agent's declaration:
 
