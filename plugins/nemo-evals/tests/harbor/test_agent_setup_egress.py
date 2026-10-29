@@ -9,14 +9,17 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from harbor.agents.factory import AgentFactory
+from harbor.agents.installed.base import NonZeroAgentExitCodeError
 from harbor.agents.nop import NopAgent
 from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
+from nemo_evals.harbor import agent_setup_egress
 from nemo_evals.harbor.agent_setup_egress import (
     GUARDED_METHODS,
     INNER_AGENT_KWARG,
@@ -217,6 +220,123 @@ async def test_codex_installs_inside_the_window(tmp_path):
     assert any("npm install -g @openai/codex" in command for command in commands), commands
     assert all(open_ for _, open_ in environment.commands)
     assert not environment.open
+
+
+CODEX_DOWNLOAD = "npm install -g @openai/codex"
+
+
+class _FlakyCodexInstallEnvironment(_CodexInstallEnvironment):
+    """The codex download fails ``failures`` times with npm's network error, then installs; counts window opens."""
+
+    def __init__(self, failures: int) -> None:
+        super().__init__()
+        self.failures = failures
+        self.opens = 0
+
+    @asynccontextmanager
+    async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
+        self.opens += 1
+        self.open = True
+        try:
+            yield
+        finally:
+            self.open = False
+
+    async def exec(self, command: str, **kwargs: Any) -> ExecResult:
+        if CODEX_DOWNLOAD in command and self.failures:
+            self.failures -= 1
+            self.commands.append((command, self.open))
+            return ExecResult(stderr="npm error code ENETUNREACH", return_code=1)
+        return await super().exec(command, **kwargs)
+
+    def downloads(self) -> list[bool]:
+        """Whether the window was open for each codex download attempt."""
+        return [open_ for command, open_ in self.commands if CODEX_DOWNLOAD in command]
+
+
+def _codex(tmp_path, monkeypatch) -> Any:
+    monkeypatch.setattr(agent_setup_egress, "SETUP_RETRY_DELAY_SEC", 0)
+    agent = _agent(tmp_path, inner="codex", hosts=SETUP_HOSTS)
+    agent.logger = Mock()
+    return agent
+
+
+async def test_a_failed_install_is_retried_once_inside_the_same_window(tmp_path, monkeypatch):
+    agent = _codex(tmp_path, monkeypatch)
+    environment = _FlakyCodexInstallEnvironment(failures=1)
+    await agent.setup(environment)
+    assert environment.downloads() == [True, True]
+    assert environment.opens == 1 and not environment.open
+    (warning,) = agent.logger.warning.call_args_list
+    assert "attempt 1 of 2" in warning.args[0] % warning.args[1:]
+
+
+async def test_a_second_failed_install_raises_and_closes_the_window(tmp_path, monkeypatch):
+    agent = _codex(tmp_path, monkeypatch)
+    environment = _FlakyCodexInstallEnvironment(failures=2)
+    with pytest.raises(NonZeroAgentExitCodeError, match="ENETUNREACH"):
+        await agent.setup(environment)
+    assert environment.downloads() == [True, True]
+    assert environment.opens == 1 and not environment.open
+
+
+async def test_an_install_that_succeeds_runs_once(tmp_path, monkeypatch):
+    agent = _codex(tmp_path, monkeypatch)
+    environment = _FlakyCodexInstallEnvironment(failures=0)
+    await agent.setup(environment)
+    assert environment.downloads() == [True]
+    agent.logger.warning.assert_not_called()
+
+
+class _HangingCodexInstallEnvironment(_FlakyCodexInstallEnvironment):
+    """The codex download never finishes."""
+
+    async def exec(self, command: str, **kwargs: Any) -> ExecResult:
+        if CODEX_DOWNLOAD in command:
+            self.commands.append((command, self.open))
+            await asyncio.Event().wait()
+        return await super().exec(command, **kwargs)
+
+
+async def test_an_install_that_times_out_is_not_retried(tmp_path, monkeypatch):
+    agent = _codex(tmp_path, monkeypatch)
+    environment = _HangingCodexInstallEnvironment(failures=0)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(agent.setup(environment), timeout=0.1)  # as Harbor's setup timeout does
+    assert environment.downloads() == [True]
+    assert not environment.open
+
+
+async def test_a_failed_setup_of_an_agent_that_is_not_installed_is_not_retried(tmp_path, monkeypatch):
+    events: list[str] = []
+    monkeypatch.setattr(agent_setup_egress, "SETUP_RETRY_DELAY_SEC", 0)
+
+    async def setup(self, environment) -> None:
+        events.append("setup")
+        raise NonZeroAgentExitCodeError("install failed")
+
+    monkeypatch.setattr(NopAgent, "setup", setup)
+    with pytest.raises(NonZeroAgentExitCodeError):
+        await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close"]
+
+
+async def test_a_dynamic_policy_environment_retries_inside_one_policy_switch(tmp_path, monkeypatch):
+    from harbor.agents.installed.codex import Codex
+
+    events: list[Any] = []
+    attempts = iter([NonZeroAgentExitCodeError("npm error code ENETUNREACH"), None])
+
+    async def setup(self, environment) -> None:
+        events.append(("setup", environment.network_policy))
+        if error := next(attempts):
+            raise error
+
+    monkeypatch.setattr(Codex, "setup", setup)
+    environment = _PolicyEnvironment(events)
+    await _codex(tmp_path, monkeypatch).setup(environment)
+    opened = _allowlist(*SETUP_HOSTS)
+    assert events == ["list", opened, ("setup", opened), ("setup", opened), NO_NETWORK, ("kill", KEEP)]
 
 
 async def test_a_failed_setup_still_closes_the_window(tmp_path, monkeypatch):
