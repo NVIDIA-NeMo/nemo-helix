@@ -50,7 +50,7 @@ def _plan_images(config: dict, archive: TaskArchive, allowed_registries: list[st
 
 def _plan(config: dict, archive: TaskArchive, allowed: list[str] | None = None) -> list[tuple]:
     return [
-        (image.role, image.source, image.context_path, image.dockerfile, image.image)
+        (image.type, image.source, image.context_path, image.dockerfile, image.image)
         for image in _plan_images(config, archive, allowed or [])
     ]
 
@@ -171,10 +171,10 @@ def test_the_planner_plans_the_images_the_parser_resolves(tmp_path: Path) -> Non
 
     images = plan_images({}, archive, allowed_registries=[])
 
-    assert [(image.role, image.image) for image in images[1:]] == [
+    assert [(image.type, image.image) for image in images[1:]] == [
         ("service/cache", "mirror.example.com/library/redis:7")
     ]
-    assert parsed is not None and [image.role for image in images[1:]] == [
+    assert parsed is not None and [image.type for image in images[1:]] == [
         f"service/{name}" for name in parsed.services
     ]
 
@@ -230,13 +230,13 @@ def test_a_docker_image_wins_over_a_compose_main_build() -> None:
 
 
 def test_a_compose_service_named_verifier_runs_next_to_a_separate_verifier() -> None:
-    """kumo's game server is a service called `verifier`; its image's role can't be mistaken for the verifier's."""
+    """kumo's game server is a service called `verifier`; its image's type can't be mistaken for the verifier's."""
     config = {"verifier": {"environment_mode": "separate"}}
     compose = "services:\n  verifier:\n    image: redis:7\n"
 
     images = _plan_images(config, _archive("environment/Dockerfile", "tests/Dockerfile", compose=compose), [])
 
-    assert [image.role for image in images] == ["main", "service/verifier", "verifier"]
+    assert [image.type for image in images] == ["main", "service/verifier", "verifier"]
 
 
 def test_a_compose_service_named_verifier_is_planned_without_a_separate_verifier() -> None:
@@ -244,7 +244,7 @@ def test_a_compose_service_named_verifier_is_planned_without_a_separate_verifier
 
     images = _plan_images({}, _archive("environment/Dockerfile", compose=compose), [])
 
-    assert [image.role for image in images] == ["main", "service/verifier"]
+    assert [image.type for image in images] == ["main", "service/verifier"]
 
 
 @pytest.mark.parametrize("service", ["main", "cache"])
@@ -415,7 +415,7 @@ services:
 """
     images = _plan_images({}, _archive("environment/Dockerfile", compose=compose), [])
 
-    assert [(image.role, image.platform) for image in images] == [
+    assert [(image.type, image.platform) for image in images] == [
         ("main", "linux/amd64"),
         ("service/cache", None),
         ("service/db", "linux/arm64"),
@@ -436,7 +436,7 @@ def test_a_compose_service_platform_set_in_dot_env_is_pinned(tmp_path: Path) -> 
 
     images = plan_images({}, archive, allowed_registries=[])
 
-    assert {image.role: image.platform for image in images}["service/cache"] == "linux/arm64"
+    assert {image.type: image.platform for image in images}["service/cache"] == "linux/arm64"
 
 
 def test_a_compose_service_naming_an_unreadable_platform_is_refused() -> None:
@@ -455,7 +455,7 @@ def test_a_compose_main_platform_pins_main_built_from_the_environment() -> None:
 
     images = _plan_images({}, archive, [])
 
-    assert [(image.role, image.platform) for image in images] == [("main", "linux/amd64"), ("service/db", None)]
+    assert [(image.type, image.platform) for image in images] == [("main", "linux/amd64"), ("service/db", None)]
 
 
 def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> None:
@@ -463,7 +463,7 @@ def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> 
     compose = "services:\n  main:\n    build: .\n    platform: linux/x86_64\n  cache:\n    image: redis:7\n    platform: linux/aarch64\n"
     images = _plan_images({}, _archive("environment/Dockerfile", compose=compose), [])
 
-    assert [(image.role, image.platform) for image in images] == [
+    assert [(image.type, image.platform) for image in images] == [
         ("main", "linux/amd64"),
         ("service/cache", "linux/arm64"),
     ]

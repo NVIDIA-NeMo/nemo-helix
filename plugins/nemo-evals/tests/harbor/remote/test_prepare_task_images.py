@@ -149,9 +149,14 @@ async def settle(entity_store, digest: str, attempt: int, status: str, *, images
     await entity_store.update(build)
 
 
-def image(role: str, ref: str, *, source: BuildImageSource = "dockerfile") -> BuildImage:
+def image(image_type: str, ref: str, *, source: BuildImageSource = "dockerfile") -> BuildImage:
     return BuildImage(
-        role=role, source=source, status="ready", image_ref=ref, builder_image=f"harbor-env-{role}", build_job="b"
+        type=image_type,
+        source=source,
+        status="ready",
+        image_ref=ref,
+        builder_image=f"harbor-env-{image_type}",
+        build_job="b",
     )
 
 
@@ -333,11 +338,11 @@ async def test_a_compose_service_image_that_is_not_ready_is_reported_as_a_servic
 ):
     digest = await store_task(config=SEPARATE)
     await build(builds, digest)
-    pending = BuildImage(role="service/db", source="prebuilt", image="redis:7", status="pending")
+    pending = BuildImage(type="service/db", source="prebuilt", image="redis:7", status="pending")
     await settle(entity_store, digest, 1, "ready", images=[image("main", digest_ref("d")), pending])
     result = await prepare(task(digest), clients, sandbox_policy)
     assert result.error is not None
-    assert (result.error.code, result.error.role) == ("image_unavailable", "service")
+    assert (result.error.code, result.error.image_type) == ("image_unavailable", "service")
     assert "no ready service/db image" in result.error.detail
 
 

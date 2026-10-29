@@ -18,7 +18,13 @@ from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildRe
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.builder import builder_name, copy_builder_name
-from nemo_evals.image_builds.models import ImageBuildRequest, TaskImageBuildEntity, build_entity_name, build_job_name
+from nemo_evals.image_builds.models import (
+    BuildImage,
+    ImageBuildRequest,
+    TaskImageBuildEntity,
+    build_entity_name,
+    build_job_name,
+)
 from nemo_evals.image_builds.runner import TaskImageBuildSpec, read_task_archive, run_task_image_build
 from nemo_evals.image_builds.service import BuildJob, ImageBuildService
 from nemo_evals.jobs.task_image_build import is_job_for, task_image_build_job_request
@@ -182,7 +188,7 @@ async def test_main_and_verifier_built_makes_the_build_ready(entity_store, store
 
     assert build.status == "ready"
     assert build.error is None
-    assert [(image.role, image.status) for image in build.images] == [("main", "ready"), ("verifier", "ready")]
+    assert [(image.type, image.status) for image in build.images] == [("main", "ready"), ("verifier", "ready")]
     assert all(image.image_ref and image.builder_image and image.build_job for image in build.images)
     assert await _stored_build(entity_store, spec) == build
 
@@ -430,7 +436,7 @@ async def test_a_dockerfile_pinned_platform_is_built_for(entity_store, store_tas
 
     build = await _run(entity_store, spec, builder)
 
-    assert [(image.role, image.platform) for image in build.images] == [("main", "linux/amd64"), ("verifier", None)]
+    assert [(image.type, image.platform) for image in build.images] == [("main", "linux/amd64"), ("verifier", None)]
 
 
 async def test_a_request_for_another_platform_than_the_task_pins_fails(
@@ -478,3 +484,11 @@ async def test_an_archive_read_for_its_listing_does_not_point_at_its_deleted_dow
 
     assert archive.has("environment/Dockerfile")
     assert archive.text("environment/Dockerfile") is None
+
+
+def test_build_recorded_with_role_still_loads() -> None:
+    """Builds recorded before `role` was renamed to `type` keep loading, and are saved back with `type`."""
+    image = BuildImage.model_validate({"role": "service/db", "source": "prebuilt", "image": "redis:7"})
+
+    assert image.type == "service/db"
+    assert "role" not in image.model_dump()

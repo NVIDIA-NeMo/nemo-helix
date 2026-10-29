@@ -105,21 +105,21 @@ def parse_task_config(config: Mapping[str, Any]) -> TaskConfig:
 
 #: Harbor's name for the agent's container, the one service every Docker task has.
 MAIN_SERVICE = "main"
-VERIFIER_ROLE = "verifier"
-#: Prefixes a compose service's name in its image's role. Compose service names can't contain `/`, so no service's
-#: role can collide with `main` or `verifier`, whatever the service is called.
-SERVICE_ROLE_PREFIX = "service/"
+VERIFIER_TYPE = "verifier"
+#: Prefixes a compose service's name in its image's type. Compose service names can't contain `/`, so no service's
+#: type can collide with `main` or `verifier`, whatever the service is called.
+SERVICE_TYPE_PREFIX = "service/"
 
 
-def service_role(name: str) -> str:
-    """The role of compose service ``name``'s image: ``db`` gives ``service/db``."""
-    return f"{SERVICE_ROLE_PREFIX}{name}"
+def service_image_type(name: str) -> str:
+    """The type of compose service ``name``'s image: ``db`` gives ``service/db``."""
+    return f"{SERVICE_TYPE_PREFIX}{name}"
 
 
 def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_registries: list[str]) -> list[BuildImage]:
     """Every image the task needs, in the order ``main``, its compose services, then a separate verifier.
 
-    Each image's role says which container runs it: ``main``, ``verifier`` for a separate verifier, and
+    Each image's type says which container runs it: ``main``, ``verifier`` for a separate verifier, and
     ``service/<name>`` for each compose service, so a service may have any name, ``verifier`` included.
     """
     task_config = parse_task_config(config)
@@ -141,11 +141,11 @@ def plan_images(config: Mapping[str, Any], archive: TaskArchive, *, allowed_regi
         try:
             registry = normalize_reference(image.image).registry
         except ImageIdentityError as exc:
-            raise ImagePlanError("invalid_image_reference", f"{image.role} image {image.image!r}: {exc}") from exc
+            raise ImagePlanError("invalid_image_reference", f"{image.type} image {image.image!r}: {exc}") from exc
         if allowed and registry not in allowed:
             raise ImagePlanError(
                 "registry_not_allowed",
-                f"{image.role} image {image.image} is from {registry}, which is not in allowed_registries",
+                f"{image.type} image {image.image} is from {registry}, which is not in allowed_registries",
             )
     return images
 
@@ -167,7 +167,7 @@ def _main_image(environment: EnvironmentConfig, archive: TaskArchive, compose: C
     """
     if environment.docker_image:
         replacement = compose.main_image if compose is not None else None
-        return BuildImage(role=MAIN_SERVICE, source="prebuilt", image=str(replacement or environment.docker_image))
+        return BuildImage(type=MAIN_SERVICE, source="prebuilt", image=str(replacement or environment.docker_image))
 
     build = compose.main_build if compose is not None else None
     if build is None:
@@ -187,8 +187,8 @@ def _service_image(name: str, service: ComposeService, archive: TaskArchive) -> 
     source = service.source
     if isinstance(source, ComposeBuild):
         _check_build_options(name, source)
-        return _dockerfile_image(service_role(name), archive, source.context_path, source.dockerfile)
-    return BuildImage(role=service_role(name), source="prebuilt", image=source.reference)
+        return _dockerfile_image(service_image_type(name), archive, source.context_path, source.dockerfile)
+    return BuildImage(type=service_image_type(name), source="prebuilt", image=source.reference)
 
 
 def _check_build_options(service: str, build: ComposeBuild) -> None:
@@ -207,9 +207,9 @@ def _check_build_options(service: str, build: ComposeBuild) -> None:
 
 def _verifier_image(environment: EnvironmentConfig, archive: TaskArchive) -> BuildImage:
     if environment.docker_image:
-        return BuildImage(role=VERIFIER_ROLE, source="prebuilt", image=environment.docker_image)
+        return BuildImage(type=VERIFIER_TYPE, source="prebuilt", image=environment.docker_image)
     if archive.has("tests/Dockerfile"):
-        return _dockerfile_image(VERIFIER_ROLE, archive, "tests", "Dockerfile")
+        return _dockerfile_image(VERIFIER_TYPE, archive, "tests", "Dockerfile")
     raise ImagePlanError(
         "verifier_dockerfile_missing", "the separate verifier names no image and the task has no tests/Dockerfile"
     )
@@ -256,13 +256,13 @@ def dockerfile_pin(dockerfile: str) -> str | None:
         return None
 
 
-def _dockerfile_image(role: str, archive: TaskArchive, context_path: str, dockerfile: str) -> BuildImage:
+def _dockerfile_image(image_type: str, archive: TaskArchive, context_path: str, dockerfile: str) -> BuildImage:
     path = posixpath.normpath(posixpath.join(context_path, dockerfile))
     if not archive.has(path):
-        raise ImagePlanError("dockerfile_missing", f"{role} has no {context_path}/{dockerfile}")
+        raise ImagePlanError("dockerfile_missing", f"{image_type} has no {context_path}/{dockerfile}")
     text = archive.text(path)
     return BuildImage(
-        role=role,
+        type=image_type,
         source="dockerfile",
         context_path=f"{archive.root}/{context_path}",
         dockerfile=dockerfile,

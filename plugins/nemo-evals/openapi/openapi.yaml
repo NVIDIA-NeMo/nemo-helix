@@ -4594,9 +4594,9 @@ components:
       description: Result of aggregating metric scores with full statistics.
     BuildImage:
       properties:
-        role:
+        type:
           type: string
-          title: Role
+          title: Type
           description: 'The container the image runs as: `main`, the agent''s container;
             `verifier`, for a separate verifier; or `service/<name>`, for a compose
             service.'
@@ -4655,7 +4655,7 @@ components:
       additionalProperties: false
       type: object
       required:
-      - role
+      - type
       - source
       title: BuildImage
       description: One container image a task needs, and where its build stands.

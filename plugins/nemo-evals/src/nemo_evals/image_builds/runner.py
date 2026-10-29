@@ -145,7 +145,7 @@ async def _build(
 
     failed = [image for image in build.images if image.status == "failed"]
     build.status = "failed" if failed else "ready"
-    build.error = f"{failed[0].role}: {failed[0].error}" if failed else None
+    build.error = f"{failed[0].type}: {failed[0].error}" if failed else None
     logger.info("Image build %s of %s finished %s", build.name, build.task, build.status)
     return await entities.update(build)
 
@@ -159,7 +159,7 @@ def _choose_platforms(images: list[BuildImage], requested: str | None) -> None:
         if image.platform is not None and image.platform != requested:
             raise ImagePlanError(
                 "platform_conflict",
-                f"{image.role} is pinned to {image.platform} by the task, and the request asks for {requested}",
+                f"{image.type} is pinned to {image.platform} by the task, and the request asks for {requested}",
             )
         image.platform = requested
 
