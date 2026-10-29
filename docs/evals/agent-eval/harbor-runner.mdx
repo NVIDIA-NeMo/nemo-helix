@@ -882,6 +882,7 @@ The error changes `a2`'s status and error rollup; it does not discard or replace
 
 - **`n_attempts`** — desired attempts per task. On resume, Harbor runs only the missing attempts.
 - **`n_concurrent_trials`** — maximum trials Harbor runs concurrently.
+- **`NHX_HARBOR_MAX_CONCURRENT_SETUPS`** (environment variable, default `4`) — the maximum number of local Docker trials, across every run on the machine, that can start their container and set up their agent at once. Setups that overlap slow each other down until they pass the agent setup timeout. A trial waiting for a slot starts its timers only once it has one. Set the variable to `0` to turn the cap off. Give every run on the machine the same value. The cap doesn't apply to trials in OpenSandbox or other remote environments.
 
 ## Retries
 
