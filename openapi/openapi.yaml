@@ -14024,6 +14024,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 8
         storage:
           allOf:
           - $ref: '#/components/schemas/DockerJobStorageConfig'
@@ -17190,6 +17197,7 @@ components:
       type: string
       enum:
       - created
+      - queued
       - pending
       - active
       - cancelled
@@ -17205,7 +17213,15 @@ components:
 
         This enum represents the various states a job can be in during its lifecycle,
 
-        from creation to a terminal state.'
+        from creation to a terminal state.
+
+
+        ``CREATED`` means the controller has not yet considered the job. ``QUEUED``
+        means
+
+        the controller has seen the job but not admitted it (waiting for capacity).
+
+        ``PENDING`` means the backend resource exists and is waiting to start.'
     HelixJobStatusResponse:
       properties:
         id:
@@ -18404,6 +18420,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 500
         ttl_seconds_image_pull:
           type: integer
           minimum: 0.0
@@ -22853,6 +22876,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 8
         working_directory:
           type: string
           title: Working Directory
@@ -24170,6 +24200,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 500
         ttl_seconds_image_pull:
           type: integer
           minimum: 0.0

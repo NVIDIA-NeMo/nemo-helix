@@ -57,6 +57,7 @@ from nemo_helix_ext.cli.core.waiters import wait_for_platform_job
 
 JobStatusValue = Literal[
     "created",
+    "queued",
     "pending",
     "active",
     "cancelled",

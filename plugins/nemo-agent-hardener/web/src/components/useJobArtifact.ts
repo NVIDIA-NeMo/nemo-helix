@@ -45,7 +45,7 @@ export const useJobArtifact = <T>(
   // Only give up once the job has been terminal for the grace period without the artifact showing.
   const [graceExpired, setGraceExpired] = useState(false);
 
-  const { data: results } = useAgentHardenerListJobResults(workspace, jobName ?? '', {
+  const { data: results } = useAgentHardenerListJobResults(workspace, jobName ?? '', undefined, {
     query: {
       enabled: Boolean(jobName),
       refetchInterval: (query) => {

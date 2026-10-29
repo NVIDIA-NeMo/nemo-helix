@@ -99,3 +99,7 @@ This directory is excluded from:
 - Vite production builds (only `src/` is bundled)
 
 Imports use the `@screenshots/*` path alias (defined in `tsconfig.json`), following the same pattern as `@e2e-tests/*`. Console output uses `/* eslint-disable no-console */` since this is a CLI script.
+
+## Ad-hoc Screenshots (`pnpm screenshot`)
+
+`screenshots/screenshot.ts` is a separate headless, non-interactive capture of any page or `data-testid` element, meant for agents (PR descriptions, visual checks, bug reports). See the `screenshot` skill in `web/.agents/skills/screenshot/SKILL.md` for usage.

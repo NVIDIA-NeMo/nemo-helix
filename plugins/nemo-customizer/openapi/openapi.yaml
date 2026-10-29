@@ -3610,6 +3610,7 @@ components:
       type: string
       enum:
       - created
+      - queued
       - pending
       - active
       - cancelled
@@ -3625,7 +3626,15 @@ components:
 
         This enum represents the various states a job can be in during its lifecycle,
 
-        from creation to a terminal state.'
+        from creation to a terminal state.
+
+
+        ``CREATED`` means the controller has not yet considered the job. ``QUEUED``
+        means
+
+        the controller has seen the job but not admitted it (waiting for capacity).
+
+        ``PENDING`` means the backend resource exists and is waiting to start.'
     HelixJobStatusResponse:
       properties:
         id:

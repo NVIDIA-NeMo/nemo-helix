@@ -66,6 +66,16 @@ class JobsServiceConfig(create_service_config_class("jobs")):  # type: ignore
     )
     reconcile_interval_seconds: int = Field(default=2, description="Interval in seconds for the job reconciler to run")
     schedule_interval_seconds: int = Field(default=5, description="Interval in seconds for the job scheduler to run")
+    max_active_jobs_per_user: int = Field(
+        default=50,
+        ge=1,
+        description="Default maximum number of jobs a single user may have admitted concurrently.",
+    )
+    max_active_jobs_per_workspace: int = Field(
+        default=200,
+        ge=1,
+        description="Default maximum number of jobs a single workspace may have admitted concurrently.",
+    )
     enable_subprocess_executor: bool | None = Field(
         default=None,
         description=(

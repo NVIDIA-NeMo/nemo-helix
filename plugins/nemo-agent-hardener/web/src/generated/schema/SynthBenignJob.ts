@@ -16,6 +16,7 @@ import type { SynthBenignSpec } from './SynthBenignSpec.ts';
 
 export interface SynthBenignJob {
   id?: string;
+  attempt_id?: string;
   name: string;
   description?: string;
   project?: string;
