@@ -18,8 +18,9 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.config import NemoHelixConfig, Runtime
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import JobDryRunCheck
-from nhx.customization_common.dry_run import DatasetRows, check_dataset_rows
+from nhx.customization_common.dry_run import DatasetRows, check_dataset_rows, check_execution_profiles
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -149,8 +150,13 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         cls,
         spec: BaseModel,
         *,
+        platform_spec: HelixJobSpec,
         workspace: str,
         async_sdk: AsyncNemoClient,
     ) -> list[JobDryRunCheck]:
-        """Check the first rows of every file training would read."""
-        return await check_dataset_rows(cls._dry_run_datasets(cast(JobOutputT, spec), workspace), workspace, async_sdk)
+        """Check every step's execution profile, and the first rows of every file training would read."""
+        datasets = cls._dry_run_datasets(cast(JobOutputT, spec), workspace)
+        return [
+            await check_execution_profiles(platform_spec, async_sdk),
+            *await check_dataset_rows(datasets, workspace, async_sdk),
+        ]

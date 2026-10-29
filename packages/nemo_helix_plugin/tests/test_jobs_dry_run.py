@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -77,24 +76,23 @@ def _client(
     return TestClient(app)
 
 
-def _jobs_client(*profiles: tuple[str, str]) -> MagicMock:
+def _create_job_spy() -> MagicMock:
     jobs = MagicMock()
-    jobs.list_execution_profiles = AsyncMock(
-        return_value=[SimpleNamespace(provider=provider, profile=profile) for provider, profile in profiles]
-    )
     jobs.create_job = AsyncMock()
     return jobs
 
 
 def test_a_passing_dry_run_returns_the_unsaved_job_and_its_checks() -> None:
-    seen: list[tuple[object, str]] = []
+    seen: list[tuple[object, list[str], str]] = []
 
-    async def checks(spec: object, workspace: str, async_client: AsyncNemoClient) -> list[JobDryRunCheck]:
+    async def checks(
+        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+    ) -> list[JobDryRunCheck]:
         del async_client
-        seen.append((spec, workspace))
+        seen.append((spec, [step.name for step in platform_spec.steps], workspace))
         return [JobDryRunCheck(name="dataset rows", passed=True, message="10 rows match.")]
 
-    jobs = _jobs_client(("gpu", "default"), ("cpu", "default"))
+    jobs = _create_job_spy()
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
         response = _client(dry_run_checks=checks).post(
             _CREATE_URL, params=_DRY_RUN, json={"name": "widget-a", "spec": {"label": "x"}}
@@ -104,48 +102,48 @@ def test_a_passing_dry_run_returns_the_unsaved_job_and_its_checks() -> None:
     body = response.json()
     assert (body["name"], body["id"], body["status"]) == ("widget-a", None, None)
     assert body["spec"] == {"label": "x", "learning_rate": 5e-6}
-    assert [check["name"] for check in body["status_details"]["checks"]] == ["execution profile", "dataset rows"]
-    assert seen == [(_OutputSpec(label="x", learning_rate=5e-6), "default")]
+    assert body["status_details"] == {"checks": [{"name": "dataset rows", "passed": True, "message": "10 rows match."}]}
+    assert seen == [(_OutputSpec(label="x", learning_rate=5e-6), ["training"], "default")]
     jobs.create_job.assert_not_called()
 
 
-def test_a_profile_the_platform_does_not_have_is_a_422_listing_the_checks() -> None:
-    jobs = _jobs_client(("cpu", "default"))
+def test_a_failed_check_is_a_422_that_lists_every_check() -> None:
+    async def checks(
+        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+    ) -> list[JobDryRunCheck]:
+        del spec, platform_spec, workspace, async_client
+        return [
+            JobDryRunCheck(name="execution profile", passed=True, message="Configured: gpu/default."),
+            JobDryRunCheck(name="dataset rows", passed=False, message="Row 3 has no 'messages'."),
+        ]
+
+    jobs = _create_job_spy()
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
-        response = _client().post(_CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}})
+        response = _client(dry_run_checks=checks).post(_CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}})
 
     assert response.status_code == 422
     assert response.json()["detail"] == {
-        "message": "Dry run failed: execution profile. Nothing was created.",
+        "message": "Dry run failed: dataset rows. Nothing was created.",
         "checks": [
-            {
-                "name": "execution profile",
-                "passed": False,
-                "message": "Not configured on this platform: gpu/default. Configured: cpu/default.",
-            }
+            {"name": "execution profile", "passed": True, "message": "Configured: gpu/default."},
+            {"name": "dataset rows", "passed": False, "message": "Row 3 has no 'messages'."},
         ],
     }
     jobs.create_job.assert_not_called()
 
 
-def test_a_failed_plugin_check_is_a_422_that_also_lists_what_passed() -> None:
-    async def checks(spec: object, workspace: str, async_client: AsyncNemoClient) -> list[JobDryRunCheck]:
-        del spec, workspace, async_client
-        return [JobDryRunCheck(name="dataset rows", passed=False, message="Row 3 has no 'messages'.")]
-
-    jobs = _jobs_client(("gpu", "default"))
+def test_without_checks_a_dry_run_still_validates_and_compiles() -> None:
+    jobs = _create_job_spy()
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
-        response = _client(dry_run_checks=checks).post(_CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}})
+        response = _client().post(_CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}})
 
-    assert response.status_code == 422
-    assert [(check["name"], check["passed"]) for check in response.json()["detail"]["checks"]] == [
-        ("execution profile", True),
-        ("dataset rows", False),
-    ]
+    assert response.status_code == 200, response.text
+    assert response.json()["status_details"] == {"checks": []}
+    jobs.create_job.assert_not_called()
 
 
 def test_without_the_dry_run_option_the_flag_is_refused_not_ignored() -> None:
-    jobs = _jobs_client(("gpu", "default"))
+    jobs = _create_job_spy()
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
         response = _client(route_options=[JobRouteOption.CORE]).post(
             _CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}}

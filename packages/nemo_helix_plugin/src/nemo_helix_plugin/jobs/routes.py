@@ -56,6 +56,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.profile import stamp_profile
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -319,7 +320,11 @@ def _adapt_compile(
 def _adapt_dry_run_checks(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
     """Bridge ``NemoJob.dry_run_checks`` to the factory's ``dry_run_checks`` shape."""
 
-    async def dry_run_checks_adapter(transformed_spec: Any, workspace: str, async_client: AsyncNemoClient) -> Any:
-        return await job_cls.dry_run_checks(transformed_spec, workspace=workspace, async_sdk=async_client)
+    async def dry_run_checks_adapter(
+        transformed_spec: Any, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+    ) -> Any:
+        return await job_cls.dry_run_checks(
+            transformed_spec, platform_spec=platform_spec, workspace=workspace, async_sdk=async_client
+        )
 
     return dry_run_checks_adapter

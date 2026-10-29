@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Dataset checks for a customization dry run.
+"""The checks of a customization dry run (create with ``?dry_run=true``).
 
-A dry run reads the first rows of each file training would read and checks them with
-the backend's own validator. It reads byte ranges from the Files service, so nothing is
-downloaded to job storage and nothing is created.
+A dry run checks that every step's execution profile is configured, and reads the first
+rows of each file training would read and checks them with the backend's own validator.
+It reads byte ranges from the Files service, so nothing is downloaded to job storage and
+nothing is created.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from pathlib import Path
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import JobDryRunCheck
 from nhx.customization_common.schemas.file_io import FileSetRef
 
@@ -37,6 +40,23 @@ class DatasetRows:
     select_files: Callable[[list[str]], list[str]]
     #: Training's own row validator: ``(lines, source)``; raises on a bad row.
     validate_lines: Callable[[list[str], str], object]
+
+
+async def check_execution_profiles(platform_spec: HelixJobSpec, async_sdk: AsyncNemoClient) -> JobDryRunCheck:
+    """Check that every step's provider and profile is configured on the platform."""
+    profiles = await AsyncJobsClient.from_client(async_sdk).list_execution_profiles()
+    available = {(profile.provider, profile.profile) for profile in profiles}
+    used = {(step.executor.provider, step.executor.profile) for step in platform_spec.steps}
+    missing = sorted(f"{provider}/{profile}" for provider, profile in used - available)
+    if missing:
+        configured = ", ".join(sorted(f"{provider}/{profile}" for provider, profile in available)) or "none"
+        return JobDryRunCheck(
+            name="execution profile",
+            passed=False,
+            message=f"Not configured on this platform: {', '.join(missing)}. Configured: {configured}.",
+        )
+    configured_used = ", ".join(sorted(f"{provider}/{profile}" for provider, profile in used))
+    return JobDryRunCheck(name="execution profile", passed=True, message=f"Configured: {configured_used}.")
 
 
 async def check_dataset_rows(

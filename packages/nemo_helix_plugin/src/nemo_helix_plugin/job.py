@@ -73,6 +73,7 @@ from nemo_helix_plugin._base import _NamedPlugin
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.list_filter import BaseJobsListFilter
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import JobDryRunCheck
 from pydantic import BaseModel
 
@@ -313,23 +314,25 @@ class NemoJob(_NamedPlugin):
         cls,
         spec: BaseModel,
         *,
+        platform_spec: HelixJobSpec,
         workspace: str,
         async_sdk: AsyncNemoClient,
     ) -> list[JobDryRunCheck]:
-        """Checks a dry run adds after :meth:`to_spec` and :meth:`compile` succeed.
+        """The checks a dry run (create with ``?dry_run=true``) runs after :meth:`to_spec` and :meth:`compile`.
 
         Override to catch what would otherwise fail only once the job runs, such as
         reading a few rows of the job's data. Checks must not create or change anything.
 
         Args:
             spec: Canonical :attr:`spec_schema` instance, as :meth:`compile` received it.
+            platform_spec: The compiled job: its steps, their images and execution profiles.
             workspace: Workspace scope.
             async_sdk: The request-scoped :class:`AsyncNemoClient`.
 
         Returns:
             One entry per check. The default adds none.
         """
-        del spec, workspace, async_sdk
+        del spec, platform_spec, workspace, async_sdk
         return []
 
     # ------------------------------------------------------------------ #

@@ -20,7 +20,6 @@ from typing import (
     Callable,
     Generic,
     Literal,
-    NamedTuple,
     Self,
     Type,
     TypeVar,
@@ -583,9 +582,9 @@ InputToOutputTransformerAsync = Callable[
 # Job name generator: called when user doesn't provide a name
 JobNameGenerator = Callable[[], str]
 
-# Plugin checks a dry run adds after transform and compile.
-# Signature: (transformed_spec, workspace, async_client) -> checks
-DryRunChecks = Callable[[Any, str, AsyncNemoClient], Awaitable[list[JobDryRunCheck]]]
+# The checks a ``DRY_RUN`` create runs, after transform and compile.
+# Signature: (transformed_spec, platform_spec, workspace, async_client) -> checks
+DryRunChecks = Callable[[Any, HelixJobSpec, str, AsyncNemoClient], Awaitable[list[JobDryRunCheck]]]
 
 
 def _unwrap_annotated_schema(obj: object) -> object:
@@ -936,8 +935,8 @@ def job_route_factory(
             is generated. A field this model adds with a string default, such as
             ``backend: Literal["rl"] = "rl"``, is AND-ed into every list as
             ``spec.<field>``.
-        dry_run_checks: Plugin checks a ``DRY_RUN`` create runs after transform and compile,
-            such as reading a few dataset rows. A dry run always checks the execution profiles.
+        dry_run_checks: The checks a ``DRY_RUN`` create runs after transform and compile, given
+            the canonical spec and the compiled platform spec, such as reading a few dataset rows.
 
     Example with separate input/output types:
         ```python
@@ -2013,13 +2012,6 @@ def _no_dry_run(request: Request) -> bool:
     return False
 
 
-class _DryRunStep(NamedTuple):
-    name: str
-    provider: str
-    profile: str
-    image: str | None
-
-
 async def _dry_run_checks(
     platform_spec: HelixJobSpec,
     job_spec: Any,
@@ -2027,10 +2019,8 @@ async def _dry_run_checks(
     async_client: AsyncNemoClient,
     plugin_checks: DryRunChecks | None,
 ) -> list[JobDryRunCheck]:
-    """Run a dry run's checks; raise 422 with all of them when any fails."""
-    checks = [await _check_execution_profiles(_dry_run_steps(platform_spec), async_client)]
-    if plugin_checks is not None:
-        checks.extend(await plugin_checks(job_spec, workspace, async_client))
+    """Run the plugin's dry-run checks; raise 422 with all of them when any fails."""
+    checks = await plugin_checks(job_spec, platform_spec, workspace, async_client) if plugin_checks else []
     failed = [check.name for check in checks if not check.passed]
     if failed:
         raise HTTPException(
@@ -2041,34 +2031,3 @@ async def _dry_run_checks(
             },
         )
     return checks
-
-
-def _dry_run_steps(platform_spec: HelixJobSpec) -> list[_DryRunStep]:
-    """The steps a compiled job would run, with the image and profile of each."""
-    return [
-        _DryRunStep(
-            name=step.name,
-            provider=step.executor.provider,
-            profile=step.executor.profile,
-            image=getattr(getattr(step.executor, "container", None), "image", None),
-        )
-        for step in platform_spec.steps
-    ]
-
-
-async def _check_execution_profiles(steps: list[_DryRunStep], async_client: AsyncNemoClient) -> JobDryRunCheck:
-    """Check that every step's provider and profile is configured on the platform."""
-    profiles = await AsyncJobsClient.from_client(async_client).list_execution_profiles()
-    available = {(profile.provider, profile.profile) for profile in profiles}
-    missing = sorted(
-        {f"{step.provider}/{step.profile}" for step in steps if (step.provider, step.profile) not in available}
-    )
-    if missing:
-        configured = ", ".join(sorted(f"{provider}/{profile}" for provider, profile in available)) or "none"
-        return JobDryRunCheck(
-            name="execution profile",
-            passed=False,
-            message=f"Not configured on this platform: {', '.join(missing)}. Configured: {configured}.",
-        )
-    used = ", ".join(sorted({f"{step.provider}/{step.profile}" for step in steps}))
-    return JobDryRunCheck(name="execution profile", passed=True, message=f"Configured: {used}.")

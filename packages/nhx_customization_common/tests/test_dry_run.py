@@ -5,10 +5,16 @@ import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nhx.customization_common import dry_run
-from nhx.customization_common.dry_run import DatasetRows, check_dataset_rows, check_local_dataset_rows
+from nhx.customization_common.dry_run import (
+    DatasetRows,
+    check_dataset_rows,
+    check_execution_profiles,
+    check_local_dataset_rows,
+)
 
 
 class _FakeFiles:
@@ -127,3 +133,44 @@ def test_local_dataset_is_checked_the_same_way(tmp_path: Path) -> None:
 
     (tmp_path / "train.jsonl").write_bytes(_rows(2))
     assert check_local_dataset_rows(_dataset(), tmp_path / "train.jsonl").passed
+
+
+def _platform_spec(*profiles: tuple[str, str]) -> HelixJobSpec:
+    return HelixJobSpec.model_validate(
+        {
+            "steps": [
+                {
+                    "name": f"step-{i}",
+                    "executor": {"provider": provider, "profile": profile, "container": {"image": "trainer:1"}},
+                }
+                for i, (provider, profile) in enumerate(profiles)
+            ]
+        }
+    )
+
+
+def _jobs(*profiles: tuple[str, str]) -> MagicMock:
+    jobs = MagicMock()
+    jobs.list_execution_profiles = AsyncMock(
+        return_value=[SimpleNamespace(provider=provider, profile=profile) for provider, profile in profiles]
+    )
+    return jobs
+
+
+async def test_execution_profiles_pass_when_every_step_profile_is_configured() -> None:
+    with patch.object(
+        dry_run.AsyncJobsClient, "from_client", return_value=_jobs(("gpu", "default"), ("cpu", "default"))
+    ):
+        check = await check_execution_profiles(_platform_spec(("gpu", "default"), ("cpu", "default")), MagicMock())
+
+    assert (check.passed, check.message) == (True, "Configured: cpu/default, gpu/default.")
+
+
+async def test_a_profile_the_platform_does_not_have_fails_and_lists_the_configured_ones() -> None:
+    with patch.object(dry_run.AsyncJobsClient, "from_client", return_value=_jobs(("cpu", "default"))):
+        check = await check_execution_profiles(_platform_spec(("gpu", "default")), MagicMock())
+
+    assert (check.passed, check.message) == (
+        False,
+        "Not configured on this platform: gpu/default. Configured: cpu/default.",
+    )
