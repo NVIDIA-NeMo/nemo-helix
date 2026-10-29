@@ -963,16 +963,22 @@ async def test_succeeded_prerequisite_in_index_allows_create(
     assert len(mock_backend.create_calls) == 1
 
 
+@pytest.mark.parametrize("create_failed", [False, True])
 async def test_provider_cleanup_survives_restart_and_deletion_timeout(
-    patch_reconciler_now, mock_entities, mock_backend
+    patch_reconciler_now, mock_entities, mock_backend, create_failed
 ):
     dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS - 1)
     reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
     mock_backend.delete_status = BackendStatusUpdate(
         status="DELETING",
-        status_message="Sandbox deleted; retrying gateway provider cleanup.",
+        status_message="Retrying sandbox and provider cleanup.",
         error_details={"reason": "provider_cleanup_pending"},
     )
+    if create_failed:
+        dep.status = "PENDING"
+        dep.desired_state = "READY"
+        dep.status_history = []
+        mock_backend.create_deployment = AsyncMock(return_value=mock_backend.delete_status)
     await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
     mock_entities.update.assert_awaited()
     mock_entities.delete.assert_not_awaited()
