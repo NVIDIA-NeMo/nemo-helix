@@ -273,7 +273,7 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     """Install a manifest root laid out like the real one, so tests don't depend on which plugins are installed."""
     root = tmp_path / "nemo-fabric"
     for relative_path, adapter_id in {
-        "adapters/compass/analyst.fabric-adapter.json": "nvidia.helix.compass.analyst",
+        "adapters/helix/compass/analyst.fabric-adapter.json": "nvidia.helix.compass.analyst",
         "adapters/nooa/nooa.fabric-adapter.json": "nvidia.fabric.nooa",
         "adapters/nooa/nooa-bench.fabric-adapter.json": "nvidia.fabric.nooa.bench-agent",
     }.items():

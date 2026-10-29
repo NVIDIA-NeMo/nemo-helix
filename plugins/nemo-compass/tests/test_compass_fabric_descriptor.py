@@ -38,7 +38,7 @@ def _installed_descriptor() -> Path:
     """
     import sys
 
-    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "compass" / DESCRIPTOR.name
+    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "helix" / "compass" / DESCRIPTOR.name
 
 
 def _require_installed_descriptor() -> Path:

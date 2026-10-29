@@ -110,7 +110,7 @@ def test_compass_plugin_ships_in_the_wrapper_wheel() -> None:
     shared_data = {(source / key).resolve(): value for key, value in bundle["shared_data"].items()}
 
     descriptor = (ROOT / "plugins/nemo-compass/analyst.fabric-adapter.json").resolve()
-    assert shared_data[descriptor] == "share/nemo-fabric/adapters/compass/analyst.fabric-adapter.json"
+    assert shared_data[descriptor] == "share/nemo-fabric/adapters/helix/compass/analyst.fabric-adapter.json"
 
 
 def _owning_pyproject(source: Path) -> Path | None:
