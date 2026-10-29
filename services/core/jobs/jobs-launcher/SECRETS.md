@@ -7,11 +7,16 @@ The jobs-launcher now supports automatic secret injection from the NeMo Helix Se
 
 ## Configuration
 
-The feature uses three environment variables:
+The feature uses these environment variables:
 
 1. **`NEMO_JOB_SECRETS`** (required) - A comma-separated list of secret references, e.g  `NEMO_JOB_SECRETS='ENV_VAR=workspace/secret_name,OTHER_ENV_VAR=workspace/other_secret_name'`
-2. **`NHX_SECRETS_URL`** (required when NEMO_JOB_SECRETS is set) - The base URL of the NeMo Helix API (e.g., `http://localhost:8080`)
-3. **`NHX_PRINCIPAL`** (optional) - JSON containing auth context for authenticated API calls, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`
+2. **`NHX_SECRETS_URL`** - The Secrets API endpoint (e.g., `http://localhost:8080`). Falls back to `NHX_BASE_URL` when unset; also supports `unix:///absolute/socket/path`.
+3. **`NHX_PRINCIPAL`** (legacy mode only) - JSON containing the job creator's identity, e.g. `{"id":"user@example.com","email":"user@example.com","groups":["team-a"]}`.
+4. **`NHX_WORKLOAD_IDENTITY_TOKEN_FILE`** (workload-identity mode) - Path to the controller-provided workload proof. The launcher exchanges this proof for a bearer token using auth discovery at `NHX_BASE_URL`, which is required in this mode.
+
+When a workload token file is configured, Secret requests use the exchanged bearer token, with caching and refresh between requests. Delegated identity comes from the verified token claims, not `NHX_PRINCIPAL` or legacy identity headers. Discovery or token exchange failures stop the launcher without falling back to legacy headers. Authenticated Secret requests do not follow redirects.
+
+Without a workload token file, the launcher retains the legacy `service:jobs` and on-behalf-of headers derived from `NHX_PRINCIPAL`. These headers alone cannot authenticate requests through a bearer-authenticated gateway.
 
 ## Usage Example
 
@@ -57,7 +62,8 @@ export NEMO_JOB_SECRETS="HF_TOKEN=default/hf-token,WANDB_API_KEY=default/wandb-k
 
 The launcher will exit with an error if:
 
-- `NEMO_JOB_SECRETS` is set but `NHX_SECRETS_URL` is missing
+- Secret references are configured but neither `NHX_SECRETS_URL` nor `NHX_BASE_URL` is set
+- Workload authentication is configured but discovery, proof reading, or token exchange fails
 - A secret reference has an invalid format
 - The API returns an error (e.g., secret not found, authentication failure)
 - Network connectivity issues occur

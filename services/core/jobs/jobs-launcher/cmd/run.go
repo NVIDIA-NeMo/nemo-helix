@@ -191,9 +191,32 @@ func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs 
 	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
 }
 
-func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithEndpoint(ctx context.Context, endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+	if len(secretRefs) == 0 {
+		return nil, nil
+	}
+
+	tokenSource, err := newWorkloadAuthTokenSource(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("configure workload identity auth for secrets: %w", err)
+	}
+	httpClient := secretEndpointHTTPClient(endpoint)
+	if tokenSource != nil {
+		// The verified workload token carries the actor and delegated job creator.
+		// Do not send legacy identity headers alongside bearer authentication.
+		principal = nil
+		transport := httpClient.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
+		}
+		httpClient.Transport = &workloadAuthTransport{base: transport, tokenSource: tokenSource}
+		// Do not reattach workload credentials to a redirected destination.
+		httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
 	return fetchSecretsWithClient(
-		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
+		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, httpClient),
 		secretRefs,
 	)
 }
@@ -298,7 +321,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
 			principal := nhxclient.PrincipalFromEnv()
 
-			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
+			secretEnvVars, err := fetchSecretsWithEndpoint(ctx, secretEndpoint, principal, secretRefs)
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err
