@@ -37,9 +37,17 @@ def test_directory_prefers_jsonl_over_json(tmp_path: Path) -> None:
     assert _resolve_local_data_files(str(tmp_path)) == str(tmp_path / "a.jsonl")
 
 
-def test_directory_falls_back_to_json(tmp_path: Path) -> None:
+def test_directory_reads_a_named_json_file(tmp_path: Path) -> None:
+    (tmp_path / "train.json").write_text("{}\n")
+    assert _resolve_local_data_files(str(tmp_path)) == str(tmp_path / "train.json")
+
+
+def test_directory_without_names_reads_top_level_jsonl_only(tmp_path: Path) -> None:
     (tmp_path / "data.json").write_text("{}\n")
-    assert _resolve_local_data_files(str(tmp_path)) == str(tmp_path / "data.json")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "rows.jsonl").write_text("{}\n")
+    with pytest.raises(FileNotFoundError, match="No training .jsonl/.json files"):
+        _resolve_local_data_files(str(tmp_path))
 
 
 def test_directory_returns_sorted_files(tmp_path: Path) -> None:
@@ -64,9 +72,9 @@ def test_split_train_picks_train_jsonl_only(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("train_name", "val_name"), [("training.jsonl", "eval.jsonl"), ("my_train.jsonl", "dev.jsonl")]
+    ("train_name", "val_name"), [("training.jsonl", "val.jsonl"), ("train_part-0.jsonl", "dev.jsonl")]
 )
-def test_any_train_or_val_name_picks_its_split(tmp_path: Path, train_name: str, val_name: str) -> None:
+def test_any_train_or_val_pattern_picks_its_split(tmp_path: Path, train_name: str, val_name: str) -> None:
     (tmp_path / train_name).write_text('{"text": "train"}\n')
     (tmp_path / val_name).write_text('{"text": "val"}\n')
     assert _resolve_local_data_files(str(tmp_path), split="train") == str(tmp_path / train_name)

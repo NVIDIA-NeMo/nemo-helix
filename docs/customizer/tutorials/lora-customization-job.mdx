@@ -90,7 +90,7 @@ customization = Customization.from_client(client)
 Create your data in JSONL format (one JSON object per line). For a chat model, use the **chat** format so training and inference share the model's chat template.
 
 **Dataset structure:**
-- Training files under `training/`, or at the root with `train` in the name (such as `training.jsonl`)
+- Training files under `training/`, or at the root with a name starting with `train` (such as `training.jsonl`)
 - Validation files under `validation/` (or `validation.jsonl`)
 
 **Chat format:** Each line is a JSON object with:

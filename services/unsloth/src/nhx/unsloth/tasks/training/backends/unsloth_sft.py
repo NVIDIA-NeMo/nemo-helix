@@ -439,10 +439,11 @@ def _resolve_local_data_files(
     A file path is training data, returned unchanged, and has no validation
     files. A directory (the file_io download step's output dir) is expanded
     to the files of ``split``, picked by the rule every Customizer backend
-    shares (:mod:`nhx.customization_common.dataset_files`): a ``train`` or
-    ``val`` name, or, with neither, every top-level ``.jsonl`` file (falling
-    back to ``.json``) as training data. One file is returned alone, several
-    as a list.
+    shares (:mod:`nhx.customization_common.dataset_files`): a name matching
+    ``TRAIN_PATTERNS`` or ``VAL_PATTERNS`` (``train*.jsonl``, ``val*.jsonl``),
+    or a ``train/`` or ``val/``-style directory; with neither, every top-level
+    ``.jsonl`` file is training data. One file is returned alone, several as
+    a list.
 
     Returns:
         The files, or ``None`` for a validation split the dataset does not have.
@@ -463,7 +464,7 @@ def _resolve_local_data_files(
             return None
         raise FileNotFoundError(
             f"No training .jsonl/.json files found in dataset directory {path!r}. "
-            "Name training files with 'train' (train.jsonl) and validation files with 'val' (validation.jsonl)."
+            "Expected files matching patterns like train*.jsonl or a train/ directory."
         )
     if len(files) == 1:
         return str(p / files[0])
@@ -506,7 +507,7 @@ def _load_datasets(
         if len(train) < 2:
             raise ValueError(
                 f"The dataset has {len(train)} training row(s), too few to hold out {ratio:.0%} for validation. "
-                "Add rows, or a validation file named with 'val' (validation.jsonl)."
+                "Add rows, or a validation file named like validation*.jsonl."
             )
         split = train.train_test_split(test_size=ratio, seed=spec.schedule.seed)
         train, validation = split["train"], split["test"]

@@ -3,7 +3,10 @@
 
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
-import { CUSTOMIZATION_DATASET_DIRS, CustomizationFileType } from '@studio/constants/customization';
+import {
+  CUSTOMIZATION_DATASET_DISCOVERY,
+  CustomizationFileType,
+} from '@studio/constants/customization';
 import { parseFilesetUri } from '@studio/hooks/useCustomizationFiles/utils';
 
 export interface DatasetFileDiscoveryResult {
@@ -30,18 +33,10 @@ const isDatasetFile = (path: string): boolean => {
 
 /** The split a file holds by its name (root files) or its directory, or null when neither says. */
 const splitOf = (segments: string[]): CustomizationFileType | null => {
-  if (segments.length === 1) {
-    const stem = segments[0].replace(/\.[^.]*$/, '').toLowerCase();
-    if (stem.includes('train')) return CustomizationFileType.Training;
-    if (stem.includes('val') || stem.startsWith('dev')) return CustomizationFileType.Validation;
-  } else if (segments.length === 2) {
-    const dir = segments[0].toLowerCase();
-    if (CUSTOMIZATION_DATASET_DIRS[CustomizationFileType.Training].includes(dir)) {
-      return CustomizationFileType.Training;
-    }
-    if (CUSTOMIZATION_DATASET_DIRS[CustomizationFileType.Validation].includes(dir)) {
-      return CustomizationFileType.Validation;
-    }
+  for (const type of [CustomizationFileType.Training, CustomizationFileType.Validation]) {
+    const rule = CUSTOMIZATION_DATASET_DISCOVERY[type];
+    if (segments.length === 1 && rule.filePatterns.some((re) => re.test(segments[0]))) return type;
+    if (segments.length === 2 && rule.dirs.includes(segments[0])) return type;
   }
   return null;
 };
@@ -54,7 +49,7 @@ const preferJsonl = (files: FilesetFileOutput[]): FilesetFileOutput[] => {
 
 /**
  * Splits a fileset's files into the training and validation files Customizer reads, by the
- * rule every backend shares (see CUSTOMIZATION_DATASET_DIRS).
+ * rule every backend shares (see CUSTOMIZATION_DATASET_DISCOVERY).
  */
 export const partitionDatasetFiles = (
   files: FilesetFileOutput[]
@@ -70,8 +65,9 @@ export const partitionDatasetFiles = (
     (f) => splitOf(segmentsOf(f.path)) === CustomizationFileType.Validation
   );
   if (training.length === 0 && validation.length === 0) {
-    const root = dataFiles.filter((f) => segmentsOf(f.path).length === 1);
-    training = root.length > 0 ? root : dataFiles;
+    training = dataFiles.filter(
+      (f) => segmentsOf(f.path).length === 1 && f.path.endsWith('.jsonl')
+    );
   }
   return { training: preferJsonl(training), validation: preferJsonl(validation) };
 };

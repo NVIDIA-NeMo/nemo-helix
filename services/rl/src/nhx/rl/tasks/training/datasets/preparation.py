@@ -245,9 +245,10 @@ def select_dataset_files(paths: list[str]) -> tuple[list[str], list[str]]:
     Pick training and validation files from a dataset's file paths.
 
     Uses the rule every Customizer backend shares (:mod:`nhx.customization_common.dataset_files`):
-    a top-level file whose name contains ``train`` is training data, one whose name contains
-    ``val`` or starts with ``dev`` is validation data, as are the files in ``train/`` or
-    ``val/``-style directories; with neither, every top-level JSONL file is training data.
+    a top-level file matching ``TRAIN_PATTERNS`` (``train*.jsonl``) or a file in a ``TRAIN_DIRS``
+    directory (``train/``) is training data, one matching ``VAL_PATTERNS`` (``val*.jsonl``,
+    ``dev*.jsonl``) or in a ``VAL_DIRS`` directory (``val/``) is validation data; with neither,
+    every top-level JSONL file is training data.
 
     Args:
         paths: File paths relative to the dataset root, as a fileset lists them.
@@ -261,7 +262,7 @@ def select_dataset_files(paths: list[str]) -> tuple[list[str], list[str]]:
     train_files, val_files = select_split_files(paths, DATA_SUFFIXES)
     if not train_files:
         raise DatasetFormatError(
-            "No training files found. Expected a JSONL file whose name contains 'train', such as train.jsonl."
+            "No training files found. Expected files matching patterns like train*.jsonl or a train/ directory."
         )
     return train_files, val_files
 

@@ -75,7 +75,8 @@ def test_discover_requires_a_training_file(tmp_path: Path) -> None:
         (["data.jsonl"], (["data.jsonl"], [])),
         (["train.json", "training.jsonl"], (["training.jsonl"], [])),
         (["nested/deep/train.jsonl", "train.jsonl"], (["train.jsonl"], [])),
-        (["my_train_rows.jsonl", "eval.jsonl", "test.jsonl"], (["my_train_rows.jsonl"], ["eval.jsonl"])),
+        (["train_part-0.jsonl", "dev.jsonl", "eval.jsonl", "test.jsonl"], (["train_part-0.jsonl"], ["dev.jsonl"])),
+        (["data.jsonl", "data.json", "nested/rows.jsonl"], (["data.jsonl"], [])),
     ],
 )
 def test_select_dataset_files_picks_what_training_reads(

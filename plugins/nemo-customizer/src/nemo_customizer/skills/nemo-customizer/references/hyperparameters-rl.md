@@ -54,7 +54,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 ```
 
 - `environment` is **required** for GRPO — a string ref to a FileSet with `purpose=environment` carrying a valid `nemo-environment.yaml`, in any of the three formats.
-- `dataset` is Gym JSONL (a training file such as `training.jsonl` required, a validation file such as `validation.jsonl` optional; named with `train` and `val`) — rollout rows, **not** DPO preference triples and **not** `messages[]` at the top level.
+- `dataset` is Gym JSONL (a training file such as `training.jsonl` required, a validation file such as `validation.jsonl` optional; named like `train*.jsonl` and `val*.jsonl`) — rollout rows, **not** DPO preference triples and **not** `messages[]` at the top level.
 - `sandboxed` is **not** a job field: it is platform config (`NHX_RL_SANDBOXED_GYM_DEFAULT`, default `true`), and so are the two settings submit checks for it (`rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**).
 
 ## Field reference — shared training knobs

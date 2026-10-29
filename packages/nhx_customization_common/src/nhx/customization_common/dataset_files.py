@@ -5,23 +5,24 @@
 
 Every Customizer backend picks its files by the same rule:
 
-- A top-level file whose name contains ``train`` holds training data: ``train.jsonl``,
-  ``training.jsonl``, ``my_train_rows.jsonl``.
-- Otherwise, a top-level file whose name contains ``val`` or starts with ``dev`` holds
-  validation data: ``validation.jsonl``, ``val.jsonl``, ``eval.jsonl``, ``dev.jsonl``.
-- So do the files directly in a ``train`` or ``training`` directory, and in a ``val``,
-  ``validation`` or ``dev`` directory.
-- When no file is named either way, every top-level data file holds training data, or,
-  with none at the top level, every data file at any depth.
+- A top-level file matching :data:`TRAIN_PATTERNS` (``train*.jsonl``, ``training*.jsonl``)
+  holds training data, as do the files directly in a :data:`TRAIN_DIRS` directory
+  (``train/``, ``training/``).
+- A top-level file matching :data:`VAL_PATTERNS` (``val*.jsonl``, ``validation*.jsonl``,
+  ``dev*.jsonl``) holds validation data, as do the files directly in a :data:`VAL_DIRS`
+  directory (``val/``, ``validation/``, ``dev/``).
+- When no file matches either way, every top-level ``.jsonl`` file holds training data.
 
-A ``.json`` file is left out of a split that has ``.jsonl`` files, so a dataset can carry
-wrapped JSON beside its rows. Paths are relative to the fileset root, as it lists them.
+Names match case-sensitively. A ``.json`` file is left out of a split that has ``.jsonl``
+files, so a dataset can carry wrapped JSON beside its rows. Paths are relative to the
+fileset root, as it lists them.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
+from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -30,24 +31,42 @@ logger = logging.getLogger(__name__)
 Split = Literal["train", "validation"]
 
 DATA_SUFFIXES = (".jsonl", ".json")
-TRAIN_DIRS = frozenset({"train", "training"})
-VAL_DIRS = frozenset({"val", "validation", "dev"})
+
+# Top-level file names that hold training data
+TRAIN_PATTERNS = [
+    "train*.jsonl",
+    "training*.jsonl",
+    "train*.json",
+    "training*.json",
+]
+# Directories whose files hold training data
+TRAIN_DIRS = ["train", "training"]
+
+# Top-level file names that hold validation data
+VAL_PATTERNS = [
+    "val*.jsonl",
+    "validation*.jsonl",
+    "val*.json",
+    "validation*.json",
+    "dev*.jsonl",
+    "dev*.json",
+]
+# Directories whose files hold validation data
+VAL_DIRS = ["val", "validation", "dev"]
 
 
 def split_of(path: str) -> Split | None:
     """The split *path* holds by its name or its directory, or None when it says neither."""
     parts = PurePosixPath(path.lstrip("/")).parts
     if len(parts) == 1:
-        name = PurePosixPath(parts[0]).stem.lower()
-        if "train" in name:
+        if any(fnmatchcase(parts[0], pattern) for pattern in TRAIN_PATTERNS):
             return "train"
-        if "val" in name or name.startswith("dev"):
+        if any(fnmatchcase(parts[0], pattern) for pattern in VAL_PATTERNS):
             return "validation"
     elif len(parts) == 2:
-        directory = parts[0].lower()
-        if directory in TRAIN_DIRS:
+        if parts[0] in TRAIN_DIRS:
             return "train"
-        if directory in VAL_DIRS:
+        if parts[0] in VAL_DIRS:
             return "validation"
     return None
 
@@ -66,9 +85,11 @@ def select_split_files(paths: Iterable[str], suffixes: Sequence[str] = DATA_SUFF
     train = [path for path in files if split_of(path) == "train"]
     validation = [path for path in files if split_of(path) == "validation"]
     if not train and not validation:
-        train = [path for path in files if "/" not in path] or files
+        train = [path for path in files if "/" not in path and path.endswith(".jsonl")]
         if len(train) > 1:
-            logger.warning(f"Found {len(train)} data files without train/val naming. Treating all as training: {train}")
+            logger.warning(
+                f"Found {len(train)} JSONL files without train/val naming. Treating all as training data: {train}"
+            )
     return _prefer_jsonl(train), _prefer_jsonl(validation)
 
 

@@ -40,18 +40,30 @@ export const CUSTOMIZATION_FILESET_FILE_PREFIXES: Record<CustomizationFileType, 
   [CustomizationFileType.Validation]: 'validation',
 };
 
+interface DatasetDiscoveryRule {
+  /** Root directories whose files (directly inside) hold this split: TRAIN_DIRS / VAL_DIRS. */
+  dirs: readonly string[];
+  /** Root file names that hold this split: TRAIN_PATTERNS / VAL_PATTERNS as regexes. */
+  filePatterns: readonly RegExp[];
+}
+
 /**
- * Directories whose files hold each split, by the rule every Customizer backend shares
- * (packages/nhx_customization_common/src/nhx/customization_common/dataset_files.py):
- * a root file whose name contains `train` is training data; otherwise one whose name
- * contains `val` or starts with `dev` is validation data; so are the files directly in
- * these directories. With neither, every root data file is training data, or, with none
- * at the root, every nested one. useDatasetFileDiscovery applies the rule.
+ * The rule every Customizer backend shares
+ * (packages/nhx_customization_common/src/nhx/customization_common/dataset_files.py),
+ * matched case-sensitively. With no file matching either split, every root .jsonl file is
+ * training data. useDatasetFileDiscovery applies the rule.
  */
-export const CUSTOMIZATION_DATASET_DIRS: Record<CustomizationFileType, readonly string[]> = {
-  [CustomizationFileType.Training]: ['train', 'training'],
-  [CustomizationFileType.Validation]: ['val', 'validation', 'dev'],
-};
+export const CUSTOMIZATION_DATASET_DISCOVERY: Record<CustomizationFileType, DatasetDiscoveryRule> =
+  {
+    [CustomizationFileType.Training]: {
+      dirs: ['train', 'training'],
+      filePatterns: [/^train.*\.jsonl?$/, /^training.*\.jsonl?$/],
+    },
+    [CustomizationFileType.Validation]: {
+      dirs: ['val', 'validation', 'dev'],
+      filePatterns: [/^val.*\.jsonl?$/, /^validation.*\.jsonl?$/, /^dev.*\.jsonl?$/],
+    },
+  };
 
 /**
  * Share of the training rows Customizer holds out for validation when the dataset has no

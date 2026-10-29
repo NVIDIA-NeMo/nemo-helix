@@ -217,19 +217,19 @@ def test_compile_grpo_config_colocated_anchors_config_paths(
     assert Path(nemo_gym["config_paths"][0]).is_absolute()
 
 
-def test_compile_grpo_config_sandboxed_reads_any_train_and_val_name(
+def test_compile_grpo_config_sandboxed_reads_the_train_and_val_patterns(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A sandboxed dataset is read in place, by the shared train/val naming rule."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, dataset_pvc = _prepared_step(tmp_path)
     (dataset_pvc / "training.jsonl").rename(dataset_pvc / "train.jsonl")
-    _write_gym_dataset(dataset_pvc, filename="eval.jsonl")
+    _write_gym_dataset(dataset_pvc, filename="dev.jsonl")
 
     cfg = compile_grpo_config(step, job_ctx)
 
     assert cfg["data"]["train"]["data_path"] == str((dataset_pvc / "train.jsonl").resolve())
-    assert cfg["data"]["validation"]["data_path"] == str((dataset_pvc / "eval.jsonl").resolve())
+    assert cfg["data"]["validation"]["data_path"] == str((dataset_pvc / "dev.jsonl").resolve())
 
 
 def test_compile_grpo_config_sandboxed_refuses_several_training_files(

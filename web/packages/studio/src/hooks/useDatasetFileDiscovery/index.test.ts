@@ -23,26 +23,38 @@ describe('partitionDatasetFiles', () => {
   it.each([
     ['train.jsonl', 'training'],
     ['training.jsonl', 'training'],
-    ['my_train_rows.jsonl', 'training'],
-    ['Pretrain-Corpus.jsonl', 'training'],
-    ['trainval.jsonl', 'training'],
+    ['train_part-0.jsonl', 'training'],
+    ['train.json', 'training'],
     ['validation.jsonl', 'validation'],
     ['val.jsonl', 'validation'],
-    ['eval.jsonl', 'validation'],
+    ['val_part-0.json', 'validation'],
     ['dev.jsonl', 'validation'],
     ['train/part-0.jsonl', 'training'],
-    ['Training/rows.jsonl', 'training'],
+    ['training/rows.json', 'training'],
     ['dev/rows.jsonl', 'validation'],
+    ['/validation.jsonl', 'validation'],
   ])('reads %s as %s data from its name or directory', (path, expected) => {
-    // A file named for neither split keeps the fallback out of the way.
-    const [training, validation] = split(path, 'validation_anchor.jsonl', 'train_anchor.jsonl');
+    // A file named for each split keeps the fallback out of the way. The anchors share the
+    // case's extension so a .json case is not dropped beside .jsonl files.
+    const ext = path.endsWith('.json') ? '.json' : '.jsonl';
+    const [training, validation] = split(path, `validation_anchor${ext}`, `train_anchor${ext}`);
     expect((expected === 'training' ? training : validation).includes(path)).toBe(true);
   });
 
+  // A pattern matches from the start of the name, case-sensitively.
   it.each([
+    'my_train_rows.jsonl',
+    'pretrain.jsonl',
+    'constraints.jsonl',
+    'eval.jsonl',
+    'retrieval.jsonl',
+    'Train.jsonl',
+    'Training/rows.jsonl',
+    'rows.jsonl',
     'test.jsonl',
     'eval_beir/corpus.jsonl',
     'additional/train.json',
+    'train/nested/part-0.jsonl',
     'data/train/part-0.jsonl',
   ])('leaves %s out when other files are named for a split', (path) => {
     expect(split(path, 'train.jsonl').flat()).not.toContain(path);
@@ -50,20 +62,30 @@ describe('partitionDatasetFiles', () => {
 
   it('picks both splits and leaves other files out', () => {
     expect(
-      split('training.jsonl', 'eval.jsonl', 'test.jsonl', 'README.md', 'eval_beir/corpus.jsonl')
-    ).toEqual([['training.jsonl'], ['eval.jsonl']]);
+      split(
+        'training.jsonl',
+        'validation.jsonl',
+        'eval.jsonl',
+        'test.jsonl',
+        'README.md',
+        'eval_beir/corpus.jsonl'
+      )
+    ).toEqual([['training.jsonl'], ['validation.jsonl']]);
   });
 
   it('treats train and training as the same split', () => {
     expect(split('training.jsonl', 'train.jsonl')).toEqual([['train.jsonl', 'training.jsonl'], []]);
   });
 
-  it('without names, takes every root data file as training data', () => {
-    expect(split('b.jsonl', 'a.jsonl', 'nested/c.jsonl')).toEqual([['a.jsonl', 'b.jsonl'], []]);
+  it('without names, takes every root .jsonl file as training data', () => {
+    expect(split('b.jsonl', 'a.jsonl', 'c.json', 'nested/d.jsonl')).toEqual([
+      ['a.jsonl', 'b.jsonl'],
+      [],
+    ]);
   });
 
-  it('without root data files, takes the nested ones as training data', () => {
-    expect(split('data/c.jsonl', 'data/a.jsonl')).toEqual([['data/a.jsonl', 'data/c.jsonl'], []]);
+  it('without names, does not take .json or nested files as training data', () => {
+    expect(split('rows.json', 'data/c.jsonl', 'data/a.jsonl')).toEqual([[], []]);
   });
 
   it('with only a validation file, has no training data', () => {
