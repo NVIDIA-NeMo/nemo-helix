@@ -17,6 +17,14 @@ interface AccessibleTitleProps {
  */
 export declare const AccessibleTitle: FC<PropsWithChildren<AccessibleTitleProps>>;
 //#endregion
+//#region src/components/AssistantChat/describeChatError.d.ts
+interface ChatErrorDescription {
+  title: string;
+  hint: string;
+}
+/** Turns a chat failure message into an actionable description, or `undefined` if it is unknown. */
+type DescribeChatError = (message: string) => ChatErrorDescription | undefined;
+//#endregion
 //#region ../../node_modules/.pnpm/@types+unist@3.0.3/node_modules/@types/unist/index.d.ts
 // ## Interfaces
 /**
@@ -681,6 +689,12 @@ interface AssistantChatProps {
   className?: string;
   initialMessages?: readonly ThreadMessageLike[];
   onError?: (error: Error) => void;
+  /**
+   * Explains a failed reply. Called with the raw error message; a returned title and hint become
+   * the message body, while the raw error stays in the error banner and is what "Copy error"
+   * copies. Omit it (or return `undefined`) to show the generic line above the raw error.
+   */
+  describeError?: DescribeChatError;
   /**
    * Called once per assistant message after the stream completes (or after
    * the non-stream completion lands). Surfaces per-message timing so callers
