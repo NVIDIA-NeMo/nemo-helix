@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { formatLogs, formatLogsForDisplay } from '@nemo/common/src/utils/logs';
-import { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
+import { formatLogs, formatLogsForDisplay, logStatusForJob } from '@nemo/common/src/utils/logs';
+import { HelixJobLog, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
 const createLog = (message: string, timestamp: string): HelixJobLog => ({
   timestamp,
@@ -66,5 +66,19 @@ describe('formatLogsForDisplay', () => {
   it('leaves the raw formatter untouched', () => {
     const logs = [createLog('\x1b[32mok\x1b[0m\r', '2026-02-20T19:08:56Z')];
     expect(formatLogs(logs)).toBe('[2026-02-20T19:08:56Z]   \x1b[32mok\x1b[0m\r');
+  });
+});
+
+describe('logStatusForJob', () => {
+  it.each([
+    [HelixJobStatus.created, 'live'],
+    [HelixJobStatus.active, 'live'],
+    [HelixJobStatus.paused, 'live'],
+    [HelixJobStatus.completed, 'ended'],
+    [HelixJobStatus.error, 'ended'],
+    [HelixJobStatus.cancelled, 'ended'],
+    [undefined, undefined],
+  ])('maps %s -> %s', (status, expected) => {
+    expect(logStatusForJob(status)).toBe(expected);
   });
 });

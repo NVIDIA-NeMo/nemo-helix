@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { LogLoadProgress, LogStatus } from '@nemo/common/src/utils/logs';
+import { logStatusForJob, type LogLoadProgress, type LogStatus } from '@nemo/common/src/utils/logs';
 import { getJobsPageJobLogsQueryKey, jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobLog,
@@ -198,7 +198,7 @@ export const useJobLogs = ({
     error: query.error,
     total: query.data?.total ?? 0,
     loadProgress,
-    logStatus: jobStatus ? (isTerminal ? 'ended' : 'live') : undefined,
+    logStatus: logStatusForJob(jobStatus),
     refetch: query.refetch,
   };
 };
