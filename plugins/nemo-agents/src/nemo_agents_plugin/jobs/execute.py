@@ -33,6 +33,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
+from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
 from nemo_agents_plugin.fabric.invocation import (
     AgentConfigInvocationRequest,
     FabricDirectories,
@@ -428,8 +429,14 @@ class ExecuteAgentJob(NemoJob):
 
         # Validate the merged config: an EnvironmentSpec can override the harness
         # provider, so validation must run after the merge to reject e.g. a spec
-        # that selects a non-local Fabric environment.
-        _validate_agent_config(merged.config)
+        # that selects a non-local Fabric environment. A requested image may
+        # install adapters this server can't see, so the job checks harness
+        # kinds inside that image instead.
+        try:
+            # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
+            await asyncio.to_thread(_validate_agent_config, merged.config, check_adapters=not request.image)
+        except UnknownAdapterError as error:
+            raise UnknownAdapterError(f"{error} {CUSTOM_IMAGE_HINT}") from error
 
         workdir = None
         if request.workdir is not None:
@@ -1030,10 +1037,12 @@ def _configure_intake_telemetry(
     configure_intake_atif_export(agent_config, workspace=workspace, base_url=base_url)
 
 
-def _validate_agent_config(config: dict) -> AgentConfig:
+def _validate_agent_config(config: dict, *, check_adapters: bool = True) -> AgentConfig:
     agent_config = AgentConfig.model_validate(config)
     if agent_config.environment.provider != "local":
         raise ValueError("agents.execute jobs only support local Fabric environments.")
+    if check_adapters:
+        validate_harness_kinds(agent_config)
 
     return agent_config
 

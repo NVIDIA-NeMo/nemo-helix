@@ -48,6 +48,17 @@ def test_nemo_agents_config_validation_rejects_invalid_payload() -> None:
         validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
 
 
+@pytest.mark.usefixtures("installed_adapter_manifests")
+def test_nemo_agents_config_validation_leaves_adapter_ids_to_deploy_time() -> None:
+    """Registration can't know which image will run the agent, so an adapter only that image installs is accepted."""
+    config = _nemo_agents_config()
+    config["harnesses"]["acme"] = {"kind": "acme.custom.native"}
+
+    validated = validate_agent_config(NEMO_AGENTS_SPEC_CONFIG_FORMAT, config)
+
+    assert validated["harnesses"]["acme"]["kind"] == "acme.custom.native"
+
+
 def test_unknown_config_format_is_rejected() -> None:
     with pytest.raises(UnsupportedAgentConfigFormatError, match="Unsupported config_format 'custom-v2'"):
         validate_agent_config("custom-v2", {})

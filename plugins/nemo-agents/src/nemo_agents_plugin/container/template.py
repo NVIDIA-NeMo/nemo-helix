@@ -41,6 +41,7 @@ from nemo_agents_plugin.container.sandbox import (
     render_workdir_setup,
     resolve_sandbox_profile,
 )
+from nemo_agents_plugin.fabric.adapters import HARNESS_ADAPTER_IDS
 
 # Marker written as the first line of every plugin-generated ``.dockerignore``
 # / ``Dockerfile``.  ``render_dockerignore`` and the CLI no-build path only
@@ -75,8 +76,18 @@ def is_plugin_managed(path: Path) -> bool:
     return first_line[0] in (DOCKERFILE_SENTINEL, DOCKERIGNORE_SENTINEL)
 
 
-def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | None = None) -> tuple[str, bool, bool]:
-    """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag."""
+def resolve_fabric_harness_install(
+    agent_config: Path, *, python_version: str | None = None, installs_own_adapters: bool = False
+) -> tuple[str, bool, bool]:
+    """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag.
+
+    ``installs_own_adapters`` says the image installs the agent's own ``pyproject.toml``
+    or comes from a custom ``--template``, either of which may supply an adapter the
+    Platform extras don't.
+
+    Raises:
+        ValueError: A harness names an adapter the image can't install.
+    """
     try:
         payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
@@ -92,6 +103,7 @@ def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | 
         platform_extra = _FABRIC_WORKFLOW_INSTALLS.get(target_id, "nemo-agents-plugin")
         install_hermes = False
         install_pi = False
+        uses_generic_nooa = False
     else:
         harnesses = payload.get("harnesses")
         default_harness = payload.get("default_harness")
@@ -100,16 +112,43 @@ def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | 
             if isinstance(harnesses, Mapping) and isinstance(default_harness, str)
             else None
         )
+        if isinstance(harnesses, Mapping) and not installs_own_adapters:
+            _reject_unpackageable_adapters(harnesses)
         kind = selected.get("kind") if isinstance(selected, Mapping) else None
         if not isinstance(kind, str):
             return "nemo-agents-plugin", False, False
         platform_extra = _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin")
         install_hermes = kind in _HERMES_HARNESS_KINDS
         install_pi = kind in _PI_HARNESS_KINDS
-    if python_version is not None and platform_extra == "nemo-agents-plugin-nooa":
+        uses_generic_nooa = kind in _GENERIC_NOOA_HARNESS_KINDS
+    if python_version is not None and (platform_extra == "nemo-agents-plugin-nooa" or uses_generic_nooa):
         if re.fullmatch(r"3\.(12|13)(?:\.\d+)?", python_version) is None:
             raise ValueError(f"NOOA requires Python 3.12 or 3.13; got {python_version!r}. Set --python-version 3.13.")
     return platform_extra, install_hermes, install_pi
+
+
+def _reject_unpackageable_adapters(harnesses: Mapping[Any, Any]) -> None:
+    """Fail packaging for a harness whose adapter the image won't install.
+
+    Only called when the image installs no project of the agent's own and uses the
+    built-in template, so its adapters come solely from the Platform extras. Every harness is checked, not
+    just the default, since a deployment may select any of them. A kind naming no
+    known adapter is rejected here too: ``--no-build`` and ``--skip-validation``
+    skip the config translation that would otherwise report it.
+    """
+    for name, harness in harnesses.items():
+        kind = harness.get("kind") if isinstance(harness, Mapping) else None
+        if not isinstance(kind, str):
+            continue
+        adapter_id = HARNESS_ADAPTER_IDS.get(kind, kind)
+        if adapter_id not in _IMAGE_ADAPTER_IDS:
+            raise ValueError(
+                f"Harness {name!r} uses Fabric adapter {adapter_id!r}, which an image packaged without "
+                "--pyproject doesn't install. Run it with `nemo agents execute`, or package with --pyproject "
+                "for a project that installs the adapter (or --template for a Dockerfile that does). "
+                "Adapters available without --pyproject: "
+                f"{', '.join(sorted(_IMAGE_ADAPTER_IDS))}."
+            )
 
 
 # -- Defaults ---------------------------------------------------------------
@@ -228,6 +267,14 @@ _FABRIC_WORKFLOW_INSTALLS = {
 }
 _HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
 _PI_HARNESS_KINDS = {"pi", "nvidia.fabric.pi"}
+# The generic NOOA adapter selects no extra, but nemo-agents-plugin installs it only on Python 3.12 and 3.13.
+_GENERIC_NOOA_HARNESS_KINDS = {"nvidia.fabric.nooa"}
+# Adapters an image installs without a project of the agent's own: the stock
+# adapters plus the generic NOOA adapter, all shipped by the nemo-fabric-adapters-*
+# wheels nemo-agents-plugin depends on. Other installed adapters come from plugin
+# manifests and run only where that plugin is installed (the Compass Analyst
+# adapter runs only in agents execute jobs) or from a project packaged with --pyproject.
+_IMAGE_ADAPTER_IDS = frozenset({*HARNESS_ADAPTER_IDS.values(), "nvidia.fabric.nooa"})
 
 # -- Jinja2 template --------------------------------------------------------
 
@@ -878,7 +925,9 @@ def render_fabric_dockerfile(
         pins_contract_version=template_path is None and not wheel_filename,
     )
     platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(
-        agent_config, python_version=shared.python_version
+        agent_config,
+        python_version=shared.python_version,
+        installs_own_adapters=shared.has_pyproject or template_path is not None,
     )
     params = FabricRenderParams(
         **{f.name: getattr(shared, f.name) for f in fields(shared)},
