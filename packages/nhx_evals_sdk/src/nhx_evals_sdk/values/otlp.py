@@ -381,8 +381,16 @@ def fill_missing_root_end_time(resource_spans: list[ResourceSpans], *, duration_
 
 
 def _root_span(resource_spans: list[ResourceSpans]) -> Span | None:
-    """The single parentless span of a trace, or ``None`` when there is not exactly one."""
-    roots = [span for span in _spans(resource_spans) if not span.parent_span_id]
+    """The span that stands for the whole run, or ``None`` when no one span does.
+
+    That is the single parentless span or, beside childless roots such as a harness's standalone
+    event marks, the single parentless span that has children.
+    """
+    spans = list(_spans(resource_spans))
+    roots = [span for span in spans if not span.parent_span_id]
+    if len(roots) > 1:
+        parents = {(bytes(span.trace_id), bytes(span.parent_span_id)) for span in spans if span.parent_span_id}
+        roots = [span for span in roots if (bytes(span.trace_id), bytes(span.span_id)) in parents]
     return roots[0] if len(roots) == 1 else None
 
 
@@ -412,15 +420,11 @@ def _set_attributes(span: Span, attributes: Mapping[str, AttributeValue]) -> Non
 
 
 def root_span_id(resource_spans: list[ResourceSpans]) -> str | None:
-    """Return the hex id of the trace's root span, or ``None`` when it has no single root.
-
-    A trace with several roots has no one span that stands for the whole run, so there is
-    nothing to attach a trial-level score to.
-    """
-    roots = [span for span in _spans(resource_spans) if not span.parent_span_id]
-    if len(roots) != 1:
+    """Return the hex id of the span a trial-level score attaches to, or ``None`` when there is none."""
+    root = _root_span(resource_spans)
+    if root is None:
         return None
-    span_id = bytes(roots[0].span_id)
+    span_id = bytes(root.span_id)
     # Intake requires a present, non-zero id and drops the span otherwise, which would leave
     # anything scored against this id pointing at a span that was never stored.
     if not any(span_id):

@@ -88,7 +88,8 @@ def test_the_config_runs_verbatim_with_its_own_identity(tmp_path: Path) -> None:
     assert config.instructions is not None and config.instructions.system is not None
     model = config.models["default"]
     assert model.model == "nvidia-nemotron-3-5-lightning-30b-a3b"
-    assert model.base_url == "http://platform.test/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    # Relay reaches a plain-HTTP gateway through the loopback forwarder.
+    assert model.base_url == "http://127.0.0.1:14320/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     assert model.api_key_env == "NVIDIA_API_KEY"
     assert config.relay is not None and config.relay.observability is not None
     atif = config.relay.observability.atif
@@ -174,7 +175,8 @@ def test_harbor_model_name_swaps_the_model_id_but_keeps_the_endpoint_wiring(tmp_
     model = _agent(tmp_path, model_name="nvidia-nemotron-3-super")._build_config().models["default"]
 
     assert model.model == "nvidia-nemotron-3-super"
-    assert model.base_url == "http://platform.test/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    # Relay reaches a plain-HTTP gateway through the loopback forwarder.
+    assert model.base_url == "http://127.0.0.1:14320/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
     assert model.api_key_env == "NVIDIA_API_KEY"
 
 
@@ -410,6 +412,17 @@ def test_gateway_models_get_the_placeholder_key_their_client_insists_on(tmp_path
     direct["models"]["default"]["base_url"] = "https://integrate.api.nvidia.com/v1"
     config = NemoFabricAgent(logs_dir=tmp_path, fabric_config=direct)._build_config()
     assert config.environment is not None and "NVIDIA_API_KEY" not in config.environment.env
+
+
+def test_a_gateway_key_harbor_hands_the_agent_is_not_shadowed_by_the_placeholder(tmp_path: Path) -> None:
+    """A trial's own gateway key reaches the harness through the agent's environment."""
+    agent = NemoFabricAgent(
+        logs_dir=tmp_path, fabric_config=_registered_agent_config(), extra_env={"NVIDIA_API_KEY": "trial-token"}
+    )
+
+    env = agent._build_config().environment
+    assert env is not None and "NVIDIA_API_KEY" not in env.env
+    assert agent._runner_env["NVIDIA_API_KEY"] == "trial-token"
 
 
 def test_a_fabric_config_may_name_its_credential_variable_but_never_hold_a_value(tmp_path: Path) -> None:
