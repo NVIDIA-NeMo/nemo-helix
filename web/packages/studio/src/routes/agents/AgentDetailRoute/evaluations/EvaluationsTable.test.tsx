@@ -106,7 +106,7 @@ describe('EvaluationsTable Deployment column', () => {
           workspace: 'default',
           name: 'my-agent-k8s',
         }),
-        jobCalling('routed-run', { kind: 'automatic' }),
+        jobCalling('routed-run', { kind: 'default' }),
       ]
     );
 
@@ -118,7 +118,7 @@ describe('EvaluationsTable Deployment column', () => {
     for (const link of links) {
       expect(link).toHaveAttribute('href', '/workspaces/default/agent-deployments/my-agent-k8s');
     }
-    expect(screen.getAllByText('Automatic').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Default').length).toBeGreaterThan(0);
   });
 });
 

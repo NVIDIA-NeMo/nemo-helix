@@ -13,7 +13,7 @@ export type EvalJobKind = 'task' | 'dataset';
 
 export type EvalJobDeployment =
   | { kind: 'deployment'; workspace: string; name: string }
-  | { kind: 'automatic' };
+  | { kind: 'default' };
 
 export interface EvalJobRow {
   id: string;
@@ -78,7 +78,7 @@ export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null =
   const [, workspace, route, name] = match;
   return route === 'deployments'
     ? { kind: 'deployment', workspace: decodeSegment(workspace), name: decodeSegment(name) }
-    : { kind: 'automatic' };
+    : { kind: 'default' };
 };
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
