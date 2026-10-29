@@ -19,8 +19,13 @@ import {
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
-import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
+import {
+  type EvalJobDeployment,
+  type EvalJobRow,
+  evalDurationMs,
+} from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { EvalDeploymentValue } from '@studio/components/evaluation/EvalDeploymentValue';
 import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import {
@@ -45,6 +50,9 @@ interface AgentEvalTableRow {
   evaluation: AgentEvaluationRow | null;
   job: EvalJobRow | null;
 }
+
+const deploymentSortKey = (deployment?: EvalJobDeployment | null): string | undefined =>
+  deployment?.kind === 'deployment' ? deployment.name : deployment?.kind;
 
 const isTerminalJob = (job: EvalJobRow): boolean =>
   HelixJobTerminalStatuses.some((status) => status === job.status);
@@ -196,6 +204,14 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             const { evaluation } = row.original;
             const name = evaluation ? primaryExperimentName(evaluation) : undefined;
             return <Text title={name}>{name ?? '—'}</Text>;
+          },
+        }),
+        accessor((row) => deploymentSortKey(row.job?.deployment), {
+          id: 'deployment',
+          header: 'Deployment',
+          size: 200,
+          cell: ({ row }) => {
+            return <EvalDeploymentValue deployment={row.original.job?.deployment} />;
           },
         }),
         accessor((row) => row.job?.status ?? (row.evaluation ? 'completed' : undefined), {

@@ -6,8 +6,16 @@ import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluat
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
-import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
+import {
+  EVAL_CONFIG_FILESET_KEY,
+  evaluationConfigError,
+} from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
+import {
+  AGENT_DEPLOYMENTS_URL,
+  agentDeployment,
+  agentDeploymentsHandler,
+} from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
@@ -16,6 +24,11 @@ import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+
+vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
+  evaluationConfigError: vi.fn(),
+}));
 
 const AGENT = 'my-agent';
 
@@ -110,6 +123,11 @@ const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluation
   });
 
 describe('AgentEvaluationWizard', () => {
+  beforeEach(() => {
+    server.use(agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-subprocess`)]));
+    vi.mocked(evaluationConfigError).mockResolvedValue(null);
+  });
+
   it('starts by asking how to begin, and routes to the experiment form for a new experiment', async () => {
     mockLists();
     const user = userEvent.setup();
@@ -276,6 +294,17 @@ describe('AgentEvaluationWizard', () => {
     await user.clear(nameField);
     await user.type(nameField, 'nemotron-super-3-temp-1');
     expect(nameField.value).toBe('nemotron-super-3-temp-1');
+  });
+
+  it('says the deployments could not be loaded and holds Run Evaluation', async () => {
+    mockLists();
+    server.use(http.get(AGENT_DEPLOYMENTS_URL, () => HttpResponse.json({}, { status: 500 })));
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    expect(
+      await screen.findByText(`Couldn't load the deployments of ${AGENT}. Retrying...`)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
   });
 
   it('lets Back walk out of a handed-in source so the choice stays reviewable', async () => {

@@ -139,7 +139,10 @@ export interface SubmitSelections {
   evaluationId?: string;
   /** Rows sent to the agent at once. Omitted means {@link DEFAULT_PARALLELISM}. */
   parallelism?: number;
+  deployment?: string;
 }
+
+type TargetSelections = Pick<SubmitSelections, 'workspace' | 'agent' | 'deployment'>;
 
 /** ``spec.publication`` for a run that asked to publish, or nothing at all. ``agent_name`` is
  *  left off deliberately: the backend derives it from the agent target. */
@@ -157,13 +160,18 @@ const jobName = (selections: SubmitSelections) => {
 export const bareName = (value: string): string =>
   value.includes('/') ? (value.split('/').pop() ?? value) : value;
 
+const gatewayRoute = ({ agent, deployment }: TargetSelections) =>
+  deployment
+    ? `deployments/${encodeURIComponent(deployment)}`
+    : `agents/${encodeURIComponent(bareName(agent))}`;
+
 /** Chat completions is the one endpoint both config formats serve, so this needs no branch. */
-const agentEndpoint = (workspace: string, agent: string, promptVar: string) => ({
+const agentEndpoint = (selections: TargetSelections, promptVar: string) => ({
   format: 'generic' as const,
-  url: `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${encodeURIComponent(workspace)}/agents/${encodeURIComponent(bareName(agent))}/-/v1/chat/completions`,
-  name: bareName(agent),
+  url: `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${encodeURIComponent(selections.workspace)}/${gatewayRoute(selections)}/-/v1/chat/completions`,
+  name: bareName(selections.agent),
   body: {
-    model: bareName(agent),
+    model: bareName(selections.agent),
     messages: [{ role: 'user', content: `{{ ${promptVar} }}` }],
     stream: false,
   },
@@ -171,10 +179,12 @@ const agentEndpoint = (workspace: string, agent: string, promptVar: string) => (
   stream: false,
 });
 
-export const buildAgentTarget = (workspace: string, agent: string, parallelism?: number) => ({
+export const buildAgentTarget = (
+  selections: TargetSelections & Pick<SubmitSelections, 'parallelism'>
+) => ({
   kind: 'agent' as const,
-  agent: agentEndpoint(workspace, agent, 'instruction'),
-  params: agentRunParams(parallelism),
+  agent: agentEndpoint(selections, 'instruction'),
+  params: agentRunParams(selections.parallelism),
 });
 
 /** Override a metric's judge model with a ``workspace/name`` ModelRef (resolved
@@ -225,7 +235,7 @@ export const buildAgentEvalRequestBody = (
   ...jobName(selections),
   spec: {
     tasks: spec.tasks,
-    target: buildAgentTarget(selections.workspace, selections.agent, selections.parallelism),
+    target: buildAgentTarget(selections),
     max_concurrent_tasks: spec.max_concurrent_tasks ?? DEFAULT_MAX_CONCURRENT_TASKS,
     ...(selections.filesetName ? { labels: { eval_config_fileset: selections.filesetName } } : {}),
     ...publicationSpec(selections.evaluationId),
@@ -236,8 +246,8 @@ export const buildAgentEvalRequestBody = (
  *  this is NOT wrapped in {kind, agent}: EvaluateInputSpec forbids extra keys and
  *  takes the agent object directly. The body renders the row-based ``prompt``
  *  rather than a task ``instruction``. */
-export const buildDatasetAgentTarget = (workspace: string, agent: string) =>
-  agentEndpoint(workspace, agent, 'prompt');
+export const buildDatasetAgentTarget = (selections: TargetSelections) =>
+  agentEndpoint(selections, 'prompt');
 
 /** Build the ``evaluate/jobs`` POST body from a dataset-driven config. ``params``
  *  must be exactly RunConfigOnline for an agent target, and ``prompt_template``
@@ -253,7 +263,7 @@ export const buildDatasetEvalRequestBody = (
     metrics: judgeModel
       ? spec.metrics.map((metric) => injectJudgeModel(metric, judgeModel))
       : spec.metrics,
-    target: buildDatasetAgentTarget(selections.workspace, selections.agent),
+    target: buildDatasetAgentTarget(selections),
     prompt_template: spec.prompt_template,
     ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
     params: agentRunParams(selections.parallelism),

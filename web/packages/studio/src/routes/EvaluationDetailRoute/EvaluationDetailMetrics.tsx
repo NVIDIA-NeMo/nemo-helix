@@ -9,6 +9,7 @@ import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { Divider, Flex, Tooltip } from '@nvidia/foundations-react-core';
 import { evalJobDetailRoute } from '@studio/api/evaluation/utils';
 import { ChangesetBadge } from '@studio/components/ChangesetBadge';
+import { EvalDeploymentValue } from '@studio/components/evaluation/EvalDeploymentValue';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useEvaluationJob } from '@studio/routes/EvaluationDetailRoute/useEvaluationJob';
 import { tooltipClassName } from '@studio/styles/common';
@@ -97,6 +98,16 @@ export const EvaluationDetailMetrics: FC<EvaluationDetailMetricsProps> = ({ eval
           orientation="vertical"
         />
         <Divider orientation="vertical" className="grow-0 self-stretch" />
+        {job?.deployment ? (
+          <>
+            <KVPair
+              label="Deployment"
+              value={<EvalDeploymentValue deployment={job.deployment} />}
+              orientation="vertical"
+            />
+            <Divider orientation="vertical" className="grow-0 self-stretch" />
+          </>
+        ) : null}
         <KVPair
           label="Created"
           value={
