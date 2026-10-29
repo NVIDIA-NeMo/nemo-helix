@@ -239,6 +239,22 @@ class ModelSpec(BaseModel):
     sliding_window_config: Optional[SlidingWindowConfig] = Field(
         default=None, description="Sliding window attention config if applicable"
     )
+    has_vision_tower: bool = Field(
+        default=False,
+        description="True when the checkpoint config contains a vision tower.",
+    )
+    has_audio_tower: bool = Field(
+        default=False,
+        description="True when the checkpoint config contains an audio tower.",
+    )
+    num_experts: Optional[int] = Field(
+        default=None,
+        description="Routed expert count when the checkpoint declares more than one. None for a dense model.",
+    )
+    num_nextn_predict_layers: Optional[int] = Field(
+        default=None,
+        description="Multi-token prediction depth declared by the checkpoint. None when the config has no such field.",
+    )
 
     # LoRA-specific metadata (pre-computed to avoid model instantiation)
     linear_layers: Optional[list[LinearLayerSpec]] = Field(
