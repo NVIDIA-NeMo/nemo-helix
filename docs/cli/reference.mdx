@@ -7374,7 +7374,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 **Job Spec:**
 
 * `--agent`: Agent to execute: an Agent entity name or workspace/name ref, or an inline agent definition for a config composed at request time. This flag accepts the string form only; use `--spec` or `--spec-file` for the other union form(s).
-* `--input`: Prompt to pass to the agent.
+* `--input`: Prompt to pass to the agent. Omit to use the Agent entity's default_input; required for an inline agent or an entity that declares none.
 * `--environment`: AgentEnvironment to run under: a "workspace/name" ref to a stored AgentEnvironment, an inline environment, or None. Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the job step at creation time. This flag accepts the string form only; use `--spec` or `--spec-file` for the other union form(s).
 * `--workdir.base-workdir`: Optional Files reference for the initial working directory.
 * `--timeout-seconds <FLOAT>`: Maximum time to wait for Fabric to return an execution result.

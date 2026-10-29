@@ -766,3 +766,84 @@ class TestDeleteAgent:
         resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc")
 
         assert resp.status_code == 500
+
+
+class TestAgentRunDeclarations:
+    @staticmethod
+    def _echo_create(mock_entity_client: AsyncMock) -> None:
+        async def _save_agent(agent: Agent) -> Agent:
+            agent._id = f"agent-{agent.name}-id"
+            agent._created_at = NOW
+            return agent
+
+        mock_entity_client.create = AsyncMock(side_effect=_save_agent)
+
+    def test_register_stores_the_run_declarations(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        self._echo_create(mock_entity_client)
+        context_schema = {
+            "type": "object",
+            "properties": {"since": {"type": "string", "format": "date-time"}},
+            "additionalProperties": False,
+        }
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={
+                "name": "analyst",
+                "context_schema": context_schema,
+                "default_input": "Analyze recent traces.",
+                "post_run_actions": ["insights.analysis", "agents.noop"],
+            },
+        )
+
+        assert resp.status_code == 201
+        created: Agent = mock_entity_client.create.call_args.args[0]
+        assert created.context_schema == context_schema
+        assert created.default_input == "Analyze recent traces."
+        assert created.post_run_actions == {"agents.noop", "insights.analysis"}
+        # Serialized as a sorted array of unique strings.
+        assert resp.json()["post_run_actions"] == ["agents.noop", "insights.analysis"]
+
+    def test_register_defaults_post_run_actions_to_noop(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        self._echo_create(mock_entity_client)
+
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "calc"})
+
+        assert resp.status_code == 201
+        assert resp.json()["post_run_actions"] == ["agents.noop"]
+        assert resp.json()["context_schema"] is None
+        assert resp.json()["default_input"] is None
+
+    def test_register_rejects_an_uninstalled_post_run_action(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "calc", "post_run_actions": ["agents.noop", "acme.missing"]},
+        )
+
+        assert resp.status_code == 400
+        assert "Unknown post-run action 'acme.missing'" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
+    def test_register_rejects_an_empty_post_run_actions(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "calc", "post_run_actions": []})
+
+        assert resp.status_code == 422
+        mock_entity_client.create.assert_not_called()
+
+    def test_register_rejects_an_invalid_context_schema(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "calc", "context_schema": {"type": "objekt"}},
+        )
+
+        assert resp.status_code == 400
+        assert "context_schema is not a valid JSON Schema" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()

@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import Callable
 from contextlib import nullcontext
 from importlib.util import find_spec
@@ -167,9 +168,11 @@ def _agent_config(**environment: str) -> dict[str, Any]:
     return config
 
 
-def _agent(name: str = "calc", workspace: str = "default", config_format: str = "nemo-agents-spec-v1") -> Agent:
+def _agent(
+    name: str = "calc", workspace: str = "default", config_format: str = "nemo-agents-spec-v1", **fields: Any
+) -> Agent:
     config = _agent_config() if config_format == "nemo-agents-spec-v1" else {"workflow": {}}
-    return Agent(name=name, workspace=workspace, config=config, config_format=config_format)
+    return Agent(name=name, workspace=workspace, config=config, config_format=config_format, **fields)
 
 
 def test_run_passes_caller_context_with_platform_fields_under_reserved_key(ctx: JobContext) -> None:
@@ -177,6 +180,7 @@ def test_run_passes_caller_context_with_platform_fields_under_reserved_key(ctx: 
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello", context=caller_context),
         agent=_resolved_agent(workspace="research"),
+        input="hello",
     )
     seen: dict[str, Any] = {}
 
@@ -197,6 +201,7 @@ def test_run_without_caller_context_sends_only_platform_fields(ctx: JobContext) 
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
     seen: dict[str, Any] = {}
 
@@ -490,7 +495,7 @@ async def test_to_spec_rejects_a_bad_post_run_action_config_at_create_time() -> 
 @pytest.mark.asyncio
 async def test_to_spec_resolves_post_run_action() -> None:
     entity_client = AsyncMock()
-    entity_client.get.return_value = _agent()
+    entity_client.get.return_value = _agent(post_run_actions={"agents.noop", "example.action"})
 
     with patch(
         "nemo_agents_plugin.jobs.execute.validate_post_run_action_config",
@@ -543,18 +548,194 @@ def test_job_config_rejects_the_removed_extension_field() -> None:
 @pytest.mark.asyncio
 async def test_to_spec_rejects_the_unprefixed_noop_kind() -> None:
     entity_client = AsyncMock()
-    entity_client.get.return_value = _agent()
 
     with pytest.raises(
         ValueError, match=r"Unknown post-run action 'noop'\. Installed post-run actions: .*agents\.noop"
     ):
         await ExecuteAgentJob.to_spec(
-            ExecuteAgentJobConfig(agent="calc", input="hello", post_run_action=PostRunActionConfig(kind="noop")),
+            ExecuteAgentJobConfig(
+                agent=AgentInline(config=_agent_config(), config_format="nemo-agents-spec-v1"),
+                input="hello",
+                post_run_action=PostRunActionConfig(kind="noop"),
+            ),
             workspace="default",
             entity_client=entity_client,
             async_sdk=_sdk_with_files(),
             is_local=False,
         )
+
+
+_SINCE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"since": {"type": "string", "format": "date-time"}},
+    "additionalProperties": False,
+}
+
+
+def _inline_agent(**fields: Any) -> AgentInline:
+    return AgentInline(config=_agent_config(), config_format="nemo-agents-spec-v1", **fields)
+
+
+async def _step_config_for(agent: Agent | AgentInline, **request: Any) -> ExecuteAgentStepConfig:
+    """Run ``to_spec`` for *agent*: an entity is fetched by ref, an inline agent sent as-is."""
+    entity_client = AsyncMock()
+    entity_client.get.return_value = agent
+    spec = await ExecuteAgentJob.to_spec(
+        ExecuteAgentJobConfig(agent="calc" if isinstance(agent, Agent) else agent, **request),
+        workspace="default",
+        entity_client=entity_client,
+        async_sdk=_sdk_with_files(),
+        is_local=False,
+    )
+    return ExecuteAgentStepConfig.model_validate(spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent", [_agent(context_schema=_SINCE_SCHEMA), _inline_agent(context_schema=_SINCE_SCHEMA)])
+async def test_to_spec_rejects_an_unknown_context_key(agent: Agent | AgentInline) -> None:
+    with pytest.raises(ValueError, match=r"context\['sinse'\] was unexpected|'sinse' was unexpected"):
+        await _step_config_for(agent, input="hello", context={"sinse": "2026-10-01T00:00:00Z"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("since", ["2026-10-01", "2026-10-01 00:00:00", "2026-13-01T00:00:00Z", "yesterday"])
+async def test_to_spec_rejects_a_malformed_date_time(since: str) -> None:
+    with pytest.raises(ValueError, match=r"context\['since'\]: .* is not a 'date-time'"):
+        await _step_config_for(_agent(context_schema=_SINCE_SCHEMA), input="hello", context={"since": since})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("since", ["2026-10-01T00:00:00Z", "2026-10-01T08:30:00.123456789-07:00"])
+async def test_to_spec_accepts_a_context_matching_the_schema(since: str) -> None:
+    step_config = await _step_config_for(_agent(context_schema=_SINCE_SCHEMA), input="hello", context={"since": since})
+
+    assert step_config.request.context == {"since": since}
+
+
+@pytest.mark.asyncio
+async def test_to_spec_validates_an_omitted_context_against_the_schema() -> None:
+    schema = {**_SINCE_SCHEMA, "required": ["since"]}
+
+    with pytest.raises(ValueError, match="'since' is a required property"):
+        await _step_config_for(_agent(context_schema=schema), input="hello")
+
+
+def test_job_config_rejects_an_inline_agent_with_an_invalid_context_schema() -> None:
+    with pytest.raises(ValidationError, match="context_schema is not a valid JSON Schema"):
+        ExecuteAgentJobConfig(agent=_inline_agent(context_schema={"type": "objekt"}), input="hello")
+
+
+@pytest.mark.asyncio
+async def test_to_spec_uses_the_entity_default_input_when_input_is_omitted() -> None:
+    step_config = await _step_config_for(_agent(default_input="Analyze recent traces."))
+
+    assert step_config.input == "Analyze recent traces."
+    assert step_config.request.input is None
+
+
+@pytest.mark.asyncio
+async def test_to_spec_prefers_the_request_input_to_the_default() -> None:
+    step_config = await _step_config_for(_agent(default_input="Analyze recent traces."), input="hello")
+
+    assert step_config.input == "hello"
+
+
+@pytest.mark.asyncio
+async def test_to_spec_requires_input_when_the_entity_declares_no_default() -> None:
+    with pytest.raises(ValueError, match="agent 'default/calc' declares no default_input"):
+        await _step_config_for(_agent())
+
+
+@pytest.mark.asyncio
+async def test_to_spec_requires_input_for_an_inline_agent() -> None:
+    with pytest.raises(ValueError, match="'input' is required for an inline agent"):
+        await _step_config_for(_inline_agent())
+
+
+def test_a_stored_job_without_a_resolved_input_reads_the_request_input() -> None:
+    """Jobs created before ``input`` was resolved onto the step still read back and run."""
+    stored = {"request": {"agent": "calc", "input": "hello"}, "agent": _resolved_agent().model_dump()}
+
+    assert ExecuteAgentStepConfig.model_validate(stored).input == "hello"
+
+
+def test_run_invokes_the_agent_with_the_resolved_input(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc"), agent=_resolved_agent(), input="from the default"
+    )
+    seen: dict[str, Any] = {}
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        seen["input"] = request.input
+        return FabricRuntimeResult(status="succeeded")
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert seen["input"] == "from the default"
+
+
+# The RFC's post-run action resolution table: what the agent declares (None for
+# an inline agent), what the request names, and the kind the run gets — or the
+# error it is rejected with.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("declared", "requested", "expected"),
+    [
+        pytest.param({"agents.noop"}, None, "agents.noop", id="noop-only-omitted"),
+        pytest.param({"agents.noop", "acme.report"}, None, "agents.noop", id="noop-declared-omitted"),
+        pytest.param({"agents.noop", "acme.report"}, "acme.report", "acme.report", id="noop-declared-chosen"),
+        pytest.param({"acme.report"}, None, "acme.report", id="single-member-omitted"),
+        pytest.param({"acme.report"}, "acme.report", "acme.report", id="single-member-chosen"),
+        pytest.param(
+            {"acme.report", "acme.digest"},
+            None,
+            ValueError("set post_run_action.kind to one of: acme.digest, acme.report"),
+            id="several-omitted",
+        ),
+        pytest.param({"acme.report", "acme.digest"}, "acme.digest", "acme.digest", id="several-chosen"),
+        pytest.param(
+            {"acme.report", "acme.digest"},
+            "agents.noop",
+            ValueError("'agents.noop' is not one this agent declares"),
+            id="outside-the-set",
+        ),
+        pytest.param(
+            {"agents.noop"},
+            "acme.report",
+            ValueError("'acme.report' is not one this agent declares"),
+            id="undeclared-entity-accepts-only-noop",
+        ),
+        pytest.param(None, None, "agents.noop", id="inline-omitted"),
+        pytest.param(None, "acme.report", "acme.report", id="inline-any-kind"),
+    ],
+)
+async def test_to_spec_resolves_the_post_run_action_against_the_declaration(
+    declared: set[str] | None, requested: str | None, expected: str | ValueError
+) -> None:
+    agent = _inline_agent() if declared is None else _agent(post_run_actions=declared)
+    request: dict[str, Any] = {"input": "hello"}
+    if requested is not None:
+        request["post_run_action"] = PostRunActionConfig(kind=requested)
+
+    with patch("nemo_agents_plugin.jobs.execute.validate_post_run_action_config") as validate:
+        if isinstance(expected, ValueError):
+            with pytest.raises(ValueError, match=re.escape(str(expected))):
+                await _step_config_for(agent, **request)
+            validate.assert_not_called()
+            return
+        step_config = await _step_config_for(agent, **request)
+
+    assert step_config.post_run_action == PostRunActionConfig(kind=expected)
+    validate.assert_called_once_with(expected, {})
+
+
+@pytest.mark.asyncio
+async def test_to_spec_defaults_to_an_installed_single_action() -> None:
+    """Unpatched: the defaulted kind is resolved and its empty config validated for real."""
+    step_config = await _step_config_for(_agent(post_run_actions={"insights.analysis"}), input="hello")
+
+    assert step_config.post_run_action == PostRunActionConfig(kind="insights.analysis")
 
 
 @pytest.mark.asyncio
@@ -749,6 +930,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         workdir=AgentWorkdir(base_workdir="default/source#project/"),
+        input="hello",
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
@@ -776,7 +958,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
 
 async def _compiled_image(config: AgentsConfig, request: ExecuteAgentJobConfig) -> str | None:
     """Compile a minimal job under ``config`` and return the step's container image."""
-    spec = ExecuteAgentStepConfig(request=request, agent=_resolved_agent())
+    spec = ExecuteAgentStepConfig(request=request, agent=_resolved_agent(), input="hello")
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get", return_value=config):
         platform_spec = await ExecuteAgentJob.compile(
@@ -1076,6 +1258,7 @@ async def test_compile_injects_secret_env_and_compute_resources() -> None:
             )
         ),
         secrets={"OPENAI_API_KEY": "default/openai-key"},
+        input="hello",
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
@@ -1104,6 +1287,7 @@ async def test_compile_without_compute_omits_executor_resources() -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
@@ -1127,6 +1311,7 @@ async def test_compile_rejects_unsupported_compute_resource_key() -> None:
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         compute=ComputeSpecInline(resources=ComputeResources(limits={"cpu": "1", "ephemeral-storage": "1Gi"})),
+        input="hello",
     )
 
     with (
@@ -1149,6 +1334,7 @@ async def test_compile_rejects_secret_env_colliding_with_reserved_name() -> None
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         secrets={"NHX_BASE_URL": "default/some-secret"},
+        input="hello",
     )
 
     with (
@@ -1169,6 +1355,7 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1208,6 +1395,7 @@ def test_run_reports_terminal_fabric_token_usage(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1229,6 +1417,7 @@ def test_run_threads_custom_timeout_to_fabric(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello", timeout_seconds=12.5),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1262,6 +1451,7 @@ def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="example.action", config={"agent": "research-agent"}),
+        input="hello",
     )
     sdk = MagicMock()
 
@@ -1298,6 +1488,7 @@ def test_run_hands_the_post_run_action_the_create_time_agent_config(ctx: JobCont
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="example.action"),
+        input="hello",
     )
     created_config = json.loads(json.dumps(spec.agent.config))
     fabric_configs: list[dict[str, Any]] = []
@@ -1344,6 +1535,7 @@ def test_run_validates_the_post_run_action_config_against_the_image_before_invok
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="example.action", config={"target": "accepted-by-the-server"}),
+        input="hello",
     )
     invoke = AsyncMock()
 
@@ -1362,6 +1554,7 @@ def test_run_names_a_post_run_action_that_fails_to_import(ctx: JobContext) -> No
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="broken.action"),
+        input="hello",
     )
     invoke = AsyncMock()
 
@@ -1383,6 +1576,7 @@ def test_run_skips_post_run_action_for_failed_fabric_result(ctx: JobContext) -> 
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="example.action"),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1404,6 +1598,7 @@ def test_run_post_run_action_exception_is_logged(ctx: JobContext, caplog: pytest
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="example.action"),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1431,6 +1626,7 @@ def test_run_fails_before_invoking_the_agent_when_its_post_run_action_is_not_ins
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
         post_run_action=PostRunActionConfig(kind="uninstalled.action"),
+        input="hello",
     )
     invoke = AsyncMock()
 
@@ -1452,6 +1648,7 @@ def test_run_rejects_non_fabric_step_config(ctx: JobContext) -> None:
             config={"workflow": {}},
             config_format="nat-workflow-v1",
         ),
+        input="hello",
     )
 
     with pytest.raises(ValueError, match="only support 'nemo-agents-spec-v1'"):
@@ -1470,6 +1667,7 @@ def test_run_downloads_and_registers_input_workdir(ctx: JobContext) -> None:
             base_workdir="default/source#project/",
             artifact_mounts=[AgentWorkdirArtifactMount(ref="default/artifacts#notes.txt", mount_path="notes.txt")],
         ),
+        input="hello",
     )
     sdk = MagicMock()
     download_calls: list[tuple[str, str]] = []
@@ -1520,6 +1718,7 @@ def test_run_clears_stale_input_workdir_before_materializing(ctx: JobContext) ->
         ),
         agent=_resolved_agent(),
         workdir=AgentWorkdir(base_workdir="default/source#project/"),
+        input="hello",
     )
     stale_workdir = ctx.storage.ephemeral / "fabric" / "workspace"
     stale_workdir.mkdir(parents=True)
@@ -1556,6 +1755,7 @@ def test_run_clears_stale_artifacts_dir_before_invoking(ctx: JobContext) -> None
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
     stale_artifacts = ctx.storage.ephemeral / "fabric" / "artifacts"
     stale_artifacts.mkdir(parents=True)
@@ -1584,6 +1784,7 @@ def test_run_failed_download_does_not_register_partial_result(ctx: JobContext) -
         ),
         agent=_resolved_agent(),
         workdir=AgentWorkdir(base_workdir="default/source#project/"),
+        input="hello",
     )
     sdk = MagicMock()
 
@@ -1604,6 +1805,7 @@ def test_run_failed_fabric_result_saves_results_and_marks_job_failed(ctx: JobCon
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1629,6 +1831,7 @@ def test_run_fabric_exception_saves_best_effort_error_results(ctx: JobContext) -
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1654,6 +1857,7 @@ def test_run_fabric_exception_preserves_original_error_if_result_save_fails(ctx:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
     original_save = ctx.results.save
 
@@ -1958,6 +2162,7 @@ def test_run_failed_fabric_result_reports_the_reason_in_the_log(
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -1987,6 +2192,7 @@ def test_run_logs_the_agent_stderr_when_the_run_fails(ctx: JobContext, caplog: p
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2012,6 +2218,7 @@ def test_run_logs_the_agent_stderr_when_fabric_raises(ctx: JobContext, caplog: p
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2036,6 +2243,7 @@ def test_run_does_not_log_agent_stderr_on_success(ctx: JobContext, caplog: pytes
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2060,6 +2268,7 @@ def test_run_ignores_the_agent_stdout_file(ctx: JobContext, caplog: pytest.LogCa
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2087,6 +2296,7 @@ def test_run_logs_the_whole_agent_stderr_for_realistic_output(
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
     long_stderr = "\n".join(f"line {n}" for n in range(5000))
 
@@ -2111,6 +2321,7 @@ def test_run_tolerates_a_failure_with_no_agent_stderr(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2143,6 +2354,7 @@ def test_run_logs_progress_through_a_successful_run(ctx: JobContext, caplog: pyt
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello", timeout_seconds=300),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2169,6 +2381,7 @@ def test_run_names_the_agent_before_validating_its_config(ctx: JobContext, caplo
             config={"not": "a valid agent config"},
             config_format="nemo-agents-spec-v1",
         ),
+        input="hello",
     )
 
     with (
@@ -2187,6 +2400,7 @@ def test_run_does_not_announce_workdir_staging_when_there_is_none(
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2206,6 +2420,7 @@ def test_run_logs_elapsed_time_when_fabric_raises(ctx: JobContext, caplog: pytes
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
+        input="hello",
     )
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2500,7 +2715,9 @@ def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     )
     agent = _resolved_agent()
     assert not gateway_proxy.routes_inference_through_gateway(AgentConfig.model_validate(agent.config))
-    spec = ExecuteAgentStepConfig(request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=agent)
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=agent, input="hello"
+    )
     seen: dict[str, Any] = {}
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2524,7 +2741,9 @@ def test_an_auth_disabled_platform_exports_straight_to_the_platform(
     monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
     monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
     monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
-    spec = ExecuteAgentStepConfig(request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=_resolved_agent())
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=_resolved_agent(), input="hello"
+    )
     seen: dict[str, Any] = {}
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2558,6 +2777,7 @@ def test_declining_auto_telemetry_submits_the_agent_config_as_written(
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello", auto_telemetry=False),
         agent=agent,
+        input="hello",
     )
     seen: dict[str, Any] = {}
 
@@ -2628,7 +2848,9 @@ def test_a_telemetry_only_job_completes_when_the_proxy_cannot_start(
     monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", explode)
     agent = _resolved_agent()
     assert not gateway_proxy.routes_inference_through_gateway(AgentConfig.model_validate(agent.config))
-    spec = ExecuteAgentStepConfig(request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=agent)
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"), agent=agent, input="hello"
+    )
     seen: dict[str, Any] = {}
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
@@ -2765,6 +2987,7 @@ def test_run_stages_ethos_skills_before_invoke_and_keeps_workdir(
         ),
         agent=_agent_with_probe_skill(),
         workdir=AgentWorkdir(base_workdir="default/source#notes.txt"),
+        input="hello",
     )
 
     def _download_workdir(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
@@ -2803,6 +3026,7 @@ def test_run_rejects_declared_skills_when_ethos_cannot_be_staged(
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_agent_with_probe_skill(),
+        input="hello",
     )
 
     with (
@@ -2841,6 +3065,7 @@ def test_run_keeps_workdir_when_workspace_is_the_fabric_base(ctx: JobContext, mo
         ),
         agent=_agent_with_probe_skill(workspace_dir="."),
         workdir=AgentWorkdir(base_workdir="default/source#notes.txt"),
+        input="hello",
     )
 
     def _download_workdir(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:

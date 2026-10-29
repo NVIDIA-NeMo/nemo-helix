@@ -21,12 +21,11 @@ from nemo_helix_plugin.agents.post_run_actions import (
     PostRunAction,
     PostRunActionContext,
 )
+from nemo_helix_plugin.agents.types import NOOP_POST_RUN_ACTION_KIND as NOOP_POST_RUN_ACTION_KIND
 from nemo_helix_plugin.agents.types import PostRunActionInfo
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 logger = logging.getLogger(__name__)
-
-NOOP_POST_RUN_ACTION_KIND = "agents.noop"
 
 
 class NoopPostRunActionConfig(BaseModel):
@@ -75,6 +74,17 @@ def list_post_run_actions() -> list[PostRunActionInfo]:
             )
         )
     return infos
+
+
+def validate_post_run_action_kinds(kinds: set[str]) -> None:
+    """Reject a declared kind that is not installed, or not uniquely so.
+
+    Only the kind is checked: an action's config is chosen per run, so it is
+    validated when a job sets it.
+    """
+    registered = _registered_entry_points()
+    for kind in sorted(kinds):
+        _load_registered_post_run_action(kind, registered)
 
 
 def validate_post_run_action_config(
