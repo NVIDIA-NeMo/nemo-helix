@@ -80,6 +80,7 @@ async def test_resolve_environment_ref_dereferences_all_entities() -> None:
         compute_spec="default/cspec",
     )
     espec = AgentEnvironmentSpec(name="espec", workspace="default", env={"A": "1"})
+    espec = AgentEnvironmentSpec.model_validate(espec.model_dump() | {"id": "stored-spec", "db_version": 2})
     cspec = AgentComputeSpec(name="cspec", workspace="default", resources=ComputeResources(requests={"cpu": "1"}))
 
     entity_client = AsyncMock()
