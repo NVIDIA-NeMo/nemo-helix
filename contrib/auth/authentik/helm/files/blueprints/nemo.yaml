@@ -59,6 +59,17 @@ entries:
       expression: |
         return {"groups": ",".join(group.name for group in user.ak_groups.all())}
 
+  - model: authentik_providers_oauth2.scopemapping
+    id: nemo-platform-read-scope
+    identifiers:
+      name: "NeMo platform read"
+    attrs:
+      name: "NeMo platform read"
+      scope_name: platform:read
+      description: "Read-only API scope for the NeMo CLI"
+      expression: |
+        return {}
+
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-provider
     identifiers:
@@ -147,6 +158,7 @@ entries:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
         - !KeyOf nemo-groups-scope
+        - !KeyOf nemo-platform-read-scope
 
   - model: authentik_providers_oauth2.oauth2provider
     id: nemo-workload-provider

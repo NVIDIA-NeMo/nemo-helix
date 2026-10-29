@@ -123,6 +123,12 @@ present.
 
 Do not use `id_token` solely to work around an opaque access token. Confirm the provider contract, configure `audience`, and verify that the ID token contains the identity and group claims used by your RBAC policy. The `audience` setting defaults to unset; when it is unset, NeMo Helix validates the token signature, issuer, and expiry but does not require a specific audience.
 
+The API server also enforces this policy: an ID token is accepted as an API bearer only for a matching client profile that explicitly selects `id_token`. Selecting `access_token` rejects that client's ID token, even when its signature and audience are valid. Enabling ID tokens for another profile does not enable them for this client.
+
+JWT access tokens can establish their purpose through explicit token typing or a configured API audience distinct from client audiences. For an ambiguous signed JWT, Helix confirms access-token acceptance at the provider's UserInfo endpoint and checks that the subject matches. The signed JWT's original scopes and identity claims remain in use. Providers with neither a distinguishable token contract nor a usable UserInfo endpoint require compatible provider configuration; Helix rejects ambiguous credentials.
+
+ID-token mode continues to apply scopes actually present on the ID token and the user's RBAC permissions. It does not inherit scopes from the accompanying access token. Deployments previously sending ID tokens under an access-token profile must explicitly select the supported ID-token mode before upgrading. Normal OIDC login can still receive and validate ID tokens independently of their use as API bearers.
+
 ### Step 3: Seed Auth Role Bindings
 
 The `auth.admin_email` setting identifies the bootstrap admin, but the role binding is created by the platform seed task. Docker quickstart runs platform seed automatically, and Helm deployments run the platform-seed Job by default. For source installs, start services with `platform.seed_on_startup: true` or `NHX_SEED_ON_STARTUP=true`; if services are already running, run the seed task manually after services are healthy:

@@ -16,6 +16,7 @@ from nhx.common.config import AuthConfig
 from . import token_claims
 from .json_payload import JsonObject, JsonObjectDeserializationError, JsonObjectDeserializer
 from .jwks import AsyncJWKSClient
+from .oidc_bearer import OIDCBearerPurpose, has_api_only_audience, id_token_bearer_allowed, oidc_bearer_purpose
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +190,21 @@ class JWTValidator:
 
         Returns None when the UserInfo endpoint is unavailable or rejects the token.
         """
+        claims = await self._fetch_userinfo(token)
+        if claims is None:
+            return None
+
+        logger.warning(
+            "Resolved opaque token via UserInfo endpoint; the token's original OAuth scope "
+            "grant cannot be recovered, so scope enforcement is skipped for this request "
+            "(RBAC/permissions still apply)"
+        )
+        return claims
+
+    async def _fetch_userinfo(self, token: str) -> JsonObject | None:
         userinfo_endpoint = await self._userinfo_endpoint()
         if userinfo_endpoint is None:
-            logger.warning("Cannot resolve opaque token: no userinfo_endpoint configured or discoverable")
+            logger.warning("No OIDC UserInfo endpoint configured or discoverable")
             return None
 
         client = http_clients.shared_async_http_client()
@@ -208,15 +221,29 @@ class JWTValidator:
                 return None
             raise
 
-        logger.warning(
-            "Resolved opaque token via UserInfo endpoint; the token's original OAuth scope "
-            "grant cannot be recovered, so scope enforcement is skipped for this request "
-            "(RBAC/permissions still apply)"
-        )
         try:
             return self._json_deserializer.deserialize(response.content)
         except JsonObjectDeserializationError as exc:
             raise jwt.InvalidTokenError("UserInfo response was not a JSON object") from exc
+
+    async def _accepts_jwt_bearer(self, token: str, header: JsonObject, claims: JsonObject) -> bool:
+        purpose = oidc_bearer_purpose(header, claims)
+        if purpose is OIDCBearerPurpose.INVALID:
+            return False
+        if purpose is OIDCBearerPurpose.ACCESS_TOKEN:
+            return True
+        allows_id_token = id_token_bearer_allowed(self.config.oidc, claims)
+        if purpose is OIDCBearerPurpose.ID_TOKEN:
+            return allows_id_token
+        if allows_id_token or has_api_only_audience(self.config.oidc, claims):
+            return True
+        try:
+            userinfo = await self._fetch_userinfo(token)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 403:
+                return False
+            raise
+        return userinfo is not None and userinfo.get("sub") == claims.get("sub")
 
     async def _resolve_opaque_token(self, token: str) -> token_claims.TokenClaims | None:
         if self.config.oidc.resolve_opaque_tokens_via_userinfo:
@@ -267,6 +294,7 @@ class JWTValidator:
         """
         try:
             token_alg = ""
+            token_header: JsonObject = {}
             try:
                 token_header = jwt.get_unverified_header(token)
                 token_alg = str(token_header.get("alg", "")).lower()
@@ -340,11 +368,14 @@ class JWTValidator:
                 logger.warning("Invalid token issuer")
                 return None
             except jwt.PyJWTError as e:
-                logger.warning(f"JWT validation failed; trying opaque token resolution if configured: {e}")
-                return await self._resolve_opaque_token(token)
+                logger.warning(f"JWT validation failed: {e}")
+                return None
             except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch JWKS; trying opaque token resolution if configured: {e}")
-                return await self._resolve_opaque_token(token)
+                logger.error(f"Failed to fetch JWKS: {e}")
+                return None
+            if not await self._accepts_jwt_bearer(token, token_header, claims):
+                logger.warning("OIDC bearer rejected by token-purpose/client policy")
+                return None
             return self._claims_extractor.extract(claims)
 
         except jwt.ExpiredSignatureError:

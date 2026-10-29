@@ -19,6 +19,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from jwt.algorithms import RSAAlgorithm
+from nhx.common.auth.discovery import BearerTokenSource
 from nhx.common.auth.jwt import JWTValidator
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims
 from nhx.common.auth.token_resolver import ResolvedBearerToken
@@ -496,6 +498,51 @@ def test_authenticate_rejects_unresolved_bearer_token(tmp_path):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid bearer token"
+
+
+@pytest.mark.parametrize("source", ["access_token", "id_token"])
+@pytest.mark.parametrize("path", ["/authenticate", "/ext-authz"])
+def test_oidc_bearer_policy_is_enforced_by_authentication_and_gateway(
+    tmp_path, source: BearerTokenSource, path: str
+) -> None:
+    config = _auth_config_with_workload_exchange(tmp_path)
+    config.oidc.public_client = OIDCPublicClientConfig(client_id="browser-client", bearer_token_source=source)
+    config.oidc.audience = "browser-client"
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_jwk = RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True)
+    public_jwk.update({"kid": "provider-key", "alg": "RS256"})
+    now = datetime.now(tz=UTC)
+    claims = {
+        "iss": "https://sso.example.com",
+        "sub": "oidc-user",
+        "aud": "browser-client",
+        "azp": "browser-client",
+        "iat": now,
+        "exp": now + timedelta(minutes=5),
+    }
+    access_token = jwt.encode(
+        {**claims, "typ": "Bearer", "scope": "platform:read"},
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "provider-key"},
+    )
+    id_token = jwt.encode({**claims, "typ": "ID"}, private_key, algorithm="RS256", headers={"kid": "provider-key"})
+    with respx.mock(assert_all_called=False) as provider:
+        provider.get("https://sso.example.com/jwks").mock(return_value=httpx.Response(200, json={"keys": [public_jwk]}))
+        with _test_client(config) as client:
+            access_response = client.get(path, headers={"Authorization": f"Bearer {access_token}"})
+            id_response = client.get(path, headers={"Authorization": f"Bearer {id_token}"})
+
+    assert access_response.status_code == 200, access_response.text
+    assert id_response.status_code == (401 if source == "access_token" else 200), id_response.text
+    if path == "/authenticate":
+        assert access_response.json()["scopes"] == ["platform:read"]
+        if source == "id_token":
+            assert id_response.json()["scopes"] == []
+    else:
+        assert access_response.content == b""
+        if source == "access_token":
+            _assert_no_principal_response_headers(id_response)
 
 
 def test_authenticate_workload_access_token_returns_principal_json(tmp_path):

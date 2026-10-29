@@ -640,6 +640,7 @@ class TestJWTValidator:
             "exp": int(time.time()) + 3600,
             "iat": int(time.time()),
             "aud": "some-other-audience",
+            "typ": "Bearer",
             "iss": "https://sso.example.com",
         }
 
