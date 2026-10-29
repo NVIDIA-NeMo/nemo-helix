@@ -22,7 +22,6 @@ import {
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
 import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
-import { DATASET_TYPE_SAMPLE } from '@studio/routes/FilesetNewRoute/constants';
 import {
   getExternalStorageCreateErrorMessage,
   toFileList,
@@ -30,24 +29,21 @@ import {
 import {
   DatasetCreateFilesetFormSchema,
   DatasetFormFields,
-  DatasetType,
 } from '@studio/routes/FilesetNewRoute/types';
 import { getFilesetDetailRoute, getFilesetDetailsRoute } from '@studio/routes/utils';
 import { storageConfigFromUrl } from '@studio/util/storageConfigFromUrl';
-import { QueryObserverResult, useQueryClient } from '@tanstack/react-query';
-import { MutableRefObject, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import type { UseFormGetValues, UseFormSetError } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 
 interface UseCreateFilesetParams {
   workspace: string;
-  activeTab: DatasetType;
   storageTab: 'local' | 'external';
   hasValidationErrors: boolean;
   nameTaken: boolean;
   getValues: UseFormGetValues<DatasetFormFields>;
   setError: UseFormSetError<DatasetFormFields>;
-  sampleFilesRef: MutableRefObject<Promise<QueryObserverResult<File[], Error>> | null>;
   setIsSubmitPending: (value: boolean) => void;
   /** A fileset this form created whose upload then failed. */
   createdFileset?: FilesetOutput;
@@ -57,13 +53,11 @@ interface UseCreateFilesetParams {
 
 export function useCreateFileset({
   workspace,
-  activeTab,
   storageTab,
   hasValidationErrors,
   nameTaken,
   getValues,
   setError,
-  sampleFilesRef,
   setIsSubmitPending,
   createdFileset,
   onCreated,
@@ -139,41 +133,16 @@ export function useCreateFileset({
 
       setIsSubmitPending(true);
 
-      // Step 1 (sample/local only): fetch sample files or read local file selection
-      let files: File[] = [];
-      if (activeTab === DATASET_TYPE_SAMPLE) {
-        if (!sampleFilesRef.current) {
-          toast.error('No sample files could be loaded.');
-          setIsSubmitPending(false);
-          return;
-        }
-        const result = (await sampleFilesRef.current) as QueryObserverResult<File[], Error>;
-        if (result.isError || result.error) {
-          toast.error(getApiErrorMessage(result.error as Error, 'Failed to load sample files'));
-          setIsSubmitPending(false);
-          return;
-        }
-        if (!result.data?.length) {
-          toast.error('No sample files could be loaded.');
-          setIsSubmitPending(false);
-          return;
-        }
-        files = result.data;
-      } else if (storageTab === 'local') {
-        files = toFileList(getValues('files'));
-      }
+      // Step 1 (local only): read local file selection
+      const files = storageTab === 'local' ? toFileList(getValues('files')) : [];
 
-      // Step 2: create fileset. Sample tab always produces a dataset-purpose fileset
-      // (preconfigured samples are training/eval data by definition); Custom tab
-      // uses whatever the user picked in the Purpose selector.
-      const effectivePurpose =
-        activeTab === DATASET_TYPE_SAMPLE ? FilesetPurpose.dataset : data.purpose;
+      // Step 2: create fileset
       let createPayload: CreateFilesetRequest = {
         name: data.name,
         description: data.description ?? '',
         project: data.project,
         storage: data.storage ?? undefined,
-        purpose: effectivePurpose,
+        purpose: data.purpose,
         metadata: data.metadata,
         custom_fields: data.custom_fields,
         cache: data.cache,
@@ -210,13 +179,11 @@ export function useCreateFileset({
           fileset = await createFilesetStep(workspace, createPayload);
         } catch (err) {
           setIsSubmitPending(false);
-          // The name check can lose a race with another create. The sample tab has no name
-          // field to put the error on, so it toasts; the recheck then flags the name there.
+          // The name check can lose a race with another create; the recheck then flags the name.
           if (isConflictError(err)) {
             void invalidateFilesetNameCheck(queryClient, workspace, createPayload.name);
             const message = filesetNameTakenMessage(createPayload.name, workspace);
-            if (activeTab === DATASET_TYPE_SAMPLE) toast.error(message);
-            else setError('name', { message });
+            setError('name', { message });
             return;
           }
           const message =
@@ -251,7 +218,6 @@ export function useCreateFileset({
       navigate(getFilesetDetailsRoute(workspace, getEntityReference(fileset), undefined, true));
     },
     [
-      activeTab,
       createFilesetStep,
       createdFileset,
       getValues,
@@ -260,7 +226,6 @@ export function useCreateFileset({
       navigate,
       onCreated,
       queryClient,
-      sampleFilesRef,
       setError,
       setIsSubmitPending,
       storageTab,
