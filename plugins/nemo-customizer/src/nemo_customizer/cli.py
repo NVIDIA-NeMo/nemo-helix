@@ -21,6 +21,7 @@ from nemo_helix_plugin.discovery import (
     CUSTOMIZATION_CONTRIBUTORS_GROUP,
     discover_customization_contributors,
 )
+from nhx.customization_common.cli.dataset_prepare import add_dataset_commands
 from nhx.customization_common.cli.uploads import UploadReport
 
 # The router is deliberately backend-neutral: it never names automodel, unsloth or
@@ -35,7 +36,11 @@ _UPLOAD_PANEL = "Resource Creation Options"
 
 _NEXT_STEPS = """Run 'nemo customization <backend> --help' for the full description of a
 backend, or 'nemo customization <backend> explain' to print its job JSON
-schema."""
+schema. Run 'nemo customization dataset prepare --help' to turn a Parquet, CSV
+or JSONL table, such as Data Designer output, into a training dataset."""
+
+#: How to call a subcommand that is not a backend, for the misplaced-flag error.
+_SUBCOMMAND_USAGE = {"dataset": "dataset prepare SOURCE --name NAME --format FORMAT [OPTIONS]"}
 
 
 class CustomizationCLIError(CustomizationContributorDiscoveryError):
@@ -72,6 +77,7 @@ class CustomizationCLI(NemoCLI):
         )
 
         _add_upload_callback(app)
+        add_dataset_commands(app)
 
         for key, subgroup in subgroups.items():
             app.add_typer(subgroup, name=key)
@@ -161,10 +167,9 @@ def _add_upload_callback(app: typer.Typer) -> None:
             }
             misplaced = [flag for flag, is_set in given.items() if is_set]
             if misplaced:
-                typer_ctx.fail(
-                    f"{', '.join(misplaced)} must come after the subcommand: "
-                    f"'nemo customization {typer_ctx.invoked_subcommand} --job-json JOB_JSON [OPTIONS]'."
-                )
+                subcommand = typer_ctx.invoked_subcommand
+                usage = _SUBCOMMAND_USAGE.get(subcommand, f"{subcommand} --job-json JOB_JSON [OPTIONS]")
+                typer_ctx.fail(f"{', '.join(misplaced)} must come after the subcommand: 'nemo customization {usage}'.")
             return
         if upload_model is None and upload_dataset is None and upload_environment is None:
             typer.echo(typer_ctx.get_help())

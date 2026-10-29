@@ -16,6 +16,38 @@ Use the following guidelines to prepare your training dataset for the supported 
 
 For dataset creation tutorials, refer to [Format Training Dataset](/documentation/customizer-reference/tutorials/format-training-dataset).
 
+## Prepare Data Designer Output or a Table
+
+`nemo customization dataset prepare` turns a Parquet, CSV or JSONL table, such as Data Designer output, into a training dataset in the format you name with `--format`. It maps the columns, splits the rows with a seeded shuffle, and uploads the splits to a new `dataset` fileset, printing the references to put in your job:
+
+```bash
+# A local file or directory, or a fileset
+nemo customization dataset prepare ./rows.parquet --name sft-data --format chat
+nemo customization dataset prepare default/my-table --name dpo-data --format preference
+```
+
+To prepare the output of a Data Designer job, download its `artifacts` result and pass the `parquet-files` directory inside it:
+
+```bash
+nemo jobs results download artifacts --job my-dd-job --workspace default -o artifacts.tar
+tar -xf artifacts.tar
+nemo customization dataset prepare "$(find . -type d -name parquet-files)" --name sft-data --format chat
+```
+
+| `--format` | Each row | Trains on | Columns read by default |
+|---|---|---|---|
+| `chat` | [OpenAI Chat](#openai-chat-model) `messages` | Automodel `sft` and `distillation`; Unsloth with `dataset.apply_chat_template: true` | `instruction` or `prompt`, and `response` or `completion`; or a `messages` column |
+| `preference` | [Preference pair](#preference-pairs) | NeMo-RL `dpo` | `instruction` or `prompt`, `chosen`, `rejected` |
+| `prompt-completion` | [Prompt and completion](#basic-prompt-completion), trained as raw text with no chat template | Automodel; Unsloth | as `chat` |
+| `embedding` | [Embedding triplet](#embedding-model) | Automodel with `training.recipe` `bi_encoder` or `cross_encoder` | `query`, `pos_doc`, `neg_doc` (a list) |
+| `text` | [Text](#text) | Unsloth with `dataset.text_field: text` | `text` |
+
+The command does not prepare GRPO datasets: GRPO trains on NeMo Gym rows that each environment builds.
+
+The Studio "Instruction fine-tuning" and "Preference pairs" templates need no column flags. For other column names, pass the flag for the field: `--prompt-column`, `--response-column`, `--system-column` (adds a system message, for `chat` and `preference`), `--messages-column`, `--chosen-column`, `--rejected-column`, `--query-column`, `--positive-column`, `--negatives-column` or `--text-column`. A flag the format does not use, or a column the table does not have, fails before anything is uploaded. `--input-format` reads files whose extension does not give their format, or one format from a directory that mixes them.
+
+Every format writes `train.jsonl` and `validation.jsonl`. The test split (`--test-fraction`, 0 by default for `preference` and 0.1 otherwise) goes to a separate `<name>-test` fileset, so training never reads it. `--val-fraction` (default 0.1) and `--seed` (default 42) set the rest; the same seed always gives the same split. Rows with an empty field, such as a failed generation, are dropped and counted.
+
 ## Dataset Formats
 
 The following sections describe the required schema and example dataset entries for each model type.
@@ -181,3 +213,35 @@ Each line in your JSONL file must contain a JSON object with these required fiel
 ```
 
 The `system` plus `conversations: [{from, value}]` layout is **not** a supported SFT schema. Automodel detects chat data from a `messages` array (`role` / `content`), prompt/completion pairs, embedding triplets, or a custom two-column `prompt_template`. Convert conversational examples to [OpenAI Chat Model](#openai-chat-model) format before training; otherwise the job fails at start with `DatasetFormatError`.
+
+### Preference Pairs
+
+DPO on NeMo-RL trains on preference pairs.
+
+#### Required Schema
+
+- **`prompt`** (string, or array of `messages` objects): The prompt. An array can start with a system message.
+- **`chosen`** (string): The preferred response.
+- **`rejected`** (string): The dispreferred response.
+
+#### Example Dataset Entry
+
+```json
+{
+  "prompt": "What is the capital of France?",
+  "chosen": "Paris.",
+  "rejected": "I am not sure."
+}
+```
+
+### Text
+
+Unsloth trains on a single text field, named by `dataset.text_field` (`text` by default), as raw text.
+
+#### Example Dataset Entry
+
+```json
+{
+  "text": "Paris is the capital and largest city of France."
+}
+```
