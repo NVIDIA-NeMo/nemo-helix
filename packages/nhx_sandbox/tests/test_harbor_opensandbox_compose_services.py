@@ -303,6 +303,19 @@ async def test_main_s_entrypoint_and_env_reach_the_container_as_written(tmp_path
     assert (environment._merge_env(None) or {})["PASSWORD"] == "pa$$word"
 
 
+async def test_a_docker_runtime_gets_main_s_entrypoint_and_env_unescaped(tmp_path: Path, server: Server) -> None:
+    """Docker never expands ``$`` in a container's command or env, so nothing is escaped for it."""
+    entrypoints = {"registry.example/task:1": ["/bin/sh", "-c", 'echo "$(HOME)" a$$b']}
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints, runtime="docker")
+    environment._persistent_env["PASSWORD"] = "pa$$word"
+
+    await environment._create_sandbox()
+
+    sent = server.creates[-1]
+    assert sent["entrypoint"][:3] == ["/bin/sh", "-c", 'echo "$(HOME)" a$$b']
+    assert sent["env"]["PASSWORD"] == "pa$$word"
+
+
 @pytest.mark.parametrize(
     "entrypoints",
     [{"registry.example/task:1": []}, {"registry.example/verifier:1": ["/verify"]}],

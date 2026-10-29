@@ -55,7 +55,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, override
+from typing import Any, Literal, override
 
 import httpx
 from harbor.environments.base import BaseEnvironment, ExecResult
@@ -175,6 +175,10 @@ def _local_write_mode(path: Path) -> int:
     return int(format(stat.S_IMODE(path.stat().st_mode), "o"))
 
 
+#: The runtime the OpenSandbox server starts sandboxes with, which decides how a container's command and env are read.
+SandboxRuntime = Literal["kubernetes", "docker"]
+
+
 def _literal(text: str) -> str:
     """``text`` as Kubernetes passes it on unchanged: a container's command and env expand ``$(VAR)``
     and turn ``$$`` into ``$``, which Docker never does, so every ``$`` is doubled."""
@@ -221,6 +225,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             ``docker_image`` names, with an empty list for an image that has none. OpenSandbox
             replaces the container's entrypoint, so the sandbox restores its image's, unless the
             compose file gives ``main`` its own. An image missing here starts as before.
+        runtime: The OpenSandbox server's runtime. Kubernetes expands ``$`` in a container's
+            command and env, so they're escaped for it; Docker passes them on as written. NeMo Evals
+            only runs on the in-cluster Kubernetes server; set ``docker`` for a Docker-runtime server.
 
     Any other keyword argument is Harbor's and goes to ``BaseEnvironment`` unchanged.
     """
@@ -251,6 +258,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         compose_services: dict[str, Any] | None = None,
         agent_bundle: dict[str, Any] | None = None,
         image_entrypoints: dict[str, list[str]] | None = None,
+        runtime: SandboxRuntime = "kubernetes",
         **kwargs: Any,
     ) -> None:
         """Store this environment's settings, then let ``BaseEnvironment`` validate the task against them."""
@@ -286,6 +294,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._image_entrypoints = dict(image_entrypoints or {})
+        self._runtime: SandboxRuntime = runtime
         self._egress_verification: EgressVerificationMode = egress_verification
         self._enforce_disk_limit = enforce_disk_limit
         self._max_disk_mb = max_disk_mb
@@ -442,6 +451,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             extensions[EXTENSION_KEY] = self._services.to_json()
         return extensions
 
+    def _as_written(self, text: str) -> str:
+        """``text`` escaped so the runtime starts the container with it exactly as written."""
+        return _literal(text) if self._runtime == "kubernetes" else text
+
     async def _create_sandbox(self) -> Any:
         """Create the sandbox, then verify its egress; it is killed if the policy can't be read or doesn't match."""
         uses_extension = self._services is not None or self._agent_bundle is not None
@@ -456,7 +469,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 image=str(self.task_env_config.docker_image),
                 # Applied at create so the entrypoint sees it too, not only exec'd commands. Escaped
                 # here only: commands run in the sandbox later get the env as is, unexpanded.
-                env={name: _literal(value) for name, value in self._persistent_env.items()},
+                env={name: self._as_written(value) for name, value in self._persistent_env.items()},
                 metadata={
                     **self._metadata,
                     "session_id": self.session_id,
@@ -469,7 +482,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 expires_at=self._sandbox_expires_at,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
-                entrypoint=[_literal(argument) for argument in entrypoint] if entrypoint is not None else None,
+                entrypoint=[self._as_written(argument) for argument in entrypoint] if entrypoint is not None else None,
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its
