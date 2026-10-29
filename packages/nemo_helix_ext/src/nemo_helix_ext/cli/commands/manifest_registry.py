@@ -163,16 +163,27 @@ nemo docs cli/configuration""",
         kind="group",
     ),
     TopLevelEntry(
-        import_path="nemo_helix_ext.cli.commands.use_cases.describe:describe_command",
+        import_path="nemo_helix_ext.cli.commands.use_cases.describe:describe_cli_command",
         help="""\
-Describe the installed NeMo Helix CLI, plugins, and skills.
+Describe the NeMo Helix CLI or any command in it.
 
-Prints installed plugins, top-level commands, the plugin entry-point
-catalog, available agent skills, and quick-reference patterns as
-Markdown. Reads local metadata only and does not contact the platform.
+Without a command path, prints an overview of installed plugins,
+top-level commands, the plugin entry-point catalog, agent skills, and
+quick-reference patterns. With a command path, prints that command's
+usage, arguments, options, and subcommands.
+
+Tokens after the command path, such as the command's own arguments and
+options, are ignored, so 'describe' can go in front of a full command
+line. Put describe's own options before the path. Reads local metadata
+only and does not contact the platform.
 
 Examples:
-nemo describe""",
+# Overview of the installed CLI.
+nemo describe
+# Describe one command.
+nemo describe models create
+# Describe a full command line as JSON.
+nemo describe -f json models create my-model --spec-file model.yaml""",
         name="describe",
         panel="CLI functions",
         kind="command",
