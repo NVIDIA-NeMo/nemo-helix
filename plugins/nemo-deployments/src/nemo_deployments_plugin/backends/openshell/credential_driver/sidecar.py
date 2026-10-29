@@ -41,6 +41,14 @@ def _read_mount(path: Path) -> bytes:
     return value
 
 
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def prepare_credentials(source: Path, destination: Path, *, auth_disabled: bool = False) -> None:
     """Copy only operator-mounted credentials into private, container-owned files.
 
@@ -74,10 +82,12 @@ def prepare_credentials(source: Path, destination: Path, *, auth_disabled: bool 
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temporary, destination / name)
+            _sync_directory(destination)
         finally:
             Path(temporary).unlink(missing_ok=True)
     if auth_disabled:
         (destination / "helix.token").unlink(missing_ok=True)
+        _sync_directory(destination)
 
 
 async def check_ready(socket_path: Path) -> None:
