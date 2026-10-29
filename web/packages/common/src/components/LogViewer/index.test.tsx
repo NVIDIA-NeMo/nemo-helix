@@ -101,7 +101,7 @@ describe('LogViewer', () => {
 
   it.each([
     ['live', 'Live'],
-    ['completed', 'Completed'],
+    ['ended', 'Ended'],
   ] as const)('badges a %s log as %s', (logStatus, label) => {
     render(<LogViewer logs={[makeLog(0)]} logStatus={logStatus} />);
 

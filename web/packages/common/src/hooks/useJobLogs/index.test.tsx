@@ -248,9 +248,13 @@ describe('useJobLogs', () => {
     it.each([
       [HelixJobStatus.active, 'live'],
       [HelixJobStatus.pending, 'live'],
-      [HelixJobStatus.completed, 'completed'],
-      [HelixJobStatus.error, 'completed'],
-      [HelixJobStatus.cancelled, 'completed'],
+      [HelixJobStatus.completed, 'ended'],
+      [HelixJobStatus.error, 'ended'],
+      [HelixJobStatus.cancelled, 'ended'],
+      // Legacy aliases some callers (e.g. agent eval jobs) may still report.
+      ['succeeded' as HelixJobStatus, 'ended'],
+      ['failed' as HelixJobStatus, 'ended'],
+      ['canceled' as HelixJobStatus, 'ended'],
     ])('is %s -> %s', async (jobStatus, expected) => {
       mockJobsPageJobLogs.mockResolvedValue(makePage([], 0));
 

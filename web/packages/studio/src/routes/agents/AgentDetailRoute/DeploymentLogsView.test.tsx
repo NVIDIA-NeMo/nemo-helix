@@ -106,6 +106,18 @@ describe('DeploymentLogsView', () => {
     expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'live');
   });
 
+  it.each(['failed', 'deleting'] as const)(
+    'badges the log as ended for a %s deployment even while the stream is open',
+    async (status) => {
+      mocks.streamSse.mockReturnValue(new Promise(() => {}));
+
+      render(<DeploymentLogsView workspace="default" deployments={[{ ...deployment, status }]} />);
+
+      await waitFor(() => expect(streamSse).toHaveBeenCalled());
+      expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'ended');
+    }
+  );
+
   it('drops the live badge once the stream gives up, e.g. on a 401', async () => {
     mocks.streamSse.mockImplementation(async (_url: string, options: StreamSseOptions) => {
       options.onError?.(new Error('SSE request failed: 401'));

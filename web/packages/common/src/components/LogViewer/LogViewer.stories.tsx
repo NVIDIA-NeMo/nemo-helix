@@ -173,14 +173,14 @@ const meta = {
     rows: 30,
     downloadFilename: 'job-demo-logs.txt',
     emptyMessage: 'No logs available yet',
-    logStatus: 'completed',
+    logStatus: 'ended',
   },
   argTypes: {
     lineCount: { control: { type: 'number', min: 0, step: 100 } },
     streamIntervalMs: { control: { type: 'number', min: 0, step: 100 } },
     rows: { control: { type: 'number', min: 1 } },
     loadProgress: { control: 'object' },
-    logStatus: { control: 'select', options: ['live', 'completed', undefined] },
+    logStatus: { control: 'select', options: ['live', 'ended', undefined] },
   },
 } satisfies Meta<StoryArgs>;
 

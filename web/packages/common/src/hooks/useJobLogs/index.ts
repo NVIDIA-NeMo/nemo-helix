@@ -26,6 +26,14 @@ import { getJobRefetchInterval } from '../../utils/query';
 // few times post-terminal to capture the tail. Bounded and self-clearing.
 const LOG_SETTLE_DELAYS_MS = [2_000, 6_000, 12_000];
 
+// Some callers (e.g. agent eval jobs) may report legacy aliases for terminal statuses.
+const LEGACY_JOB_STATUSES: Record<string, HelixJobStatus> = {
+  succeeded: 'completed',
+  success: 'completed',
+  failed: 'error',
+  canceled: 'cancelled',
+};
+
 // Progress lives in a module store keyed by query key rather than in component state,
 // for two reasons. The log query key is shared — a viewer and a download button can
 // observe the same job — and React Query runs the queryFn of whichever observer won
@@ -101,10 +109,11 @@ export const useJobLogs = ({
   workspace,
   name,
   enabled,
-  jobStatus,
+  jobStatus: rawJobStatus,
   pageSize = LOGS_PAGE_SIZE,
   maxPages = LOGS_MAX_PAGES,
 }: UseJobLogsOptions): UseJobLogsResult => {
+  const jobStatus = rawJobStatus && (LEGACY_JOB_STATUSES[rawJobStatus] ?? rawJobStatus);
   const queryClient = useQueryClient();
   const queryKey = getJobLogsQueryKey(workspace, name);
   const queryKeyHash = hashKey(queryKey);
@@ -189,7 +198,7 @@ export const useJobLogs = ({
     error: query.error,
     total: query.data?.total ?? 0,
     loadProgress,
-    logStatus: jobStatus ? (isTerminal ? 'completed' : 'live') : undefined,
+    logStatus: jobStatus ? (isTerminal ? 'ended' : 'live') : undefined,
     refetch: query.refetch,
   };
 };

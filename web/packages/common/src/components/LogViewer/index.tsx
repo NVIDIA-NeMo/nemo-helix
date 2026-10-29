@@ -70,7 +70,7 @@ interface LogViewerProps {
   /** Progress of the initial multi-page fetch, shown beneath the loading spinner.
    *  Ignored once logs are on screen. Callers that fetch in one shot can omit it. */
   loadProgress?: LogLoadProgress | null;
-  /** Badges the header as Live or Completed. Omit when the caller can't tell. */
+  /** Badges the header as Live or Ended. Omit when the caller can't tell. */
   logStatus?: LogStatus;
   /** Where the copy confirmation goes. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
@@ -168,7 +168,7 @@ export const LogViewer: FC<LogViewerProps> = ({
                   status={logStatus}
                   statusConfig={{
                     live: { label: 'Live', color: 'green', icon: RecordIcon },
-                    completed: { label: 'Completed', color: 'gray' },
+                    ended: { label: 'Ended', color: 'gray' },
                   }}
                 />
               )}
