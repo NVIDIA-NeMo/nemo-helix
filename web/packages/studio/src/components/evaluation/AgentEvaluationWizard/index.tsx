@@ -831,7 +831,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       return selectedAgent ? undefined : blockedWith('Pick an agent to evaluate.');
     }
     if (step === 'experiment') {
-      if (!experimentPreview) return blockedWith('Name the experiment to continue.');
+      if (!experimentPreview) {
+        return blockedWith('Name the experiment to continue.');
+      }
       if (experimentNameStatus === 'checking' || experimentNameStatus === 'conflict') {
         return SHOWN_ON_FIELD;
       }
@@ -841,21 +843,31 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       if (isLoadingFilesetFile || isLoadingFilesetConfig) {
         return blockedWith('Reading the selected file...');
       }
-      if (isLlmJudge && isJudgeModelsLoading) return blockedWith('Loading judge models...');
+      if (isLlmJudge && isJudgeModelsLoading) {
+        return blockedWith('Loading judge models...');
+      }
     }
     // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
     // click. Schema errors stay out: those only show once a submit is tried.
     if (step === 'evaluation') {
       if (mode === MODE_EXPERIMENT) {
-        if (hasNoEvaluations) return SHOWN_ON_FIELD;
+        if (hasNoEvaluations) {
+          return SHOWN_ON_FIELD;
+        }
         // Nothing can be picked, and a handed-in source cannot be resolved or checked, until the
         // list arrives.
-        if (sources.isLoading) return blockedWith('Loading evaluations...');
+        if (sources.isLoading) {
+          return blockedWith('Loading evaluations...');
+        }
         if (evaluationName && !selectedEvaluation) {
           return blockedWith(`Evaluation ${evaluationName} no longer exists. Pick another.`);
         }
-        if (isValidatingEvaluation) return blockedWith('Checking the saved eval config...');
-        if (evaluationConfigIssue) return SHOWN_ON_FIELD;
+        if (isValidatingEvaluation) {
+          return blockedWith('Checking the saved eval config...');
+        }
+        if (evaluationConfigIssue) {
+          return SHOWN_ON_FIELD;
+        }
       }
       // invalidModelRefs is empty while the list is in flight, so submitting inside that window
       // would skip the judge-model check entirely.
@@ -875,11 +887,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const blocker = stepBlocker();
 
   const goNext = async () => {
-    if (blocker) return;
+    if (blocker) {
+      return;
+    }
     if (step === 'configuration') {
       setSubmitAttempted(true);
       const valid = await trigger(['judgeModel', 'parallelism']);
-      if (!valid || !uploads) return;
+      if (!valid || !uploads) {
+        return;
+      }
     }
     setStep(nextStep(steps, step));
   };
@@ -892,7 +908,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const onSubmit: SubmitHandler<SubmitEvaluationFormData> = async (formData) => {
     // EvalWizard already drops clicks and Enter while blocked; this keeps a submit from ever
     // skipping a gate.
-    if (blocker) return;
+    if (blocker) {
+      return;
+    }
     if (mode === MODE_DEFAULT && !uploads) {
       setStep('configuration');
       return;
