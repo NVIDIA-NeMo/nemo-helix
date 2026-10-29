@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from typing import Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,31 @@ class RuntimePrincipal(Protocol):
     @property
     def effective_principal(self) -> RuntimePrincipal:
         raise NotImplementedError
+
+
+class RuntimeAuthPrincipal(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def caller_kind(self) -> str: ...
+
+    @property
+    def is_delegated(self) -> bool: ...
+
+
+class RuntimeAuthClient(Protocol):
+    @property
+    def auth_enabled(self) -> bool: ...
+
+    @property
+    def principal(self) -> RuntimeAuthPrincipal: ...
+
+
+def current_auth_client(request: Request) -> RuntimeAuthClient:
+    from nhx.common.auth.dependencies import get_auth_client
+
+    return get_auth_client(request)
 
 
 class AuthContext(BaseModel):
@@ -249,4 +275,11 @@ def is_service_principal_id(principal_id: str) -> bool:
     return is_service_principal(principal_id)
 
 
-__all__ = ["AuthContext", "current_auth_context", "is_service_principal_id", "platform_auth_enabled"]
+__all__ = [
+    "AuthContext",
+    "RuntimeAuthClient",
+    "current_auth_client",
+    "current_auth_context",
+    "is_service_principal_id",
+    "platform_auth_enabled",
+]

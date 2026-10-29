@@ -29,6 +29,7 @@ from nemo_agents_plugin.entities import (
     DeploymentStatus,
 )
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
+from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
@@ -40,6 +41,11 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def policy_auth_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(response_policy, "current_auth_client", lambda request: SimpleNamespace(auth_enabled=False))
 
 
 def _fabric_agent_config() -> dict[str, Any]:
@@ -120,6 +126,7 @@ def _test_client(mock_entity_client: AsyncMock, mock_files_client: AsyncMock | N
     )
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
     app.dependency_overrides[get_files_client] = lambda: mock_files_client or _files_client()
+
     return TestClient(app, raise_server_exceptions=False)
 
 

@@ -535,11 +535,6 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         return self._authenticates_with_direct_service_token()
 
     @property
-    def can_read_stored_auth_context(self) -> bool:
-        """Whether this client may hydrate stored creator auth context from entities."""
-        return self.authenticates_as_service_principal
-
-    @property
     def workspace(self) -> str | None:
         return self._workspace
 

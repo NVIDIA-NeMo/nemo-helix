@@ -59,7 +59,9 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -74,12 +76,14 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+deployment_policy = AuthContextResponsePolicy(dto_type=AgentDeployment, field="auth_context")
+deployment_routes = PolicyRoutes(router, deployment_policy)
 
 _deployment_filter_dep = make_filter_obj_dep(DeploymentFilter)
 _DELETE_MARK_ATTEMPTS = 3
 
 
-@router.post("/deployments", response_model=AgentDeployment, status_code=201, tags=["Agent Deployments"])
+@deployment_routes.post("/deployments", status_code=201, tags=["Agent Deployments"])
 @scope.write
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -267,7 +271,7 @@ def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentM
     )
 
 
-@router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])
+@deployment_routes.get("/deployments", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -309,7 +313,7 @@ async def list_deployments(
     )
 
 
-@router.get("/deployments/{name}", response_model=AgentDeployment, tags=["Agent Deployments"])
+@deployment_routes.get("/deployments/{name}", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],

@@ -511,7 +511,6 @@ def _stored_private_attr_types(model_type: type[EntityBase]) -> dict[str, Any]:
 def _convert_api_entity_to_model(
     entity: Entity,
     entity_type: EntityTypeLike,
-    client: AsyncEntitiesClient | EntitiesClient,
 ) -> EntityT:
     """Convert an API entity to an EntityBase model."""
     entity_dict = entity.model_dump()
@@ -536,11 +535,6 @@ def _convert_api_entity_to_model(
                 setattr(result, field_name, validated)
             else:
                 setattr(result, field_name, raw_value)
-
-    # Strip _auth_context unless the effective caller is a service principal.
-    if hasattr(result, "_auth_context"):
-        if not client.can_read_stored_auth_context:
-            setattr(result, "_auth_context", None)
 
     return result
 
@@ -620,7 +614,6 @@ class EntityClient:
         return _convert_api_entity_to_model(
             entity,
             entity_type,
-            self._client,
         )
 
     async def list(
@@ -1153,7 +1146,6 @@ class SyncEntityClient:
         return _convert_api_entity_to_model(
             entity,
             entity_type,
-            self._client,
         )
 
     def list(
