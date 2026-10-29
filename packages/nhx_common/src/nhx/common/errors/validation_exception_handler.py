@@ -14,6 +14,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette import status
 
+# The only fields that hold request values as Python objects. pydantic-core builds type, loc and msg as UTF-8 strings:
+# it replaces a lone surrogate in a loc key with U+FFFD, and a validator message holding one fails validation itself.
 _UNENCODABLE_FIELDS = ("input", "ctx")
 
 
