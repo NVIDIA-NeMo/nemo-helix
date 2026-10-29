@@ -388,25 +388,27 @@ print(f"Total jobs: {len(list(all_jobs.items()))}")
 
 **Error: "Dataset must have at least 200 records to use holdout."**
 
-This occurs when synthesis is enabled on datasets with fewer than 200 records. Holdout validation
-splits your data into training and test sets to measure quality, requiring a minimum dataset size.
+Holdout evaluation requires at least 200 input records. Separately, synthesis training requires
+at least 200 **training rows after the holdout split**. Having 200 input rows alone is not enough
+if some are reserved for holdout.
 
-**Solution:**
+**Solution:** For synthesis, provide enough data to leave at least 200 training rows after splitting.
+Setting `.with_data(holdout=0)` disables the evaluation split, but does not remove the training
+minimum: a 150-row dataset still cannot be used for synthesis training. Without holdout, holdout-based
+privacy and synthetic-data quality scores are unavailable.
+
+For a small table that only needs PII replacement, use a **PII-only** job instead:
 
 ```python
 builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_data(holdout=0)  # Disable holdout for small datasets
     .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .synthesize()
+    # Do not call .synthesize(), .with_train(), or .with_generate().
 )
 ```
 
-<Warning>
-
-Disabling holdout means you won't get quality metrics like privacy scores and synthetic data quality
-scores. For production use, ensure your dataset has at least 200 records.
-
-</Warning>
+This path skips training and generation and returns the input data with PII replaced, not new
+synthetic records. The plugin disables holdout and the training-size check for PII-only jobs;
+PII classification still requires a configured provider.
