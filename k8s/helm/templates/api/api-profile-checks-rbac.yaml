@@ -1,0 +1,72 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+The jobs API reads execution profiles live: the GPUs of the nodes a profile's node selector
+matches (GET /apis/jobs/v2/execution-profiles/gpus), and whether an image exists in its
+registry, signed in with the image pull secrets (GET .../execution-profiles/image).
+*/ -}}
+{{- if and .Values.api.enabled .Values.api.profileChecks.rbac }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-node-reader" (include "nhx-api.apiServiceAccountName" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-node-reader" (include "nhx-api.apiServiceAccountName" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-node-reader" (include "nhx-api.apiServiceAccountName" .) | trunc 63 | trimSuffix "-" }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "nhx-api.apiServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- /* An empty resourceNames would grant every Secret, so the Role exists only when there are pull secrets. */}}
+{{- if .Values.imagePullSecrets }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-pull-secret-reader" (include "nhx-api.apiServiceAccountName" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+rules:
+# get only, and only the chart's image pull secrets.
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: {{ include "nemo-common.imagepullsecretnames" . }}
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-pull-secret-reader" (include "nhx-api.apiServiceAccountName" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-pull-secret-reader" (include "nhx-api.apiServiceAccountName" .) | trunc 63 | trimSuffix "-" }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "nhx-api.apiServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

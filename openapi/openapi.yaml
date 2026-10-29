@@ -5769,6 +5769,115 @@ paths:
                 type: array
                 title: Response Get Execution Profiles Apis Jobs V2 Execution Profiles
                   Get
+  /apis/jobs/v2/execution-profiles/gpus:
+    get:
+      tags:
+      - Jobs
+      summary: Get Execution Profile Gpus
+      description: 'Read the GPUs each GPU execution profile can run on, live from
+        its backend.
+
+
+        Docker runs ``nvidia-smi`` in a short container given the GPUs a job would
+        get. Kubernetes
+
+        and Volcano sum the allocatable GPUs of the nodes the profile''s node selector
+        matches, by
+
+        the model GPU Feature Discovery labels. This is the inventory a profile can
+        use, not how
+
+        many GPUs are idle now.'
+      operationId: get_execution_profile_gpus_apis_jobs_v2_execution_profiles_gpus_get
+      parameters:
+      - name: provider
+        in: query
+        required: false
+        schema:
+          description: Only profiles of this provider, e.g. 'gpu'.
+          title: Provider
+          type: string
+        description: Only profiles of this provider, e.g. 'gpu'.
+      - name: profile
+        in: query
+        required: false
+        schema:
+          description: Only profiles with this name.
+          title: Profile
+          type: string
+        description: Only profiles with this name.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionProfileGPUs'
+                title: Response Get Execution Profile Gpus Apis Jobs V2 Execution
+                  Profiles Gpus Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/execution-profiles/image:
+    get:
+      tags:
+      - Jobs
+      summary: Check Execution Profile Image
+      description: 'Check whether a job on this execution profile could pull *image*,
+        without pulling it.
+
+
+        Docker looks for the image on its host, then asks its registry with the host''s
+        credentials.
+
+        Kubernetes and Volcano ask the image''s registry for its manifest, signed
+        in with the image
+
+        pull secrets of the profile and the platform.'
+      operationId: check_execution_profile_image_apis_jobs_v2_execution_profiles_image_get
+      parameters:
+      - name: provider
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Execution provider, e.g. 'gpu'.
+          title: Provider
+        description: Execution provider, e.g. 'gpu'.
+      - name: profile
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Execution profile name.
+          title: Profile
+        description: Execution profile name.
+      - name: image
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Image reference, e.g. 'nvcr.io/nvidia/nemo:25.09'.
+          title: Image
+        description: Image reference, e.g. 'nvcr.io/nvidia/nemo:25.09'.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionProfileImage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -13641,6 +13750,97 @@ components:
       - action_name
       title: ExecutedAction
       description: Information about an action that was executed.
+    ExecutionProfileGPU:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: GPU model, e.g. 'NVIDIA H100 80GB HBM3'.
+        compute_capability:
+          title: Compute Capability
+          description: CUDA compute capability, e.g. '9.0'. Hopper is 9.0; Blackwell
+            is 10.0 and up.
+          type: string
+        count:
+          type: integer
+          title: Count
+          description: How many of these GPUs the profile can use.
+      type: object
+      required:
+      - name
+      - count
+      title: ExecutionProfileGPU
+      description: GPUs of one model that an execution profile can run on.
+    ExecutionProfileGPUs:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        profile:
+          type: string
+          title: Profile
+        backend:
+          type: string
+          title: Backend
+        status:
+          type: string
+          enum:
+          - available
+          - none
+          - unknown
+          title: Status
+          description: '''available'': GPUs were found. ''none'': the profile has
+            no GPU a job can use. ''unknown'': they could not be read; message says
+            why.'
+        gpus:
+          items:
+            $ref: '#/components/schemas/ExecutionProfileGPU'
+          type: array
+          title: Gpus
+        message:
+          title: Message
+          type: string
+      type: object
+      required:
+      - provider
+      - profile
+      - backend
+      - status
+      title: ExecutionProfileGPUs
+      description: The GPUs an execution profile can run on, read live from its backend.
+    ExecutionProfileImage:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        profile:
+          type: string
+          title: Profile
+        image:
+          type: string
+          title: Image
+        status:
+          type: string
+          enum:
+          - exists
+          - missing
+          - unknown
+          title: Status
+          description: '''exists'': the backend has the image or its registry does.
+            ''missing'': neither does. ''unknown'': it could not be checked; message
+            says why.'
+        message:
+          title: Message
+          type: string
+      type: object
+      required:
+      - provider
+      - profile
+      - image
+      - status
+      title: ExecutionProfileImage
+      description: Whether an image exists for an execution profile, checked without
+        pulling it.
     ExperimentFilter:
       additionalProperties: false
       description: Filter for listing Experiments.

@@ -30,6 +30,10 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    ExecutionProfileGPUs,
+    ExecutionProfileGPUsQueryParams,
+    ExecutionProfileImage,
+    ExecutionProfileImageQueryParams,
     HelixJobAttemptResponse,
     HelixJobListResultResponse,
     HelixJobListTaskResponse,
@@ -69,6 +73,18 @@ ExecutionProfile = (
 @get("/apis/jobs/v2/execution-profiles")
 @abstractmethod
 def get_execution_profiles() -> list[ExecutionProfile]: ...
+
+
+@get("/apis/jobs/v2/execution-profiles/gpus")
+@abstractmethod
+def get_execution_profile_gpus(
+    *, query_params: ExecutionProfileGPUsQueryParams | None = None
+) -> list[ExecutionProfileGPUs]: ...
+
+
+@get("/apis/jobs/v2/execution-profiles/image")
+@abstractmethod
+def check_execution_profile_image(*, query_params: ExecutionProfileImageQueryParams) -> ExecutionProfileImage: ...
 
 
 # ---------------------------------------------------------------------------

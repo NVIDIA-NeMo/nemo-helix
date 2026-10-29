@@ -7,12 +7,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
+from nemo_helix_plugin.jobs.types import (
+    ExecutionProfileGPU,
+    ExecutionProfileGPUs,
+    ExecutionProfileGPUStatus,
+    ExecutionProfileImage,
+    ExecutionProfileImageStatus,
+    JobDryRunCheck,
+)
 from nhx.customization_common import dry_run
+from nhx.customization_common.contributor import jobs as contributor_jobs
+from nhx.customization_common.contributor.jobs import BaseSubmitJob
 from nhx.customization_common.dry_run import (
     DatasetRows,
     check_dataset_rows,
     check_execution_profiles,
+    check_gpus,
+    check_images,
     check_local_dataset_rows,
 )
 
@@ -174,3 +187,138 @@ async def test_a_profile_the_platform_does_not_have_fails_and_lists_the_configur
         False,
         "Not configured on this platform: gpu/default. Configured: cpu/default.",
     )
+
+
+def _steps(*steps: tuple[str, str, str]) -> HelixJobSpec:
+    """A compiled job whose steps run (provider, profile, image)."""
+    return HelixJobSpec.model_validate(
+        {
+            "steps": [
+                {
+                    "name": f"step-{i}",
+                    "executor": {"provider": provider, "profile": profile, "container": {"image": image}},
+                }
+                for i, (provider, profile, image) in enumerate(steps)
+            ]
+        }
+    )
+
+
+def _gpus(status: ExecutionProfileGPUStatus, *gpus: ExecutionProfileGPU, message: str | None = None) -> MagicMock:
+    result = ExecutionProfileGPUs(
+        provider="gpu", profile="default", backend="docker", status=status, gpus=list(gpus), message=message
+    )
+    return MagicMock(data=MagicMock(return_value=[result]))
+
+
+def _image(image: str, status: ExecutionProfileImageStatus, message: str) -> MagicMock:
+    result = ExecutionProfileImage(provider="gpu", profile="default", image=image, status=status, message=message)
+    return MagicMock(data=MagicMock(return_value=result))
+
+
+_TRAINING = ("gpu", "default", "nvcr.io/nvidia/nemo/automodel:1")
+_TASKS = ("cpu", "default", "nvcr.io/nvidia/nemo/tasks:1")
+_H100 = ExecutionProfileGPU(name="NVIDIA H100 80GB HBM3", compute_capability="9.0", count=8)
+
+
+async def test_gpus_are_read_only_for_gpu_steps_and_reported_by_model() -> None:
+    jobs = MagicMock(get_execution_profile_gpus=AsyncMock(return_value=_gpus("available", _H100)))
+    with patch.object(dry_run.AsyncJobsClient, "from_client", return_value=jobs):
+        check = await check_gpus(_steps(_TASKS, _TRAINING, _TASKS), MagicMock())
+
+    assert check is not None
+    assert (check.passed, check.message) == (True, "gpu/default: 8x NVIDIA H100 80GB HBM3 (compute 9.0).")
+    jobs.get_execution_profile_gpus.assert_awaited_once_with(query_params={"provider": "gpu", "profile": "default"})
+
+
+async def test_a_gpu_profile_without_gpus_fails() -> None:
+    jobs = MagicMock(
+        get_execution_profile_gpus=AsyncMock(return_value=_gpus("none", message="nvidia-smi listed no GPUs."))
+    )
+    with patch.object(dry_run.AsyncJobsClient, "from_client", return_value=jobs):
+        check = await check_gpus(_steps(_TRAINING), MagicMock())
+
+    assert check is not None
+    assert (check.passed, check.message) == (False, "gpu/default has no GPU a job can use: nvidia-smi listed no GPUs.")
+
+
+async def test_gpus_that_cannot_be_read_pass_as_not_checked() -> None:
+    jobs = MagicMock(get_execution_profile_gpus=AsyncMock(return_value=_gpus("unknown", message="RBAC missing.")))
+    with patch.object(dry_run.AsyncJobsClient, "from_client", return_value=jobs):
+        check = await check_gpus(_steps(_TRAINING), MagicMock())
+
+    assert check is not None
+    assert (check.passed, check.message) == (True, "gpu/default: GPUs not checked (RBAC missing.).")
+
+
+async def test_a_job_without_gpu_steps_has_no_gpu_check() -> None:
+    assert await check_gpus(_steps(_TASKS), MagicMock()) is None
+
+
+async def test_each_distinct_image_is_checked_and_a_missing_one_fails() -> None:
+    def answer(*, query_params: dict[str, str]) -> MagicMock:
+        if query_params["image"] == _TRAINING[2]:
+            return _image(_TRAINING[2], "missing", "nvcr.io has no nvidia/nemo/automodel:1.")
+        return _image(query_params["image"], "exists", "On the Docker host.")
+
+    jobs = MagicMock(check_execution_profile_image=AsyncMock(side_effect=answer))
+    with patch.object(dry_run.AsyncJobsClient, "from_client", return_value=jobs):
+        check = await check_images(_steps(_TASKS, _TRAINING, _TASKS), MagicMock())
+
+    assert check is not None
+    assert (check.passed, check.message) == (
+        False,
+        f"{_TRAINING[2]} is missing for gpu/default: nvcr.io has no nvidia/nemo/automodel:1.",
+    )
+    assert jobs.check_execution_profile_image.await_count == 2
+
+
+async def test_an_image_check_the_platform_cannot_answer_passes_as_not_checked() -> None:
+    request = MagicMock(status_code=404, json=MagicMock(return_value={"detail": "Not Found"}))
+    jobs = MagicMock(check_execution_profile_image=AsyncMock(side_effect=NotFoundError(request)))
+    with patch.object(dry_run.AsyncJobsClient, "from_client", return_value=jobs):
+        check = await check_images(_steps(_TASKS), MagicMock())
+
+    assert check is not None
+    assert check.passed is True
+    assert check.message.startswith(f"{_TASKS[2]}: not checked (")
+
+
+def _named_check(name: str, passed: bool = True) -> JobDryRunCheck:
+    return JobDryRunCheck(name=name, passed=passed, message="...")
+
+
+async def _hook_checks(*, profiles_pass: bool) -> tuple[list[str], AsyncMock, AsyncMock]:
+    gpus, images = AsyncMock(return_value=_named_check("GPUs")), AsyncMock(return_value=_named_check("images"))
+    with (
+        patch.object(
+            contributor_jobs,
+            "check_execution_profiles",
+            AsyncMock(return_value=_named_check("execution profile", profiles_pass)),
+        ),
+        patch.object(contributor_jobs, "check_gpus", gpus),
+        patch.object(contributor_jobs, "check_images", images),
+        patch.object(
+            contributor_jobs, "check_dataset_rows", AsyncMock(return_value=[_named_check("training dataset")])
+        ),
+    ):
+        checks = await BaseSubmitJob.dry_run_checks(
+            MagicMock(), platform_spec=_steps(_TRAINING), workspace="default", async_sdk=MagicMock()
+        )
+    return [check.name for check in checks], gpus, images
+
+
+async def test_the_hook_checks_gpus_and_images_once_the_profiles_exist() -> None:
+    names, gpus, images = await _hook_checks(profiles_pass=True)
+
+    assert names == ["execution profile", "GPUs", "images", "training dataset"]
+    gpus.assert_awaited_once()
+    images.assert_awaited_once()
+
+
+async def test_the_hook_skips_gpus_and_images_for_a_missing_profile() -> None:
+    names, gpus, images = await _hook_checks(profiles_pass=False)
+
+    assert names == ["execution profile", "training dataset"]
+    gpus.assert_not_called()
+    images.assert_not_called()

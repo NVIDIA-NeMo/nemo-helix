@@ -9,7 +9,7 @@ import base64
 
 import httpx
 import pytest
-from nemo_builder_plugin.registry_auth import RegistryAuthError, login, parse_challenges
+from nemo_helix_plugin.registry_auth import RegistryAuthError, login, parse_challenges
 
 REGISTRY = "reg.example.com"
 REALM = "https://auth.example.com/token"
@@ -32,7 +32,7 @@ class Registry:
         return httpx.Response(self.token_status, json={"token": "registry-token", "expires_in": 300})
 
 
-def _login(registry: Registry, *, plain_http: bool = False) -> str:
+def _login(registry: Registry, *, plain_http: bool = False) -> str | None:
     http = httpx.Client(transport=httpx.MockTransport(registry))
     return login(REGISTRY, "builder", "secret", "ws/app", http=http, plain_http=plain_http)
 
@@ -63,6 +63,27 @@ class TestTheChallengeDecides:
 
         http = httpx.Client(transport=httpx.MockTransport(handle))
         assert login(REGISTRY, "builder", "secret", "ws/app", http=http) == "Bearer from-oauth"
+
+
+class TestAnonymousAndPullOnly:
+    def _anonymous(self, registry: Registry) -> str | None:
+        http = httpx.Client(transport=httpx.MockTransport(registry))
+        return login(REGISTRY, None, None, "ws/app", http=http, actions="pull")
+
+    def test_a_bearer_challenge_gets_an_anonymous_token_for_pull_without_a_credential(self) -> None:
+        registry = Registry()
+        assert self._anonymous(registry) == "Bearer registry-token"
+        asked = registry.requests[1]
+        assert asked.url.params["scope"] == "repository:ws/app:pull"
+        assert "Authorization" not in asked.headers
+
+    def test_without_a_credential_a_basic_challenge_gets_no_header(self) -> None:
+        registry = Registry(challenge='Basic realm="Registry Realm"')
+        assert self._anonymous(registry) is None
+        assert len(registry.requests) == 1
+
+    def test_without_a_credential_an_open_registry_gets_no_header(self) -> None:
+        assert self._anonymous(Registry(status=200, challenge="")) is None
 
 
 class TestRefusals:

@@ -127,6 +127,8 @@ After secret + fileset are wired, re-submit the same job JSON (use a fresh `outp
 
 Job errors like `Failed to pull image … nhx-unsloth-training:… Not Found`, `manifest unknown`, or a missing automodel training image mean the **connected platform's Docker daemon** (the one that runs GPU job steps) does not have the image. With the default `NHX_BASE_URL` (`127.0.0.1:8080` / `localhost:8080`), that daemon is usually on the same machine as the agent; with a user-overridden URL (e.g. `<remote-host>:8080`), it is on the remote target host instead.
 
+To confirm from the agent, whichever host the platform is on: `nemo jobs check-execution-profile-image <image> --provider gpu --profile <profile>` answers `exists`, `missing` or `unknown` (with a `message`) for the profile's own Docker host or registry, without pulling.
+
 **Did the user override the base URL?** (same rule as **Platform unreachable** — track this from the start of the workflow.)
 
 | Situation | Action |

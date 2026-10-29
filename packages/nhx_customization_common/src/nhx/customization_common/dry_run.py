@@ -3,26 +3,30 @@
 
 """The checks of a customization dry run (create with ``?dry_run=true``).
 
-A dry run checks that every step's execution profile is configured, and reads the first
-rows of each file training would read and checks them with the backend's own validator.
-It reads byte ranges from the Files service, so nothing is downloaded to job storage and
-nothing is created.
+A dry run checks that every step's execution profile is configured, that a GPU step's
+profile has GPUs, and that each step's image exists, through the jobs API, which asks the
+profile's backend. It reads the first rows of each file training would read and checks them
+with the backend's own validator, reading byte ranges from the Files service, so nothing is
+downloaded to job storage and nothing is created.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
-from nemo_helix_plugin.jobs.types import JobDryRunCheck
+from nemo_helix_plugin.jobs.types import ExecutionProfileGPUs, JobDryRunCheck
 from nhx.customization_common.schemas.file_io import FileSetRef
 
 ROWS_TO_CHECK = 10
+_GPU_PROVIDERS = ("gpu", "gpu_distributed")
 _CHUNK_BYTES = 64 * 1024
 # A file whose first rows are longer than this is left unchecked rather than read in full.
 _MAX_BYTES = 4 * 1024 * 1024
@@ -46,7 +50,7 @@ async def check_execution_profiles(platform_spec: HelixJobSpec, async_sdk: Async
     """Check that every step's provider and profile is configured on the platform."""
     profiles = await AsyncJobsClient.from_client(async_sdk).list_execution_profiles()
     available = {(profile.provider, profile.profile) for profile in profiles}
-    used = {(step.executor.provider, step.executor.profile) for step in platform_spec.steps}
+    used = _step_profiles(platform_spec)
     missing = sorted(f"{provider}/{profile}" for provider, profile in used - available)
     if missing:
         configured = ", ".join(sorted(f"{provider}/{profile}" for provider, profile in available)) or "none"
@@ -57,6 +61,87 @@ async def check_execution_profiles(platform_spec: HelixJobSpec, async_sdk: Async
         )
     configured_used = ", ".join(sorted(f"{provider}/{profile}" for provider, profile in used))
     return JobDryRunCheck(name="execution profile", passed=True, message=f"Configured: {configured_used}.")
+
+
+async def check_gpus(platform_spec: HelixJobSpec, async_sdk: AsyncNemoClient) -> JobDryRunCheck | None:
+    """Check that the profile of every GPU step has GPUs; None when no step needs one.
+
+    A profile whose GPUs cannot be read passes as not checked: the platform's not knowing
+    is no reason to refuse the job.
+    """
+    profiles = sorted(
+        (provider, profile) for provider, profile in _step_profiles(platform_spec) if provider in _GPU_PROVIDERS
+    )
+    if not profiles:
+        return None
+    jobs = AsyncJobsClient.from_client(async_sdk)
+    results = await asyncio.gather(*(_profile_gpus(jobs, provider, profile) for provider, profile in profiles))
+    failed = [message for passed, message in results if not passed]
+    return JobDryRunCheck(name="GPUs", passed=not failed, message=" ".join(failed or [m for _, m in results]))
+
+
+async def check_images(platform_spec: HelixJobSpec, async_sdk: AsyncNemoClient) -> JobDryRunCheck | None:
+    """Check that each step's image exists for its profile, without pulling it; None when no step names one.
+
+    An image that cannot be checked passes as not checked.
+    """
+    images = sorted(
+        {
+            (step.executor.provider, step.executor.profile, image)
+            for step in platform_spec.steps
+            if (image := getattr(getattr(step.executor, "container", None), "image", None))
+        }
+    )
+    if not images:
+        return None
+    jobs = AsyncJobsClient.from_client(async_sdk)
+    results = await asyncio.gather(*(_profile_image(jobs, *image) for image in images))
+    failed = [message for passed, message in results if not passed]
+    return JobDryRunCheck(name="images", passed=not failed, message=" ".join(failed or [m for _, m in results]))
+
+
+def _step_profiles(platform_spec: HelixJobSpec) -> set[tuple[str, str]]:
+    return {(step.executor.provider, step.executor.profile) for step in platform_spec.steps}
+
+
+async def _profile_gpus(jobs: AsyncJobsClient, provider: str, profile: str) -> tuple[bool, str]:
+    try:
+        [result] = (
+            await jobs.get_execution_profile_gpus(query_params={"provider": provider, "profile": profile})
+        ).data()
+    except (NemoClientError, ValueError) as exc:
+        return True, f"{provider}/{profile}: GPUs not checked ({exc})."
+    return result.status != "none", describe_profile_gpus(result)
+
+
+def describe_profile_gpus(result: ExecutionProfileGPUs) -> str:
+    """One line on a profile's GPUs: what it has, that it has none, or why they were not read."""
+    where = f"{result.provider}/{result.profile}"
+    if result.status == "available":
+        found = ", ".join(
+            f"{gpu.count}x {gpu.name}" + (f" (compute {gpu.compute_capability})" if gpu.compute_capability else "")
+            for gpu in result.gpus
+        )
+        return f"{where}: {found}."
+    if result.status == "none":
+        return f"{where} has no GPU a job can use: {result.message}"
+    return f"{where}: GPUs not checked ({result.message})."
+
+
+async def _profile_image(jobs: AsyncJobsClient, provider: str, profile: str, image: str) -> tuple[bool, str]:
+    try:
+        result = (
+            await jobs.check_execution_profile_image(
+                query_params={"provider": provider, "profile": profile, "image": image}
+            )
+        ).data()
+    except NemoClientError as exc:
+        return True, f"{image}: not checked ({exc})."
+    if result.status == "exists":
+        return True, f"{image}: {result.message}"
+    if result.status == "missing":
+        return False, f"{image} is missing for {provider}/{profile}: {result.message}"
+    return True, f"{image}: not checked ({result.message})."
 
 
 async def check_dataset_rows(

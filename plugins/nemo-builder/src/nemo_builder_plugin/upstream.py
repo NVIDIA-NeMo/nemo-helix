@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from nemo_builder_plugin.identity import DIGEST_PATTERN, ImageIdentityError, ImageReference, Platform
-from nemo_builder_plugin.registry_auth import parse_challenges
+from nemo_helix_plugin.registry_auth import parse_challenges
 
 MANIFEST_ACCEPT = ", ".join(
     (

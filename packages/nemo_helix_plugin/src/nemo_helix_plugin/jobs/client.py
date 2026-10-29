@@ -98,6 +98,8 @@ class AsyncJobsWatchClient(AsyncJobStatusClient, AsyncJobLogsClient, Protocol):
 class _JobsMethods:
     # Execution profiles
     get_execution_profiles = method(endpoints.get_execution_profiles)
+    get_execution_profile_gpus = method(endpoints.get_execution_profile_gpus)
+    check_execution_profile_image = method(endpoints.check_execution_profile_image)
 
     # Job CRUD + lifecycle
     create_job = method(endpoints.create_job)

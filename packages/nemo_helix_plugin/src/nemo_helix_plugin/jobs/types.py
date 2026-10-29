@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Any, NotRequired, Optional, Self, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Optional, Self, TypedDict
 
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
@@ -242,6 +242,58 @@ class JobDryRunCheck(BaseModel):
     name: str = Field(description="What was checked.")
     passed: bool
     message: str = Field(description="What the check found; on failure, what to fix.")
+
+
+ExecutionProfileGPUStatus = Literal["available", "none", "unknown"]
+ExecutionProfileImageStatus = Literal["exists", "missing", "unknown"]
+
+
+class ExecutionProfileGPU(BaseModel):
+    """GPUs of one model that an execution profile can run on."""
+
+    name: str = Field(description="GPU model, e.g. 'NVIDIA H100 80GB HBM3'.")
+    compute_capability: str | None = Field(
+        default=None, description="CUDA compute capability, e.g. '9.0'. Hopper is 9.0; Blackwell is 10.0 and up."
+    )
+    count: int = Field(description="How many of these GPUs the profile can use.")
+
+
+class ExecutionProfileGPUs(BaseModel):
+    """The GPUs an execution profile can run on, read live from its backend."""
+
+    provider: str
+    profile: str
+    backend: str
+    status: ExecutionProfileGPUStatus = Field(
+        description="'available': GPUs were found. 'none': the profile has no GPU a job can use. "
+        "'unknown': they could not be read; message says why."
+    )
+    gpus: list[ExecutionProfileGPU] = Field(default_factory=list)
+    message: str | None = None
+
+
+class ExecutionProfileImage(BaseModel):
+    """Whether an image exists for an execution profile, checked without pulling it."""
+
+    provider: str
+    profile: str
+    image: str
+    status: ExecutionProfileImageStatus = Field(
+        description="'exists': the backend has the image or its registry does. 'missing': neither does. "
+        "'unknown': it could not be checked; message says why."
+    )
+    message: str | None = None
+
+
+class ExecutionProfileGPUsQueryParams(TypedDict, total=False):
+    provider: NotRequired[str]
+    profile: NotRequired[str]
+
+
+class ExecutionProfileImageQueryParams(TypedDict):
+    provider: str
+    profile: str
+    image: str
 
 
 class HelixJobResponse(BaseModel):

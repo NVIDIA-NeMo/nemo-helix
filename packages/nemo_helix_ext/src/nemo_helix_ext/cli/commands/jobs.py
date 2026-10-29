@@ -15,6 +15,8 @@ from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    ExecutionProfileGPUsQueryParams,
+    ExecutionProfileImageQueryParams,
     HelixJobStatusUpdateRequest,
     HelixJobTaskUpdate,
     JobControl,
@@ -270,6 +272,17 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
         ]
     if operation == (("jobs",), "list_execution_profiles"):
         return ["response = jobs_client.get_execution_profiles()", "for item in response.data():", "    print(item)"]
+    if operation == (("jobs",), "list_execution_profile_gpus"):
+        return [
+            "response = jobs_client.get_execution_profile_gpus(query_params=dict(args) or None)",
+            "for item in response.data():",
+            "    print(item)",
+        ]
+    if operation == (("jobs",), "check_execution_profile_image"):
+        return [
+            "response = jobs_client.check_execution_profile_image(query_params=dict(args))",
+            "print(response.data())",
+        ]
     if operation == (("jobs",), "retrieve"):
         return [
             "response = jobs_client.get_job(name=args['name'], workspace=args.get('workspace'))",
@@ -999,6 +1012,93 @@ def list_execution_profiles_jobs(
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
+    )
+
+
+@app.command("list-execution-profile-gpus")
+@collect_warnings
+@handle_errors
+def list_execution_profile_gpus_jobs(
+    ctx: typer.Context,
+    provider: Annotated[
+        str | None, typer.Option("--provider", help="Only profiles of this provider, e.g. gpu.")
+    ] = None,
+    profile: Annotated[str | None, typer.Option("--profile", help="Only profiles with this name.")] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    columns: OutputColumnsOption = None,
+    stream: StreamOutputOption = False,
+) -> None:
+    """List the GPUs each GPU execution profile can run on, read live from its backend.
+
+    Shows the GPUs a profile can use, not how many are idle now."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
+
+    check_output_columns_with_format(columns, resolved_output_format)
+
+    default_columns = [
+        Column("provider", None),
+        Column("profile", None),
+        Column("backend", None),
+        Column("status", None),
+        Column("gpus", None),
+        Column("message", None),
+    ]
+    output_columns: str | list[Column] | None = columns
+    if columns is None or str(columns).strip() == "default":
+        output_columns = default_columns
+
+    query_params = ExecutionProfileGPUsQueryParams(**build_kwargs(provider=provider, profile=profile))
+    if handle_code_generation(
+        ["jobs"], "list_execution_profile_gpus", dict(query_params), resolved_output_format, state
+    ):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    items = jobs_client.get_execution_profile_gpus(query_params=query_params or None).data()
+
+    format_output(
+        items,
+        is_list=True,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+        stream=stream,
+    )
+
+
+@app.command("check-execution-profile-image")
+@collect_warnings
+@handle_errors
+def check_execution_profile_image_jobs(
+    ctx: typer.Context,
+    image: Annotated[str, typer.Argument(help="Image reference, e.g. nvcr.io/nvidia/nemo:25.09.")],
+    provider: Annotated[str, typer.Option("--provider", help="Execution provider, e.g. gpu.")],
+    profile: Annotated[str, typer.Option("--profile", help="Execution profile name.")],
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Check whether a job on an execution profile could pull an image, without pulling it."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    query_params = ExecutionProfileImageQueryParams(provider=provider, profile=profile, image=image)
+    if handle_code_generation(
+        ["jobs"], "check_execution_profile_image", dict(query_params), resolved_output_format, state
+    ):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.check_execution_profile_image(query_params=query_params).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
     )
 
 

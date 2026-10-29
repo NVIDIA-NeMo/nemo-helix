@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,11 +13,13 @@ from unittest.mock import MagicMock, patch
 import httpx
 from nemo_helix_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
+    check_execution_profile_image_jobs,
     create_or_update_tasks,
     create_results,
     download_results,
     get_logs_jobs,
     list_attempts,
+    list_execution_profile_gpus_jobs,
     list_jobs,
     list_results,
     list_steps,
@@ -661,3 +663,99 @@ def test_jobs_task_update_code_generation_uses_attempt_route() -> None:
     assert "update_attempt_step_task" in code
     assert "update_job_step_task" not in code
     assert "attempt=args['attempt_id']" in code
+
+
+def _wire_ctx(handler: Callable[[httpx.Request], httpx.Response]) -> SimpleNamespace:
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    return _ctx(NemoClient(base_url="http://nemo.test", workspace="test-workspace", http_client=http_client))
+
+
+def test_list_execution_profile_gpus_sends_filters_and_parses_profiles() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "provider": "gpu",
+                    "profile": "default",
+                    "backend": "kubernetes_job",
+                    "status": "available",
+                    "gpus": [{"name": "NVIDIA H100 80GB HBM3", "compute_capability": "9.0", "count": 8}],
+                }
+            ],
+        )
+
+    with patch("nemo_helix_ext.cli.commands.jobs.format_output") as format_output:
+        list_execution_profile_gpus_jobs(_wire_ctx(handler), provider="gpu", profile="default")
+
+    assert requests[0].url.path == "/apis/jobs/v2/execution-profiles/gpus"
+    assert dict(requests[0].url.params) == {"provider": "gpu", "profile": "default"}
+    (profile,) = format_output.call_args.args[0]
+    assert profile.gpus[0].count == 8
+    assert profile.gpus[0].compute_capability == "9.0"
+
+
+def test_list_execution_profile_gpus_without_filters_sends_no_query() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    with patch("nemo_helix_ext.cli.commands.jobs.format_output"):
+        list_execution_profile_gpus_jobs(_wire_ctx(handler))
+
+    assert requests[0].url.query == b""
+
+
+def test_check_execution_profile_image_sends_profile_and_image() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"provider": "gpu", "profile": "default", "image": "nvcr.io/nvidia/nemo:25.09", "status": "missing"},
+        )
+
+    with patch("nemo_helix_ext.cli.commands.jobs.format_output") as format_output:
+        check_execution_profile_image_jobs(
+            _wire_ctx(handler), image="nvcr.io/nvidia/nemo:25.09", provider="gpu", profile="default"
+        )
+
+    assert requests[0].url.path == "/apis/jobs/v2/execution-profiles/image"
+    assert dict(requests[0].url.params) == {
+        "provider": "gpu",
+        "profile": "default",
+        "image": "nvcr.io/nvidia/nemo:25.09",
+    }
+    assert format_output.call_args.args[0].status == "missing"
+
+
+def test_execution_profile_check_code_generation_uses_jobs_client() -> None:
+    gpus = _generate_jobs_python_code(
+        resource_path=["jobs"],
+        method="list_execution_profile_gpus",
+        args={"provider": "gpu"},
+        base_url="http://example.test",
+        wait_config=None,
+        wait_options=None,
+        watch_config=None,
+        watch_options=None,
+    )
+    image = _generate_jobs_python_code(
+        resource_path=["jobs"],
+        method="check_execution_profile_image",
+        args={"provider": "gpu", "profile": "default", "image": "nvcr.io/nvidia/nemo:25.09"},
+        base_url="http://example.test",
+        wait_config=None,
+        wait_options=None,
+        watch_config=None,
+        watch_options=None,
+    )
+
+    assert "jobs_client.get_execution_profile_gpus(query_params=dict(args) or None)" in gpus
+    assert "jobs_client.check_execution_profile_image(query_params=dict(args))" in image

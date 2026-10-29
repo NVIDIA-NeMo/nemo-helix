@@ -151,6 +151,27 @@ NeMo Helix currently supports the following execution backends:
 
 For when the **control plane** itself needs Docker (deployments preflight) versus when jobs use subprocess, see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors). Inspect registered profiles with `nemo jobs list-execution-profiles -f json`.
 
+### Checking a Profile's GPUs and Images
+
+Two read-only checks ask a profile's backend directly, on every call, so they work against a remote platform where the agent's local `docker` or `kubectl` would answer about the wrong host.
+
+```bash
+# GPUs each gpu / gpu_distributed profile can run on, by model and compute capability
+nemo jobs list-execution-profile-gpus -f json
+nemo jobs list-execution-profile-gpus --provider gpu --profile default -f json
+
+# Whether a job on the profile could pull an image, without pulling it
+nemo jobs check-execution-profile-image nvcr.io/nvidia/nemo:25.09 --provider gpu --profile default
+```
+
+The REST routes are `GET /apis/jobs/v2/execution-profiles/gpus` and `GET /apis/jobs/v2/execution-profiles/image`.
+
+- **GPUs** are the inventory a profile can use, not how many are idle now. Docker runs `nvidia-smi` in a short container of the platform's tasks image, given the GPUs a job would get (`docker.reserved_gpu_device_ids`), which also proves the NVIDIA Container Toolkit works. Kubernetes and Volcano sum allocatable `nvidia.com/gpu` on the nodes the profile's `node_selector` matches, by the `nvidia.com/gpu.product` and `nvidia.com/gpu.compute.*` labels that [GPU Feature Discovery](https://github.com/NVIDIA/k8s-device-plugin) sets.
+- **Images**: Docker looks on its host, then asks the registry with the host's credentials. Kubernetes and Volcano ask the registry for the image's manifest, signed in with the platform's and the profile's `image_pull_secrets`.
+- Each result has a `status` (`available`/`none`/`unknown` for GPUs, `exists`/`missing`/`unknown` for images) and a `message` that says why when it is not a clear yes.
+
+On Kubernetes, the API's service account needs to list nodes and read the pull secrets. When `api.profileChecks.rbac` is `true` (the default), the Helm chart grants node `get`/`list` and `get` on only the Secrets named in `imagePullSecrets`. Without node access the GPU check answers `unknown`; without a pull secret the image check asks the registry anonymously.
+
 ### Subprocess
 
 The subprocess backend runs job commands directly on the control plane host. It is useful for trusted local development workloads, but it does not provide container isolation and should not run untrusted code.

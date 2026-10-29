@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Logging in to a registry with a username and password, the way its `/v2/` challenge asks."""
+"""Logging in to a registry with a username and password, or anonymously, the way its `/v2/` challenge asks."""
 
 from __future__ import annotations
 
@@ -43,12 +43,21 @@ def basic(username: str, password: str) -> str:
 
 
 def login(
-    registry: str, username: str, password: str, repository: str, *, http: httpx.Client, plain_http: bool = False
-) -> str:
-    """The `Authorization` header for pushing to ``repository`` on ``registry``.
+    registry: str,
+    username: str | None,
+    password: str | None,
+    repository: str,
+    *,
+    http: httpx.Client,
+    plain_http: bool = False,
+    actions: str = "pull,push",
+) -> str | None:
+    """The `Authorization` header for ``actions`` on ``repository`` on ``registry``.
 
-    A Bearer challenge gets a token from the registry's token service, for ``repository``, pull and push, in
-    exchange for the credential (the Distribution token specification). Any other gets the credential as Basic.
+    A Bearer challenge gets a token from the registry's token service, for ``repository`` and ``actions``, in
+    exchange for the credential (the Distribution token specification); without a credential, an anonymous
+    token. Any other challenge gets the credential as Basic. ``None`` when the registry asks for nothing, or
+    asks for Basic and there is no credential.
     """
     scheme = "http" if plain_http else "https"
     try:
@@ -58,8 +67,10 @@ def login(
     if response.status_code not in (200, 401):
         raise RegistryAuthError(f"{registry} answered /v2/ with {response.status_code}")
     bearer = dict(parse_challenges(response.headers.get("WWW-Authenticate", ""))).get("bearer")
+    if response.status_code == 200 and username is None:
+        return None
     if response.status_code == 200 or bearer is None or not bearer.get("realm"):
-        return basic(username, password)
+        return basic(username, password) if username is not None and password is not None else None
 
     realm = bearer["realm"]
     # The credential goes to the realm the registry names: never in clear unless the registry is reached in clear.
@@ -68,8 +79,8 @@ def login(
     try:
         issued = http.get(
             realm,
-            params={"service": bearer.get("service", registry), "scope": f"repository:{repository}:pull,push"},
-            auth=(username, password),
+            params={"service": bearer.get("service", registry), "scope": f"repository:{repository}:{actions}"},
+            auth=(username, password) if username is not None and password is not None else None,
         )
     except httpx.HTTPError as exc:
         raise RegistryAuthError(f"{registry}'s token service could not be reached: {type(exc).__name__}") from exc

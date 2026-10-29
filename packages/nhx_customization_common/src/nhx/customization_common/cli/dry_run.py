@@ -17,13 +17,14 @@ import httpx
 import typer
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.cli_state import resolve_output_format
+from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.commands import resolve_submit_auth_headers, resolve_submit_base_url
 from nemo_helix_plugin.jobs._cli_options import load_options_file, merge_options, parse_dotted_kv_list
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import JobDryRunCheck
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 from nhx.customization_common.contributor.jobs import BaseSubmitJob
-from nhx.customization_common.dry_run import check_local_dataset_rows
+from nhx.customization_common.dry_run import check_local_dataset_rows, describe_profile_gpus
 
 _GPU_PROVIDERS = ("gpu", "gpu_distributed")
 _KUBERNETES_BACKENDS = ("kubernetes_job", "volcano_job")
@@ -137,8 +138,8 @@ def add_preflight_command(group: typer.Typer, *, backend: str, kubernetes_only: 
     @group.command(
         "preflight",
         help=(
-            "Check the platform before preparing data: it is reachable and has a GPU execution "
-            "profile this backend can use. Creates nothing."
+            "Check the platform before preparing data: it is reachable, has a GPU execution "
+            "profile this backend can use, and that profile has GPUs. Creates nothing."
         ),
     )
     def preflight(
@@ -152,6 +153,14 @@ def add_preflight_command(group: typer.Typer, *, backend: str, kubernetes_only: 
         try:
             with JobsClient(base_url=base_url, default_headers=headers or None) as jobs:
                 profiles = jobs.list_execution_profiles()
+                profile_check = _check_gpu_profile(
+                    profiles, backend=backend, profile=profile, kubernetes_only=kubernetes_only
+                )
+                gpu_check = (
+                    _check_profile_gpus(jobs, profile=profile, kubernetes_only=kubernetes_only)
+                    if profile_check.passed
+                    else None
+                )
         except Exception as exc:
             checks = [
                 JobDryRunCheck(
@@ -163,7 +172,8 @@ def add_preflight_command(group: typer.Typer, *, backend: str, kubernetes_only: 
         else:
             checks = [
                 JobDryRunCheck(name="platform", passed=True, message=f"Reachable at {base_url}."),
-                _check_gpu_profile(profiles, backend=backend, profile=profile, kubernetes_only=kubernetes_only),
+                profile_check,
+                *([gpu_check] if gpu_check else []),
             ]
         _report(
             typer_ctx,
@@ -201,3 +211,21 @@ def _check_gpu_profile(
         gpu = runnable
     usable = ", ".join(sorted(f"{p.provider}/{p.profile} ({p.backend})" for p in gpu))
     return JobDryRunCheck(name="execution profile", passed=True, message=f"Usable: {usable}.")
+
+
+def _check_profile_gpus(jobs: JobsClient, *, profile: str | None, kubernetes_only: bool) -> JobDryRunCheck:
+    """Check that a usable GPU profile has GPUs, read live from its backend.
+
+    Passes when any profile has GPUs or they could not be read; fails when none has any.
+    """
+    try:
+        results = jobs.get_execution_profile_gpus(query_params={"profile": profile} if profile else None).data()
+    except NemoClientError as exc:
+        return JobDryRunCheck(name="GPUs", passed=True, message=f"Not checked: {exc}.")
+    if kubernetes_only:
+        results = [result for result in results if result.backend in _KUBERNETES_BACKENDS]
+    return JobDryRunCheck(
+        name="GPUs",
+        passed=any(result.status != "none" for result in results),
+        message=" ".join(describe_profile_gpus(result) for result in results),
+    )

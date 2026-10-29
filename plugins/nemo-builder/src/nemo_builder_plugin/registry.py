@@ -57,7 +57,7 @@ def digest_of(data: bytes) -> str:
 
 
 class Registry:
-    """One registry's manifests and blobs, reached with one `Authorization` header (see `registry_auth.login`)."""
+    """One registry's manifests and blobs, reached with one `Authorization` header (see `nemo_helix_plugin.registry_auth.login`)."""
 
     def __init__(
         self,

@@ -11,7 +11,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import respx
 from nemo_automodel_plugin.contributor import AutomodelContributor
-from typer.testing import CliRunner
+from nemo_helix_plugin.jobs.types import ExecutionProfileGPU, ExecutionProfileGPUs, ExecutionProfileGPUStatus
+from typer.testing import CliRunner, Result
 
 _CHAT = {"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]}
 _CREATE = "http://nhx.test/apis/customization/v2/workspaces/default/automodel/jobs"
@@ -102,18 +103,54 @@ def test_dry_run_cannot_wait(tmp_path: Path) -> None:
     assert "--dry-run creates no job to wait for" in result.output
 
 
-def test_preflight_passes_with_a_gpu_profile() -> None:
+def _preflight_with_gpus(status: ExecutionProfileGPUStatus, message: str | None = None) -> Result:
     profiles = [SimpleNamespace(provider="gpu", profile="default", backend="docker")]
+    found = [ExecutionProfileGPU(name="NVIDIA H100 80GB HBM3", compute_capability="9.0", count=8)]
+    gpus = ExecutionProfileGPUs(
+        provider="gpu",
+        profile="default",
+        backend="docker",
+        status=status,
+        gpus=found if status == "available" else [],
+        message=message,
+    )
     jobs = MagicMock()
     jobs.__enter__.return_value.list_execution_profiles.return_value = profiles
+    jobs.__enter__.return_value.get_execution_profile_gpus.return_value.data.return_value = [gpus]
     with patch("nhx.customization_common.cli.dry_run.JobsClient", return_value=jobs):
-        result = CliRunner().invoke(AutomodelContributor().get_cli(), ["preflight"])
+        return CliRunner().invoke(AutomodelContributor().get_cli(), ["preflight"])
+
+
+def test_preflight_passes_with_a_gpu_profile_that_has_gpus() -> None:
+    result = _preflight_with_gpus("available")
 
     assert result.exit_code == 0, result.output
     assert [check["message"] for check in json.loads(result.output)["checks"]] == [
         "Reachable at http://nhx.test.",
         "Usable: gpu/default (docker).",
+        "gpu/default: 8x NVIDIA H100 80GB HBM3 (compute 9.0).",
     ]
+
+
+def test_preflight_fails_when_the_gpu_profile_has_no_gpus() -> None:
+    result = _preflight_with_gpus(
+        "none", "Docker cannot give containers a GPU: the NVIDIA Container Toolkit is not set up."
+    )
+
+    assert result.exit_code == 1
+    gpus = json.loads(result.output)["checks"][-1]
+    assert (gpus["name"], gpus["passed"]) == ("GPUs", False)
+    assert "NVIDIA Container Toolkit" in gpus["message"]
+
+
+def test_preflight_passes_when_gpus_cannot_be_read() -> None:
+    result = _preflight_with_gpus("unknown", "The jobs API may not list nodes.")
+
+    assert result.exit_code == 0, result.output
+    assert (
+        json.loads(result.output)["checks"][-1]["message"]
+        == "gpu/default: GPUs not checked (The jobs API may not list nodes.)."
+    )
 
 
 def test_preflight_fails_without_the_platform() -> None:

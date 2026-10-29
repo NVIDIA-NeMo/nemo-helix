@@ -828,7 +828,6 @@ The tests need no cluster, registry or running platform.
 | `completion.py` | Who may complete an image, and the one write that makes its row `ready` |
 | `signing.py` | What a signature says, cosign's format for storing it, and the key that makes it |
 | `registry.py` | The registry calls the push step makes to store a signature |
-| `registry_auth.py` | Logging in to a registry with a username and password, as its challenge asks |
 | `client.py` | A typed client for the builder's routes, which the push step uses |
 | `steps.py` | What each step's config contains, the push step's environment, and `WorkLayout` |
 | `entities.py` | `ContainerImage` |

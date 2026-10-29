@@ -176,7 +176,7 @@ See [Knowledge Distillation constraints](/documentation/customizer-reference/man
 
 ## Check a Job Before Submitting
 
-A dry run checks a job the way submit does, then stops before creating it. It validates and compiles the job, checks that its execution profile exists, and reads the first 10 rows of every dataset file training would read and checks them with the backend's own validator. A dataset error comes back in seconds, with the file and line number, instead of after the job reaches a GPU. Nothing is created and nothing is downloaded to job storage.
+A dry run checks a job the way submit does, then stops before creating it. It validates and compiles the job, checks that its execution profile exists and has GPUs, checks that each step's image exists without pulling it, and reads the first 10 rows of every dataset file training would read and checks them with the backend's own validator. A dataset error comes back in seconds, with the file and line number, instead of after the job reaches a GPU. Nothing is created and nothing is downloaded to job storage.
 
 Pass `dry_run=True` to `create`. It is the same call as a submit, with `?dry_run=true` on the request. When every check passes, it returns the job it would create, unsaved (no `id` or `status`), with the checks in `status_details["checks"]`. When a check fails, it raises `UnprocessableEntityError` (HTTP 422), whose body lists every check, passed and failed:
 
@@ -200,7 +200,7 @@ nemo customization automodel --job-json job.json --dry-run
 
 With `--upload-model` or `--upload-dataset`, the dry run uploads nothing. It checks the job JSON and the first rows of the local dataset; the model and dataset references and the execution profile are checked at submit, once they exist.
 
-Before preparing any data, `nemo customization <backend> preflight` checks that the platform is reachable and has a GPU execution profile the backend can use. For `rl`, that profile must run on `kubernetes_job` or `volcano_job`.
+Before preparing any data, `nemo customization <backend> preflight` checks that the platform is reachable, has a GPU execution profile the backend can use, and that the profile has GPUs, listed by model and compute capability. For `rl`, that profile must run on `kubernetes_job` or `volcano_job`. GPUs and images are read live from the profile's backend through the jobs API (see [Checking a Profile's GPUs and Images](/documentation/kubernetes-deployment/setup/jobs#checking-a-profiles-gpus-and-images)); one the platform cannot read is reported as not checked rather than failed.
 
 ---
 

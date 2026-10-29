@@ -1234,6 +1234,20 @@ authz:
         scopes:
         - jobs:read
         - platform:read
+    /apis/jobs/v2/execution-profiles/gpus:
+      get:
+        permissions:
+        - jobs.list
+        scopes:
+        - jobs:read
+        - platform:read
+    /apis/jobs/v2/execution-profiles/image:
+      get:
+        permissions:
+        - jobs.list
+        scopes:
+        - jobs:read
+        - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs:
       get:
         permissions:

@@ -947,6 +947,9 @@ api:
     name: ""
   # -- Annotations to add to the API service deployment.
   annotations: {}
+  profileChecks:
+    # -- Let the jobs API list nodes (cluster-wide) and get the Secrets named in imagePullSecrets (release namespace, those names only), so it can report each execution profile's GPUs and whether an image exists.
+    rbac: true
   # -- Annotations to add to the API service pod.
   podAnnotations: {}
   # -- Labels for the API service pod.

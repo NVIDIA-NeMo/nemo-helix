@@ -31,7 +31,6 @@ from nemo_builder_plugin.client import BuilderClient
 from nemo_builder_plugin.completion import CompleteRequest
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.registry import REGISTRY_TIMEOUT_SECONDS, Registry, registry_client
-from nemo_builder_plugin.registry_auth import login
 from nemo_builder_plugin.run.tools import run_tool
 from nemo_builder_plugin.run.utils import job_identity, read_step_config, work_mount
 from nemo_builder_plugin.signing import SigningKey, sign_image
@@ -47,6 +46,7 @@ from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.registry_auth import login
 
 logger = logging.getLogger(__name__)
 

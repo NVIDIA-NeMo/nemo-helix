@@ -76,6 +76,11 @@ spec:
             {{- end }}
             - name: NHX_CONFIG_FILE_PATH
               value: /etc/nhx/config.yaml
+            # The namespace of the image pull secrets the jobs API reads to check an image exists.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: NHX_INTAKE_CLICKHOUSE_URL
               value: {{ include "nemo-common.clickhouse.url" . | quote }}
             - name: NHX_INTAKE_CLICKHOUSE_USER

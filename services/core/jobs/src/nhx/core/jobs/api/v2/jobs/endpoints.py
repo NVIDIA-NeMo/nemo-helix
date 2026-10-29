@@ -3,6 +3,7 @@
 
 """Job API endpoints."""
 
+import asyncio
 import logging
 import math
 import re
@@ -14,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 from fastapi.openapi.models import Example
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.result_manager import download_from_result_info
-from nemo_helix_plugin.jobs.types import JobControl
+from nemo_helix_plugin.jobs.types import ExecutionProfileGPUs, ExecutionProfileImage, JobControl
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -70,6 +71,7 @@ from nhx.core.jobs.app.dispatcher import (
     StateTransitionConflictError,
     create_attempt_response,
 )
+from nhx.core.jobs.app.profile_checks import GPU_PROVIDERS, profile_gpus, profile_image
 from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.providers import CPUExecutionProvider, SubprocessExecutionProvider
 from nhx.core.jobs.app.schemas import (
@@ -341,6 +343,51 @@ async def get_execution_profiles() -> list[ExecutionProfileT]:
     process memory).
     """
     return profiles
+
+
+@router.get("/v2/execution-profiles/gpus")
+async def get_execution_profile_gpus(
+    provider: Annotated[str | None, Query(description="Only profiles of this provider, e.g. 'gpu'.")] = None,
+    profile: Annotated[str | None, Query(description="Only profiles with this name.")] = None,
+) -> list[ExecutionProfileGPUs]:
+    """Read the GPUs each GPU execution profile can run on, live from its backend.
+
+    Docker runs ``nvidia-smi`` in a short container given the GPUs a job would get. Kubernetes
+    and Volcano sum the allocatable GPUs of the nodes the profile's node selector matches, by
+    the model GPU Feature Discovery labels. This is the inventory a profile can use, not how
+    many GPUs are idle now.
+    """
+    selected = [
+        p
+        for p in profiles
+        if p.provider in GPU_PROVIDERS
+        and (provider is None or p.provider == provider)
+        and (profile is None or p.profile == profile)
+    ]
+    if not selected and (provider is not None or profile is not None):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No GPU execution profile matches provider={provider!r}, profile={profile!r}.",
+        )
+    return [await asyncio.to_thread(profile_gpus, p) for p in selected]
+
+
+@router.get("/v2/execution-profiles/image")
+async def check_execution_profile_image(
+    provider: Annotated[str, Query(description="Execution provider, e.g. 'gpu'.")],
+    profile: Annotated[str, Query(description="Execution profile name.")],
+    image: Annotated[str, Query(description="Image reference, e.g. 'nvcr.io/nvidia/nemo:25.09'.")],
+) -> ExecutionProfileImage:
+    """Check whether a job on this execution profile could pull *image*, without pulling it.
+
+    Docker looks for the image on its host, then asks its registry with the host's credentials.
+    Kubernetes and Volcano ask the image's registry for its manifest, signed in with the image
+    pull secrets of the profile and the platform.
+    """
+    match = next((p for p in profiles if p.provider == provider and p.profile == profile), None)
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No execution profile {provider}/{profile}.")
+    return await asyncio.to_thread(profile_image, match, image)
 
 
 @router.post(

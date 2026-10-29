@@ -11,6 +11,7 @@ call convention, schema validation, profile resolution) and stays per-backend.
 
 from __future__ import annotations
 
+import asyncio
 from typing import ClassVar, Generic, TypeVar, cast
 
 from nemo_helix_plugin.capabilities import probe_docker
@@ -20,7 +21,13 @@ from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import JobDryRunCheck
-from nhx.customization_common.dry_run import DatasetRows, check_dataset_rows, check_execution_profiles
+from nhx.customization_common.dry_run import (
+    DatasetRows,
+    check_dataset_rows,
+    check_execution_profiles,
+    check_gpus,
+    check_images,
+)
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -154,9 +161,16 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         workspace: str,
         async_sdk: AsyncNemoClient,
     ) -> list[JobDryRunCheck]:
-        """Check every step's execution profile, and the first rows of every file training would read."""
+        """Check every step's execution profile, its GPUs and image, and the first rows of every file training reads.
+
+        GPUs and images are checked only once every profile exists.
+        """
         datasets = cls._dry_run_datasets(cast(JobOutputT, spec), workspace)
-        return [
-            await check_execution_profiles(platform_spec, async_sdk),
-            *await check_dataset_rows(datasets, workspace, async_sdk),
-        ]
+        profiles = await check_execution_profiles(platform_spec, async_sdk)
+        checks = [profiles]
+        if profiles.passed:
+            gpus, images = await asyncio.gather(
+                check_gpus(platform_spec, async_sdk), check_images(platform_spec, async_sdk)
+            )
+            checks += [check for check in (gpus, images) if check is not None]
+        return [*checks, *await check_dataset_rows(datasets, workspace, async_sdk)]

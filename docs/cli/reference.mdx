@@ -4126,6 +4126,8 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `get-status`: Get the status of a platform job.
 * `list`: List platform jobs with filtering and pagination.
 * `list-execution-profiles`: Get all currently configured execution profiles.
+* `list-execution-profile-gpus`: List the GPUs each GPU execution profile can run on, read...
+* `check-execution-profile-image`: Check whether a job on an execution profile could pull an...
 * `pause`: Pause a platform job by name or ID.
 * `resume`: Resume a paused platform job by name or ID.
 * `rerun`: Rerun a failed platform job from surviving storage.
@@ -4374,6 +4376,61 @@ nemo jobs list-execution-profiles [OPTIONS]
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
 * `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 * `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+#### nemo jobs list-execution-profile-gpus
+
+List the GPUs each GPU execution profile can run on, read live from its backend.
+
+Shows the GPUs a profile can use, not how many are idle now.
+
+**Usage:**
+
+```shell
+nemo jobs list-execution-profile-gpus [OPTIONS]
+```
+
+**Options:**
+
+* `--provider`: Only profiles of this provider, e.g. gpu.
+* `--profile`: Only profiles with this name.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+* `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+#### nemo jobs check-execution-profile-image
+
+Check whether a job on an execution profile could pull an image, without pulling it.
+
+**Usage:**
+
+```shell
+nemo jobs check-execution-profile-image [OPTIONS] IMAGE
+```
+
+**Arguments:**
+
+* `<IMAGE>`: Image reference, e.g. nvcr.io/nvidia/nemo:25.09.
+
+**Options:**
+
+* `--provider`: Execution provider, e.g. gpu.
+* `--profile`: Execution profile name.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 #### nemo jobs pause
 
@@ -9749,7 +9806,7 @@ nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `preflight`: Check the platform before preparing data: it is reachable...
+* `preflight`: Check the platform before preparing data: it is...
 
 ##### nemo customization automodel explain
 
@@ -9771,7 +9828,7 @@ nemo customization automodel explain [OPTIONS]
 
 ##### nemo customization automodel preflight
 
-Check the platform before preparing data: it is reachable and has a GPU execution profile this backend can use. Creates nothing.
+Check the platform before preparing data: it is reachable, has a GPU execution profile this backend can use, and that profile has GPUs. Creates nothing.
 
 **Usage:**
 
@@ -9878,7 +9935,7 @@ nemo customization rl [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `preflight`: Check the platform before preparing data: it is reachable...
+* `preflight`: Check the platform before preparing data: it is...
 
 ##### nemo customization rl explain
 
@@ -9900,7 +9957,7 @@ nemo customization rl explain [OPTIONS]
 
 ##### nemo customization rl preflight
 
-Check the platform before preparing data: it is reachable and has a GPU execution profile this backend can use. Creates nothing.
+Check the platform before preparing data: it is reachable, has a GPU execution profile this backend can use, and that profile has GPUs. Creates nothing.
 
 **Usage:**
 
@@ -10004,7 +10061,7 @@ nemo customization unsloth [OPTIONS] [COMMAND] [ARGS]...
 **Commands:**
 
 * `explain`: Show input/output schemas.
-* `preflight`: Check the platform before preparing data: it is reachable...
+* `preflight`: Check the platform before preparing data: it is...
 
 ##### nemo customization unsloth explain
 
@@ -10026,7 +10083,7 @@ nemo customization unsloth explain [OPTIONS]
 
 ##### nemo customization unsloth preflight
 
-Check the platform before preparing data: it is reachable and has a GPU execution profile this backend can use. Creates nothing.
+Check the platform before preparing data: it is reachable, has a GPU execution profile this backend can use, and that profile has GPUs. Creates nothing.
 
 **Usage:**
 
