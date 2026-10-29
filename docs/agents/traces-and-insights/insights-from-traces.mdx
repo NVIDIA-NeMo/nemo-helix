@@ -207,10 +207,9 @@ Analysis runs save their findings with the `compass.persist`
 [post-run action](/documentation/agents/execute-agents-as-jobs#post-run-actions).
 Its counterpart, `compass.preview`, files nothing: its `analysis-report` lists
 the Insights the run would create, with their descriptions, ratings, and
-evidence, and the existing Insights that would gain evidence. If persisting
-would fail because the run adds evidence to another agent's Insight, the
-report says so at the top. Neither action takes config. Both act on the agent
-named in the Compass agent config and on the job's own workspace.
+evidence, and the existing Insights that would gain evidence. Neither action
+takes config. Both act on the agent named in the Compass agent config and on
+the job's own workspace.
 
 ## Run Analysis on a Schedule
 

@@ -17,7 +17,6 @@ from nemo_compass_plugin.post_run_actions import (
     REPORT_RESULT_NAME,
     CompassPersistAction,
     CompassPreviewAction,
-    ExistingInsight,
     render_preview,
     target_agent,
 )
@@ -42,7 +41,6 @@ CHANGE_SET: dict[str, Any] = {
     "updated_insights": [
         {"id": "insight-known", "evidence": [{"trace_id": "trace-2"}]},
         {"id": "insight-gone", "evidence": [{"trace_id": "trace-3"}]},
-        {"id": "insight-foreign", "evidence": [{"trace_id": "trace-4"}]},
     ],
     "notes": ["- below threshold: one flaky tool call"],
 }
@@ -112,9 +110,7 @@ class FakeBackend:
         self.looked_up.append((workspace, insight_id))
         if insight_id == "insight-gone":
             raise InsightNotFoundError(insight_id)
-        if insight_id == "insight-foreign":
-            return SimpleNamespace(title="Another agent's insight", workspace=workspace, agent="other-agent")
-        return SimpleNamespace(title="Known insight title", workspace=workspace, agent="research-agent")
+        return SimpleNamespace(title="Known insight title")
 
 
 @pytest.fixture
@@ -146,18 +142,13 @@ def test_preview_writes_nothing_and_reports_what_persisting_would_do(ctx: JobCon
 
     [backend] = FakeBackend.instances
     assert backend.persisted == []
-    assert backend.looked_up == [
-        ("job-workspace", "insight-known"),
-        ("job-workspace", "insight-gone"),
-        ("job-workspace", "insight-foreign"),
-    ]
+    assert backend.looked_up == [("job-workspace", "insight-known"), ("job-workspace", "insight-gone")]
     assert client.closed
     report = _report(ctx)
     assert "Preview: no insights were saved." in report
     assert "Retrieval truncates long documents" in report
     assert "- Known insight title [insight-known]: 1 trace, 0 spans" in report
     assert "- would skip (insight not found): insight-gone" in report
-    assert "- would fail (insight belongs to another agent): Another agent's insight [insight-foreign]" in report
 
 
 @pytest.mark.parametrize("action", [CompassPersistAction, CompassPreviewAction])
@@ -208,7 +199,7 @@ def test_a_compass_harness_without_an_agent_is_rejected() -> None:
 
 
 def test_an_empty_preview_says_so() -> None:
-    report = render_preview(CompassResult(summary="Nothing new."), existing={})
+    report = render_preview(CompassResult(summary="Nothing new."), existing_titles={})
 
     assert report == "\n".join(
         [
@@ -228,14 +219,7 @@ def test_an_empty_preview_says_so() -> None:
 def test_a_preview_lays_out_each_proposed_insight() -> None:
     result = CompassResult.model_validate(CHANGE_SET)
 
-    report = render_preview(
-        result,
-        existing={
-            "insight-known": ExistingInsight(title="Known insight title", owned=True),
-            "insight-gone": None,
-            "insight-foreign": ExistingInsight(title="Another agent's insight", owned=True),
-        },
-    )
+    report = render_preview(result, existing_titles={"insight-known": "Known insight title", "insight-gone": None})
 
     assert report.splitlines()[4:13] == [
         "Proposed new insights (1)",
@@ -249,34 +233,3 @@ def test_a_preview_lays_out_each_proposed_insight() -> None:
         "       - span span-1",
     ]
     assert report.splitlines()[-2:] == ["Notes", "- below threshold: one flaky tool call"]
-
-
-def test_a_preview_warns_when_persisting_would_fail() -> None:
-    """Persisting raises on evidence for another agent's insight; the preview says so up front."""
-    result = CompassResult.model_validate(CHANGE_SET)
-
-    report = render_preview(
-        result,
-        existing={
-            "insight-known": ExistingInsight(title="Known insight title", owned=True),
-            "insight-gone": None,
-            "insight-foreign": ExistingInsight(title="Another agent's insight", owned=False),
-        },
-    )
-
-    assert report.splitlines()[:2] == [
-        "Preview: no insights were saved.",
-        "Persisting this change-set would fail: it adds evidence to another agent's insights.",
-    ]
-    assert "Existing insights that would gain evidence (1)" in report
-    assert "- would fail (insight belongs to another agent): Another agent's insight [insight-foreign]" in report
-
-
-def test_an_unowned_insight_without_new_evidence_does_not_fail() -> None:
-    """Persisting checks ownership only when it adds evidence."""
-    result = CompassResult.model_validate({"summary": "s", "updated_insights": [{"id": "insight-foreign"}]})
-
-    report = render_preview(result, existing={"insight-foreign": ExistingInsight(title="Theirs", owned=False)})
-
-    assert "would fail" not in report
-    assert "- Theirs [insight-foreign]: 0 traces, 0 spans" in report
