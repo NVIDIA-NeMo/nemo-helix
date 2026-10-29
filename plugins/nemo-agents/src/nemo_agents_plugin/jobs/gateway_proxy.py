@@ -24,10 +24,10 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Generator, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, overload
+from typing import Any
 from urllib.parse import urlsplit
 
 import uvicorn
@@ -45,39 +45,23 @@ _STARTUP_TIMEOUT_SECONDS = 10.0
 _SHUTDOWN_TIMEOUT_SECONDS = 5
 
 
-def _gateway_models(config: AgentConfig | Mapping[str, Any]) -> Iterator[tuple[ModelConfig | dict[str, Any], str]]:
-    if isinstance(config, AgentConfig):
-        models: list[ModelConfig | dict[str, Any]] = [
-            *config.models.values(),
-            *(h.model for h in config.harnesses.values() if h.model is not None),
-        ]
-    else:
-        model_entries = config.get("models")
-        harness_entries = config.get("harnesses")
-        models = (
-            [model for model in model_entries.values() if isinstance(model, dict)]
-            if isinstance(model_entries, Mapping)
-            else []
-        )
-        if isinstance(harness_entries, Mapping):
-            models.extend(
-                model
-                for harness in harness_entries.values()
-                if isinstance(harness, Mapping) and isinstance((model := harness.get("model")), dict)
-            )
+def _is_gateway_url(base_url: object) -> bool:
+    return isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/")
+
+
+def _onto_proxy(url: str, origin: str) -> str:
+    proxy = urlsplit(origin)
+    return urlsplit(url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+
+
+def _gateway_models(config: AgentConfig) -> Iterator[ModelConfig]:
+    models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
     for model in models:
-        if isinstance(model, ModelConfig):
-            base_url = model.base_url or model.settings.get("base_url")
-        else:
-            base_url = model.get("base_url")
-            settings = model.get("settings")
-            if not base_url and isinstance(settings, Mapping):
-                base_url = settings.get("base_url")
-        if isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/"):
-            yield model, base_url
+        if _is_gateway_url(model.base_url or model.settings.get("base_url")):
+            yield model
 
 
-def routes_inference_through_gateway(config: AgentConfig | Mapping[str, Any]) -> bool:
+def routes_inference_through_gateway(config: AgentConfig) -> bool:
     """Whether any of *config*'s models point at Inference Gateway.
 
     One of the two reasons to run a proxy; the caller ORs it with the other
@@ -86,17 +70,7 @@ def routes_inference_through_gateway(config: AgentConfig | Mapping[str, Any]) ->
     return any(_gateway_models(config))
 
 
-@overload
-def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConfig: ...
-
-
-@overload
-def rewrite_gateway_models(config: Mapping[str, Any], origin: str | None) -> Mapping[str, Any]: ...
-
-
-def rewrite_gateway_models(
-    config: AgentConfig | Mapping[str, Any], origin: str | None
-) -> AgentConfig | Mapping[str, Any]:
+def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConfig:
     """Return *config* with its gateway models pointed at *origin*.
 
     Returns the config itself when there is no proxy to route through or no
@@ -107,18 +81,34 @@ def rewrite_gateway_models(
     if origin is None or not routes_inference_through_gateway(config):
         return config
 
-    proxy = urlsplit(origin)
-    runtime_config = config.model_copy(deep=True) if isinstance(config, AgentConfig) else copy.deepcopy(config)
-    for model, original_url in _gateway_models(runtime_config):
-        rewritten = urlsplit(original_url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
-        if isinstance(model, ModelConfig):
-            model.base_url = rewritten
-            model.settings.pop("base_url", None)
-        else:
-            model["base_url"] = rewritten
-            settings = model.get("settings")
-            if isinstance(settings, dict):
-                settings.pop("base_url", None)
+    runtime_config = config.model_copy(deep=True)
+    for model in _gateway_models(runtime_config):
+        model.base_url = _onto_proxy(model.base_url or model.settings["base_url"], origin)
+        model.settings.pop("base_url", None)
+    return runtime_config
+
+
+def _fabric_gateway_models(config: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    for model in (config.get("models") or {}).values():
+        if _is_gateway_url(model.get("base_url") or (model.get("settings") or {}).get("base_url")):
+            yield model
+
+
+def routes_fabric_inference_through_gateway(config: dict[str, Any]) -> bool:
+    """:func:`routes_inference_through_gateway` for a translated Fabric config."""
+    return any(_fabric_gateway_models(config))
+
+
+def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """:func:`rewrite_gateway_models` for a translated Fabric config, with the same contract."""
+    if origin is None or not routes_fabric_inference_through_gateway(config):
+        return config
+
+    runtime_config = copy.deepcopy(config)
+    for model in _fabric_gateway_models(runtime_config):
+        settings = model.get("settings") or {}
+        model["base_url"] = _onto_proxy(model.get("base_url") or settings["base_url"], origin)
+        settings.pop("base_url", None)
     return runtime_config
 
 
@@ -152,11 +142,9 @@ def rewrite_intake_otlp_endpoints(config: AgentConfig, origin: str | None) -> Ag
     if origin is None or not exports_otlp_to_intake(config):
         return config
 
-    proxy = urlsplit(origin)
     runtime_config = config.model_copy(deep=True)
     for endpoint_config in _intake_otlp_endpoints(runtime_config.telemetry):
-        endpoint = urlsplit(endpoint_config["endpoint"])
-        endpoint_config["endpoint"] = endpoint._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+        endpoint_config["endpoint"] = _onto_proxy(endpoint_config["endpoint"], origin)
     return runtime_config
 
 

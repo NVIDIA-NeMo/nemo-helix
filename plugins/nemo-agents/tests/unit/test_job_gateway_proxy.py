@@ -7,7 +7,6 @@ import asyncio
 import copy
 import json
 import socket
-from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
@@ -110,10 +109,9 @@ def test_rebases_translated_fabric_config_without_mutating_input() -> None:
     }
     before = copy.deepcopy(config)
 
-    assert gateway_proxy.routes_inference_through_gateway(config)
-    runtime = gateway_proxy.rewrite_gateway_models(config, "http://127.0.0.1:9019")
+    assert gateway_proxy.routes_fabric_inference_through_gateway(config)
+    runtime = gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019")
 
-    assert isinstance(runtime, Mapping)
     assert runtime["models"]["default"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}?version=1"
     assert runtime["models"]["legacy"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}"
     assert "base_url" not in runtime["models"]["legacy"]["settings"]

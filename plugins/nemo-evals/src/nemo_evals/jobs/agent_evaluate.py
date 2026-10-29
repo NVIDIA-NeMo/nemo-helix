@@ -29,8 +29,8 @@ from typing import Any, ClassVar, Literal
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from nemo_agents_plugin.jobs.gateway_proxy import (
     platform_auth_proxy,
-    rewrite_gateway_models,
-    routes_inference_through_gateway,
+    rewrite_fabric_gateway_models,
+    routes_fabric_inference_through_gateway,
 )
 from nemo_evals.config import get_config
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
@@ -498,7 +498,7 @@ class _AgentEvalJobBase(NemoJob):
             target = upgrade_registered_agent_config(target)
             assert target.config is not None  # canonical spec guarantees resolution ran
             config = expand_mcp_secret_env(target.config, os.environ)
-            config = rewrite_gateway_models(config, fabric_gateway_origin)
+            config = rewrite_fabric_gateway_models(config, fabric_gateway_origin)
             fabric_runtime = FabricAgentRuntime(
                 config=config,
                 model=target.model,
@@ -590,10 +590,11 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         self._prepared_tasks(tasks)
-        fabric_config = spec.target.config if isinstance(spec.target, FabricRunnerTarget) else None
         proxy = (
             platform_auth_proxy()
-            if fabric_config is not None and routes_inference_through_gateway(fabric_config)
+            if isinstance(spec.target, FabricRunnerTarget)
+            and spec.target.config is not None
+            and routes_fabric_inference_through_gateway(spec.target.config)
             else nullcontext(None)
         )
         with proxy as fabric_gateway_origin:
