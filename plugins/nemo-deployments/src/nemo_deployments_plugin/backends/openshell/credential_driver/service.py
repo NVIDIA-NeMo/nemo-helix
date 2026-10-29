@@ -187,7 +187,8 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
             request = StoreRequest.model_validate(raw)
             self._require_auth_mode(self.registry.tickets.verify(request.value).principal_id)
             owner = ProviderOwner.model_validate(request.model_dump(include=ProviderOwner.model_fields.keys()))
-            handle = self.registry.register(
+            handle = await asyncio.to_thread(
+                self.registry.register,
                 owner,
                 request.value,
                 object_id=request.object_id,
@@ -197,7 +198,7 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
         if method == "DeleteCredential":
             request = LookupRequest.model_validate(raw)
             owner = ProviderOwner.model_validate(request.model_dump(include=ProviderOwner.model_fields.keys()))
-            self.registry.delete(owner, request.handle.identifier())
+            await asyncio.to_thread(self.registry.delete, owner, request.handle.identifier())
             return wire.message("DeleteCredentialResponse")
         if method == "ResolveCredentials":
             requests = ResolveRequest.model_validate(raw).credentials
@@ -206,7 +207,8 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 raise RegistrationDenied("Invalid batch request identities.")
             # Validate every binding before making any Secrets API calls.
             bindings = [
-                self.registry.resolve(
+                await asyncio.to_thread(
+                    self.registry.resolve,
                     ProviderOwner.model_validate(item.model_dump(include=ProviderOwner.model_fields.keys())),
                     item.handle.identifier(),
                 )
@@ -238,7 +240,7 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 results.append({"request_id": item.request_id, "value": secret.value})
             # A revoke/expiry while the remote read was pending must win.
             for result, binding, deadline in zip(results, bindings, deadlines, strict=True):
-                self.registry.resolve(binding.owner, binding.handle)
+                await asyncio.to_thread(self.registry.resolve, binding.owner, binding.handle)
                 async with asyncio.timeout(15):
                     await self._require_active_workload(binding.claims.workload)
                 result["expiration_time"] = datetime.fromtimestamp(deadline, tz=timezone.utc).isoformat()
