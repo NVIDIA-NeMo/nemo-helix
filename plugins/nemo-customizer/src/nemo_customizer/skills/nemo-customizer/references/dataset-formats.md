@@ -5,10 +5,11 @@
 
 All three backends read JSONL from a platform fileset, but the **row shape and the job-JSON dataset block differ**. Pick the section that matches your plugin (automodel, unsloth, or rl/DPO).
 
-Upload the JSONL files at the **fileset root**, then reference the fileset from the job JSON `dataset` block. The filenames differ by backend, so keep the contracts separate:
+Upload the JSONL files at the **fileset root**, then reference the fileset from the job JSON `dataset` block. Name them `train.jsonl` and `validation.jsonl`, which every SFT and DPO backend reads; the job-JSON contracts differ:
 
-- **SFT (automodel, unsloth):** upload `train.jsonl` and optional `validation.jsonl`. Automodel points `dataset.training` / `dataset.validation` at the fileset; unsloth uses `dataset.path` (and `dataset.validation_path`).
-- **rl (DPO):** upload both `training.jsonl` **and** `validation.jsonl` to a single fileset, referenced by one `dataset` string (no separate validation ref) — see § NeMo-RL (DPO).
+- **Every backend takes one dataset fileset** holding the training file and, optionally, the validation file; there is no separate validation reference. Without a validation file, training holds out a share of the training rows (automodel and unsloth: `schedule.validation_split`, default 0.1; rl: 10%).
+- **SFT (automodel, unsloth):** automodel points `dataset.training` at the fileset; unsloth uses `dataset.path`.
+- **rl (DPO):** one `dataset` string — see § NeMo-RL (DPO).
 - **rl (GRPO):** rows are **NeMo Gym rollout rows** written for the environment; the **nemo-gym-environments** skill covers them.
 
 ## Automodel
@@ -66,7 +67,6 @@ Optional fields on the unsloth `dataset` block:
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `validation_path` | `null` | Same ref shape as `path` (`"name"` or `"workspace/name"`). |
 | `text_field` | `"text"` | Column the trainer reads. In messages mode it's the column the rendered string is **written to** before training. |
 | `apply_chat_template` | `false` | Set `true` only when each row has a `messages` array. |
 | `packing` | `false` | `trl.SFTTrainer` packing — concatenates short rows up to `max_seq_length` for throughput. Needs short, compatible rows; safe to leave off. |
@@ -88,7 +88,7 @@ EMBEDDING and CUSTOM (automodel-only schemas) are not supported by unsloth today
 
 ## NeMo-RL (DPO) — preference data
 
-DPO trains on **preference pairs**, not prompt→completion examples. The `rl` backend takes a **single** dataset fileset that must contain **both** `training.jsonl` **and** `validation.jsonl` at the fileset root (unlike automodel/unsloth, the dataset block in the job JSON is a single ref — there is no separate validation ref).
+DPO trains on **preference pairs**, not prompt→completion examples. The `rl` backend takes a **single** dataset fileset, referenced by one `dataset` string, holding a training file and, optionally, a validation file at the fileset root (named with `train` and `val`, such as `training.jsonl` and `validation.jsonl`). Without a validation file, 10% of the training rows are held out for validation.
 
 The dataset-preparation step **auto-detects the row schema from the first line** and selects the matching NeMo-RL loader. **Three preference formats are supported** (platform schemas `BinaryPreferenceDatasetItemSchema` / `HelpSteer3DatasetItemSchema` / `Tulu3PreferenceDatasetItemSchema`):
 

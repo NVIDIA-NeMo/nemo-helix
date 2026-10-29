@@ -65,8 +65,10 @@ class RlJobInput(RlSchema):
     model: str = Field(description="Model entity reference ('name' or 'workspace/name').")
     dataset: str = Field(
         description=(
-            "Dataset fileset reference. DPO: preference JSONL (training.jsonl + validation.jsonl). "
-            "GRPO: Gym JSONL (training.jsonl required)."
+            "Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file "
+            "and, optionally, a validation file, named with 'train' and 'val' (training.jsonl, "
+            "validation.jsonl). Without a validation file, 10% of the training rows are held out, "
+            "except in a sandboxed GRPO run, which skips validation."
         ),
     )
     environment: str | None = Field(

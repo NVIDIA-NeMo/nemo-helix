@@ -28,6 +28,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     DEFAULT_ROLLOUT_CHUNK_SIZE,
     DEFAULT_ROLLOUT_MAX_IN_FLIGHT,
 )
+from nhx.rl.tasks.training.datasets.preparation import DatasetFormatError
 
 
 @pytest.fixture
@@ -168,7 +169,7 @@ def test_compile_grpo_config_sandboxed_paths(
     assert nemo_gym["episode_broker"] == {"port": 51234}
     # The master reads the dataset itself, so the dataloader path stays on job storage
     # even though the sandbox sees the same file at /job/dataset.
-    assert cfg["data"]["train"]["data_path"] == str(dataset_pvc / "training.jsonl")
+    assert cfg["data"]["train"]["data_path"] == str((dataset_pvc / "training.jsonl").resolve())
     assert nemo_gym["sandbox"]["network_policy"]["egress_allow"]
     # The Gym actor builds the sandbox's own env inside the sandbox pod, where paths differ
     # from the training pod's. Emitting them here would conflict, and nothing reads them.
@@ -214,6 +215,32 @@ def test_compile_grpo_config_colocated_anchors_config_paths(
 
     assert nemo_gym["config_paths"] == [f"{step.gym.environment_path}/configs/verifiers_agent.yaml"]
     assert Path(nemo_gym["config_paths"][0]).is_absolute()
+
+
+def test_compile_grpo_config_sandboxed_reads_any_train_and_val_name(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sandboxed dataset is read in place, by the shared train/val naming rule."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset_pvc = _prepared_step(tmp_path)
+    (dataset_pvc / "training.jsonl").rename(dataset_pvc / "train.jsonl")
+    _write_gym_dataset(dataset_pvc, filename="eval.jsonl")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["data"]["train"]["data_path"] == str((dataset_pvc / "train.jsonl").resolve())
+    assert cfg["data"]["validation"]["data_path"] == str((dataset_pvc / "eval.jsonl").resolve())
+
+
+def test_compile_grpo_config_sandboxed_refuses_several_training_files(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset_pvc = _prepared_step(tmp_path)
+    _write_gym_dataset(dataset_pvc, filename="train_extra.jsonl")
+
+    with pytest.raises(DatasetFormatError, match="one training file and at most one validation file"):
+        compile_grpo_config(step, job_ctx)
 
 
 def test_compile_grpo_config_sandboxed_requires_pvc_claim(

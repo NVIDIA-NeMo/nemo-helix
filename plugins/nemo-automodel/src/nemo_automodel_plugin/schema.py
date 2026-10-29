@@ -86,9 +86,13 @@ class LoRAParams(AutomodelSchema):
 
 class DatasetSpec(AutomodelSchema):
     training: str = Field(
-        description="Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory."
+        description=(
+            "Dataset fileset as 'name', 'workspace/name', or either form with a '#path/' directory. "
+            "Holds the training files and, optionally, the validation files, told apart by name "
+            "(train.jsonl, validation.jsonl). Without validation files, schedule.validation_split "
+            "of the training rows is held out for validation."
+        )
     )
-    validation: str | None = None
     prompt_template: str | None = None
     shuffle: bool = Field(
         default=True,

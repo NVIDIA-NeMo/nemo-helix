@@ -477,3 +477,15 @@ def test_pipeline_schedule_rejects_an_unknown_rounding_mode() -> None:
                 "parallelism": {"pipeline": {"round_virtual_stages_to_pp_multiple": "sideways"}},
             }
         )
+
+
+def test_a_separate_validation_fileset_is_rejected() -> None:
+    """Validation files live in the dataset fileset; there is no second reference to set."""
+    with pytest.raises(ValidationError, match="validation"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "llama",
+                "dataset": {"training": "default/train", "validation": "default/val"},
+                "training": {"training_type": "sft"},
+            },
+        )

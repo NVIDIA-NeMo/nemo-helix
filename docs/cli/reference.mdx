@@ -9738,9 +9738,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
-One `--upload-dataset` fills both dataset.training and dataset.validation with
-the new fileset. Automodel finds the train and validation files inside it by
-name, so upload a directory holding both.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Automodel tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
 which applies to whichever sources you gave.
@@ -9847,8 +9847,10 @@ Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
 Uploaded files keep their local names. NeMo-RL reads both splits from one
-fileset, so point `--upload-dataset` at a local directory holding training.jsonl
-and validation.jsonl. For GRPO, `--upload-environment` takes the environment
+fileset, so point `--upload-dataset` at a local directory holding a training file
+and, optionally, a validation file, named with 'train' and 'val'
+(training.jsonl, validation.jsonl). Without a validation file, 10% of the
+training rows are held out. For GRPO, `--upload-environment` takes the environment
 directory. Build and validate that package first; the job command only uploads it.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
@@ -9953,9 +9955,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
-One `--upload-dataset` fills both dataset.path and dataset.validation_path with
-the new fileset, so upload a directory holding a training and a validation
-file.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Unsloth tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
 which applies to whichever sources you gave.
@@ -10040,8 +10042,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Override `model` in the spec.
-* `--dataset.training`: Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory.
-* `--dataset.validation`: Override `dataset.validation` in the spec.
+* `--dataset.training`: Dataset fileset as 'name', 'workspace/name', or either form with a '#path/' directory. Holds the training files and, optionally, the validation files, told apart by name (train.jsonl, validation.jsonl). Without validation files, schedule.validation_split of the training rows is held out for validation.
 * `--dataset.prompt-template`: Override `dataset.prompt_template` in the spec.
 * `--dataset.shuffle`: Reshuffle training examples each epoch. Disable only for a deliberate curriculum order.
 * `--training.lora.rank <INTEGER>`: Override `training.lora.rank` in the spec.
@@ -10176,7 +10177,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Model entity reference ('name' or 'workspace/name').
-* `--dataset`: Dataset fileset reference. DPO: preference JSONL (training.jsonl + validation.jsonl). GRPO: Gym JSONL (training.jsonl required).
+* `--dataset`: Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file and, optionally, a validation file, named with 'train' and 'val' (training.jsonl, validation.jsonl). Without a validation file, 10% of the training rows are held out, except in a sandboxed GRPO run, which skips validation.
 * `--environment`: Environment fileset reference (required when training.type is grpo).
 * `--integrations.wandb.project`: W&B project name (groups related runs). Defaults to output.name if not set.
 * `--integrations.wandb.name`: W&B run name. Defaults to job_id if not provided.
@@ -10252,10 +10253,9 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--model.load-in-4bit`: bitsandbytes 4-bit. Mutex with load_in_8bit. Default for Unsloth's headline path.
 * `--model.load-in-8bit`: Override `model.load_in_8bit` in the spec.
 * `--model.trust-remote-code`: Override `model.trust_remote_code` in the spec.
-* `--dataset.path`: Training fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. Resolved to a local path by the plugin run.
+* `--dataset.path`: Dataset fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. Holds the training files and, optionally, the validation files, told apart by name (train.jsonl, validation.jsonl). Without validation files, schedule.validation_split of the training rows is held out for validation.
 * `--dataset.text-field`: Row field consumed by SFTTrainer.
 * `--dataset.apply-chat-template`: If True, expects rows with a 'messages' field and applies tokenizer.apply_chat_template at training time.
-* `--dataset.validation-path`: Optional validation fileset reference (same format as 'path'). Downloaded under the same scheme.
 * `--dataset.packing`: trl. SFTTrainer packing flag.
 * `--training.lora.rank <INTEGER>`: LoRA rank.
 * `--training.lora.alpha <INTEGER>`: LoRA scaling factor (alpha).
@@ -10272,6 +10272,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--schedule.logging-steps <INTEGER>`: Override `schedule.logging_steps` in the spec.
 * `--schedule.save-steps <INTEGER>`: Override `schedule.save_steps` in the spec.
 * `--schedule.eval-steps <INTEGER>`: Override `schedule.eval_steps` in the spec.
+* `--schedule.validation-split <FLOAT>`: Validation split to use when the dataset has no validation files.
 * `--schedule.progress-reporting.min-report-interval-seconds <FLOAT>`: Least number of seconds between progress reports reaching the Jobs service. Every metric the training library logs is still recorded at full resolution -- this only buffers them in memory and decides how often the accumulated set is sent, which is what the reporting actually costs. 0 sends a report for every step the library logs. Raising it reduces the time training spends blocked on reporting, at the cost of a progress bar and charts that update less often.
 * `--schedule.seed <INTEGER>`: Override `schedule.seed` in the spec.
 * `--batch.per-device-train-batch-size <INTEGER>`: Override `batch.per_device_train_batch_size` in the spec.

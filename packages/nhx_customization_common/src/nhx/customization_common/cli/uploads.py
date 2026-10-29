@@ -81,8 +81,6 @@ class SpecRefs:
     model: tuple[str, ...]
     #: Path to the training dataset reference, e.g. ``("dataset", "training")``.
     dataset: tuple[str, ...]
-    #: Path to the validation dataset reference, when the backend has a separate one.
-    dataset_validation: tuple[str, ...] | None = None
     #: Path to the environment reference, when the backend has one. GRPO only.
     environment: tuple[str, ...] | None = None
 
@@ -207,8 +205,6 @@ def write_refs(spec: dict, refs: SpecRefs, report: UploadReport) -> None:
         _write_spec(spec, refs.model, report.model_ref)
     if report.dataset_ref is not None:
         _write_spec(spec, refs.dataset, report.dataset_ref)
-        if refs.dataset_validation is not None:
-            _write_spec(spec, refs.dataset_validation, report.dataset_ref)
     if report.environment_ref is not None and refs.environment is not None:
         _write_spec(spec, refs.environment, report.environment_ref)
 
@@ -230,7 +226,6 @@ def find_conflicts(
     checks: list[tuple[bool, tuple[str, ...] | None]] = [
         (model, refs.model),
         (dataset, refs.dataset),
-        (dataset, refs.dataset_validation),
         (environment, refs.environment),
     ]
     conflicts = []

@@ -23,6 +23,7 @@ from nemo_helix_plugin.jobs.types import ListJobsQueryParams
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.common.entities.utils import parse_entity_ref
+from nhx.customization_common.dataset_files import select_split_files
 from nhx.customization_common.schemas.file_io import FileSetRef
 
 #: ``source`` of every customization job (automodel, unsloth and rl) in the Jobs service.
@@ -129,7 +130,7 @@ async def check_gym_dataset_layout(
     dataset_uri: str,
     default_workspace: str,
 ) -> None:
-    """Ensure a GRPO Gym dataset fileset contains training.jsonl."""
+    """Ensure a GRPO Gym dataset fileset holds a training file (:mod:`~nhx.customization_common.dataset_files`)."""
     ref = FileSetRef.model_validate(dataset_uri)
     workspace = ref.workspace or default_workspace
     try:
@@ -141,12 +142,14 @@ async def check_gym_dataset_layout(
             f"Dataset fileset '{ref.name}' not found in workspace '{workspace}'. Verify the dataset exists."
         ) from None
 
-    paths = {item.path.lstrip("/") for item in listing.data}
-    expected_path = f"{ref.path or ''}training.jsonl"
-    if expected_path not in paths:
+    prefix = f"{ref.path.strip('/')}/" if ref.path and ref.path.strip("/") else ""
+    listed = (item.path.lstrip("/") for item in listing.data)
+    paths = [path.removeprefix(prefix) for path in listed if path.startswith(prefix)]
+    train_files, _ = select_split_files(paths, (".jsonl",))
+    if not train_files:
         raise ValueError(
-            f"GRPO dataset fileset '{workspace}/{ref.name}' must contain {expected_path} "
-            "(Gym JSONL rows, not DPO preference triples)."
+            f"GRPO dataset fileset '{workspace}/{ref.name}' must contain a training JSONL file under '{prefix}', "
+            "such as training.jsonl (Gym JSONL rows, not DPO preference triples)."
         )
 
 

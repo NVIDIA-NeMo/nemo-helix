@@ -76,7 +76,7 @@ def test_automodel_sft_smoke(
     spec = AutomodelJobInput.model_validate(
         {
             "model": f"{ws}/{automodel_base_entity}",
-            "dataset": {"training": f"{ws}/{squad_smoke_fileset}", "validation": f"{ws}/{squad_smoke_fileset}"},
+            "dataset": {"training": f"{ws}/{squad_smoke_fileset}"},
             "training": {"training_type": "sft", "finetuning_type": finetuning_type, "max_seq_length": 1024},
             "schedule": {"epochs": 1, "max_steps": MAX_STEPS},
             "batch": {"global_batch_size": 8, "micro_batch_size": 1},
@@ -96,8 +96,7 @@ def test_automodel_sft_smoke(
 def test_unsloth_sft_smoke(
     client: NemoClient,
     customizer_workspace: str,
-    unsloth_smoke_train_fileset: str,
-    unsloth_smoke_val_fileset: str,
+    squad_smoke_fileset: str,
     unsloth_base_entity: str,
     vllm_lora_template: str,
     finetuning_type: str,
@@ -111,8 +110,7 @@ def test_unsloth_sft_smoke(
         {
             "model": {"name": f"{ws}/{unsloth_base_entity}", "max_seq_length": 1024, "load_in_4bit": False},
             "dataset": {
-                "path": f"{ws}/{unsloth_smoke_train_fileset}",
-                "validation_path": f"{ws}/{unsloth_smoke_val_fileset}",
+                "path": f"{ws}/{squad_smoke_fileset}",
                 "apply_chat_template": True,
             },
             "training": {"finetuning_type": finetuning_type},

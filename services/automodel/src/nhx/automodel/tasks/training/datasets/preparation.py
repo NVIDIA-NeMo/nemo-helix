@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from nhx.automodel.app.constants import DEFAULT_SEED
+from nhx.customization_common import dataset_files
 
 logger = logging.getLogger(__name__)
 
@@ -29,26 +30,6 @@ logger = logging.getLogger(__name__)
 MERGED_DIR = "merged"
 TRAIN_FILE = "train.jsonl"
 VAL_FILE = "validation.jsonl"
-
-# Heuristic patterns for discovering training files
-TRAIN_PATTERNS = [
-    "train*.jsonl",
-    "training*.jsonl",
-    "train*.json",
-    "training*.json",
-]
-TRAIN_DIRS = ["train", "training"]
-
-# Heuristic patterns for discovering validation files
-VAL_PATTERNS = [
-    "val*.jsonl",
-    "validation*.jsonl",
-    "val*.json",
-    "validation*.json",
-    "dev*.jsonl",
-    "dev*.json",
-]
-VAL_DIRS = ["val", "validation", "dev"]
 
 
 class DatasetSchema(str, Enum):
@@ -245,72 +226,38 @@ class PreparedDataset:
     validation_samples: int
 
 
-def _discover_files_by_patterns(base_path: Path, patterns: list[str], dirs: list[str]) -> list[Path]:
+def select_dataset_files(paths: list[str]) -> tuple[list[str], list[str]]:
     """
-    Discover files matching patterns or in specific directories.
+    Pick training and validation files from a dataset's file paths.
 
-    Searches for:
-    1. Files matching glob patterns in base_path
-    2. All .jsonl/.json files in specified subdirectories
+    Uses the rule every Customizer backend shares (:mod:`nhx.customization_common.dataset_files`):
+    a top-level file whose name contains ``train`` is training data, one whose name contains
+    ``val`` or starts with ``dev`` is validation data, as are the files in ``train/`` or
+    ``val/``-style directories; with neither, every top-level JSONL file is training data.
 
     Args:
-        base_path: Root directory to search.
-        patterns: Glob patterns to match (e.g., ["train*.jsonl"]).
-        dirs: Subdirectory names to search (e.g., ["train", "training"]).
+        paths: File paths relative to the dataset root, as a fileset lists them.
 
     Returns:
-        Sorted list of discovered file paths.
+        Tuple of (training_files, validation_files), as relative paths.
+
+    Raises:
+        DatasetFormatError: If no training files can be found.
     """
-    files: set[Path] = set()
-
-    # Pattern matching in base directory
-    for pattern in patterns:
-        for match in base_path.glob(pattern):
-            if match.is_file():
-                files.add(match.resolve())
-
-    # Files in subdirectories
-    for dir_name in dirs:
-        subdir = base_path / dir_name
-        if subdir.is_dir():
-            for f in subdir.iterdir():
-                if f.is_file() and f.suffix.lower() in (".jsonl", ".json"):
-                    files.add(f.resolve())
-
-    return sorted(files)  # Sorted for deterministic ordering
-
-
-def _prefer_jsonl(files: list[Path]) -> list[Path]:
-    """
-    Drop ``.json`` candidates when ``.jsonl`` files are present.
-
-    Retrieval Stage 1 publishes a wrapped ``train.json`` beside the inline
-    ``training.jsonl``; both match the discovery patterns, and merging them
-    would emit invalid JSONL.
-    """
-    jsonl_files = [f for f in files if f.suffix.lower() == ".jsonl"]
-    if jsonl_files and len(jsonl_files) < len(files):
-        skipped = [f.name for f in files if f.suffix.lower() != ".jsonl"]
-        logger.info(f"Ignoring non-JSONL dataset file(s) found alongside JSONL: {skipped}")
-    return jsonl_files or files
+    train_files, val_files = dataset_files.select_split_files(paths)
+    if not train_files:
+        raise DatasetFormatError(
+            "No training files found. Expected a JSONL file whose name contains 'train', such as train.jsonl."
+        )
+    return train_files, val_files
 
 
 def discover_dataset_files(dataset_path: Path) -> tuple[list[Path], list[Path]]:
     """
-    Discover training and validation files using heuristics.
-
-    Heuristics applied (in order):
-    1. Files matching train*/training* patterns → training
-    2. Files in train/ or training/ directories → training
-    3. Files matching val*/validation*/dev* patterns → validation
-    4. Files in val/, validation/, or dev/ directories → validation
-    5. If only one .jsonl file found → treat as training (will auto-split)
-
-    A ``.json`` candidate is ignored when JSONL files are present for the same
-    split, so a dataset may also carry wrapped JSON or BEIR artifacts.
+    Discover training and validation files with :func:`select_dataset_files`.
 
     Args:
-        dataset_path: Path to the dataset directory.
+        dataset_path: Path to the dataset directory, or a single training file.
 
     Returns:
         Tuple of (training_files, validation_files).
@@ -328,34 +275,13 @@ def discover_dataset_files(dataset_path: Path) -> tuple[list[Path], list[Path]]:
         logger.info(f"Dataset path is a file, treating as training data: {dataset_path}")
         return [dataset_path], []
 
-    # Discover training files
-    train_files = _discover_files_by_patterns(dataset_path, TRAIN_PATTERNS, TRAIN_DIRS)
-
-    # Discover validation files
-    val_files = _discover_files_by_patterns(dataset_path, VAL_PATTERNS, VAL_DIRS)
-
-    # Fallback: if no files found with patterns, check for any .jsonl files
-    if not train_files and not val_files:
-        all_jsonl = sorted(f for f in dataset_path.glob("*.jsonl") if f.is_file())
-        if len(all_jsonl) == 1:
-            logger.info(f"Found single JSONL file, treating as training data: {all_jsonl[0]}")
-            train_files = all_jsonl
-        elif len(all_jsonl) > 1:
-            # Ambiguous - could be train/val or multiple training files
-            logger.warning(
-                f"Found {len(all_jsonl)} JSONL files without clear train/val naming. "
-                f"Treating all as training data: {[f.name for f in all_jsonl]}"
-            )
-            train_files = all_jsonl
-
-    train_files = _prefer_jsonl(train_files)
-    val_files = _prefer_jsonl(val_files)
-
-    if not train_files:
-        raise DatasetFormatError(
-            f"No training files found in {dataset_path}. "
-            f"Expected files matching patterns like train*.jsonl or a train/ directory."
-        )
+    paths = [f.relative_to(dataset_path).as_posix() for f in dataset_path.rglob("*") if f.is_file()]
+    try:
+        train, val = select_dataset_files(paths)
+    except DatasetFormatError as e:
+        raise DatasetFormatError(f"{e} Searched {dataset_path}.") from e
+    train_files = [(dataset_path / path).resolve() for path in train]
+    val_files = [(dataset_path / path).resolve() for path in val]
 
     logger.info(f"Discovered {len(train_files)} training file(s): {[f.name for f in train_files]}")
     if val_files:

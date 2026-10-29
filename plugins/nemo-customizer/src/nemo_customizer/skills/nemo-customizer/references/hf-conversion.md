@@ -165,10 +165,10 @@ Only the **chat-template / `messages` (`to_chat`) output is backend-agnostic** �
 
 | Backend | Row format used | Dataset block in job JSON |
 |---------|----------------|---------------------------|
-| automodel (CHAT) | `to_chat` output (`messages`, string `content`) | `{ "training": "default/<DATASET_NAME>", "validation": "default/<DATASET_NAME>" }` — schema auto-detected from row 1 |
-| automodel (MULTIMODAL) | `to_multimodal_chat` output (part list + sibling images) | same fileset refs. Text-only rows in the same file stay string `content`. |
+| automodel (CHAT) | `to_chat` output (`messages`, string `content`) | `{ "training": "default/<DATASET_NAME>" }` — schema auto-detected from row 1 |
+| automodel (MULTIMODAL) | `to_multimodal_chat` output (part list + sibling images) | same fileset ref. Text-only rows in the same file stay string `content`. |
 | automodel (SFT)  | `to_sft` output (`prompt` / `completion`) | same as above (no `prompt_template`) |
-| **unsloth (preferred)** | `to_chat` output (`messages`) | `{ "path": "default/<DATASET_NAME>", "apply_chat_template": true }` (+ `validation_path` if present) |
+| **unsloth (preferred)** | `to_chat` output (`messages`) | `{ "path": "default/<DATASET_NAME>", "apply_chat_template": true }` |
 | unsloth (no chat template) | **Custom `to_text` rendering**: emit `{"text": "<prompt>\n<completion>"}` rows (not the `to_sft` output directly) | `{ "path": "default/<DATASET_NAME>", "text_field": "text" }` |
 
 **Note:** Unsloth does **not** read the automodel SFT shape `{"prompt": ..., "completion": ...}`. If `has_chat` is False *and* the user picked unsloth, swap `to_sft` for a `to_text` that renders one `text` column. Sketch:

@@ -104,7 +104,7 @@ def test_wall_clock_wraps_load_and_train_but_not_save(tmp_path: Path, monkeypatc
         "apply_integrations_to_sft_config",
         lambda **kwargs: ([], {}, {}),
     )
-    monkeypatch.setattr(unsloth_sft, "_load_training_dataset", lambda **kwargs: ["row"])
+    monkeypatch.setattr(unsloth_sft, "_load_datasets", lambda **kwargs: (["row"], None))
     monkeypatch.setattr(
         unsloth_sft,
         "_save_model",

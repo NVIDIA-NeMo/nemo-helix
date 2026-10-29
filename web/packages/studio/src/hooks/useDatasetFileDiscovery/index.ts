@@ -3,22 +3,12 @@
 
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
-import {
-  CUSTOMIZATION_DATASET_DISCOVERY,
-  CustomizationFileType,
-} from '@studio/constants/customization';
+import { CUSTOMIZATION_DATASET_DIRS, CustomizationFileType } from '@studio/constants/customization';
 import { parseFilesetUri } from '@studio/hooks/useCustomizationFiles/utils';
 
 export interface DatasetFileDiscoveryResult {
   training: FilesetFileOutput[];
   validation: FilesetFileOutput[];
-  /**
-   * Root-level .json files that matched no training/validation pattern and were
-   * not promoted by the Customizer fallback. Native Unsloth with
-   * apply_chat_template disabled can treat these as training data; all other
-   * consumers ignore them.
-   */
-  unmatchedRootJson: FilesetFileOutput[];
   hasRequiredFiles: boolean;
   isPending: boolean;
   /**
@@ -31,67 +21,64 @@ export interface DatasetFileDiscoveryResult {
 
 const DATASET_EXTENSIONS = ['.jsonl', '.json'] as const;
 
-const isDatasetFile = (filename: string): boolean =>
-  DATASET_EXTENSIONS.some((ext) => filename.endsWith(ext));
+const segmentsOf = (path: string): string[] => path.split('/').filter(Boolean);
 
-const matchesAnyPattern = (filename: string, patterns: readonly RegExp[]): boolean =>
-  patterns.some((re) => re.test(filename));
+const isDatasetFile = (path: string): boolean => {
+  const name = path.toLowerCase();
+  return DATASET_EXTENSIONS.some((ext) => name.endsWith(ext));
+};
 
-interface PartitionedFiles {
-  training: FilesetFileOutput[];
-  validation: FilesetFileOutput[];
-  unmatchedRootJsonl: FilesetFileOutput[];
-  /** Root-level .json files that matched no training/validation pattern. */
-  unmatchedRootJson: FilesetFileOutput[];
-}
-
-export const partitionDatasetFiles = (files: FilesetFileOutput[]): PartitionedFiles => {
-  const training: FilesetFileOutput[] = [];
-  const validation: FilesetFileOutput[] = [];
-  const unmatchedRootJsonl: FilesetFileOutput[] = [];
-  const unmatchedRootJson: FilesetFileOutput[] = [];
-  const trainingRule = CUSTOMIZATION_DATASET_DISCOVERY[CustomizationFileType.Training];
-  const validationRule = CUSTOMIZATION_DATASET_DISCOVERY[CustomizationFileType.Validation];
-
-  for (const f of files) {
-    const segments = f.path.split('/').filter(Boolean);
-    if (segments.length === 0) continue;
-    const filename = segments[segments.length - 1];
-    if (!isDatasetFile(filename)) continue;
-
-    const top = segments[0];
-    if (segments.length > 1) {
-      if (trainingRule.dirs.includes(top)) {
-        training.push(f);
-      } else if (validationRule.dirs.includes(top)) {
-        validation.push(f);
-      }
-      continue;
+/** The split a file holds by its name (root files) or its directory, or null when neither says. */
+const splitOf = (segments: string[]): CustomizationFileType | null => {
+  if (segments.length === 1) {
+    const stem = segments[0].replace(/\.[^.]*$/, '').toLowerCase();
+    if (stem.includes('train')) return CustomizationFileType.Training;
+    if (stem.includes('val') || stem.startsWith('dev')) return CustomizationFileType.Validation;
+  } else if (segments.length === 2) {
+    const dir = segments[0].toLowerCase();
+    if (CUSTOMIZATION_DATASET_DIRS[CustomizationFileType.Training].includes(dir)) {
+      return CustomizationFileType.Training;
     }
-
-    // Root-level file
-    if (matchesAnyPattern(filename, trainingRule.filePatterns)) {
-      training.push(f);
-    } else if (matchesAnyPattern(filename, validationRule.filePatterns)) {
-      validation.push(f);
-    } else if (filename.endsWith('.jsonl')) {
-      // Only .jsonl is eligible for the lone-root fallback (matches customizer).
-      unmatchedRootJsonl.push(f);
-    } else if (filename.endsWith('.json')) {
-      // .json files that matched no pattern: not used by the Customizer fallback
-      // but can be claimed as training by native Unsloth (apply_chat_template off).
-      unmatchedRootJson.push(f);
+    if (CUSTOMIZATION_DATASET_DIRS[CustomizationFileType.Validation].includes(dir)) {
+      return CustomizationFileType.Validation;
     }
   }
+  return null;
+};
 
-  return { training, validation, unmatchedRootJsonl, unmatchedRootJson };
+/** Drop `.json` files when `.jsonl` files are present, as Customizer does. */
+const preferJsonl = (files: FilesetFileOutput[]): FilesetFileOutput[] => {
+  const jsonl = files.filter((f) => f.path.toLowerCase().endsWith('.jsonl'));
+  return jsonl.length > 0 ? jsonl : files;
+};
+
+/**
+ * Splits a fileset's files into the training and validation files Customizer reads, by the
+ * rule every backend shares (see CUSTOMIZATION_DATASET_DIRS).
+ */
+export const partitionDatasetFiles = (
+  files: FilesetFileOutput[]
+): { training: FilesetFileOutput[]; validation: FilesetFileOutput[] } => {
+  // Sorted by code point, as Customizer sorts them, so both list the files in one order.
+  const dataFiles = files
+    .filter((f) => isDatasetFile(f.path))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  let training = dataFiles.filter(
+    (f) => splitOf(segmentsOf(f.path)) === CustomizationFileType.Training
+  );
+  const validation = dataFiles.filter(
+    (f) => splitOf(segmentsOf(f.path)) === CustomizationFileType.Validation
+  );
+  if (training.length === 0 && validation.length === 0) {
+    const root = dataFiles.filter((f) => segmentsOf(f.path).length === 1);
+    training = root.length > 0 ? root : dataFiles;
+  }
+  return { training: preferJsonl(training), validation: preferJsonl(validation) };
 };
 
 /**
  * Lists every file in a fileset (no path filter) and partitions them into
- * training / validation buckets using the same discovery rules as the
- * Customizer service. See CUSTOMIZATION_DATASET_DISCOVERY and
- * services/customizer/src/nhx/customizer/tasks/training/datasets/preparation.py.
+ * training / validation buckets with partitionDatasetFiles.
  */
 export const useDatasetFileDiscovery = ({
   fileset,
@@ -112,24 +99,12 @@ export const useDatasetFileDiscovery = ({
     },
   });
 
-  const files = filesResponse ?? [];
-  const { training, validation, unmatchedRootJsonl, unmatchedRootJson } =
-    partitionDatasetFiles(files);
-
-  // Customizer fallback (preparation.py:324-336): when no train/val patterns
-  // matched at all, ALL unmatched root .jsonl files are claimed as training.
-  // Single file is unambiguous; multiple files trigger a warning in customizer
-  // but still get treated as training (the merged set is auto-split for val).
-  const useRootFallback =
-    training.length === 0 && validation.length === 0 && unmatchedRootJsonl.length > 0;
-
-  const finalTraining = useRootFallback ? unmatchedRootJsonl : training;
+  const { training, validation } = partitionDatasetFiles(filesResponse ?? []);
 
   return {
-    training: finalTraining,
+    training,
     validation,
-    unmatchedRootJson,
-    hasRequiredFiles: finalTraining.length > 0,
+    hasRequiredFiles: training.length > 0,
     isPending: enabled && isPending,
     error: error ?? null,
   };

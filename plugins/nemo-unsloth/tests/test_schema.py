@@ -360,3 +360,15 @@ class TestDeploymentConfigGpuBound:
         assert spec.deployment_config is not None
         assert not isinstance(spec.deployment_config, str)
         assert spec.deployment_config.gpu == 2
+
+
+def test_a_separate_validation_fileset_is_rejected() -> None:
+    """Validation files live in the dataset fileset; there is no second reference to set."""
+    payload = _minimal_payload()
+    payload["dataset"]["validation_path"] = "default/val"
+    with pytest.raises(ValidationError, match="validation_path"):
+        UnslothJobInput.model_validate(payload)
+
+
+def test_the_validation_split_defaults_like_automodel() -> None:
+    assert UnslothJobInput.model_validate(_minimal_payload()).schedule.validation_split == 0.1

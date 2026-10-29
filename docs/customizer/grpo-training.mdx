@@ -19,7 +19,7 @@ Unlike SFT or DPO, GRPO takes **two** FileSets:
 | FileSet     | `purpose`     | Holds                                                                       |
 | ----------- | ------------- | --------------------------------------------------------------------------- |
 | Environment | `environment` | Code and config that runs a rollout and returns a reward                    |
-| Dataset     | `dataset`     | `training.jsonl` (required) and `validation.jsonl` (optional) — prompt rows |
+| Dataset     | `dataset`     | A training file (required) and a validation file (optional), named with `train` and `val`, such as `training.jsonl` and `validation.jsonl` — prompt rows |
 
 Plus a registered model entity, exactly as for the other backends.
 
@@ -283,7 +283,7 @@ Extra keys are allowed and forwarded to the environment. Only the agent-agnostic
 
 <Note>
   Row shapes are checked inside the training container, not at submit.
-  Submitting only verifies that the dataset FileSet contains `training.jsonl`
+  Submitting only verifies that the dataset FileSet contains a training file
   and that the environment package's manifest is valid, so a malformed row costs
   a job start. Validate rows locally before uploading.
 </Note>

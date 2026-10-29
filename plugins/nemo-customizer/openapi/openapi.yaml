@@ -2378,11 +2378,11 @@ components:
         training:
           type: string
           title: Training
-          description: Training fileset as 'name', 'workspace/name', or either form
-            with a '#path/' directory.
-        validation:
-          title: Validation
-          type: string
+          description: Dataset fileset as 'name', 'workspace/name', or either form
+            with a '#path/' directory. Holds the training files and, optionally, the
+            validation files, told apart by name (train.jsonl, validation.jsonl).
+            Without validation files, schedule.validation_split of the training rows
+            is held out for validation.
         prompt_template:
           title: Prompt Template
           type: string
@@ -4656,8 +4656,11 @@ components:
         dataset:
           type: string
           title: Dataset
-          description: 'Dataset fileset reference. DPO: preference JSONL (training.jsonl
-            + validation.jsonl). GRPO: Gym JSONL (training.jsonl required).'
+          description: 'Dataset fileset reference. DPO: preference JSONL; GRPO: Gym
+            JSONL. Holds a training file and, optionally, a validation file, named
+            with ''train'' and ''val'' (training.jsonl, validation.jsonl). Without
+            a validation file, 10% of the training rows are held out, except in a
+            sandboxed GRPO run, which skips validation.'
         environment:
           title: Environment
           description: Environment fileset reference (required when training.type
@@ -5294,8 +5297,11 @@ components:
         path:
           type: string
           title: Path
-          description: 'Training fileset reference: ''name'' (uses the job''s workspace)
-            or ''workspace/name''. Resolved to a local path by the plugin run.'
+          description: 'Dataset fileset reference: ''name'' (uses the job''s workspace)
+            or ''workspace/name''. Holds the training files and, optionally, the validation
+            files, told apart by name (train.jsonl, validation.jsonl). Without validation
+            files, schedule.validation_split of the training rows is held out for
+            validation.'
         text_field:
           type: string
           title: Text Field
@@ -5307,11 +5313,6 @@ components:
           description: If True, expects rows with a 'messages' field and applies tokenizer.apply_chat_template
             at training time.
           default: false
-        validation_path:
-          title: Validation Path
-          description: Optional validation fileset reference (same format as 'path').
-            Downloaded under the same scheme.
-          type: string
         packing:
           type: boolean
           title: Packing
@@ -5325,13 +5326,15 @@ components:
       description: 'Training data location + shape.
 
 
-        ``path`` and ``validation_path`` are platform fileset references
+        ``path`` is a platform fileset reference (``"name"`` or ``"workspace/name"``)
 
-        (``"name"`` or ``"workspace/name"``). The plugin''s run downloads
+        holding the training files and, optionally, the validation files, told apart
+        by
 
-        each fileset before training; ``train_sft`` only ever sees a local
+        name (:mod:`nhx.customization_common.dataset_files`). The plugin''s run downloads
 
-        filesystem path.'
+        the fileset before training; ``train_sft`` only ever sees a local filesystem
+        path.'
     UnslothHardwareSpec:
       properties:
         gpus:
@@ -6054,6 +6057,14 @@ components:
         eval_steps:
           title: Eval Steps
           type: integer
+          exclusiveMinimum: 0.0
+        validation_split:
+          title: Validation Split
+          description: Validation split to use when the dataset has no validation
+            files.
+          default: 0.1
+          type: number
+          exclusiveMaximum: 1.0
           exclusiveMinimum: 0.0
         progress_reporting:
           $ref: '#/components/schemas/ProgressReportingConfig'
