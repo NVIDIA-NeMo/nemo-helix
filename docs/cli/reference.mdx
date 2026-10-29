@@ -9691,7 +9691,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 **Commands:**
 
-* `dataset`: Prepare a training dataset.
+* `dataset`: Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
 * `automodel`: Create an Automodel training job on the platform.
 * `rl`: Create a NeMo-RL training job on the platform.
 * `unsloth`: Create an Unsloth training job on the platform.
@@ -9704,7 +9704,18 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 #### nemo customization dataset
 
-Prepare a training dataset.
+Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
+
+Formats (`--format`), and the backends that train on each:
+- chat: automodel, training.training_type sft or distillation; or unsloth, with dataset.apply_chat_template: true.
+- preference: rl, training.type dpo.
+- prompt-completion: automodel, training.training_type sft or distillation; or unsloth. Raw text with no chat template, for base models.
+- embedding: automodel, training.recipe bi_encoder or cross_encoder.
+- text: unsloth, with dataset.text_field: text.
+
+GRPO is not supported: rl GRPO (training.type: grpo) trains on NeMo Gym rows that each environment defines, not on a table. Write them for the environment and upload them with `--upload-dataset` on the rl command.
+
+The prepare command's help lists the source, split and column options.
 
 **Usage:**
 
@@ -9718,25 +9729,24 @@ nemo customization dataset [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `prepare`: Convert a Parquet, CSV or JSONL table, such as Data...
+* `prepare`: Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
 
 ##### nemo customization dataset prepare
 
-Convert a Parquet, CSV or JSONL table, such as Data Designer output, into a training dataset in the format `--format` names, split it, and upload it to a new dataset fileset. Prints the references.
+Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
 
-Each format, and the backends that train on it:
+Reads SOURCE on this machine: a local file or directory, or a fileset. Writes its rows in the format `--format` names, drops rows with an empty field, and splits the rest with a seeded shuffle. Then uploads the training and validation splits to the platform as a new dataset fileset, NAME (train.jsonl, validation.jsonl), and the test split, when there is one, as a second fileset, NAME-test (test.jsonl). Prints the fileset references as JSON, to put in the job JSON. It creates filesets, not a training job.
 
-chat: automodel (sft, distillation); unsloth with dataset.apply_chat_template: true.
+Formats (`--format`), and the backends that train on each:
+- chat: automodel, training.training_type sft or distillation; or unsloth, with dataset.apply_chat_template: true.
+- preference: rl, training.type dpo.
+- prompt-completion: automodel, training.training_type sft or distillation; or unsloth. Raw text with no chat template, for base models.
+- embedding: automodel, training.recipe bi_encoder or cross_encoder.
+- text: unsloth, with dataset.text_field: text.
 
-preference: rl with training.type: dpo.
+GRPO is not supported: rl GRPO (training.type: grpo) trains on NeMo Gym rows that each environment defines, not on a table. Write them for the environment and upload them with `--upload-dataset` on the rl command.
 
-prompt-completion: automodel; unsloth. Trains on raw text, with no chat template.
-
-embedding: automodel with training.recipe: bi_encoder or cross_encoder.
-
-text: unsloth, with dataset.text_field: text.
-
-GRPO datasets are not supported: GRPO trains on NeMo Gym rows that each environment builds, not on a table.
+Data Designer output: download the job's artifacts result (nemo jobs results download artifacts `--job` JOB -o artifacts.tar), extract it, and pass its parquet-files directory.
 
 **Usage:**
 
@@ -9750,7 +9760,7 @@ nemo customization dataset prepare [OPTIONS] SOURCE
 
 **Options:**
 
-* `--name`: Dataset fileset to create. The test split goes to NAME-test.
+* `--name`: Dataset fileset to create on the platform and upload the splits to. The test split goes to NAME-test.
 * `--format <CHOICE>`: Row format to write; it decides which backends can train on the dataset. [possible values: chat, preference, prompt-completion, embedding, text]
 * `--input-format <CHOICE>`: Format of the source files. Default: from the file extensions, which must all be the same. [possible values: parquet, csv, jsonl]
 * `--val-fraction <FLOAT>`: Share of rows for validation. [default: 0.1]

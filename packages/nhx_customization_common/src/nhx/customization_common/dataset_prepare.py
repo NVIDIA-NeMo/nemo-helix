@@ -41,13 +41,19 @@ class DatasetFormat(StrEnum):
     TEXT = "text"
 
 
-#: The backends that train on each format, and the job settings they need.
-TRAINED_BY: dict[DatasetFormat, str] = {
-    DatasetFormat.CHAT: "automodel (sft, distillation); unsloth with dataset.apply_chat_template: true",
-    DatasetFormat.PREFERENCE: "rl with training.type: dpo",
-    DatasetFormat.PROMPT_COMPLETION: "automodel; unsloth. Trains on raw text, with no chat template",
-    DatasetFormat.EMBEDDING: "automodel with training.recipe: bi_encoder or cross_encoder",
-    DatasetFormat.TEXT: "unsloth, with dataset.text_field: text",
+#: The backends that train on each format, with the job settings they need.
+TRAINED_BY: dict[DatasetFormat, tuple[str, ...]] = {
+    DatasetFormat.CHAT: (
+        "automodel, training.training_type sft or distillation",
+        "unsloth, with dataset.apply_chat_template: true",
+    ),
+    DatasetFormat.PREFERENCE: ("rl, training.type dpo",),
+    DatasetFormat.PROMPT_COMPLETION: (
+        "automodel, training.training_type sft or distillation",
+        "unsloth",
+    ),
+    DatasetFormat.EMBEDDING: ("automodel, training.recipe bi_encoder or cross_encoder",),
+    DatasetFormat.TEXT: ("unsloth, with dataset.text_field: text",),
 }
 
 #: The file each split is written to. Every backend reads these names.
