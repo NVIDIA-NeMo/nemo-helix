@@ -402,16 +402,18 @@ class DeploymentReconciler:
         if elapsed < timeout:
             return None
         elapsed_int = int(elapsed)
+        last_message = deployment.status_message
         return BackendStatusUpdate(
             status="FAILED",
             status_message=(
                 f"Deployment stuck in DELETING for {elapsed_int}s (timeout: {timeout}s). "
-                "Backend resources were not removed."
+                "Backend resources were not removed." + (f" Last status: {last_message}" if last_message else "")
             ),
             error_details={
                 "reason": "deleting_timeout",
                 "elapsed_seconds": elapsed_int,
                 "timeout_seconds": timeout,
+                **({"last_status_message": last_message} if last_message else {}),
             },
         )
 

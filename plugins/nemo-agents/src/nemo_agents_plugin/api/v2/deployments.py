@@ -377,11 +377,11 @@ async def _mark_deployment_deleting_once(
         logger.exception("Failed to look up deployment '%s' before delete", name)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc
 
+    if is_container_deployment_mode(dep.deployment_mode):
+        await _reopen_timed_out_backend_delete(entity_client, workspace=workspace, name=name)
     if dep.status == "deleting":
         return
 
-    if is_container_deployment_mode(dep.deployment_mode):
-        await _reopen_timed_out_backend_delete(entity_client, workspace=workspace, name=name)
     dep.status = "deleting"
     try:
         await entity_client.update(dep)

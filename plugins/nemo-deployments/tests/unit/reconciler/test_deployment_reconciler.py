@@ -579,6 +579,30 @@ async def test_delete_timeout_fails_at_boundary(
 
 
 @pytest.mark.asyncio
+async def test_delete_timeout_keeps_deleting_reason(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS)
+    dep.status_message = "Waiting for backend to delete deployment: container still stopping"
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status == "FAILED"
+    assert dep.status_message.endswith(
+        "Last status: Waiting for backend to delete deployment: container still stopping"
+    )
+    assert dep.error_details is not None
+    assert dep.error_details["reason"] == "deleting_timeout"
+    assert dep.error_details["last_status_message"] == (
+        "Waiting for backend to delete deployment: container still stopping"
+    )
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_delete_timeout_failure_is_not_re_evaluated(
     patch_reconciler_now,
     mock_entities: AsyncMock,
