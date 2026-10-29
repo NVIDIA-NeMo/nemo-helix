@@ -42,6 +42,7 @@ from nemo_helix_plugin.commands import (
 )
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
+from nhx.customization_common.cli.dry_run import dry_run_local, dry_run_remote
 from nhx.customization_common.cli.tracking import FollowResult, follow_job
 from nhx.customization_common.cli.uploads import (
     SpecRefs,
@@ -52,6 +53,7 @@ from nhx.customization_common.cli.uploads import (
     spec_parent,
     write_refs,
 )
+from nhx.customization_common.contributor.jobs import BaseSubmitJob
 from pydantic import ValidationError
 
 LoadJobJson = Callable[[Path], str]
@@ -73,15 +75,20 @@ def apply_job_cli_overrides(
     submit_help: str | None = None,
     spec_refs: SpecRefs | None = None,
     validate_job_spec: ValidateJobSpec | None = None,
+    job_cls: type[BaseSubmitJob] | None = None,
 ) -> None:
     """Drop the generated ``run`` verb, then replace generated submit with the flat backend command.
 
     Order matters: drop first, then re-register. Typer iterates
     ``registered_commands`` in insertion order, so stale entries would route
     users back to the auto-generated shapes.
+
+    With *job_cls*, the command also takes ``--dry-run``.
     """
     _drop_command(group, "run")
-    _replace_job_callback(group, backend, load_job_json, job_json_help, submit_help, spec_refs, validate_job_spec)
+    _replace_job_callback(
+        group, backend, load_job_json, job_json_help, submit_help, spec_refs, validate_job_spec, job_cls
+    )
 
 
 def _drop_command(group: typer.Typer, name: str) -> None:
@@ -96,6 +103,7 @@ def _replace_job_callback(
     submit_help: str | None = None,
     spec_refs: SpecRefs | None = None,
     validate_job_spec: ValidateJobSpec | None = None,
+    job_cls: type[BaseSubmitJob] | None = None,
 ) -> None:
     """Replace generated submit with a flat ``--job-json JOB_JSON`` backend callback."""
     original = take_job_submit(group)
@@ -178,6 +186,17 @@ def _replace_job_callback(
             help="Platform secret holding a HuggingFace token, for a gated or private repo.",
             rich_help_panel=_UPLOAD_PANEL,
         ),
+        dry_run: bool = typer.Option(
+            False,
+            "--dry-run",
+            help=(
+                "Check the job without creating anything. The platform validates the job JSON, its "
+                "model and dataset references and its execution profile, and checks the first 10 rows "
+                "of each dataset file training reads. With --upload-model, --upload-dataset or "
+                "--upload-environment, nothing is uploaded and only the job JSON is checked, plus the "
+                "first 10 rows of the local --upload-dataset files."
+            ),
+        ),
     ) -> None:
         if typer_ctx.invoked_subcommand is not None:
             return
@@ -190,6 +209,28 @@ def _replace_job_callback(
 
         if wait and watch:
             raise typer.BadParameter("Use either --wait or --watch, not both.")
+
+        if dry_run:
+            if job_cls is None:
+                raise typer.BadParameter(f"The {backend} backend does not support --dry-run.")
+            if wait or watch:
+                raise typer.BadParameter("--dry-run creates no job to wait for. Drop --wait and --watch.")
+            _dry_run(
+                typer_ctx,
+                job_cls,
+                job_json,
+                backend=backend,
+                workspace=workspace,
+                profile=profile,
+                options=options,
+                options_file=options_file,
+                load_job_json=load_job_json,
+                refs=spec_refs,
+                validate_job_spec=validate_job_spec,
+                model_source=upload_model,
+                dataset_source=upload_dataset,
+                environment_source=upload_environment,
+            )
 
         if upload_model is None and upload_dataset is None and upload_environment is None:
             spec_json = load_job_json(job_json)
@@ -278,6 +319,44 @@ def _upload_then_validate(
     return _validate(spec, validate_job_spec)
 
 
+def _dry_run(
+    typer_ctx: typer.Context,
+    job_cls: type[BaseSubmitJob],
+    job_json: Path,
+    *,
+    backend: str,
+    workspace: str,
+    profile: str | None,
+    options: list[str],
+    options_file: Path | None,
+    load_job_json: LoadJobJson,
+    refs: SpecRefs | None,
+    validate_job_spec: ValidateJobSpec | None,
+    model_source: str | None,
+    dataset_source: str | None,
+    environment_source: str | None,
+) -> None:
+    """Check the job as submit would, create nothing, and exit with the result."""
+    if model_source is None and dataset_source is None and environment_source is None:
+        dry_run_remote(
+            typer_ctx,
+            job_cls,
+            load_job_json(job_json),
+            backend=backend,
+            workspace=workspace,
+            profile=profile,
+            options=options,
+            options_file=options_file,
+        )
+    if refs is None or validate_job_spec is None:
+        raise typer.BadParameter(f"The {backend} backend cannot create resources at submit time.")
+    spec = _read_job_json(job_json)
+    model, dataset, environment = (s is not None for s in (model_source, dataset_source, environment_source))
+    _reject_conflicts(spec, refs, model=model, dataset=dataset, environment=environment)
+    validated = _precheck(spec, refs, validate_job_spec, model=model, dataset=dataset, environment=environment)
+    dry_run_local(typer_ctx, job_cls, json.loads(validated), workspace=workspace, dataset_source=dataset_source)
+
+
 def _reject_conflicts(
     spec: dict,
     refs: SpecRefs,
@@ -290,11 +369,10 @@ def _reject_conflicts(
     conflicts = find_conflicts(spec, refs, model=model, dataset=dataset, environment=environment)
     if not conflicts:
         return
-    fields = ", ".join(conflicts)
+    fields = "; ".join(conflicts)
     typer.echo(
-        f"Error: the job JSON already sets {fields}, and the matching --upload flag would "
-        "replace it. Set each reference in one place: remove the field from the job JSON to "
-        "create it here, or drop the flag to use what the file names.",
+        f"Error: the job JSON already sets {fields}. Set each reference in one place: remove "
+        "the field from the job JSON to create it here, or drop the flag to use what the file names.",
         err=True,
     )
     raise typer.Exit(code=2)
@@ -321,8 +399,8 @@ def _precheck(
     model: bool,
     dataset: bool,
     environment: bool,
-) -> None:
-    """Validate a copy standing in for the references we are about to create."""
+) -> str:
+    """Validate a copy standing in for the references we are about to create; return it as canonical JSON."""
     probe = deepcopy(spec)
     if model:
         _set_placeholder(probe, refs.model)
@@ -330,7 +408,7 @@ def _precheck(
         _set_placeholder(probe, refs.dataset)
     if environment and refs.environment is not None:
         _set_placeholder(probe, refs.environment)
-    _validate(probe, validate_job_spec)
+    return _validate(probe, validate_job_spec)
 
 
 def _set_placeholder(spec: dict, path: tuple[str, ...]) -> None:

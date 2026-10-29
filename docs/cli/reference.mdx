@@ -9765,6 +9765,7 @@ nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
+* `--dry-run`: Check the job without creating anything. The platform validates the job JSON, its model and dataset references and its execution profile, and checks the first 10 rows of each dataset file training reads. With `--upload-model`, `--upload-dataset` or `--upload-environment`, nothing is uploaded and only the job JSON is checked, plus the first 10 rows of the local `--upload-dataset` files.
 
 **Help:**
 
@@ -9878,6 +9879,7 @@ nemo customization rl [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
+* `--dry-run`: Check the job without creating anything. The platform validates the job JSON, its model and dataset references and its execution profile, and checks the first 10 rows of each dataset file training reads. With `--upload-model`, `--upload-dataset` or `--upload-environment`, nothing is uploaded and only the job JSON is checked, plus the first 10 rows of the local `--upload-dataset` files.
 
 **Help:**
 
@@ -9984,6 +9986,7 @@ nemo customization unsloth [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile to run the job on. Uses the backend default when omitted.
 * `-o`: Backend option override, 'backend.key=value'. [default: ]
 * `--options-file <PATH>`: JSON or YAML file of backend option overrides. Any -o flag wins over it.
+* `--dry-run`: Check the job without creating anything. The platform validates the job JSON, its model and dataset references and its execution profile, and checks the first 10 rows of each dataset file training reads. With `--upload-model`, `--upload-dataset` or `--upload-environment`, nothing is uploaded and only the job JSON is checked, plus the first 10 rows of the local `--upload-dataset` files.
 
 **Help:**
 

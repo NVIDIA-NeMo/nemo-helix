@@ -3,7 +3,7 @@
 
 # Fast path — rl (GRPO and DPO)
 
-Commands and job JSON for the `rl` backend, after `SKILL.md` § **Pre-flight** and the **`rl` runtime gate** in **Plugin pick**. The rules each step must follow are in `SKILL.md` § **Workflow**.
+Commands and job JSON for the `rl` backend, after `SKILL.md` § **Pre-flight** and the **platform check** in **Plugin pick**. The rules each step must follow are in `SKILL.md` § **Workflow**.
 
 ## Fast path — rl (GRPO)
 

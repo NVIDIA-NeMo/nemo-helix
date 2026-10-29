@@ -212,8 +212,16 @@ class JobsResource:
         ownership: dict[str, Any] | None = None,
         custom_fields: dict[str, Any] | None = None,
         output_location: str | None = None,
+        dry_run: bool = False,
     ) -> NemoResponse[CustomizationJob]:
-        """Submit a training job through the Customizer backend route."""
+        """Submit a training job through the Customizer backend route.
+
+        With ``dry_run=True``, the job is checked as submit would check it (validated and
+        compiled, its execution profile and the first rows of each dataset file) and
+        nothing is created. It returns the job unsaved, with the checks in
+        ``status_details["checks"]``; a failed check raises ``UnprocessableEntityError``,
+        whose ``body["detail"]["checks"]`` lists every check, passed and failed.
+        """
         body = _create_request(
             spec,
             name=name,
@@ -229,6 +237,7 @@ class JobsResource:
             workspace=workspace,
             backend=self.backend,
             body=body,
+            query_params={"dry_run": True} if dry_run else None,
         )
 
     def list(
@@ -317,8 +326,16 @@ class AsyncJobsResource:
         ownership: dict[str, Any] | None = None,
         custom_fields: dict[str, Any] | None = None,
         output_location: str | None = None,
+        dry_run: bool = False,
     ) -> NemoResponse[CustomizationJob]:
-        """Submit a training job through the Customizer backend route."""
+        """Submit a training job through the Customizer backend route.
+
+        With ``dry_run=True``, the job is checked as submit would check it (validated and
+        compiled, its execution profile and the first rows of each dataset file) and
+        nothing is created. It returns the job unsaved, with the checks in
+        ``status_details["checks"]``; a failed check raises ``UnprocessableEntityError``,
+        whose ``body["detail"]["checks"]`` lists every check, passed and failed.
+        """
         body = _create_request(
             spec,
             name=name,
@@ -334,6 +351,7 @@ class AsyncJobsResource:
             workspace=workspace,
             backend=self.backend,
             body=body,
+            query_params={"dry_run": True} if dry_run else None,
         )
 
     async def list(

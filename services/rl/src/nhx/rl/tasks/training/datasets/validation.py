@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -265,6 +266,32 @@ class DatasetValidator:
         if os.path.getsize(file_path) == 0:
             raise DatasetFormatError(f"{file_path} is empty")
 
+        with open(file_path, "r", encoding="utf-8") as jsonl_file:
+            self.validate_lines(jsonl_file, file_path, dataset_type)
+
+    def validate_lines(self, lines: Iterable[str], source: str, dataset_type: Optional[str] = None) -> int:
+        """Validate JSONL lines against the schema for *dataset_type*.
+
+        Training passes a whole file; a dry run passes the first rows of each file.
+
+        Args:
+            lines: JSONL lines, numbered from 1 in error messages.
+            source: Where the lines came from, for error messages.
+            dataset_type: Dataset type to validate against. If None, uses training type from config
+
+        Returns:
+            The number of rows validated.
+
+        Raises:
+            DatasetFormatError: If the dataset type is unsupported, or a line is not JSON or does not
+                match the schema
+        """
+        if dataset_type is None:
+            dataset_type = self.training_type.value
+        schema_factory = SCHEMAS.get(dataset_type)
+        if not schema_factory:
+            raise DatasetFormatError(f"Unsupported dataset_type for validation: {dataset_type}")
+
         validator = _compile_validator(schema_factory(self.prompt_template))
         is_dpo = dataset_type == TrainingType.DPO.value
         expected_dpo_schema: str | None = None
@@ -272,46 +299,44 @@ class DatasetValidator:
 
         # Validate each line in the JSONL file. Log identifiers (path + row number)
         # only — never the raw line/object, which can contain customer training data.
-        with open(file_path, "r", encoding="utf-8") as jsonl_file:
-            for line_number, raw_line in enumerate(jsonl_file, start=1):
-                line = raw_line.strip()
-                if not line:
-                    continue
+        for line_number, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
 
-                try:
-                    obj: dict[str, Any] = json.loads(line)
-                except Exception as e:
-                    logger.debug(f"{file_path}:{line_number} is not valid JSON: {e}")
-                    raise DatasetFormatError(f"{file_path} line {line_number} is not valid JSON: {e}")
+            try:
+                obj: dict[str, Any] = json.loads(line)
+            except Exception as e:
+                logger.debug(f"{source}:{line_number} is not valid JSON: {e}")
+                raise DatasetFormatError(f"{source} line {line_number} is not valid JSON: {e}")
 
-                # Reject files that mix multiple DPO schemas: detect_dpo_schema_name()
-                # later selects one concrete loader from the first row, so a mixed
-                # file would silently be handed to the wrong NeMo-RL dataset class.
-                if is_dpo:
-                    row_schema = get_preference_dataset_discriminator(obj)
-                    if expected_dpo_schema is None:
-                        expected_dpo_schema = row_schema
-                    elif row_schema != expected_dpo_schema:
-                        raise DatasetFormatError(
-                            f"{file_path} mixes DPO dataset schemas: expected {expected_dpo_schema}, "
-                            f"got {row_schema} on line {line_number}"
-                        )
-
-                try:
-                    self._validate_json_object(obj, validator)
-                except Exception as e:
-                    logger.debug(f"{file_path}:{line_number} does not conform to the expected schema: {e}")
+            # Reject files that mix multiple DPO schemas: detect_dpo_schema_name()
+            # later selects one concrete loader from the first row, so a mixed
+            # file would silently be handed to the wrong NeMo-RL dataset class.
+            if is_dpo:
+                row_schema = get_preference_dataset_discriminator(obj)
+                if expected_dpo_schema is None:
+                    expected_dpo_schema = row_schema
+                elif row_schema != expected_dpo_schema:
                     raise DatasetFormatError(
-                        f"{file_path} line {line_number} does not conform to the expected schema: {e}"
+                        f"{source} mixes DPO dataset schemas: expected {expected_dpo_schema}, "
+                        f"got {row_schema} on line {line_number}"
                     )
-                validated_rows += 1
-                if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
-                    logger.info("Validated %s rows in %s", validated_rows, file_path)
+
+            try:
+                self._validate_json_object(obj, validator)
+            except Exception as e:
+                logger.debug(f"{source}:{line_number} does not conform to the expected schema: {e}")
+                raise DatasetFormatError(f"{source} line {line_number} does not conform to the expected schema: {e}")
+            validated_rows += 1
+            if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
+                logger.info("Validated %s rows in %s", validated_rows, source)
 
         # A whitespace-only file would otherwise pass silently (no rows validated).
         if validated_rows == 0:
-            raise DatasetFormatError(f"{file_path} has no non-empty rows to validate")
-        logger.info("Validated %s rows in %s", validated_rows, file_path)
+            raise DatasetFormatError(f"{source} has no non-empty rows to validate")
+        logger.info("Validated %s rows in %s", validated_rows, source)
+        return validated_rows
 
 
 def _first_nonempty_line(file_path: str | Path) -> str | None:

@@ -174,6 +174,36 @@ See [Knowledge Distillation constraints](/documentation/customizer-reference/man
 
 ---
 
+## Check a Job Before Submitting
+
+A dry run checks a job the way submit does, then stops before creating it. It validates and compiles the job, checks that its execution profile exists, and checks the first 10 rows of each dataset file training reads with the backend's own validator. A failed row check names the file and line, so a dataset error is found before the job is scheduled. A dry run creates nothing.
+
+Pass `dry_run=True` to `create`. It is the same call as a submit, with `?dry_run=true` on the request. When every check passes, it returns the job it would create, unsaved (no `id` or `status`), with the checks in `status_details["checks"]`. When a check fails, it raises `UnprocessableEntityError` (HTTP 422), whose body lists every check, passed and failed:
+
+```python
+from nemo_helix_plugin.client.errors import UnprocessableEntityError
+
+try:
+    job = customization.automodel.jobs.create(spec=spec, workspace="default", dry_run=True).data()
+    checks = job.status_details["checks"]
+except UnprocessableEntityError as error:
+    checks = error.body["detail"]["checks"]
+for check in checks:
+    print("OK  " if check["passed"] else "FAIL", check["name"], check["message"])
+```
+
+From the CLI, add `--dry-run` to the submit command. It exits non-zero when a check fails:
+
+```bash
+nemo customization automodel --job-json job.json --dry-run
+```
+
+With `--upload-model`, `--upload-dataset` or `--upload-environment`, the dry run uploads nothing and runs on your machine. It checks the job JSON and, with `--upload-dataset`, the first 10 rows of the local dataset. The model and dataset references and the execution profile do not exist yet, so submit checks them after the upload.
+
+Before preparing any data, run `nemo jobs list-execution-profiles` to check that the platform is reachable and has a GPU execution profile (`provider` is `gpu` or `gpu_distributed`) for the backend. For `rl`, that profile's `backend` must be `kubernetes_job` or `volcano_job`.
+
+---
+
 ## After Submission
 
 A submitted job runs on the platform's Jobs service. Manage its lifecycle — polling status, listing, cancelling, pausing, resuming, and rerunning — through that service, regardless of which backend you submitted to. See [Get Job Status](/documentation/customizer-reference/manage-customization-jobs/get-job-status), [List Active Jobs](/documentation/customizer-reference/manage-customization-jobs/list-active-jobs), [Cancel a Job](/documentation/customizer-reference/manage-customization-jobs/cancel-job), and [Pause, Resume, and Rerun a Job](/documentation/customizer-reference/manage-customization-jobs/pause-resume-rerun).
