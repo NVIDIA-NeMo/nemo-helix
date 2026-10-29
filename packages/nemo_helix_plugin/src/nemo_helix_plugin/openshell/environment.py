@@ -12,10 +12,10 @@ ProviderBindingName = Annotated[str, StringConstraints(min_length=1, pattern=r"^
 
 
 class ProviderFulfillment(BaseModel):
-    """Bind an approved injection profile to existing environment secret entries.
+    """Select an injection profile and map its credential slots to environment secret aliases.
 
-    This describes intent only. Runtime support must be checked before launching
-    an agent; storing a fulfillment does not grant access to its credentials.
+    Agent environment resolution replaces the aliases with secret references for
+    the OpenShell backend. The backend checks profile approval and creator access.
     """
 
     model_config = ConfigDict(extra="forbid")

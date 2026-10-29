@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
@@ -18,8 +21,10 @@ from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.auth.access_keys import (
     ACCESS_KEY_JTI_PATTERN,
+    AccessKeyServiceAttributesForbiddenError,
     AccessKeyValidationError,
 )
+from nhx.common.auth.principal_identifier import parse_principal_identifier
 from nhx.common.config import get_auth_config
 from nhx.common.entities import EntityConflictError
 from nhx.common.service.dependencies import get_nemo_client
@@ -33,7 +38,29 @@ from nhx.core.auth.app.access_keys import (
 
 from . import schemas
 
-router = APIRouter(tags=["Scoped Access Keys"])
+
+class _RejectedInputNotEchoedRoute(APIRoute):
+    """Answers a request that fails validation with 422 and without the rejected input, which may not be JSON."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def handle(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                errors = [
+                    {key: value for key, value in error.items() if key not in ("input", "ctx")}
+                    for error in exc.errors()
+                ]
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": jsonable_encoder(errors)}
+                )
+
+        return handle
+
+
+router = APIRouter(tags=["Scoped Access Keys"], route_class=_RejectedInputNotEchoedRoute)
 
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
@@ -71,7 +98,10 @@ _ACCESS_KEY_CREATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": schemas.AccessKeyErrorResponse,
     },
     403: {
-        "description": "Service-bound Scoped Access Keys require HelixAdmin",
+        "description": (
+            "Service-bound Scoped Access Keys require HelixAdmin, or service_attributes were set by a caller "
+            "that isn't a platform service"
+        ),
         "model": schemas.AccessKeyErrorResponse,
     },
     404: _ACCESS_KEY_DISABLED_ERROR_RESPONSE,
@@ -132,6 +162,18 @@ def _caller_access_key_scope(auth_client: AuthClient) -> list[str] | None:
     return services or None
 
 
+def _acting_service(auth_client: AuthClient) -> str | None:
+    """The platform service making the request, whether or not it acts for a user.
+
+    None with auth off, where any caller can claim a service identity in its headers.
+    """
+    principal_id = auth_client.principal.id
+    if not auth_client.auth_enabled or not principal_id:
+        return None
+    identifier = parse_principal_identifier(principal_id, validate=False)
+    return identifier.service_name if identifier.is_service_principal() else None
+
+
 def get_access_key_issuer(
     auth_client: AuthClient = Depends(get_auth_client),
     registry: AccessKeyRegistry = Depends(get_access_key_registry),
@@ -144,6 +186,7 @@ def get_access_key_issuer(
         workspaces_client,
         admin_override=lambda: _is_platform_admin(auth_client),
         caller_scope=_caller_access_key_scope(auth_client),
+        acting_service=_acting_service(auth_client),
     )
 
 
@@ -204,6 +247,8 @@ async def create_access_key(
         return _disabled_response()
     except AccessKeyOperationNotImplementedError as exc:
         raise _not_implemented(exc) from exc
+    except AccessKeyServiceAttributesForbiddenError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except AccessKeyValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except EntityConflictError as exc:

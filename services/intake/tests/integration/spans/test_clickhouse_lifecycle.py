@@ -4,11 +4,10 @@
 """Native ClickHouse client ownership through the platform test harness."""
 
 import asyncio
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from aiohttp import ClientSession
-from fastapi import FastAPI
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nhx.intake.config import IntakeConfig
 from nhx.intake.service import IntakeService
@@ -29,15 +28,15 @@ def test_concurrent_async_callers_share_and_close_one_driver(
         return raw_client
 
     monkeypatch.setattr(ClickHouseSpanClient, "_create_raw_client", tracked_create)
+    service = IntakeService()
 
     with asyncio.Runner() as caller:
         with create_test_client(
-            IntakeService,
+            lambda: service,
             client_type=ClientContext,
             service_configs={IntakeService: intake_config},
         ) as ctx:
             client = AsyncIntakeClient.from_client(ctx.async_client)
-            service = cast(IntakeService, cast(FastAPI, ctx.test_client.app).state.intake_service)
             assert ctx.test_client.portal is not None
             service_loop = ctx.test_client.portal.call(asyncio.get_running_loop)
             assert service.clickhouse_client is not None

@@ -40,8 +40,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Native routing requires the extension and the IGW adapter in the same image.
 RUN /app/.venv/bin/python -c 'import switchyard_rust; import nemo_switchyard.middleware'
 
-# This image also runs the gateway credential-driver sidecar. Verify that its
-# optional OpenShell dependencies and packaged wire descriptor are installed.
+# Verify the credential-driver entrypoint and its OpenShell dependencies.
 RUN /app/.venv/bin/python -m nemo_deployments_plugin.backends.openshell.credential_driver.sidecar --help
 
 # Fail the build if pip is broken or duplicated (regression guard).

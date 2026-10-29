@@ -20,8 +20,10 @@ from harbor.models.task.verifier_mode import resolve_effective_verifier_env_conf
 from harbor.models.trial.config import AgentConfig, ResourceMode
 from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
+from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.remote.profile import ResourceOverrides, resource_defaults
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
@@ -43,6 +45,8 @@ from nemo_evals.jobs.harbor_task_dispatch import (
     check_execution_deadline,
     check_sandbox_server,
     configure_runtime,
+    image_entrypoints,
+    prepared_compose_services,
 )
 from nemo_evals.jobs.harbor_task_spec import (
     HarborTaskJobSpec,
@@ -55,7 +59,10 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProvider
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import HARBOR_TASK_DIR_KEY
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.values import ModelRef
+from pydantic import ValidationError
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
 AGENT = PreparedImage(image_ref="registry.invalid/agent@sha256:" + "a" * 64, preparation_key="ka")
@@ -198,6 +205,34 @@ def test_runtime_selects_opensandbox_with_frozen_policy_and_no_key(task_spec, tm
     assert kwargs["metadata"] == {"nemo-run": "run-0123456789abcdef", "nemo-task-index": "1", "nemo-job": ctx.job_id}
     assert configured.n_concurrent_trials == 1
     assert "private-worker-value" not in json.dumps(configured.model_dump(mode="json"))
+
+
+def _ctx() -> JobContext:
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    return ctx
+
+
+def test_runtime_passes_each_recorded_images_own_entrypoint(harbor_plan, harbor_run, tmp_path):
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    environment = ENVIRONMENT.model_copy(update={"agent": agent})
+    spec = build_task_job_input(harbor_plan, harbor_run, 1, environment)
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), _ctx(), spec)
+    assert configured.environment is not None
+    # The verifier's image wasn't recorded, so its sandbox starts as it did before.
+    assert configured.environment.kwargs["image_entrypoints"] == {AGENT.image_ref: ["/bin/bash", "-l", "-c"]}
+
+
+def test_image_entrypoints_name_an_image_without_one_and_skip_unrecorded_ones():
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(cmd=["/app/run.sh"])})
+    assert image_entrypoints(ENVIRONMENT.model_copy(update={"agent": agent})) == {AGENT.image_ref: []}
+    assert image_entrypoints(ENVIRONMENT) == {}
+
+
+def test_runtime_without_recorded_images_passes_no_entrypoints(task_spec, tmp_path):
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), _ctx(), task_spec)
+    assert configured.environment is not None
+    assert "image_entrypoints" not in configured.environment.kwargs
 
 
 def test_runtime_passes_the_frozen_agent_channel(task_spec, tmp_path):
@@ -406,10 +441,13 @@ def test_bind_leaves_a_shared_verifier_alone(tmp_path):
     assert "verifier" not in tomllib.loads((task / "task.toml").read_text())
 
 
-def test_bind_rejects_compose_tasks(tmp_path):
+def test_bind_leaves_a_compose_tasks_files_alone(tmp_path):
+    import tomllib
+
     task = write_task(tmp_path / "t", "[environment]\n", compose=True)
-    with pytest.raises(ValueError, match="compose tasks"):
-        bind_task_image(task, AGENT.image_ref)
+    bind_task_image(task, AGENT.image_ref)
+    assert tomllib.loads((task / "task.toml").read_text())["environment"]["docker_image"] == AGENT.image_ref
+    assert (task / "environment" / "docker-compose.yaml").read_text() == "services: {}\n"
 
 
 def test_a_no_network_task_off_the_agent_channel_stops_before_any_sandbox(task_spec, harbor_resolved_task, monkeypatch):
@@ -457,3 +495,149 @@ def test_every_sandbox_ends_at_the_runs_execution_deadline(task_spec, tmp_path):
     assert kwargs["sandbox_timeout_sec"] == task_spec.sandbox_policy.max_sandbox_lifetime_s
     expires_at = kwargs["sandbox_expires_at"]
     assert isinstance(expires_at, str) and datetime.fromisoformat(expires_at) == task_spec.execution_deadline_at
+
+
+SERVICE_DB = PreparedImage(image_ref="registry.invalid/db@sha256:" + "c" * 64, preparation_key="kc")
+SERVICE_API = PreparedImage(image_ref="registry.invalid/api@sha256:" + "d" * 64, preparation_key="kd")
+COMPOSE_ENVIRONMENT = ENVIRONMENT.model_copy(update={"compose_images": {"db": SERVICE_DB, "api": SERVICE_API}})
+
+
+def write_compose_task(root: Path) -> Path:
+    """A task with a built main (its Dockerfile has an ENTRYPOINT), a published ``db`` and a built ``api``."""
+    task = write_task(root, "[environment]\n", compose=True)
+    (task / "environment" / "Dockerfile").write_text('FROM python:3.12-slim\nENTRYPOINT ["/start.sh"]\n')
+    (task / "environment" / "api").mkdir()
+    (task / "environment" / "api" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  db:\n    image: postgres:16\n  api:\n    build: ./api\n"
+    )
+    return task
+
+
+def test_compose_services_run_the_images_the_run_prepared(tmp_path):
+    task = write_compose_task(tmp_path / "t")
+    spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+    assert spec is not None
+    assert {service["name"]: service["image"] for service in spec["services"]} == {
+        "db": SERVICE_DB.image_ref,
+        "api": SERVICE_API.image_ref,
+    }
+    assert spec["main"]["entrypoint"] == ["/start.sh"]
+
+
+def test_compose_services_are_derived_before_the_image_is_bound(tmp_path):
+    """Binding sets docker_image, and the parser then ignores main's Dockerfile: its ENTRYPOINT would be lost."""
+    task = write_compose_task(tmp_path / "t")
+    bind_task_image(task, AGENT.image_ref)
+    spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+    assert spec is not None and "main" not in spec
+
+
+def test_a_compose_tasks_env_values_stay_out_of_the_config_harbor_persists(task_spec, tmp_path, monkeypatch):
+    """Harbor writes ``environment.kwargs`` to ``config.json`` and every trial's ``result.json``; the values are the task's own."""
+    task = write_compose_task(tmp_path / "t")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  db:\n    image: postgres:16\n    environment:\n      POSTGRES_PASSWORD: pg-pass\n      PGDATA: /data\n"
+        "  api:\n    build: ./api\n    environment:\n      VERIFIER_TOKEN: api-tok-value\n"
+        "  main:\n    environment:\n      MYSQL_PASSWORD: my-pass\n"
+    )
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    runtime = HarborRuntimeConfig(jobs_dir=tmp_path)
+    raw = prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+    assert raw is not None
+    # The same spec, with its values in it, is what the credential guard refuses.
+    with pytest.raises(ValidationError, match="look like plaintext credentials"):
+        configure_runtime(runtime, ctx, task_spec, raw)
+
+    monkeypatch.setattr(os, "environ", {})
+    job = HarborTaskAgentEvalJob()
+    job._task_spec = task_spec.model_copy(update={"environment": COMPOSE_ENVIRONMENT})
+    job._prepared_tasks([MagicMock(spec=AgentEvalTask, metadata={HARBOR_TASK_DIR_KEY: str(task)})])
+
+    configured = configure_runtime(runtime, ctx, job._task_spec, job._compose_services)
+
+    assert configured.environment is not None
+    persisted = json.dumps(configured.environment.kwargs)
+    values = ("pg-pass", "/data", "api-tok-value", "my-pass")
+    assert not [value for value in values if value in persisted]
+    assert persisted.count("${NEMO_COMPOSE_ENV_") == len(values)
+    assert sorted(os.environ.values()) == sorted(values)
+
+
+def test_a_recorded_main_image_leaves_its_entrypoint_to_the_sandbox(tmp_path):
+    """With Builder's record of main's image, the Dockerfile isn't guessed from: the sandbox restores the real one."""
+    task = write_compose_task(tmp_path / "t")
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT.model_copy(update={"agent": agent}))
+    assert spec is not None and "main" not in spec
+
+
+def write_main_only_task(root: Path) -> Path:
+    """A task whose compose file only changes how ``main`` starts, as swe-lancer's do."""
+    task = write_task(root, "[environment]\n", compose=True)
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n"
+    )
+    return task
+
+
+def test_a_main_only_task_runs_main_s_command_after_its_recorded_entrypoint(tmp_path):
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    spec = prepared_compose_services(
+        write_main_only_task(tmp_path / "t"), ENVIRONMENT.model_copy(update={"agent": agent})
+    )
+    assert spec is not None
+    # The sandbox restores the ENTRYPOINT from image_entrypoints, so the spec carries only the compose settings.
+    assert spec["main"] == {"command": ["/app/tests/run.sh"], "working_dir": "/app"}
+    assert spec.get("services", []) == []
+
+
+def test_a_main_command_whose_entrypoint_is_unknown_is_refused(tmp_path):
+    """Without Builder's record, main's command would run without the ENTRYPOINT its image may inherit."""
+    with pytest.raises(ComposeError, match="compose_entrypoint_unknown"):
+        prepared_compose_services(write_main_only_task(tmp_path / "t"), ENVIRONMENT)
+
+
+def test_a_single_container_task_has_no_compose_services(tmp_path):
+    task = write_task(tmp_path / "t", "[environment]\n")
+    assert prepared_compose_services(task, ENVIRONMENT) is None
+
+
+def test_a_built_service_without_a_prepared_image_is_refused(tmp_path):
+    task = write_compose_task(tmp_path / "t")
+    only_db = ENVIRONMENT.model_copy(update={"compose_images": {"db": SERVICE_DB}})
+    with pytest.raises(ComposeError, match="compose_build_not_prepared"):
+        prepared_compose_services(task, only_db)
+
+
+def test_prepared_images_must_be_for_the_tasks_services(tmp_path):
+    task = write_compose_task(tmp_path / "t")
+    extra = COMPOSE_ENVIRONMENT.model_copy(
+        update={"compose_images": {**COMPOSE_ENVIRONMENT.compose_images, "ghost": SERVICE_DB}}
+    )
+    with pytest.raises(ValueError, match="not the services the run prepared images for"):
+        prepared_compose_services(task, extra)
+
+
+def test_a_compose_file_the_pod_cannot_run_fails_the_job_with_the_parsers_message(tmp_path):
+    task = write_task(tmp_path / "t", "[environment]\n")
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n"
+    )
+    with pytest.raises(ComposeError, match="compose_reserved_port"):
+        prepared_compose_services(task, COMPOSE_ENVIRONMENT)
+
+
+def test_runtime_passes_compose_services_to_the_environment(task_spec, tmp_path):
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    services = {"services": [{"name": "db", "image": SERVICE_DB.image_ref}]}
+    with_services = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec, services)
+    without = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), ctx, task_spec)
+    assert with_services.environment is not None and without.environment is not None
+    assert with_services.environment.kwargs["compose_services"] == services
+    assert "compose_services" not in without.environment.kwargs

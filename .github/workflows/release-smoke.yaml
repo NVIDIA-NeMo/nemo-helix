@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release-version:
-        description: "Published chart version (e.g. 0.8.0 or 0.8.0-nightly-20261021000000)"
+        description: "Published chart version (e.g. 0.8.0 or 0.8.0-rc-20261021000000)"
         required: true
         type: string
       send-notifications:

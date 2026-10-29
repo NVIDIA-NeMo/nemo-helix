@@ -94,6 +94,11 @@ class JobReconciler(HeartbeatMixin, Controller):
             logger.debug("Stop signal received, skipping reconciliation step")
             return
 
+        # Keep fetch, per-step reconciliation, cleanup, and their logs in one trace.
+        with tracer.start_as_current_span("jobs_reconciler/step"):
+            self._reconcile()
+
+    def _reconcile(self) -> None:
         fetch_started_at = time.monotonic()
         with tracer.start_as_current_span("jobs_reconciler/fetch_steps_for_reconciliation"):
             try:
@@ -111,14 +116,16 @@ class JobReconciler(HeartbeatMixin, Controller):
                 logger.exception("Could not fetch job steps for reconciliation", exc_info=True)
                 return
 
-        if len(steps_to_reconcile) > 0:
-            logger.info(f"Got {len(steps_to_reconcile)} job steps to reconcile")
-        else:
-            logger.debug("No job steps to reconcile")
-        logger.debug(
-            "Reconciler fetched job steps",
-            extra={"count": len(steps_to_reconcile), "duration_seconds": time.monotonic() - fetch_started_at},
-        )
+        with tracer.start_as_current_span("jobs_reconciler/fetch_summary") as span:
+            span.set_attribute("count", len(steps_to_reconcile))
+            if len(steps_to_reconcile) > 0:
+                logger.info(f"Got {len(steps_to_reconcile)} job steps to reconcile")
+            else:
+                logger.debug("No job steps to reconcile")
+            logger.debug(
+                "Reconciler fetched job steps",
+                extra={"count": len(steps_to_reconcile), "duration_seconds": time.monotonic() - fetch_started_at},
+            )
         for step in steps_to_reconcile:
             with start_span_with_ctx(
                 tracer,
@@ -207,7 +214,8 @@ class JobReconciler(HeartbeatMixin, Controller):
                     self.emit_heartbeat()
 
         # Perform any necessary cleanup steps for expired jobs
-        logger.debug("Running job cleanup for expired job steps")
+        with tracer.start_as_current_span("jobs_reconciler/cleanup_summary"):
+            logger.debug("Running job cleanup for expired job steps")
         for backend in self._backend_registry.get_all_backends():
             with tracer.start_as_current_span("jobs_reconciler/cleanup_backend_steps"):
                 try:
@@ -217,13 +225,15 @@ class JobReconciler(HeartbeatMixin, Controller):
                 finally:
                     self.emit_heartbeat()
 
-        self._enforce_storage_retention()
+        with tracer.start_as_current_span("jobs_reconciler/enforce_storage_retention"):
+            self._enforce_storage_retention()
 
     def _enforce_storage_retention(self) -> None:
         """Reclaim queued storage every tick, and queue stopped jobs' storage on the retention interval."""
         if self._stop_signal and self._stop_signal.is_set():
             return
-        self._reclaim_queued_storage()
+        with tracer.start_as_current_span("jobs_reconciler/reclaim_queued_storage"):
+            self._reclaim_queued_storage()
 
         # Listing every stopped step is the expensive part, so it runs on a slower interval.
         now = time.monotonic()

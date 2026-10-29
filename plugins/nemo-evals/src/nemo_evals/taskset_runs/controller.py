@@ -6,11 +6,11 @@
 Submit only accepts a run (its images are built and frozen in the plan); this
 controller does the rest, in cycles of two phases:
 
-- **Phase 1** settles every open run, oldest first: it creates the run's members (one per task, queued in
+- **The settle phase** settles every open run, oldest first: it creates the run's members (one per task, queued in
   ``image_ready``), resolves create intents, settles members whose Job ended, stops a cancelled or expired run,
   and once every member has settled ends the run or finalizes it (bundle Job, result record). Each run reports
   a :class:`RunTally`: the task-Job slots it holds and the tasks it has queued.
-- **Phase 2** hands out the free slots (:func:`allocate`): each goes to the creator holding the fewest, and
+- **The grant phase** hands out the free slots (:func:`allocate`): each goes to the creator holding the fewest, and
   within that creator to its oldest run below its caps. It registers in grant order, then retries pending
   creates, which already hold a slot.
 
@@ -33,6 +33,7 @@ over them, ``result_state=ready``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import Counter
@@ -113,6 +114,9 @@ NO_RETRY = RetryPolicy(max_retries=0)
 """The controller's clients never retry: the platform's default retries timeouts, 5xx and 409, so a hung Jobs
 call would hold a cycle for three timeouts, and a create retried after an ambiguous attempt could be refused
 and read as a refusal of the first POST."""
+LIST_CHUNK = 100
+"""Names per Jobs list. Jobs pages by offset, so a Job deleted between two pages would shift a running Job off
+both and read as missing; names are unique in a workspace, so a list of at most this many names is one page."""
 
 
 class RunJobs(Protocol):
@@ -123,6 +127,11 @@ class RunJobs(Protocol):
     """
 
     async def get(self, name: str) -> HelixJobResponse | None: ...
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        """The Jobs now under ``names`` (at most :data:`LIST_CHUNK`), by name: one call, the answer a GET of each
+        would give. A name with no Job (or one saved without its attempt) is left out."""
+        ...
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
         """Result ``name`` of the Job now under name ``job``; its ``job`` field is that Job's id."""
@@ -161,13 +170,14 @@ class JobsUnavailableError(Exception):
 class JobsBreaker:
     """The first Jobs timeout or connection error ends the Jobs calls it guards, until the next cycle.
 
-    Phase 1 and the stuck-Job reads share one; each phase-2 drain has its own. A fast 5xx is an answer, not a
+    Settling and the stuck-Job reads share one; each grant-phase drain has its own. A fast 5xx is an answer, not a
     timeout, and doesn't trip it.
     """
 
     def __init__(self) -> None:
         self.tripped = False
         self.timeouts = 0
+        self.reads = 0  # Jobs read requests it let through: lists, GETs, results, step listings
 
     def trip(self) -> None:
         self.tripped = True
@@ -181,9 +191,10 @@ class GuardedRunJobs:
         self._inner = inner
         self._breaker = breaker
 
-    async def _jobs_call[T](self, call: Callable[[], Awaitable[T]]) -> T:
+    async def _jobs_call[T](self, call: Callable[[], Awaitable[T]], *, read: bool = False) -> T:
         if self._breaker.tripped:
             raise JobsUnavailableError("an earlier Jobs call timed out this cycle")
+        self._breaker.reads += read
         try:
             return await call()
         except (NemoTransportError, httpx.TransportError, TimeoutError):
@@ -195,16 +206,25 @@ class GuardedRunJobs:
         return self._inner.evaluations
 
     async def get(self, name: str) -> HelixJobResponse | None:
-        return await self._jobs_call(lambda: self._inner.get(name))
+        return await self._jobs_call(lambda: self._inner.get(name), read=True)
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        """Any number of names, :data:`LIST_CHUNK` per call; each call checks the breaker, so once another run's
+        timeout trips it, no later chunk is sent. Any chunk failing fails the whole list."""
+        listed: dict[str, HelixJobResponse] = {}
+        for start in range(0, len(names), LIST_CHUNK):
+            chunk = names[start : start + LIST_CHUNK]
+            listed |= await self._jobs_call(lambda chunk=chunk: self._inner.list_named(chunk), read=True)
+        return listed
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
-        return await self._jobs_call(lambda: self._inner.result(job, name))
+        return await self._jobs_call(lambda: self._inner.result(job, name), read=True)
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse:
         return await self._jobs_call(lambda: self._inner.create(request))
 
     async def has_steps(self, name: str) -> bool:
-        return await self._jobs_call(lambda: self._inner.has_steps(name))
+        return await self._jobs_call(lambda: self._inner.has_steps(name), read=True)
 
     async def cancel(self, name: str) -> None:
         await self._jobs_call(lambda: self._inner.cancel(name))
@@ -239,15 +259,15 @@ class StuckJob:
 
 @dataclass
 class _RunState:
-    """One open run through one cycle: what phase 1 learned, and what phase 2 needs to register its tasks."""
+    """One open run through one cycle: what settling learned, and what the grant phase needs to register its tasks."""
 
     run: TasksetRunEntity
     creator: str
     members: list[TasksetRunMemberEntity]
     plan: TasksetRunPlan | None = None
     cap: int | None = 0
-    no_grant: bool = True  # stopping, finalizing, plan unavailable, or an error: phase 2 skips the run
-    missing: set[str] = field(default_factory=set)  # intents whose Job read 404 this cycle: phase 2 retries them
+    no_grant: bool = True  # stopping, finalizing, plan unavailable, or an error: the grant phase skips the run
+    missing: set[str] = field(default_factory=set)  # intents whose Job read 404 this cycle: granting retries them
     matched: set[str] = field(default_factory=set)  # members whose running Job read as theirs (job_id) this pass
     action: str = "waiting"
 
@@ -274,8 +294,9 @@ class CycleReport:
     held_by_creator: dict[str, int] = field(default_factory=dict)
     oldest_queued_wait: timedelta | None = None
     jobs_timeouts: int = 0
+    jobs_reads: int = 0  # Jobs read requests: lists, GETs, results, step listings
     created: int = 0
-    phase2_skipped: str | None = None
+    grant_skipped: str | None = None
     grants: list[str] = field(default_factory=list)  # run names in grant order, as allocate() returned them
 
 
@@ -285,6 +306,12 @@ class MemberListingIncompleteError(RuntimeError):
 
 def _settled(member: TasksetRunMemberEntity) -> bool:
     return member.phase in SETTLED_MEMBER_PHASES
+
+
+def _retry_key(item: tuple[_RunState, TasksetRunMemberEntity]) -> tuple[str, int]:
+    """Where a pending create sits in the retry rotation: its run, then its task."""
+    state, member = item
+    return state.run.id, member.task_index
 
 
 def _rotated[T](items: Sequence[T], offset: int) -> list[T]:
@@ -403,7 +430,11 @@ class TasksetRunReconciler:
         # Where each run's Job reads (and the stuck-Job reads) start next cycle: just past the read that last
         # tripped the cutoff, so one Job whose GET always hangs can't keep the others from ever being read.
         self._read_cursor: dict[str, int] = {}  # run id -> task index
+        # Runs whose last Jobs list failed: read one Job at a time from the cursor until a pass reads every one,
+        # so one Job that can't be read never keeps the run's other Jobs from being read.
+        self._read_one_by_one: set[str] = set()
         self._stuck_cursor: tuple[str, str] | None = None
+        self._retry_last: tuple[str, int] | None = None  # (run id, task index) of the last retried create
 
     @property
     def grace(self) -> timedelta:
@@ -418,47 +449,60 @@ class TasksetRunReconciler:
             runs = await self.store.list_open_runs()
         except Exception:
             logger.exception("Listing open taskset runs failed; skipping this cycle")
-            report.phase2_skipped = "open runs couldn't be listed"
+            report.grant_skipped = "open runs couldn't be listed"
             return report
         now = self._clock()
         breaker = JobsBreaker()
         states: dict[str, _RunState] = {}
         listing_failed: list[str] = []
-        # The stuck-Job reads take a turn in the rotation, so a hanging read can't always come first or last.
-        for run in _rotated([*runs, None], self._cycle):
-            if self._stop_requested():
-                return report
-            if run is None:
-                await self._refresh_stuck(breaker)
-                continue
-            try:
-                state = await self._settle(run, now, breaker)
-            except Exception:
-                logger.exception("Run %s/%s: listing its members failed; no grants this cycle", run.workspace, run.name)
-                listing_failed.append(run.name)
-                continue
-            states[run.id] = state
-            if state.action not in {"waiting", "bundling"}:
-                logger.info("Run %s/%s: %s", run.workspace, run.name, state.action)
+        # Workers take runs, and the stuck-Job reads, in a rotation that starts one later each cycle: the breaker
+        # is shared, so a run whose reads always hang must not always go first and cut off the runs after it.
+        items = iter(_rotated([*runs, None], self._cycle))
+        stopped = False
+
+        async def worker() -> None:
+            nonlocal stopped
+            for run in items:  # shared: each run is taken once, in rotated order
+                if self._stop_requested():
+                    stopped = True
+                    return
+                if run is None:
+                    await self._refresh_stuck(breaker)
+                    continue
+                try:
+                    state = await self._settle(run, now, breaker)
+                except Exception:
+                    logger.exception(
+                        "Run %s/%s: listing its members failed; no grants this cycle", run.workspace, run.name
+                    )
+                    listing_failed.append(run.name)
+                    continue
+                states[run.id] = state
+                if state.action not in {"waiting", "bundling"}:
+                    logger.info("Run %s/%s: %s", run.workspace, run.name, state.action)
+
+        await asyncio.gather(*(worker() for _ in range(self.config.settle_concurrency)))
+        if stopped:
+            return report
         ordered = [states[run.id] for run in runs if run.id in states]  # oldest first, as listed
         tallies = [state.tally() for state in ordered]
         stuck_by_creator = Counter(entry.creator for entry in self.stuck.values())
         free = task_slots(tallies, stuck_by_creator, self.config)
         if listing_failed:
-            report.phase2_skipped = f"members of {', '.join(listing_failed)} couldn't be listed"
-        # A tripped breaker doesn't skip phase 2: it bounds itself (each drain ends at its first ambiguous create),
+            report.grant_skipped = f"members of {', '.join(listing_failed)} couldn't be listed"
+        # A tripped breaker doesn't skip granting: it bounds itself (each drain ends at its first ambiguous create),
         # and a single Job whose GET hangs must not stop every grant in the cluster.
         elif self._stop_requested():
-            report.phase2_skipped = "shutting down"
+            report.grant_skipped = "shutting down"
         else:
             await self._hand_out(ordered, tallies, free, stuck_by_creator, report)
         self._report(report, ordered, stuck_by_creator, breaker, now, started, runs)
         return report
 
-    # ---- phase 1 ---------------------------------------------------------------------------------------
+    # ---- settle phase -----------------------------------------------------------------------------------
 
     async def _settle(self, run: TasksetRunEntity, now: datetime, breaker: JobsBreaker) -> _RunState:
-        """Phase 1 for one run. Raises only when its members can't all be listed; every other exit reports a tally."""
+        """Settle one run. Raises only when its members can't all be listed; every other exit reports a tally."""
         members = await self.store.list_all_members(run)
         state = _RunState(run=run, creator=run.created_by or DEVELOPMENT_CALLER, members=members)
         try:
@@ -528,33 +572,62 @@ class TasksetRunReconciler:
         now: datetime,
         stop: TasksetRunPhase | None,
     ) -> None:
-        """P3 and P4 in one pass over the run's members with a Job name, starting at the run's read cursor.
+        """P3 and P4 over the run's members with a Job name: one Jobs list, then a pass from the run's read cursor.
 
-        One loop, so a Job whose GET always times out can't keep the run's other Jobs from being read: the
-        first timeout ends the cycle's Jobs calls, and the next cycle starts just past the read that tripped it.
+        The list answers what a GET of each name would, in one call per :data:`LIST_CHUNK` names. When it fails,
+        nothing it would have read is used; the run's Jobs are read one at a time instead, from this cycle until a
+        pass reads every one, so a Job whose read always fails or hangs can't keep the others from being read.
+        A timeout (of the list, a GET or a result read) ends the cycle's Jobs calls, and the next cycle starts just
+        past the member whose read was cut off.
         """
+        run_id = state.run.id
         named = [m for m in state.members if m.task_job is not None and not _settled(m)]
-        order = _from_cursor(named, lambda m: m.task_index, self._read_cursor.get(state.run.id))
-        for member in order:
+        if not named:
+            self._read_one_by_one.discard(run_id)
+            return
+        listed: dict[str, HelixJobResponse] | None = None
+        if run_id not in self._read_one_by_one:
+            try:
+                listed = await jobs.list_named([m.task_job for m in named if m.task_job is not None])
+            except JobsUnavailableError:
+                pass  # not sent: another read's timeout tripped the breaker, and the loop below stops at once
+            except Exception as exc:
+                logger.info("Run %s: listing its Jobs failed (%s); reading them one at a time", state.run.name, exc)
+                self._read_one_by_one.add(run_id)
+        every_read = True
+        for member in _from_cursor(named, lambda m: m.task_index, self._read_cursor.get(run_id)):
             if breaker.tripped:
-                self._read_cursor[state.run.id] = member.task_index
+                self._read_cursor[run_id] = member.task_index
+                every_read = False
                 break
-            job: HelixJobResponse | None = None
+            assert member.task_job is not None
+            if listed is not None:
+                job = listed.get(member.task_job)  # None: no Job under the name, as a GET's 404
+            else:
+                try:
+                    job = await jobs.get(member.task_job)
+                except Exception as exc:
+                    logger.debug("Run %s: reading Job %s failed: %s", state.run.name, member.task_job, exc)
+                    every_read = False
+                    continue  # keeps its slot and its last job_status
             if member.phase is MemberPhase.IMAGE_READY:
-                member, job = await self._resolve_intent(state, plan, member, jobs, now, stop)
+                member, job = await self._resolve_intent(state, plan, member, job, jobs, now, stop)
             if member.phase is MemberPhase.REGISTERED:
                 await self._settle_registered(state, member, job, jobs, stop)
+        if listed is None and every_read:
+            self._read_one_by_one.discard(run_id)  # every Job answered: back to one list next cycle
 
     async def _resolve_intent(
         self,
         state: _RunState,
         plan: TasksetRunPlan,
         member: TasksetRunMemberEntity,
+        job: HelixJobResponse | None,
         jobs: RunJobs,
         now: datetime,
         stop: TasksetRunPhase | None,
     ) -> tuple[TasksetRunMemberEntity, HelixJobResponse | None]:
-        """P3: read a create intent's Job as the evals service: ours → registered; foreign → failed.
+        """P3: a create intent's Job, as the run's Jobs list read it: ours → registered; foreign → failed.
 
         Returns the member as last written and, when it was adopted, the Job just read.
         """
@@ -562,13 +635,12 @@ class TasksetRunReconciler:
         request = await task_job_request(plan, state.run, index, plan.task_environments[index])
         assert request.name is not None
         try:
-            job = await jobs.get(request.name)
             found = await adoption(job, request, jobs) if job is not None else None
         except Exception as exc:
             logger.debug("Run %s: reading intent %s failed: %s", state.run.name, request.name, exc)
             return member, None
         if job is None:
-            state.missing.add(member.name)  # pending; phase 2 retries the create, a stop may settle it
+            state.missing.add(member.name)  # pending; the grant phase retries the create, a stop may settle it
         elif found == "ours":
             registered = await self.store.update_member(
                 member, phase=MemberPhase.REGISTERED, job_id=job.id, job_status=job.status
@@ -592,13 +664,13 @@ class TasksetRunReconciler:
     ) -> None:
         """P4: settle a registered member whose Job ended; record a changed ``job_status`` otherwise.
 
-        ``job`` is the Job when P3 just read it. Ours only when its id is ``member.job_id``: Jobs deletes only
-        ended Jobs, so another id under the name means ours ended and was deleted (``job_missing``). A result
-        counts only when it names that id too.
+        ``job`` is what the run's Jobs list read under the member's name (None: no Job there). Ours only when its
+        id is ``member.job_id``: Jobs deletes only ended Jobs, so another id under the name means ours ended and
+        was deleted (``job_missing``). A result counts only when it names that id too.
         """
         assert member.task_job is not None
         try:
-            job = _ours(job or await jobs.get(member.task_job), member)
+            job = _ours(job, member)
             status = _status(job) if job is not None else None
             result = await jobs.result(member.task_job, DEFAULT_RESULT_NAME) if status == "completed" else None
         except Exception as exc:
@@ -808,11 +880,12 @@ class TasksetRunReconciler:
             except Exception as exc:
                 logger.debug("Reading stuck Job %s/%s failed: %s", entry.workspace, entry.name, exc)
                 continue
-            if gone:
+            # Runs settle while this reads: a force settle may have put a new entry under the key since.
+            if gone and self.stuck.get(key) is entry:
                 logger.info("Stuck Job %s/%s ended or is gone; no longer counted", entry.workspace, entry.name)
                 del self.stuck[key]
 
-    # ---- phase 2 ---------------------------------------------------------------------------------------
+    # ---- grant phase ------------------------------------------------------------------------------------
 
     async def _hand_out(
         self,
@@ -822,27 +895,48 @@ class TasksetRunReconciler:
         stuck_by_creator: Counter[str],
         report: CycleReport,
     ) -> None:
-        """Phase 2: register in ``allocate()``'s grant order, then retry pending creates.
+        """The grant phase: register in ``allocate()``'s grant order, then retry pending creates, within one budget.
+
+        Every create attempt, a grant or a retry, spends one of ``max_creates_per_cycle``: creates are sequential
+        (~3 s each in AC 9.2), so the budget bounds the cycle. Retries get up to half of it while grants are due
+        and whatever the grants leave: grants can't starve them even when finished tasks free slots every cycle,
+        and a burst of retries can't stop every grant. Retries start just past the intent the last cycle tried, so
+        the same ones failing again can't keep the others waiting.
 
         Two drains, each ending at its first ambiguous create (a timeout or 5xx may still be saving): an
         ambiguous grant doesn't stop the retries, and an ambiguous retry doesn't stop the grants. The clock is
         read again before each create, and a run gets nothing past its ``execution_deadline_at``. An error for
         one run (a 409 on its ``running`` write after a cancel landed) ends only that run's creates this cycle.
         """
+        budget = self.config.max_creates_per_cycle
+        pending = sorted(
+            (
+                (state, member)
+                for state in ordered
+                for member in state.members
+                if member.name in state.missing and member.phase is MemberPhase.IMAGE_READY and not state.no_grant
+            ),
+            key=_retry_key,
+        )
+        if self._retry_last is not None:  # start just past the intent tried last
+            k = next((i for i, item in enumerate(pending) if _retry_key(item) > self._retry_last), 0)
+            pending = [*pending[k:], *pending[:k]]
+        reserve = min(len(pending), budget // 2)
         by_id = {state.run.id: state for state in ordered}
-        grants = allocate(tallies, free, self.config.max_concurrent_task_jobs_per_creator, stuck_by_creator)
+        grants = allocate(
+            tallies, min(free, budget - reserve), self.config.max_concurrent_task_jobs_per_creator, stuck_by_creator
+        )
         report.grants = [by_id[run_id].run.name for run_id in grants]
         granted = ((by_id[run_id], next((m for m in by_id[run_id].members if is_queued(m)), None)) for run_id in grants)
-        pending = (
-            (state, member)
-            for state in ordered
-            for member in [m for m in state.members if m.name in state.missing and m.phase is MemberPhase.IMAGE_READY]
-        )
+        attempts = 0
         async with AsyncExitStack() as stack:
             opened: dict[str, RunJobs] = {}
-            for drain in (granted, pending):  # both lazy: each pair is read after the creates before it
+            # granted is lazy: each run's next queued member is read after the creates before it.
+            for drain, retrying in ((granted, False), (iter(pending), True)):
                 breaker = JobsBreaker()
                 for state, member in drain:
+                    if attempts >= budget:
+                        break
                     if state.no_grant or member is None:
                         continue
                     if state.run.id not in opened:
@@ -857,9 +951,13 @@ class TasksetRunReconciler:
                             )
                             state.no_grant = True
                             continue
+                    if retrying:
+                        self._retry_last = _retry_key((state, member))  # before the attempt: an ambiguous one too
+                    attempts += 1
                     if not await self._register(state, member, GuardedRunJobs(opened[state.run.id], breaker), report):
                         break
                 report.jobs_timeouts += breaker.timeouts
+                report.jobs_reads += breaker.reads
 
     async def _register(
         self, state: _RunState, member: TasksetRunMemberEntity, jobs: RunJobs, report: CycleReport
@@ -921,9 +1019,10 @@ class TasksetRunReconciler:
         report.held_by_creator = dict(held_by_creator)
         report.oldest_queued_wait = oldest
         report.jobs_timeouts += breaker.timeouts
+        report.jobs_reads += breaker.reads
         logger.info(
             "Taskset runs: task slots %d/%d, queued tasks %d, open runs %d, oldest queued run waited %s, "
-            "held per creator %s, stuck Jobs %d, created %d, cycle %.1fs, Jobs timeouts %d%s",
+            "held per creator %s, stuck Jobs %d, created %d, cycle %.1fs, Jobs timeouts %d, Jobs reads %d%s",
             report.used,
             report.cap,
             report.queued,
@@ -934,7 +1033,8 @@ class TasksetRunReconciler:
             report.created,
             time.monotonic() - started,
             report.jobs_timeouts,
-            f", phase 2 skipped: {report.phase2_skipped}" if report.phase2_skipped else "",
+            report.jobs_reads,
+            f", grant phase skipped: {report.grant_skipped}" if report.grant_skipped else "",
         )
 
 
@@ -1294,6 +1394,17 @@ class JobsServiceRunJobs:
             return (await self._jobs.get_job(workspace=self._workspace, name=name)).data()
         except NotFoundError:
             return None
+
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        if len(names) > LIST_CHUNK:
+            raise ValueError(f"at most {LIST_CHUNK} names per Jobs list, got {len(names)}: more could span pages")
+        if not names:
+            return {}
+        response = await self._jobs.list_jobs(
+            workspace=self._workspace,
+            query_params={"filter": {"name": {"$in": list(names)}}, "page_size": LIST_CHUNK},
+        )
+        return {job.name: job for job in response.page().items if job.name in names}
 
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
         try:

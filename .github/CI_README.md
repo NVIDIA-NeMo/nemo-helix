@@ -57,22 +57,15 @@ reusable actions, and supporting docs.
 
 ### Deployment and Release Workflows
 
-- `release-nightly.yaml`
-  Scheduled and manually dispatched nightly release orchestration.
+- `release.yaml`
+  Single workflow for scheduled and manual timestamped RC builds and versioned
+  releases. It selects artifacts from the requested source, stages Helm,
+  dispatches wheel/container work, polls final destinations, and signals
+  deployment. See [RELEASING.md](../RELEASING.md) for inputs and destinations.
 
-- `release-rc.yaml`
-  Manually dispatched release candidate orchestration.
-
-- `release-stable.yaml`
-  Manually dispatched stable release orchestration. It includes a preview step
-  and requires the `release-stable` environment approval before producing the
-  release bundle.
-
-- `release-bundle.yaml`
-  Reusable release implementation shared by nightly, RC, and stable workflows.
-  It validates release inputs, creates release tags when needed, builds SDK
-  wheels, assembles the release bundle artifact, and dispatches the downstream
-  release handoff event.
+- `release-smoke.yaml`
+  Verifies published charts, containers and wheels. Timestamped RC charts map
+  to `.dev` wheels; numbered prereleases such as `1.0.0-rc1` remain distinct.
 
 ## GitHub Apps
 

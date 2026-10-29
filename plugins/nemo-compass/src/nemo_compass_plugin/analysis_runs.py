@@ -25,7 +25,11 @@ from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_compass_plugin._perms import AnalysisRunPerms
-from nemo_compass_plugin.analysis.agent_config import AGENT_CONFIG_FORMAT, build_compass_agent_config
+from nemo_compass_plugin.analysis.agent_config import (
+    AGENT_CONFIG_FORMAT,
+    build_compass_agent_config,
+    build_compass_run_context,
+)
 from nemo_compass_plugin.authz import scope
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisRun
@@ -47,7 +51,7 @@ from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-COMPASS_ANALYSIS_EXTENSION_KIND = "insights.analysis"
+COMPASS_ANALYSIS_ACTION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "compass-run-"
 
 router = APIRouter(tags=["Compass Analysis Runs"])
@@ -322,17 +326,18 @@ def build_execute_agent_job_config(
     request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
 ) -> JsonObject:
     """Translate a high-level Compass request into a generic execute-agent job config."""
-    extension_config: JsonObject = {
+    action_config: JsonObject = {
         "agent": request.agent,
         "workspace": workspace,
     }
     payload = _json_object(
         {
-            "agent": _inline_compass(request, workspace=workspace, base_url=base_url),
+            "agent": _inline_compass(request, base_url=base_url),
             "input": _analysis_prompt(request.agent),
-            "extension": {
-                "kind": COMPASS_ANALYSIS_EXTENSION_KIND,
-                "config": extension_config,
+            "context": build_compass_run_context(since=request.since, evaluation_id=request.evaluation_id),
+            "post_run_action": {
+                "kind": COMPASS_ANALYSIS_ACTION_KIND,
+                "config": action_config,
             },
         }
     )
@@ -342,13 +347,13 @@ def build_execute_agent_job_config(
     return payload
 
 
-def _inline_compass(request: CreateAnalysisRunRequest, *, workspace: str, base_url: str | None = None) -> JsonObject:
+def _inline_compass(request: CreateAnalysisRunRequest, *, base_url: str | None = None) -> JsonObject:
     """Build the ``agent`` arm of the execute job as an inline definition.
 
     Compass has no Agent entity: its config is composed here from the
-    request's model pair and read scope. ``ExecuteAgentJobConfig.agent`` also
-    accepts an entity ref, so pointing a run at a stored Compass is a small
-    change if a use case appears.
+    request's model pair; its read scope travels in the job's ``context``.
+    ``ExecuteAgentJobConfig.agent`` also accepts an entity ref, so pointing a
+    run at a stored Compass is a small change if a use case appears.
     """
     return _json_object(
         {
@@ -357,13 +362,10 @@ def _inline_compass(request: CreateAnalysisRunRequest, *, workspace: str, base_u
             "config_format": AGENT_CONFIG_FORMAT,
             "config": build_compass_agent_config(
                 agent=request.agent,
-                workspace=workspace,
                 base_url=base_url,
                 default_model=request.default_model,
                 fast_model=request.fast_model,
                 ethos=request.ethos,
-                since=request.since,
-                evaluation_id=request.evaluation_id,
                 # Compass's self-observability builds its own OTLP exporter from
                 # the operator's local CLI config, which does not exist in a task
                 # pod, so on a cluster it exports unauthenticated at best. Telemetry

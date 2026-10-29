@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from jinja2 import Environment
 from jinja2 import nodes as jinja_nodes
 from nemo_helix_plugin.inference_middleware import BackendFormat
+from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth import AuthContext
 from nhx.common.entities import Filter, constants
 from nhx.common.entities.utils import get_random_id
@@ -1310,21 +1311,30 @@ class GetModelEntityRequest(BaseModel):
     )
 
 
+def _adapters_as_exists(operation: FilterOperation) -> FilterOperation:
+    """Rewrite ``adapters`` true/false as the relationship's ``$exists`` check.
+
+    ``adapters`` is an entity relationship, not a data field, so the generic null/not-null
+    coercion doesn't apply: the entities service reads ``adapters $eq null`` as a condition on
+    each adapter, which inverts the result.
+    """
+    if isinstance(operation, ComparisonOperation):
+        if operation.field != "adapters" or operation.operator != FilterOperator.EQ:
+            return operation
+        value = operation.value
+        if isinstance(value, str) and value.lower() in ("true", "false"):
+            value = value.lower() == "true"
+        if not isinstance(value, bool):
+            raise ValueError("'adapters' filters take true or false")
+        return operation.model_copy(update={"operator": FilterOperator.EXISTS, "value": value})
+    if isinstance(operation, LogicalOperation):
+        return operation.model_copy(
+            update={"operations": [_adapters_as_exists(child) for child in operation.operations]}
+        )
+    return operation
+
+
 # Filter classes for Model Entity queries
-class BaseModelFilter(Filter):
-    """Filter for base model properties."""
-
-    name: StringFilter | str | None = Field(None, description="Filter by name of the base model.")
-
-
-class FinetuningTypeFilter(Filter):
-    """Filter for PEFT-related properties."""
-
-    finetuning_type: Optional[FinetuningType] = Field(
-        None, description="Filter models with adapters with this fine-tuning type."
-    )
-
-
 class ModelEntityFilter(Filter):
     """Filter for Model Entity queries."""
 
@@ -1333,14 +1343,15 @@ class ModelEntityFilter(Filter):
     name: StringFilter | str | None = Field(None, description="Filter by name.")
     project: Optional[str] = Field(None, description="Filter by project name.")
     workspace: Optional[str] = Field(None, description="Filter by workspace id.")
-    base_model: Optional[Union[BaseModelFilter, bool, str]] = Field(
+    base_model: Optional[Union[bool, str]] = Field(
         default=None,
         description="Filter by base model: true = has a base model, false = no base model, "
-        "{ name: string } or string = match base model name.",
+        "string = match base model name.",
     )
-    adapters: Annotated[Optional[Union[FinetuningTypeFilter, bool]], map_entity_field("adapters")] = Field(
+    adapters: Annotated[Optional[bool], map_entity_field("adapters")] = Field(
         default=None,
-        description="Filter models with Parameter Efficient Fine-tuning Adapters.",
+        description="Filter by Parameter Efficient Fine-tuning adapters: true = has at least one adapter, "
+        "false = has none.",
     )
     finetuning_type: Optional[Union[FinetuningType, bool]] = Field(
         None, description="Filter models that have been perviously finetuned."
@@ -1366,6 +1377,10 @@ class ModelEntityFilter(Filter):
     )
     created_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on creation date.")
     updated_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on update date.")
+
+    @classmethod
+    def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
+        return super().translate_operation(_adapters_as_exists(operation))
 
 
 class AdapterEntityFilter(Filter):

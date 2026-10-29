@@ -580,3 +580,47 @@ def test_pydantic_validation_error_is_usage_error(capsys):
     assert "Invalid input:" in captured.err
     assert "name" in captured.err
     assert "--help" in captured.err
+
+
+def test_pydantic_validation_error_keeps_pattern_brackets(capsys):
+    """Validation messages are printed verbatim; Rich must not parse ``[a-z]`` in a regex as markup."""
+    from nemo_helix_plugin.entity_naming import NAME_PATTERN
+    from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+    from pydantic import ValidationError
+
+    try:
+        HelixSecretCreateRequest(name="name with spaces", value="v")
+    except ValidationError as error:
+        with pytest.raises(typer.Exit) as exc_info:
+            handle_exception(error)
+    else:  # pragma: no cover - guards the test's own assumption
+        raise AssertionError("expected a validation error")
+
+    assert exc_info.value.exit_code == 2
+    captured = capsys.readouterr()
+    assert NAME_PATTERN in captured.err
+
+
+def test_api_error_detail_keeps_square_brackets(capsys):
+    """Server error details are printed verbatim, including bracketed text such as a 422 ``loc`` list."""
+    pattern = "^[a-z](?!.*--)[a-z0-9\\-@.+_]{1,62}(?<!-)$"
+    detail = f"name: String should match pattern '{pattern}' (loc=['body', 'name'])"
+    request = httpx.Request("POST", "http://test/apis/core/v2/workspaces")
+    response = httpx.Response(422, request=request, json={"detail": detail})
+    error = plugin_errors.UnprocessableEntityError(response)
+
+    with pytest.raises(typer.Exit):
+        handle_exception(error)
+
+    captured = capsys.readouterr()
+    assert pattern in captured.err
+    assert "['body', 'name']" in captured.err
+
+
+@pytest.mark.parametrize("text", ["[/bold] closing tag first", "unbalanced [/] tag", "[link=x]text"])
+def test_error_text_that_looks_like_markup_is_printed_not_parsed(capsys, text):
+    """Bracketed text in an error must neither be dropped nor raise rich.errors.MarkupError."""
+    with pytest.raises(typer.Exit):
+        handle_exception(_http_error(BadRequestError, 400, {"detail": text}))
+
+    assert text in capsys.readouterr().err

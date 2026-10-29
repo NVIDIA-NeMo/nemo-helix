@@ -167,6 +167,29 @@ async def test_workspace_access_refreshes_stale_denial(
 
 
 @pytest.mark.asyncio
+async def test_delegated_kubernetes_workload_uses_creator_workspace_bindings(
+    cached_bindings_repository, workspace_auth: AuthClient
+) -> None:
+    repository, bindings = cached_bindings_repository
+    actor = "system:serviceaccount:test-namespace:nemo-platform-jobs"
+    creator_group = "workspace-admins"
+    actor_group = "system:serviceaccounts"
+    workspace_auth.principal = Principal(
+        id=actor,
+        groups=[actor_group],
+        on_behalf_of=TEST_PRINCIPAL,
+        on_behalf_of_groups=[creator_group],
+    )
+    bindings[creator_group] = [_binding_entity("default", "Admin", principal=creator_group)]
+    # Actor permissions must not leak into the delegated user's workspace scope.
+    bindings[actor_group] = [_binding_entity("actor-only", "Admin", principal=actor_group)]
+
+    assert await get_accessible_workspaces(repository) == {"default"}
+    queried = {call.kwargs["filter_op"].value for call in repository.list_entities.await_args_list}
+    assert queried == {TEST_PRINCIPAL, creator_group, "*"}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("revoked", [False, True], ids=["no-binding", "revoked-binding"])
 async def test_workspace_access_still_denies_after_refresh(
     cached_bindings_repository, workspace_auth: AuthClient, revoked: bool

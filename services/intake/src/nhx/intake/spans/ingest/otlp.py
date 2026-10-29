@@ -9,7 +9,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.config import IntakeConfig
+from nhx.intake.dependencies import IntakeConfigDep
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
 from nhx.intake.spans.domain import (
     IntakeSpan,
@@ -94,6 +94,7 @@ class IngestResponse(BaseModel):
 async def ingest_otlp_traces(
     workspace: str,
     request: Request,
+    config: IntakeConfigDep,
     service: SpansServiceDep,
     entity_client: EntityClientDep,
     denormalizer: DenormalizerDep,
@@ -106,7 +107,7 @@ async def ingest_otlp_traces(
             detail="OTLP trace ingest only accepts application/x-protobuf",
         )
 
-    max_bytes = _otlp_max_body_bytes(request)
+    max_bytes = config.otlp_max_body_bytes
     if content_length is not None and content_length > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -194,16 +195,6 @@ async def _read_limited_body(request: Request, *, max_bytes: int) -> bytes:
             )
         chunks.append(chunk)
     return b"".join(chunks)
-
-
-def _otlp_max_body_bytes(request: Request) -> int:
-    """Read the configured OTLP body-size cap from the attached Intake service."""
-
-    service = getattr(request.app.state, "intake_service", None) or getattr(request.app.state, "service", None)
-    cfg: IntakeConfig | None = getattr(service, "service_config", None) if service is not None else None
-    if cfg is None:
-        cfg = IntakeConfig()
-    return cfg.otlp_max_body_bytes
 
 
 def _span_to_domain(

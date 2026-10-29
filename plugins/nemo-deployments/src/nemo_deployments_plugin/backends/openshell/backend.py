@@ -83,6 +83,7 @@ _OPENSHELL_IMPORT_ERROR: ImportError | None = None
 try:
     import grpc
     from google.protobuf.message import Message
+    from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
     from openshell._proto import datamodel_pb2 as dm
     from openshell._proto import openshell_pb2 as pb
     from openshell._proto import openshell_pb2_grpc as pb_grpc
@@ -386,8 +387,6 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 )
             provider_bindings = config.gateway_providers
             if provider_bindings:
-                from nemo_helix_plugin.openshell.isolation import validate_provider_environment
-
                 if self._executor_config.gateway_credentials is None:
                     raise ValueError("This OpenShell executor has no gateway_credentials configuration.")
                 if platform_auth_enabled() and config.auth_proxy_sidecar and not config.auth_proxy_sidecar_on_behalf_of:
@@ -482,8 +481,6 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         policy = self._build_deployment_policy(openshell_cfg.policy_path)
         provider_names: list[str] = []
         if provider_bindings:
-            from nemo_helix_plugin.openshell.isolation import restricted_platform_policy
-
             egress = self._executor_config.platform_egress
             if egress is None:
                 return BackendStatusUpdate(

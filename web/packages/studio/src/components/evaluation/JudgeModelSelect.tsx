@@ -9,6 +9,7 @@ import type { InferenceParams, ModelEntity } from '@nemo/sdk/generated/platform/
 import { FormField } from '@nvidia/foundations-react-core';
 import { useSetFieldErrorOnApiError } from '@studio/hooks/evaluation/useSetFieldErrorOnApiError';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { parseEvaluationModelValue } from '@studio/util/evaluations';
 import { useState } from 'react';
 import { type FieldValues, type Path, useController, useFormContext } from 'react-hook-form';
 
@@ -17,6 +18,16 @@ const isChatCapable = (model: ModelEntity): boolean =>
   getModelEntityChatStatus(model) !== 'disabled';
 
 export interface JudgeModelSelectProps<TFieldValues extends FieldValues = FieldValues> {
+  /**
+   * Offer each model's adapters as selections in their own right. The field then
+   * holds `workspace/model::adapter` for an adapter, which
+   * {@link parseEvaluationModelValue} splits back apart.
+   *
+   * Off by default, and off is what every judge field wants: a judge is called
+   * as a plain chat endpoint, and listing adapters there only invites a
+   * selection the submit path cannot express.
+   */
+  allowAdapters?: boolean;
   required?: boolean;
   placeholder?: string;
   slotLabel?: string;
@@ -35,6 +46,7 @@ export interface JudgeModelSelectProps<TFieldValues extends FieldValues = FieldV
  * and paged in the API, so nothing is fetched until the dropdown opens.
  */
 export const JudgeModelSelect = <TFieldValues extends FieldValues = FieldValues>({
+  allowAdapters = false,
   required = false,
   placeholder = 'Select a judge model',
   slotLabel = 'Judge Model',
@@ -67,10 +79,18 @@ export const JudgeModelSelect = <TFieldValues extends FieldValues = FieldValues>
 
   useSetFieldErrorOnApiError<TFieldValues>(formFieldName, error);
 
-  const value: ModelSelection | null = field.value ? { model: field.value as string } : null;
+  // Round-trips the adapter through the single string the form field holds. Both
+  // halves have to agree: keeping only `selection.model` on the way in is what
+  // made picking an adapter silently evaluate its base model instead.
+  const parsed = field.value ? parseEvaluationModelValue(field.value as string) : null;
+  const value: ModelSelection | null = parsed
+    ? { model: parsed.modelUrn, ...(parsed.adapterName ? { adapter: parsed.adapterName } : {}) }
+    : null;
 
   const handleValueChange = (selection: ModelSelection) => {
-    field.onChange(selection.model);
+    field.onChange(
+      selection.adapter ? `${selection.model}::${selection.adapter}` : selection.model
+    );
   };
 
   const handleOpenChange = (isOpen: boolean) => {
@@ -96,6 +116,7 @@ export const JudgeModelSelect = <TFieldValues extends FieldValues = FieldValues>
         onInferenceParamsChange={onInferenceParamsChange}
         onOpenChange={handleOpenChange}
         dropdownSide={dropdownSide}
+        hideAdapters={!allowAdapters}
         fullWidth
       />
     </FormField>

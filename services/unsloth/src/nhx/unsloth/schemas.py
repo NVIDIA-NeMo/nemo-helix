@@ -250,7 +250,14 @@ class BatchSpec(UnslothSchema):
 
 
 class OptimizerSpec(UnslothSchema):
-    learning_rate: float = Field(default=2e-4, gt=0.0)
+    learning_rate: float = Field(
+        default=2e-4,
+        gt=0.0,
+        description=(
+            "Peak learning rate. Left unset, it follows Unsloth's guidance: 2e-4 for LoRA and "
+            "a lower 2e-5 for finetuning_type 'all_weights'."
+        ),
+    )
     weight_decay: float = Field(default=0.0, ge=0.0)
     # Unsloth's notebooks default to adamw_8bit (bitsandbytes-backed) — much
     # smaller optimizer state than adamw_torch, which lets users fit larger
@@ -274,6 +281,16 @@ class OptimizerSpec(UnslothSchema):
         ge=0.0,
         description="NEFTune embedding-noise alpha (quality boost). None disables.",
     )
+
+
+FULL_WEIGHTS_LEARNING_RATE = 2e-5
+
+
+def resolve_learning_rate(training: TrainingSpec, optimizer: OptimizerSpec) -> OptimizerSpec:
+    """Lower an unset learning rate for a full-weight run, following Unsloth's guidance."""
+    if training.finetuning_type == "all_weights" and "learning_rate" not in optimizer.model_fields_set:
+        return optimizer.model_copy(update={"learning_rate": FULL_WEIGHTS_LEARNING_RATE})
+    return optimizer
 
 
 class HardwareSpec(UnslothSchema):
@@ -333,3 +350,8 @@ class UnslothJobOutput(UnslothSchema):
         default=None,
         description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
+
+    @model_validator(mode="after")
+    def _resolve_learning_rate(self) -> Self:
+        self.optimizer = resolve_learning_rate(self.training, self.optimizer)
+        return self

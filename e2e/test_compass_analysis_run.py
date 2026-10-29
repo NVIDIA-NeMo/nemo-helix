@@ -10,7 +10,7 @@ needs to execute analysis in an operator's shell.
 
 The Compass's model is mocked, deliberately. What is under test is the wiring —
 run recorded, job submitted under the run's name, Fabric runs the inline
-Compass, the ``insights.analysis`` extension persists the change-set and saves
+Compass, the ``insights.analysis`` post-run action persists the change-set and saves
 the report — not whether a real model reaches a good conclusion. Two seeded
 Intake traces pass through Compass's evidence streams and compilation,
 with deterministic Nooa model responses.
@@ -340,14 +340,14 @@ def test_analysis_run_persists_insights_and_saves_its_report(
     assert final.run.default_model == default_model
     assert final.run.fast_model == fast_model
 
-    # The execute extension saves a durable report of what the run did.
+    # The post-run action saves a durable report of what the run did.
     result_names = {str(result["name"]) for result in _list_job_results(agents_client, workspace, run_name)["data"]}
     assert REPORT_RESULT_NAME in result_names, f"Saved results: {sorted(result_names)}"
     report = _download_job_result(client, workspace, run_name, REPORT_RESULT_NAME)
     assert COMPASS_SUMMARY in report
     assert INSIGHT_TITLE in report
 
-    # The extension persisted the change-set as a real Insight. The report's
+    # The post-run action persisted the change-set as a real Insight. The report's
     # change log is what says which one: it is written from what the Insights
     # API returned, so its id only exists if the write landed.
     # Relay carries the Compass's own trajectory to Intake. Nothing in this

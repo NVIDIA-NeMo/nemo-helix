@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AppendMessage, ThreadMessageLike } from '@assistant-ui/react';
+import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import {
+  getFailedReply,
   getOpenAIMessages,
   getUserMessageContent,
   modelSupportsImageAttachments,
@@ -116,5 +118,25 @@ describe('modelSupportsImageAttachments', () => {
     expect(modelSupportsImageAttachments('meta/llama-3.1-8b-instruct')).toBe(false);
     expect(modelSupportsImageAttachments('')).toBe(false);
     expect(modelSupportsImageAttachments(undefined)).toBe(false);
+  });
+});
+
+describe('getFailedReply', () => {
+  it('keeps the raw error in the status and puts the explanation in the body', () => {
+    const raw =
+      "RuntimeError: internal error: APIStatusError: Error code: 429 - {'detail': 'slow down'}";
+
+    const { parts, status } = getFailedReply(raw, describeChatError);
+
+    expect(status).toEqual({ type: 'incomplete', reason: 'error', error: raw });
+    expect(parts).toHaveLength(1);
+    expect(parts[0].text).toMatch(/rate limiting/i);
+  });
+
+  it('puts the generic line in the body when nothing describes the error', () => {
+    const { parts, status } = getFailedReply('Something nobody mapped');
+
+    expect(parts[0].text).toBe('There was an error generating a response.');
+    expect(status).toMatchObject({ error: 'Something nobody mapped' });
   });
 });

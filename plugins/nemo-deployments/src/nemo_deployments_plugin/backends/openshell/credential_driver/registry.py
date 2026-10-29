@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Durable binding metadata, retry identity and revocation; no secret values."""
+"""Persist the driver handles that connect OpenShell provider slots to Helix secrets."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from .tickets import RegistrationDenied, RegistrationTickets, TicketClaims
 
 
 class ProviderOwner(BaseModel):
+    """The gateway's provider identity and credential slot that own a driver handle."""
+
     model_config = ConfigDict(extra="forbid", frozen=True, str_min_length=1)
 
     workspace: str
@@ -32,6 +34,8 @@ class ProviderOwner(BaseModel):
 
 
 class Binding(BaseModel):
+    """A driver handle, its provider owner and the signed scope used for secret lookup."""
+
     model_config = ConfigDict(frozen=True)
 
     handle: str
@@ -86,10 +90,12 @@ def require_private_directory(directory: Path) -> None:
 
 
 class BindingRegistry:
-    """Single-host SQLite registry. An expired/deleted ticket cannot be resurrected.
+    """Store provider-to-secret associations behind opaque handles in local SQLite.
 
-    Retain tombstones for replay protection. The trusted controller may revoke a
-    job through this registry; no untrusted network registration API is exposed.
+    The credential driver registers signed requests here and looks up their scopes
+    when OpenShell asks for credentials. Matching registration retries reuse a
+    handle; revoked records remain stored so retries cannot restore access.
+    Secret values are fetched separately by the driver and are never stored here.
     """
 
     def __init__(self, path: Path, tickets: RegistrationTickets, *, clock: Callable[[], float] = time.time) -> None:
@@ -189,6 +195,7 @@ class BindingRegistry:
             return handle
 
     def resolve(self, owner: ProviderOwner, handle: str) -> Binding:
+        """Find an owned, unrevoked binding; the driver checks live workload and creator access."""
         with self._session() as session:
             row = session.scalar(select(BindingRecord).where(BindingRecord.handle == handle))
             if row is None:
@@ -196,6 +203,7 @@ class BindingRegistry:
             return self._binding(session, row, owner)
 
     def delete(self, owner: ProviderOwner, handle: str) -> None:
+        """Revoke the handle while retaining its record; leave the Helix secret untouched."""
         with self._session(write=True) as session:
             row = session.scalar(select(BindingRecord).where(BindingRecord.handle == handle))
             if row is None:

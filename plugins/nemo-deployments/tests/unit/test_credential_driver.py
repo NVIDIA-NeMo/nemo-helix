@@ -19,6 +19,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
+from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file, running_server
+from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import check_ready, prepare_credentials
 from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import (
     BindingScope,
     RegistrationDenied,
@@ -148,8 +151,6 @@ async def test_driver_rejects_mismatched_auth_mode_before_secret_access(harness:
 
 
 def test_auth_disabled_sidecar_needs_only_signing_key(tmp_path: Path) -> None:
-    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
-
     source = tmp_path / "source"
     source.mkdir()
     (source / "registration.key").write_bytes(KEY)
@@ -341,10 +342,6 @@ def socket_directory() -> Iterator[Path]:
 async def test_sidecar_recovers_stale_socket_and_rejects_second_driver(
     harness: Harness, socket_directory: Path
 ) -> None:
-    from nemo_deployments_plugin.backends.openshell.credential_driver.server import running_server
-    from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
-    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import check_ready
-
     path = socket_directory / "driver.sock"
     # SIGKILL leaves the same filesystem artifact: a socket with no listener.
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
@@ -381,9 +378,6 @@ def test_sidecar_does_not_remove_other_socket_owners(socket_directory: Path, kin
 
 
 def test_sidecar_stages_private_files_and_rotates_only_token(tmp_path: Path) -> None:
-    from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file
-    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
-
     source, destination = tmp_path / "mount", tmp_path / "private"
     source.mkdir()
     (source / "registration.key").write_bytes(KEY)
@@ -407,8 +401,6 @@ def test_sidecar_stages_private_files_and_rotates_only_token(tmp_path: Path) -> 
 
 @pytest.mark.parametrize("invalid", ["symlink", "empty", "oversize", "short-key"])
 def test_sidecar_rejects_invalid_mounted_credentials(tmp_path: Path, invalid: str) -> None:
-    from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import prepare_credentials
-
     source, destination = tmp_path / "mount", tmp_path / "private"
     source.mkdir()
     (source / "registration.key").write_bytes(KEY if invalid != "short-key" else b"short")

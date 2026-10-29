@@ -27,7 +27,8 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
-from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver
+from nhx_sandbox.compose_env import ComposeEnvError
+from nhx_sandbox.harbor_opensandbox_driver import CommandResult, OpenSandboxDriver
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
@@ -200,6 +201,72 @@ async def test_create_sends_services_and_main_settings(tmp_path: Path, server: S
     assert health.headers["X-Client"] == "opensandbox-sdk"
 
 
+async def test_templated_env_values_reach_the_sandbox_and_the_services(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Harbor persists the config, so it carries templates; the values come from this process's environment."""
+    spec = {
+        "services": [
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "env": {"POSTGRES_PASSWORD": "${NEMO_COMPOSE_ENV_0}"},
+            }
+        ],
+        "main": {"env": {"API_TOKEN": "${NEMO_COMPOSE_ENV_1}"}},
+    }
+    monkeypatch.setenv("NEMO_COMPOSE_ENV_0", "pg-pass")
+    monkeypatch.setenv("NEMO_COMPOSE_ENV_1", "api-token")
+    environment = _environment(_task(tmp_path), server, compose_services=spec)
+
+    await environment._create_sandbox()
+
+    create = server.creates[-1]
+    sent = ComposeServices.model_validate_json(create["extensions"][EXTENSION_KEY])
+    assert sent.services[0].env == {"POSTGRES_PASSWORD": "pg-pass"}
+    assert create["env"]["API_TOKEN"] == "api-token"
+    assert (environment._merge_env(None) or {})["API_TOKEN"] == "api-token"
+    assert "NEMO_COMPOSE_ENV" not in str(create)
+
+
+def test_a_template_without_its_variable_fails_naming_the_variable(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = {
+        "services": [
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "env": {"POSTGRES_PASSWORD": "${NEMO_COMPOSE_ENV_0}"},
+            }
+        ]
+    }
+    monkeypatch.delenv("NEMO_COMPOSE_ENV_0", raising=False)
+
+    with pytest.raises(ComposeEnvError, match="NEMO_COMPOSE_ENV_0"):
+        _environment(_task(tmp_path), server, compose_services=spec)
+
+
+def test_a_separate_verifier_without_a_compose_file_needs_none_of_the_variables(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Harbor builds the verifier's environment from the same config, but ``compose_services`` only applies with a Compose file."""
+    spec = {
+        "services": [
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "env": {"POSTGRES_PASSWORD": "${NEMO_COMPOSE_ENV_0}"},
+            }
+        ]
+    }
+    monkeypatch.delenv("NEMO_COMPOSE_ENV_0", raising=False)
+
+    environment = _environment(_task(tmp_path, compose=False), server, compose_services=spec)
+
+    assert environment.capabilities.docker_compose is False
+
+
 async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(
     tmp_path: Path, server: Server, extension: _Extension
 ) -> None:
@@ -211,6 +278,124 @@ async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(
     assert server.creates[-1]["entrypoint"] is None
     assert environment.capabilities.docker_compose is False
     assert extension.requests == []
+
+
+async def test_a_plain_sandbox_starts_with_its_image_s_own_entrypoint(tmp_path: Path, server: Server) -> None:
+    entrypoints = {"registry.example/task:1": ["/bin/bash", "-l", "-c"], "registry.example/verifier:1": ["/verify"]}
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints)
+
+    await environment._create_sandbox()
+
+    assert server.creates[-1]["entrypoint"] == ["/bin/bash", "-l", "-c", "sh", "-c", "sleep infinity"]
+
+
+async def test_main_s_entrypoint_and_env_reach_the_container_as_written(tmp_path: Path, server: Server) -> None:
+    """Kubernetes expands ``$(VAR)`` and ``$$`` at create, so both are escaped there; later commands get the env as is."""
+    entrypoints = {"registry.example/task:1": ["/bin/sh", "-c", 'echo "$(HOME)" a$$b']}
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints)
+    environment._persistent_env["PASSWORD"] = "pa$$word"
+
+    await environment._create_sandbox()
+
+    sent = server.creates[-1]
+    assert sent["entrypoint"][:3] == ["/bin/sh", "-c", 'echo "$$(HOME)" a$$$$b']
+    assert sent["env"]["PASSWORD"] == "pa$$$$word"
+    assert (environment._merge_env(None) or {})["PASSWORD"] == "pa$$word"
+
+
+async def test_a_docker_runtime_gets_main_s_entrypoint_and_env_unescaped(tmp_path: Path, server: Server) -> None:
+    """Docker never expands ``$`` in a container's command or env, so nothing is escaped for it."""
+    entrypoints = {"registry.example/task:1": ["/bin/sh", "-c", 'echo "$(HOME)" a$$b']}
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints, runtime="docker")
+    environment._persistent_env["PASSWORD"] = "pa$$word"
+
+    await environment._create_sandbox()
+
+    sent = server.creates[-1]
+    assert sent["entrypoint"][:3] == ["/bin/sh", "-c", 'echo "$(HOME)" a$$b']
+    assert sent["env"]["PASSWORD"] == "pa$$word"
+
+
+@pytest.mark.parametrize(
+    "entrypoints",
+    [{"registry.example/task:1": []}, {"registry.example/verifier:1": ["/verify"]}],
+    ids=["image-has-none", "another-image-s"],
+)
+async def test_an_image_without_a_recorded_entrypoint_keeps_the_default(
+    tmp_path: Path, server: Server, entrypoints: dict[str, list[str]]
+) -> None:
+    environment = _environment(_task(tmp_path, compose=False), server, image_entrypoints=entrypoints)
+
+    await environment._create_sandbox()
+
+    assert server.creates[-1]["entrypoint"] is None
+
+
+async def test_compose_main_without_its_own_entrypoint_starts_with_its_image_s(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    main = {key: value for key, value in COMPOSE_SERVICES["main"].items() if key != "entrypoint"}
+    environment = _environment(
+        _task(tmp_path),
+        server,
+        compose_services={**COMPOSE_SERVICES, "main": main},
+        image_entrypoints={"registry.example/task:1": ["/bin/bash", "-l", "-c"]},
+    )
+
+    await environment._create_sandbox()
+
+    assert server.creates[-1]["entrypoint"] == ["/bin/bash", "-l", "-c", "sh", "-c", "sleep infinity"]
+
+
+# A compose file that only changes `main`, as swe-lancer's do.
+MAIN_ONLY: dict[str, Any] = {"main": {"command": ["/app/tests/run.sh"], "working_dir": "/app"}}
+
+
+async def test_a_compose_file_that_only_changes_main_starts_it_as_harbor_would(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    extension.features = ["compose-services", "agent-bundle", "compose-main"]
+    environment = _environment(
+        _task(tmp_path),
+        server,
+        compose_services=MAIN_ONLY,
+        image_entrypoints={"registry.example/task:1": ["/bin/bash", "-l", "-c"]},
+    )
+
+    await environment._create_sandbox()
+
+    create = server.creates[-1]
+    assert create["entrypoint"] == ["/bin/bash", "-l", "-c", "/app/tests/run.sh"]
+    assert ComposeServices.model_validate_json(create["extensions"][EXTENSION_KEY]).main.working_dir == "/app"
+
+
+async def test_an_extension_without_main_settings_is_refused_before_any_sandbox(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    environment = _environment(_task(tmp_path), server, compose_services=MAIN_ONLY)
+
+    with pytest.raises(RuntimeError, match="only change main"):
+        await environment._create_sandbox()
+
+    assert server.creates == []
+
+
+async def test_commands_run_in_main_s_working_dir_unless_the_task_names_one(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _environment(_task(tmp_path), server, compose_services=MAIN_ONLY)
+    environment._sandbox = SimpleNamespace(id="sbx-1")
+    directories: list[str | None] = []
+
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> SimpleNamespace:
+        directories.append(kwargs["cwd"])
+        return SimpleNamespace(stdout="", stderr="", exit_code=0)
+
+    monkeypatch.setattr(environment._driver, "run", run)
+    await environment.exec("pwd")
+    await environment.exec("pwd", cwd="/tmp")
+
+    assert directories == ["/app", "/tmp"]
 
 
 def test_compose_task_without_services_is_still_rejected(tmp_path: Path, server: Server) -> None:
@@ -304,19 +489,23 @@ async def test_start_waits_for_main_then_the_services(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     environment = _environment(_task(tmp_path), server)
-    results = [ExecResult(stdout="", stderr="refused", return_code=7), ExecResult(stdout="ok", return_code=0)]
+    results = [
+        CommandResult(stdout="", stderr="refused", exit_code=7),
+        CommandResult(stdout="ok", stderr="", exit_code=0),
+    ]
     commands: list[str] = []
 
-    async def exec_(command: str, **kwargs: Any) -> ExecResult:
-        # start() also opens up the log directories; only main's readiness check is scripted.
-        if command.startswith("chmod "):
-            return ExecResult(stdout="", stderr="", return_code=0)
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> CommandResult:
+        # start() also opens up the log directories, as root; only main's readiness check is scripted.
+        if command != "curl -sf http://localhost:8000/health":
+            return CommandResult(stdout="0", stderr="", exit_code=0)
         commands.append(command)
-        assert kwargs["user"] == "root"
-        assert kwargs["cwd"] == "/"
+        # Like a Docker healthcheck: the image's own user and WORKDIR, so neither is sent.
+        assert kwargs.get("uid") is None
+        assert kwargs.get("cwd") is None
         return results.pop(0)
 
-    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment._driver, "run", run)
     # The first status is read by the create's readiness wait, the rest by start's own wait.
     extension.statuses = [
         {"failure": None, "not_ready": ["db"]},
@@ -383,12 +572,12 @@ async def test_start_waits_as_long_as_the_spec_allows(
 async def test_main_readiness_timeout_reports_last_output(
     tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    environment = _environment(_task(tmp_path), server)
+    environment = await _started(_environment(_task(tmp_path), server))
 
-    async def exec_(command: str, **kwargs: Any) -> ExecResult:
-        return ExecResult(stdout="", stderr="connection refused", return_code=7)
+    async def run(sandbox: Any, command: str, **kwargs: Any) -> CommandResult:
+        return CommandResult(stdout="", stderr="connection refused", exit_code=7)
 
-    monkeypatch.setattr(environment, "exec", exec_)
+    monkeypatch.setattr(environment._driver, "run", run)
 
     with pytest.raises(RuntimeError, match="main was not ready.*connection refused"):
         await environment._wait_for_main(["false"], deadline=0)

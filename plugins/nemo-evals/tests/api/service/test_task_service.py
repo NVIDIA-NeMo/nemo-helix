@@ -19,6 +19,7 @@ from nemo_evals.api.schemas import (
 )
 from nemo_evals.api.service.task_service import MetricRefNotFoundError, TaskService
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
+from nemo_evals.entities import TaskEntity
 from nemo_evals.shared.metric_bundles.bundles import bundle_metric
 from nemo_evals.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -321,11 +322,63 @@ async def test_create_rolls_back_the_head_when_publishing_fails(
     assert await service.get_task("default", "task-1") is None, "the orphaned head must not survive"
 
 
-async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:
-    """Losing the optimistic lock is a client-retryable conflict, not a server fault — the route
-    maps this to 409, so the service must let it through rather than swallowing it."""
+async def test_create_rollback_spares_a_head_another_publisher_wrote(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """A replace that lost the create race publishes onto our head; our failed publish must not delete theirs."""
     service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
-    await service.create_task("task-1", _task_input(), workspace="default")
+    real_create = type(entity_store).create
+
+    async def _theirs_lands_then_ours_fails(entity):
+        if entity.__entity_type__ == "task_revision":
+            head = await entity_store.get(TaskEntity, "task-1", workspace="default")
+            await entity_store.update(head)  # the other publisher's pointer write
+            raise RuntimeError("store unavailable")
+        return await real_create(entity_store, entity)
+
+    entity_store.create = _theirs_lands_then_ours_fails
+
+    with pytest.raises(RuntimeError):
+        await service.create_task("task-1", _task_input(), workspace="default")
+
+    entity_store.create = real_create.__get__(entity_store)
+    assert await service.get_task("default", "task-1") is not None
+
+
+async def test_create_rollback_spares_a_head_whose_version_a_publish_retry_adopted(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """A contended revision create refreshes our head to the other publisher's version; the rollback
+    must still expect the version our create returned, not the one the retry adopted."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    real_create = type(entity_store).create
+    attempts = 0
+
+    async def _lose_then_fail(entity):
+        nonlocal attempts
+        if entity.__entity_type__ != "task_revision":
+            return await real_create(entity_store, entity)
+        attempts += 1
+        if attempts == 1:  # another publisher's pointer write lands, and our ordinal is taken
+            head = await entity_store.get(TaskEntity, "task-1", workspace="default")
+            await entity_store.update(head)
+            raise NemoEntityConflictError("ordinal taken")
+        raise RuntimeError("store unavailable")
+
+    entity_store.create = _lose_then_fail
+
+    with pytest.raises(RuntimeError):
+        await service.create_task("task-1", _task_input(), workspace="default")
+
+    entity_store.create = real_create.__get__(entity_store)
+    assert await service.get_task("default", "task-1") is not None
+
+
+async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _FakeMetricService, entity_store) -> None:
+    """Losing the optimistic lock on a real change is a client-retryable conflict, not a server
+    fault — the route maps this to 409, so the service must let it through rather than swallowing it."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    await service.create_task("task-1", _task_input(), workspace="default", project="proj-a")
 
     async def _stale(entity, *, original_name=None):
         raise NemoEntityConflictError("modified by another request")
@@ -333,7 +386,52 @@ async def test_replace_propagates_a_concurrent_write_conflict(metric_service: _F
     entity_store.update = _stale
 
     with pytest.raises(NemoEntityConflictError):
-        await service.replace_task("task-1", _task_input(), workspace="default")
+        await service.replace_task("task-1", _task_input(), workspace="default", project="proj-b")
+
+
+async def test_replace_with_unchanged_content_writes_nothing_a_concurrent_writer_could_conflict_with(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """Twenty submits of one taskset PUT the same task at once (AC 9.3): all but one used to lose the
+    optimistic lock on a write that changed nothing, and their submits failed with 409."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    await service.create_task("task-1", _task_input(), workspace="default", project="proj-a")
+
+    async def _stale(entity, *, original_name=None):
+        raise NemoEntityConflictError("modified by another request")
+
+    entity_store.update = _stale
+
+    replaced, published = await service.replace_task("task-1", _task_input(), workspace="default", project="proj-a")
+    assert not published and replaced.revision == 1
+    replaced, published = await service.replace_task("task-1", _task_input(), workspace="default")
+    assert not published and replaced.project == "proj-a"
+
+
+async def test_replace_that_loses_the_create_race_republishes_onto_the_winners_task(
+    metric_service: _FakeMetricService, entity_store
+) -> None:
+    """Two first publishers both read "not found"; the one whose create loses replaces instead of failing."""
+    service = TaskService(entity_store, metric_service, files_client=Mock(), authorize_metric_read=AsyncMock())
+    await service.create_task("task-1", _task_input(), workspace="default")
+    real_get = entity_store.get
+    reads = 0
+
+    async def _before_the_winner(entity_type, *args, **kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == 1:  # our first read ran before the winner's create landed
+            raise NemoEntityNotFoundError("not found")
+        return await real_get(entity_type, *args, **kwargs)
+
+    entity_store.get = _before_the_winner
+
+    replaced, published = await service.replace_task("task-1", _task_input(), workspace="default")
+    assert not published and replaced.revision == 1
+    changed = _task_input(intent="Rewritten.")
+    reads = 0
+    replaced, published = await service.replace_task("task-1", changed, workspace="default")
+    assert published and replaced.revision == 2  # a real change still publishes after a lost create
 
 
 async def test_replace_leaves_no_uncovered_head_content_when_publishing_fails(

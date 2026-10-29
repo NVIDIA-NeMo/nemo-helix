@@ -133,17 +133,55 @@ def publish_harbor_task_archive(
                 download_verified(
                     files_client, source.fileset_ref, output, limit=MAX_ARCHIVE_BYTES, expected_digest=digest
                 )
-            extracted = check / "contents"
-            extracted.mkdir(mode=0o700)
-            _, native = extract_task(downloaded, extracted)
-        return HarborTaskDefinition(
-            kind="harbor",
-            native_task_id=native.task_id,
-            source=source,
-            harbor_hash=HarborTaskHash(digest=fingerprint, harbor_version=version("harbor")),
-            instruction=native.instruction,
-            config=native.config,
+            return _definition(downloaded, check, source, fingerprint)
+
+
+def describe_harbor_task_archive(
+    root: Path,
+    *,
+    fileset_ref: str,
+    path_prefix: str = "",
+    verify_against: HarborAgentEvalTask | None = None,
+) -> HarborTaskDefinition:
+    """The definition :func:`publish_harbor_task_archive` would return for ``root``, with no remote call.
+
+    The archive is packed deterministically and its Fileset path is addressed by its digest, so the same task
+    directory always yields the same definition: a caller compares it with the stored task to skip a publication
+    that would change nothing.
+
+    Raises:
+        ValueError: The task or destination is invalid.
+    """
+    from harbor.publisher.packager import Packager
+
+    prefix = f"{path_prefix}/" if path_prefix else ""
+    HarborArchiveSource(fileset_ref=f"{fileset_ref}#{prefix}{root.name}/{'0' * 64}/task_archive", files_hash="0" * 64)
+    with private_directory() as owned:
+        contents = owned / "contents"
+        contents.mkdir(mode=0o700)
+        snapshot = _capture_for_publication(root, contents, verify_against)
+        fingerprint, _ = Packager.compute_content_hash(snapshot)
+        archive_path = owned / "task_archive"
+        digest = pack_task(snapshot, archive_path)
+        source = HarborArchiveSource(
+            fileset_ref=f"{fileset_ref}#{prefix}{root.name}/{digest}/task_archive", files_hash=digest
         )
+        return _definition(archive_path, owned, source, fingerprint)
+
+
+def _definition(archive: Path, scratch: Path, source: HarborArchiveSource, fingerprint: str) -> HarborTaskDefinition:
+    """The Harbor definition of ``archive``, read from its extracted native task."""
+    extracted = scratch / "extracted"
+    extracted.mkdir(mode=0o700)
+    _, native = extract_task(archive, extracted)
+    return HarborTaskDefinition(
+        kind="harbor",
+        native_task_id=native.task_id,
+        source=source,
+        harbor_hash=HarborTaskHash(digest=fingerprint, harbor_version=version("harbor")),
+        instruction=native.instruction,
+        config=native.config,
+    )
 
 
 async def publish_harbor_task_archive_async(

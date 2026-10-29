@@ -16,7 +16,11 @@ from nhx.common.secrets.encryption import envelope_decrypt, envelope_encrypt
 from nhx.common.secrets.exceptions import EncryptionError
 from nhx.common.service.dependencies import get_entity_client, get_platform_config
 from nhx.core.secrets.api.v2.secrets import schemas
-from nhx.core.secrets.api.v2.secrets.ngc_api_key import get_default_ngc_api_key, is_default_ngc_api_key
+from nhx.core.secrets.api.v2.secrets.ngc_api_key import (
+    get_default_ngc_api_key,
+    is_default_ngc_api_key,
+    is_default_ngc_api_key_configured,
+)
 from nhx.core.secrets.app.ctx import SecretsContext
 from nhx.core.secrets.app.encryptor import (
     EncryptionProviderNotConfiguredError,
@@ -41,6 +45,20 @@ _UPDATE_SECRET_OPENAPI_EXAMPLES = {
 
 ENCRYPTION_PROVIDER_NOT_CONFIGURED = "ENCRYPTION_PROVIDER_NOT_CONFIGURED"
 ENCRYPTION_PROVIDER_NOT_CONFIGURED_MESSAGE = "Secret management requires a configured encryption provider."
+
+
+def _require_default_ngc_api_key(platform_config: HelixConfig, workspace: str, name: str) -> HelixSecret:
+    """Return the default NGC API key secret, or raise 404 when its environment variable is unset."""
+    if not is_default_ngc_api_key_configured(platform_config):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Secret {workspace}/{name} not found: environment variable "
+                f"{platform_config.ngc_api_key_env_var} is not set"
+            ),
+        )
+    return get_default_ngc_api_key(platform_config)
+
 
 ## CRUD Endpoints for Platform Secrets ##
 
@@ -133,7 +151,10 @@ async def list_secrets(
         total_results = result.pagination.total_results
         total_pages = result.pagination.total_pages
         ngc_api_key_secret = platform_config.ngc_api_key_secret.split("/")
-        if is_default_ngc_api_key(platform_config, workspace, ngc_api_key_secret[1]):
+        include_default_ngc_api_key = is_default_ngc_api_key(
+            platform_config, workspace, ngc_api_key_secret[1]
+        ) and is_default_ngc_api_key_configured(platform_config)
+        if include_default_ngc_api_key:
             total_results = result.pagination.total_results + 1
             total_pages = math.ceil(total_results / page_size) if page_size else 1
             if page == total_pages:
@@ -162,7 +183,9 @@ async def get_secret(
     with scoped_app_ctx(SecretsContext(name=name, namespace=workspace)):
         # If the secret is the default NGC API key secret, return the default NGC API key secret metadata
         if is_default_ngc_api_key(platform_config, workspace, name):
-            return schemas.HelixSecretResponse.from_entity(get_default_ngc_api_key(platform_config))
+            return schemas.HelixSecretResponse.from_entity(
+                _require_default_ngc_api_key(platform_config, workspace, name)
+            )
 
         try:
             secret = await entity_store.get(HelixSecret, workspace=workspace, name=name)
@@ -274,7 +297,7 @@ async def access_secret(
             return schemas.HelixSecretAccessResponse(
                 name=name,
                 workspace=workspace,
-                value=get_default_ngc_api_key(platform_config)._data,
+                value=_require_default_ngc_api_key(platform_config, workspace, name)._data,
             )
 
         try:

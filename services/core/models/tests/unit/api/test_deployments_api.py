@@ -208,7 +208,7 @@ def test_list_deployments_with_search(client, mock_deployment_service, sample_pa
     """Test listing deployments with search parameter."""
     mock_deployment_service.list_deployments.return_value = sample_page
 
-    response = client.get("/v2/workspaces/default/deployments?filter[name][]=test")
+    response = client.get("/v2/workspaces/default/deployments?filter[name]=test")
 
     assert response.status_code == 200
 

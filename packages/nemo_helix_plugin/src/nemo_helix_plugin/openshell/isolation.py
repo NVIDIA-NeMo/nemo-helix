@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Restrict a provider-bearing sandbox's access back to the Helix control plane."""
+"""Build environment and network restrictions for sandboxes using Helix-backed providers."""
 
 import re
+from fnmatch import fnmatchcase
 
 from google.protobuf import json_format
 from google.protobuf.message import Message
@@ -20,6 +21,7 @@ def _segment(value: str) -> str:
 def validate_provider_environment(
     bindings: dict[str, GatewayProviderBinding], *, workspace: str, secret_env: dict[str, str], env_names: set[str]
 ) -> None:
+    """Reject process-env secrets and provider credential slots that collide with workload env vars."""
     if secret_env:
         raise ValueError("OpenShell secrets require gateway provider bindings; process-env injection is not supported.")
     keys = [key for binding in bindings.values() for key in binding.credentials]
@@ -44,16 +46,17 @@ def restricted_platform_policy[Policy: Message](
     workspace: str,
     binaries: list[str],
     job: str | None = None,
+    attempt: str | None = None,
     step: str | None = None,
     fileset: str | None = None,
     secret_env: dict[str, str] | None = None,
     read_filesets: list[str] | None = None,
 ) -> Policy:
-    """Replace broad egress with the workload's required platform operations.
+    """Preserve external-service access and restrict Helix to the workload's required API calls.
 
-    Approved service profiles are composed by OpenShell. No entity, credential,
-    token-minting, job-submission or deployment-management endpoint is allowed.
-    The enforcement lives outside the sandbox, including its auth proxy.
+    Replace Helix endpoints with inference, telemetry and optional job/fileset access.
+    This prevents the sandbox from using the platform connection to read secrets
+    directly. OpenShell adds approved provider access and enforces the policy.
     """
     workspace = _segment(workspace)
     rules = [
@@ -76,16 +79,22 @@ def restricted_platform_policy[Policy: Message](
                 }
             )
     if job is not None and step is not None:
+        if attempt is None:
+            raise ValueError("Job sandbox policy requires a concrete attempt.")
         prefix = f"/apis/jobs/v2/workspaces/{workspace}/jobs/{_segment(job)}"
         step_path = f"{prefix}/steps/{_segment(step)}"
+        attempt_path = f"{prefix}/attempts/{_segment(attempt)}"
+        attempt_step_path = f"{attempt_path}/steps/{_segment(step)}"
         rules.extend(
             {"allow": {"method": method, "path": path}}
             for method, path in (
                 ("GET", step_path),
                 ("GET", f"{prefix}/status"),
-                ("PATCH", f"{prefix}/status-details"),
+                ("PATCH", f"{attempt_path}/status-details"),
                 ("PATCH", f"{step_path}/status"),
-                ("PUT", f"{step_path}/tasks/*"),
+                ("PATCH", f"{attempt_step_path}/status"),
+                ("PUT", f"{attempt_step_path}/tasks/*"),
+                ("GET", f"{attempt_step_path}/tasks/*"),
                 ("GET", f"{step_path}/tasks/*"),
                 ("POST", f"{prefix}/results/*"),
             )
@@ -111,22 +120,38 @@ def restricted_platform_policy[Policy: Message](
     if secret_env:
         raise ValueError("OpenShell sandboxes cannot fetch secret values from the platform.")
     data = json_format.MessageToDict(policy, preserving_proto_field_name=True)
-    data["network_policies"] = {
-        "nemo_workload": {
-            "name": "nemo-workload-access",
-            "endpoints": [
-                {
-                    "host": host,
-                    "port": port,
-                    "protocol": "rest",
-                    "enforcement": "NETWORK_ENFORCEMENT_MODE_ENFORCE",
-                    "rules": rules,
-                }
-            ],
-            "binaries": [{"path": path} for path in binaries],
-        }
+    network = data.setdefault("network_policies", {})
+    platform_host = host.lower().rstrip(".")
+    for key, existing in list(network.items()):
+        endpoints = []
+        for endpoint in existing.get("endpoints", []):
+            endpoint_host = endpoint.get("host", "").lower().rstrip(".")
+            if endpoint_host == platform_host:
+                continue
+            if fnmatchcase(platform_host, endpoint_host):
+                raise ValueError("A wildcard network endpoint overlaps Helix; use explicit external-service hosts.")
+            endpoints.append(endpoint)
+        if endpoints:
+            existing["endpoints"] = endpoints
+        else:
+            del network[key]
+    key = "nemo_workload"
+    while key in network:
+        key += "_"
+    network[key] = {
+        "name": "nemo-workload-access",
+        "endpoints": [
+            {
+                "host": host,
+                "port": port,
+                "protocol": "rest",
+                "enforcement": "NETWORK_ENFORCEMENT_MODE_ENFORCE",
+                "rules": rules,
+            }
+        ],
+        "binaries": [{"path": path} for path in binaries],
     }
-    data["landlock"] = {"compatibility": "hard_requirement"}
+    data.setdefault("landlock", {})["compatibility"] = "hard_requirement"
     restricted = type(policy)()
     json_format.ParseDict(data, restricted)
     return restricted

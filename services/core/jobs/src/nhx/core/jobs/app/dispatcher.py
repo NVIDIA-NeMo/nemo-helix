@@ -14,6 +14,7 @@ from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermi
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
+from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
@@ -289,8 +290,6 @@ class JobDispatcher:
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
             if step.gateway_providers:
-                from nemo_helix_plugin.openshell.authorization import authorize_provider_references
-
                 try:
                     await authorize_provider_references(
                         step.gateway_providers, workspace=job_workspace, secrets_client=self.secrets

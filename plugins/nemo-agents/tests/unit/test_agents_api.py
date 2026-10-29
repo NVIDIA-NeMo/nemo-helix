@@ -490,6 +490,7 @@ class TestListAgents:
                 {"data.labels.helix-agents/managed-by": {"$eq": "insights"}},
             ),
             ("filter[labels.team][$in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
+            ("filter[labels][team][in]=a,b", {"data.labels.team": {"$in": ["a", "b"]}}),
             ("filter[config_format]=nemo-agents-spec-v1", {"data.config_format": {"$eq": "nemo-agents-spec-v1"}}),
         ],
     )
@@ -512,6 +513,26 @@ class TestListAgents:
         # Query parsing does not preserve parameter order, so compare the clauses as a set.
         clauses = mock_entity_client.list.call_args.kwargs["filter_operation"].to_dict()["$and"]
         assert sorted(clauses, key=str) == [{"data.labels.a": {"$eq": "1"}}, {"data.labels.b": {"$eq": "2"}}]
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "filter[labels]=x",
+            "filter[labels][$like]=x",
+            "filter[labels][$hasKey]=team",
+            "filter[labels][$exists]=true",
+            'filter={"labels": {}}',
+        ],
+    )
+    def test_list_rejects_bare_labels_filters(
+        self, client: TestClient, mock_entity_client: AsyncMock, query: str
+    ) -> None:
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+
+        resp = client.get(f"/apis/agents/v2/workspaces/default/agents?{query}")
+
+        assert resp.status_code == 400
+        mock_entity_client.list.assert_not_awaited()
 
     def test_list_rejects_unknown_filter_field(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))

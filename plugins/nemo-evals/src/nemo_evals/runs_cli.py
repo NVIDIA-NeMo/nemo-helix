@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 import typer
 from nemo_evals.api.fields import TaskRef, TasksetRef
-from nemo_evals.api.schemas import AgentEvalResult, TasksetInput
+from nemo_evals.api.schemas import AgentEvalResult, TaskInput, TasksetInput
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, ImageBuild
@@ -47,8 +47,9 @@ from nemo_helix_plugin.jobs.archive import safe_extract_tar
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 
-COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml")
 RETRY_ATTEMPTS = 5
+# The run POST alone: it answers once the run is accepted, which can take minutes while many submits share the API.
+SUBMIT_TIMEOUT_SECONDS = 300.0
 _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
@@ -111,10 +112,6 @@ def entity_name(text: str) -> str:
 def selection_suffix(refs: Sequence[str]) -> str:
     """Eight hex characters identifying a set of pinned task refs, independent of their order."""
     return hashlib.sha256("\n".join(sorted(refs)).encode()).hexdigest()[:8]
-
-
-def is_compose_task(task_dir: Path) -> bool:
-    return any((task_dir / "environment" / name).is_file() for name in COMPOSE_FILENAMES)
 
 
 def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tuple[str, str | None, list[Path]]:
@@ -209,20 +206,40 @@ def _run_git[T](operation: Coroutine[Any, Any, T]) -> T:
 def publish_tasks(
     evaluator: Evaluator, task_dirs: Sequence[Path], *, prefix: str, workspace: str, echo: Callable[[str], None]
 ) -> list[str]:
-    """Publish each task directory as ``<prefix>-<dir>``; return the pinned refs."""
+    """Publish each task directory as ``<prefix>-<dir>``; return the pinned refs.
+
+    A task whose stored content already equals what publishing it would write is not published again: its archive
+    is packed locally and compared, and its current revision is pinned. Republishing it would upload, read back
+    and store the same bytes, on every submit of the same tasks.
+    """
+    from nemo_evals.sdk.task_preparation import describe_harbor_task
     from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     refs: list[str] = []
     for task_dir in task_dirs:
-        if is_compose_task(task_dir):
-            raise SelectionError(f"{task_dir.name} is a compose task; Kubernetes runs don't support them yet")
         (source,) = discover_harbor_tasks(task_dir)
         name = entity_name(f"{prefix}-{task_dir.name}")
-        task = evaluator.tasks.replace(name, task=source, workspace=workspace)
-        ref = pinned_task_ref(evaluator, workspace, name, task.revision)
+        stored = _unchanged_revision(evaluator, workspace, name, describe_harbor_task(source, workspace=workspace))
+        if stored is not None:
+            ref = pinned_task_ref(evaluator, workspace, name, stored)
+            echo(f"Unchanged task {ref}")
+        else:
+            task = evaluator.tasks.replace(name, task=source, workspace=workspace)
+            ref = pinned_task_ref(evaluator, workspace, name, task.revision)
+            echo(f"Published task {ref}")
         refs.append(ref)
-        echo(f"Published task {ref}")
     return refs
+
+
+def _unchanged_revision(evaluator: Evaluator, workspace: str, name: str, expected: TaskInput) -> int | None:
+    """The stored task's current revision when its content is ``expected``; None when absent or different."""
+    try:
+        current = evaluator.tasks.retrieve(name, workspace=workspace)
+    except NotFoundError:
+        return None
+    if current.spec == expected.spec and current.metadata == expected.metadata:
+        return current.revision
+    return None
 
 
 def pinned_task_ref(evaluator: Evaluator, workspace: str, name: str, revision: int) -> str:
@@ -366,15 +383,19 @@ def wait_for_builds(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, ImageBuild]:
-    """Request every task's build, then follow each by its id until it's ready or failed; return the last builds.
+    """Request each task's build unless its newest is ready, then follow each by its id until it's ready or failed.
 
-    Between polls only reads go out. A request goes out again only to start a task's one retry, or after
+    Returns the last builds. A task whose newest build is already ready gets no request: a request costs the API a
+    build check per task, on every submit of the same tasks. Between polls only reads go out. A request goes out again only to start a task's one retry, or after
     ``BUILD_REPAIR_SECONDS`` without a request, since only a request notices a build whose Job died. A request
     that answers with another id means the followed attempt ended. A failed attempt prints its error; a task's
     second failure settles it ``failed``. A read error keeps the last known state, ``BUILD_READ_FAILURES`` in a
     row raise.
     """
-    followed = request_builds(evaluator, refs)
+    newest = read_builds(evaluator, refs)
+    ready = {ref: build for ref, build in newest.items() if build is not None and build.status == "ready"}
+    requested = request_builds(evaluator, [ref for ref in refs if ref not in ready])
+    followed = {ref: ready[ref] if ref in ready else requested[ref] for ref in refs}
     retries = dict.fromkeys(refs, 0)
     requested_at = dict.fromkeys(refs, clock())
     width = len(str(len(refs)))
@@ -475,10 +496,25 @@ def submit_run(
     echo: Callable[[str], None],
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """POST the run, retrying a 503 (an outage before the run was accepted) with the same idempotency key."""
+    """POST the run, retrying a 503 (an outage before the run was accepted) with the same idempotency key.
+
+    A POST that gets no answer is not resent: the server may still be accepting it, and a second POST would redo
+    that work while the API is at its slowest. The error names the key, so a rerun replays the run instead of
+    starting another.
+    """
     url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
     for attempt in range(1, RETRY_ATTEMPTS + 1):
-        response = client.http_client.post(url, json=body, headers=client.request_headers(None, url=url))
+        try:
+            response = client.http_client.post(
+                url, json=body, headers=client.request_headers(None, url=url), timeout=SUBMIT_TIMEOUT_SECONDS
+            )
+        except httpx.TransportError as exc:
+            reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            raise RuntimeError(
+                f"the submit got no answer ({reason}); the run may still be "
+                f"accepted. To check or finish it without starting a second run, rerun the same command with "
+                f"--idempotency-key {body.get('idempotency_key')}"
+            ) from exc
         if response.status_code == 503 and attempt < RETRY_ATTEMPTS:
             echo(f"{response.json().get('detail')}; retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
             sleep(2**attempt)
@@ -567,8 +603,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         harbor_git: str | None = typer.Option(
             None,
             "--harbor-git",
-            help="Public git repo of Harbor tasks, pinned to a tag or commit: <url>@<ref> reads tasks/ at that ref. "
-            "For another directory, use a GitHub tree URL: https://github.com/<org>/<repo>/tree/<ref>/<dir>.",
+            help="Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. "
+            "For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.",
         ),
         taskset: str | None = typer.Option(
             None,

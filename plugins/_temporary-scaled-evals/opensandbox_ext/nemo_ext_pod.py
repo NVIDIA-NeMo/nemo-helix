@@ -37,11 +37,14 @@ EGRESS_CONTAINER = "egress"
 # The volume the bundle is installed into when the template doesn't already mount /installed-agent.
 INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
 
-# Probes run every second, so failure thresholds are roughly seconds: a service gets ~10 minutes
-# to become ready once it runs, egress 2 minutes.
+# Probes run every second, so failure thresholds are roughly seconds while checks answer quickly: a
+# service gets ~10 minutes to become ready once it runs, egress 2 minutes.
 STARTUP_PROBE_FAILURES = 600
 EGRESS_STARTUP_PROBE_FAILURES = 120
 READINESS_PROBE_FAILURES = 3
+# How long one service check may run: Compose's default healthcheck timeout, which is what a check
+# that doesn't set its own ``timeout`` gets under Harbor.
+PROBE_TIMEOUT_SECONDS = 30
 
 # Kubernetes restarts a crashing sidecar forever; after this many restarts it counts as failed.
 CRASH_RESTARTS = 3
@@ -56,7 +59,7 @@ def _probe(readiness: Readiness, failure_threshold: int) -> dict[str, Any]:
     return {
         "exec": {"command": list(readiness.exec_)},
         "periodSeconds": 1,
-        "timeoutSeconds": 5,
+        "timeoutSeconds": PROBE_TIMEOUT_SECONDS,
         "failureThreshold": failure_threshold,
     }
 
@@ -230,8 +233,11 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
         if s.shm_size is not None
     )
 
-    # main is the stock sandbox container; it only gains mounts and the one allowed capability.
+    # main is the stock sandbox container; it only gains mounts, the one allowed capability and its working directory.
     sandbox = containers[0]
+    if services.main.working_dir is not None:
+        # The stock server sets none, so the image's WORKDIR applied; Compose's `working_dir` replaces it.
+        sandbox["workingDir"] = services.main.working_dir
     if services.main.volume_mounts:
         sandbox.setdefault("volumeMounts", []).extend(_mounts(services.main.volume_mounts))
     if services.main.add_capabilities:

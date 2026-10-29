@@ -5,6 +5,7 @@ import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSel
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import { getFileExtension } from '@nemo/common/src/utils/file';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
@@ -14,7 +15,7 @@ import {
   SOURCE_TYPE_DATASET,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
-import { getContentColumns, getFileExtension } from '@studio/util/files';
+import { getContentColumns } from '@studio/util/files';
 import { FC, useEffect, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 

@@ -12,7 +12,9 @@ export const entityNameField = () =>
 /** The message for a name with nothing salvageable in it, or undefined when there is. */
 export const unsalvageableNameError = (value: string, label: string): string | undefined => {
   if (sanitizeEntityName(value) !== undefined) return undefined;
-  return value ? `${label} must contain at least one letter or number.` : `${label} is required.`;
+  return value
+    ? `${label} must start with a letter and be at least 2 characters.`
+    : `${label} is required.`;
 };
 
 /** The server's own explanation for a failed submit, falling back to the transport error.

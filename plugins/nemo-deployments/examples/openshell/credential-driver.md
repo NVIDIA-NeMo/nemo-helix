@@ -67,7 +67,7 @@ dc up -d --wait credential-driver
 dc ps -a
 ```
 
-A healthy driver means its local `GetCapabilities` RPC succeeds. It does not prove that the Helix token is authorized or that remote secret access works. No real secret is read by this probe.
+The health probe calls the local `GetCapabilities` RPC without contacting Helix or reading secrets.
 
 Before starting the gateway, complete the base example's JWT-key generation and ensure its `/var/lib/openshell` host directory and port 17670 are not used by another gateway. A different Compose project name isolates the new named volumes, but does not isolate the base example's bind-mounted gateway state or published port. Do not run this against an existing gateway's data directory. The `gateway-credentials.toml` file preserves the base example's pinned runtime settings and adds the driver socket configuration.
 
@@ -76,7 +76,7 @@ dc up -d gateway
 dc logs --tail=50 credential-driver gateway
 ```
 
-Check that OpenShell completes credential-driver protocol negotiation. Gateway/driver startup is separate from sandbox credential expiry and refresh acceptance.
+Check that OpenShell completes credential-driver protocol negotiation.
 
 ## Connect Helix provisioning
 
@@ -86,7 +86,7 @@ Mount the same signing key into the trusted Helix controller, then configure its
 
 `NEMO_DRIVER_CACHE_LIFETIME_SECONDS` configures the driver’s advertised credential lifetime (default 300; range 1–3600 seconds). This applies in both auth modes. Standalone grants are also capped by binding expiry; workload grants check live workload state on resolution. Change it by recreating the driver container. Previously resolved credentials retain their original deadlines.
 
-Starting the sidecar alone does not enable controller renewal. Keep `credential_refresh_verified: false` until the installation passes the lifetime, rotation, cleanup and isolation checks in the environment integration guide. Driver readiness and protocol negotiation do not establish those guarantees.
+Keep `credential_refresh_verified: false` until the installation passes the lifetime, rotation, cleanup and isolation checks in the environment integration guide. Driver readiness and protocol negotiation do not validate Helix authorization or credential lifecycle behavior.
 
 ## Restart, rotate and stop
 

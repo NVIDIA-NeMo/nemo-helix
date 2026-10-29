@@ -14,12 +14,15 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
+from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import FileSetSource, ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.harbor.archive import MAX_ARCHIVE_BYTES
+from nemo_evals.harbor.archive import MAX_ARCHIVE_BYTES, extract_task, run_blocking_archive_operation
 from nemo_evals.harbor.archive_io import download_verified_async
+from nemo_evals.harbor.compose.models import ComposeError
+from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.builder import (
     ENDED_JOB_STATUSES,
     ImageBuilder,
@@ -143,7 +146,7 @@ async def _build(
 
     failed = [image for image in build.images if image.status == "failed"]
     build.status = "failed" if failed else "ready"
-    build.error = f"{failed[0].role}: {failed[0].error}" if failed else None
+    build.error = f"{failed[0].type}: {failed[0].error}" if failed else None
     logger.info("Image build %s of %s finished %s", build.name, build.task, build.status)
     return await entities.update(build)
 
@@ -157,7 +160,7 @@ def _choose_platforms(images: list[BuildImage], requested: str | None) -> None:
         if image.platform is not None and image.platform != requested:
             raise ImagePlanError(
                 "platform_conflict",
-                f"{image.role} is pinned to {image.platform} by the task, and the request asks for {requested}",
+                f"{image.type} is pinned to {image.platform} by the task, and the request asks for {requested}",
             )
         image.platform = requested
 
@@ -169,12 +172,15 @@ def _settled(images: list[BuildImage]) -> bool:
 
 
 async def read_task_archive(files: AsyncFilesClient, source: HarborArchiveSource) -> TaskArchive:
-    """Download a task archive, check its digest, and list its files.
+    """Download a task archive, check its digest, and list its files, with its compose file parsed.
 
     The download is gone once this returns, so the archive keeps no path to it: ``text`` reads nothing.
+
+    Raises:
+        ImagePlanError: The archive is unsafe, or its compose file can't run as sandbox services.
     """
     async with _downloaded(files, source) as path:
-        return replace(await asyncio.to_thread(TaskArchive.read, path), path=None)
+        return replace(await _read_archive(path), path=None)
 
 
 async def _plan(
@@ -182,13 +188,34 @@ async def _plan(
 ) -> list[BuildImage]:
     """The task's images, planned while its downloaded archive still exists: planning reads Dockerfiles from it."""
 
-    def plan(path: Path) -> list[BuildImage]:
-        images = plan_images(definition.config, TaskArchive.read(path), allowed_registries=build.allowed_registries)
+    def plan(archive: TaskArchive) -> list[BuildImage]:
+        images = plan_images(definition.config, archive, allowed_registries=build.allowed_registries)
         _choose_platforms(images, build.platform)
         return images
 
     async with _downloaded(files, definition.source) as path:
-        return await asyncio.to_thread(plan, path)
+        return await asyncio.to_thread(plan, await _read_archive(path))
+
+
+async def _read_archive(path: Path) -> TaskArchive:
+    """List a downloaded archive's files; a task with a compose file is also extracted next to it and parsed.
+
+    The compose file is parsed once, here, so everything downstream reads it as the parser does.
+    """
+    archive = await asyncio.to_thread(TaskArchive.read, path)
+    if archive.compose is None:
+        return archive
+    contents = path.parent / "contents"
+    contents.mkdir(mode=0o700)
+    try:
+        root, _ = await run_blocking_archive_operation(extract_task, path, contents)
+        # Planning needs main's build, not its ENTRYPOINT, so a missing Dockerfile is the planner's to report.
+        compose_task = await asyncio.to_thread(parse_compose, root, read_entrypoint=False)
+    except ComposeError as exc:
+        raise ImagePlanError("invalid_compose_file", str(exc)) from exc
+    except ValueError as exc:
+        raise ImagePlanError("invalid_task_archive", str(exc)) from exc
+    return replace(archive, compose_task=compose_task)
 
 
 @asynccontextmanager
@@ -240,7 +267,7 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
     builder_image = submitted.images[0]
     image.builder_image = builder_image.name
     image.build_job = submitted.job
-    _apply(image, builder_image.status, builder_image.image_ref, builder_image.status_detail)
+    _apply(image, builder_image)
 
 
 async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
@@ -275,18 +302,20 @@ async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
             changed = True
             continue
         before = image.status
-        _apply(image, current.status, current.image_ref, current.status_detail)
+        _apply(image, current)
         changed = changed or image.status != before
     return changed
 
 
-def _apply(image: BuildImage, status: str, image_ref: str | None, detail: str | None) -> None:
-    if status == "ready":
+def _apply(image: BuildImage, builder_image: ContainerImage) -> None:
+    """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready."""
+    if builder_image.status == "ready":
         image.status = "ready"
-        image.image_ref = image_ref
-    elif status == "failed":
+        image.image_ref = builder_image.image_ref
+        image.runtime_config = builder_image.runtime_config
+    elif builder_image.status == "failed":
         image.status = "failed"
-        image.error = detail or "the Builder build failed"
+        image.error = builder_image.status_detail or "the Builder build failed"
     else:
         image.status = "building"
 

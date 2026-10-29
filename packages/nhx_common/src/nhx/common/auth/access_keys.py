@@ -45,6 +45,9 @@ from .token_claims import TokenClaims, groups_from_claim, scopes_from_claim
 ACCESS_KEY_TOKEN_TYPE = "access_key"
 ACCESS_KEY_TOKEN_TYPE_CLAIM = "nhx_token_type"
 ACCESS_KEY_METADATA_CLAIM = "nhx_access_key"
+ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM = "nhx_service_attributes"
+# Keys travel in an Authorization header; 7 KiB leaves room under the 8 KiB header line many proxies allow by default.
+ACCESS_KEY_TOKEN_MAX_BYTES = 7 * 1024
 ACCESS_KEY_JWKS_PATH = "/apis/auth/jwks"
 ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
@@ -79,6 +82,10 @@ _EXPIRES_IN_SECONDS_FIELD = "expires_in_seconds"
 
 class AccessKeyValidationError(ValueError):
     """Raised when a Scoped Access Key request conflicts with platform policy."""
+
+
+class AccessKeyServiceAttributesForbiddenError(PermissionError):
+    """Raised when a caller that isn't a platform service sets service_attributes."""
 
 
 @dataclass(frozen=True)
@@ -208,19 +215,26 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         config: AuthConfig,
         principal: Principal,
         now: Callable[[], int] | None = None,
+        acting_service: str | None = None,
     ) -> None:
         self._config = config
         self._principal = principal
         self._now = now or (lambda: int(time.time()))
+        self._acting_service = acting_service
 
     def _ensure_enabled(self) -> None:
         if not self._config.access_keys.enabled:
             raise AccessKeyFeatureDisabledError("Scoped Access Keys are not enabled")
 
     def create(
-        self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
+        self,
+        request: AccessKeyCreateRequest,
+        *,
+        allow_service_account: bool = False,
+        inherited_service_attributes: dict[str, dict[str, Any]] | None = None,
     ) -> AccessKeyCreateResponse:
         self._ensure_enabled()
+        service_attributes = self._service_attributes(request, inherited_service_attributes)
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
         return _create_access_key_token(
@@ -230,14 +244,20 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             name=request.name,
             description=request.description,
             scope=request.scope,
+            service_attributes=service_attributes,
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
 
     async def create_async(
-        self, request: AccessKeyCreateRequest, *, allow_service_account: bool = False
+        self,
+        request: AccessKeyCreateRequest,
+        *,
+        allow_service_account: bool = False,
+        inherited_service_attributes: dict[str, dict[str, Any]] | None = None,
     ) -> AccessKeyCreateResponse:
         self._ensure_enabled()
+        service_attributes = self._service_attributes(request, inherited_service_attributes)
         expires_in_seconds = _resolve_expires_in_seconds(self._config, request)
         principal, entity_type = self._target_principal(request, allow_service_account=allow_service_account)
         return await _create_access_key_token_async(
@@ -247,9 +267,33 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             name=request.name,
             description=request.description,
             scope=request.scope,
+            service_attributes=service_attributes,
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
+
+    def _service_attributes(
+        self,
+        request: AccessKeyCreateRequest,
+        inherited: dict[str, dict[str, Any]] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The key's attributes by service: the acting service's from the request, or those a predecessor carried.
+
+        ``inherited`` is set, possibly empty, only when the key replaces a predecessor.
+
+        Raises:
+            AccessKeyServiceAttributesForbiddenError: The request sets attributes and no service is acting.
+            AccessKeyValidationError: The request sets attributes on a key that inherits them.
+        """
+        if request.service_attributes is None:
+            return dict(inherited or {})
+        if self._acting_service is None:
+            raise AccessKeyServiceAttributesForbiddenError("Only a platform service can set service_attributes")
+        if inherited is not None:
+            raise AccessKeyValidationError(
+                "A replacement Scoped Access Key keeps its predecessor's service_attributes; omit service_attributes"
+            )
+        return {self._acting_service: dict(request.service_attributes)}
 
     def _target_principal(
         self, request: AccessKeyCreateRequest, *, allow_service_account: bool
@@ -297,6 +341,7 @@ def _create_access_key_token(
     name: str | None = None,
     description: str | None = None,
     scope: list[str] | None = None,
+    service_attributes: dict[str, dict[str, Any]] | None = None,
     expires_in_seconds: int | None = None,
     now: int,
 ) -> AccessKeyCreateResponse:
@@ -307,6 +352,7 @@ def _create_access_key_token(
         name=name,
         description=description,
         scope=scope,
+        service_attributes=service_attributes,
         expires_in_seconds=expires_in_seconds,
         now=now,
     )
@@ -321,6 +367,7 @@ async def _create_access_key_token_async(
     name: str | None = None,
     description: str | None = None,
     scope: list[str] | None = None,
+    service_attributes: dict[str, dict[str, Any]] | None = None,
     expires_in_seconds: int | None = None,
     now: int,
 ) -> AccessKeyCreateResponse:
@@ -331,6 +378,7 @@ async def _create_access_key_token_async(
         name=name,
         description=description,
         scope=scope,
+        service_attributes=service_attributes,
         expires_in_seconds=expires_in_seconds,
         now=now,
     )
@@ -346,6 +394,7 @@ def _build_access_key_token_payload(
     name: str | None,
     description: str | None,
     scope: list[str] | None = None,
+    service_attributes: dict[str, dict[str, Any]] | None = None,
     expires_in_seconds: int | None,
     now: int,
 ) -> _AccessKeyTokenPayload:
@@ -376,6 +425,8 @@ def _build_access_key_token_payload(
     resolved_scope = list(dict.fromkeys(service.strip() for service in (scope or []) if service.strip()))
     if resolved_scope:
         claims["scope"] = " ".join(f"{service}:{verb}" for service in resolved_scope for verb in ("read", "write"))
+    if service_attributes:
+        claims[ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM] = service_attributes
     if principal.email:
         claims["email"] = principal.email
     if principal.groups:
@@ -413,6 +464,11 @@ def _access_key_response_from_payload(
         algorithm="RS256",
         headers={"kid": signing_key.kid},
     )
+    if len(token) > ACCESS_KEY_TOKEN_MAX_BYTES:
+        raise AccessKeyValidationError(
+            f"The Scoped Access Key token would be {len(token)} bytes, over the {ACCESS_KEY_TOKEN_MAX_BYTES}-byte "
+            "limit; shorten its name, description, scope or service_attributes"
+        )
     return AccessKeyCreateResponse(
         jti=payload.jti,
         name=payload.name,
@@ -425,6 +481,7 @@ def _access_key_response_from_payload(
         issuer=payload.issuer,
         audiences=payload.audiences,
         scope=payload.scope,
+        service_attributes=payload.claims.get(ACCESS_KEY_SERVICE_ATTRIBUTES_CLAIM, {}),
         created_at=payload.created_at,
         expires_at=payload.expires_at,
     )

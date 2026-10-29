@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Run a deployed agent beside its loopback platform-auth proxy.
+"""Start a deployed agent after its local Helix auth proxy is ready.
 
-Identity headers are not credentials. The OpenShell policy outside this process
-limits all platform calls, including calls bypassing the loopback proxy.
+The proxy adds the deployment's service and creator identity to Helix requests.
+OpenShell's network policy controls which requests the sandbox can make.
 """
 
 import argparse
@@ -12,12 +12,11 @@ import asyncio
 import signal
 from contextlib import suppress
 
+import uvicorn
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
 
 
 async def run(command: list[str], *, upstream: str, principal: str, on_behalf_of: str, port: int) -> int:
-    import uvicorn
-
     app = build_auth_proxy_app(
         base_url=upstream,
         headers={"X-NHX-Principal-Id": f"service:{principal}", "X-NHX-Principal-On-Behalf-Of": on_behalf_of},
