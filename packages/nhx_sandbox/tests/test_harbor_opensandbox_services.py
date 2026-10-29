@@ -236,3 +236,50 @@ def test_security_and_tmpfs_round_trip_and_need_the_security_feature() -> None:
 def test_invalid_security_and_tmpfs_are_rejected(main: dict[str, Any], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         parse_compose_services(_spec(volumes=["shared"], main=main))
+
+
+READ_ONLY = {"read_only_root_filesystem": True}
+
+
+@pytest.mark.parametrize(
+    "main",
+    [
+        {"security": READ_ONLY, "tmpfs": [{"mount_path": "/tmp"}]},
+        {"security": READ_ONLY, "volume_mounts": [{"name": "shared", "mount_path": "/tmp"}]},
+        # A writable mount over a parent of the temp folder covers it too.
+        {"security": READ_ONLY, "env": {"TMPDIR": "/scratch/tmp"}, "tmpfs": [{"mount_path": "/scratch"}]},
+    ],
+)
+def test_a_read_only_main_with_a_writable_temp_folder_is_accepted(main: dict[str, Any]) -> None:
+    parse_compose_services(_spec(volumes=["shared"], main=main))
+
+
+@pytest.mark.parametrize(
+    ("main", "temp_dir"),
+    [
+        ({"security": READ_ONLY}, "/tmp"),
+        ({"security": READ_ONLY, "tmpfs": [{"mount_path": "/scratch"}]}, "/tmp"),
+        # execd uses TMPDIR when it's set, so /tmp alone doesn't help.
+        ({"security": READ_ONLY, "env": {"TMPDIR": "/scratch"}, "tmpfs": [{"mount_path": "/tmp"}]}, "/scratch"),
+        (
+            {
+                "security": READ_ONLY,
+                "volume_mounts": [{"name": "shared", "mount_path": "/tmp", "read_only": True}],
+            },
+            "/tmp",
+        ),
+        # The read-only mount is the closer one, so the writable tmpfs above it doesn't count.
+        (
+            {
+                "security": READ_ONLY,
+                "env": {"TMPDIR": "/scratch/tmp"},
+                "tmpfs": [{"mount_path": "/scratch"}],
+                "volume_mounts": [{"name": "shared", "mount_path": "/scratch/tmp", "read_only": True}],
+            },
+            "/scratch/tmp",
+        ),
+    ],
+)
+def test_a_read_only_main_needs_a_writable_temp_folder(main: dict[str, Any], temp_dir: str) -> None:
+    with pytest.raises(ValidationError, match=f"needs a writable tmpfs or volume at {temp_dir},"):
+        parse_compose_services(_spec(volumes=["shared"], main=main))

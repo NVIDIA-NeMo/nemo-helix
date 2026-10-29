@@ -41,6 +41,7 @@ images that can't install them, such as images with a non-root ``USER``.
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -266,9 +267,35 @@ class Main(_Strict):
 
     @model_validator(mode="after")
     def _check(self) -> Main:
-        """Reject more tmpfs mounts than the sandbox container takes."""
+        """Reject more tmpfs mounts than the sandbox container takes, and a read-only ``main`` commands can't run in."""
         _check_tmpfs(MAIN_SERVICE, self.tmpfs)
+        if self.security is not None and self.security.read_only_root_filesystem:
+            # execd, which runs every command in main, first writes the command's output to files in its temp folder.
+            # On a read-only root with nothing writable there, every command fails, even `true`.
+            temp_dir = self.env.get("TMPDIR") or "/tmp"
+            if not self._is_writable(temp_dir):
+                raise ValueError(
+                    f"main is read-only, so it needs a writable tmpfs or volume at {temp_dir}, "
+                    "where commands write their output"
+                )
         return self
+
+    def _is_writable(self, path: str) -> bool:
+        """Whether ``path`` can be written in a read-only ``main``: the closest mount over it is writable.
+
+        A read-only mount inside a writable one wins over it, as it does in the container.
+        """
+        mounts = [(tmpfs.mount_path, True) for tmpfs in self.tmpfs]
+        mounts += [(mount.mount_path, not mount.read_only) for mount in self.volume_mounts]
+        covering_mounts = [
+            (PurePosixPath(mount_path), writable)
+            for mount_path, writable in mounts
+            if PurePosixPath(path).is_relative_to(mount_path)
+        ]
+        if not covering_mounts:
+            return False
+        _closest_path, writable = max(covering_mounts, key=lambda mount: len(mount[0].parts))
+        return writable
 
 
 class ComposeServices(_Strict):
