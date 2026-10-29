@@ -255,6 +255,8 @@ class DeploymentReconciler:
                 logger.warning("Backend delete failed for %s — will retry", dep_id, exc_info=True)
                 return
             if status_update.status not in _DELETE_COMPLETE_STATUSES:
+                if status_update.status == "DELETING":
+                    await self._update_deployment_status(deployment, status_update)
                 logger.debug(
                     "Backend delete not complete for %s: %s — %s",
                     dep_id,
@@ -426,6 +428,9 @@ class DeploymentReconciler:
         )
 
     def _check_deleting_timeout(self, deployment: Deployment) -> BackendStatusUpdate | None:
+        # The sandbox is gone; credential cleanup must remain retryable after restart.
+        if deployment.error_details and deployment.error_details.get("reason") == "provider_cleanup_pending":
+            return None
         timeout = self._controller_config.deleting_timeout_seconds
         if timeout <= 0:
             return None
