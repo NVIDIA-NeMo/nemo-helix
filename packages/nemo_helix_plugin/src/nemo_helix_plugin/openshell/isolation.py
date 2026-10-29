@@ -4,6 +4,7 @@
 """Build environment and network restrictions for sandboxes using Helix-backed providers."""
 
 import re
+from fnmatch import fnmatchcase
 
 from google.protobuf import json_format
 from google.protobuf.message import Message
@@ -51,9 +52,9 @@ def restricted_platform_policy[Policy: Message](
     secret_env: dict[str, str] | None = None,
     read_filesets: list[str] | None = None,
 ) -> Policy:
-    """Return a policy copy allowing only the workload's required Helix API calls.
+    """Preserve external-service access and restrict Helix to the workload's required API calls.
 
-    Replace network rules with inference, telemetry and optional job/fileset access.
+    Replace Helix endpoints with inference, telemetry and optional job/fileset access.
     This prevents the sandbox from using the platform connection to read secrets
     directly. OpenShell adds approved provider access and enforces the policy.
     """
@@ -119,22 +120,38 @@ def restricted_platform_policy[Policy: Message](
     if secret_env:
         raise ValueError("OpenShell sandboxes cannot fetch secret values from the platform.")
     data = json_format.MessageToDict(policy, preserving_proto_field_name=True)
-    data["network_policies"] = {
-        "nemo_workload": {
-            "name": "nemo-workload-access",
-            "endpoints": [
-                {
-                    "host": host,
-                    "port": port,
-                    "protocol": "rest",
-                    "enforcement": "NETWORK_ENFORCEMENT_MODE_ENFORCE",
-                    "rules": rules,
-                }
-            ],
-            "binaries": [{"path": path} for path in binaries],
-        }
+    network = data.setdefault("network_policies", {})
+    platform_host = host.lower().rstrip(".")
+    for key, existing in list(network.items()):
+        endpoints = []
+        for endpoint in existing.get("endpoints", []):
+            endpoint_host = endpoint.get("host", "").lower().rstrip(".")
+            if endpoint_host == platform_host:
+                continue
+            if fnmatchcase(platform_host, endpoint_host):
+                raise ValueError("A wildcard network endpoint overlaps Helix; use explicit external-service hosts.")
+            endpoints.append(endpoint)
+        if endpoints:
+            existing["endpoints"] = endpoints
+        else:
+            del network[key]
+    key = "nemo_workload"
+    while key in network:
+        key += "_"
+    network[key] = {
+        "name": "nemo-workload-access",
+        "endpoints": [
+            {
+                "host": host,
+                "port": port,
+                "protocol": "rest",
+                "enforcement": "NETWORK_ENFORCEMENT_MODE_ENFORCE",
+                "rules": rules,
+            }
+        ],
+        "binaries": [{"path": path} for path in binaries],
     }
-    data["landlock"] = {"compatibility": "hard_requirement"}
+    data.setdefault("landlock", {})["compatibility"] = "hard_requirement"
     restricted = type(policy)()
     json_format.ParseDict(data, restricted)
     return restricted
