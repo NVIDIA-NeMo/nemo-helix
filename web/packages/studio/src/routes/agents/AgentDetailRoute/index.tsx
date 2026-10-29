@@ -3,12 +3,13 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { Commit } from '@nemo/icons/icons';
+import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { Cog, Commit, CopyDoc } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
   Badge,
+  Button,
   Flex,
   PageHeader,
   Stack,
@@ -34,6 +35,7 @@ import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
+import { AgentConfigPanel } from '@studio/routes/agents/AgentDetailRoute/AgentConfigPanel';
 import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
 import {
   BuildThenDeploy,
@@ -42,14 +44,13 @@ import {
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
-import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
+import { HeaderDeploymentSelect } from '@studio/routes/agents/AgentDetailRoute/HeaderDeploymentSelect';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { InsightsTab } from '@studio/routes/agents/AgentDetailRoute/InsightsTab';
 import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationsTab';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
-import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import {
   ACTION_SEARCH_PARAM,
   type AgentDetailTab,
@@ -70,22 +71,23 @@ import {
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { getAgentRunEvaluationRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { [ROUTE_PARAMS.agentName]: agentName } = useParams<{ agentName: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | undefined>();
-  const [logsDeploymentName, setLogsDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
   const [launchStrategy, setLaunchStrategy] = useState<OptimizationStrategy | undefined>();
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
+  const { success, error } = useToast();
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const deployButtonRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -110,7 +112,7 @@ export const AgentDetailRoute: FC = () => {
     agentEvals,
     isAgentEvalsPending,
     agentJobs,
-    chatDeployment,
+    selectedDeployment,
     deleteDeploymentMutation,
     healthyDeployments,
     isDeploying,
@@ -167,7 +169,7 @@ export const AgentDetailRoute: FC = () => {
   };
 
   const viewLogs = (deployment: AgentDeployment) => {
-    setLogsDeploymentName(deployment.name);
+    setSelectedDeploymentName(deployment.name);
     setSelectedTab('logs');
   };
 
@@ -249,19 +251,17 @@ export const AgentDetailRoute: FC = () => {
     navigate,
   ]);
 
-  const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
-  const statusPillLabel =
-    healthyDeployments.length > 0
-      ? 'Healthy'
-      : status === 'pending' || status === 'starting'
-        ? 'Deploying'
-        : status === 'deleting'
-          ? 'Deleting'
-          : status === 'failed'
-            ? 'Failed'
-            : agentDeployments.length === 0
-              ? 'No deployments'
-              : (status ?? 'Unknown');
+  const displayName = agent?.name ?? agentName ?? 'Agent details';
+
+  const copyAgentId = async () => {
+    if (!agent?.id) return;
+    try {
+      await navigator.clipboard.writeText(agent.id);
+      success('Copied agent ID', { durationMs: 3000 });
+    } catch {
+      error('Error copying agent ID', { durationMs: 3000 });
+    }
+  };
 
   return (
     <AccessibleTitle title={`${agentName ?? 'Agent'} details for ${workspace}`}>
@@ -269,40 +269,48 @@ export const AgentDetailRoute: FC = () => {
         <PageHeader
           className="shrink-0 p-0"
           slotHeading={
-            <Flex align="baseline" gap="3">
-              <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
-              <StatusBadge status={status} label={statusPillLabel} />
-              {specSource ? (
-                <Link
-                  to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
-                  className="contents"
-                  aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
-                >
-                  <Badge kind="solid" color="gray" className="cursor-pointer">
+            <Flex align="center" gap="3" className="min-w-0">
+              <Text kind="title/md" className="min-w-0 truncate font-bold" title={displayName}>
+                {displayName}
+              </Text>
+              <Flex align="center" gap="3" className="shrink-0">
+                <HeaderDeploymentSelect
+                  deployments={agentDeployments}
+                  selected={selectedDeployment}
+                  canCreate={!!agentName && !isDeploying && !isAgentPending}
+                  onSelect={setSelectedDeploymentName}
+                  onCreate={onDeploy}
+                />
+                {agent?.id ? (
+                  <button
+                    type="button"
+                    className="group contents"
+                    onClick={copyAgentId}
+                    aria-label={`Copy agent ID ${agent.id}`}
+                  >
+                    <Badge kind="solid" color="gray" className="cursor-pointer">
+                      <CopyDoc size="12" aria-hidden />
+                      ID
+                      <span className="max-w-0 overflow-hidden whitespace-nowrap transition-[max-width] duration-200 group-hover:max-w-96 group-focus-visible:max-w-96">
+                        {agent.id}
+                      </span>
+                    </Badge>
+                  </button>
+                ) : null}
+                {specSource ? (
+                  <Badge
+                    kind="solid"
+                    color="gray"
+                    aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
+                  >
                     <Commit size="12" aria-hidden />
                     {shortRevision(specSource.revision)}
                   </Badge>
-                </Link>
-              ) : null}
+                ) : null}
+              </Flex>
             </Flex>
           }
-          slotActions={
-            <AgentDetailCTAs
-              tab={selectedTab}
-              agentName={agentName}
-              canDeploy={canDeploy}
-              isAgentPending={isAgentPending}
-              canRunEvaluation={canRunEvaluation}
-              isDeploying={isDeploying}
-              canOptimize={!isCreatingOptimization}
-              deployButtonRef={deployButtonRef}
-              onDeploy={onDeploy}
-              onRunEvaluation={runEvaluation}
-              onOptimize={openOptimize}
-              onImportTraces={() => setImportTracesOpen(true)}
-            />
-          }
-        ></PageHeader>
+        />
 
         <TabsRoot
           className="flex min-h-0 flex-1 flex-col"
@@ -311,18 +319,43 @@ export const AgentDetailRoute: FC = () => {
             if (isAgentDetailTab(value)) setSelectedTab(value);
           }}
         >
-          <TabsList className="shrink-0" ref={tabsRef}>
-            {AGENT_OVERVIEW_ENABLED && <TabsTrigger value="overview">Overview</TabsTrigger>}
-            <TabsTrigger value="deployments">Deployments</TabsTrigger>
-            <TabsTrigger value="logs">Logs</TabsTrigger>
-            <TabsTrigger value="chat">Chat</TabsTrigger>
-            <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
-            {AGENT_OPTIMIZATIONS_ENABLED && (
-              <TabsTrigger value="optimizations">Optimizations</TabsTrigger>
-            )}
-            {OPTIMIZER_ENABLED && <TabsTrigger value="insights">Insights</TabsTrigger>}
-            <TabsTrigger value="details">Details</TabsTrigger>
-          </TabsList>
+          <Flex className="shrink-0" align="center" gap="4">
+            <TabsList className="min-w-0 flex-1" ref={tabsRef}>
+              {AGENT_OVERVIEW_ENABLED && <TabsTrigger value="overview">Overview</TabsTrigger>}
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
+              {OPTIMIZER_ENABLED && <TabsTrigger value="insights">Insights</TabsTrigger>}
+              {AGENT_OPTIMIZATIONS_ENABLED && (
+                <TabsTrigger value="optimizations">Optimizations</TabsTrigger>
+              )}
+              <TabsTrigger value="deployments">Deployment</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+            </TabsList>
+            <Flex align="center" gap="2">
+              <Button
+                kind="secondary"
+                aria-label="Agent config"
+                aria-haspopup="dialog"
+                onClick={() => setConfigOpen(true)}
+              >
+                <Cog aria-hidden />
+              </Button>
+              <AgentDetailCTAs
+                tab={selectedTab}
+                agentName={agentName}
+                canDeploy={canDeploy}
+                isAgentPending={isAgentPending}
+                canRunEvaluation={canRunEvaluation}
+                isDeploying={isDeploying}
+                canOptimize={!isCreatingOptimization}
+                deployButtonRef={deployButtonRef}
+                onDeploy={onDeploy}
+                onRunEvaluation={runEvaluation}
+                onOptimize={openOptimize}
+                onImportTraces={() => setImportTracesOpen(true)}
+              />
+            </Flex>
+          </Flex>
 
           {AGENT_OVERVIEW_ENABLED && (
             <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
@@ -394,12 +427,7 @@ export const AgentDetailRoute: FC = () => {
           </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="logs">
-            <DeploymentLogsView
-              workspace={workspace}
-              deployments={agentDeployments}
-              selectedDeploymentName={logsDeploymentName}
-              onSelectDeployment={setLogsDeploymentName}
-            />
+            <DeploymentLogsView workspace={workspace} deployment={selectedDeployment} />
           </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-hidden p-0 pt-6" value="chat">
@@ -407,24 +435,26 @@ export const AgentDetailRoute: FC = () => {
               <ChatPlaygroundContent
                 workspace={workspace}
                 agentName={agentName}
-                chatDeployment={chatDeployment}
-                healthyDeployments={healthyDeployments}
+                deployment={selectedDeployment}
+                hasHealthyDeployments={healthyDeployments.length > 0}
                 isDeploymentsLoading={isDeploymentsLoading}
                 isDeploying={isDeploying}
                 chatAreaRef={chatAreaRef}
-                onSelectDeployment={setSelectedDeploymentName}
                 onDeploy={onDeploy}
                 canDeploy={canDeploy}
                 isAgentPending={isAgentPending}
               />
             </div>
           </TabsContent>
-
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="details">
-            <DetailsTab workspace={workspace} agentName={agentName} agent={agent} />
-          </TabsContent>
         </TabsRoot>
       </Stack>
+      <AgentConfigPanel
+        open={configOpen}
+        workspace={workspace}
+        agent={agent}
+        specSource={specSource}
+        onClose={() => setConfigOpen(false)}
+      />
       {agentName && importTracesOpen && (
         <ImportTracesModal
           open

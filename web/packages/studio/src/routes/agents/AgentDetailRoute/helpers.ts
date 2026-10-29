@@ -30,10 +30,3 @@ const DEPLOYMENT_MODE_LABELS: Record<string, string> = {
 /** The backend defaults this field to `subprocess`, so an absent mode is that. */
 export const deploymentModeLabel = (mode?: string): string =>
   DEPLOYMENT_MODE_LABELS[mode ?? 'subprocess'] ?? (mode as string);
-
-export function deploymentStatusColor(status?: string): 'green' | 'red' | 'yellow' | undefined {
-  if (status === 'running') return 'green';
-  if (status === 'error' || status === 'failed') return 'red';
-  if (status === 'pending' || status === 'starting' || status === 'deleting') return 'yellow';
-  return undefined;
-}
