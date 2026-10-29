@@ -2019,6 +2019,7 @@ async def test_blocking_mcp_tool_response_streams_keepalives_until_user_responds
 def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.MonkeyPatch):
     service = StudioService()
     app = FastAPI()
+    app.dependency_overrides.update(service.app.dependency_overrides)
     app.include_router(service.app.router, prefix="/apis/studio")
     service.configure_app(app)
     session_id = str(uuid.uuid4())
@@ -2123,6 +2124,7 @@ def test_platform_route_stream_uses_deployed_assistant(monkeypatch: pytest.Monke
 def test_platform_route_stream_infers_studio_url_from_browser_headers(monkeypatch: pytest.MonkeyPatch):
     service = StudioService()
     app = FastAPI()
+    app.dependency_overrides.update(service.app.dependency_overrides)
     app.include_router(service.app.router, prefix="/apis/studio")
     service.configure_app(app)
     session_id = str(uuid.uuid4())
@@ -2552,6 +2554,7 @@ def test_assistant_request_payload_keeps_session_outside_model_messages():
 def test_public_mcp_route_is_mounted_before_static_fallback():
     service = StudioService()
     app = FastAPI()
+    app.dependency_overrides.update(service.app.dependency_overrides)
     service.configure_app(app)
     client = TestClient(app)
     session_id = str(uuid.uuid4())
@@ -2577,6 +2580,27 @@ def test_public_mcp_route_is_mounted_before_static_fallback():
     assert get_response.headers["allow"] == "POST"
     assert delete_response.status_code == 405
     assert delete_response.headers["allow"] == "POST"
+
+
+def test_public_mcp_route_uses_running_studio_config(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "nhx.studio.config.Configuration.get_global_settings_from_env",
+        lambda: {"studio": {"feature_flags": {"intake_enabled": True}}},
+    )
+    service = StudioService().with_config(StudioConfig())
+    app = FastAPI()
+    app.dependency_overrides.update(service.app.dependency_overrides)
+    service.configure_app(app)
+
+    response = TestClient(app).post(
+        f"/studio/api/assistant/mcp/{uuid.uuid4()}",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+
+    assert response.status_code == 200
+    tools = response.json()["result"]["tools"]
+    studio_link = next(tool for tool in tools if tool["name"] == "studio_link")
+    assert "intake_span" in studio_link["inputSchema"]["properties"]["destination"]["description"]
 
 
 def test_assistant_routes_are_available_by_default(service_client: TestClient):

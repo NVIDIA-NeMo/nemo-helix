@@ -225,3 +225,94 @@ async def test_get_other_workspace_ngc_name_not_treated_as_default(
     """A secret named ngc-api-key in a non-system workspace is not the default and returns 404 if missing."""
     response = test_client.get("/apis/secrets/v2/workspaces/default/secrets/ngc-api-key")
     assert response.status_code == 404
+
+
+@pytest.fixture(params=["unset", "empty"])
+def ngc_api_key_missing(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make NGC_API_KEY unavailable, either removed or set to an empty string."""
+    if request.param == "unset":
+        monkeypatch.delenv("NGC_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("NGC_API_KEY", "")
+
+
+@pytest.mark.usefixtures("ngc_api_key_missing")
+async def test_list_secrets_system_workspace_without_ngc_key_returns_empty_page(
+    test_client: TestClient,
+) -> None:
+    """Without NGC_API_KEY, an empty system workspace lists no secrets and is not padded."""
+    response = test_client.get(
+        "/apis/secrets/v2/workspaces/system/secrets",
+        params={"page": 1, "page_size": 10},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["data"] == []
+    assert data["pagination"]["total_results"] == 0
+    assert data["pagination"]["total_pages"] == 0
+    assert data["pagination"]["current_page_size"] == 0
+
+
+@pytest.mark.usefixtures("ngc_api_key_missing")
+async def test_list_secrets_system_workspace_without_ngc_key_counts_only_stored_secrets(
+    test_client: TestClient,
+) -> None:
+    """Without NGC_API_KEY, the last page of the system workspace returns only stored secrets."""
+    page_size = 10
+    num_secrets = 12
+    created_names = []
+    for i in range(num_secrets):
+        name = f"no-ngc-paging-{i:02d}"
+        resp = test_client.post(
+            "/apis/secrets/v2/workspaces/system/secrets",
+            json={"name": name, "value": "paging-test"},
+        )
+        assert resp.status_code == 201, resp.text
+        created_names.append(name)
+    try:
+        last_page = test_client.get(
+            "/apis/secrets/v2/workspaces/system/secrets",
+            params={"page": 2, "page_size": page_size},
+        )
+        assert last_page.status_code == 200, last_page.text
+        data = last_page.json()
+        names = [s["name"] for s in data["data"]]
+        assert "ngc-api-key" not in names
+        assert len(names) == num_secrets - page_size
+        assert data["pagination"]["total_results"] == num_secrets
+        assert data["pagination"]["total_pages"] == 2
+    finally:
+        for name in created_names:
+            test_client.delete(f"/apis/secrets/v2/workspaces/system/secrets/{name}")
+
+
+@pytest.mark.usefixtures("ngc_api_key_missing")
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/apis/secrets/v2/workspaces/system/secrets/ngc-api-key",
+        "/apis/secrets/v2/workspaces/system/secrets/ngc-api-key/access",
+    ],
+)
+async def test_read_default_ngc_api_key_without_env_returns_404(
+    test_client: TestClient,
+    path: str,
+) -> None:
+    """Without NGC_API_KEY, get and access of the default NGC key return 404 naming the env var."""
+    response = test_client.get(path)
+    assert response.status_code == 404, response.text
+    assert "NGC_API_KEY" in response.json()["detail"]
+
+
+@pytest.mark.usefixtures("ngc_api_key_missing")
+async def test_mutating_default_ngc_api_key_without_env_still_forbidden(
+    test_client: TestClient,
+) -> None:
+    """The reserved name stays protected from create, update, and delete when NGC_API_KEY is missing."""
+    base = "/apis/secrets/v2/workspaces/system/secrets"
+    create = test_client.post(base, json={"name": "ngc-api-key", "value": "attempted-override"})
+    update = test_client.patch(f"{base}/ngc-api-key", json={"description": "Updated description"})
+    delete = test_client.delete(f"{base}/ngc-api-key")
+    assert create.status_code == 403
+    assert update.status_code == 403
+    assert delete.status_code == 403

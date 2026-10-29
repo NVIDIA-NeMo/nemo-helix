@@ -18,6 +18,7 @@ export const JobLogsSection: FC = () => {
     isLoading,
     error,
     loadProgress,
+    logStatus,
   } = useJobLogs({
     workspace,
     name: jobName,
@@ -45,6 +46,7 @@ export const JobLogsSection: FC = () => {
             logs={logs}
             isLoading={isLoading && logs.length === 0}
             loadProgress={loadProgress}
+            logStatus={logStatus}
             downloadFilename={`data-designer-${jobName}-logs.txt`}
             emptyMessage={
               isRunning

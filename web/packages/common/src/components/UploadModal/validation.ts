@@ -10,12 +10,16 @@
  * its affiliates is strictly prohibited.
  */
 import { UploadDataset, UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import { isFileTypeAllowed } from '@nemo/common/src/components/UploadModal/utils';
 import { DATASET_NAME_REGEX } from '@nemo/common/src/datasets/constants';
 
 interface ValidateUploadFormParams {
   selectedFiles: UploadFile[];
   selectedDataset: UploadDataset | undefined;
   isDatasetRequired: boolean;
+  /** Extensions a selected file must match when `invalidFileMode` is 'disable' or 'hide'. */
+  acceptableFileTypes?: string[];
+  invalidFileMode?: 'show' | 'hide' | 'disable';
 }
 
 /**
@@ -29,12 +33,20 @@ export const validateUploadForm = ({
   selectedFiles,
   selectedDataset,
   isDatasetRequired = false,
+  acceptableFileTypes,
+  invalidFileMode,
 }: ValidateUploadFormParams): Record<string, string> => {
   const errors: Record<string, string> = {};
 
   // Check if file is selected
   if (selectedFiles.length === 0) {
     errors.file = 'File is required.';
+  } else if (
+    invalidFileMode !== undefined &&
+    invalidFileMode !== 'show' &&
+    selectedFiles.some((f) => !isFileTypeAllowed(f, acceptableFileTypes))
+  ) {
+    errors.file = `Only ${acceptableFileTypes?.join(', ')} files can be selected.`;
   }
 
   // Check if dataset is required and selected

@@ -1748,10 +1748,10 @@ jobs:
         with:
           package: ${{ matrix.package }}
           out-dir: ${{ github.workspace }}/dist
-          cadence: nightly
+          cadence: rc
           # Sentinel epoch — the wheel version is meaningless for a CI test
           # build, but stamp_sdk_version.py requires \d{14}.
-          nightly-timestamp: "19700101000000"
+          rc-timestamp: "19700101000000"
           python-version: ${{ matrix.python-version }}
       - name: Upload wheel
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

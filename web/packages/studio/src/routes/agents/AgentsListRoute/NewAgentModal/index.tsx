@@ -6,6 +6,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import {
   getAgentsListAgentsQueryKey,
   useAgentsRegisterAgent,
@@ -139,12 +140,12 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setValue,
     handleSubmit,
     reset: resetForm,
-    formState: { errors },
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
     defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
     disabled: isPending || deployOnCreate.isDeploying,
-    mode: 'onChange',
+    mode: 'onTouched',
   });
 
   const tracedAgents = useTraceAgentNames(workspace, open && tab === 'imported-traces');
@@ -164,6 +165,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   }, [sourceLabel, entries]);
 
   const watchedName = useWatch({ control, name: 'name' });
+  const agentPreview = toValidEntityName(watchedName ?? '', '');
+  const agentNameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
@@ -182,7 +185,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
   // Derived, not stored: an armed replace targets one fileset, so editing the name
   // disarms it in the same render rather than one render later.
-  const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
+  const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === agentPreview;
 
   const resetAndClose = () => {
     resetMutation();
@@ -457,7 +460,16 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
-                formFieldProps={{ slotError: errors.name?.message }}
+                formFieldProps={{
+                  slotHelp: agentNameError ? undefined : agentPreview ? (
+                    <>
+                      Your agent will be created as{' '}
+                      <span className="text-primary">{agentPreview}</span>
+                    </>
+                  ) : undefined,
+                  slotError: agentNameError,
+                  status: agentNameError ? 'error' : undefined,
+                }}
               />
               {deployFields}
             </Stack>
@@ -495,7 +507,16 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
-                formFieldProps={{ slotError: errors.name?.message }}
+                formFieldProps={{
+                  slotHelp: agentNameError ? undefined : agentPreview ? (
+                    <>
+                      Your agent will be created as{' '}
+                      <span className="text-primary">{agentPreview}</span>
+                    </>
+                  ) : undefined,
+                  slotError: agentNameError,
+                  status: agentNameError ? 'error' : undefined,
+                }}
               />
               {deployFields}
             </Stack>

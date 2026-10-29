@@ -8,6 +8,7 @@ import {
   getEvaluationMetricDetailsRoute,
   getEvaluationMetricRunRoute,
   getEvaluationMetricsRunRoute,
+  getEvaluationNewRoute,
   getEvaluationSessionDetailRoute,
   getFilesetDetailsRoute,
   getFilesetRoute,
@@ -48,6 +49,18 @@ describe('Evaluation route helpers', () => {
         })
       ).toBe(
         '/workspaces/test-workspace/evaluation/metrics/toxicity/run?model=test-namespace%2Fmodel-a'
+      );
+    });
+  });
+
+  describe('getEvaluationNewRoute', () => {
+    it('opens the wizard with no model chosen by default', () => {
+      expect(getEvaluationNewRoute(workspace)).toBe('/workspaces/test-workspace/evaluation/new');
+    });
+
+    it('pre-selects an encoded model when one is given', () => {
+      expect(getEvaluationNewRoute(workspace, { model: 'test-namespace/model-a' })).toBe(
+        '/workspaces/test-workspace/evaluation/new?model=test-namespace%2Fmodel-a'
       );
     });
   });

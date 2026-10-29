@@ -15,7 +15,7 @@ _CLI_SOURCE_ROOT = _SOURCE_ROOT / "cli_commands"
 # Only service composition roots, the local lifecycle provisioner, and the
 # executor may depend on the raw runtime client.
 _EXPECTED_RAW_CLIENT_IMPORTS = {
-    "api/v2/experiments/dependencies.py",
+    "dependencies.py",
     "local_clickhouse.py",
     "repository/clickhouse/executor.py",
     "service.py",

@@ -408,7 +408,7 @@ if not client.models.wait_for_gateway(deployment.name, workspace="default", time
 
 ### 8. Test the Deployed Model
 
-Call the inference gateway through the SDK. Use the base model name to test the original model and the output adapter name to test the LoRA-adapted model.
+Call the inference gateway's OpenAI-compatible route and name each model by its entity ID: `default/<model>` for the base model, and `default/<model>&adapters/default/<adapter>` for the LoRA adapter. The gateway routes the adapter through its base model's deployment.
 
 <Tabs>
 
@@ -424,8 +424,7 @@ from nemo_helix_plugin.inference_gateway.types import JsonBody
 
 
 def chat(model_id: str):
-    return InferenceGatewayClient.from_client(client).provider_post(
-        name=deployment.name,
+    return InferenceGatewayClient.from_client(client).openai_post(
         workspace="default",
         trailing_uri="v1/chat/completions",
         body=JsonBody(
@@ -439,7 +438,7 @@ def chat(model_id: str):
     ).data()
 
 BASE_INFERENCE_MODEL_NAME = f"default/{MODEL_NAME}"
-INFERENCE_MODEL_NAME = f"default--{OUTPUT_NAME}"
+INFERENCE_MODEL_NAME = f"default/{MODEL_NAME}&adapters/default/{OUTPUT_NAME}"
 base_response = chat(BASE_INFERENCE_MODEL_NAME)
 lora_response = chat(INFERENCE_MODEL_NAME)
 
@@ -456,8 +455,9 @@ print(lora_response["choices"][0]["message"]["content"])
 This example uses `NHX_BASE_URL` when it is set and falls back to `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL first. Refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
 ```bash
+export MODEL_NAME="my-private-model"
 export OUTPUT_NAME="<output adapter name from the Python job block>"
-export INFERENCE_MODEL_NAME="default--${OUTPUT_NAME}"
+export INFERENCE_MODEL_NAME="default/${MODEL_NAME}&adapters/default/${OUTPUT_NAME}"
 
 curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'Content-Type: application/json' \

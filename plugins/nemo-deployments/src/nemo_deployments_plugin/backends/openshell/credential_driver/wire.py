@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""JSON adapters for OpenShell's first-party credential-driver messages."""
+"""Convert SDK protobuf messages to and from dictionaries for driver request validation."""
 
 from typing import Any
 

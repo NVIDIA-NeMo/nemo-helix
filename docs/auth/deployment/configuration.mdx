@@ -193,6 +193,22 @@ deployments can cut over configuration before the old key is finalized. Call
 `DELETE /apis/auth/v2/access-keys/{jti}` on the old key to finalize rotation
 immediately, or let it lapse automatically once the grace period elapses.
 
+A platform service can attach facts it vouches for to a key it creates on a
+user's behalf, by setting `service_attributes` in the create request. The auth
+service signs them into the token's `nhx_service_attributes` claim under the
+acting service's name, for example `{"evals": {...}}`, so one service can never
+write another's. Only a service principal may set them: a request from a user,
+or from a user's key, gets `403`. Listing and getting a key return its
+attributes read-only, and rotation carries them over to the successor key. They
+are limited to 32 names, values nested at most one object or array deep,
+strings of at most 256 characters, and 2 KiB as JSON. A component that reads
+them must verify the key's signature itself, so they're never trusted from an
+unsigned token.
+
+Every Scoped Access Key token is limited to 7 KiB, so it fits the 8 KiB header
+line many proxies allow by default. A request whose key would be larger gets
+`400`; shorten its name, description, scope or `service_attributes`.
+
 The issuer defaults to `<platform.base_url>/apis/auth` when
 `auth.token_signing.issuer` is unset. Use an externally reachable issuer URL
 when a gateway validates Scoped Access Keys before forwarding requests to

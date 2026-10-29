@@ -226,7 +226,7 @@ def nvidia_build_provider(request: pytest.FixtureRequest, nhx_base_url: str, clu
     )
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def inference_tutorial_model(
     request: pytest.FixtureRequest, nhx_base_url: str, cluster_url: str | None
 ) -> Iterator[None]:

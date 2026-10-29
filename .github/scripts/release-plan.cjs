@@ -15,7 +15,7 @@ const SEMVER_PATTERN = new RegExp(
     "(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
 );
 
-function resolveNightlyBaseVersion(sourceBranch, tags) {
+function resolveRcBaseVersion(sourceBranch, tags) {
   const [major, minor] = sourceBranch
     .slice("release/".length)
     .split(".")
@@ -98,7 +98,12 @@ async function resolveReleasePlan({
 }) {
   const inputs = context.payload.inputs ?? {};
   const isManual = context.eventName === "workflow_dispatch";
-  const releaseType = isManual ? inputs["release-type"] : "nightly";
+  const releaseType = isManual ? inputs["release-type"] : "rc";
+  if (!["rc", "stable"].includes(releaseType)) {
+    throw new Error(
+      `Unsupported release type: ${releaseType}. Expected rc or stable.`,
+    );
+  }
   const releaseScope = isManual ? inputs["release-scope"] || "all" : "all";
   const updateNgcMetadata =
     isManual && inputs["update-ngc-metadata"] === "true";
@@ -128,9 +133,7 @@ async function resolveReleasePlan({
     }
   } else {
     if (sourceSha && !/^[0-9a-f]{40}$/i.test(sourceSha)) {
-      throw new Error(
-        "A pinned nightly source must be an exact 40-character SHA.",
-      );
+      throw new Error("A pinned RC source must be an exact 40-character SHA.");
     }
     const [branch] = (await listBranches())
       .filter(({ name }) => /^release\/\d+\.\d+$/.test(name))
@@ -146,7 +149,7 @@ async function resolveReleasePlan({
         return bMajor - aMajor || bMinor - aMinor;
       });
     if (!branch) {
-      throw new Error("No release/X.X branch found for nightly publication.");
+      throw new Error("No release/X.X branch found for RC publication.");
     }
     sourceBranch = branch.name;
     if (sourceSha) {
@@ -156,7 +159,7 @@ async function resolveReleasePlan({
       );
       if (status !== "identical" && status !== "ahead") {
         throw new Error(
-          `Pinned nightly source ${sourceSha} must be an ancestor of ${sourceBranch} (${branch.commit.sha}).`,
+          `Pinned RC source ${sourceSha} must be an ancestor of ${sourceBranch} (${branch.commit.sha}).`,
         );
       }
     } else {
@@ -224,7 +227,7 @@ async function resolveReleasePlan({
   }
   if (independentWheels.length > 0 && releaseType !== "stable") {
     throw new Error(
-      "An independent wheel is versioned from its own tags, which a nightly cannot derive: " +
+      "An independent wheel is versioned from its own tags, which an RC cannot derive: " +
         `${independentWheels.map((wheel) => wheel.id).join(", ")}.`,
     );
   }
@@ -257,12 +260,11 @@ async function resolveReleasePlan({
     : version;
   const tagPrefix = taggedIndependent ? taggedIndependent.tagPrefix : "";
 
-  const nightlyTimestamp =
-    releaseType === "nightly"
+  const rcTimestamp =
+    releaseType === "rc"
       ? now().toISOString().replace(/\D/g, "").slice(0, 14)
       : "";
-  const releaseLabel =
-    releaseType === "nightly" ? `nightly-${nightlyTimestamp}` : version;
+  const releaseLabel = releaseType === "rc" ? `rc-${rcTimestamp}` : version;
 
   return {
     releaseType,
@@ -274,7 +276,7 @@ async function resolveReleasePlan({
     releaseTag,
     tagPrefix,
     releaseLabel,
-    nightlyTimestamp,
+    rcTimestamp,
     wheels,
     containers,
     wheelIds,
@@ -289,6 +291,6 @@ async function resolveReleasePlan({
 
 module.exports = {
   resolveReleasePlan,
-  resolveNightlyBaseVersion,
+  resolveRcBaseVersion,
   readReleaseCatalog,
 };

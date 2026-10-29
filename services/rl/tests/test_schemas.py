@@ -150,6 +150,27 @@ def test_grpo_lora_defaults_params() -> None:
     assert t.lora.alpha == 32
 
 
+@pytest.mark.parametrize(
+    ("training", "expected"),
+    [
+        ({"type": "dpo"}, 5e-6),
+        ({"type": "grpo"}, 5e-6),
+        ({"type": "grpo", "finetuning_type": "lora"}, 1e-5),
+        ({"type": "grpo", "finetuning_type": "lora", "learning_rate": 3e-5}, 3e-5),
+        ({"type": "dpo", "learning_rate": 1e-6}, 1e-6),
+    ],
+)
+def test_learning_rate_defaults_per_method(training: dict[str, Any], expected: float) -> None:
+    model = DPOTraining if training["type"] == "dpo" else GRPOTraining
+    assert model.model_validate(training).learning_rate == expected
+
+
+def test_grpo_lora_default_rate_is_checked_against_min_learning_rate() -> None:
+    """The LoRA default must be in place before the min-vs-peak check runs."""
+    t = GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora", "min_learning_rate": 9e-6})
+    assert t.learning_rate == 1e-5
+
+
 def test_grpo_advanced_knobs_default_to_current_behaviour() -> None:
     """Turning hardcoded values into settings must not move an unchanged job.
 

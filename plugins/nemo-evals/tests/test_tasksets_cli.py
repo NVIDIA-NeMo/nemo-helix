@@ -93,7 +93,7 @@ class FakeBuilds:
         )
         update: dict = {"status": status, "updated_at": T0 + timedelta(minutes=2, seconds=14)}
         if status == "ready":
-            update["images"] = [BuildImage(role="main", source="prebuilt")]
+            update["images"] = [BuildImage(type="main", source="prebuilt")]
         if status == "failed":
             update["error"] = "no Dockerfile"
         attempts[index] = build.model_copy(update=update)
@@ -134,6 +134,15 @@ def test_wait_requests_once_then_only_reads_by_id():
         f"[2/2] ready     default/b#{DIGEST} (1 image, 2m14s)",
         "Image builds: 2 of 2 tasks ready (2 images).",
     ]
+
+
+def test_a_task_whose_newest_build_is_ready_gets_no_request():
+    builds = FakeBuilds()
+    builds.attempts["a"] = [_build("a", "1", "ready")]
+    result, lines = wait(builds)
+    assert builds.posts == ["b"]  # only the task with no ready build
+    assert {ref: b.status for ref, b in result.items()} == dict.fromkeys(result, "ready")
+    assert lines[0] == "Image builds for 2 tasks: 1 ready, 1 building, 0 failed. Ctrl-C is safe; builds keep going."
 
 
 def test_a_failed_attempt_is_retried_once_then_the_task_settles_failed():

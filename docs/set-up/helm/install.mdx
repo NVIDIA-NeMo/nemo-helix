@@ -18,7 +18,7 @@ Complete [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequ
 
 ## Set install variables
 
-Use a pinned chart version for every install and upgrade. For a stable release, use the chart version from the release notes or NGC Catalog. For nightly GHCR charts, the release workflow uses the latest stable SemVer release tag and appends a nightly timestamp, falling back to `k8s/helm/Chart.yaml` if no release tag is available.
+Use a pinned chart version for every install and upgrade. For a stable release, use the chart version from the release notes or NGC Catalog. For release candidate (RC) charts in GHCR, use the full `X.Y.Z-rc-YYYYMMDDHHMMSS` version reported by the release workflow.
 
 ```sh
 export NHX_NAMESPACE=nemo-helix
@@ -65,15 +65,15 @@ helm show values "./nemo-helix-${NHX_HELM_CHART_VERSION}.tgz" > values.yaml
 ```
 
 </Tab>
-<Tab title="Nightly GHCR">
+<Tab title="RC GHCR">
 
-NeMo Helix also publishes nightly Helm charts to GitHub Container Registry for testing before a stable NGC release. The package is available at [nemo-helix/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix/pkgs/container/nemo-helix%2Fnemo-helix), and the Helm OCI reference is:
+NeMo Helix also publishes RC Helm charts to GitHub Container Registry for testing before a stable NGC release. The package is available at [nemo-helix/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix/pkgs/container/nemo-helix%2Fnemo-helix), and the Helm OCI reference is:
 
 ```sh
 export NHX_HELM_CHART_REF=oci://ghcr.io/nvidia-nemo/nemo-helix/nemo-helix
 ```
 
-Nightly chart versions use the latest released SemVer tag plus a timestamp, for example `<latest-release-version>-nightly-YYYYMMDDHHMMSS`.
+RC chart versions use the next patch in the selected release branch's version series plus a UTC timestamp, for example `0.9.1-rc-20261026010203` after stable `0.9.0`. The matching containers use `rc-20261026010203`, and Python wheels keep `0.9.1.dev20261026010203`. Numbered prereleases such as `0.9.1-rc1` are a separate versioned release path.
 
 If Helm cannot pull from GHCR anonymously, log in with a GitHub token that can read the package:
 
@@ -83,7 +83,7 @@ echo "$GITHUB_TOKEN" | helm registry login ghcr.io \
   --password-stdin
 ```
 
-Inspect the values for the nightly chart:
+Inspect the values for the RC chart:
 
 ```sh
 helm show values "$NHX_HELM_CHART_REF" \
@@ -226,7 +226,7 @@ helm upgrade --install "$NHX_HELM_RELEASE" nemo-helix/nemo-helix \
   --timeout 20m
 ```
 
-To install a nightly chart from GHCR, use the OCI reference:
+To install an RC chart from GHCR, use the OCI reference:
 
 ```sh
 helm upgrade --install "$NHX_HELM_RELEASE" "$NHX_HELM_CHART_REF" \

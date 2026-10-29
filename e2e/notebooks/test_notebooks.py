@@ -93,6 +93,7 @@ NOTEBOOK_REQUIRED_ENV: dict[str, set[str]] = {
     "docs/evals/tutorials/run-llm-judge-evaluation.mdx": {"NVIDIA_API_KEY"},
     # Example applications
     "docs/example-applications/custom-evaluations-synthetic-data.md": {"NVIDIA_API_KEY"},
+    "docs/example-applications/tool-calling.ipynb": {"NVIDIA_API_KEY", "HF_TOKEN"},
     # Run-inference
     "docs/run-inference/tutorials/deploy-models.md": {
         "NVIDIA_API_KEY",
@@ -131,6 +132,8 @@ BIFURCATED_NOTEBOOKS: set[str] = {
 }
 
 GPU_NOTEBOOKS: set[str] = {
+    # Tool calling trains an Automodel LoRA adapter and deploys it with local vLLM.
+    "docs/example-applications/tool-calling.ipynb",
     # Customizer tutorials launch training jobs and require GPU-enabled quickstart.
     "docs/customizer/tutorials/distillation-customization-job.ipynb",
     "docs/customizer/tutorials/dpo-customization-job.ipynb",

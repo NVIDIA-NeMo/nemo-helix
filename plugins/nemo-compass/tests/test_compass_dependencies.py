@@ -41,7 +41,7 @@ async def check():
         else:
             assert error.__cause__.name == missing
             message = str(error)
-            for text in ("nemo-compass==0.1.0", "Python 3.12 or 3.13", "nemo-helix[all]"):
+            for text in ("nemo-compass==0.2.0", "Python 3.12 or 3.13", "nemo-helix[all]"):
                 assert text in message
     else:
         raise AssertionError("Missing dependency did not fail compass execution")

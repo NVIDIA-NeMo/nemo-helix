@@ -30,6 +30,9 @@ from nemo_deployments_plugin.backends.openshell.policy import (
 )
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.jobs import endpoints as jobs_endpoints
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, JobStatusDetailsUpdate
 from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
 from nemo_helix_plugin.openshell.provider_client import ProviderGatewayClient
 from nemo_helix_plugin.openshell.registration import RegistrationDenied, RegistrationTickets
@@ -653,6 +656,7 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
         workspace="team",
         binaries=["/usr/bin/python"],
         job="job-1",
+        attempt="attempt-1",
         step="run",
         fileset="results",
     )
@@ -664,6 +668,42 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
     assert all("/secrets/" not in path and "/entities/" not in path and "/auth/" not in path for _, path in allowed)
     assert ("POST", "/apis/jobs/v2/workspaces/team/jobs") not in allowed
     assert restricted.landlock.compatibility == "hard_requirement"
+
+    # Compare the handwritten policy with requests built by the actual client contract.
+    requests = [
+        jobs_endpoints.update_job_attempt_status_details(
+            workspace="team", job="job-1", attempt="attempt-1", body=JobStatusDetailsUpdate({})
+        ),
+        jobs_endpoints.update_attempt_step_status(
+            workspace="team",
+            job="job-1",
+            attempt="attempt-1",
+            name="run",
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
+        ),
+        jobs_endpoints.update_attempt_step_task(
+            workspace="team",
+            job="job-1",
+            attempt="attempt-1",
+            step="run",
+            name="*",
+            body=HelixJobTaskUpdate(),
+        ),
+        jobs_endpoints.get_attempt_step_task(
+            workspace="team",
+            job="job-1",
+            attempt="attempt-1",
+            step="run",
+            name="*",
+        ),
+    ]
+    expected = {(request.method, request.path_template.format(**request.path_params)) for request in requests}
+    actual = {
+        (method, path)
+        for method, path in allowed
+        if "/attempts/" in path or path.endswith("/status-details") or method == "PUT" and "/tasks/" in path
+    }
+    assert actual == expected
 
 
 @pytest.mark.parametrize("secret_env,env_names", [({"ALIAS": "token"}, set()), ({}, {"API_TOKEN"})])

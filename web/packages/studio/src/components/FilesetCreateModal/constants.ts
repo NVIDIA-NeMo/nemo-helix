@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { entityNameSchema } from '@nemo/common/src/utils/entityName';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { FilesCreateFilesetBody } from '@nemo/sdk/generated/platform/zod/files';
 import { z } from 'zod';
@@ -18,7 +18,19 @@ export const filesetCreateFormSchema = FilesCreateFilesetBody.pick({
   name: true,
   description: true,
 }).extend({
-  name: z.string().trim().pipe(entityNameSchema('Name')),
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value
+            ? 'Name must start with a letter and be at least 2 characters.'
+            : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
   url: z.string().optional(),
   secretKey: z.string().optional(),
 });

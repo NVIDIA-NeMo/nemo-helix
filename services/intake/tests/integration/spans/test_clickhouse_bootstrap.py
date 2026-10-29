@@ -3,9 +3,6 @@
 
 """ClickHouse schema bootstrap tests."""
 
-from typing import cast
-
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
 from nhx.intake.service import IntakeService
@@ -57,9 +54,10 @@ def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanCli
         assert ttl in str(create.result_rows[0][0])
 
 
-def test_intake_service_readiness_bootstraps_and_probes_service_owned_clickhouse(client: TestClient):
-    app = cast(FastAPI, client.app)
-    service = cast(IntakeService, app.state.intake_service)
+def test_intake_service_readiness_bootstraps_and_probes_service_owned_clickhouse(
+    client: TestClient, intake_service: IntakeService
+):
+    service = intake_service
 
     assert service.clickhouse_client is not None
     assert client.portal is not None

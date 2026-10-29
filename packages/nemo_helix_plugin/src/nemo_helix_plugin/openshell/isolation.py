@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Restrict a provider-bearing sandbox's access back to the Helix control plane."""
+"""Build environment and network restrictions for sandboxes using Helix-backed providers."""
 
 import re
 
@@ -20,6 +20,7 @@ def _segment(value: str) -> str:
 def validate_provider_environment(
     bindings: dict[str, GatewayProviderBinding], *, workspace: str, secret_env: dict[str, str], env_names: set[str]
 ) -> None:
+    """Reject process-env secrets and provider credential slots that collide with workload env vars."""
     if secret_env:
         raise ValueError("OpenShell secrets require gateway provider bindings; process-env injection is not supported.")
     keys = [key for binding in bindings.values() for key in binding.credentials]
@@ -44,16 +45,17 @@ def restricted_platform_policy[Policy: Message](
     workspace: str,
     binaries: list[str],
     job: str | None = None,
+    attempt: str | None = None,
     step: str | None = None,
     fileset: str | None = None,
     secret_env: dict[str, str] | None = None,
     read_filesets: list[str] | None = None,
 ) -> Policy:
-    """Replace broad egress with the workload's required platform operations.
+    """Return a policy copy allowing only the workload's required Helix API calls.
 
-    Approved service profiles are composed by OpenShell. No entity, credential,
-    token-minting, job-submission or deployment-management endpoint is allowed.
-    The enforcement lives outside the sandbox, including its auth proxy.
+    Replace network rules with inference, telemetry and optional job/fileset access.
+    This prevents the sandbox from using the platform connection to read secrets
+    directly. OpenShell adds approved provider access and enforces the policy.
     """
     workspace = _segment(workspace)
     rules = [
@@ -76,16 +78,22 @@ def restricted_platform_policy[Policy: Message](
                 }
             )
     if job is not None and step is not None:
+        if attempt is None:
+            raise ValueError("Job sandbox policy requires a concrete attempt.")
         prefix = f"/apis/jobs/v2/workspaces/{workspace}/jobs/{_segment(job)}"
         step_path = f"{prefix}/steps/{_segment(step)}"
+        attempt_path = f"{prefix}/attempts/{_segment(attempt)}"
+        attempt_step_path = f"{attempt_path}/steps/{_segment(step)}"
         rules.extend(
             {"allow": {"method": method, "path": path}}
             for method, path in (
                 ("GET", step_path),
                 ("GET", f"{prefix}/status"),
-                ("PATCH", f"{prefix}/status-details"),
+                ("PATCH", f"{attempt_path}/status-details"),
                 ("PATCH", f"{step_path}/status"),
-                ("PUT", f"{step_path}/tasks/*"),
+                ("PATCH", f"{attempt_step_path}/status"),
+                ("PUT", f"{attempt_step_path}/tasks/*"),
+                ("GET", f"{attempt_step_path}/tasks/*"),
                 ("GET", f"{step_path}/tasks/*"),
                 ("POST", f"{prefix}/results/*"),
             )

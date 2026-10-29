@@ -18,7 +18,6 @@ Discriminated by `training.type`: `"dpo"` or `"grpo"`. **`training.type` is requ
   "training": {
     "type": "dpo",
     "epochs": 1,
-    "learning_rate": 5e-6,
     "max_seq_length": 1024,
     "batch_size": 32,
     "micro_batch_size": 1,
@@ -64,7 +63,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `1e-4` | Peak LR. DPO typically uses a **low** LR (e.g. `5e-6`–`1e-5`). |
+| `learning_rate` | `5e-6`; GRPO with `finetuning_type: "lora"` `1e-5` | Peak LR. |
 | `min_learning_rate` | `null` | Floor for cosine decay. |
 | `weight_decay` | `0.01` | |
 | `adam_beta1` / `adam_beta2` | `0.9` / `0.999` | Adam betas. |
@@ -213,7 +212,7 @@ The last two default to `true` on this platform, where the underlying library de
 
 ### Using a GRPO adapter
 
-The job registers an HF PEFT adapter entity whose base model is the entity you trained from, with `rank` and `alpha` recorded on it. It behaves like any other platform LoRA adapter: it hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true` and a max LoRA rank ≥ the adapter's `rank`, so there is no deployment to create before evaluating it. Default deployments stop at rank 16, so the skill's rank-128 GRPO default needs `--max-lora-rank 128` on the deployment (`post-training-eval.md` § **LoRA rank limit**). Route inference through the **provider** gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`) — the model-entity path always hits the base model. See `post-training-eval.md` § **Request routing (base vs LoRA)**.
+The job registers an HF PEFT adapter entity whose base model is the entity you trained from, with `rank` and `alpha` recorded on it. It behaves like any other platform LoRA adapter: it hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true` and a max LoRA rank ≥ the adapter's `rank`, so there is no deployment to create before evaluating it. Default deployments (vLLM and the vLLM model-free NIM) stop at rank 16, and the SGLang model-free NIM at 16 when it starts with no adapters (otherwise at the highest rank among adapters present when it starts), so the skill's rank-128 GRPO default needs `--max-lora-rank 128` on the deployment (`post-training-eval.md` § **LoRA rank limit**). Call it on the gateway's OpenAI-compatible route by its entity ID, `default/<base>&adapters/default/<adapter>` (`post-training-eval.md` § **Hand-off to nemo-evals**).
 
 Full-weight GRPO instead registers a new **model** entity, which does need its own deployment before inference.
 

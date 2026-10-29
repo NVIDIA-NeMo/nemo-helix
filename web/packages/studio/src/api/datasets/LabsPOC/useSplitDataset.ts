@@ -9,6 +9,7 @@ import {
   getFileMimeType,
   SupportedFileExtension,
 } from '@nemo/common/src/LabsPOC/dataset-file-utils';
+import { getFileExtension } from '@nemo/common/src/utils/file';
 import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -22,7 +23,6 @@ import {
   FILESET_VALIDATION_FILE_PATH,
 } from '@studio/api/datasets/LabsPOC/constants';
 import type { SplitFormData } from '@studio/api/datasets/LabsPOC/formSchema';
-import { getFileExtension } from '@studio/util/files';
 import { useMutation, UseMutationOptions } from '@tanstack/react-query';
 
 const splitFile = async (file: File, split: SplitFormData) => {

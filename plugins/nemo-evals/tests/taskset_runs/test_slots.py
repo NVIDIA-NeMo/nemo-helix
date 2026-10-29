@@ -11,6 +11,7 @@ from nemo_evals.config import RunControllerConfig
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.slots import RunTally, allocate, run_cap, task_slots
 from nemo_evals.taskset_runs.task_jobs import past_grace, sent_at_after_refusal
+from pydantic import ValidationError
 
 NOW = datetime(2026, 10, 22, tzinfo=timezone.utc)
 
@@ -76,3 +77,12 @@ def test_past_grace_and_the_refusal_restore():
     assert past_grace(None, NOW, grace)
     assert sent_at_after_refusal(None, NOW) == NOW  # the first POST keeps its own
     assert sent_at_after_refusal(NOW - grace, NOW) == NOW - grace  # a retry writes back the one it overwrote
+
+
+def test_phase_1_concurrency_and_the_create_budget_default_to_8_and_10():
+    config = RunControllerConfig()
+    assert (config.settle_concurrency, config.max_creates_per_cycle) == (8, 10)
+    with pytest.raises(ValidationError):
+        RunControllerConfig(settle_concurrency=0)
+    with pytest.raises(ValidationError):
+        RunControllerConfig(max_creates_per_cycle=1)  # 1 // 2 would reserve nothing for retries
