@@ -1266,6 +1266,22 @@ def test_a_read_only_main_needs_somewhere_writable_for_harbor(tmp_path: Path) ->
     assert error.paths == ("/logs/agent", "/logs/verifier", "/logs/artifacts")
 
 
+def test_a_read_only_main_needs_task_toml_s_workdir_writable_too(tmp_path: Path) -> None:
+    # The sandbox creates the workdir when it starts, so it needs a writable mount like Harbor's own paths.
+    compose = "services:\n  main:\n    read_only: true\n    tmpfs: [/logs, /tests, /solution{extra}]\n"
+    task_toml = '[environment]\nworkdir = "/app"\n'
+
+    error = _error(tmp_path / "unmounted", compose.format(extra=""), task_toml=task_toml)
+    assert error.code == "compose_unsupported"
+    assert error.paths == ("/app",)
+
+    assert _parsed(tmp_path / "mounted", compose.format(extra=", /app"), task_toml=task_toml).main.security
+    # `/` is never created, so it needs nothing.
+    assert _parsed(
+        tmp_path / "root", compose.format(extra=""), task_toml='[environment]\nworkdir = "/"\n'
+    ).main.security
+
+
 def test_a_read_only_service_needs_nothing_writable(tmp_path: Path) -> None:
     spec = _spec(tmp_path, "services:\n  a:\n    image: redis\n    read_only: true\n")
     assert _service(spec, "a")["security"] == {"read_only_root_filesystem": True}

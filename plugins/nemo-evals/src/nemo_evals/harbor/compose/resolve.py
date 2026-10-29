@@ -100,6 +100,9 @@ class ResolvedCompose:
     network_disabled: bool
     """Whether ``task.toml`` makes every phase ``no-network``, so the sandbox already denies all egress."""
 
+    workdir: str | None
+    """``task.toml``'s ``workdir``, which the sandbox creates in ``main`` when it starts; None when it sets none."""
+
 
 def resolve_compose(
     task_dir: Path, compose_file: Path, compose_path: str, problems: ComposeProblems
@@ -159,6 +162,7 @@ def resolve_compose(
         task_limits=_task_limits(task_environment),
         interpolator=interpolator,
         network_disabled=_network_disabled(task_dir),
+        workdir=str(task_environment["workdir"]) if task_environment.get("workdir") else None,
     )
 
 

@@ -176,7 +176,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         compose_path=compose_path,
     )
     services, main, log_volumes = _share_harbor_log_mounts(services, main, resolved.harbor_log_mounts)
-    _check_read_only_main(main, compose_path)
+    _check_read_only_main(main, resolved.workdir, compose_path)
 
     # Only a prebuilt task runs the image named in the compose file; a built `main` comes from its Dockerfile.
     main_image = resolved.main.get("image")
@@ -413,20 +413,22 @@ def _check_main_network_mode(
         problems.unsupported(f"services.{MAIN_SERVICE}.network_mode: none, alongside other services")
 
 
-def _check_read_only_main(main: ComposeMainSettings, compose_path: str) -> None:
+def _check_read_only_main(main: ComposeMainSettings, workdir: str | None, compose_path: str) -> None:
     """Raise if ``main`` is ``read_only`` and Harbor couldn't write where it needs to.
 
-    Harbor writes its logs, and uploads the tests and the solution, into ``main``. Each of those paths needs a
-    ``tmpfs`` or a writable volume over it; without one the trial would only fail later, when the verifier runs.
+    Harbor writes its logs, and uploads the tests and the solution, into ``main``. The sandbox also creates
+    ``task.toml``'s ``workdir`` there when it starts, unless it's ``/``. Each of those paths needs a ``tmpfs`` or a
+    writable volume over it; without one the trial would only fail later, when the sandbox starts or the verifier runs.
     """
     if main.security is None or not main.security.read_only:
         return
 
     writable = [mount.mount_path for mount in main.tmpfs]
     writable += [mount.mount_path for mount in main.volume_mounts if not mount.read_only]
+    required = [*_HARBOR_WRITABLE_PATHS, *([workdir] if workdir and workdir != "/" else [])]
     missing = [
         path
-        for path in _HARBOR_WRITABLE_PATHS
+        for path in required
         if not any(path == mount or path.startswith(f"{mount.rstrip('/')}/") for mount in writable)
     ]
     if missing:
