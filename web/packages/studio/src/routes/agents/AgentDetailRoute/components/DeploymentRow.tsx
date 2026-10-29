@@ -3,12 +3,12 @@
 
 import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { StatusDot } from '@nemo/common/src/components/StatusDot';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Badge, Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
+import { Badge, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
 import {
   deploymentModeLabel,
-  deploymentStatusColor,
   deploymentUrl,
   shortRevision,
 } from '@studio/routes/agents/AgentDetailRoute/helpers';
@@ -55,11 +55,7 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
 
   return (
     <Flex align="start" gap="2" className={`px-4 py-3 ${isFirst ? '' : 'border-t border-base'}`}>
-      <StatusIndicator
-        color={deploymentStatusColor(deployment.status)}
-        size="small"
-        className="mt-1.5 shrink-0"
-      />
+      <StatusDot status={deployment.status} className="mt-1.5" />
       <Stack gap="0" className="min-w-0 flex-1">
         <Text kind="body/semibold/sm">{deployment.name}</Text>
         {url && (

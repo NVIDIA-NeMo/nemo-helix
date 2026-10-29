@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { StatusDot } from '@nemo/common/src/components/StatusDot';
 import { Check } from '@nemo/icons/icons';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
@@ -9,7 +9,6 @@ import {
   DropdownItem,
   DropdownRoot,
   DropdownTrigger,
-  Flex,
   MenuSection,
 } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
@@ -36,8 +35,8 @@ export const HeaderDeploymentSelect: FC<HeaderDeploymentSelectProps> = ({
   return (
     <DropdownRoot>
       <DropdownTrigger kind="secondary" size="small" aria-label="Deployment" className="font-bold">
+        {selected ? <StatusDot status={selected.status} /> : null}
         {selected?.name ?? 'No deployments'}
-        {selected ? <StatusBadge status={selected.status} /> : null}
       </DropdownTrigger>
       <DropdownContent align="start" className="min-w-72">
         {named.length > 0 ? (
@@ -46,14 +45,12 @@ export const HeaderDeploymentSelect: FC<HeaderDeploymentSelectProps> = ({
               <DropdownItem
                 key={d.name}
                 onSelect={() => onSelect(d.name)}
+                slotStart={<StatusDot status={d.status} />}
                 slotEnd={
-                  <Flex align="center" gap="2">
-                    <StatusBadge status={d.status} />
-                    <Check
-                      aria-hidden
-                      className={d.name === selected?.name ? undefined : 'invisible'}
-                    />
-                  </Flex>
+                  <Check
+                    aria-hidden
+                    className={d.name === selected?.name ? undefined : 'invisible'}
+                  />
                 }
               >
                 {d.name}
