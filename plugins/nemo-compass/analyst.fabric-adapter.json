@@ -1,6 +1,6 @@
 {
   "contract_version": "fabric.adapter/v1alpha2",
-  "adapter_id": "nvidia.fabric.insights-analyst",
+  "adapter_id": "nvidia.helix.compass.analyst",
   "adapter_kind": "python",
   "runner": {
     "module": "nemo_compass_plugin.fabric_adapter"

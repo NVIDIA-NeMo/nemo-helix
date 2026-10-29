@@ -405,7 +405,7 @@ async def test_to_spec_rejects_an_unknown_adapter_id_at_create_time() -> None:
 @pytest.mark.usefixtures("installed_adapter_manifests")
 async def test_to_spec_accepts_a_plugin_installed_adapter_id() -> None:
     config = _agent_config()
-    config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.insights-analyst"
+    config["harnesses"]["hermes"]["kind"] = "nvidia.helix.compass.analyst"
 
     spec = await ExecuteAgentJob.to_spec(
         ExecuteAgentJobConfig(agent=AgentInline(config=config, config_format="nemo-agents-spec-v1"), input="hello"),
@@ -416,7 +416,7 @@ async def test_to_spec_accepts_a_plugin_installed_adapter_id() -> None:
     )
 
     step_config = ExecuteAgentStepConfig.model_validate(spec)
-    assert step_config.agent.config["harnesses"]["hermes"]["kind"] == "nvidia.fabric.insights-analyst"
+    assert step_config.agent.config["harnesses"]["hermes"]["kind"] == "nvidia.helix.compass.analyst"
 
 
 @pytest.mark.asyncio

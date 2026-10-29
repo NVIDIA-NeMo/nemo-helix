@@ -27,7 +27,7 @@ from nemo_compass_plugin.analysis.agent_config import (
 from nemo_fabric_adapter_contract import models as contract
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-DESCRIPTOR = _PLUGIN_ROOT / "compass.fabric-adapter.json"
+DESCRIPTOR = _PLUGIN_ROOT / "analyst.fabric-adapter.json"
 
 
 _REINSTALL_HINT = "Refresh it with: uv sync --reinstall-package nemo-compass-plugin"
@@ -42,7 +42,7 @@ def _installed_descriptor() -> Path:
     """
     import sys
 
-    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "compass" / DESCRIPTOR.name
+    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "helix" / "compass" / DESCRIPTOR.name
 
 
 def _require_installed_descriptor() -> Path:
