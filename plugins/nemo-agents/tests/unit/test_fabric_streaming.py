@@ -15,6 +15,7 @@ from nemo_agents_plugin.fabric.streaming import (
     StreamingMethod,
     extract_assistant_delta,
     extract_assistant_text_delta,
+    extract_output_reasoning,
     iter_fabric_assistant_deltas,
     iter_fabric_chat_completion_sse,
     iter_openai_chat_completion_sse,
@@ -554,3 +555,37 @@ async def test_iter_fabric_assistant_deltas_falls_back_to_response_after_tool_on
     deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
 
     assert [delta.content for delta in deltas] == ["final"]
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        (
+            {
+                "messages": [
+                    {"role": "human", "content": "earlier"},
+                    {"role": "ai", "content": "Old narration.", "tool_calls": [{"name": "ls"}]},
+                    {"role": "ai", "content": "Old answer."},
+                    {"role": "human", "content": "now"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "hmm"},
+                            {"type": "text", "text": "Searching."},
+                            {"type": "tool_use", "name": "search", "input": {}},
+                        ],
+                    },
+                    {"role": "tool", "content": "results"},
+                    {"role": "ai", "content": "Answer.", "additional_kwargs": {"reasoning_content": "wrap up"}},
+                ]
+            },
+            "hmm\n\nSearching.\n\nwrap up",
+        ),
+        ({"messages": [{"role": "user", "content": "hi"}, {"role": "ai", "content": "Hello."}]}, None),
+        ({"response": "no transcript"}, None),
+        (None, None),
+    ],
+    ids=["final-turn-only", "no-reasoning", "no-messages", "no-output"],
+)
+def test_extract_output_reasoning(output: object, expected: str | None) -> None:
+    assert extract_output_reasoning(output) == expected

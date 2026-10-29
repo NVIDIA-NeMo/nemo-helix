@@ -40,6 +40,7 @@ class ChatCompletionResponseMessage(BaseModel):
 
     role: Literal["assistant"] = "assistant"
     content: str
+    reasoning_content: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ChatCompletionChoice(BaseModel):

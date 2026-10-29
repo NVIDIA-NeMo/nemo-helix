@@ -35,6 +35,7 @@ from nemo_fabric import FabricConfig, RunPlan
 # attaches a provider-neutral ``category_profile.annotated_response`` to LLM
 # scopes, which is used as a text fallback.
 _ASSISTANT_ROLES = frozenset({"assistant", "ai"})
+_USER_ROLES = frozenset({"user", "human"})
 _ATOF_EVENT_KINDS = frozenset({"scope", "mark"})
 # Content blocks carry reasoning under a key matching their type: LangChain uses
 # ``{"type": "reasoning", "reasoning": ...}`` and Anthropic ``{"type": "thinking", "thinking": ...}``.
@@ -102,6 +103,29 @@ def extract_assistant_delta(record: Mapping[str, Any]) -> ChatCompletionStreamDe
         return _extract_llm_output_delta(record) if _is_llm_output_scope(record) else None
     content = _extract_payload_text_delta(record)
     return ChatCompletionStreamDelta(content=content) if content is not None else None
+
+
+def extract_output_reasoning(output: Any) -> str | None:
+    """Collect the final turn's reasoning and tool-step narration from a Fabric result's ``messages``.
+
+    Mirrors the streamed ``reasoning_content`` for non-streaming completions.
+    """
+    messages = output.get("messages") if isinstance(output, Mapping) else None
+    if not isinstance(messages, list):
+        return None
+    turn_start = 0
+    for index, message in enumerate(messages):
+        if isinstance(message, Mapping) and message.get("role") in _USER_ROLES:
+            turn_start = index + 1
+
+    parts: list[str] = []
+    for message in messages[turn_start:]:
+        if not isinstance(message, Mapping) or message.get("role") not in _ASSISTANT_ROLES:
+            continue
+        reasoning = _reasoning_from_message(message)
+        narration = _text_from_content(message.get("content")) if _requested_tools({}, message) else None
+        parts.extend(part for part in (reasoning, narration) if part)
+    return "\n\n".join(parts) or None
 
 
 def extract_assistant_text_delta(record: Mapping[str, Any]) -> str | None:
