@@ -1517,6 +1517,26 @@ async def test_proxy_request_without_context_records_unknown_labels(mocker, mock
 
 
 @pytest.mark.asyncio
+async def test_proxy_request_response_construction_failure_records_once_with_upstream_status(
+    mocker, mock_proxy_client, next_request_info
+):
+    # A 2xx upstream whose response object cannot be constructed (e.g. a header
+    # Starlette rejects) must be counted EXACTLY ONCE as (200, 500) -- not twice
+    # (once as success, once by the generic 500 handler).
+    mocker.patch(
+        "nhx.core.inference_gateway.api.proxy.StreamingResponse",
+        side_effect=UnicodeEncodeError("latin-1", "\u4e2d", 0, 1, "bad header"),
+    )
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 500
+    _labels, upstream_status, gateway_status = _recorded(record)  # asserts called exactly once
+    assert upstream_status == 200
+    assert gateway_status == 500
+
+
+@pytest.mark.asyncio
 async def test_proxy_request_streaming_closes_connection(mock_proxy_client, mock_proxy_response, next_request_info):
     response = await proxy_request(mock_proxy_client, next_request_info)
 

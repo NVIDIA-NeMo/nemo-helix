@@ -532,6 +532,12 @@ async def proxy_request(
     """
     response: aiohttp.ClientResponse | None = None
     metric_labels = _upstream_request_labels(upstream_context)
+    # The true upstream status once a response is received; stays None if the
+    # request never completed (a connection/network error before any response).
+    # Used by the exception handlers so a failure AFTER the upstream responded
+    # (e.g. building the StreamingResponse) still records the real upstream
+    # status rather than the sentinel.
+    upstream_status_seen: int | None = None
     try:
         response = await http_client.request(
             next_request_info.method,
@@ -541,6 +547,7 @@ async def proxy_request(
             data=next_request_info.body,
             timeout=None,
         )
+        upstream_status_seen = response.status
 
         if response.status >= 400:
             error_body = await _read_error_body(response)
@@ -553,16 +560,18 @@ async def proxy_request(
                 error_body,
             )
             if response.status in _DEPENDENCY_FAILURE_STATUSES:
-                record_upstream_request(metric_labels, response.status, _DEPENDENCY_FAILURE_STATUS)
                 detail = _dependency_failure_detail(response.status, error_body, upstream_context)
+                # Record last, immediately before the raise, so a failure while
+                # building the detail can't leave this path both uncounted here
+                # and re-counted by the generic handler below.
+                record_upstream_request(metric_labels, response.status, _DEPENDENCY_FAILURE_STATUS)
                 raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
-                record_upstream_request(metric_labels, response.status, response.status)
                 detail = error_body if error_body else str(response.status)
+                record_upstream_request(metric_labels, response.status, response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
 
         response_headers = _filter_response_headers(response.headers)
-        record_upstream_request(metric_labels, response.status, response.status)
 
         # The original implementation branched Response/StreamingResponse
         # based on resp_headers['content-type'] being 'text/event-stream'. However, always
@@ -583,20 +592,26 @@ async def proxy_request(
                 # in this try/finally.
                 _close_response(response)
 
-        return StreamingResponse(
+        streaming_response = StreamingResponse(
             event_stream_generator(),
             status_code=response.status,
             headers=response_headers,
         )
+        # Record only after the response object is successfully constructed, so a
+        # construction failure (e.g. a non-Latin-1 upstream header that Starlette
+        # rejects) is counted once by the generic handler as (status, 500) rather
+        # than twice.
+        record_upstream_request(metric_labels, response.status, response.status)
+        return streaming_response
     except HTTPException:
         raise
     except aiohttp.ClientError as e:
         # Network error (connection failed, timeout, DNS, etc.)
-        record_upstream_request(metric_labels, None, 502)
+        record_upstream_request(metric_labels, upstream_status_seen, 502)
         _close_response(response)
         raise HTTPException(status_code=502, detail=f"Backend networking error: {e}")
     except Exception as e:
-        record_upstream_request(metric_labels, None, 500)
+        record_upstream_request(metric_labels, upstream_status_seen, 500)
         _close_response(response)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
