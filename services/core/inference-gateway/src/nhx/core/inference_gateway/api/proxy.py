@@ -23,6 +23,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
+    InferenceAccessRequest,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceResponse,
@@ -41,6 +42,7 @@ from nhx.core.inference_gateway.api.errors import (
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     build_inference_response,
+    execute_access_checks,
     execute_post_response_middleware,
     execute_request_middleware,
     execute_response_middleware,
@@ -1019,6 +1021,18 @@ async def virtual_model_proxy(
     instead of silently bypassing the middleware chain. Recovery is automatic
     once the next IGW polling cycle re-resolves the VM cleanly.
     """
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    await execute_access_checks(
+        registry.plugins,
+        InferenceAccessRequest(
+            request_id=request_id,
+            workspace=workspace,
+            path=trailing_uri,
+            headers=dict(request.headers),
+            virtual_model_id=f"{workspace}/{vm_name}",
+            requested_model=json_body["model"] if isinstance(json_body.get("model"), str) else None,
+        ),
+    )
     if (workspace, vm_name) in registry.broken_vms:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1078,7 +1092,6 @@ async def virtual_model_proxy(
     # snapshot is contractually the request as the client sent it (nemo-guardrails reads
     # ``ctx.original_request.body`` precisely so later middleware can't hide content by
     # mutating the body), so it must not alias any mutable state the chain can touch.
-    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     original_request = build_inference_request(
         body=copy.deepcopy(json_body),
         headers=dict(request.headers),

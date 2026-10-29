@@ -396,6 +396,36 @@ class InferenceMiddlewareContext:
         return PluginStateNamespace(plugin_name=plugin_name, _store=self._state)
 
 
+@dataclass(frozen=True)
+class InferenceAccessRequest:
+    """A call IGW is about to serve, as :meth:`NemoInferenceMiddleware.check_access` sees it.
+
+    Exactly one of ``virtual_model_id`` and ``provider_name`` is set: a call on the ``model`` or ``openai`` routes
+    goes through a VirtualModel, and a call on the ``provider`` route goes straight to a ModelProvider, skipping
+    every VirtualModel's middleware.
+
+    Attributes:
+        request_id: The call's ``X-Request-ID``, or the id IGW generated for it.
+        workspace: The workspace in the request path.
+        path: The URI after the route's ``/-/``, e.g. ``v1/responses``.
+        headers: The caller's headers, credentials included.
+        virtual_model_id: ``"workspace/name"`` of the VirtualModel serving the call; read it with
+            :meth:`NemoInferenceMiddleware.get_virtual_model`.
+        requested_model: On a VirtualModel route, the model the call asked for: the body's ``model``, or the
+            URL's model name when it names a LoRA adapter. IGW then replaces it with the VirtualModel's
+            ``default_model_entity``, keeping a LoRA adapter suffix.
+        provider_name: The ModelProvider a ``provider`` route call names.
+    """
+
+    request_id: str
+    workspace: str
+    path: str
+    headers: Mapping[str, str]
+    virtual_model_id: str | None = None
+    requested_model: str | None = None
+    provider_name: str | None = None
+
+
 @dataclass
 class ModelProviderInferenceTarget:
     """Provider URL, model name, and request policy for a direct inference call.
@@ -1215,3 +1245,17 @@ class NemoInferenceMiddleware(ABC):
         Default: pass-through (return ``response`` unchanged).
         """
         return response
+
+    async def check_access(self, request: InferenceAccessRequest) -> None:
+        """Refuse a call before IGW serves it.
+
+        IGW calls this on every installed plugin, for every call on the ``model``, ``openai`` and ``provider``
+        routes, whether or not any VirtualModel lists the plugin, before any request middleware runs. Use it for
+        policy a caller's credential carries, which must hold on every route the caller can reach. It is on the
+        path of every call, so keep it fast: return at once for calls the plugin has no opinion on.
+
+        Raises:
+            InferenceMiddlewareError: Refuse the call with its ``status_code`` and ``detail``.
+
+        Default: allow every call.
+        """

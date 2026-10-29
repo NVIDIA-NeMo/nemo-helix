@@ -22,6 +22,7 @@ from nemo_helix_plugin.discovery import discover_inference_middleware
 from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
+    InferenceAccessRequest,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceRequest,
@@ -771,6 +772,29 @@ async def load_middleware_plugins(
 # ---------------------------------------------------------------------------
 # Pipeline execution
 # ---------------------------------------------------------------------------
+
+
+async def execute_access_checks(plugins: dict[str, NemoInferenceMiddleware], request: InferenceAccessRequest) -> None:
+    """Run every installed plugin's ``check_access`` on a call; the first refusal refuses it.
+
+    Raises:
+        :class:`~fastapi.HTTPException`: A plugin refused the call (its status and detail), or raised
+            unexpectedly (500): a check that fails never lets the call through.
+    """
+    for plugin_name, plugin in plugins.items():
+        if getattr(type(plugin), "check_access", NemoInferenceMiddleware.check_access) is (
+            NemoInferenceMiddleware.check_access
+        ):
+            continue
+        try:
+            await plugin.check_access(request)
+        except InferenceMiddlewareError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        except Exception as exc:
+            logger.exception("Plugin '%s' raised an unexpected error while checking access", plugin_name)
+            raise HTTPException(
+                status_code=500, detail=f"Plugin '{plugin_name}' raised an unexpected error while checking access."
+            ) from exc
 
 
 async def execute_request_middleware(
