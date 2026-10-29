@@ -1039,7 +1039,8 @@ async def test_to_spec_rejects_local_provider_credentials_before_workdir_access(
 
 
 @pytest.mark.asyncio
-async def test_provider_bindings_survive_remote_compilation_without_env_secrets() -> None:
+@pytest.mark.parametrize("with_workdir", [False, True])
+async def test_provider_bindings_survive_remote_compilation_without_env_secrets(with_workdir: bool) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent()
     environment = AgentEnvironmentInline(
@@ -1065,6 +1066,8 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
     authorize.assert_awaited_once()
     assert isinstance(spec, ExecuteAgentStepConfig)
     assert spec.secrets == {}
+    if with_workdir:
+        spec.workdir = AgentWorkdir(base_workdir="other/source", artifact_mounts=[])
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
         get_config.return_value.jobs.default_image = "registry.example/tasks:test"
         compiled = await ExecuteAgentJob.compile(
@@ -1077,6 +1080,9 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
         )
     step = compiled.steps[0]
     assert step.gateway_providers["service"].credentials == {"API_TOKEN": "default/service-token"}
+    assert step.gateway_read_filesets == sorted(
+        [f"{spec.agent.workspace}/{spec.agent.name}-ethos"] + (["other/source"] if with_workdir else [])
+    )
     assert step.executor.profile == "sandbox"
     assert not step.environment
     assert "default/service-token" not in str(spec.agent.config)

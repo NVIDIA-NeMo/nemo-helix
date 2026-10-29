@@ -32,6 +32,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import urlsplit
 
+from nemo_deployments_plugin.auth_proxy import auth_proxy_port
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
@@ -617,6 +618,15 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:
         sandbox_name = _sandbox_name(workspace, name)
+        needs_provider_cleanup = self._executor_config.gateway_credentials is not None
+        if needs_provider_cleanup:
+            try:
+                deployment = await self._entities.get(Deployment, name, workspace=workspace)
+                config = await self._load_deployment_config(workspace, deployment.deployment_config)
+            except NemoEntityNotFoundError:
+                pass
+            else:
+                needs_provider_cleanup = bool(config.gateway_providers)
         try:
             await self._unary(
                 self._stub.DeleteSandbox,
@@ -627,12 +637,16 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 pass
             else:
                 return BackendStatusUpdate(status="FAILED", status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}")
-        if self._executor_config.gateway_credentials is not None:
+        if needs_provider_cleanup:
             try:
                 async with self._provider_provisioner() as provisioner:
                     await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
             except Exception:
-                return BackendStatusUpdate(status="DELETING", status_message="Retrying gateway provider cleanup.")
+                return BackendStatusUpdate(
+                    status="DELETING",
+                    status_message="Sandbox deleted; retrying gateway provider cleanup.",
+                    error_details={"reason": "provider_cleanup_pending"},
+                )
         return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Sandbox {sandbox_name} deleted")
 
     @asynccontextmanager
@@ -798,15 +812,17 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 return failure
             command = list(container.command) + list(container.args)
             if config.gateway_providers and config.auth_proxy_sidecar:
-                from nemo_deployments_plugin.auth_proxy import auth_proxy_port
-
                 try:
                     upstream = self._platform_proxy_upstream(config)
                 except ValueError as exc:
                     await self._delete_sandbox_best_effort(sandbox_name, workspace=workspace)
                     return BackendStatusUpdate(status="FAILED", status_message=str(exc))
+                virtual_env = next(
+                    (var.value for var in container.env if var.name == "VIRTUAL_ENV"),
+                    self._executor_config.serve_virtual_env,
+                )
                 command = [
-                    "python",
+                    posixpath.join(virtual_env, "bin/python") if virtual_env else "python",
                     "-m",
                     "nemo_helix_plugin.openshell.launch",
                     "--upstream",

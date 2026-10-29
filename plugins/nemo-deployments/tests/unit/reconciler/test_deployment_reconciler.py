@@ -592,6 +592,7 @@ async def test_delete_timeout_before_boundary_stays_deleting(
 
     assert dep.status == "DELETING"
     mock_entities.delete.assert_not_awaited()
+    mock_entities.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -960,3 +961,27 @@ async def test_succeeded_prerequisite_in_index_allows_create(
 
     assert server.status == "STARTING"
     assert len(mock_backend.create_calls) == 1
+
+
+async def test_provider_cleanup_survives_restart_and_deletion_timeout(
+    patch_reconciler_now, mock_entities, mock_backend
+):
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS - 1)
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    mock_backend.delete_status = BackendStatusUpdate(
+        status="DELETING",
+        status_message="Sandbox deleted; retrying gateway provider cleanup.",
+        error_details={"reason": "provider_cleanup_pending"},
+    )
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+    mock_entities.update.assert_awaited()
+    mock_entities.delete.assert_not_awaited()
+    dep = Deployment.model_validate(dep.model_dump())
+    patch_reconciler_now.now.return_value = NOW + timedelta(seconds=DELETING_TIMEOUT_SECONDS * 2)
+    restarted = _starting_timeout_reconciler(mock_entities, mock_backend)
+    await _reconcile_stuck_deleting(restarted, mock_backend, dep)
+    assert dep.status == "DELETING"
+    mock_entities.delete.assert_not_awaited()
+    mock_backend.delete_status = BackendStatusUpdate(status="SUCCEEDED")
+    await _reconcile_stuck_deleting(restarted, mock_backend, dep)
+    mock_entities.delete.assert_awaited_once()

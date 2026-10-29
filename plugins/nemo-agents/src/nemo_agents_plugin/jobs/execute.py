@@ -28,6 +28,7 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     AgentInline,
     ComputeSpecInline,
+    ethos_fileset_name,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -525,6 +526,17 @@ class ExecuteAgentJob(NemoJob):
         if resources is not None:
             executor["resources"] = resources
 
+        read_filesets: set[str] = set()
+        if step_config.providers:
+            read_filesets.add(f"{step_config.agent.workspace}/{ethos_fileset_name(step_config.agent.name)}")
+            if step_config.workdir:
+                refs = [mount.ref for mount in step_config.workdir.artifact_mounts]
+                if step_config.workdir.base_workdir:
+                    refs.append(step_config.workdir.base_workdir)
+                read_filesets.update(
+                    "/".join(parse_fileset_ref(ref, workspace_fallback=step_config.agent.workspace)[:2]) for ref in refs
+                )
+
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
@@ -533,17 +545,7 @@ class ExecuteAgentJob(NemoJob):
                     config=step_config.model_dump(mode="json"),
                     environment=environment,
                     gateway_providers=step_config.providers,
-                    gateway_read_filesets=sorted(
-                        {
-                            "/".join(parse_fileset_ref(ref, workspace_fallback=step_config.agent.workspace)[:2])
-                            for ref in (
-                                ([step_config.workdir.base_workdir] if step_config.workdir.base_workdir else [])
-                                + [mount.ref for mount in step_config.workdir.artifact_mounts]
-                            )
-                        }
-                    )
-                    if step_config.providers and step_config.workdir
-                    else [],
+                    gateway_read_filesets=sorted(read_filesets),
                 )
             ],
         )

@@ -1787,3 +1787,62 @@ async def test_changed_proxy_upstream_cleans_up_before_reporting_failure(
         provisioner.cleanup.assert_not_awaited()
     else:
         provisioner.cleanup.assert_awaited_once_with(workload_workspace="default", workload_id="sandbox-1")
+
+
+@pytest.mark.parametrize("with_providers", [False, True])
+async def test_delete_only_waits_for_provider_cleanup_when_bound(
+    openshell_backend, mock_stub, mock_entities, with_providers
+):
+    config = _config()
+    if with_providers:
+        config.gateway_providers = {
+            "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
+        }
+    deployment = Deployment(name="srv", workspace="default", deployment_config="cfg")
+    mock_entities.get.side_effect = [deployment, config, deployment, config]
+    openshell_backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file=Path("/run/key"),
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    provisioner = AsyncMock()
+    provisioner.cleanup.side_effect = RuntimeError("gateway unavailable")
+    with patch.object(
+        openshell_backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)
+    ) as connect:
+        update = await openshell_backend.delete_deployment("default", "srv")
+        if with_providers:
+            assert update.status == "DELETING"
+            assert update.error_details == {"reason": "provider_cleanup_pending"}
+            provisioner.cleanup.side_effect = None
+            mock_stub.DeleteSandbox.side_effect = _not_found()
+            update = await openshell_backend.delete_deployment("default", "srv")
+            assert provisioner.cleanup.await_count == 2
+        else:
+            connect.assert_not_called()
+        assert update.status == "SUCCEEDED"
+
+
+@pytest.mark.parametrize("virtual_env", [None, "/opt/custom env"])
+async def test_provider_proxy_uses_workload_python(openshell_backend, mock_entities, virtual_env):
+    config = _config()
+    config.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
+    }
+    config.auth_proxy_sidecar = True
+    config.containers[0].env.append(EnvVar(name="NHX_BASE_URL", value="http://platform:8080"))
+    if virtual_env is not None:
+        config.containers[0].env.append(EnvVar(name="VIRTUAL_ENV", value=virtual_env))
+    mock_entities.get.return_value = config
+    openshell_backend._executor_config.platform_egress = HelixEgressConfig(host="platform")
+    with (
+        patch.object(openshell_backend, "_marker_exists", return_value=False),
+        patch.object(openshell_backend, "_deliver_config_files", return_value=None),
+        patch.object(openshell_backend, "_launch_serve", return_value=None) as launch,
+    ):
+        update = await openshell_backend._advance_provisioning(
+            _sandbox(pb.SANDBOX_PHASE_READY).sandbox, "sandbox-1", "default"
+        )
+    assert update.status == "STARTING"
+    expected_env = virtual_env or openshell_backend._executor_config.serve_virtual_env
+    assert launch.call_args.args[1][:3] == [f"{expected_env}/bin/python", "-m", "nemo_helix_plugin.openshell.launch"]
