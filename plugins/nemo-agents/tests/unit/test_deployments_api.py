@@ -29,6 +29,7 @@ from nemo_agents_plugin.entities import (
     DeploymentStatus,
 )
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
+from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
@@ -718,6 +719,50 @@ class TestDeleteDeployment:
 
         assert resp.status_code == 409
         assert mock_entity_client.update.await_count == deployments_router_module._DELETE_MARK_ATTEMPTS  # noqa: SLF001
+
+    def test_delete_reopens_timed_out_backend_teardown_when_already_deleting(self) -> None:
+        agent_dep = _make_deployment(status="deleting")
+        agent_dep.deployment_mode = "docker"
+        backend_dep = Deployment(
+            name="fabric-dep",
+            workspace="default",
+            deployment_config="fabric-dep",
+            status="FAILED",
+            error_details={"reason": "deleting_timeout"},
+        )
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(side_effect=lambda cls, **_: backend_dep if cls is Deployment else agent_dep)
+        client = _test_client(mock_entity_client)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/deployments/fabric-dep")
+
+        assert resp.status_code == 204
+        assert backend_dep.status == "DELETING"
+        mock_entity_client.update.assert_awaited_once_with(backend_dep)
+
+    @pytest.mark.parametrize(("error_details", "reopened"), [({"reason": "deleting_timeout"}, True), (None, False)])
+    def test_delete_reopens_only_timed_out_backend_teardown(
+        self, error_details: dict[str, Any] | None, reopened: bool
+    ) -> None:
+        agent_dep = _make_deployment(status="failed")
+        agent_dep.deployment_mode = "docker"
+        backend_dep = Deployment(
+            name="fabric-dep",
+            workspace="default",
+            deployment_config="fabric-dep",
+            status="FAILED",
+            error_details=error_details,
+        )
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(side_effect=lambda cls, **_: backend_dep if cls is Deployment else agent_dep)
+        client = _test_client(mock_entity_client)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/deployments/fabric-dep")
+
+        assert resp.status_code == 204
+        assert (backend_dep.status == "DELETING") is reopened
+        assert agent_dep.status == "deleting"
+        assert mock_entity_client.update.await_count == (2 if reopened else 1)
 
 
 class TestListDeploymentModes:
