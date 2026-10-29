@@ -38,6 +38,7 @@ from nhx.core.inference_gateway.api.errors import (
     raise_no_providers_for_model_entity,
     raise_unresolved_provider_secret,
 )
+from nhx.core.inference_gateway.api.metrics import UpstreamRequestLabels, record_upstream_request
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     build_inference_response,
@@ -389,15 +390,28 @@ def _upstream_status_token(status_code: int) -> str:
 class UpstreamProviderContext:
     """Identifying context for the upstream model provider a request was routed to.
 
-    Used only to build a human-readable message when an upstream credential/route
-    rejection (401/403/404) is wrapped as 424. Every field is optional so callers
-    that lack full context (e.g. the mock path) still get a sensible message.
+    Used to build a human-readable message when an upstream credential/route
+    rejection (401/403/404) is wrapped as 424, and to label the upstream-requests
+    metric (see :func:`_upstream_request_labels`). Every field is optional so
+    callers that lack full context (e.g. the mock path) still get a sensible
+    message and a well-formed metric series.
     """
 
     model_provider_name: str | None = None
     provider_host_url: str | None = None
     model_name: str | None = None
     purpose: str | None = None
+    workspace: str | None = None
+
+
+def _upstream_request_labels(context: UpstreamProviderContext | None) -> UpstreamRequestLabels:
+    """Project an :class:`UpstreamProviderContext` onto the metric's routing labels."""
+    context = context or UpstreamProviderContext()
+    return UpstreamRequestLabels(
+        workspace=context.workspace,
+        model=context.model_name,
+        model_provider=context.model_provider_name,
+    )
 
 
 def _redact_url_userinfo(url: str) -> str | None:
@@ -517,6 +531,7 @@ async def proxy_request(
             original status for other backend errors, 500 for internal errors
     """
     response: aiohttp.ClientResponse | None = None
+    metric_labels = _upstream_request_labels(upstream_context)
     try:
         response = await http_client.request(
             next_request_info.method,
@@ -538,13 +553,16 @@ async def proxy_request(
                 error_body,
             )
             if response.status in _DEPENDENCY_FAILURE_STATUSES:
+                record_upstream_request(metric_labels, response.status, _DEPENDENCY_FAILURE_STATUS)
                 detail = _dependency_failure_detail(response.status, error_body, upstream_context)
                 raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
+                record_upstream_request(metric_labels, response.status, response.status)
                 detail = error_body if error_body else str(response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
 
         response_headers = _filter_response_headers(response.headers)
+        record_upstream_request(metric_labels, response.status, response.status)
 
         # The original implementation branched Response/StreamingResponse
         # based on resp_headers['content-type'] being 'text/event-stream'. However, always
@@ -574,9 +592,11 @@ async def proxy_request(
         raise
     except aiohttp.ClientError as e:
         # Network error (connection failed, timeout, DNS, etc.)
+        record_upstream_request(metric_labels, None, 502)
         _close_response(response)
         raise HTTPException(status_code=502, detail=f"Backend networking error: {e}")
     except Exception as e:
+        record_upstream_request(metric_labels, None, 500)
         _close_response(response)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
@@ -666,6 +686,10 @@ async def fetch_proxy_response(
         HTTPException: Same conditions as :func:`proxy_request`.
     """
     response: aiohttp.ClientResponse | None = None
+    metric_labels = _upstream_request_labels(upstream_context)
+    # The true upstream status once a response is received; stays None if the
+    # request never completed (a connection/network error before any response).
+    upstream_status_seen: int | None = None
     try:
         response = await http_client.request(
             next_request_info.method,
@@ -676,6 +700,7 @@ async def fetch_proxy_response(
             timeout=None,
             auto_decompress=True,
         )
+        upstream_status_seen = response.status
 
         if response.status >= 400:
             error_body = await _read_error_body(response)
@@ -694,9 +719,11 @@ async def fetch_proxy_response(
             if served_model_name is not None and restored_model_id is not None:
                 error_body = _rewrite_model_field_in_error_body(error_body, served_model_name, restored_model_id)
             if response.status in _DEPENDENCY_FAILURE_STATUSES:
+                record_upstream_request(metric_labels, response.status, _DEPENDENCY_FAILURE_STATUS)
                 detail = _dependency_failure_detail(response.status, error_body, upstream_context)
                 raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
+                record_upstream_request(metric_labels, response.status, response.status)
                 detail = error_body if error_body else str(response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
 
@@ -736,11 +763,15 @@ async def fetch_proxy_response(
                     ),
                 )
 
+        record_upstream_request(metric_labels, status_code, status_code)
         return result, response_headers, status_code
 
     except HTTPException:
         raise
     except aiohttp.ClientPayloadError as exc:
+        # Upstream status was received (2xx, since >=400 raises above) but the body
+        # could not be decoded, so the client gets a 502 despite a healthy status.
+        record_upstream_request(metric_labels, upstream_status_seen, 502)
         _close_response(response)
         logger.warning(
             "Inference Gateway could not decode upstream response from %s",
@@ -752,9 +783,11 @@ async def fetch_proxy_response(
             detail="Inference Gateway could not decode the upstream response body.",
         ) from exc
     except aiohttp.ClientError as exc:
+        record_upstream_request(metric_labels, upstream_status_seen, 502)
         _close_response(response)
         raise HTTPException(status_code=502, detail=f"Backend networking error: {exc}")
     except Exception as exc:
+        record_upstream_request(metric_labels, upstream_status_seen, 500)
         _close_response(response)
         raise HTTPException(status_code=500, detail=f"Internal server error: {exc}")
 
@@ -1150,15 +1183,17 @@ async def virtual_model_proxy(
         ctx.backend_format = backend_format
         resolved_served_model_name, resolved_model_provider_info = resolved_model_entity.model_providers[0]
 
-        # Context used only to enrich the 424 message when the upstream provider
-        # rejects the request (401/403/404). The model name we surface is the
-        # entity ref the caller asked for, never the upstream served_model_name.
+        # Context used to enrich the 424 message when the upstream provider
+        # rejects the request (401/403/404), and to label the upstream-requests
+        # metric. The model name we surface is the entity ref the caller asked
+        # for, never the upstream served_model_name.
         restored_model_id = f"{modified_model_ref.workspace}/{modified_model_ref.name}"
         upstream_context = UpstreamProviderContext(
             model_provider_name=resolved_model_provider_info.model_provider.name,
             provider_host_url=resolved_model_provider_info.model_provider.host_url,
             model_name=restored_model_id,
             purpose=f"proxying {proxy_path!r}",
+            workspace=workspace,
         )
 
         if (
