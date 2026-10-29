@@ -10,10 +10,11 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
+from typing import Annotated
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.jobs.openapi_utils import clear_query_param_schemas, generate_openapi_extra_params
 from nhx.common.config import AuthConfig, Configuration
@@ -21,6 +22,7 @@ from nhx.common.config.base import OIDCConfig
 from nhx.common.controller import ControllerManager
 from nhx.common.platform_endpoint import _SyncHelixEndpointRoutingTransport
 from nhx.common.service import RouterConfig, Service
+from nhx.common.service.dependencies import service_instance_dependency
 from nhx.platform_runner import config as runner_config
 from nhx.platform_runner import server
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS
@@ -66,6 +68,78 @@ class PluginService(Service):
 
     def get_routers(self):
         return []
+
+
+class NamedService(Service):
+    def __init__(self, name: str):
+        super().__init__(name=name, module_name="test.named_service")
+
+    def _setup_dependencies(self, app: FastAPI) -> None:
+        super()._setup_dependencies(app)
+        service_instance_dependency(self.name, NamedService).bind(app, self)
+
+    def get_routers(self) -> list[RouterConfig]:
+        router = APIRouter()
+        if self.name == "alpha":
+
+            @router.get("/whoami")
+            def whoami(service: AlphaServiceDep) -> int:
+                return id(service)
+
+        else:
+
+            @router.get("/whoami")
+            def whoami(service: BetaServiceDep) -> int:
+                return id(service)
+
+        return [RouterConfig(router, tag="Named", description="Named service")]
+
+
+AlphaServiceDep = Annotated[NamedService, Depends(service_instance_dependency("alpha", NamedService))]
+BetaServiceDep = Annotated[NamedService, Depends(service_instance_dependency("beta", NamedService))]
+
+
+class SpecializedNamedService(NamedService):
+    pass
+
+
+def test_subclass_inherits_declared_route_service_binding() -> None:
+    service = SpecializedNamedService("alpha")
+
+    assert TestClient(service.create_app()).get("/whoami").json() == id(service)
+
+
+def test_running_service_dependency_resolves_standalone_and_merged(monkeypatch: pytest.MonkeyPatch) -> None:
+    alpha = NamedService("alpha")
+    beta = NamedService("beta")
+    alpha_token = service_instance_dependency("alpha", NamedService)
+    beta_token = service_instance_dependency("beta", NamedService)
+
+    assert alpha_token == service_instance_dependency("alpha", NamedService)
+    assert alpha_token != beta_token
+    standalone = alpha.create_app()
+    assert not hasattr(standalone.state, "service")
+    assert TestClient(standalone).get("/whoami").json() == id(alpha)
+
+    other_alpha = NamedService("alpha")
+    assert TestClient(other_alpha.create_app()).get("/whoami").json() == id(other_alpha)
+
+    _patch_platform_app_config(monkeypatch, seed_on_startup=False)
+    merged = server.create_app(services=[alpha, beta])
+    assert not hasattr(merged.state, "alpha_service")
+    assert not hasattr(merged.state, "beta_service")
+    with TestClient(merged) as client:
+        assert client.get("/apis/alpha/whoami").json() == id(alpha)
+        assert client.get("/apis/beta/whoami").json() == id(beta)
+
+    del merged.dependency_overrides[beta_token]
+    with TestClient(merged, raise_server_exceptions=False) as client:
+        assert client.get("/apis/alpha/whoami").json() == id(alpha)
+        assert client.get("/apis/beta/whoami").status_code == 500
+
+    del standalone.dependency_overrides[alpha_token]
+    with pytest.raises(RuntimeError, match="Service 'alpha' is not bound"):
+        TestClient(standalone).get("/whoami")
 
 
 class _DateFilter(BaseModel):

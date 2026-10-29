@@ -22,6 +22,7 @@ import secrets
 from typing import Any, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
@@ -44,6 +45,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
+from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
 from nemo_agents_plugin.runner.deployments_backend import (
     image_entrypoint_unsupported_message,
     require_deployment_mode_available,
@@ -58,7 +60,9 @@ from nemo_agents_plugin.schema import (
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -68,16 +72,19 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.schema import PaginationData
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+deployment_policy = AuthContextResponsePolicy(dto_type=AgentDeployment, field="auth_context")
+deployment_routes = PolicyRoutes(router, deployment_policy)
 
 _deployment_filter_dep = make_filter_obj_dep(DeploymentFilter)
 _DELETE_MARK_ATTEMPTS = 3
 
 
-@router.post("/deployments", response_model=AgentDeployment, status_code=201, tags=["Agent Deployments"])
+@deployment_routes.post("/deployments", status_code=201, tags=["Agent Deployments"])
 @scope.write
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -149,6 +156,12 @@ async def create_deployment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
+    # A requested image may install adapters this server can't see; the container checks them itself.
+    if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
+        body.image.strip() and is_container_deployment_mode(body.deployment_mode)
+    ):
+        # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
+        await asyncio.to_thread(_validate_harness_kinds, merged.config)
 
     # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
     spec = SpecRevision()
@@ -198,6 +211,15 @@ def _resolve_deployment_config(agent: Agent, *, workspace: str) -> dict[str, Any
         )
     except AgentConfigFormatError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_harness_kinds(config: dict[str, Any]) -> None:
+    try:
+        validate_harness_kinds(AgentConfig.model_validate(config))
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent config: {exc}") from exc
+    except UnknownAdapterError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent config: {exc} {CUSTOM_IMAGE_HINT}") from exc
 
 
 async def _resolve_deployment_environment(
@@ -250,7 +272,7 @@ def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentM
     )
 
 
-@router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])
+@deployment_routes.get("/deployments", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -292,7 +314,7 @@ async def list_deployments(
     )
 
 
-@router.get("/deployments/{name}", response_model=AgentDeployment, tags=["Agent Deployments"])
+@deployment_routes.get("/deployments/{name}", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],

@@ -4527,7 +4527,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'data-designer-nemo'" },
     { name = "duckdb", marker = "extra == 'test'" },
     { name = "fastapi" },
-    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
+    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.27.0,<1" },
@@ -4593,7 +4593,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "kubernetes", marker = "extra == 'k8s'", specifier = ">=30.1.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "openshell", marker = "extra == 'openshell'", specifier = ">=0.1.2" },
+    { name = "openshell", marker = "extra == 'openshell'", url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" },
     { name = "protobuf", marker = "extra == 'openshell'", specifier = ">=6.31.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -6050,7 +6050,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'nemo-compass-plugin'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'nemo-data-designer-plugin'" },
     { name = "fastapi", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=0.115" },
-    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
+    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.115.8" },
     { name = "fastapi", marker = "extra == 'plugins'" },
     { name = "fastapi", marker = "extra == 'plugins'", specifier = ">=0.115" },
@@ -6994,7 +6994,7 @@ requires-dist = [
     { name = "anyio", marker = "extra == 'filesets'", specifier = ">=4.0.0" },
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "docker", marker = "extra == 'nemo-helix-ext'", specifier = ">=7.0.0" },
-    { name = "fastapi", specifier = ">=0.115.4" },
+    { name = "fastapi", specifier = ">=0.121.1" },
     { name = "filesets", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'filesets'", specifier = ">=2023.1.0" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
@@ -7289,7 +7289,7 @@ requires-dist = [
     { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
     { name = "fastapi", specifier = ">=0.115.8" },
-    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
+    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "fsspec", specifier = ">=2024.10.0" },
     { name = "gunicorn", specifier = ">=23.0.0" },
@@ -8882,7 +8882,7 @@ requires-dist = [
     { name = "kubernetes", specifier = ">=30.1.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-common", editable = "packages/nhx_common" },
-    { name = "openshell", marker = "extra == 'openshell'", specifier = ">=0.1.2" },
+    { name = "openshell", marker = "extra == 'openshell'", url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" },
     { name = "pandas", specifier = ">=1.5.3" },
     { name = "protobuf", marker = "extra == 'openshell'", specifier = ">=6.31.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
@@ -9876,8 +9876,8 @@ wheels = [
 
 [[package]]
 name = "openshell"
-version = "0.1.2"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.6"
+source = { url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "googleapis-common-protos" },
@@ -9886,7 +9886,16 @@ dependencies = [
     { name = "protobuf" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/0d/9f0c2e133bd4bfc96b9e261b870d58230d7d98fc6c51ae8f7f71f8520157/openshell-0.1.2-py3-none-any.whl", hash = "sha256:8c409da4f176d42418d92366fe201f47cceef2c0fa432bfbce2bf938649d59cf", size = 150901, upload-time = "2026-09-28T03:58:28.39Z" },
+    { url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl", hash = "sha256:a0c5b0e9954ffdbdb4d34110d4a9d0d2dc57579a53e4a67372e0f8dd3b75cd81" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cloudpickle", specifier = ">=3.0" },
+    { name = "googleapis-common-protos", specifier = ">=1.63" },
+    { name = "grpcio", specifier = ">=1.60" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "protobuf", specifier = ">=4.25" },
 ]
 
 [[package]]

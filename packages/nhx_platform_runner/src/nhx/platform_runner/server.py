@@ -315,7 +315,6 @@ def create_app(
         if configure_app is not None and callable(configure_app):
             if "app" in inspect.signature(configure_app).parameters:
                 configure_app(app)
-        setattr(app.state, f"{service_instance.name.replace('-', '_')}_service", service_instance)
         if service_instance._service_config is not None:
             app.state.service_configs[type(service_instance._service_config)] = service_instance._service_config
 

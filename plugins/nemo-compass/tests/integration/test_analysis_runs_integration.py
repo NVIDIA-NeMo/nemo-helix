@@ -154,7 +154,7 @@ def test_the_submitted_job_carries_the_compass_config_the_facade_built(
     settings = spec["agent"]["config"]["harnesses"]["compass"]["settings"]
     assert settings["agent"] == "scoped-agent"
     assert settings["ethos"] == ETHOS
-    assert settings["evaluation_id"] == "eval-123"
+    assert spec["request"]["context"]["evaluation_id"] == "eval-123"
 
 
 def test_the_sdk_serializes_a_since_bound_the_route_accepts(
@@ -165,7 +165,7 @@ def test_the_sdk_serializes_a_since_bound_the_route_accepts(
 
     assert created.run.since == datetime(2026, 8, 1, tzinfo=timezone.utc)
     spec = _backing_job(agents, created.run.name)["spec"]
-    assert spec["agent"]["config"]["harnesses"]["compass"]["settings"]["since"] == "2026-08-01T00:00:00+00:00"
+    assert spec["request"]["context"]["since"] == "2026-08-01T00:00:00+00:00"
     # The step config preserves the original request alongside the resolved agent.
     assert spec["request"]["timeout_seconds"] == 30.0
 

@@ -6,18 +6,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from clickhouse_connect.driver.external import ExternalData
-from fastapi import HTTPException, Request
 from nhx.intake.config import IntakeConfig
-from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
 from nhx.intake.spans.clickhouse_migrations import parse_clickhouse_url, run_clickhouse_migrations
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -133,31 +128,6 @@ async def bootstrap_schema(client: ClickHouseSpanClient) -> None:
     """Create the Intake ClickHouse schema if it does not exist."""
 
     await client.bootstrap_schema()
-
-
-async def get_clickhouse_client(request: Request) -> AsyncIterator[ClickHouseSpanClient]:
-    """FastAPI dependency for Intake's service-owned ClickHouse client."""
-
-    # Platform-mounted app uses `intake_service`; standalone service app uses `service`.
-    service = getattr(request.app.state, "intake_service", None)
-    if service is None:
-        service = getattr(request.app.state, "service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="Intake service is not attached to this application")
-
-    service_client = getattr(service, "clickhouse_client", None)
-    if service_client is None:
-        raise HTTPException(
-            status_code=503,
-            detail="ClickHouse spans storage is disabled or was not initialized during Intake startup",
-        )
-
-    try:
-        await bootstrap_schema(service_client)
-    except Exception as exc:
-        logger.exception("ClickHouse spans storage is unavailable")
-        raise HTTPException(status_code=503, detail=CLICKHOUSE_UNAVAILABLE_MESSAGE) from exc
-    yield service_client
 
 
 def _import_clickhouse_connect() -> Any:

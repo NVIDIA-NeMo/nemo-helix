@@ -6,6 +6,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { entityNameSchema } from '@nemo/common/src/utils/entityName';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import { getAgentsListAgentsQueryKey, useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
@@ -29,13 +30,14 @@ import {
   studyConfigLocation,
   withAgentName,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
-import { agentNameSchema } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 
-const deployTrialFormSchema = z.object({ name: agentNameSchema }).merge(deployOnCreateFormSchema);
+const deployTrialFormSchema = z
+  .object({ name: entityNameSchema() })
+  .merge(deployOnCreateFormSchema);
 
 type DeployTrialFormData = z.infer<typeof deployTrialFormSchema>;
 
@@ -127,12 +129,12 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
     control,
     reset: resetForm,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, touchedFields, isSubmitted },
   } = useForm<DeployTrialFormData>({
     resolver: zodResolver(deployTrialFormSchema),
     defaultValues: DEPLOY_TRIAL_FORM_DEFAULTS,
     disabled: busy,
-    mode: 'onChange',
+    mode: 'onTouched',
   });
   const watchedName = useWatch({ control, name: 'name' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
@@ -251,7 +253,9 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
       <ControlledTextInput
         useControllerProps={{ control, name: 'name' }}
         label="New agent name"
-        formFieldProps={{ slotError: errors.name?.message }}
+        formFieldProps={{
+          slotError: touchedFields.name || isSubmitted ? errors.name?.message : undefined,
+        }}
       />
       {trial && deployedParams.length > 0 && (
         <Stack gap="2">

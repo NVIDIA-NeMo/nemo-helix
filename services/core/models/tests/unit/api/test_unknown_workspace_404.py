@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.client.errors import NotFoundError
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import EntityNotFoundError
@@ -107,7 +108,9 @@ ENDPOINTS = [
 
 @pytest.mark.parametrize("module,dependency,method,verb,path,payload,generic_detail", ENDPOINTS)
 @pytest.mark.parametrize("error_kind", ["sdk-not-found", "entity-not-found", "unexpected"])
-def test_workspace_error_response(module, dependency, method, verb, path, payload, generic_detail, error_kind):
+def test_workspace_error_response(
+    module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch
+):
     if error_kind == "sdk-not-found":
         request = httpx.Request("GET", f"http://entities/apis/entities/v2/workspaces/{WS}/entities")
         error = NotFoundError(httpx.Response(404, json={"detail": DETAIL}, request=request))
@@ -120,6 +123,7 @@ def test_workspace_error_response(module, dependency, method, verb, path, payloa
     service_method = AsyncMock(side_effect=error)
     setattr(service, method, service_method)
     auth_client = Mock(spec=AuthClient, auth_enabled=False)
+    monkeypatch.setattr(response_policy, "current_auth_client", lambda request: auth_client)
 
     # No default argument: FastAPI would treat it as a request parameter.
     def override_service():

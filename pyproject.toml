@@ -421,6 +421,8 @@ url = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/"
 explicit = true
 
 [tool.uv.sources]
+# Pin the official OpenShell release artifact.
+openshell = { url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" }
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 nhx-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }

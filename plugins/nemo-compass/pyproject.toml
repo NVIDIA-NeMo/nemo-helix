@@ -55,7 +55,7 @@ packages = ["src/nemo_compass_plugin"]
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel.shared-data]
-"compass.fabric-adapter.json" = "share/nemo-fabric/adapters/compass/compass.fabric-adapter.json"
+"analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/helix/compass/analyst.fabric-adapter.json"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -119,6 +119,7 @@ class AccessKeyCredentialAdapter:
             "issuer": record.issuer,
             "audiences": list(record.audiences),
             "scope": list(record.scope),
+            "service_attributes": record.service_attributes,
             "grace_period_expires_at": AccessKeyCredentialAdapter._serialize_datetime(record.grace_period_expires_at),
             "rotation_successor_jti": record.rotation_successor_jti,
         }
@@ -137,6 +138,7 @@ class AccessKeyCredentialAdapter:
             issuer=str(metadata["issuer"]),
             audiences=AccessKeyCredentialAdapter._string_list(metadata.get("audiences")),
             scope=AccessKeyCredentialAdapter._string_list(metadata.get("scope")),
+            service_attributes=AccessKeyCredentialAdapter._service_attributes(metadata.get("service_attributes")),
             issued_at=record.issued_at,
             expires_at=record.expires_at,
             last_used_at=record.last_used_at,
@@ -162,6 +164,16 @@ class AccessKeyCredentialAdapter:
     @staticmethod
     def _string_list(value: object) -> list[str]:
         return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+    @staticmethod
+    def _service_attributes(value: object) -> dict[str, dict[str, Any]]:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            service: dict(attributes)
+            for service, attributes in value.items()
+            if isinstance(service, str) and isinstance(attributes, dict)
+        }
 
     @staticmethod
     def _entity_type(value: object) -> AccessKeyEntityType:

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
@@ -205,11 +206,15 @@ async def test_a_rebuild_in_flight_hides_the_older_ready_build(
 async def test_a_ready_build_gives_agent_and_verifier(clients, builds, store_task, sandbox_policy, entity_store):
     digest = await store_task(config=SEPARATE)
     await build(builds, digest)
-    await settle(entity_store, digest, 1, "ready", images=READY)
+    main = image("main", digest_ref("d")).model_copy(
+        update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])}
+    )
+    await settle(entity_store, digest, 1, "ready", images=[main, image("verifier", digest_ref("e"))])
     result = await prepare(task(digest), clients, sandbox_policy)
     assert result.status == "ready" and result.environment is not None
     agent, verifier = result.environment.agent, result.environment.verifier
     assert agent.image_ref == digest_ref("d") and agent.preparation_key == "sha256:" + "d" * 64
+    assert agent.runtime_config == ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])
     assert agent.builder_image == "harbor-env-main" and agent.source_archive_digest == "a" * 64
     assert verifier is not None and verifier.image_ref == digest_ref("e")
     assert result.images["agent"].source == "built"
@@ -412,10 +417,14 @@ async def test_check_passes_a_compose_task_the_pod_can_run(clients, sandbox_poli
     assert await check(clients, sandbox_policy) is None
 
 
+async def test_check_passes_a_compose_file_that_only_changes_main(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n")
+    assert await check(clients, sandbox_policy) is None
+
+
 @pytest.mark.parametrize(
     ("compose", "expected"),
     [
-        ("services:\n  main:\n    environment: {A: b}\n", "compose_override_only"),
         ("services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n", "compose_reserved_port"),
         ("services:\n  db:\n    image: redis\n    privileged: true\n", "compose_unsupported"),
     ],

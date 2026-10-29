@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.service import IntakeService
 
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
@@ -42,10 +43,12 @@ def test_run_count_sort_returns_503_when_rollups_unavailable(client: TestClient)
 
 def test_session_reads_return_actionable_503_when_clickhouse_is_unavailable(
     client: TestClient,
+    intake_service: IntakeService,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _make_evaluation(client)
-    service = client.app.state.intake_service
+    service = intake_service
+    assert service.clickhouse_client is not None
     monkeypatch.setattr(
         service.clickhouse_client,
         "query",

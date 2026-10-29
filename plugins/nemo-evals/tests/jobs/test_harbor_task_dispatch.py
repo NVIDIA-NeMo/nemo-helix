@@ -20,6 +20,7 @@ from harbor.models.task.verifier_mode import resolve_effective_verifier_env_conf
 from harbor.models.trial.config import AgentConfig, ResourceMode
 from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
 from nemo_evals.harbor.compose.models import ComposeError
@@ -44,6 +45,7 @@ from nemo_evals.jobs.harbor_task_dispatch import (
     check_execution_deadline,
     check_sandbox_server,
     configure_runtime,
+    image_entrypoints,
     prepared_compose_services,
 )
 from nemo_evals.jobs.harbor_task_spec import (
@@ -203,6 +205,34 @@ def test_runtime_selects_opensandbox_with_frozen_policy_and_no_key(task_spec, tm
     assert kwargs["metadata"] == {"nemo-run": "run-0123456789abcdef", "nemo-task-index": "1", "nemo-job": ctx.job_id}
     assert configured.n_concurrent_trials == 1
     assert "private-worker-value" not in json.dumps(configured.model_dump(mode="json"))
+
+
+def _ctx() -> JobContext:
+    ctx = MagicMock(spec=JobContext)
+    ctx.job_id = "run-0123456789abcdef-task-1"
+    return ctx
+
+
+def test_runtime_passes_each_recorded_images_own_entrypoint(harbor_plan, harbor_run, tmp_path):
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    environment = ENVIRONMENT.model_copy(update={"agent": agent})
+    spec = build_task_job_input(harbor_plan, harbor_run, 1, environment)
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), _ctx(), spec)
+    assert configured.environment is not None
+    # The verifier's image wasn't recorded, so its sandbox starts as it did before.
+    assert configured.environment.kwargs["image_entrypoints"] == {AGENT.image_ref: ["/bin/bash", "-l", "-c"]}
+
+
+def test_image_entrypoints_name_an_image_without_one_and_skip_unrecorded_ones():
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(cmd=["/app/run.sh"])})
+    assert image_entrypoints(ENVIRONMENT.model_copy(update={"agent": agent})) == {AGENT.image_ref: []}
+    assert image_entrypoints(ENVIRONMENT) == {}
+
+
+def test_runtime_without_recorded_images_passes_no_entrypoints(task_spec, tmp_path):
+    configured = configure_runtime(HarborRuntimeConfig(jobs_dir=tmp_path), _ctx(), task_spec)
+    assert configured.environment is not None
+    assert "image_entrypoints" not in configured.environment.kwargs
 
 
 def test_runtime_passes_the_frozen_agent_channel(task_spec, tmp_path):
@@ -534,6 +564,41 @@ def test_a_compose_tasks_env_values_stay_out_of_the_config_harbor_persists(task_
     assert not [value for value in values if value in persisted]
     assert persisted.count("${NEMO_COMPOSE_ENV_") == len(values)
     assert sorted(os.environ.values()) == sorted(values)
+
+
+def test_a_recorded_main_image_leaves_its_entrypoint_to_the_sandbox(tmp_path):
+    """With Builder's record of main's image, the Dockerfile isn't guessed from: the sandbox restores the real one."""
+    task = write_compose_task(tmp_path / "t")
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    spec = prepared_compose_services(task, COMPOSE_ENVIRONMENT.model_copy(update={"agent": agent}))
+    assert spec is not None and "main" not in spec
+
+
+def write_main_only_task(root: Path) -> Path:
+    """A task whose compose file only changes how ``main`` starts, as swe-lancer's do."""
+    task = write_task(root, "[environment]\n", compose=True)
+    (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
+    (task / "environment" / "docker-compose.yaml").write_text(
+        "services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n"
+    )
+    return task
+
+
+def test_a_main_only_task_runs_main_s_command_after_its_recorded_entrypoint(tmp_path):
+    agent = AGENT.model_copy(update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])})
+    spec = prepared_compose_services(
+        write_main_only_task(tmp_path / "t"), ENVIRONMENT.model_copy(update={"agent": agent})
+    )
+    assert spec is not None
+    # The sandbox restores the ENTRYPOINT from image_entrypoints, so the spec carries only the compose settings.
+    assert spec["main"] == {"command": ["/app/tests/run.sh"], "working_dir": "/app"}
+    assert spec.get("services", []) == []
+
+
+def test_a_main_command_whose_entrypoint_is_unknown_is_refused(tmp_path):
+    """Without Builder's record, main's command would run without the ENTRYPOINT its image may inherit."""
+    with pytest.raises(ComposeError, match="compose_entrypoint_unknown"):
+        prepared_compose_services(write_main_only_task(tmp_path / "t"), ENVIRONMENT)
 
 
 def test_a_single_container_task_has_no_compose_services(tmp_path):

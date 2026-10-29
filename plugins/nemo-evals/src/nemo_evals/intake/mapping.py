@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -58,6 +58,7 @@ from nhx_evals_sdk.values.otlp import (
 )
 from nhx_evals_sdk.values.protocol import OUTPUT_DETAIL
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 from pydantic import RootModel
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,146 @@ async def otlp_ingest_for_trial(
         fill_missing_root_end_time(resource_spans, duration_unix_nano=int(measurements.runtime_sec * 1_000_000_000))
     # The Export RPC envelope goes on only here, at the point these actually cross a wire.
     return ExportTraceServiceRequest(resource_spans=resource_spans).SerializeToString(), span_id
+
+
+class OtlpSpanTooLargeError(ValueError):
+    """A single span, with the envelope it needs, is larger than the OTLP request budget."""
+
+
+def split_otlp_request(payload: bytes, *, max_request_bytes: int) -> list[bytes]:
+    """Split a serialized ``ExportTraceServiceRequest`` into requests of at most ``max_request_bytes``.
+
+    A payload that already fits is returned unchanged as the only request. Otherwise spans are
+    packed in their original order, and each request repeats the resource and scope envelope
+    (resource, scope, schema URLs) of the spans it carries, so every span keeps its ids, parent,
+    and metadata. Resource or scope entries that hold no spans are dropped, since there is nothing
+    for Intake to store against them.
+
+    Sizes are accumulated from each part's encoded length rather than by re-serializing the growing
+    request. Raises :class:`OtlpSpanTooLargeError` before returning anything when one span cannot
+    fit in a request on its own, so a caller can fail without sending part of the trace.
+    """
+    if max_request_bytes <= 0:
+        raise ValueError(f"max_request_bytes must be positive, got {max_request_bytes}")
+    if len(payload) <= max_request_bytes:
+        return [payload]
+
+    request = ExportTraceServiceRequest()
+    request.ParseFromString(payload)
+
+    batches: list[bytes] = []
+    batch = _OtlpBatch()
+    for resource_index, resource_spans in enumerate(request.resource_spans):
+        resource = _Envelope.of(resource_spans)
+        for scope_index, scope_spans in enumerate(resource_spans.scope_spans):
+            scope = _Envelope.of(scope_spans)
+            key = (resource_index, scope_index)
+            for span in scope_spans.spans:
+                span_field = _field_size(span.ByteSize())
+                sizes = batch.sizes_with(span_field, resource=resource, scope=scope, key=key)
+                if sizes[0] > max_request_bytes and batch.key is not None:
+                    batches.append(batch.request.SerializeToString())
+                    batch = _OtlpBatch()
+                    sizes = batch.sizes_with(span_field, resource=resource, scope=scope, key=key)
+                if sizes[0] > max_request_bytes:
+                    raise OtlpSpanTooLargeError(
+                        f"span {span.span_id.hex()} needs a {sizes[0]}-byte OTLP request, larger than the "
+                        f"{max_request_bytes}-byte budget"
+                    )
+                batch.add(span, sizes, resource=resource, scope=scope, key=key)
+
+    if batch.key is not None:
+        batches.append(batch.request.SerializeToString())
+    return batches
+
+
+@dataclass(frozen=True)
+class _Envelope[M: (ResourceSpans, ScopeSpans)]:
+    """A ResourceSpans or ScopeSpans without its child spans, and that envelope's encoded size.
+
+    Copies the resource or scope and the schema URL. The batch appends the source message's
+    child spans, so packing does not copy those span bodies.
+    """
+
+    message: M
+    size: int
+
+    @classmethod
+    def of(cls, message: M) -> _Envelope[M]:
+        envelope = type(message)()
+        if isinstance(envelope, ResourceSpans) and isinstance(message, ResourceSpans):
+            if message.HasField("resource"):
+                envelope.resource.CopyFrom(message.resource)
+        elif isinstance(envelope, ScopeSpans) and isinstance(message, ScopeSpans):
+            if message.HasField("scope"):
+                envelope.scope.CopyFrom(message.scope)
+        envelope.schema_url = message.schema_url
+        return cls(envelope, envelope.ByteSize())
+
+
+#: ``(request, resource, scope)`` encoded sizes of a batch's open entries.
+_BatchSizes = tuple[int, int, int]
+
+
+@dataclass
+class _OtlpBatch:
+    """One outgoing request being packed, with the encoded sizes of its open entries."""
+
+    request: ExportTraceServiceRequest = field(default_factory=ExportTraceServiceRequest)
+    size: int = 0
+    resource_size: int = 0
+    scope_size: int = 0
+    #: ``(resource index, scope index)`` in the source request of the last ScopeSpans added.
+    key: tuple[int, int] | None = None
+
+    def sizes_with(
+        self,
+        span_field: int,
+        *,
+        resource: _Envelope[ResourceSpans],
+        scope: _Envelope[ScopeSpans],
+        key: tuple[int, int],
+    ) -> _BatchSizes:
+        """Return the sizes after adding a span whose encoded field is ``span_field`` bytes."""
+        same_scope = self.key == key
+        same_resource = self.key is not None and self.key[0] == key[0]
+        scope_size = (self.scope_size if same_scope else scope.size) + span_field
+        if not same_resource:
+            resource_size = resource.size + _field_size(scope_size)
+            return self.size + _field_size(resource_size), resource_size, scope_size
+        replaced_scope = _field_size(self.scope_size) if same_scope else 0
+        resource_size = self.resource_size - replaced_scope + _field_size(scope_size)
+        return self.size - _field_size(self.resource_size) + _field_size(resource_size), resource_size, scope_size
+
+    def add(
+        self,
+        span: Span,
+        sizes: _BatchSizes,
+        *,
+        resource: _Envelope[ResourceSpans],
+        scope: _Envelope[ScopeSpans],
+        key: tuple[int, int],
+    ) -> None:
+        if self.key is None or self.key[0] != key[0]:
+            self.request.resource_spans.append(resource.message)
+        if self.key != key:
+            self.request.resource_spans[-1].scope_spans.append(scope.message)
+        self.request.resource_spans[-1].scope_spans[-1].spans.append(span)
+        self.size, self.resource_size, self.scope_size = sizes
+        self.key = key
+
+
+def _field_size(length: int) -> int:
+    """Encoded size of a length-delimited field numbered 1-15 whose body is ``length`` bytes."""
+    return 1 + _varint_size(length) + length
+
+
+def _varint_size(value: int) -> int:
+    size = 1
+    while value >= 0x80:
+        value >>= 7
+        size += 1
+    return size
 
 
 def _trial_totals(trial: AgentEvalTrial, measurements: TrialMeasurements) -> dict[str, str | int | float]:

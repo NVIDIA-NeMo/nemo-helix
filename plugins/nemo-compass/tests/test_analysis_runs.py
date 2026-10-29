@@ -290,17 +290,25 @@ def test_compass_is_submitted_inline_with_the_requested_models() -> None:
     assert config.agent.config["harnesses"]["compass"]["settings"]["agent"] == "demo-agent"
 
 
-def test_read_scope_reaches_the_inline_compass_settings() -> None:
+def test_read_scope_reaches_the_job_context_not_the_compass_settings() -> None:
     request = _request(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
 
     config = ExecuteAgentJobConfig.model_validate(
         build_execute_agent_job_config(request, workspace="default", run_name=RUN_NAME)
     )
 
+    assert config.context == {"since": "2026-08-01T00:00:00+00:00", "evaluation_id": "eval-123"}
     assert isinstance(config.agent, AgentInline)
     settings = config.agent.config["harnesses"]["compass"]["settings"]
-    assert settings["since"] == "2026-08-01T00:00:00+00:00"
-    assert settings["evaluation_id"] == "eval-123"
+    assert not {"since", "evaluation_id", "workspace"} & set(settings)
+
+
+def test_an_unscoped_request_sends_an_empty_context() -> None:
+    config = ExecuteAgentJobConfig.model_validate(
+        build_execute_agent_job_config(_request(), workspace="default", run_name=RUN_NAME)
+    )
+
+    assert config.context == {}
 
 
 def test_ethos_is_inlined_into_the_compass_harness_settings() -> None:
@@ -334,7 +342,7 @@ def test_blank_settings_are_rejected(field: str, blank: str) -> None:
         CreateAnalysisRunRequest.model_validate(body)
 
 
-def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_inline_compass() -> None:
+def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_job() -> None:
     request = _request(agent="  demo-agent  ", evaluation_id="  eval-123\n", ethos="\n# Ethos\n")
 
     config = ExecuteAgentJobConfig.model_validate(
@@ -344,8 +352,8 @@ def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_inline_compass(
     assert isinstance(config.agent, AgentInline)
     settings = config.agent.config["harnesses"]["compass"]["settings"]
     assert settings["agent"] == "demo-agent"
-    assert settings["evaluation_id"] == "eval-123"
     assert settings["ethos"] == "# Ethos"
+    assert config.context["evaluation_id"] == "eval-123"
     assert config.post_run_action is not None
     assert config.post_run_action.config["agent"] == "demo-agent"
 
