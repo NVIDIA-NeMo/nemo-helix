@@ -21,7 +21,14 @@ import pytest
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
 from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file, running_server
 from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
-from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import check_ready, prepare_credentials
+from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import (
+    CredentialInitializationError,
+    check_ready,
+    prepare_credentials,
+)
+from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import (
+    main as sidecar_main,
+)
 from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import (
     BindingScope,
     RegistrationDenied,
@@ -158,8 +165,77 @@ def test_auth_disabled_sidecar_needs_only_signing_key(tmp_path: Path) -> None:
     prepare_credentials(source, destination, auth_disabled=True)
     assert (destination / "registration.key").read_bytes() == KEY
     assert not (destination / "helix.token").exists()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(CredentialInitializationError, match="helix.token"):
         prepare_credentials(source, destination)  # Missing token never selects disabled mode implicitly.
+    (source / "helix.token").write_bytes(b"staged-service-token")
+    prepare_credentials(source, destination)
+    (source / "helix.token").unlink()
+    (source / "registration.key").write_bytes(b"different-signing-key-32-bytes-long")
+    with pytest.raises(CredentialInitializationError, match="explicit migration"):
+        prepare_credentials(source, destination, auth_disabled=True)
+    assert (destination / "helix.token").read_bytes() == b"staged-service-token"
+    (source / "registration.key").write_bytes(KEY)
+    prepare_credentials(source, destination, auth_disabled=True)
+    assert not (destination / "helix.token").exists()
+    assert (destination / "registration.key").read_bytes() == KEY
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        ("missing-token", "Cannot open mounted helix.token"),
+        ("short-key", "signing key of at least 32 bytes"),
+        ("key-mismatch", "explicit migration is required"),
+        ("invalid-utf8", "nonempty UTF-8 token"),
+    ],
+)
+def test_sidecar_init_reports_safe_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: str, expected: str
+) -> None:
+    source, destination = tmp_path / "source", tmp_path / "private"
+    source.mkdir()
+    key = source / "registration.key"
+    token = source / "helix.token"
+    key.write_bytes(KEY)
+    token.write_bytes(b"sensitive-service-token")
+    if failure == "missing-token":
+        token.unlink()
+    elif failure == "short-key":
+        key.write_bytes(b"sensitive-short-key")
+    elif failure == "key-mismatch":
+        prepare_credentials(source, destination)
+        key.write_bytes(b"sensitive-different-key-32-bytes-long")
+    else:
+        token.write_bytes(b"sensitive-service-token\xff")
+    with patch("sys.argv", ["sidecar", "init", "--source", str(source), "--destination", str(destination)]):
+        with pytest.raises(SystemExit) as error:
+            sidecar_main()
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    assert expected in output.err
+    assert "sensitive" not in output.err
+    assert KEY.decode() not in output.err
+    assert not output.out
+
+
+@pytest.mark.parametrize("command", ["init", "healthcheck"])
+def test_sidecar_unexpected_errors_do_not_disclose_credentials(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str
+) -> None:
+    module = "nemo_deployments_plugin.backends.openshell.credential_driver.sidecar"
+    if command == "init":
+        argv = ["sidecar", "init", "--source", str(tmp_path), "--destination", str(tmp_path)]
+        function = "prepare_credentials"
+    else:
+        argv = ["sidecar", "healthcheck", "--socket-path", str(tmp_path / "driver.sock")]
+        function = "check_ready"
+    with patch("sys.argv", argv), patch(f"{module}.{function}", side_effect=ValueError("sensitive-token")):
+        with pytest.raises(SystemExit) as error:
+            sidecar_main()
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    assert output.err == "Credential-driver initialization or readiness check failed.\n"
+    assert not output.out
 
 
 @pytest.mark.asyncio

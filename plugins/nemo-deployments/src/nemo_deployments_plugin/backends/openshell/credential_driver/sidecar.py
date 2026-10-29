@@ -20,15 +20,24 @@ from .server import MAX_CREDENTIAL_FILE_BYTES, read_private_file
 from .service import CAPABILITY, DRIVER_NAME
 
 
+class CredentialInitializationError(ValueError):
+    """An initialization failure with a credential-free message for the operator."""
+
+
 def _read_mount(path: Path) -> bytes:
     """Read an operator-supplied read-only bind mount; host UIDs may differ."""
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise CredentialInitializationError(
+            f"Cannot open mounted {path.name}; provide a readable regular file, not a symlink."
+        ) from None
     with os.fdopen(descriptor, "rb") as file:
         if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
-            raise ValueError("Mounted credentials must be regular files.")
+            raise CredentialInitializationError("Mounted credentials must be regular files.")
         value = file.read(MAX_CREDENTIAL_FILE_BYTES + 1)
     if not value or len(value) > MAX_CREDENTIAL_FILE_BYTES:
-        raise ValueError("Invalid credential file size.")
+        raise CredentialInitializationError("Mounted credentials must contain between 1 byte and 64 KiB.")
     return value
 
 
@@ -40,17 +49,23 @@ def prepare_credentials(source: Path, destination: Path, *, auth_disabled: bool 
     """
     key = _read_mount(source / "registration.key")
     if len(key) < 32:
-        raise ValueError("Provide a signing key of at least 32 bytes.")
+        raise CredentialInitializationError("Provide a signing key of at least 32 bytes.")
     files = [("registration.key", key)]
     if not auth_disabled:
         token = _read_mount(source / "helix.token")
-        if not token.decode().strip():
-            raise ValueError("Provide a nonempty UTF-8 token.")
+        try:
+            valid_token = bool(token.decode().strip())
+        except UnicodeDecodeError:
+            valid_token = False
+        if not valid_token:
+            raise CredentialInitializationError("Provide a nonempty UTF-8 token.")
         files.append(("helix.token", token))
     require_private_directory(destination)
     key_path = destination / "registration.key"
     if os.path.lexists(key_path) and read_private_file(key_path) != key:
-        raise ValueError("Registration key differs from the existing key; explicit migration is required.")
+        raise CredentialInitializationError(
+            "Registration key differs from the existing key; explicit migration is required."
+        )
     for name, value in files:
         descriptor, temporary = tempfile.mkstemp(prefix=f".{name}-", dir=destination)
         try:
@@ -61,6 +76,8 @@ def prepare_credentials(source: Path, destination: Path, *, auth_disabled: bool 
             os.replace(temporary, destination / name)
         finally:
             Path(temporary).unlink(missing_ok=True)
+    if auth_disabled:
+        (destination / "helix.token").unlink(missing_ok=True)
 
 
 async def check_ready(socket_path: Path) -> None:
@@ -106,6 +123,8 @@ def main() -> None:
             prepare_credentials(args.source, args.destination, auth_disabled=args.auth_disabled)
         else:
             asyncio.run(check_ready(args.socket_path))
+    except CredentialInitializationError as exc:
+        parser.exit(1, f"Credential-driver initialization failed: {exc}\n")
     except Exception:
         # Credential-bearing errors must not land in Docker healthcheck/log output.
         parser.exit(1, "Credential-driver initialization or readiness check failed.\n")

@@ -80,7 +80,7 @@ Check that OpenShell completes credential-driver protocol negotiation.
 
 ## Connect Helix provisioning
 
-For a Helix installation with authentication disabled, add `-f docker-compose.credentials-noauth.yml` after the credentials overlay in the helper above. Supply `registration.key`; `helix.token` is unnecessary. The override explicitly selects `--auth-disabled` for initialization and the driver. Changing auth modes requires recreating the workload's providers; bindings from the other mode are rejected. TLS and sandbox network restrictions still apply.
+For a Helix installation with authentication disabled, add `-f docker-compose.credentials-noauth.yml` after the credentials overlay in the helper above. Supply `registration.key`; initialization removes any previously staged `helix.token` after validating the key. The override explicitly selects `--auth-disabled` for initialization and the driver. Changing auth modes requires recreating the workload's providers; bindings from the other mode are rejected. TLS and sandbox network restrictions still apply.
 
 Mount the same signing key into the trusted Helix controller, then configure its OpenShell executor or job execution profile with the matching gateway ID and approved injection profiles. Follow the [environment integration guide](../../../nemo-agents/docs/provider-fulfillments.md#operator-configuration). These controller settings are not set by the sidecar overlay.
 
