@@ -142,6 +142,64 @@ def test_pod_gets_volumes_host_aliases_and_main_options() -> None:
     assert sandbox["securityContext"]["capabilities"] == {"drop": ["NET_ADMIN"], "add": ["SYS_PTRACE"]}
 
 
+def test_security_narrows_each_container_and_tmpfs_gets_its_own_memory_volume() -> None:
+    pod_spec = stock_pod_spec()
+    services = parse_compose_services(
+        {
+            "services": [
+                {
+                    "name": "cache",
+                    "image": "docker.io/library/redis:7",
+                    "security": {"run_as_user": 999, "drop_capabilities": ["ALL"]},
+                    "tmpfs": [{"mount_path": "/data"}],
+                }
+            ],
+            "main": {
+                "add_capabilities": ["SYS_PTRACE"],
+                "security": {
+                    "run_as_user": 1000,
+                    "run_as_group": 1000,
+                    "read_only_root_filesystem": True,
+                    "drop_capabilities": ["ALL"],
+                    "no_new_privileges": True,
+                },
+                "tmpfs": [{"mount_path": "/tmp", "size_limit": "32Mi"}, {"mount_path": "/tests"}],
+            },
+        }
+    )
+
+    add_services(pod_spec, services, "IfNotPresent")
+
+    sandbox = pod_spec["containers"][0]
+    # The stock drop and main's one added capability survive; Kubernetes drops first, then adds.
+    assert sandbox["securityContext"] == {
+        "capabilities": {"drop": ["ALL", "NET_ADMIN"], "add": ["SYS_PTRACE"]},
+        "runAsUser": 1000,
+        "runAsGroup": 1000,
+        "readOnlyRootFilesystem": True,
+        "allowPrivilegeEscalation": False,
+    }
+    assert sandbox["volumeMounts"] == [
+        {"name": "nemo-t0-sandbox", "mountPath": "/tmp"},
+        {"name": "nemo-t1-sandbox", "mountPath": "/tests"},
+    ]
+
+    cache = next(container for container in pod_spec["initContainers"] if container["name"] == "cache")
+    assert cache["securityContext"] == {
+        "privileged": False,
+        "capabilities": {"drop": ["ALL", "NET_ADMIN", "NET_RAW"]},
+        "runAsUser": 999,
+    }
+    assert cache["volumeMounts"] == [{"name": "nemo-t0-cache", "mountPath": "/data"}]
+
+    # Each tmpfs is a volume of its own, so no two containers share one.
+    assert [volume for volume in pod_spec["volumes"] if volume["name"].startswith("nemo-t")] == [
+        {"name": "nemo-t0-cache", "emptyDir": {"medium": "Memory"}},
+        {"name": "nemo-t0-sandbox", "emptyDir": {"medium": "Memory", "sizeLimit": "32Mi"}},
+        {"name": "nemo-t1-sandbox", "emptyDir": {"medium": "Memory"}},
+    ]
+
+
 def test_sandbox_without_network_policy_has_no_egress_to_move() -> None:
     pod_spec = stock_pod_spec(egress=False)
 

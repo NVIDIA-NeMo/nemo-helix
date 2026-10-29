@@ -16,7 +16,14 @@ import shlex
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from nemo_evals.harbor.compose.models import ComposePort, ComposeProblems, ComposeReadiness, ComposeVolumeMount
+from nemo_evals.harbor.compose.models import (
+    ComposePort,
+    ComposeProblems,
+    ComposeReadiness,
+    ComposeSecurity,
+    ComposeTmpfs,
+    ComposeVolumeMount,
+)
 from nhx_sandbox.harbor_opensandbox_services import quantity_value
 
 _CONDITIONS = ("service_started", "service_healthy", "service_completed_successfully")
@@ -421,12 +428,14 @@ def parse_resources(
 
 
 def _mount_entry(
-    entry: Any, path: str, declared_volumes: set[str], problems: ComposeProblems
+    entry: Any, path: str, declared_volumes: set[str], anonymous_name: str, problems: ComposeProblems
 ) -> ComposeVolumeMount | None:
-    """Read one ``volumes`` entry as a mount of a declared named volume; bind mounts and anonymous volumes are refused.
+    """Read one ``volumes`` entry as a mount of a named volume; bind mounts are refused.
 
     ``"data:/var/lib/db:ro"`` and ``{type: volume, source: data, target: /var/lib/db, read_only: true}`` both
-    mount ``data`` read-only; ``"./data:/db"`` is a bind mount and ``"/db"`` an anonymous volume.
+    mount ``data`` read-only. ``"/db"`` and ``{type: volume, target: /db}`` are anonymous volumes: Compose gives the
+    container a fresh volume of its own, so the mount gets ``anonymous_name``, which no other container mounts.
+    ``"./data:/db"`` is a bind mount.
     """
     source: Any
     target: Any
@@ -437,8 +446,7 @@ def _mount_entry(
         parts = entry.split(":")
         # A lone path, such as "/data", asks Compose for a fresh unnamed volume there.
         if len(parts) == 1:
-            problems.unsupported(f"{path}: anonymous volume")
-            return None
+            return _anonymous_mount(parts[0], anonymous_name, False, path, problems)
         # The third part is a comma-separated list of options, such as "ro,z"; only `ro` changes anything here.
         source, target = parts[0], parts[1]
         read_only = len(parts) > 2 and "ro" in parts[2].split(",")
@@ -460,9 +468,12 @@ def _mount_entry(
         problems.invalid(path, "expected a string or a mapping")
         return None
 
-    # What a pod can't do: a volume with no name, a host path, or a volume the file never declared.
+    # A long-form volume with no source is anonymous, as a lone path is in the short form.
+    if isinstance(entry, dict) and source is None:
+        return _anonymous_mount(target, anonymous_name, read_only, path, problems)
+    # What a pod can't do: an empty source (as `${UNSET}:/data` gives), a host path, or a volume the file never declared.
     if not isinstance(source, str) or not isinstance(target, str) or not source:
-        problems.unsupported(f"{path}: anonymous volume")
+        problems.unsupported(f"{path}: a mount with no source")
     elif source.startswith((".", "/", "~")):
         problems.unsupported(f"{path}: bind mount {source}")
     elif source not in declared_volumes:
@@ -472,17 +483,38 @@ def _mount_entry(
     return None
 
 
+def _anonymous_mount(
+    target: Any, name: str, read_only: bool, path: str, problems: ComposeProblems
+) -> ComposeVolumeMount | None:
+    """Mount an anonymous volume, named ``name``, at ``target``; None, recorded as invalid, for a relative target."""
+    if not isinstance(target, str) or not target.startswith("/"):
+        problems.invalid(path, "an anonymous volume needs an absolute container path")
+        return None
+    return ComposeVolumeMount(name=name, mount_path=target, read_only=read_only, anonymous=True)
+
+
+def anonymous_volume_name(service: str, index: int) -> str:
+    """The name the anonymous volume at ``index`` in ``service``'s ``volumes`` gets: ``main-anon-0`` for main's first."""
+    return f"{service}-anon-{index}"
+
+
 def parse_volume_mounts(
-    value: Any, path: str, declared_volumes: set[str], problems: ComposeProblems
+    value: Any, path: str, service: str, declared_volumes: set[str], problems: ComposeProblems
 ) -> list[ComposeVolumeMount]:
-    """Read a service's ``volumes`` as mounts of the top-level named volumes in ``declared_volumes``."""
+    """Read ``service``'s ``volumes`` as mounts of the top-level named volumes in ``declared_volumes``.
+
+    An anonymous volume is named by :func:`anonymous_volume_name`.
+    """
     if value is None:
         return []
     if not isinstance(value, list):
         problems.invalid(path, "expected a list")
         return []
 
-    mounts = (_mount_entry(entry, f"{path}[{index}]", declared_volumes, problems) for index, entry in enumerate(value))
+    mounts = (
+        _mount_entry(entry, f"{path}[{index}]", declared_volumes, anonymous_volume_name(service, index), problems)
+        for index, entry in enumerate(value)
+    )
     return [mount for mount in mounts if mount is not None]
 
 
@@ -534,3 +566,148 @@ def parse_capabilities(
         if capability != "SYS_PTRACE":
             problems.unsupported(f"{path}.cap_add: {capability}")
     return ["SYS_PTRACE"] if "SYS_PTRACE" in capabilities else []
+
+
+# The `security_opt` entries that turn on `no-new-privileges`; `:false` (the default) changes nothing.
+_NO_NEW_PRIVILEGES = re.compile(r"no-new-privileges(?:[:=](?P<value>true|false))?")
+
+
+def _parse_user(value: Any, path: str, problems: ComposeProblems) -> tuple[int | None, int | None]:
+    """Read ``user`` as ``(uid, gid)``: ``"1000:1000"`` gives ``(1000, 1000)`` and ``1000`` gives ``(1000, None)``.
+
+    A pod needs numbers: it can't look a name like ``app`` up in the image's ``/etc/passwd``, so names are unsupported.
+    """
+    if value is None or value == "":
+        return None, None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        problems.invalid(path, "expected a user such as 1000 or 1000:1000")
+        return None, None
+
+    user, _, group = str(value).partition(":")
+    if not (user.isascii() and user.isdigit()) or not (group == "" or (group.isascii() and group.isdigit())):
+        problems.unsupported(f"{path}: {value!r} (only a numeric uid[:gid])")
+        return None, None
+    return int(user), int(group) if group else None
+
+
+def _parse_cap_drop(value: Any, path: str, problems: ComposeProblems) -> list[str]:
+    """Read ``cap_drop`` as capability names without ``CAP_``, in capitals: ``[cap_net_raw]`` gives ``["NET_RAW"]``."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        problems.invalid(path, "expected a list")
+        return []
+
+    capabilities: list[str] = []
+    for index, entry in enumerate(value):
+        name = str(entry).upper().removeprefix("CAP_") if isinstance(entry, str) else ""
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+            problems.invalid(f"{path}[{index}]", f"not a capability: {entry!r}")
+        elif name not in capabilities:
+            capabilities.append(name)
+    return capabilities
+
+
+def _parse_no_new_privileges(value: Any, path: str, problems: ComposeProblems) -> bool:
+    """Read ``security_opt``: whether it sets ``no-new-privileges``. Any other option is unsupported.
+
+    The other options load a seccomp, AppArmor or SELinux profile. ``unconfined`` would weaken the sandbox, and a
+    pod can only use profiles already installed on its node, so none of them can be honored.
+    """
+    if value is None:
+        return False
+    if not isinstance(value, list):
+        problems.invalid(path, "expected a list")
+        return False
+
+    enabled = False
+    for entry in value:
+        match = _NO_NEW_PRIVILEGES.fullmatch(entry) if isinstance(entry, str) else None
+        if match is None:
+            problems.unsupported(f"{path}: {entry}")
+        elif match["value"] != "false":
+            enabled = True
+    return enabled
+
+
+def parse_security(raw_service: Mapping[str, Any], path: str, problems: ComposeProblems) -> ComposeSecurity | None:
+    """Read how a service restricts its container: ``user``, ``read_only``, ``cap_drop`` and ``security_opt``.
+
+    None when it sets none of them, or only their defaults.
+    """
+    user, group = _parse_user(raw_service.get("user"), f"{path}.user", problems)
+    security = ComposeSecurity(
+        user=user,
+        group=group,
+        read_only=bool(parse_boolean(raw_service.get("read_only"), f"{path}.read_only", problems)),
+        cap_drop=_parse_cap_drop(raw_service.get("cap_drop"), f"{path}.cap_drop", problems),
+        no_new_privileges=_parse_no_new_privileges(raw_service.get("security_opt"), f"{path}.security_opt", problems),
+    )
+    return None if security == ComposeSecurity() else security
+
+
+def _tmpfs_entry(
+    entry: Any, path: str, security: ComposeSecurity | None, problems: ComposeProblems
+) -> ComposeTmpfs | None:
+    """Read one ``tmpfs`` entry, ``/path[:option,...]``, as a mount a pod can make; None when it can't.
+
+    A pod's memory-backed ``emptyDir`` takes a size and nothing else, so each option is read for what it would change:
+
+    * ``size=`` becomes the size limit. ``rw``, ``exec``, ``suid`` and ``dev`` are how an ``emptyDir`` behaves anyway.
+    * ``mode=1777`` and ``mode=777`` are accepted: an ``emptyDir`` is 0777, which lacks only the sticky bit.
+    * ``nosuid`` is accepted when the service sets ``no-new-privileges``, so a setuid program raises no privileges,
+      and ``nodev`` when it drops ``MKNOD`` (or ``ALL``), so it can't create a device file to open.
+    * Anything else (``noexec``, ``ro``, ``uid=``, a narrower ``mode``) would be silently lost, so it's unsupported.
+    """
+    if not isinstance(entry, str):
+        problems.invalid(path, "expected a path with optional options, such as /tmp:size=64m")
+        return None
+
+    mount_path, _, options = entry.partition(":")
+    if not mount_path.startswith("/"):
+        problems.invalid(path, f"{mount_path!r} is not an absolute path")
+        return None
+
+    drops_mknod = security is not None and bool({"ALL", "MKNOD"} & set(security.cap_drop))
+    size = None
+    for option in filter(None, (option.strip() for option in options.split(","))):
+        name, _, value = option.partition("=")
+        if option in ("rw", "exec", "suid", "dev"):
+            continue
+        if name == "size":
+            size = parse_memory_quantity(value, f"{path}.size", problems)
+        elif name == "mode" and value.lstrip("0") in ("777", "1777"):
+            continue
+        elif option == "nosuid" and security is not None and security.no_new_privileges:
+            continue
+        elif option == "nodev" and drops_mknod:
+            continue
+        elif option in ("nosuid", "nodev"):
+            requirement = "security_opt: [no-new-privileges]" if option == "nosuid" else "cap_drop: [MKNOD] or [ALL]"
+            problems.unsupported(f"{path}: {option} without {requirement}")
+        else:
+            problems.unsupported(f"{path}: {option}")
+    return ComposeTmpfs(mount_path=mount_path, size=size)
+
+
+def parse_tmpfs(
+    value: Any, path: str, security: ComposeSecurity | None, problems: ComposeProblems
+) -> list[ComposeTmpfs]:
+    """Read ``tmpfs``, one entry or a list, as memory-backed scratch directories (see :func:`_tmpfs_entry`).
+
+    ``security`` is the same service's restrictions, which decide whether ``nosuid`` and ``nodev`` already hold.
+    """
+    if value is None:
+        return []
+    entries = value if isinstance(value, list) else [value]
+
+    mounts: list[ComposeTmpfs] = []
+    for index, entry in enumerate(entries):
+        mount = _tmpfs_entry(entry, f"{path}[{index}]", security, problems)
+        if mount is None:
+            continue
+        if any(existing.mount_path == mount.mount_path for existing in mounts):
+            problems.invalid(f"{path}[{index}]", f"{mount.mount_path} is mounted twice")
+            continue
+        mounts.append(mount)
+    return mounts

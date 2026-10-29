@@ -14,6 +14,8 @@ network policy, and an ``execd-installer`` init container. Kubernetes does all t
 * ``run_once`` services become plain init containers, which must exit 0 before the next starts.
 * ``after_main`` services become regular containers that start next to ``sandbox``.
 * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
+* Each container's ``security`` narrows its ``securityContext``, and each ``tmpfs`` becomes a
+  memory-backed ``emptyDir`` mounted only in that container.
 
 Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
 """
@@ -28,7 +30,9 @@ from nhx_sandbox.harbor_opensandbox_services import (
     ComposeServices,
     Readiness,
     SandboxAgentBundle,
+    Security,
     Service,
+    Tmpfs,
     VolumeMount,
 )
 
@@ -67,6 +71,47 @@ def _probe(readiness: Readiness, failure_threshold: int) -> dict[str, Any]:
 def _mounts(mounts: list[VolumeMount]) -> list[dict[str, Any]]:
     """Container ``volumeMounts`` for spec mounts; each spec volume is the pod volume ``nemo-vol-<name>``."""
     return [{"name": f"nemo-vol-{m.name}", "mountPath": m.mount_path, "readOnly": m.read_only} for m in mounts]
+
+
+def _restrict(container: dict[str, Any], security: Security | None) -> None:
+    """Narrow ``container``'s ``securityContext`` by ``security``, keeping what it already sets.
+
+    Capabilities already dropped stay dropped, and any already added (``main``'s ``SYS_PTRACE``) stay added:
+    Kubernetes drops first, then adds, as Docker does with ``cap_drop: [ALL]`` and ``cap_add``.
+    """
+    if security is None:
+        return
+    context: dict[str, Any] = container.setdefault("securityContext", {})
+    if security.run_as_user is not None:
+        context["runAsUser"] = security.run_as_user
+    if security.run_as_group is not None:
+        context["runAsGroup"] = security.run_as_group
+    if security.read_only_root_filesystem:
+        context["readOnlyRootFilesystem"] = True
+    if security.no_new_privileges:
+        context["allowPrivilegeEscalation"] = False
+    if security.drop_capabilities:
+        capabilities = context.setdefault("capabilities", {})
+        capabilities["drop"] = sorted(set(capabilities.get("drop") or []) | set(security.drop_capabilities))
+
+
+def _tmpfs_volume_name(container: str, index: int) -> str:
+    """The pod volume for a container's ``index``-th tmpfs; ``Name`` and ``MAX_TMPFS_MOUNTS`` keep it within 63."""
+    return f"nemo-t{index}-{container}"
+
+
+def _add_tmpfs(pod_spec: dict[str, Any], container: dict[str, Any], tmpfs: list[Tmpfs]) -> None:
+    """Mount each of ``tmpfs`` into ``container`` as its own memory-backed ``emptyDir``.
+
+    Kubernetes creates an ``emptyDir`` with mode 0777, so Compose's usual ``mode=1777`` loses only its sticky bit.
+    """
+    for index, mount in enumerate(tmpfs):
+        name = _tmpfs_volume_name(container["name"], index)
+        empty_dir: dict[str, Any] = {"medium": "Memory"}
+        if mount.size_limit is not None:
+            empty_dir["sizeLimit"] = mount.size_limit
+        pod_spec.setdefault("volumes", []).append({"name": name, "emptyDir": empty_dir})
+        container.setdefault("volumeMounts", []).append({"name": name, "mountPath": mount.mount_path})
 
 
 def service_container(svc: Service, image_pull_policy: str) -> dict[str, Any]:
@@ -108,6 +153,7 @@ def service_container(svc: Service, image_pull_policy: str) -> dict[str, Any]:
             container["startupProbe"] = _probe(svc.readiness, STARTUP_PROBE_FAILURES)
     if svc.role != "run_once" and svc.readiness is not None:
         container["readinessProbe"] = _probe(svc.readiness, READINESS_PROBE_FAILURES)
+    _restrict(container, svc.security)
     return container
 
 
@@ -222,7 +268,9 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
 
     # Services in spec order: init containers start one at a time, which gives depends_on order.
     for svc in services.services:
-        (containers if svc.role == "after_main" else init).append(service_container(svc, image_pull_policy))
+        container = service_container(svc, image_pull_policy)
+        _add_tmpfs(pod_spec, container, svc.tmpfs)
+        (containers if svc.role == "after_main" else init).append(container)
 
     # Shared volumes and per-service /dev/shm are emptyDirs, so they live and die with the pod.
     volumes = pod_spec.setdefault("volumes", [])
@@ -233,7 +281,8 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
         if s.shm_size is not None
     )
 
-    # main is the stock sandbox container; it only gains mounts, the one allowed capability and its working directory.
+    # main is the stock sandbox container; it only gains mounts, the one allowed capability, its working directory and
+    # the restrictions the compose file puts on it.
     sandbox = containers[0]
     if services.main.working_dir is not None:
         # The stock server sets none, so the image's WORKDIR applied; Compose's `working_dir` replaces it.
@@ -243,6 +292,8 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
     if services.main.add_capabilities:
         caps = sandbox.setdefault("securityContext", {}).setdefault("capabilities", {})
         caps["add"] = sorted(set(caps.get("add") or []) | set(services.main.add_capabilities))
+    _restrict(sandbox, services.main.security)
+    _add_tmpfs(pod_spec, sandbox, services.main.tmpfs)
 
     # Every container shares the pod network, so each Compose name is 127.0.0.1.
     pod_spec.setdefault("hostAliases", []).append({"ip": "127.0.0.1", "hostnames": [*services.names(), "main"]})

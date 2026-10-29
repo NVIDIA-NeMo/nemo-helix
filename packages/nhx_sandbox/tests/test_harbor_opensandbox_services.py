@@ -192,3 +192,47 @@ def test_a_spec_may_have_no_services_and_then_needs_the_main_settings_feature() 
 def test_main_s_working_dir_must_be_absolute() -> None:
     with pytest.raises(ValidationError):
         parse_compose_services(_spec(main={"working_dir": "app"}))
+
+
+def test_security_and_tmpfs_round_trip_and_need_the_security_feature() -> None:
+    security = {
+        "run_as_user": 1000,
+        "run_as_group": 1000,
+        "read_only_root_filesystem": True,
+        "drop_capabilities": ["ALL"],
+        "no_new_privileges": True,
+    }
+    spec = parse_compose_services(
+        _spec(
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "security": {"drop_capabilities": ["NET_RAW"]},
+                "tmpfs": [{"mount_path": "/run"}],
+            },
+            main={"security": security, "tmpfs": [{"mount_path": "/tmp", "size_limit": "32Mi"}]},
+        )
+    )
+
+    assert ComposeServices.model_validate_json(spec.to_json()) == spec
+    assert spec.uses_security_settings()
+    assert not parse_compose_services(_spec()).uses_security_settings()
+
+
+@pytest.mark.parametrize(
+    ("main", "message"),
+    [
+        ({"security": {"run_as_group": 1000}}, "run_as_group needs run_as_user"),
+        ({"security": {"run_as_user": -1}}, "greater than or equal to 0"),
+        ({"security": {"drop_capabilities": ["net_raw"]}}, "String should match pattern"),
+        ({"tmpfs": [{"mount_path": f"/t{index}"} for index in range(11)]}, "at most 10 tmpfs mounts"),
+        ({"tmpfs": [{"mount_path": "tmp"}]}, "String should match pattern"),
+        (
+            {"tmpfs": [{"mount_path": "/data"}], "volume_mounts": [{"name": "shared", "mount_path": "/data"}]},
+            "'/data' is used by more than one mount",
+        ),
+    ],
+)
+def test_invalid_security_and_tmpfs_are_rejected(main: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        parse_compose_services(_spec(volumes=["shared"], main=main))
