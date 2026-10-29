@@ -14,7 +14,6 @@ from nemo_agents_plugin.fabric.streaming import (
     FabricStreamResultError,
     StreamingMethod,
     extract_assistant_delta,
-    extract_assistant_text_delta,
     extract_output_reasoning,
     iter_fabric_assistant_deltas,
     iter_fabric_chat_completion_sse,
@@ -160,11 +159,14 @@ async def test_iter_fabric_chat_completion_sse_preserves_native_chunks() -> None
         ),
     ],
 )
-def test_extract_assistant_text_delta_from_known_text_shapes(
+def test_extract_assistant_delta_from_known_text_shapes(
     record: dict[str, object],
     expected: str,
 ) -> None:
-    assert extract_assistant_text_delta(record) == expected
+    delta = extract_assistant_delta(record)
+
+    assert delta is not None
+    assert delta.content == expected
 
 
 @pytest.mark.parametrize(
@@ -203,8 +205,8 @@ def test_extract_assistant_text_delta_from_known_text_shapes(
         },
     ],
 )
-def test_extract_assistant_text_delta_skips_non_assistant_records(record: dict[str, object]) -> None:
-    assert extract_assistant_text_delta(record) is None
+def test_extract_assistant_delta_skips_non_assistant_records(record: dict[str, object]) -> None:
+    assert extract_assistant_delta(record) is None
 
 
 @pytest.mark.asyncio
