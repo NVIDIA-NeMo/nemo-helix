@@ -172,11 +172,20 @@ def test_task_without_a_compose_file_is_single_container(tmp_path: Path) -> None
     assert compose_services_kwarg(task) is None
 
 
-def test_file_that_only_overrides_main_parses_but_has_no_services_to_run(tmp_path: Path) -> None:
-    task = _parsed(tmp_path, "services:\n  main:\n    environment:\n      A: b\n")
-    assert task.services == {} and task.main.env == {"A": "b"}
-    with pytest.raises(ComposeError, match="compose_override_only"):
-        to_compose_services(task)
+def test_a_file_that_only_changes_main_gives_a_spec_with_no_services(tmp_path: Path) -> None:
+    # What swe-lancer's compose files do: start `main` with the task's own command, in its own directory.
+    compose = (
+        "services:\n  main:\n    command: /app/tests/run.sh\n    working_dir: /app\n    environment: [ISSUE_ID=1]\n"
+    )
+    services = to_compose_services(_parsed(tmp_path, compose))
+    assert services.services == []
+    assert services.main.command == ["/app/tests/run.sh"]
+    assert (services.main.working_dir, services.main.env) == ("/app", {"ISSUE_ID": "1"})
+
+
+def test_harbor_s_own_keep_alive_command_is_not_carried_as_main_s(tmp_path: Path) -> None:
+    services = to_compose_services(_parsed(tmp_path, "services:\n  main:\n    environment: {A: b}\n"))
+    assert services.main.command is None and services.main.env == {"A": "b"}
 
 
 AGENT_DOCKERFILE = 'FROM scratch\nENTRYPOINT ["/agent"]\n'
@@ -1108,10 +1117,22 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
     ("compose", "code", "names"),
     [
         pytest.param(
-            "services:\n  main:\n    command: [python, app.py]\n  db:\n    image: redis\n",
+            "services:\n  main:\n    command: []\n",
             "compose_unsupported",
-            "services.main.command",
-            id="mains-own-command",
+            "services.main.command: an empty command",
+            id="mains-empty-command",
+        ),
+        pytest.param(
+            "services:\n  main:\n    command: null\n",
+            "compose_unsupported",
+            "services.main.command: null",
+            id="mains-null-command",
+        ),
+        pytest.param(
+            "services:\n  main:\n    working_dir: app\n",
+            "compose_unsupported",
+            "services.main.working_dir: a relative working directory",
+            id="mains-relative-working-dir",
         ),
         pytest.param(
             "services:\n  a: {image: x, depends_on: [b]}\n  b: {image: x, depends_on: [a]}\n",

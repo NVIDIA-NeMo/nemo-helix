@@ -501,6 +501,22 @@ def parse_platform(value: Any, path: str, problems: ComposeProblems) -> str | No
     return value or None
 
 
+def parse_working_dir(value: Any, path: str, problems: ComposeProblems) -> str | None:
+    """Read ``working_dir`` as an absolute path in the container; None when it sets none.
+
+    A relative one would be resolved against the image's ``WORKDIR``, which isn't known here, so it's unsupported.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        problems.invalid(path, "expected a path")
+        return None
+    if not value.startswith("/"):
+        problems.unsupported(f"{path}: a relative working directory")
+        return None
+    return value
+
+
 def parse_capabilities(
     raw_service: Mapping[str, Any], path: str, problems: ComposeProblems
 ) -> list[Literal["SYS_PTRACE"]]:

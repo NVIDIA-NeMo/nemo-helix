@@ -50,6 +50,25 @@ class Provenance(BaseModel):
     upstream: UpstreamImage | None = Field(default=None, description="For a copy, the image it copies.")
 
 
+class ImageRuntimeConfig(BaseModel):
+    """How the image starts by default, from its image config, including what it inherits from its base image.
+
+    A runtime that replaces the container's entrypoint, such as OpenSandbox, reads this to start the image's own.
+    """
+
+    entrypoint: list[str] | None = Field(
+        default=None, max_length=256, description="The image's `ENTRYPOINT`, or None when it has none."
+    )
+    cmd: list[str] | None = Field(
+        default=None,
+        max_length=256,
+        description="The image's `CMD`: the default arguments to its `ENTRYPOINT`, or None when it has none.",
+    )
+    working_dir: str | None = Field(
+        default=None, max_length=4096, description="The image's `WORKDIR`, or None when it sets none."
+    )
+
+
 class ContainerImage(NemoEntity, entity_type="container_image"):
     """One image. ``name`` is ``<set>-<revision>.<spec>``, or ``<set>-<revision>`` for the set's unnamed spec."""
 
@@ -65,6 +84,13 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
         default=None,
         pattern=DIGEST_PATTERN,
         description="The manifest digest the push step pushed under the system tag, and signed.",
+    )
+    runtime_config: ImageRuntimeConfig | None = Field(
+        default=None,
+        description=(
+            "How the image starts by default, read from its config when it became `ready`. None for an image "
+            "completed before Builder recorded it, or whose config couldn't be read."
+        ),
     )
 
     # In every response, but never stored: the entity store writes a row without its computed fields.

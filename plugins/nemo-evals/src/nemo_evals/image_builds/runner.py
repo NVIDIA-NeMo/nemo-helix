@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
+from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
 from nemo_builder_plugin.schema import FileSetSource, ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
@@ -266,7 +267,7 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
     builder_image = submitted.images[0]
     image.builder_image = builder_image.name
     image.build_job = submitted.job
-    _apply(image, builder_image.status, builder_image.image_ref, builder_image.status_detail)
+    _apply(image, builder_image)
 
 
 async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
@@ -301,18 +302,20 @@ async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
             changed = True
             continue
         before = image.status
-        _apply(image, current.status, current.image_ref, current.status_detail)
+        _apply(image, current)
         changed = changed or image.status != before
     return changed
 
 
-def _apply(image: BuildImage, status: str, image_ref: str | None, detail: str | None) -> None:
-    if status == "ready":
+def _apply(image: BuildImage, builder_image: ContainerImage) -> None:
+    """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready."""
+    if builder_image.status == "ready":
         image.status = "ready"
-        image.image_ref = image_ref
-    elif status == "failed":
+        image.image_ref = builder_image.image_ref
+        image.runtime_config = builder_image.runtime_config
+    elif builder_image.status == "failed":
         image.status = "failed"
-        image.error = detail or "the Builder build failed"
+        image.error = builder_image.status_detail or "the Builder build failed"
     else:
         image.status = "building"
 

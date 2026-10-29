@@ -9,6 +9,7 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar, Literal
 
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry, platform_name
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
@@ -63,6 +64,13 @@ class BuildImage(BaseModel):
     build_job: str | None = Field(default=None, description="The Builder job building this image.")
     image_ref: str | None = Field(
         default=None, description="`<registry>/<repository>@<digest>` once the image is ready."
+    )
+    runtime_config: ImageRuntimeConfig | None = Field(
+        default=None,
+        description=(
+            "How the image starts by default (its `ENTRYPOINT`, `CMD` and `WORKDIR`), once it's ready. None when "
+            "Builder didn't record it, as for an image it built before it started to."
+        ),
     )
     error: str | None = None
 
