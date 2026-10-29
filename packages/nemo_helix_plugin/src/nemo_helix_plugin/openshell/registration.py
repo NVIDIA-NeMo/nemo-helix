@@ -12,9 +12,7 @@ import time
 import uuid
 from collections.abc import Callable
 
-from nemo_helix_plugin.openshell.authorization import authorize_secret_binding
 from nemo_helix_plugin.openshell.types import GatewayWorkload
-from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 MAX_TICKET_LIFETIME = 300
@@ -66,28 +64,19 @@ class RegistrationTickets:
         self.gateway_id = gateway_id
         self.clock = clock
 
-    async def issue(
+    def sign(
         self,
         scope: BindingScope,
         *,
-        requester_secrets: AsyncSecretsClient,
         binding_lifetime: int = MAX_BINDING_LIFETIME,
     ) -> SecretStr:
-        """Check value-access permission without fetching the value, then issue.
+        """Sign a scope already authorized by the owning trusted backend.
 
-        The caller separately authorizes the workload and injection profile.
-        Preflight checks creator permission and secret existence; auth-disabled
-        bindings check existence only.
+        This operation performs no platform calls. The backend must check the
+        creator, secret, workload and injection profile before signing.
         """
         if scope.gateway_id != self.gateway_id or not 1 <= binding_lifetime <= MAX_BINDING_LIFETIME:
             raise RegistrationDenied("Invalid registration scope or lifetime.")
-        await authorize_secret_binding(
-            workspace=scope.secret_workspace,
-            name=scope.secret_name,
-            principal_id=scope.principal_id,
-            secrets_client=requester_secrets,
-            service_name="jobs" if scope.workload is not None and scope.workload.kind == "job" else "deployments",
-        )
         now = int(self.clock())
         claims = TicketClaims(
             **scope.model_dump(),

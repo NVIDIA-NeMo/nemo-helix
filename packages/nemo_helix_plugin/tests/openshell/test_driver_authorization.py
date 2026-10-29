@@ -66,11 +66,6 @@ async def test_service_bearer_requires_signed_creator_permission(
         workspace="driver-team", body=HelixSecretCreateRequest(name="bound-token", value=SecretStr("synthetic-secret"))
     )
     tickets = RegistrationTickets(b"synthetic-registration-key-32-bytes", "gateway")
-    requester = AsyncSecretsClient.from_client(
-        context.async_client.with_headers(
-            Principal(id="service:deployments", on_behalf_of=TEST_ADMIN_EMAIL).get_headers()
-        )
-    )
     scope = BindingScope(
         gateway_id="gateway",
         gateway_workspace="gateway-team",
@@ -81,15 +76,14 @@ async def test_service_bearer_requires_signed_creator_permission(
         job_id="sandbox",
         principal_id=TEST_ADMIN_EMAIL,
     )
-    ticket = await tickets.issue(scope, requester_secrets=requester)
+    ticket = tickets.sign(scope)
     registry = BindingRegistry(tmp_path / "bindings.db", tickets)
     owner = ProviderOwner(workspace="gateway-team", provider="provider", provider_id="uuid", credential_key="API_TOKEN")
     handle = registry.register(owner, ticket)
     # Issue a second signed binding while permission is available; the changed
     # creator has no current read grant when the driver resolves it.
     denied_scope = scope.model_copy(update={"principal_id": "user-without-permission"})
-    with patch("nemo_helix_plugin.openshell.authorization._require_creator_permission"):
-        denied_handle = registry.register(owner, await tickets.issue(denied_scope, requester_secrets=requester))
+    denied_handle = registry.register(owner, tickets.sign(denied_scope))
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     key_file = tmp_path / "token-key.pem"
     key_file.write_bytes(

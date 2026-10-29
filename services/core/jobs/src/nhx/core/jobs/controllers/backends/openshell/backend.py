@@ -93,10 +93,11 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
 _OPENSHELL_IMPORT_ERROR: ImportError | None = None
 try:
     import grpc
-    from nemo_helix_plugin.openshell.provisioning import ProviderProvisioner
     from nhx.core.jobs.controllers.backends.openshell.sandbox_client import JobsSandboxClient
     from openshell import SandboxError, TlsConfig
     from openshell._proto import openshell_pb2 as pb
+
+    from .provisioning import JobProviderProvisioner
 except ImportError as exc:
     _OPENSHELL_IMPORT_ERROR = exc
 
@@ -693,7 +694,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             await provisioner.cleanup_unused()
 
     @asynccontextmanager
-    async def _provider_provisioner(self) -> AsyncGenerator[ProviderProvisioner]:
+    async def _provider_provisioner(self) -> AsyncGenerator[JobProviderProvisioner]:
         config = self._executor_config.gateway_credentials
         if config is None:
             raise ValueError("Gateway credentials are not configured.")
@@ -711,7 +712,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         # Jobs invokes provider operations with asyncio.run; never retain a
         # channel across those event loops or create it on the controller thread.
         async with channel:
-            yield ProviderProvisioner(
+            yield JobProviderProvisioner(
                 config, self._workspace, channel, timeout=self._executor_config.request_timeout_seconds
             )
 

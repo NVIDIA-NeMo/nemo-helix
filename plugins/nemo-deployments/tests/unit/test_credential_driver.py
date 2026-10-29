@@ -112,13 +112,11 @@ class Harness:
         return httpx.Response(200, json=payload)
 
     async def issue(self) -> SecretStr:
-        return await self.tickets.issue(self.scope, requester_secrets=self.client)
+        return self.tickets.sign(self.scope)
 
 
 @pytest.fixture
-def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
-    # Permission integration has its own tests; these exercise tickets and gRPC.
-    monkeypatch.setattr("nemo_helix_plugin.openshell.authorization._require_creator_permission", AsyncMock())
+def harness(tmp_path: Path) -> Harness:
     return Harness(tmp_path)
 
 
@@ -262,7 +260,7 @@ async def test_existing_handle_cannot_be_borrowed_from_another_provider(harness:
     old = harness.registry.register(harness.owner, await harness.issue())
     other_scope = harness.scope.model_copy(update={"provider": "other-provider"})
     other = harness.owner.model_copy(update={"provider": "other-provider", "provider_id": "other-uuid"})
-    ticket = await harness.tickets.issue(other_scope, requester_secrets=harness.client)
+    ticket = harness.tickets.sign(other_scope)
     with pytest.raises(RegistrationDenied):
         harness.registry.register(other, ticket, existing_handle=old)
 
