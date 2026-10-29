@@ -30,10 +30,7 @@
       "agent": {"type": "string", "minLength": 1},
       "target_agent": {"type": "string", "minLength": 1},
       "ethos": {"type": "string", "minLength": 1},
-      "workspace": {"type": "string", "minLength": 1},
       "base_url": {"type": "string", "minLength": 1},
-      "since": {"type": "string", "format": "date-time"},
-      "evaluation_id": {"type": "string", "minLength": 1},
       "enable_observability": {"type": "boolean", "default": true},
       "default_model": {"type": "string", "minLength": 1},
       "fast_model": {"type": "string", "minLength": 1}
