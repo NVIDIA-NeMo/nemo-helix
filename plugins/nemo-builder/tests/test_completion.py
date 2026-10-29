@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from nemo_builder_plugin import completion as completion_module
 from nemo_builder_plugin.completion import Caller, CompletionConflict, caller_refusal, complete, current_caller
-from nemo_builder_plugin.entities import ContainerImage, Provenance, UpstreamImage
+from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance, UpstreamImage
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityConflictError
 
@@ -93,6 +93,14 @@ class TestComplete:
         ready = await _complete(rows)
         assert (ready.status, ready.digest) == ("ready", DIGEST)
         assert rows.writes == 1
+
+    @pytest.mark.asyncio
+    async def test_how_the_image_starts_is_written_with_it(self) -> None:
+        rows = FakeRows(_row())
+        runtime_config = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app")
+        ready = await complete(rows, workspace="ws-a", name="build-1-0", digest=DIGEST, runtime_config=runtime_config)
+        assert ready.runtime_config == runtime_config
+        assert rows.row.runtime_config == runtime_config
 
     @pytest.mark.asyncio
     async def test_the_same_digest_again_is_accepted_and_writes_nothing(self) -> None:

@@ -175,7 +175,7 @@ async def build(entity_store, task: str, status: str, *, rebuild: bool = False) 
         ref = f"registry.invalid/{task}@sha256:{'d' * 64}"
         record.images = [
             BuildImage(
-                role="main", source="dockerfile", status="ready", image_ref=ref, builder_image="b", build_job="j"
+                type="main", source="dockerfile", status="ready", image_ref=ref, builder_image="b", build_job="j"
             )
         ]
     await entity_store.update(record)

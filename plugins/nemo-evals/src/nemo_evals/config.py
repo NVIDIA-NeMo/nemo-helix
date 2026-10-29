@@ -131,7 +131,11 @@ class RunControllerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    interval_seconds: float = Field(default=15.0, gt=0, description="Time between controller cycles.")
+    interval_seconds: float = Field(
+        default=20.0,
+        gt=0,
+        description="Time between controller cycles. The controller reports itself unhealthy after 3 intervals without one.",
+    )
     max_cluster_concurrent_jobs: int = Field(
         default=50, gt=0, description="Task Jobs at once across every run in every workspace."
     )
@@ -158,6 +162,23 @@ class RunControllerConfig(BaseModel):
             "How long after a task Job create with an unknown outcome a 404 or stepless read of the Job is "
             "conclusive: Jobs keeps saving after the controller's client times out. At least 60 s, twice the "
             "controller's 30 s create timeout."
+        ),
+    )
+    settle_concurrency: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Open runs settled at once in a cycle's settle phase (reads, settles, stops, bundles). It takes no slot, "
+            "so the caps don't depend on it; 1 settles them one after another."
+        ),
+    )
+    max_creates_per_cycle: int = Field(
+        default=10,
+        ge=2,
+        description=(
+            "Task Job creates a cycle attempts, new grants and retries of creates whose Job wasn't found alike. "
+            "Retries get up to half while grants are due, and the rest when none are. At least 2, so retries "
+            "always get one."
         ),
     )
 

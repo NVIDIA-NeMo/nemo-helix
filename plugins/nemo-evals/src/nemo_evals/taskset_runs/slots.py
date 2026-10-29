@@ -3,7 +3,7 @@
 
 """Task-Job slots: how the run controller counts its caps and hands out free slots.
 
-Phase 1 of each cycle settles every open run and reports a :class:`RunTally`; phase 2 hands out what is left
+Each cycle's settle phase settles every open run and reports a :class:`RunTally`; the grant phase hands out what is left
 with :func:`allocate`: each free slot goes to the creator holding the fewest, and within that creator to its
 oldest run that is below its caps and has a queued task.
 """
@@ -18,7 +18,7 @@ from nemo_evals.taskset_runs.specs import TasksetRunPlan
 
 @dataclass(frozen=True)
 class RunTally:
-    """What phase 1 learned about one open run."""
+    """What the settle phase learned about one open run."""
 
     run: TasksetRunEntity
     creator: str  # run.created_by or DEVELOPMENT_CALLER
@@ -36,10 +36,10 @@ def task_slots(tallies: list[RunTally], stuck_by_creator: Counter[str], config: 
 def allocate(
     tallies: list[RunTally], available_slots: int, creator_cap: int | None, stuck_by_creator: Counter[str]
 ) -> list[str]:
-    """Phase 2: each free slot goes to the creator holding the fewest; that creator's oldest eligible run takes it.
+    """Grant phase: each free slot goes to the creator holding the fewest; that creator's oldest eligible run takes it.
 
     Returns one run per slot, by entity id (run names are unique only within a workspace), in grant order.
-    Registration follows that order, so ending phase 2 at an ambiguous create leaves the creates made so far
+    Registration follows that order, so ending the grant phase at an ambiguous create leaves the creates made so far
     spread across creators (A, B, A, …), not one run's batch.
 
     Tallies come oldest run first (list_open_runs order). Pending creates (intents whose Job wasn't found) are

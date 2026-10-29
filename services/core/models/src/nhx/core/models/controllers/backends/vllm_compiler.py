@@ -131,12 +131,15 @@ def compute_tensor_parallel_size(
 def compile_vllm_args(
     view: DeploymentConfigView,
     model_entity: Optional[ModelEntity],
+    *,
+    tool_call_plugin_path: str | None = None,
 ) -> list[str]:
     """Build the ``vllm serve`` argument vector for the container.
 
     The image's entrypoint is ``vllm serve``; these are the args appended to it.
     ``additional_args`` are appended verbatim, and any flag the user set there is
-    not auto-injected by the compiler.
+    not auto-injected by the compiler. ``tool_call_plugin_path`` is the backend's
+    materialized in-container path, never the configured plugin fileset reference.
     """
     user_flags = _user_set_args(view.additional_args)
     args: list[str] = [_model_path(model_entity)]
@@ -152,6 +155,35 @@ def compile_vllm_args(
 
     if view.chat_template and "--chat-template" not in user_flags:
         args.extend(["--chat-template", view.chat_template])
+
+    model_tool_config = getattr(getattr(model_entity, "spec", None), "tool_call_config", None)
+    tool_call_parser = getattr(model_tool_config, "tool_call_parser", None)
+    tool_call_plugin = getattr(model_tool_config, "tool_call_plugin", None)
+    auto_tool_choice = getattr(model_tool_config, "auto_tool_choice", None)
+    if view.tool_call_config is not None:
+        if view.tool_call_config.tool_call_parser is not None:
+            tool_call_parser = view.tool_call_config.tool_call_parser
+        if view.tool_call_config.tool_call_plugin is not None:
+            tool_call_plugin = view.tool_call_config.tool_call_plugin
+        if view.tool_call_config.auto_tool_choice is not None:
+            auto_tool_choice = view.tool_call_config.auto_tool_choice
+
+    if tool_call_plugin and not tool_call_plugin_path and "--tool-parser-plugin" not in user_flags:
+        logger.warning(
+            "vLLM tool-call plugin is configured but has no mounted path; skipping inferred parser and auto tool choice"
+        )
+        tool_call_parser = None
+        auto_tool_choice = False
+    if tool_call_plugin_path and "--tool-parser-plugin" not in user_flags:
+        args.extend(["--tool-parser-plugin", tool_call_plugin_path])
+    if tool_call_parser and "--tool-call-parser" not in user_flags:
+        args.extend(["--tool-call-parser", tool_call_parser])
+    # vLLM uses BooleanOptionalAction, so an explicit raw negative flag also wins.
+    if auto_tool_choice and not {"--enable-auto-tool-choice", "--no-enable-auto-tool-choice"} & user_flags:
+        if tool_call_parser or "--tool-call-parser" in user_flags:
+            args.append("--enable-auto-tool-choice")
+        else:
+            logger.warning("Skipping inferred vLLM auto tool choice because no tool-call parser is configured")
 
     if view.lora_enabled and "--enable-lora" not in user_flags:
         args.append("--enable-lora")

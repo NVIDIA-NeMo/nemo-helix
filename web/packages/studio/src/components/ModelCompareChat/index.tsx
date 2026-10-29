@@ -71,6 +71,7 @@ export const ModelCompareChat: FC<ModelCompareChatProps> = ({
       roleLabel: PANEL_ROLE_LABELS[roleColor],
       isSinglePanel,
       locked: !!m.locked,
+      promptData: m.promptData,
     };
   });
 

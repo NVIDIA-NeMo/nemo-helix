@@ -4,28 +4,26 @@
 const console = require("node:console");
 
 function resolveRelease(version) {
-  const match = /^(\d+\.\d+\.\d+)(?:-(nightly-\d{14}|(?:a|b|rc)\d+))?$/.exec(
+  const match = /^(\d+\.\d+\.\d+)(?:-(rc-\d{14}|(?:a|b|rc)\d+))?$/.exec(
     version,
   );
   if (!match || match[0] !== version)
     throw new Error(
-      "Use a full chart version, e.g. 0.8.0 or 0.8.0-nightly-20261021000000",
+      "Use a full chart version, e.g. 0.8.0 or 0.8.0-rc-20261021000000",
     );
   const [, base, suffix] = match;
-  const nightly = suffix?.startsWith("nightly-");
+  const rc = suffix?.startsWith("rc-");
   return {
     chart_version: version,
-    wheel_version: nightly
-      ? `${base}.dev${suffix.slice(8)}`
+    wheel_version: rc
+      ? `${base}.dev${suffix.slice(3)}`
       : `${base}${suffix || ""}`,
-    wheel_index: nightly
-      ? "https://pypi.nvidia.com"
-      : "https://pypi.org/simple",
-    image_registry: nightly
+    wheel_index: rc ? "https://pypi.nvidia.com" : "https://pypi.org/simple",
+    image_registry: rc
       ? "ghcr.io/nvidia-nemo/nemo-helix"
       : "nvcr.io/nvidia/nemo-helix",
-    image_tag: nightly ? suffix : version,
-    chart_repository: nightly
+    image_tag: rc ? suffix : version,
+    chart_repository: rc
       ? "oci://ghcr.io/nvidia-nemo/nemo-helix/nemo-helix"
       : "https://helm.ngc.nvidia.com/nvidia/nemo-helix",
   };
@@ -34,7 +32,7 @@ function resolveRelease(version) {
 function smokeEligible(env) {
   return (
     env.RELEASE_SCOPE === "all" &&
-    ["stable", "nightly"].includes(env.RELEASE_TYPE) &&
+    ["stable", "rc"].includes(env.RELEASE_TYPE) &&
     env.POLL_RESULT === "success" &&
     env.DRY_RUN !== "true" &&
     env.ACT !== "true"

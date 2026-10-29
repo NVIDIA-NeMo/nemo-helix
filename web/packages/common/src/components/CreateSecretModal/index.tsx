@@ -16,14 +16,24 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
-import { ENTITY_NAME_HELP, entityNameSchema } from '@nemo/common/src/utils/entityName';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { Stack } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const secretFormSchema = z.object({
-  name: entityNameSchema('Name'),
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value ? 'Name must contain at least one letter or number.' : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
   description: z.string().optional(),
   value: z.string().min(1, 'Secret value is required'),
 });
@@ -59,13 +69,18 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
     control,
     reset: resetForm,
     handleSubmit,
-    formState: { errors },
+    watch,
+    formState: { errors, touchedFields },
   } = useForm({
     resolver: zodResolver(secretFormSchema),
     defaultValues,
     disabled: pending,
-    mode: 'onChange',
+    mode: 'onBlur',
   });
+
+  const rawSecretName = watch('name');
+  const secretPreview = toValidEntityName(rawSecretName ?? '', '');
+  const nameError = touchedFields.name ? errors.name?.message : undefined;
 
   const resetAndClose = () => {
     resetForm(defaultValues);
@@ -103,8 +118,13 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
           formFieldProps={{
             slotInfo:
               'Best practice: Use lowercase letters, numbers, and hyphens only to ensure compatibility with Kubernetes naming conventions.',
-            slotHelp: ENTITY_NAME_HELP,
-            slotError: errors.name?.message,
+            slotHelp: nameError ? undefined : secretPreview ? (
+              <>
+                Your secret will be created as <span className="text-primary">{secretPreview}</span>
+              </>
+            ) : undefined,
+            slotError: nameError,
+            status: nameError ? 'error' : undefined,
           }}
         />
         <ControlledTextArea

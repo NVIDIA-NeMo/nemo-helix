@@ -3,12 +3,31 @@
 
 # Report to user
 
-After polling reaches a **terminal** status (`completed`, `error`, or `cancelled`), report using this template for **all** backends (automodel, unsloth, rl). Fill fields from the job JSON and `nemo jobs get-status`.
+After polling reaches a **terminal** status (`completed`, `error`, or `cancelled`), report using this template for **all** backends (automodel, unsloth, rl). Fill fields from the job JSON, `nemo jobs get-status`, and the base and tuned scores from `post-training-eval.md`.
+
+## Before you call the run done
+
+- [ ] The **top-level** job status is `completed`, not only its steps.
+- [ ] Final losses come from the `metrics` history; for GRPO, the reward trend and the health series in **RL (GRPO) example**.
+- [ ] Every `WARN:` or `ALERT:` line the poll script printed is in **Notes**, with its value.
+- [ ] The output is registered: the adapter is listed under `nemo models get <model-entity>`, or the model entity `<output.name>` exists.
+- [ ] The tuned model answers through the gateway (`post-training-eval.md` § **3. Score the tuned model**).
+- [ ] SFT and LoRA: base and tuned were scored on the frozen test split, or the eval failure is reported on its own.
 
 ## Result template
 
+Lead with the comparison; job details follow.
+
 ```markdown
 ## Fine-tune result
+
+**Base vs tuned on the frozen test split** (<n> rows, <metric>)
+
+| Model | <metric> |
+|---|---|
+| Base `default/<model-entity>` | <base score> |
+| Tuned `<tuned model ID>` | <tuned score> |
+| **Improvement** | <tuned − base> |
 
 - **Job:** <automodel-|unsloth-|rl-><id>
 - **Backend:** <automodel|unsloth|rl>
@@ -35,6 +54,7 @@ For **rl (DPO)** the output is a **full-weight model entity** (no adapter): labe
 | **Status** | Top-level `status` from `nemo jobs get-status` — not step-level status |
 | **Final train loss** | Last entry in `status_details.metrics.train_loss` (or nested under a step's `status_details.metrics`). Use the **last** `value` in the list — not `status_details.train_loss` alone (that is the most recent logged step, which may differ from epoch-average loss on some backends). Round to 3 decimal places. |
 | **Final validation loss** | Last entry in `status_details.metrics.val_loss`. If the list is empty, report `n/a (no validation run)` and note whether validation data was configured. Automodel validates once per epoch by default. Unsloth validates once per epoch when `dataset.validation_path` is set and `schedule.eval_steps` is omitted (platform default: `max(1, effective_steps - 1)`). |
+| **Base vs tuned** | The two nemo-evals runs (`post-training-eval.md`). If scoring failed, replace the table with `Evaluation failed: <reason>`; the training result stands. GRPO: validation reward at start and end instead |
 | **Notes** | See **Notes by status** below |
 
 **Metrics extraction** — after polling, always run `nemo jobs get-status <job-id>` and read `status_details.metrics` (every backend accumulates time series there). Include the final losses in the report even when status is `error` if training completed before the failure (e.g. entity registration failed after upload).
@@ -45,7 +65,7 @@ For **rl (DPO)** the output is a **full-weight model entity** (no adapter): labe
 
 | Status | Notes |
 |--------|-------|
-| `completed` | Brief success summary. LoRA (`save_method: lora`): adapter registered on base model entity. Full SFT / merged checkpoint: new model entity at `output.name`. When `metrics.train_loss` has ≥2 entries, add a loss-drop sentence: *Loss dropped from \<first value, 1 dp\> at step 1 to \<last value, 3 dp\> at step \<N\>; validation loss was \<val or n/a\>.* Append **Using the adapter** (LoRA) or **Using the fine-tuned model** (full SFT / merged) with discovered provider name and concrete gateway URLs (see below). |
+| `completed` | Brief success summary. LoRA (`save_method: lora`): adapter registered on base model entity. Full SFT / merged checkpoint: new model entity at `output.name`. When `metrics.train_loss` has ≥2 entries, add a loss-drop sentence: *Loss dropped from \<first value, 1 dp\> at step 1 to \<last value, 3 dp\> at step \<N\>; validation loss was \<val or n/a\>.* Append **Using the adapter** (LoRA) or **Using the fine-tuned model** (full SFT / merged) with concrete model names (see below). |
 | `error` | Quote `error_details.message` or the failing step; note setup that succeeded before the failure (auth, dataset upload, submit). |
 | `cancelled` | Cancellation reason if available. |
 
@@ -186,104 +206,41 @@ After **Training configuration**, branch on output type:
 
 ### Using the adapter (LoRA / `save_method: lora`)
 
-**LoRA adapters only** — DPO never produces an adapter; for full-weight output use **Using the fine-tuned model** below. Run these discovery commands:
-
-1. `nemo models get <model-entity> --workspace default` — confirm `<output.name>` appears under `adapters` with `enabled: true`.
-2. `nemo inference providers list --workspace default -f json` — pick a **READY** provider whose `served_models` includes `default/<model-entity>` (base entity). Record its `name` as `<provider>` (often matches the deployment name).
-
-On a deployment with `lora_enabled: true`, the adapter is **hot-reloaded automatically** — no new deployment, deployment update, or provider reconfiguration before inference or post-training eval. Append this section with **concrete URLs and provider name** from discovery:
+**LoRA adapters only** — DPO never produces an adapter; for full-weight output use **Using the fine-tuned model** below. Confirm `<output.name>` appears under `adapters` with `enabled: true` in `nemo models get <model-entity> --workspace default`, then append:
 
 ```markdown
 ### Using the adapter
 
-The adapter `<output.name>` is registered on `default/<model-entity>`. Weights are hot-reloaded on LoRA-enabled deployments serving the **base** entity — no new deployment or provider update after training.
+The adapter `<output.name>` is registered on `default/<model-entity>` and served by the base model's LoRA-enabled deployment. Call either one on the gateway's OpenAI-compatible route, `<gateway>/apis/inference-gateway/v2/workspaces/default/openai/-/v1` (`nemo inference get-url` prints it), naming the model by its entity ID:
 
-#### Request routing (base vs LoRA)
+| Target | Request `"model"` field |
+|--------|-------------------------|
+| Base model | `default/<model-entity>` |
+| LoRA adapter | `default/<model-entity>&adapters/default/<output.name>` |
 
-| Target | Gateway path | OpenAI base URL | Request `"model"` field |
-|--------|--------------|-----------------|-------------------------|
-| **Base** weights | model-entity | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| **LoRA adapter** | **provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>` |
-
-**Common mistake:** posting to the model-entity URL with `"model": "default--<output.name>"` still runs the **base** model. Base-vs-adapter eval will look identical until LoRA requests use the **provider** URL above. See `references/post-training-eval.md` § **Request routing (base vs LoRA)**.
-
-#### Chat inference (CHAT-trained models)
-
-Match training context at inference — send **`messages[:-1]`** (all turns except the final assistant label). Single-turn rows are just the user message; multi-turn rows keep prior user/assistant history.
-
-| Setting | Value | Why |
-|---------|-------|-----|
-| `messages` | All turns except the final assistant label from the JSONL row | Same decode path as SFT |
-| `max_tokens` | `64` for short assistant labels | Training targets are brief (e.g. MCQA choice text) |
-| `temperature` | `0` | Reproducible eval / regression checks |
-| `chat_template_kwargs.enable_thinking` | `false` for short-answer SFT on thinking models (Nemotron 3.5 Lightning, Qwen3) | Thinking mode needs extra tokens and changes output shape vs training |
-
-#### Example — LoRA adapter via provider
+Match the training context: send `messages[:-1]` from a training row (every turn but the final assistant label), with `max_tokens` 64 and `temperature` 0 for short labels, and `"chat_template_kwargs": {"enable_thinking": false}` on thinking models (Nemotron 3.5 Lightning, Qwen3).
 
 \`\`\`bash
-export NHX_BASE_URL=<platform-url>   # omit when using default localhost
-nemo inference gateway provider post v1/chat/completions <provider> --workspace default \\
-  --body '{
-    "model": "default--<output.name>",
-    "messages": [<all turns except final assistant label from the eval row>],
-    "max_tokens": 64,
-    "temperature": 0,
-    "chat_template_kwargs": {"enable_thinking": false}
-  }'
+curl -s "$(nemo inference get-url)/chat/completions" -H 'content-type: application/json' -d '{
+  "model": "default/<model-entity>&adapters/default/<output.name>",
+  "messages": [<all turns except the final assistant label>],
+  "max_tokens": 64, "temperature": 0,
+  "chat_template_kwargs": {"enable_thinking": false}
+}'
 \`\`\`
-
-#### Example — base model via model-entity (comparison)
-
-\`\`\`bash
-export NHX_BASE_URL=<platform-url>
-nemo inference gateway model post v1/chat/completions <model-entity> --workspace default \\
-  --body '{
-    "model": "default/<model-entity>",
-    "messages": [<same prompt turns as LoRA example — exclude final assistant label>],
-    "max_tokens": 64,
-    "temperature": 0,
-    "chat_template_kwargs": {"enable_thinking": false}
-  }'
-\`\`\`
-
-#### Post-training eval (optional)
-
-Validation loss from training is **not** accuracy. To compare base vs adapter on the validation split with correct routing:
-
-\`\`\`bash
-cd /path/to/nemo-helix
-uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \\
-  --model-entity <model-entity> \\
-  --adapter <output.name> \\
-  --provider <provider> \\
-  --dataset-fileset <dataset-fileset> \\
-  --split validation.jsonl
-\`\`\`
-
-Uses CHAT `messages` rows unchanged from the training fileset (`messages[:-1]` at inference). Repeat `--adapter` for multi-adapter compare. `--provider` is optional when a READY provider is auto-discovered. Set `NHX_BASE_URL` (or pass `--base-url`) when the platform is not localhost. LoRA only — full SFT / merged outputs need a deployed model entity (see **Using the fine-tuned model**).
 ```
 
 ### Using the fine-tuned model (full SFT / merged checkpoint / DPO / full-weight GRPO)
 
-When `finetuning_type: all_weights`, `save_method` is `merged_16bit` / `merged_4bit`, or the backend is **rl (DPO)**, the job registers a **model** entity at `output.name` with full fine-tuned weights. **Deploy that entity before inference or eval** — full checkpoints are not hot-reloaded onto the base model's LoRA deployment.
-
-1. `nemo models get <output.name> --workspace default` — confirm the fine-tuned model entity exists.
-2. Create or update an inference deployment / provider that serves `default/<output.name>` (same workflow as deploying any model entity).
-3. Append this section with the **READY** provider or deployment name and concrete gateway URL.
+When `finetuning_type: all_weights`, `save_method` is `merged_16bit` / `merged_4bit`, or the backend is **rl (DPO)**, the job registers a **model** entity at `output.name` with full fine-tuned weights. It needs its own deployment: the job created one when it set `deployment_config`; otherwise deploy `default/<output.name>` before inference. Confirm the entity with `nemo models get <output.name> --workspace default`, then append:
 
 ```markdown
 ### Using the fine-tuned model
 
-Fine-tuned weights are on model entity `default/<output.name>`. Unlike LoRA adapters, full checkpoints **require a new inference deployment** (or provider update) before chat or eval.
-
-| Target | Gateway path | OpenAI base URL | Request `"model"` field |
-|--------|--------------|-----------------|-------------------------|
-| Fine-tuned model | model-entity | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<output.name>/-/v1` | `default/<output.name>` |
-
-Use the same chat settings as LoRA inference (`messages[:-1]`, `max_tokens`, `temperature`, `enable_thinking` as appropriate). Post-training eval: run generation eval against this model-entity URL (not `eval_helpers.py --adapter`, which is LoRA-specific).
+Fine-tuned weights are on model entity `default/<output.name>`, served by its own deployment. Call it on the gateway's OpenAI-compatible route (`nemo inference get-url`) with `"model": "default/<output.name>"`, using the same chat settings as training (`messages[:-1]`, `max_tokens`, `temperature`, `enable_thinking` as appropriate).
 ```
 
-Use the user's platform URL in `NHX_BASE_URL` when they overrode it; omit the export line for default `http://127.0.0.1:8080`. Substitute `<provider>`, concrete URLs, and entity names with values from discovery — do not leave generic placeholders in the user-facing report. For **LoRA**, do **not** tell the user to update the deployment before calling the adapter — registration on the base model entity is sufficient. For **full SFT / merged / DPO**, tell the user they must deploy `<output.name>` before inference.
+Use the user's platform URL when they overrode it. Substitute concrete entity and adapter names — do not leave generic placeholders in the user-facing report. For **LoRA**, do **not** tell the user to update the deployment before calling the adapter — registration on the base model entity is sufficient.
 
 **Save report to `/tmp`** — unless the user opts out, write the full Markdown report (header, **Training configuration**, **Using the adapter** or **Using the fine-tuned model** when `completed`, and **Resources created** when a slug or new filesets were used) to `/tmp/fine-tune-result-<slug-or-job-suffix>.md`. Use the random slug from the run when one was assigned; otherwise use the job id suffix (e.g. `a925b07ff678`).
 

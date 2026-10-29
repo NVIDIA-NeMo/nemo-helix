@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
 from nemo_builder_plugin.identity import DIGEST_PATTERN
 from nemo_helix_plugin.auth import current_auth_context, is_service_principal_id, platform_auth_enabled
 from nemo_helix_plugin.entities import EntityConflictError
@@ -21,6 +21,9 @@ class CompleteRequest(BaseModel):
     digest: str = Field(
         pattern=DIGEST_PATTERN,
         description="The manifest digest the push step pushed under the image's system tag, and signed.",
+    )
+    runtime_config: ImageRuntimeConfig | None = Field(
+        default=None, description="How the image starts by default, read from the config the push step pushed."
     )
 
 
@@ -112,8 +115,12 @@ def settled(row: ContainerImage, digest: str) -> bool:
     return False
 
 
-async def complete(rows: _Rows, *, workspace: str, name: str, digest: str) -> ContainerImage:
+async def complete(
+    rows: _Rows, *, workspace: str, name: str, digest: str, runtime_config: ImageRuntimeConfig | None = None
+) -> ContainerImage:
     """Write the row ``name`` ``ready`` at ``digest``, conditional on the version it was read at.
+
+    ``runtime_config`` is written with it: how the image starts by default, from its config.
 
     Raises :class:`CompletionConflict` if the row settled otherwise, or the store's not-found error.
     """
@@ -125,6 +132,7 @@ async def complete(rows: _Rows, *, workspace: str, name: str, digest: str) -> Co
         if upstream is not None and digest != upstream.manifest_digest:
             raise CompletionConflict(f"{name} copies {upstream.manifest_digest}, not {digest}")
         row.digest = digest
+        row.runtime_config = runtime_config
         row.status = "ready"
         row.status_detail = None
         try:

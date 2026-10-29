@@ -167,6 +167,11 @@ _SESSION_LIST_COLUMNS = [
     Column("expires_at"),
     Column("created_at"),
 ]
+_POST_RUN_ACTION_LIST_COLUMNS = [
+    Column("kind"),
+    Column("title"),
+    Column("description"),
+]
 _ENVIRONMENT_LIST_COLUMNS = [
     Column("name"),
     Column("workspace"),
@@ -301,6 +306,7 @@ class AgentsCLI(NemoCLI):
         _register_local_commands(app)
         _register_platform_commands(app)
         _register_environment_commands(app)
+        _register_post_run_action_commands(app)
         return app
 
 
@@ -1844,6 +1850,51 @@ def _spec_body_from_inputs(
         body = loaded
 
     return {**body, "name": name}
+
+
+def _register_post_run_action_commands(app: typer.Typer) -> None:
+    """Register the ``post-run-actions`` sub-group.
+
+    Lists the kinds the *platform* has installed, which is what ``agents.execute``
+    validates ``post_run_action.kind`` against; the CLI's own plugins are not
+    consulted.
+    """
+    actions_app = typer.Typer(
+        name="post-run-actions",
+        help="Discover the post-run actions an execute-agent job can run after the agent.",
+        no_args_is_help=True,
+    )
+    app.add_typer(actions_app, rich_help_panel="Agent Resources")
+
+    @actions_app.command(name="list")
+    @collect_warnings
+    def post_run_action_list(
+        ctx: typer.Context,
+        output_format: ListOutputFormatOption = None,
+        no_truncate: NoTruncateOption = None,
+        columns: OutputColumnsOption = None,
+    ) -> None:
+        """List the post-run actions installed on the platform.
+
+        Set one on `nemo agents execute` with `--post-run-action.kind`.
+        """
+        resolved_output_format = resolve_output_format(ctx, output_format)
+        check_output_columns_with_format(columns, resolved_output_format)
+        if resolved_output_format == "code":
+            handle_code_generation(AgentsClient, "list_post_run_actions", {}, resolved_output_format, cli_state(ctx))
+            return
+        client = _agents_client(_resolve_base_url(), "")
+        actions = _run_sdk("GET agent API", lambda: client.list_post_run_actions().data())
+        format_output(
+            [action.model_dump(mode="json") for action in actions],
+            is_list=True,
+            output_format=resolved_output_format,
+            output_columns=columns
+            if columns is not None and columns.strip() != "default"
+            else _POST_RUN_ACTION_LIST_COLUMNS,
+            no_truncate=_resolve_no_truncate(ctx, no_truncate),
+            timestamp_format=_resolve_timestamp_format(ctx),
+        )
 
 
 def _register_environment_commands(app: typer.Typer) -> None:

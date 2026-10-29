@@ -109,23 +109,35 @@ fi
 
 **`rl` runtime gate:** before submitting rl, confirm the `cpu`/`gpu` profiles report `backend: kubernetes_job` (or `volcano_job`). If they report `docker`/`subprocess`, **stop**: tell the user DPO and GRPO need a Kubernetes-runtime platform. Do **not** start or reuse a docker-runtime platform and do **not** fall back to automodel/unsloth, which train neither. To configure one: `references/rl-kubernetes-runtime.md`.
 
+## Plan the job
+
+Settle the plan before any data work, and confirm it with the user in one message: model, method, fine-tuning type, dataset and GPUs.
+
+- **Method.** SFT, unless the data is preference pairs (DPO) or the reward comes from an environment (GRPO).
+- **Fine-tuning type.** LoRA by default, since it is much cheaper. Use full weights when the user asks for them or needs a standalone model. DPO trains full weights only. GRPO LoRA needs Hopper or newer GPUs, so plan full-weight GRPO on older ones (`references/hyperparameters-rl.md` § **`policy_backend`**).
+- **Model, when the user names none.** SFT: `Qwen/Qwen3-1.7B`. It is ungated, Apache-2.0 and has a chat template, and it fits LoRA and full SFT on one GPU. For LoRA on **4 or more Hopper/Blackwell GPUs**, use `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` instead (`references/recipes.md`); full SFT stays on Qwen3-1.7B. Both are thinking models, so short-answer eval turns thinking off (`references/post-training-eval.md`). DPO and GRPO: `references/defaults.md`.
+- **Dataset, when the user names none.** SFT: `tau/commonsense_qa`, converted to CHAT rows (`references/hf-conversion.md`). DPO: `nvidia/HelpSteer3` preference pairs (`references/defaults.md`). GRPO: the environment supplies the rows (**GRPO** below).
+- **User-supplied values win.** When the user gives hyperparameters or a job JSON, keep their values. Only validate them (`explain`, batch divisibility, the `rl` runtime gate), and tell the user every field you changed and why.
+
 ## Workflow
 
 Commands and job JSON for each backend: `references/fast-path-sft.md` (automodel, unsloth) and `references/fast-path-rl.md` (DPO, GRPO).
 
-1. **Convert the dataset.** An HF dataset id from the user → convert it locally (`references/hf-conversion.md`); do not ask for local paths. Write CHAT `messages` rows when the model has a chat template: `references/dataset-formats.md` says why and gives each backend's row shape. GRPO rows come from the environment instead (see **GRPO** below).
-2. **Upload it to a dataset fileset.** Name the fileset after the HF dataset only (`tau/commonsense_qa` → `commonsense_qa`), not the model. **When the data changes, upload to a new fileset name** (`sft-data-v2/`): `--exist-ok` reuses an existing fileset **without re-uploading**, so edited files silently train on the old contents. Do not update a fileset in place unless the user confirms nothing else uses it, and never delete one without their explicit confirmation of the exact `<workspace>/<name>`. Run `nemo files list` to verify.
-3. **Register the model.** HF weights fileset + model entity, if missing (gated repos: see Pre-flight). Submit without polling `nemo models get`; the model spec fills in asynchronously. To create the model and dataset during submit instead: `references/fast-path-sft.md` § **Create resources at submit**. **LoRA job:** if the base model is already deployed without LoRA, ask the user before submitting (`references/post-training-eval.md` § **Base already deployed without LoRA**).
-4. **Write the job JSON.** For a named model, start from its recipe in `references/recipes.md`; otherwise use **Defaults** below. **Do not add `max_steps` to a real run**: it overrides `epochs` and can stop mid-epoch. Test fixtures set it only so smoke tests finish fast. Every schema accepts `epochs` and `max_steps` together, so when the user sets both, keep both. The live schema, `nemo customization <plugin> explain`, outranks this skill and its references.
-5. **Submit and read the job id.** Parse **stdout only**: `submit`, `explain` and `-f json` write JSON on stdout and warnings on stderr, so `2>&1` into `json.load` fails even when the job was created, and re-submitting after that parse error is the usual cause of duplicate jobs. If submit output does not parse, check `nemo jobs list` before submitting again. The job id is the `"name"` field, already prefixed (`automodel-…`, `unsloth-…`, `rl-…`); pass it verbatim. `rl` has no `--name` flag, and the newest `rl-*` in `nemo jobs list` may be someone else's job.
+1. **Convert the dataset.** An HF dataset id from the user → convert it locally (`references/hf-conversion.md`); do not ask for local paths. Write CHAT `messages` rows when the model has a chat template: `references/dataset-formats.md` says why and gives each backend's row shape. DPO keeps its preference rows instead (`references/dataset-formats.md` § **NeMo-RL (DPO)**), and GRPO rows come from the environment (see **GRPO** below). For SFT and LoRA, then **freeze a test split** before anything is uploaded (`references/post-training-eval.md` § **1. Freeze a test split**); DPO and GRPO skip it (step 8).
+2. **Upload it to a dataset fileset.** Name the fileset after the HF dataset only (`tau/commonsense_qa` → `commonsense_qa`), not the model. **When the data changes, upload to a new fileset name** (`sft-data-v2/`): `--exist-ok` reuses an existing fileset **without re-uploading**, so edited files silently train on the old contents. Do not update a fileset in place unless the user confirms nothing else uses it, and never delete one without their explicit confirmation of the exact `<workspace>/<name>`. Run `nemo files list` to verify. The test split goes to its own fileset, `<dataset-fileset>-test`.
+3. **Register the model.** HF weights fileset + model entity, if missing (gated repos: see Pre-flight). Submit without polling `nemo models get`; the model spec fills in asynchronously. To create the model and dataset during submit instead: `references/fast-path-sft.md` § **Create resources at submit**.
+4. **Score the base model** on the test split, before training: serve it (LoRA: with `lora_enabled: true`) and hand off to **nemo-evals** (`references/post-training-eval.md` § **2. Serve the base model and score it**). SFT and LoRA only; GRPO compares validation reward inside the job. **LoRA:** if the base is already deployed without LoRA, ask the user before deploying it again (same file, § **Base already deployed without LoRA**).
+5. **Write the job JSON.** For a named model, start from its recipe in `references/recipes.md`; otherwise use **Defaults** below. Set `deployment_config` so the job serves its output when training finishes. **Do not add `max_steps` to a real run**: it overrides `epochs` and can stop mid-epoch. Test fixtures set it only so smoke tests finish fast. The live schema, `nemo customization <plugin> explain`, outranks this skill and its references.
+6. **Submit and read the job id.** Parse **stdout only**: `submit`, `explain` and `-f json` write JSON on stdout and warnings on stderr, so `2>&1` into `json.load` fails even when the job was created, and re-submitting after that parse error is the usual cause of duplicate jobs. If submit output does not parse, check `nemo jobs list` before submitting again. The job id is the `"name"` field, already prefixed (`automodel-…`, `unsloth-…`, `rl-…`); pass it verbatim. `rl` has no `--name` flag, and the newest `rl-*` in `nemo jobs list` may be someone else's job.
 
    ```bash
    nemo customization automodel --job-json /tmp/job.json --workspace default > /tmp/submit.json
    JOB=$(python3 -c "import json;print(json.load(open('/tmp/submit.json'))['name'])")
    ```
 
-6. **Poll to a terminal status.** The job is done only when its **top-level** `status` is `completed`, `error` or `cancelled`. Every step can show `completed` while the job is still `active`, and `status_details.phase` can sit at `training` with `progress_pct: 100` for a while. `bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"` polls any backend's job every 15s (append seconds to change it) and exits 1 on `error`/`cancelled`.
-7. **Report** with `references/reporting.md`. Then, for inference or eval, `references/post-training-eval.md`: a LoRA adapter hot-reloads onto a READY `lora_enabled: true` deployment of its base, while full-weight and merged outputs are new model entities to deploy (vLLM by default).
+7. **Poll to a terminal status, watching training health.** The job is done only when its **top-level** `status` is `completed`, `error` or `cancelled`. Every step can show `completed` while the job is still `active`, and `status_details.phase` can sit at `training` with `progress_pct: 100` for a while. `bash plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/poll_customization_job.sh "$JOB"` polls any backend's job every 15s (append seconds to change it) and prints progress with the latest loss, or reward and health for GRPO. It exits 0 on `completed` and 1 on `error`/`cancelled`. Report every `WARN:` line it prints. On an `ALERT:` it exits 3 while the job keeps running: show the user the alert and ask whether to cancel (`nemo jobs cancel "$JOB"`) or keep going (re-run with `"$JOB" 15 --continue-on-alert`). Causes and fixes: `references/troubleshooting.md` § **Runtime failures**.
+8. **Score the tuned model** on the same test split, with the same settings (`references/post-training-eval.md` § **3. Score the tuned model**). An eval failure never fails the run: report it separately. DPO and GRPO have no test split: report the validation metrics the job logs (`references/reporting.md` § **RL (DPO) example**, § **RL (GRPO) example**).
+9. **Report** with `references/reporting.md`, leading with base vs tuned for SFT and LoRA.
 
 A job that fails on a missing training image, a gated download or a platform error: `references/troubleshooting.md`.
 
@@ -145,9 +157,11 @@ A GRPO job takes two FileSets beyond the model: an **environment** package and a
 |-------|-------|
 | Workspace | `default` |
 | Plugin | `automodel` (override per **Plugin pick**) |
+| Model, dataset | `Qwen/Qwen3-1.7B` on `tau/commonsense_qa` (**Plan the job**) |
 | Training | SFT + LoRA, `max_seq_length` 2048 |
 | Schedule | `epochs` ≥ 1 |
-| Automodel batch / optimizer | `global_batch_size` 4, `micro_batch_size` 1 (unknown VRAM; ≥48 GB → `references/batch-sizing.md`); `learning_rate` 5e-5 |
+| Automodel batch | `global_batch_size` 4, `micro_batch_size` 1 (unknown VRAM; ≥48 GB → `references/batch-sizing.md`) |
+| Learning rate | Leave `learning_rate` unset: each backend's schema picks it per method and fine-tuning type, and `explain` lists the values |
 
 Unsloth, rl DPO and rl GRPO defaults: `references/defaults.md`. Worked examples (Nemotron LoRA, small dense, unsloth, DPO): `references/worked-examples.md`.
 
@@ -168,8 +182,8 @@ Unsloth, rl DPO and rl GRPO defaults: `references/defaults.md`. Worked examples 
 | Errors: platform unreachable, profiles, images, gated HF | `references/troubleshooting.md` |
 | rl Kubernetes runtime, sandboxed Gym | `references/rl-kubernetes-runtime.md` |
 | W&B secret, MLflow, jobs-launcher | `references/integrations-setup.md` |
-| Post-training eval (base vs LoRA) | `references/post-training-eval.md`, `references/eval_helpers.py` |
-| Job polling script | `scripts/poll_customization_job.sh` |
+| Evaluation: frozen test split, base vs tuned, model IDs | `references/post-training-eval.md` |
+| Job polling and training health | `scripts/poll_customization_job.sh`, `scripts/job_health.py` |
 | GRPO environment package and rollout rows | the **nemo-gym-environments** skill |
 
 Related skills: **`nemo-files`**, **`nemo-status`**, **`nemo-secrets`**.

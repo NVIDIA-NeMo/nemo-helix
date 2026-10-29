@@ -161,7 +161,7 @@ Example: 1 node, 2 GPUs, TP=1 → DP=2 → GBS must be a multiple of `2 × micro
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `5e-6` (schema) | Encoder recipes rewrite unset values (`1e-5` bi-encoder, `3e-6` cross-encoder). Skill uses **5e-5** for small LoRA SFT; see tuning below |
+| `learning_rate` | `5e-5` (LoRA); `5e-6` when `finetuning_type` is `all_weights` | Encoder recipes rewrite unset values (`1e-5` bi-encoder, `3e-6` cross-encoder); see tuning below |
 | `min_learning_rate` | `null` | Floor for the cosine LR decay; null lets it decay toward 0 |
 | `weight_decay` | `0.01` | L2-style regularization |
 | `adam_beta1` | `0.9` | Adam optimizer beta1 |
@@ -179,7 +179,7 @@ When the resolved recipe is `bi_encoder` or `cross_encoder` (explicit, or `auto`
 |-------|----------------|--------------|-----------------|
 | `batch.global_batch_size` | `8` | `256` | `128` |
 | `batch.micro_batch_size` | `1` | `8` | `8` |
-| `optimizer.learning_rate` | `5e-6` | `1e-5` | `3e-6` |
+| `optimizer.learning_rate` | `5e-5` LoRA, `5e-6` `all_weights` | `1e-5` | `3e-6` |
 | `optimizer.warmup_steps` | `0` | `5` | `100` |
 
 `optimizer.optimizer: auto` still selects FusedAdam for these recipes and Adam for SFT.
@@ -275,7 +275,7 @@ Apply user overrides to `/tmp/job.json` before submit. For **batch / GPU count /
 | 3B – 8B | `2e-5` – `5e-5` |
 | > 8B | `1e-5` – `2e-5` |
 
-Schema default is `5e-6` (conservative). Fixtures: `qwen3_0.6b_sft_lora.json` uses `5e-5`; `minimal_sft_lora.json` uses `5e-6`.
+The schema default for LoRA is `5e-5`.
 
 ### Automodel LoRA rank / alpha
 

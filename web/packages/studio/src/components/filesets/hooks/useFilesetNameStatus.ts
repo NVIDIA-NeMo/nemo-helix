@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
-import { ENTITY_NAME_REGEXP } from '@nemo/common/src/utils/entityName';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import {
   getFilesListFilesetsQueryKey,
   useFilesListFilesets,
@@ -19,11 +19,12 @@ const nameCheckParams = (name: string): FilesListFilesetsParams => ({
   filter: { name },
 });
 
-/** The typed name when it would pass the create forms' strict schema, otherwise ''. A
- *  malformed name already shows a format error, so there is nothing to ask the server. */
+/** The sanitized name when the typed input is salvageable, otherwise ''. A salvageable input
+ *  has at least one letter or number, producing a valid entity name after sanitization.
+ *  An unsalvageable input already shows a format error, so there is nothing to ask the server. */
 export const strictFilesetNameCandidate = (name: string | undefined): string => {
   const trimmed = name?.trim() ?? '';
-  return ENTITY_NAME_REGEXP.test(trimmed) ? trimmed : '';
+  return sanitizeEntityName(trimmed) !== undefined ? toValidEntityName(trimmed, '') : '';
 };
 
 /** Drops the cached check for `name`, so a name the server just rejected as taken is

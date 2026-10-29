@@ -128,7 +128,7 @@ def _entities(row: ContainerImage) -> AsyncMock:
 
 
 class TestComplete:
-    def _post(self, row: ContainerImage, *, caller: Caller = Caller(auth=False), body: dict[str, str] | None = None):
+    def _post(self, row: ContainerImage, *, caller: Caller = Caller(auth=False), body: dict | None = None):
         entities = _entities(row)
         body = {"digest": DIGEST} if body is None else body
         response = TestClient(_app(entities, caller)).post(f"{IMAGE}/complete", json=body)
@@ -140,6 +140,12 @@ class TestComplete:
         assert (response.json()["status"], response.json()["digest"]) == ("ready", DIGEST)
         assert response.json()["image_ref"] == f"reg.example.com/ws-a/app@{DIGEST}"
         entities.update.assert_awaited_once()
+
+    def test_how_the_image_starts_is_recorded_with_it(self) -> None:
+        runtime_config = {"entrypoint": ["/bin/bash", "-l", "-c"], "cmd": ["/app/run.sh"], "working_dir": "/app"}
+        response, _ = self._post(_row(), body={"digest": DIGEST, "runtime_config": runtime_config})
+        assert response.status_code == 200
+        assert response.json()["runtime_config"] == runtime_config
 
     def test_an_image_already_ready_at_that_digest_is_returned_as_it_is(self) -> None:
         response, entities = self._post(_row("ready", DIGEST))
@@ -177,8 +183,16 @@ class TestComplete:
         response = TestClient(_app(entities)).post(f"{IMAGE}/complete", json={"digest": DIGEST})
         assert response.status_code == 404
 
-    @pytest.mark.parametrize("body", [{"digest": "sha256:abc"}, {"digest": DIGEST, "signature": "x"}, {}])
-    def test_anything_but_a_digest_is_refused(self, body: dict[str, str]) -> None:
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"digest": "sha256:abc"},
+            {"digest": DIGEST, "signature": "x"},
+            {},
+            {"digest": DIGEST, "runtime_config": {"entrypoint": "/start"}},
+        ],
+    )
+    def test_anything_but_a_digest_and_how_the_image_starts_is_refused(self, body: dict) -> None:
         response, entities = self._post(_row(), body=body)
         assert response.status_code == 422
         entities.update.assert_not_awaited()

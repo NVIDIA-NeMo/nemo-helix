@@ -33,6 +33,7 @@ import {
   appendMessageToThreadMessage,
   createTextMessage,
   getEditedMessageIndex,
+  getFailedReply,
   getOpenAIMessages,
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
@@ -63,6 +64,7 @@ type UseAssistantChatRuntimeOptions = Pick<
   | 'broadcast'
   | 'stopCount'
   | 'disabled'
+  | 'describeError'
   | 'initialMessages'
   | 'model'
   | 'onError'
@@ -83,6 +85,7 @@ export const useAssistantChatRuntime = ({
   tools,
   disabled = false,
   initialMessages = [],
+  describeError,
   onError,
   onMessageComplete,
   onRunningChange,
@@ -282,17 +285,8 @@ export const useAssistantChatRuntime = ({
         }
 
         const errorMessage = error instanceof Error ? error.message : 'Unknown Error';
-        const status: MessageStatus = {
-          type: 'incomplete',
-          reason: 'error',
-          error: errorMessage,
-        };
-        updateAssistantMessage(
-          assistantMessage.id!,
-          [{ type: 'text', text: errorMessage }],
-          responseImages,
-          status
-        );
+        const { parts, status } = getFailedReply(errorMessage, describeError);
+        updateAssistantMessage(assistantMessage.id!, parts, responseImages, status);
         onError?.(error instanceof Error ? error : new Error(errorMessage));
       } finally {
         if (abortControllerRef.current === runController) {
@@ -304,6 +298,7 @@ export const useAssistantChatRuntime = ({
     [
       baseURL,
       createChatCompletion,
+      describeError,
       disabled,
       model,
       onError,

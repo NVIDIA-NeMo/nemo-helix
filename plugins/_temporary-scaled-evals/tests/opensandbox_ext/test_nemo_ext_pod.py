@@ -92,6 +92,8 @@ def test_services_are_placed_by_role_after_egress() -> None:
     assert db["imagePullPolicy"] == "Always"
     assert db["startupProbe"]["exec"]["command"] == ["pg_isready"]
     assert db["readinessProbe"]["failureThreshold"] == 3
+    # Compose's default healthcheck timeout, so a check slower than a few seconds still passes.
+    assert db["startupProbe"]["timeoutSeconds"] == db["readinessProbe"]["timeoutSeconds"] == 30
     assert db["env"] == [{"name": "POSTGRES_PASSWORD", "value": "pw"}]
     assert db["volumeMounts"] == [
         {"name": "nemo-vol-shared", "mountPath": "/data", "readOnly": False},
@@ -111,6 +113,18 @@ def test_services_are_placed_by_role_after_egress() -> None:
     assert "restartPolicy" not in worker and "startupProbe" not in worker
     assert worker["readinessProbe"]["exec"]["command"] == ["redis-cli", "ping"]
     assert worker["resources"] == {"limits": {"cpu": "1"}}
+
+
+def test_a_spec_that_only_changes_main_sets_its_working_dir_and_adds_no_containers() -> None:
+    pod_spec = stock_pod_spec()
+    add_services(
+        pod_spec, parse_compose_services({"main": {"command": ["/app/run.sh"], "working_dir": "/app"}}), "Always"
+    )
+
+    sandbox = pod_spec["containers"][0]
+    assert sandbox["workingDir"] == "/app"
+    assert [container["name"] for container in pod_spec["containers"]] == ["sandbox"]
+    assert pod_spec["hostAliases"] == [{"ip": "127.0.0.1", "hostnames": ["main"]}]
 
 
 def test_pod_gets_volumes_host_aliases_and_main_options() -> None:

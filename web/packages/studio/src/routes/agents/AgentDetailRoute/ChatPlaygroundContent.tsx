@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Block, Select } from '@nvidia/foundations-react-core';
 import { ModelChat } from '@studio/components/ModelChat';
@@ -80,6 +81,7 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
               : undefined
           }
           disabled={isDeploymentsLoading || noHealthyDeployments || !chatDeployment}
+          describeError={describeChatError}
         />
       </Block>
     </div>

@@ -3,6 +3,7 @@
 
 """Reusable Compass run orchestration."""
 
+import logging
 import os
 import sys
 from datetime import datetime
@@ -15,6 +16,7 @@ from nemo_compass_plugin.analysis.observability import (
     setup_compass_observability,
 )
 from nemo_compass_plugin.analysis.result import CompassResult
+from nemo_compass_plugin.model_guidance import model_warning
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.nooa_model_client import (
@@ -128,7 +130,7 @@ async def run_compass_change_set(
         if exc.name not in {"compass", "trace_ingest"}:
             raise
         raise RuntimeError(
-            "Compass analysis requires nemo-compass==0.1.0 on Python 3.12 or 3.13. "
+            "Compass analysis requires nemo-compass==0.2.0 on Python 3.12 or 3.13. "
             "Reinstall nemo-helix[all] in the environment running Compass to restore its dependencies."
         ) from exc
 
@@ -138,6 +140,13 @@ async def run_compass_change_set(
     try:
         models_client = AsyncModelsClient.from_client(client)
         model_clients = await resolve_model_clients(models_client, model_refs)
+        model_warnings = [
+            warning
+            for model in dict.fromkeys((model_clients.default.model, model_clients.fast.model))
+            if (warning := model_warning(model))
+        ]
+        for warning in model_warnings:
+            logging.getLogger(__name__).warning(warning)
         backend = make_backend(
             client=client,
             insights_output=insights_output_path,
@@ -168,6 +177,8 @@ async def run_compass_change_set(
                 relay_scope_name=relay_scope_name,
                 event_handler=_echo_event if verbose else None,
             )
+        if model_warnings:
+            result = result.model_copy(update={"notes": [*result.notes, *model_warnings]})
         return result, backend
     finally:
         # *client* is deliberately absent here: it belongs to the caller, who

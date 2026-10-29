@@ -48,6 +48,8 @@ class OTELSettings(BaseSettings):
     otel_exporter_otlp_traces_endpoint: str | None = None
     otel_exporter_otlp_metrics_endpoint: str | None = None
     otel_exporter_otlp_logs_endpoint: str | None = None
+    otel_exporter_otlp_protocol: str = "grpc"
+    otel_exporter_otlp_logs_protocol: str | None = None
 
     otel_nhx_include_auth_context: bool = True
     log_level: str = "INFO"

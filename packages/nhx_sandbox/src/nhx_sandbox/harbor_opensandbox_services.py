@@ -58,7 +58,10 @@ COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml"
 # they need, since an older extension would ignore a key it doesn't know.
 COMPOSE_SERVICES_FEATURE = "compose-services"
 AGENT_BUNDLE_FEATURE = "agent-bundle"
-EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE)
+# A spec with no services, and ``main``'s ``command`` and ``working_dir``: what a compose file that only changes
+# ``main`` needs. An extension from before them refuses such a spec.
+COMPOSE_MAIN_FEATURE = "compose-main"
+EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE, COMPOSE_MAIN_FEATURE)
 
 # The agent bundle's extensions key and pod annotation, copied the same way as the services'.
 AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
@@ -70,6 +73,8 @@ INSTALLED_AGENT_DIR = "/installed-agent"
 # Names the sandbox pod already uses: its containers (sandbox, egress, execd-installer, and the
 # agent bundle's), and ``main``, which every container resolves to 127.0.0.1.
 RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer", AGENT_BUNDLE_CONTAINER})
+# The most services one sandbox pod runs besides ``main``.
+MAX_SERVICES = 16
 # Ports the sandbox pod already listens on: execd (44772), the egress DNS proxy (15353) and the
 # egress policy API (18080). Every container shares the pod network, so a service can't use them.
 RESERVED_PORTS = frozenset({44772, 15353, 18080})
@@ -192,6 +197,11 @@ class Main(_Strict):
     # The image's Dockerfile ENTRYPOINT. OpenSandbox replaces it with its own process, so the
     # client runs it explicitly, followed by "sleep infinity" to keep the container alive.
     entrypoint: list[str] | None = Field(default=None, min_length=1)
+    # Compose `command`: runs after the entrypoint in place of "sleep infinity", as Compose passes it to the image's
+    # ENTRYPOINT. Under Harbor it must keep running, or the container ends.
+    command: list[str] | None = Field(default=None, min_length=1)
+    # Compose `working_dir`: where main's entrypoint and command start, and where commands run by default.
+    working_dir: AbsolutePath | None = None
     env: dict[EnvName, str] = Field(default_factory=dict)
     volume_mounts: list[VolumeMount] = Field(default_factory=list)
     # The only capability ``main`` may gain; anything broader (e.g. NET_ADMIN) could bypass egress.
@@ -203,7 +213,8 @@ class ComposeServices(_Strict):
     """A profile's whole ``compose_services`` block: the services, the volumes they share, and ``main``."""
 
     volumes: list[Name] = Field(default_factory=list, max_length=16)
-    services: list[Service] = Field(min_length=1, max_length=16)
+    # Empty for a compose file that only changes `main`.
+    services: list[Service] = Field(default_factory=list, max_length=MAX_SERVICES)
     main: Main = Field(default_factory=Main)
     # How long ``NemoOpenSandboxEnvironment.start()`` waits for the services when the ``main`` container has no
     # readiness check to carry its own ``timeout_sec``.
@@ -228,8 +239,9 @@ class ComposeServices(_Strict):
             if mount.name not in self.volumes:
                 raise ValueError(f"{owner}: volume {mount.name!r} is not declared in volumes")
 
-        # Kubernetes requires a container's mount paths to be unique; separate containers may share one.
-        seen: set[tuple[str, str]] = set()
+        # Kubernetes requires a container's mount paths to be unique; separate containers may share one. A service
+        # with `shm_size` already has a mount at /dev/shm, which the server adds for it.
+        seen = {(s.name, "/dev/shm") for s in self.services if s.shm_size is not None}
         for owner, mount in mounts:
             if (owner, mount.mount_path) in seen:
                 raise ValueError(f"{owner}: mount_path {mount.mount_path!r} is used by more than one volume mount")
@@ -240,17 +252,17 @@ class ComposeServices(_Strict):
         """The service names, in start order."""
         return [s.name for s in self.services]
 
-    def sandbox_entrypoint(self) -> list[str] | None:
-        """The sandbox container's entrypoint: ``main``'s own entrypoint, kept alive; None to keep the default.
+    def sandbox_entrypoint(self, image_entrypoint: list[str] | None = None) -> list[str] | None:
+        """The sandbox container's entrypoint: ``main``'s from the spec, else ``image_entrypoint``, then its command.
 
-        OpenSandbox replaces the container's entrypoint with its own process, which would skip the
-        image's ``ENTRYPOINT``, so it is restored here. ``sh -c "sleep infinity"`` follows it as its
-        arguments, as Compose passes ``command`` to an image's ``ENTRYPOINT``. An entrypoint that exits
-        on its own therefore ends the container, as it would under Compose, rather than being masked.
+        ``image_entrypoint`` is the image's own ``ENTRYPOINT``, for a spec that doesn't carry it. See
+        :func:`keep_alive_entrypoint`.
         """
-        if self.main.entrypoint is None:
-            return None
-        return [*self.main.entrypoint, "sh", "-c", "sleep infinity"]
+        return keep_alive_entrypoint(self.main.entrypoint or image_entrypoint, self.main.command)
+
+    def uses_main_settings(self) -> bool:
+        """Whether the spec needs the extension's ``COMPOSE_MAIN_FEATURE``: no services, or ``main``'s command or working directory."""
+        return not self.services or self.main.command is not None or self.main.working_dir is not None
 
     def to_json(self) -> str:
         """The value sent in ``extensions[EXTENSION_KEY]``."""
@@ -292,6 +304,24 @@ class SandboxAgentBundle(_Strict):
     def to_json(self) -> str:
         """The value sent in ``extensions[AGENT_BUNDLE_EXTENSION_KEY]``."""
         return self.model_dump_json(exclude_defaults=True)
+
+
+def keep_alive_entrypoint(entrypoint: list[str] | None, command: list[str] | None = None) -> list[str] | None:
+    """The sandbox container's entrypoint for an image that starts with ``entrypoint``; None to keep the default.
+
+    OpenSandbox replaces the container's entrypoint with its own process, which would skip the
+    image's ``ENTRYPOINT``, so it is restored here, followed by ``command`` as its arguments, as
+    Docker passes a command to the image's ``ENTRYPOINT``. Without a command, Harbor's own
+    ``sh -c "sleep infinity"`` follows it. An entrypoint or command that exits on its own therefore
+    ends the container, as it would under Harbor, rather than being masked.
+
+    ``["/bin/bash", "-l", "-c"]`` with command ``["/app/run.sh"]`` gives ``["/bin/bash", "-l", "-c", "/app/run.sh"]``.
+    """
+    if command:
+        return [*(entrypoint or []), *command]
+    if not entrypoint:
+        return None
+    return [*entrypoint, "sh", "-c", "sleep infinity"]
 
 
 def parse_compose_services(raw: object) -> ComposeServices:

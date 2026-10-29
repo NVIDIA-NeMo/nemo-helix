@@ -547,12 +547,15 @@ class TestTranslateAgentConfig:
     @pytest.mark.parametrize(
         "adapter_id",
         [
-            "nvidia.fabric.insights-analyst",
-            "nvidia.fabric.some.future.adapter",
+            # A stock ID, accepted whether or not its manifest is installed.
+            "nvidia.fabric.claude",
+            # Installed manifests with no stock short name.
+            "nvidia.fabric.nooa",
+            "nvidia.helix.compass.analyst",
         ],
     )
-    def test_fully_qualified_adapter_id_passes_through(self, adapter_id: str) -> None:
-        """Plugin-owned adapters ship their own descriptor, so no short-name entry is needed."""
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_accepted_adapter_id_passes_through(self, adapter_id: str) -> None:
         payload = _example_yaml_config()
         payload["default_harness"] = "selected"
         payload["harnesses"] = {"selected": {"kind": adapter_id}}
@@ -563,13 +566,26 @@ class TestTranslateAgentConfig:
         assert fabric_config.harness is not None
         assert fabric_config.harness.adapter_id == adapter_id
 
-    def test_adapter_id_passthrough_requires_the_nvidia_fabric_prefix(self) -> None:
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            # A typo in a stock ID.
+            "nvidia.fabric.claud",
+            # The nvidia.fabric. prefix no longer admits an ID on its own.
+            "nvidia.fabric.some.future.adapter",
+            "acme.fabric.custom",
+            # A directory name, not the ID its manifest declares.
+            "compass",
+        ],
+    )
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_unknown_adapter_id_rejected(self, kind: str) -> None:
         payload = _example_yaml_config()
         payload["default_harness"] = "selected"
-        payload["harnesses"] = {"selected": {"kind": "acme.fabric.custom"}}
+        payload["harnesses"] = {"selected": {"kind": kind}}
         config = AgentConfig.model_validate(payload)
 
-        with pytest.raises(FabricTranslationError, match="Unsupported harness kind 'acme.fabric.custom'"):
+        with pytest.raises(FabricTranslationError, match=f"Unsupported harness kind {kind!r}"):
             translate_agent_config(config)
 
     def test_missing_model_rejected(self) -> None:
