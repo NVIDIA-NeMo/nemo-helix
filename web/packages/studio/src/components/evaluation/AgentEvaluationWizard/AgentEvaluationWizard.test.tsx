@@ -6,7 +6,10 @@ import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluat
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
-import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
+import {
+  EVAL_CONFIG_FILESET_KEY,
+  evaluationConfigError,
+} from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
@@ -16,6 +19,12 @@ import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+
+// The fixture filesets hold no eval config, so the real check would report every run as unusable.
+vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
+  evaluationConfigError: vi.fn(),
+}));
 
 const AGENT = 'my-agent';
 
@@ -98,6 +107,21 @@ const mockLists = () => {
   );
 };
 
+/** Holds the evaluation list request until the returned function is called. */
+const holdEvaluationsList = (): (() => void) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.use(
+    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), async () => {
+      await held;
+      return HttpResponse.json({ data: EVALUATIONS });
+    })
+  );
+  return release;
+};
+
 const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluationWizard>> = {}) =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
@@ -110,6 +134,10 @@ const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluation
   });
 
 describe('AgentEvaluationWizard', () => {
+  beforeEach(() => {
+    vi.mocked(evaluationConfigError).mockResolvedValue(null);
+  });
+
   it('starts by asking how to begin, and routes to the experiment form for a new experiment', async () => {
     mockLists();
     const user = userEvent.setup();
@@ -276,6 +304,80 @@ describe('AgentEvaluationWizard', () => {
     await user.clear(nameField);
     await user.type(nameField, 'nemotron-super-3-temp-1');
     expect(nameField.value).toBe('nemotron-super-3-temp-1');
+  });
+
+  it('holds Run Evaluation, saying why, until the saved eval config is checked', async () => {
+    mockLists();
+    let finishCheck: (issue: string | null) => void = () => {};
+    vi.mocked(evaluationConfigError).mockReturnValue(
+      new Promise((resolve) => {
+        finishCheck = resolve;
+      })
+    );
+    const user = userEvent.setup();
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    const name = await screen.findByLabelText('New Evaluation Name');
+    await user.clear(name);
+    await user.type(name, 'baseline-rerun');
+    expect(await screen.findByText('Checking the saved eval config...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+
+    finishCheck(null);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+  });
+
+  it('holds Run Evaluation on a taken name, saying so only under the name field', async () => {
+    mockLists();
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    // The re-run proposes the source's own name, which is taken.
+    expect(await screen.findByText(/named baseline already exists/)).toBeInTheDocument();
+    expect(screen.getAllByText(/named baseline already exists/)).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+  });
+
+  it('waits for the evaluation list before a handed-in source can run', async () => {
+    mockLists();
+    const releaseList = holdEvaluationsList();
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    expect(await screen.findByText('Loading evaluations...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+
+    releaseList();
+    await waitFor(() =>
+      expect(screen.queryByText('Loading evaluations...')).not.toBeInTheDocument()
+    );
+  });
+
+  it('holds Run Evaluation while the list loads, before anything can be picked', async () => {
+    mockLists();
+    const releaseList = holdEvaluationsList();
+    const user = userEvent.setup();
+    renderWizard();
+
+    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Loading evaluations...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+
+    releaseList();
+    await waitFor(() =>
+      expect(screen.queryByText('Loading evaluations...')).not.toBeInTheDocument()
+    );
+  });
+
+  it('says a handed-in source that is no longer listed is gone, and holds Run Evaluation', async () => {
+    mockLists();
+    renderWizard({ sourceEvaluation: 'deleted-run' });
+
+    expect(
+      await screen.findByText('Evaluation deleted-run no longer exists. Pick another.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
   });
 
   it('lets Back walk out of a handed-in source so the choice stays reviewable', async () => {
