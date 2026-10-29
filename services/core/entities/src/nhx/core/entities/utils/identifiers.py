@@ -66,6 +66,11 @@ def generate_entity_name(entity_type: str) -> str:
     return f"{type_prefix}-{suffix}"
 
 
+def entity_id_prefix(entity_type: str) -> str:
+    """The prefix every ID generate_entity_id makes for ``entity_type`` starts with, e.g. 'account-'."""
+    return f"{_normalize_entity_type(entity_type)}-"
+
+
 def generate_entity_id(entity_type: str) -> str:
     """Generate a compound entity ID with normalized type prefix and base58-encoded UUID.
 
@@ -81,9 +86,8 @@ def generate_entity_id(entity_type: str) -> str:
         >>> generate_entity_id('job')
         'job-7hxkp9Q2LoF8z8M9JZxZsHw'
     """
-    type_prefix = _normalize_entity_type(entity_type)
     u = uuid.uuid4()
-    return f"{type_prefix}-{base58.b58encode(u.bytes).decode('ascii')}"
+    return f"{entity_id_prefix(entity_type)}{base58.b58encode(u.bytes).decode('ascii')}"
 
 
 def parse_entity_id(entity_id: str) -> tuple[str, str]:

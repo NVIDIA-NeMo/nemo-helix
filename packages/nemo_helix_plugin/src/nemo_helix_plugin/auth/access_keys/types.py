@@ -91,8 +91,21 @@ class AccessKeyCreateRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$",
         json_schema_extra={"nullable": True},
         description=(
-            "Optional non-human service account to bind the key to. Service-bound keys can only be "
-            "created by a HelixAdmin and authenticate as service-account:<id>."
+            "Optional non-human service account to bind the key to. Service-bound keys can be "
+            "created by a HelixAdmin, or by an Admin of every workspace named in `workspaces` for a "
+            "service account named `<workspace>--<name>` after one of them, and authenticate as "
+            "service-account:<id>."
+        ),
+    )
+    acknowledge_workspace_bound_keys: bool = Field(
+        default=False,
+        description=(
+            "Confirm creating a service-bound key for an account that already has live keys bound to "
+            "workspaces, when the new key grants the account a role it doesn't hold yet, in any workspace "
+            "(roles it holds include those they include, such as Viewer with Editor). Roles belong to the "
+            "service account, so those keys gain the new roles too, while being managed by the bound "
+            "workspaces' Admins. Without it, such a request fails with 409 and code "
+            "`workspace_bound_keys_exist`, whose detail names the service account and those keys' workspaces."
         ),
     )
     scope: list[str] | None = Field(
@@ -113,7 +126,20 @@ class AccessKeyCreateRequest(BaseModel):
     workspaces: list[AccessKeyWorkspaceGrant] | None = Field(
         default=None,
         json_schema_extra={"nullable": True},
-        description="Optional workspace memberships to grant to the newly created key principal.",
+        description=(
+            "Optional workspace memberships to grant to the newly created key principal. For a "
+            "service-bound key whose account is named `<workspace>--<name>` after one of them, each "
+            "workspace is also one the key is bound to (any other key is managed by HelixAdmins only): "
+            "a key bound to several workspaces is managed by someone who is Admin of all of them, or by "
+            "a HelixAdmin. A caller "
+            "who is not a HelixAdmin must be Admin of every listed workspace, must name the service "
+            "account `<workspace>--<name>` after one of them (with no `/`), and can only use a service "
+            "account whose live keys and role bindings are all within these workspaces (checked when "
+            "the key is created, rotated or unsuspended, not continuously). The key is bound to each "
+            "workspace's ID, so if a "
+            "bound workspace is deleted and recreated under the same name, only a HelixAdmin can manage "
+            "the key."
+        ),
     )
 
     @model_validator(mode="after")
@@ -173,6 +199,21 @@ class AccessKeyMetadataResponse(BaseModel):
     entity_type: AccessKeyEntityType = Field(
         default="USER",
         description="Whether the key is bound to a user or a non-human service account.",
+    )
+    bound_workspaces: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Current names of the workspaces a service-bound key is bound to, aligned with "
+            "`bound_workspace_ids`; a workspace that no longer exists, or that the caller can't see, is "
+            "shown by its ID. Empty for personal and unbound keys."
+        ),
+    )
+    bound_workspace_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "IDs of the workspaces a service-bound key is bound to. The key stays bound to these IDs: a "
+            "workspace deleted and recreated under the same name has a new ID and doesn't manage the key."
+        ),
     )
     status: AccessKeyStatus
     issuer: str = Field(description="Issuer stamped into the Scoped Access Key JWT.")
@@ -271,10 +312,17 @@ class AccessKeyErrorResponse(BaseModel):
     """Scoped Access Key error response."""
 
     detail: str
-    code: Literal["access_keys_disabled"] | None = Field(
-        default=None,
-        json_schema_extra={"nullable": True},
-        description="Set to access_keys_disabled when the Scoped Access Key feature is disabled.",
+    code: Literal["access_keys_disabled", "workspace_bound_keys_exist", "bound_workspaces_not_administered"] | None = (
+        Field(
+            default=None,
+            json_schema_extra={"nullable": True},
+            description=(
+                "Set to access_keys_disabled when the Scoped Access Key feature is disabled, to "
+                "workspace_bound_keys_exist when creating the key needs acknowledge_workspace_bound_keys, or to "
+                "bound_workspaces_not_administered when the caller is Admin of some of a service-bound key's "
+                "bound workspaces but not all of them."
+            ),
+        )
     )
 
 

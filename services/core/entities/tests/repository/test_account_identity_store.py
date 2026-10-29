@@ -133,3 +133,34 @@ async def test_resolve_or_materialize_reuses_account_with_same_link_key(session_
         identity_count = await session.scalar(select(func.count()).select_from(DBAccountIdentity))
     assert account_count == 1
     assert identity_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_subject_finds_the_accounts_identity_from_an_issuer(session_maker):
+    store = AccountIdentityStore(session_maker)
+    record = await store.resolve_or_materialize(
+        issuer="nemo:service-account",
+        subject="team-a--otel",
+        subject_claim="service_account_id",
+        account_type="service",
+    )
+
+    assert await store.get_subject(account_id=record.account_id, issuer="nemo:service-account") == "team-a--otel"
+    assert await store.get_subject(account_id=record.account_id, issuer="https://idp.example.com") is None
+    assert await store.get_subject(account_id="account-unknown", issuer="nemo:service-account") is None
+
+
+@pytest.mark.asyncio
+async def test_get_linked_at_reports_when_an_identity_was_first_linked(session_maker):
+    store = AccountIdentityStore(session_maker)
+    await store.resolve_or_materialize(
+        issuer="nemo:service-account",
+        subject="team-a--otel",
+        subject_claim="service_account_id",
+        account_type="service",
+    )
+
+    linked_at = await store.get_linked_at(issuer="nemo:service-account", subject="team-a--otel")
+
+    assert linked_at is not None and linked_at.tzinfo is not None
+    assert await store.get_linked_at(issuer="nemo:service-account", subject="never-issued") is None

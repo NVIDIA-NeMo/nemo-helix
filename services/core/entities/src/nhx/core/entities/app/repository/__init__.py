@@ -16,6 +16,7 @@ from nhx.core.entities.app.repository.account_credential import (
     credential_lookup_hash,
 )
 from nhx.core.entities.app.repository.account_identity import (
+    SERVICE_ACCOUNT_IDENTITY_ISSUER,
     AccountIdentityConflictError,
     AccountIdentityRecord,
     AccountIdentityStore,
@@ -114,6 +115,7 @@ def dep_entity_repository(session_maker: async_sessionmaker[AsyncSession]) -> En
 
 __all__ = [
     "WorkspaceRepositoryInterface",
+    "SERVICE_ACCOUNT_IDENTITY_ISSUER",
     "AccountIdentityConflictError",
     "AccountIdentityRecord",
     "AccountIdentityStore",

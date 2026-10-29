@@ -156,12 +156,18 @@ client.workspaces.create_workspace_member(
 
 </Tabs>
 
-A human HelixAdmin must create the key. Service-account callers are
-rejected, and any other caller receives `403 Forbidden`. Use the unprefixed ID
-only in that command:
+A human HelixAdmin creates the key with the unprefixed ID. The key isn't bound to
+any workspace, so only a HelixAdmin can manage it:
 
 `nemo auth access-keys create --service-account intake-reader`. NeMo stamps the
 token subject as `service-account:intake-reader`.
+
+A workspace Admin can also create keys for a service account named after their
+workspace, such as `ml-team--intake-reader`, by binding the key to the workspace
+with `--workspace ml-team:Viewer`. That grants the role in the same step, so the
+membership command above isn't needed. See [Service-bound keys and workspaces](/documentation/access-control/authentication/using-authentication#service-bound-keys-and-workspaces)
+for the rules. Service-account callers can never create keys, and any other
+caller receives `403 Forbidden`.
 
 <Warning>
 
