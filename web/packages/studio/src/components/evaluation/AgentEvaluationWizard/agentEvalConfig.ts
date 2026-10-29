@@ -12,11 +12,11 @@ import type { DatasetEvalSpec } from '@studio/components/evaluation/submitEvalua
 
 const IDENTIFIER = /^[A-Za-z_]\w*$/;
 
+export const itemRef = (column: string): string =>
+  IDENTIFIER.test(column) ? `item.${column}` : `item['${column}']`;
+
 const fieldBlocks = (columns: string[]) =>
-  columns.map(
-    (column) =>
-      `${column}:\n{{ ${IDENTIFIER.test(column) ? `item.${column}` : `item['${column}']`} }}`
-  );
+  columns.map((column) => `${column}:\n{{ ${itemRef(column)} }}`);
 
 /** The agent's prompt until the user edits it: every column, under its name. */
 export const defaultAgentPrompt = (columns: string[]): string => fieldBlocks(columns).join('\n\n');

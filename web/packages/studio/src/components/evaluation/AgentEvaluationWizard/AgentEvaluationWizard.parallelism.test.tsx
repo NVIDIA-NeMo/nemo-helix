@@ -200,6 +200,9 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
     await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
