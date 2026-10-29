@@ -16,6 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 AccountType = Literal["user", "service"]
 
+# Issuer under which NeMo service accounts are linked. They have no IdP, so the subject is the
+# bare service account ID (``service-account:<id>`` without its prefix).
+SERVICE_ACCOUNT_IDENTITY_ISSUER = "nemo:service-account"
+
 
 class AccountIdentityUnavailableError(RuntimeError):
     """Raised when an account or identity exists but is not active."""
@@ -46,6 +50,19 @@ class AccountIdentityStore:
         """Return the active identity for ``issuer``/``subject`` if present."""
         async with self.session_maker() as session:
             return await self._get_active_identity(session, issuer=issuer, subject=subject)
+
+    async def get_account_id(self, *, issuer: str, subject: str) -> str | None:
+        """Return the account ID for ``issuer``/``subject`` whatever its status, or None if unknown.
+
+        Unlike get_active_identity this never raises for a disabled account or identity: callers
+        that authorize against an account's credentials must still see one that has been disabled,
+        since disabling an account doesn't revoke the credentials already issued for it.
+        """
+        stmt = select(DBAccountIdentity.account_id).where(
+            DBAccountIdentity.issuer == issuer, DBAccountIdentity.subject == subject
+        )
+        async with self.session_maker() as session:
+            return (await session.execute(stmt)).scalar_one_or_none()
 
     async def resolve_or_materialize(
         self,

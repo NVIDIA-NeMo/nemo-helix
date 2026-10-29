@@ -52,6 +52,11 @@ class AccessKeyEntity(EntityBase):
     # user-bound keys and is the creating administrator for service-bound keys.
     principal: str
     subject_principal: str | None = None
+    # ID of the workspace a service-bound key is bound to, whose Admins may manage it; None for
+    # personal keys and for platform-owned service keys only a HelixAdmin manages. Only the ID is
+    # stored: a workspace deleted and recreated under the same name gets a new ID and doesn't
+    # inherit the key. The name is resolved from the ID whenever one is needed.
+    bound_workspace_id: str | None = None
     entity_type: AccessKeyEntityType = "USER"
     issuer: str
     audiences: list[str]

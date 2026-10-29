@@ -201,7 +201,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '403':
-          description: Service-bound Scoped Access Keys require HelixAdmin
+          description: Service-bound Scoped Access Keys require HelixAdmin, or Admin
+            of the single workspace named in `workspaces`, which the key is then bound
+            to and whose Admins manage it. A workspace Admin can only use a service
+            account whose live keys and role bindings are all within that workspace
           content:
             application/json:
               schema:
@@ -365,6 +368,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '403':
+          description: A workspace Admin can't rotate a service-bound key whose service
+            account has access outside the key's bound workspace; only a HelixAdmin
+            can
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
         '404':
           description: Scoped Access Keys are not enabled or the key was not found
           content:
@@ -459,6 +470,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AccessKeyStatusChangeResponse'
+        '400':
+          description: The service-bound key's service account is disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '403':
+          description: A workspace Admin can't unsuspend a service-bound key whose
+            service account has access outside the key's bound workspace; only a HelixAdmin
+            can
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
         '404':
           description: Scoped Access Keys are not enabled or the key was not found
           content:
@@ -1670,9 +1695,11 @@ paths:
         \ creates role bindings for the specified principal with the given roles.\n\
         By default, this endpoint waits for the roles to propagate before returning.\n\
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).\n\
-        \nExample:\n```\nPOST /apis/entities/v2/workspaces/ml-team/members\n{\n  \
-        \  \"principal\": \"user@example.com\",\n    \"roles\": [\"Editor\"]\n}\n\
-        ```"
+        \nA service account with live Scoped Access Keys bound to another workspace\
+        \ can only be\ngranted roles here by a HelixAdmin or an Admin of every workspace\
+        \ those keys are bound\nto; other callers get 403.\n\nExample:\n```\nPOST\
+        \ /apis/entities/v2/workspaces/ml-team/members\n{\n    \"principal\": \"user@example.com\"\
+        ,\n    \"roles\": [\"Editor\"]\n}\n```"
       operationId: add_workspace_member_apis_entities_v2_workspaces__workspace__members_post
       parameters:
       - name: workspace
@@ -1719,7 +1746,11 @@ paths:
       description: "Update the roles for a workspace member.\n\nThis will revoke existing\
         \ roles not in the new list and add new roles.\nBy default, this endpoint\
         \ waits for the roles to propagate before returning.\nUse `wait_role_propagation=false`\
-        \ to skip waiting (useful for bulk operations).\n\nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team/members/user@example.com\n\
+        \ to skip waiting (useful for bulk operations).\n\nAdding roles for a service\
+        \ account with live Scoped Access Keys bound to another\nworkspace requires\
+        \ HelixAdmin or Admin of every workspace those keys are bound to, as\nwhen\
+        \ adding a member; other callers get 403. Removing roles is never restricted.\n\
+        \nExample:\n```\nPUT /apis/entities/v2/workspaces/ml-team/members/user@example.com\n\
         {\n    \"roles\": [\"Viewer\", \"Editor\"]\n}\n```"
       operationId: update_workspace_member_apis_entities_v2_workspaces__workspace__members__principal_id__put
       parameters:
@@ -9394,7 +9425,9 @@ components:
         service_account_id:
           title: Service Account Id
           description: Optional non-human service account to bind the key to. Service-bound
-            keys can only be created by a HelixAdmin and authenticate as service-account:<id>.
+            keys authenticate as service-account:<id>. A HelixAdmin can create one
+            for any account; anyone else must be Admin of the single workspace named
+            in `workspaces`, and the key is bound to it.
           nullable: true
           type: string
           maxLength: 240
@@ -9420,8 +9453,17 @@ components:
           pattern: ^ak_[0-9a-f]{32}$
         workspaces:
           title: Workspaces
-          description: Optional workspace memberships to grant to the newly created
-            key principal.
+          description: 'Optional workspace memberships to grant to the newly created
+            key principal. On a service-account key created by someone who is not
+            a HelixAdmin this must name exactly one workspace, the caller must be
+            Admin of it, and the key is bound to it: that workspace''s Admins can
+            then list, suspend, unsuspend, rotate and revoke the key. Such a caller
+            can only use a service account whose live keys and role bindings are all
+            within that workspace (checked when the key is created, rotated or unsuspended,
+            not continuously). A HelixAdmin''s service-account key is never bound,
+            so it stays HelixAdmin-only. The key is bound to the workspace''s ID,
+            so if a bound workspace is deleted and recreated under the same name,
+            only a HelixAdmin can manage the key.'
           nullable: true
           items:
             $ref: '#/components/schemas/AccessKeyWorkspaceGrant'
@@ -9457,6 +9499,21 @@ components:
           title: Entity Type
           description: Whether the key is bound to a user or a non-human service account.
           default: USER
+        bound_workspace:
+          title: Bound Workspace
+          description: Current name of the workspace a service-bound key is bound
+            to, whose Admins manage it. A workspace that no longer exists, or that
+            the caller can't see, is shown by its ID. None for personal keys and for
+            service keys only a HelixAdmin manages.
+          nullable: true
+          type: string
+        bound_workspace_id:
+          title: Bound Workspace Id
+          description: 'ID of the workspace a service-bound key is bound to. The key
+            stays bound to this ID: a workspace deleted and recreated under the same
+            name has a new ID and doesn''t manage the key.'
+          nullable: true
+          type: string
         status:
           type: string
           enum:
@@ -9587,6 +9644,21 @@ components:
           title: Entity Type
           description: Whether the key is bound to a user or a non-human service account.
           default: USER
+        bound_workspace:
+          title: Bound Workspace
+          description: Current name of the workspace a service-bound key is bound
+            to, whose Admins manage it. A workspace that no longer exists, or that
+            the caller can't see, is shown by its ID. None for personal keys and for
+            service keys only a HelixAdmin manages.
+          nullable: true
+          type: string
+        bound_workspace_id:
+          title: Bound Workspace Id
+          description: 'ID of the workspace a service-bound key is bound to. The key
+            stays bound to this ID: a workspace deleted and recreated under the same
+            name has a new ID and doesn''t manage the key.'
+          nullable: true
+          type: string
         status:
           type: string
           enum:

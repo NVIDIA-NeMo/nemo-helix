@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -98,3 +99,70 @@ async def test_missing_new_and_legacy_records_fail_closed(credential_backend) ->
     registry = AccessKeyRegistry(legacy_client, adapter)
 
     assert await registry.is_active("ak_missing", "alice") is False
+
+
+def _service_key(jti: str = "ak_service") -> AccessKeyCreateResponse:
+    return _key(jti).model_copy(
+        update={"principal": "service-account:otel-collector", "entity_type": "SERVICE_ACCOUNT"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_bound_workspace_id_round_trips_through_the_credential_store(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    registry = AccessKeyRegistry(AsyncMock(), adapter)
+
+    await registry.add(
+        _service_key(),
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+        bound_workspace_id="workspace-aaa",
+    )
+
+    stored = await adapter.get("ak_service")
+    assert stored is not None
+    assert stored.bound_workspace_id == "workspace-aaa"
+
+
+@pytest.mark.asyncio
+async def test_a_key_stored_before_binding_existed_reads_as_unbound(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    registry = AccessKeyRegistry(AsyncMock(), adapter)
+    await registry.add(_service_key(), owner_principal="alice", owner_account_id=owner_account_id)
+
+    # Rows written before this field existed have no such key at all; reading one must not fail.
+    record = await adapter.credential_store.get("access_key", "ak_service")
+    assert record is not None
+    metadata = dict(record.public_metadata)
+    metadata.pop("bound_workspace_id")
+    await adapter.credential_store.update(replace(record, public_metadata=metadata))
+
+    stored = await adapter.get("ak_service")
+    assert stored is not None
+    assert stored.bound_workspace_id is None
+
+
+@pytest.mark.asyncio
+async def test_service_account_keys_returns_every_key_for_the_account(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    registry = AccessKeyRegistry(AsyncMock(), adapter)
+    await registry.add(
+        _service_key("ak_one"),
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+        bound_workspace_id="workspace-aaa",
+    )
+    await registry.add(_service_key("ak_two"), owner_principal="bob", owner_account_id=owner_account_id)
+
+    identity, keys = await adapter.service_account_keys("service-account:otel-collector")
+
+    assert identity is not None
+    assert {key.name: key.bound_workspace_id for key in keys} == {"ak_one": "workspace-aaa", "ak_two": None}
+
+
+@pytest.mark.asyncio
+async def test_service_account_keys_is_empty_for_an_account_never_issued_one(credential_backend) -> None:
+    adapter, _owner_account_id = credential_backend
+
+    assert await adapter.service_account_keys("service-account:unknown") == (None, [])
+    assert await adapter.is_service_account_disabled("service-account:unknown") is False

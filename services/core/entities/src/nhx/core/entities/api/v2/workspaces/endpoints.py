@@ -31,7 +31,14 @@ from nhx.common.api.common import DeleteResponse, GenericSortField, Page, Pagina
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
-from nhx.core.entities.api.dependencies import AuthClientDep, EntityRepository, WorkspaceRepository
+from nhx.common.auth.principal_identifier import SERVICE_ACCOUNT_PRINCIPAL_PREFIX
+from nhx.core.entities.api.dependencies import (
+    AccountCredentialStoreDep,
+    AccountIdentityStoreDep,
+    AuthClientDep,
+    EntityRepository,
+    WorkspaceRepository,
+)
 from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
@@ -46,13 +53,26 @@ from nhx.core.entities.api.v2.workspaces.schemas import (
     WorkspaceMemberUpdate,
     WorkspaceUpdate,
 )
+from nhx.core.entities.app.repository import (
+    SERVICE_ACCOUNT_IDENTITY_ISSUER,
+    AccountCredentialStore,
+    AccountCredentialType,
+    AccountIdentityStore,
+    WorkspaceRepositoryInterface,
+)
 from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
 from nhx.core.entities.utils.filter import FilterDep
+from nhx.core.entities.utils.identifiers import entity_id_prefix
 from sqlalchemy.exc import IntegrityError
 
 router = APIRouter()
 API_TAG = "Entity Store"
 logger = logging.getLogger(__name__)
+
+# Scoped Access Keys, the only credential type bound to a workspace today.
+_ACCESS_KEY_CREDENTIAL_TYPE: AccountCredentialType = "access_key"
+# Prefix of a stable account ID, which a Scoped Access Key also authenticates as.
+_ACCOUNT_ID_PREFIX = entity_id_prefix("account")
 
 _ACTIVE_WORKSPACE_FILTER = ComparisonOperation(
     operator=FilterOperator.EQ,
@@ -264,6 +284,12 @@ async def create_workspace(
             )
 
     # Grant Admin role to the creator (prefer email for stored principal so listings match IdP email)
+    #
+    # Deliberately not subject to _require_bound_workspace_admin: the creator acts for itself here,
+    # and there is no one else to ask. A service account whose Scoped Access Key is bound to
+    # another workspace therefore becomes Admin of a workspace outside its binding. That is access
+    # outside the binding, so the bound workspace's Admins can no longer rotate or unsuspend its
+    # keys until a HelixAdmin removes the role.
     binding_principal = _principal_for_role_binding(auth_client.principal)
     if auth_client.auth_enabled and binding_principal:
         granted_by = auth_client.principal.id if auth_client.principal.id else binding_principal
@@ -650,6 +676,83 @@ async def list_workspace_members(
     return WorkspaceMemberListResponse(data=list(members_dict.values()))
 
 
+async def _require_bound_workspace_admin(
+    principal: str,
+    workspace: Workspace,
+    *,
+    auth_client: AuthClient,
+    workspace_repository: WorkspaceRepositoryInterface,
+    identity_store: AccountIdentityStore,
+    credential_store: AccountCredentialStore,
+) -> None:
+    """Refuse to grant a service account roles outside the workspace its Scoped Access Keys are bound to.
+
+    Roles belong to the service account, not to a key, so a role granted here reaches every live
+    key of that account — including one bound to another workspace and managed by that workspace's
+    Admins. Granting it is therefore that workspace's decision: only a HelixAdmin, or an Admin of
+    every workspace the account's live keys are bound to, may widen the account. Without this, any
+    Admin (and anyone can create a workspace and be its Admin) could hand their own access to
+    someone else's service credential.
+
+    Granting roles in the workspace a key is already bound to is unrestricted: the endpoint's own
+    Admin check already covers it. So is an account with no live bound keys.
+    """
+    if not auth_client.auth_enabled:
+        return
+    if principal.startswith(SERVICE_ACCOUNT_PRINCIPAL_PREFIX):
+        account_id = await identity_store.get_account_id(
+            issuer=SERVICE_ACCOUNT_IDENTITY_ISSUER,
+            subject=principal.removeprefix(SERVICE_ACCOUNT_PRINCIPAL_PREFIX),
+        )
+    elif principal.startswith(_ACCOUNT_ID_PREFIX):
+        # A Scoped Access Key also authenticates as its account ID, so a binding can be keyed by it.
+        account_id = principal
+    else:
+        return
+    if account_id is None:
+        # Never issued a key, so it has none to widen.
+        return
+
+    bound_ids = await credential_store.bound_workspace_ids_for_subject(_ACCESS_KEY_CREDENTIAL_TYPE, account_id)
+    elsewhere = sorted(bound_ids - {workspace.id})
+    if not elsewhere:
+        return
+    # A service principal acts for the platform, not for a person, and already passed the route's
+    # own authorization.
+    if auth_client.principal.effective_principal.is_privileged():
+        return
+    if await auth_client.has_role("system", "HelixAdmin"):
+        return
+
+    names: list[str] = []
+    for workspace_id in elsewhere:
+        bound = await workspace_repository.get_workspace_by_id(workspace_id=workspace_id)
+        # A workspace that is gone can't be administered, so its keys stay HelixAdmin-only. Keep
+        # the ID in the message rather than dropping it, so the caller can name it to an admin.
+        if bound is None:
+            names.append(workspace_id)
+            continue
+        # Confirm the name still maps back to the ID: a workspace deleted and recreated under the
+        # same name is a different workspace, and being Admin of the new one grants nothing here.
+        if not await auth_client.has_role(bound.name, "Admin"):
+            names.append(bound.name)
+            continue
+        current = await workspace_repository.get_workspace_by_name(name=bound.name)
+        if current is None or current.id != workspace_id:
+            names.append(bound.name)
+
+    if names:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"'{principal}' has live Scoped Access Keys bound to workspace(s) "
+                f"{', '.join(repr(name) for name in names)}. Roles belong to the service account, so those "
+                f"keys would also get the roles granted here. Only a HelixAdmin, or an Admin of every "
+                f"workspace they're bound to, can grant it roles in '{workspace.name}'."
+            ),
+        )
+
+
 @router.post(
     "/v2/workspaces/{workspace}/members",
     response_model=WorkspaceMember,
@@ -662,6 +765,10 @@ async def list_workspace_members(
         This creates role bindings for the specified principal with the given roles.
         By default, this endpoint waits for the roles to propagate before returning.
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
+
+        A service account with live Scoped Access Keys bound to another workspace can only be
+        granted roles here by a HelixAdmin or an Admin of every workspace those keys are bound
+        to; other callers get 403.
 
         Example:
         ```
@@ -679,6 +786,8 @@ async def add_workspace_member(
     workspace_repository: WorkspaceRepository,
     entity_repository: EntityRepository,
     auth_client: AuthClientDep,
+    identity_store: AccountIdentityStoreDep,
+    credential_store: AccountCredentialStoreDep,
     wait_role_propagation: bool = Query(
         default=True,
         description="If true, wait for roles to propagate before returning (default: true). Set to false for bulk operations.",
@@ -691,6 +800,16 @@ async def add_workspace_member(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workspace '{workspace}' not found",
+        )
+
+    if member.roles:
+        await _require_bound_workspace_admin(
+            member.principal,
+            ws,
+            auth_client=auth_client,
+            workspace_repository=workspace_repository,
+            identity_store=identity_store,
+            credential_store=credential_store,
         )
 
     granted_by = auth_client.principal.id if auth_client.principal.id else "system"
@@ -769,6 +888,10 @@ async def add_workspace_member(
         By default, this endpoint waits for the roles to propagate before returning.
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
 
+        Adding roles for a service account with live Scoped Access Keys bound to another
+        workspace requires HelixAdmin or Admin of every workspace those keys are bound to, as
+        when adding a member; other callers get 403. Removing roles is never restricted.
+
         Example:
         ```
         PUT /apis/entities/v2/workspaces/ml-team/members/user@example.com
@@ -785,6 +908,8 @@ async def update_workspace_member(
     workspace_repository: WorkspaceRepository,
     entity_repository: EntityRepository,
     auth_client: AuthClientDep,
+    identity_store: AccountIdentityStoreDep,
+    credential_store: AccountCredentialStoreDep,
     wait_role_propagation: bool = Query(
         default=True,
         description="If true, wait for roles to propagate before returning (default: true). Set to false for bulk operations.",
@@ -828,6 +953,17 @@ async def update_workspace_member(
     # Track which roles are being added and removed
     roles_to_add = new_roles - current_roles
     roles_to_remove = current_roles - new_roles
+
+    # Only widening the account's access is restricted; taking roles away never is.
+    if roles_to_add:
+        await _require_bound_workspace_admin(
+            principal_id,
+            ws,
+            auth_client=auth_client,
+            workspace_repository=workspace_repository,
+            identity_store=identity_store,
+            credential_store=credential_store,
+        )
 
     # Check if removing Admin role would leave workspace without any admins
     if "Admin" in roles_to_remove:

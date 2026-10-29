@@ -21,6 +21,7 @@ def _record(
     principal: str = "alice@example.com",
     revoked: bool = False,
     service_account: bool = False,
+    bound_workspace_id: str | None = None,
 ):
     return AccessKeyEntity(
         name=jti,
@@ -29,6 +30,7 @@ def _record(
         description="CI build automation",
         principal=principal,
         subject_principal="service-account:otel-collector" if service_account else None,
+        bound_workspace_id=bound_workspace_id,
         entity_type="SERVICE_ACCOUNT" if service_account else "USER",
         issued_at=NOW,
         expires_at=datetime(2030, 1, 1, tzinfo=UTC),
@@ -1088,3 +1090,86 @@ async def test_registry_begin_rotation_concurrent_conflict_surfaces_state_confli
         await registry.begin_rotation(
             "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
         )
+
+
+@pytest.mark.asyncio
+async def test_registry_lists_service_keys_bound_to_the_callers_admin_workspaces() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
+    registry = AccessKeyRegistry(entity_client)
+
+    await registry.list_for_principal(
+        "alice@example.com",
+        page=1,
+        page_size=100,
+        admin_override=AsyncMock(return_value=True),
+        service_key_workspace_ids=["workspace-aaa", "workspace-bbb"],
+    )
+
+    assert entity_client.list.await_args.kwargs["filter_operation"].to_dict() == {
+        "$or": [
+            {"data.principal": {"$eq": "alice@example.com"}},
+            {
+                "$and": [
+                    {"data.entity_type": {"$eq": "SERVICE_ACCOUNT"}},
+                    {"data.bound_workspace_id": {"$in": ["workspace-aaa", "workspace-bbb"]}},
+                ]
+            },
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_registry_hides_a_listed_service_key_the_caller_cannot_administer() -> None:
+    mine = _record(jti="ak_mine")
+    administered = _record(jti="ak_admin", service_account=True, bound_workspace_id="workspace-aaa")
+    other = _record(jti="ak_other", service_account=True, bound_workspace_id="workspace-zzz")
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[mine, administered, other], pagination=SimpleNamespace(total_pages=1)
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    async def admin_of_aaa(workspace_id: str | None) -> bool:
+        return workspace_id == "workspace-aaa"
+
+    result = await registry.list_for_principal(
+        "alice@example.com",
+        page=1,
+        page_size=100,
+        admin_override=admin_of_aaa,
+        service_key_workspace_ids=["workspace-aaa"],
+    )
+
+    assert [key.jti for key in result.data] == ["ak_mine", "ak_admin"]
+    assert result.data[1].bound_workspace_id == "workspace-aaa"
+
+
+@pytest.mark.asyncio
+async def test_registry_authorizes_a_service_key_against_its_bound_workspace() -> None:
+    record = _record(service_account=True, bound_workspace_id="workspace-aaa")
+    entity_client = AsyncMock()
+    entity_client.get.return_value = record
+    registry = AccessKeyRegistry(entity_client)
+    asked: list[str | None] = []
+
+    async def admin_of_aaa(workspace_id: str | None) -> bool:
+        asked.append(workspace_id)
+        return workspace_id == "workspace-aaa"
+
+    assert await registry.revoke("ak_example", "someone-else@example.com", admin_override=admin_of_aaa) is True
+    assert asked == ["workspace-aaa"]
+
+
+@pytest.mark.asyncio
+async def test_registry_hides_a_service_key_bound_to_another_workspace() -> None:
+    record = _record(service_account=True, bound_workspace_id="workspace-zzz")
+    entity_client = AsyncMock()
+    entity_client.get.return_value = record
+    registry = AccessKeyRegistry(entity_client)
+
+    async def admin_of_aaa(workspace_id: str | None) -> bool:
+        return workspace_id == "workspace-aaa"
+
+    with pytest.raises(AccessKeyNotFoundError):
+        await registry.revoke("ak_example", "someone-else@example.com", admin_override=admin_of_aaa)

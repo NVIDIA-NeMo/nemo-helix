@@ -180,3 +180,129 @@ async def test_rotate_active_replaces_handle_and_rejects_old_handle(session_make
     async with session_maker() as session:
         hashes = list(await session.scalars(select(DBAccountCredential.lookup_hash)))
     assert hashes == [credential_lookup_hash("new-refresh-handle")]
+
+
+async def _service_identity(session_maker, subject: str):
+    return await AccountIdentityStore(session_maker).resolve_or_materialize(
+        issuer="nemo:service-account",
+        subject=subject,
+        subject_claim="service_account_id",
+        account_type="service",
+    )
+
+
+async def _access_key(store, *, handle, owner, subject, bound_workspace_id=None, status="ACTIVE", expires_at=None):
+    return await store.create(
+        credential_type="access_key",
+        handle=handle,
+        owner_account_id=owner,
+        subject_account_id=subject,
+        status=status,
+        expires_at=expires_at,
+        public_metadata={"bound_workspace_id": bound_workspace_id},
+    )
+
+
+@pytest.mark.asyncio
+async def test_bound_workspace_ids_for_subject_reports_only_live_bound_keys(session_maker) -> None:
+    owner = await _identity(session_maker)
+    account = await _service_identity(session_maker, "otel-collector")
+    store = AccountCredentialStore(session_maker)
+    await _access_key(store, handle="a", owner=owner.account_id, subject=account.account_id, bound_workspace_id="ws-a")
+    # Suspended keys still count: they can be unsuspended.
+    await _access_key(
+        store,
+        handle="b",
+        owner=owner.account_id,
+        subject=account.account_id,
+        bound_workspace_id="ws-b",
+        status="SUSPENDED",
+    )
+    # Revoked and expired ones can never authenticate again, so they constrain nothing.
+    await _access_key(
+        store,
+        handle="c",
+        owner=owner.account_id,
+        subject=account.account_id,
+        bound_workspace_id="ws-c",
+        status="REVOKED",
+    )
+    await _access_key(
+        store,
+        handle="d",
+        owner=owner.account_id,
+        subject=account.account_id,
+        bound_workspace_id="ws-d",
+        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    # An unbound key contributes nothing.
+    await _access_key(store, handle="e", owner=owner.account_id, subject=account.account_id)
+
+    assert await store.bound_workspace_ids_for_subject("access_key", account.account_id) == {"ws-a", "ws-b"}
+
+
+@pytest.mark.asyncio
+async def test_bound_workspace_ids_for_subject_is_empty_for_an_account_without_keys(session_maker) -> None:
+    account = await _service_identity(session_maker, "unused")
+
+    store = AccountCredentialStore(session_maker)
+
+    assert await store.bound_workspace_ids_for_subject("access_key", account.account_id) == set()
+
+
+@pytest.mark.asyncio
+async def test_list_for_owner_includes_other_owners_keys_bound_to_the_callers_workspaces(session_maker) -> None:
+    caller = await _identity(session_maker)
+    other = await AccountIdentityStore(session_maker).resolve_or_materialize(
+        issuer="https://idp.example.com", subject="user-2", subject_claim="sub", account_type="user"
+    )
+    account = await _service_identity(session_maker, "otel-collector")
+    store = AccountCredentialStore(session_maker)
+    mine = await _access_key(store, handle="mine", owner=caller.account_id, subject=caller.account_id)
+    theirs = await _access_key(
+        store, handle="theirs", owner=other.account_id, subject=account.account_id, bound_workspace_id="ws-a"
+    )
+    await _access_key(
+        store, handle="elsewhere", owner=other.account_id, subject=account.account_id, bound_workspace_id="ws-z"
+    )
+
+    listed, has_more = await store.list_for_owner(
+        "access_key",
+        caller.account_id,
+        include_service_subjects=False,
+        service_subject_bound_workspace_ids=["ws-a"],
+        offset=0,
+        limit=10,
+    )
+
+    assert {record.id for record in listed} == {mine.id, theirs.id}
+    assert has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_for_subject_pages_by_id_across_every_status(session_maker) -> None:
+    owner = await _identity(session_maker)
+    account = await _service_identity(session_maker, "otel-collector")
+    store = AccountCredentialStore(session_maker)
+    created = [
+        await _access_key(
+            store,
+            handle=f"key-{index}",
+            owner=owner.account_id,
+            subject=account.account_id,
+            status="REVOKED" if index == 1 else "ACTIVE",
+        )
+        for index in range(3)
+    ]
+
+    seen = []
+    after_id = None
+    while True:
+        page, has_more = await store.list_for_subject("access_key", account.account_id, after_id=after_id, limit=2)
+        seen.extend(page)
+        if not has_more:
+            break
+        after_id = page[-1].id
+
+    assert {record.id for record in seen} == {record.id for record in created}
+    assert [record.id for record in seen] == sorted(record.id for record in created)

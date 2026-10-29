@@ -285,3 +285,75 @@ class TestWorkspaceMemberMultipleWorkspaces:
         response2 = await client.get("/apis/entities/v2/workspaces/workspace-three/members")
         members2 = [m for m in response2.json()["data"] if m["principal"] == "cross-ws@example.com"]
         assert len(members2) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+class TestBoundWorkspaceGuardWiring:
+    """Where the bound-workspace check runs: on granting roles, never on taking them away."""
+
+    @pytest.fixture
+    def checked(self, monkeypatch):
+        """Record every principal the bound-workspace check is asked about."""
+        from nhx.core.entities.api.v2.workspaces import endpoints
+
+        principals: list[str] = []
+
+        async def record(principal, workspace, **_):
+            principals.append(principal)
+
+        monkeypatch.setattr(endpoints, "_require_bound_workspace_admin", record)
+        return principals
+
+    async def test_adding_a_member_with_roles_is_checked(self, client: AsyncClient, ctx, checked):
+        response = await client.post(
+            "/apis/entities/v2/workspaces/default/members?wait_role_propagation=false",
+            json={"principal": "service-account:otel", "roles": ["Editor"]},
+        )
+
+        assert response.status_code == 201
+        assert checked == ["service-account:otel"]
+
+    async def test_updating_a_member_is_checked_only_while_roles_are_added(self, client: AsyncClient, ctx, checked):
+        await client.post(
+            "/apis/entities/v2/workspaces/default/members?wait_role_propagation=false",
+            json={"principal": "service-account:otel", "roles": ["Editor", "Viewer"]},
+        )
+        checked.clear()
+
+        narrowed = await client.put(
+            "/apis/entities/v2/workspaces/default/members/service-account:otel?wait_role_propagation=false",
+            json={"roles": ["Viewer"]},
+        )
+        assert narrowed.status_code == 200
+        assert checked == []
+
+        widened = await client.put(
+            "/apis/entities/v2/workspaces/default/members/service-account:otel?wait_role_propagation=false",
+            json={"roles": ["Viewer", "Editor"]},
+        )
+        assert widened.status_code == 200
+        assert checked == ["service-account:otel"]
+
+    async def test_removing_a_member_is_not_checked(self, client: AsyncClient, ctx, checked):
+        await client.post(
+            "/apis/entities/v2/workspaces/default/members?wait_role_propagation=false",
+            json={"principal": "service-account:otel", "roles": ["Editor"]},
+        )
+        checked.clear()
+
+        response = await client.delete(
+            "/apis/entities/v2/workspaces/default/members/service-account:otel?wait_role_propagation=false"
+        )
+
+        assert response.status_code == 200
+        assert checked == []
+
+    async def test_a_missing_workspace_is_a_404_before_any_check(self, client: AsyncClient, ctx, checked):
+        response = await client.post(
+            "/apis/entities/v2/workspaces/nope/members?wait_role_propagation=false",
+            json={"principal": "service-account:otel", "roles": ["Editor"]},
+        )
+
+        assert response.status_code == 404
+        assert checked == []

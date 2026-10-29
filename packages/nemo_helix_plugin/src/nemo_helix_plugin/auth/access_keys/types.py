@@ -91,8 +91,9 @@ class AccessKeyCreateRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$",
         json_schema_extra={"nullable": True},
         description=(
-            "Optional non-human service account to bind the key to. Service-bound keys can only be "
-            "created by a HelixAdmin and authenticate as service-account:<id>."
+            "Optional non-human service account to bind the key to. Service-bound keys authenticate as "
+            "service-account:<id>. A HelixAdmin can create one for any account; anyone else must be Admin "
+            "of the single workspace named in `workspaces`, and the key is bound to it."
         ),
     )
     scope: list[str] | None = Field(
@@ -113,7 +114,17 @@ class AccessKeyCreateRequest(BaseModel):
     workspaces: list[AccessKeyWorkspaceGrant] | None = Field(
         default=None,
         json_schema_extra={"nullable": True},
-        description="Optional workspace memberships to grant to the newly created key principal.",
+        description=(
+            "Optional workspace memberships to grant to the newly created key principal. On a "
+            "service-account key created by someone who is not a HelixAdmin this must name exactly one "
+            "workspace, the caller must be Admin of it, and the key is bound to it: that workspace's "
+            "Admins can then list, suspend, unsuspend, rotate and revoke the key. Such a caller can only "
+            "use a service account whose live keys and role bindings are all within that workspace "
+            "(checked when the key is created, rotated or unsuspended, not continuously). A HelixAdmin's "
+            "service-account key is never bound, so it stays HelixAdmin-only. The key is bound to the "
+            "workspace's ID, so if a bound workspace is deleted and recreated under the same name, only a "
+            "HelixAdmin can manage the key."
+        ),
     )
 
     @model_validator(mode="after")
@@ -173,6 +184,23 @@ class AccessKeyMetadataResponse(BaseModel):
     entity_type: AccessKeyEntityType = Field(
         default="USER",
         description="Whether the key is bound to a user or a non-human service account.",
+    )
+    bound_workspace: str | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Current name of the workspace a service-bound key is bound to, whose Admins manage it. A "
+            "workspace that no longer exists, or that the caller can't see, is shown by its ID. None for "
+            "personal keys and for service keys only a HelixAdmin manages."
+        ),
+    )
+    bound_workspace_id: str | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description=(
+            "ID of the workspace a service-bound key is bound to. The key stays bound to this ID: a "
+            "workspace deleted and recreated under the same name has a new ID and doesn't manage the key."
+        ),
     )
     status: AccessKeyStatus
     issuer: str = Field(description="Issuer stamped into the Scoped Access Key JWT.")

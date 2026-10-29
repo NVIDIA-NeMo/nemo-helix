@@ -85,6 +85,22 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
 
             return db_workspace.to_pydantic()
 
+    async def get_workspace_by_id(
+        self,
+        *,
+        workspace_id: str,
+        session: AsyncSession | None = None,
+    ) -> Optional[Workspace]:
+        """Get a workspace by ID."""
+        async with self._get_session(session) as sess:
+            result = await sess.execute(select(DBWorkspace).where(DBWorkspace.id == workspace_id))
+            db_workspace = result.scalar_one_or_none()
+
+            if db_workspace is None:
+                return None
+
+            return db_workspace.to_pydantic()
+
     async def list_workspaces(
         self,
         *,

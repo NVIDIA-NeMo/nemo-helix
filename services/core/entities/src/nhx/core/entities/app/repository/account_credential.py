@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccount, DBAccountCredential, DBAccountIdentity
 from nhx.core.entities.utils.identifiers import generate_entity_id
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import String, and_, cast, delete, func, or_, select, update
 from sqlalchemy.engine import CursorResult, Result
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -20,6 +21,26 @@ from sqlalchemy.orm import aliased
 
 AccountCredentialType = Literal["access_key", "broker_refresh", "token_authorization_code", "web_session"]
 AccountCredentialStatus = Literal["ACTIVE", "REVOKED", "SUSPENDED", "ROTATING"]
+
+# Statuses a credential can still authenticate from, now or after an administrator reverses the
+# status. A revoked credential is gone for good, so it constrains nothing.
+_LIVE_CREDENTIAL_STATUSES: tuple[AccountCredentialStatus, ...] = ("ACTIVE", "SUSPENDED", "ROTATING")
+
+
+# What an unbound credential's bound_workspace_id renders as: both backends return the literal
+# JSON token for a stored null, which carries no quotes for _bound_workspace_id to trim.
+_JSON_NULL = "null"
+
+
+def _bound_workspace_id() -> Any:
+    """A credential's bound workspace ID from its public metadata, as bare text.
+
+    Mirrors ``SQLAlchemyFilterRepository._cast_json_to_text``: SQLite's json_extract and
+    PostgreSQL's JSON subscript both render string values with their JSON quotes, so trim them.
+    Renders SQL NULL for a credential whose metadata has no such key, and ``_JSON_NULL`` for one
+    that stores an explicit null -- both unbound.
+    """
+    return func.trim(cast(DBAccountCredential.public_metadata["bound_workspace_id"], String), '"')
 
 
 def _utcnow() -> datetime:
@@ -267,6 +288,7 @@ class AccountCredentialStore:
         owner_account_id: str,
         *,
         include_service_subjects: bool,
+        service_subject_bound_workspace_ids: Sequence[str] = (),
         offset: int,
         limit: int,
     ) -> tuple[list[AccountCredentialRecord], bool]:
@@ -275,6 +297,17 @@ class AccountCredentialStore:
         query = select(DBAccountCredential).join(subject, subject.id == DBAccountCredential.subject_account_id)
         if include_service_subjects:
             ownership = or_(ownership, subject.type == "service")
+        elif service_subject_bound_workspace_ids:
+            # Service credentials someone else owns but the caller administers, because the
+            # credential is bound to one of their workspaces. One IN over a scalar, so a long list
+            # of workspace IDs stays a single index-friendly comparison.
+            ownership = or_(
+                ownership,
+                and_(
+                    subject.type == "service",
+                    _bound_workspace_id().in_(list(service_subject_bound_workspace_ids)),
+                ),
+            )
         query = (
             query.where(DBAccountCredential.credential_type == credential_type, ownership)
             .order_by(DBAccountCredential.issued_at.desc())
@@ -286,6 +319,60 @@ class AccountCredentialStore:
         async with self.session_maker() as session:
             rows = list((await session.scalars(query)).all())
         return [self._record(row) for row in rows[:limit]], len(rows) > limit
+
+    async def list_for_subject(
+        self,
+        credential_type: AccountCredentialType,
+        subject_account_id: str,
+        *,
+        after_id: str | None = None,
+        limit: int,
+    ) -> tuple[list[AccountCredentialRecord], bool]:
+        """A page of this subject's credentials of ``credential_type``, in any status, by ID.
+
+        Callers use this to scan every row for a security check, where a skipped row would fail
+        open: unlike offset paging, a row deleted while the scan runs can't shift a later row onto
+        a page already read.
+        """
+        query = select(DBAccountCredential).where(
+            DBAccountCredential.credential_type == credential_type,
+            DBAccountCredential.subject_account_id == subject_account_id,
+        )
+        if after_id is not None:
+            query = query.where(DBAccountCredential.id > after_id)
+        # Fetch one extra row as a lookahead, as list_for_owner does.
+        query = query.order_by(DBAccountCredential.id).limit(limit + 1)
+        async with self.session_maker() as session:
+            rows = list((await session.scalars(query)).all())
+        return [self._record(row) for row in rows[:limit]], len(rows) > limit
+
+    async def bound_workspace_ids_for_subject(
+        self,
+        credential_type: AccountCredentialType,
+        subject_account_id: str,
+    ) -> set[str]:
+        """The workspace IDs this subject's live credentials of ``credential_type`` are bound to.
+
+        Live means neither revoked nor expired: such a credential can never authenticate again, so
+        it doesn't tie the account to the workspace it was bound to. Unbound credentials, and
+        subjects with none, contribute nothing.
+        """
+        bound = _bound_workspace_id()
+        query = (
+            select(bound)
+            .distinct()
+            .where(
+                DBAccountCredential.credential_type == credential_type,
+                DBAccountCredential.subject_account_id == subject_account_id,
+                DBAccountCredential.status.in_(_LIVE_CREDENTIAL_STATUSES),
+                or_(DBAccountCredential.expires_at.is_(None), DBAccountCredential.expires_at > _utcnow()),
+                bound.isnot(None),
+                bound != _JSON_NULL,
+            )
+        )
+        async with self.session_maker() as session:
+            rows = (await session.scalars(query)).all()
+        return {row for row in rows if row}
 
     async def revoke_for_account(self, account_id: str, *, revoked_by: str | None = None) -> int:
         now = _utcnow()
