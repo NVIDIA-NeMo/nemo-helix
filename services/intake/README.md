@@ -64,6 +64,38 @@ back before reporting success. Intake rejects spans outside its 90-day observati
 window with `422` before writing any part of the batch. Increase the ClickHouse `spans` and
 `trace_index` TTLs before importing older data.
 
+## Counting model usage once
+
+A model call can reach Intake more than once: the agent reports it in its own trace, and the
+Inference Gateway, when a recording middleware is attached, records it too. Two span attributes,
+defined in `nemo_helix_plugin.intake.span_attributes` so producers can import them, tell Intake
+which record to count:
+
+| Attribute | Set on | Means |
+|---|---|---|
+| `nemo.inference_gateway.call` | The gateway's span for one upstream call | This span carries the usage the provider reported for the call |
+| `nemo.usage.superseded_by_gateway` | The root of an agent's own trace | The gateway recorded this trace's calls in another trace of the same session |
+
+Where the gateway's record lands depends on whether the agent sends a W3C `traceparent`:
+
+- **One trace.** With a `traceparent`, the gateway's span sits beneath the agent's span for the same
+  call. Gateway call spans are the trace's first usage tier, so they replace the agent's spans for
+  those calls. If any gateway call span in the trace lacks usage, the trace counts the agent's spans
+  instead, so no call is dropped or counted twice.
+- **Two traces.** Without one, the gateway's spans form their own trace in the session, beside the
+  agent's trace. The producer marks the agent's trace as superseded. Per metric, once any trace in
+  the session gets that metric from gateway call spans, marked traces stop adding it to the session.
+
+Intake can't tell on its own whether two traces in a session describe the same calls; a session can
+hold several traces whose usage really does add up. That is why superseding is an explicit marker
+set by the producer, which knows it routed the agent through a recording gateway model.
+
+A marked trace keeps its own totals. It still adds a metric the gateway doesn't report, such as
+cost, and every metric when no gateway span in the session reported it. Traces with neither
+attribute are counted as they always were.
+
+The tier order and the SQL behind these rules are in `src/nhx/intake/spans/span_rollups.py`.
+
 ## Local Development
 
 Run these commands from the repository root unless a command says otherwise.
