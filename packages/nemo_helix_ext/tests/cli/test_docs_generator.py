@@ -206,3 +206,58 @@ def test_write_docs_files_matches_individual_generators(tmp_path):
     assert summary_path.read_text(encoding="utf-8") == with_trailing_newline(
         generate_index_snippet(docs_app, name="nemo")
     )
+
+
+def test_committed_cli_reference_has_no_bare_placeholder_urls() -> None:
+    """A URL template in help text must be a code span, not an autolinked dead URL.
+
+    Fern autolinks a bare ``https://`` URL in prose, so an escaped placeholder such as
+    ``https://github.com/&lt;org>/...`` becomes a live link whose href GitHub cannot resolve.
+    """
+    reference = Path(_docs_generator._REFERENCE_DOCS_PATH).read_text(encoding="utf-8")
+    prose = re.sub(r"(`+)(?:(?!\1).)+?\1", "", reference)
+    offenders = [line for line in prose.splitlines() if re.search(r"https?://\S*&lt;", line)]
+    assert offenders == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("pass --auto to use env vars", "pass `--auto` to use env vars"),
+        ("Defaults to --email.", "Defaults to `--email`."),
+        ("Use `--auto` already coded", "Use `--auto` already coded"),
+        ("a well-known -- separator", "a well-known -- separator"),
+        ("re-run with -x", "re-run with -x"),
+        ("  nemo --base-url http://localhost:8080 setup", "  `nemo --base-url http://localhost:8080 setup`"),
+        ("```shell\nnemo x --flag\n```", "```shell\nnemo x --flag\n```"),
+    ],
+)
+def test_escape_mdx_code_formats_prose_flags(source: str, expected: str) -> None:
+    # Fern's typographer renders a bare "--flag" as an em dash, which breaks copy-paste.
+    assert _docs_generator._escape_mdx(source) == expected
+
+
+def test_examples_separated_by_blank_lines_stay_in_one_code_block() -> None:
+    docs_app = typer.Typer()
+
+    @docs_app.command()
+    def upload() -> None:
+        """Upload files.
+
+        Examples:
+            # First
+            nemo files upload ./a my-fileset
+
+            # Second
+            nemo files upload ./b my-fileset --remote-path uploads/
+
+        Trailing prose.
+        """
+
+    reference = generate_docs(docs_app, name="nemo")
+
+    block = reference.split("```shell\n", 1)[1].split("```", 1)[0]
+    assert "nemo files upload ./a my-fileset" in block
+    assert "nemo files upload ./b my-fileset --remote-path uploads/" in block
+    assert "\\# Second" not in reference
+    assert "Trailing prose." in reference.split("```shell", 1)[1].split("```", 2)[1]

@@ -16,6 +16,7 @@ audits.
 
 import argparse
 import ast
+import inspect
 import os
 import re
 import subprocess
@@ -103,6 +104,7 @@ class PreparedTypeCheckFile:
     doc_path: Path
     temp_path: Path
     line_mapping: tuple[int, ...]
+    column_offsets: tuple[int, ...] = ()
 
 
 def find_doc_files(paths: Iterable[Path]) -> list[Path]:
@@ -295,6 +297,50 @@ def prepare_type_check_file(
     if not any(line.strip() for line in source_lines):
         return None
 
+    # IPython executes cells with this flag. Detect notebook-level async code
+    # without running it, then give ty the async scope it requires. Keep the
+    # entire page in one scope so values remain available across cells. This
+    # approximates notebook scope: function-local/global and class-body name
+    # resolution can differ from actual module-level cell execution.
+    column_offsets: list[int] = []
+    try:
+        # Exclude module-only imports before detecting page-wide async code.
+        # A future import can start a valid later cell even after an earlier
+        # cell's executable code, which compile() rejects in a combined module.
+        module_lines: set[int] = set()
+        for statement in ast.parse("\n".join(source_lines)).body:
+            if isinstance(statement, ast.ImportFrom) and (
+                statement.module == "__future__" or any(alias.name == "*" for alias in statement.names)
+            ):
+                module_lines.update(range(statement.lineno - 1, statement.end_lineno or statement.lineno))
+        imports = [index for index in range(len(source_lines)) if index in module_lines]
+        body = [index for index in range(len(source_lines)) if index not in module_lines]
+        code = compile(
+            "\n".join(source_lines[index] for index in body),
+            str(doc_path),
+            "exec",
+            flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+        )
+    except SyntaxError:
+        # Let ty report invalid Python with the original source mapping.
+        pass
+    else:
+        if code.co_flags & inspect.CO_COROUTINE:
+            # Future and wildcard imports are only valid at module scope.
+            # Hoist their complete statements (including multiline imports),
+            # retaining their original locations independently of the body.
+            source_lines = [
+                *(source_lines[index] for index in imports),
+                "async def _notebook_cells():",
+                *("    " + source_lines[index] for index in body),
+            ]
+            line_mapping = [
+                *(line_mapping[index] for index in imports),
+                line_mapping[0],
+                *(line_mapping[index] for index in body),
+            ]
+            column_offsets = [*([0] * (len(imports) + 1)), *([4] * len(body))]
+
     with tempfile.NamedTemporaryFile(
         "w",
         encoding="utf-8",
@@ -306,7 +352,9 @@ def prepare_type_check_file(
         temp_file.write("\n".join(source_lines))
         temp_path = Path(temp_file.name)
 
-    return PreparedTypeCheckFile(doc_path=doc_path, temp_path=temp_path, line_mapping=tuple(line_mapping))
+    return PreparedTypeCheckFile(
+        doc_path=doc_path, temp_path=temp_path, line_mapping=tuple(line_mapping), column_offsets=tuple(column_offsets)
+    )
 
 
 def translate_line_number(line_in_combined: int, line_mapping: tuple[int, ...]) -> int:
@@ -383,7 +431,9 @@ def run_type_check(
                 continue
 
             combined_line = int(match.group("line"))
-            column = match.group("column")
+            offsets = matched_prepared.column_offsets
+            column_offset = offsets[combined_line - 1] if 0 < combined_line <= len(offsets) else 0
+            column = max(1, int(match.group("column")) - column_offset)
             message = match.group("message")
             doc_line = translate_line_number(combined_line, matched_prepared.line_mapping)
             results[matched_prepared.doc_path].append(f"{matched_prepared.doc_path}:{doc_line}:{column}: {message}")

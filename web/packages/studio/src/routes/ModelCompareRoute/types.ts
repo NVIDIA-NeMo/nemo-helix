@@ -5,6 +5,7 @@ import type {
   BroadcastSignal,
   ComposerMode,
 } from '@nemo/common/src/components/AssistantChat/types';
+import type { PromptData } from '@nemo/sdk/generated/platform/schema';
 import type { ReactNode } from 'react';
 
 /** Color/label slots assigned by position. First panel is Baseline. */
@@ -69,6 +70,8 @@ export interface SharedModelEntry {
   modelURN: string | null;
   adapter?: string | null;
   locked?: boolean;
+  /** Saved system prompt and inference params the panel starts from. */
+  promptData?: PromptData;
 }
 
 /** Shape consumed by ModelChatPanel — composed per-render from shared entry + local state. */
@@ -83,4 +86,5 @@ export interface PanelState {
   /** True when this is the only panel — drives the larger per-panel action bar. */
   isSinglePanel: boolean;
   locked: boolean;
+  promptData?: PromptData;
 }

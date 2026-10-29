@@ -5,6 +5,7 @@
 (parent_evaluation_id, status, root_cause): round-trip through create/update, parent-reference
 validation, and free-form status."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
@@ -136,6 +137,27 @@ def test_filter_experiments_by_metadata(client: TestClient) -> None:
     # A shared value returns both.
     both = client.get(EVALUATIONS, params={"filter[metadata.lane]": "gold"})
     assert {e["name"] for e in both.json()["data"]} == {"exp-claude", "exp-gpt"}
+
+    # The bracket form matches the pairs it names ("contains"), not the whole metadata object.
+    bracket = client.get(
+        EVALUATIONS, params={"filter[metadata][model]": "claude-opus", "filter[metadata][lane]": "gold"}
+    )
+    assert bracket.status_code == 200, bracket.text
+    assert [e["name"] for e in bracket.json()["data"]] == ["exp-claude"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"filter[metadata][$exists]": "true"},
+        {"filter[metadata][$hasKey]": "model"},
+        {"filter[metadata]": "claude-opus"},
+    ],
+)
+def test_filter_rejects_comparisons_on_bare_metadata(client: TestClient, params: dict[str, str]) -> None:
+    resp = client.get(EVALUATIONS, params=params)
+    assert resp.status_code == 400, resp.text
+    assert "key/value pairs" in resp.json()["detail"]
 
 
 def test_filter_experiment_groups_by_metadata(client: TestClient) -> None:

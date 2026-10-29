@@ -80,6 +80,7 @@ class AgentsService(NemoService):
             deployments,
             environments,
             gateway,
+            post_run_actions,
             sample_agent,
             sessions,
         )
@@ -90,6 +91,12 @@ class AgentsService(NemoService):
                 sample_agent.router,
                 tag="Sample Agent",
                 description="Provision the packaged sample agent and resources",
+                prefix="/v2",
+            ),
+            RouterSpec(
+                post_run_actions.router,
+                tag="Agent Post-Run Actions",
+                description="Installed post-run actions for execute-agent jobs",
                 prefix="/v2",
             ),
             RouterSpec(agents.router, tag="Agents", description="Agent CRUD", prefix=_prefix),

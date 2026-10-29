@@ -93,5 +93,8 @@ from nemo_helix_plugin.entities.base import (
     _get_entity_type as _get_entity_type,
 )
 from nemo_helix_plugin.entities.base import (
+    is_workspace_not_found as is_workspace_not_found,
+)
+from nemo_helix_plugin.entities.base import (
     parse_qualified_name as parse_qualified_name,
 )

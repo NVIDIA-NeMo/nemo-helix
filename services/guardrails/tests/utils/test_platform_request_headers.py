@@ -3,6 +3,7 @@
 
 import pytest
 from nhx.common.config import Configuration
+from nhx.guardrails.app.handlers.utils import update_models_in_config
 from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
     set_request_default_headers_into_context,
@@ -76,6 +77,34 @@ def test_apply_platform_auth_headers_only_on_platform_models(platform_endpoint: 
 
     assert platform_headers["Authorization"] == "Bearer workload-token"
     assert external_headers == {"X-Custom": "kept"}
+
+
+def test_apply_platform_auth_headers_after_update_models_with_base_url(platform_endpoint: None):
+    """Configs with an explicit `parameters.base_url` must not crash the request path."""
+    config = RailsConfig(
+        models=[
+            Model(
+                type="main",
+                engine="nim",
+                parameters={"base_url": "https://platform.example.test/apis/inference-gateway/v2/v1"},
+            ),
+            Model(
+                type="content_safety",
+                engine="nim",
+                model="safety",
+                parameters={"base_url": "https://nim.example.test/v1"},
+            ),
+        ]
+    )
+
+    updated = apply_platform_auth_headers(
+        update_models_in_config(config, Model(type="main", engine="nim", model="default/llama"))
+    )
+
+    assert updated.models[0].model == "default/llama"
+    assert updated.models[0].parameters.default_headers["Authorization"] == "Bearer workload-token"
+    assert updated.models[1].parameters.base_url == "https://nim.example.test/v1"
+    assert "Authorization" not in updated.models[1].parameters.default_headers
 
 
 @pytest.mark.asyncio

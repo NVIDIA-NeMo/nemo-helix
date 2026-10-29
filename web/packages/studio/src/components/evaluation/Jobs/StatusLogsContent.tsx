@@ -22,6 +22,7 @@ export const StatusLogsContent: FC<StatusLogsContentProps> = ({
     data: logs,
     isLoading,
     loadProgress,
+    logStatus,
   } = useJobLogs({
     workspace,
     name: jobName,
@@ -34,6 +35,7 @@ export const StatusLogsContent: FC<StatusLogsContentProps> = ({
       logs={logs}
       isLoading={isLoading}
       loadProgress={loadProgress}
+      logStatus={logStatus}
       downloadFilename={`${jobName}-logs.txt`}
       emptyMessage="No status logs available for this job."
     />

@@ -260,7 +260,7 @@ cpu-tasks = [
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[claude,codex,deepagents]",
-  # Compass Fabric adapter and compass.analysis execute extension.
+  # Compass Fabric adapter and insights.analysis post-run action.
   { include-group = "compass" },
   "nemo-evals-plugin",
   # nemo-evals' bind_task_image rewrites task.toml with it; scaled-evals pins the same version.

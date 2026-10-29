@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 import click
 import typer
 from nemo_compass_plugin.client import CompassClient
+from nemo_compass_plugin.model_guidance import model_warning
 from nemo_compass_plugin.schema import AnalysisRunResponse, EnableAnalysisConfigRequest
 from nemo_compass_plugin.sdk_resources.analysis_configs import _list_params as _config_list_params
 from nemo_compass_plugin.sdk_resources.analysis_runs import (
@@ -501,6 +502,14 @@ def _read_ethos_file(ethos: Path | None) -> str | None:
 
 
 def _resolve_model_refs(default_model: str | None, fast_model: str | None) -> tuple[str, str]:
+    pair = _configured_model_pair(default_model, fast_model)
+    for model in dict.fromkeys(pair):
+        if warning := model_warning(model):
+            typer.echo(f"Warning: {warning}", err=True)
+    return pair
+
+
+def _configured_model_pair(default_model: str | None, fast_model: str | None) -> tuple[str, str]:
     """Fill either model ref from the operator's CLI config when not given.
 
     The Helix process cannot read that config, so the request has to carry

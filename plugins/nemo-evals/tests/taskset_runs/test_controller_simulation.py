@@ -10,7 +10,7 @@ controller's own tests:
 - The 9 **invariants** are checked after every cycle, and invariants 1, 3 and 9 also at the instant each Job
   is saved and each slot is taken (a create intent written), so an overload shows where it happens.
 - Invariant 8 is checked on ``allocate()``'s inputs and output (the module global is wrapped), and on the
-  order of the create intents phase 2 then writes.
+  order of the create intents the grant phase then writes.
 - The two accepted exceptions to invariants 1 and 9 are honored: a stuck Job forgotten by a controller
   restart is marked exempt (and logged), and creates that outlive ``create_grace`` are never injected.
 
@@ -27,7 +27,7 @@ import logging
 import math
 import random
 from collections import Counter, defaultdict
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -198,6 +198,7 @@ class FakeJobsCluster:
         self.duration: Callable[[str], int] = lambda name: sim.rng.randint(2, 6)
         self.cancel_ticks: tuple[int, int] = (1, 3)
         self.calls: Counter[int] = Counter()  # Jobs calls that reached the service, per cycle
+        self.task_posts: Counter[int] = Counter()  # the grant phase's task Job create attempts, per cycle
         self.timeouts: Counter[int] = Counter()
         self.create_posts: Counter[int] = Counter()
         self.posts_by_name: Counter[tuple[str, str]] = Counter()
@@ -211,10 +212,13 @@ class FakeJobsCluster:
     def _enter(self, kind: str, name: str) -> None:
         sim = self.sim
         self.calls[sim.cycle] += 1
-        # Phase 1's Jobs calls stop at its first timeout; phase 2 still runs (each drain ends at its first
+        # Settling's Jobs calls stop at its first timeout; the grant phase still runs (each drain ends at its first
         # ambiguous create), so a hanging read can't stop every grant in the cluster.
-        if sim.phase1_timed_out and sim.grant_order is None:
-            sim.violate("phase-1 breaker", f"Jobs {kind} of {name} after a phase-1 Jobs timeout, still in phase 1")
+        if sim.settle_timed_out and sim.grant_order is None:
+            sim.violate(
+                "settle-phase breaker",
+                f"Jobs {kind} of {name} after a settle-phase Jobs timeout, still in the settle phase",
+            )
         if name in self.hanging:
             self._time_out(kind)
         if self.outage == "5xx":
@@ -228,7 +232,7 @@ class FakeJobsCluster:
     def _time_out(self, kind: str) -> None:
         self.timeouts[self.sim.cycle] += 1
         if self.sim.in_reconcile and self.sim.grant_order is None and kind != "create":
-            self.sim.phase1_timed_out = True
+            self.sim.settle_timed_out = True
         self.sim.clock.advance(timedelta(seconds=30 if kind == "create" else 10))
         raise _timeout(kind)
 
@@ -244,6 +248,14 @@ class FakeJobsCluster:
         self._read_faults("get")
         job = self.jobs.get((workspace, name))
         return job.response() if job is not None and job.visible(self.sim.clock.now) else None
+
+    async def list_named(self, workspace: str, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        # One call for every name; a hanging name hangs the whole list.
+        self._enter("list", next((name for name in names if name in self.hanging), names[0]))
+        self._read_faults("list")
+        now = self.sim.clock.now
+        listed = {name: self.jobs.get((workspace, name)) for name in names}
+        return {name: job.response() for name, job in listed.items() if job is not None and job.visible(now)}
 
     async def has_steps(self, workspace: str, name: str) -> bool:
         self._enter("steps", name)
@@ -293,10 +305,14 @@ class FakeJobsCluster:
         drain = sim.post_kind.get(request.name, "bundle")
         if drain in sim.drains_ended:
             sim.violate("P1", f"{drain} drain sent {request.name} after an ambiguous create this cycle")
+        if drain != "bundle":
+            self.task_posts[sim.cycle] += 1
+            if self.task_posts[sim.cycle] > sim.config.max_creates_per_cycle:
+                sim.violate("budget", f"create {self.task_posts[sim.cycle]} this cycle: {request.name}")
         try:
             return await self._create(workspace, run, request)
         except (InternalServerError, NemoTransportError):
-            if drain != "bundle":  # phase 1's bundle creates stop only at a timeout (the phase-1 rule)
+            if drain != "bundle":  # the settle phase's bundle creates stop only at a timeout (the settle-phase rule)
                 sim.drains_ended.add(drain)
             raise
 
@@ -484,6 +500,9 @@ class ClusterRunJobs:
     async def get(self, name: str) -> HelixJobResponse | None:
         return await self._cluster.get(self._workspace, name)
 
+    async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
+        return await self._cluster.list_named(self._workspace, names)
+
     async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
         return await self._cluster.result(self._workspace, job, name)
 
@@ -592,16 +611,16 @@ class Sim:
         self.creator_baseline: dict[str, float] = {}
         self.files_down = False
         self.fail_listing: set[str] = set()  # run ids whose member listing raises
-        self.cycle_grants: list[str] = []  # run ids, in the order phase 2 wrote create intents
+        self.cycle_grants: list[str] = []  # run ids, in the order the grant phase wrote create intents
         self.grant_order: list[str] | None = None  # allocate()'s output this cycle
-        self.disrupted: set[str] = set()  # run ids whose phase 1 a fault disrupted this cycle
+        self.disrupted: set[str] = set()  # run ids whose settle phase a fault disrupted this cycle
         self.crashed = False
         self.task_jobs: dict[tuple[str, str], str] = {}  # (run id, member) -> task_job ever written
         self._settled: dict[tuple[str, str], tuple[MemberPhase, int]] = {}
         self._final: dict[str, TasksetRunPhase] = {}
         self.reports: list[CycleReport | None] = []
         self.trace: list[tuple[int, str, str]] = []  # (cycle, job name, event): evidence for violations
-        self.phase1_timed_out = False
+        self.settle_timed_out = False
         self.drains_ended: set[str] = set()
         self.retrying = False
         self.post_kind: dict[str, str] = {}  # task Job name -> "grant" or "retry", per the last intent write
@@ -744,7 +763,7 @@ class Sim:
         self.cycle += 1
         self.cycle_start = self.clock.now
         self.cycle_grants, self.grant_order, self.disrupted, self.crashed = [], None, set(), False
-        self.phase1_timed_out, self.drains_ended, self.retrying = False, set(), False
+        self.settle_timed_out, self.drains_ended, self.retrying = False, set(), False
         if before is not None:
             await before(self)
         if self.faults.restart and self.rng.random() < self.faults.restart:
@@ -889,7 +908,9 @@ class Sim:
             if lower:
                 self.violate(8, f"{sim_run.label}: {member.name} granted before lower-index queued {lower[:3]}")
             if self.retrying:
-                self.violate(8, f"{sim_run.label}: a grant ({member.name}) after phase 2 started retrying creates")
+                self.violate(
+                    8, f"{sim_run.label}: a grant ({member.name}) after the grant phase started retrying creates"
+                )
         if retry:
             self.retrying = True
         if grant or retry:
@@ -1101,7 +1122,7 @@ class Sim:
             self.violate(8, "tallies aren't oldest run first")
         missing = truth.open_ids - {t.run.id for t in tallies}
         if missing:
-            self.violate(8, f"open runs missing from phase 2: {[self.by_id[i].label for i in missing]}")
+            self.violate(8, f"open runs missing from the grant phase: {[self.by_id[i].label for i in missing]}")
         for t in tallies:
             sim_run = self.by_id[t.run.id]
             if t.held != truth.held[t.run.id]:
@@ -1123,8 +1144,11 @@ class Sim:
                     3, f"{sim_run.label} tallied with cap {t.cap}, run_cap is {run_cap(sim_run.plan, self.config)}"
                 )
         used = sum(t.held for t in tallies) + stuck.total()
-        if available != max(0, self.config.max_cluster_concurrent_jobs - used):
-            self.violate(1, f"free slots {available} != cap - used ({used})")
+        # allocate() gets the free slots, cut to the create budget less what it reserves for retries (≤ half).
+        free = max(0, self.config.max_cluster_concurrent_jobs - used)
+        budget = self.config.max_creates_per_cycle
+        if not min(free, budget - budget // 2) <= available <= min(free, budget):
+            self.violate(1, f"{available} slots offered with {free} free (cap - used {used}) and a budget of {budget}")
         unheld_by_creator = Counter(j.creator for j in truth.unheld)
         for creator, count in unheld_by_creator.items():
             if stuck[creator] < count:
@@ -1173,7 +1197,7 @@ class Sim:
         for job in truth.unheld:
             if (job.workspace, job.name) not in self.reconciler.stuck:
                 self.violate(1, f"Job {job.name} runs with no open run's member holding it and isn't counted stuck")
-        disrupted_cycle = self.crashed or report is None or report.phase2_skipped == "open runs couldn't be listed"
+        disrupted_cycle = self.crashed or report is None or report.grant_skipped == "open runs couldn't be listed"
         for sim_run in self.runs:
             stored = self.stored(sim_run)
             members = self.members(sim_run)
@@ -1232,7 +1256,7 @@ class Sim:
             "crashed"
             if report is None
             else f"used={report.used} grants={len(report.grants)} created={report.created} "
-            f"timeouts={report.jobs_timeouts} skip={report.phase2_skipped}"
+            f"timeouts={report.jobs_timeouts} skip={report.grant_skipped}"
         )
         seconds = (self.cycle_start - SIM_START).total_seconds()
         self.history.append(
@@ -1299,12 +1323,16 @@ def make_sim(entity_store, files_client, harbor_resolved_task, sandbox_policy, h
     return make
 
 
+UNBOUNDED_CREATES = 10_000
+"""A create budget no scenario reaches: scenarios written before the budget fill every free slot in one cycle."""
+
+
 def caps(cluster: int, per_creator: int | None = None, per_run: int | None = None, **extra: Any) -> RunControllerConfig:
     return RunControllerConfig(
         max_cluster_concurrent_jobs=cluster,
         max_concurrent_task_jobs_per_creator=per_creator,
         default_max_concurrent_task_jobs=per_run,
-        **extra,
+        **{"max_creates_per_cycle": UNBOUNDED_CREATES, **extra},
     )
 
 
@@ -1478,6 +1506,26 @@ async def test_two_creators_converge_to_25_25(make_sim: MakeSim) -> None:
     sim.assert_clean()
 
 
+async def test_twenty_open_runs_with_the_default_concurrency_and_create_budget(make_sim: MakeSim) -> None:
+    """AC 9.3's load: 4 creators x 5 runs x 20 tasks, caps 25 / 15 / 10, settling eight runs at a time, 10 creates a
+    cycle. Every invariant holds, no cycle creates more than 10, and every run ends."""
+    sim = make_sim(caps(25, per_creator=15, per_run=10, settle_concurrency=8, max_creates_per_cycle=10))
+    sim.cluster.duration = lambda name: sim.rng.randint(4, 10)
+    runs = [
+        await sim.submit(f"{creator}{i}", tasks=20, creator=f"user:{creator}")
+        for creator in ("alice", "bob", "carol", "dave")
+        for i in range(5)
+    ]
+    report = await sim.step()
+    assert report is not None and report.open_runs == 20 and report.created == 10
+    while any(sim.queued(run) or sim.held(run) for run in runs):
+        report = await sim.step()
+        assert report is None or report.created <= 10
+        assert sim.cycle < 400, sim.history[-5:]
+    await sim.run_until_final(200)
+    sim.assert_clean()
+
+
 async def _overloaded(sim: Sim, queue_timeout: timedelta = timedelta(hours=48)) -> list[SimRun]:
     """Six 10-task runs from 2 creators, 3 per creator, on a cluster of 10 slots: far more than one budget's work."""
     return [
@@ -1563,7 +1611,7 @@ async def test_create_timeout_saved_holds_the_slot(make_sim: MakeSim) -> None:
 
 
 async def test_create_timeout_unsaved_is_retried_without_a_new_slot(make_sim: MakeSim) -> None:
-    """A create times out unsaved: its intent keeps the slot; phase 2 retries it after its new grants."""
+    """A create times out unsaved: its intent keeps the slot; the grant phase retries it after its new grants."""
     sim = make_sim(caps(2))
     sim.cluster.duration = lambda name: 5
     run = await sim.submit("retry", tasks=3)
@@ -1770,7 +1818,7 @@ async def test_job_refusing_cancel_past_finalization_then_restart(make_sim: Make
 
 
 async def test_member_listing_fails_for_one_run(make_sim: MakeSim) -> None:
-    """One run's member listing raises: phase 2 is skipped for the cycle; every other run still settles."""
+    """One run's member listing raises: the grant phase is skipped for the cycle; every other run still settles."""
     sim = make_sim(caps(10, per_run=5))
     sim.cluster.duration = lambda name: 1
     broken = await sim.submit("broken", tasks=10)
@@ -1780,7 +1828,7 @@ async def test_member_listing_fails_for_one_run(make_sim: MakeSim) -> None:
     sim.fail_listing.add(broken.id)
     settled = sum(m.phase in SETTLED_MEMBER_PHASES for m in sim.members(healthy))
     report = await sim.step()
-    assert report is not None and report.phase2_skipped and report.grants == []
+    assert report is not None and report.grant_skipped and report.grants == []
     assert sum(m.phase in SETTLED_MEMBER_PHASES for m in sim.members(healthy)) > settled
     sim.fail_listing.clear()
     await sim.run_until_final(60)
@@ -1846,9 +1894,12 @@ async def test_cancel_after_every_member_settled_completes(make_sim: MakeSim) ->
     sim.assert_clean()
 
 
+@pytest.mark.parametrize("creates", [UNBOUNDED_CREATES, 3], ids=["any creates", "3 creates a cycle"])
 @pytest.mark.parametrize("seed", [1, 2, 3, 4, 5, 6])
-async def test_fault_heavy_random_cluster(make_sim: MakeSim, seed: int) -> None:
-    """Every fault at once, over several creators, workspaces and deadlines; all 9 invariants after every cycle."""
+async def test_fault_heavy_random_cluster(make_sim: MakeSim, seed: int, creates: int) -> None:
+    """Every fault at once, over several creators, workspaces and deadlines; all 9 invariants after every cycle.
+
+    The settle phase takes runs 8 at a time; with 3 creates a cycle, grants and retries share a budget of 3."""
     faults = Faults(
         create_5xx_before=0.04,
         create_409_transient=0.02,
@@ -1872,7 +1923,11 @@ async def test_fault_heavy_random_cluster(make_sim: MakeSim, seed: int) -> None:
         restart=0.03,
         mid_cycle_cancel=0.002,
     )
-    sim = make_sim(caps(12, per_creator=8, per_run=5, create_grace_seconds=180), seed=seed, faults=faults)
+    sim = make_sim(
+        caps(12, per_creator=8, per_run=5, create_grace_seconds=180, max_creates_per_cycle=creates),
+        seed=seed,
+        faults=faults,
+    )
     sim.cluster.duration = lambda name: sim.rng.randint(1, 8)
     rng = random.Random(seed * 101)
     plan = [
@@ -1937,14 +1992,16 @@ async def test_deadline_mid_grant_stops_the_creates(make_sim: MakeSim) -> None:
 
 
 async def test_deadline_between_phase_1_and_phase_2_creates_nothing(make_sim: MakeSim) -> None:
-    """Phase 1 takes long enough that a queued run passes its queue timeout before phase 2: it gets no Job."""
+    """Settling takes long enough that a queued run passes its queue timeout before the grant phase: it gets no Job."""
     sim = make_sim(caps(10, per_run=3))
     sim.cluster.duration = lambda name: 20
     busy = await sim.submit("busy", tasks=3)
     await sim.step()  # busy holds 3 registered Jobs
-    sim.cluster.read_latency = timedelta(seconds=8)  # each Jobs read takes 8 s from now on
+    sim.cluster.read_latency = timedelta(seconds=25)  # each Jobs read takes 25 s from now on
     late = await sim.submit("late", tasks=3, creator="user:bob", queue_timeout=timedelta(seconds=20))
-    report = await sim.step()  # starts at t+15; phase 1 reads 3 Jobs (24 s): phase 2 runs after t+35
+    report = (
+        await sim.step()
+    )  # starts at t+15; the settle phase lists busy's 3 Jobs in one 25 s read: the grant phase after t+35
     assert report is not None and late.entity.name in report.grants
     assert not [name for _, name in sim.cluster.jobs if name.startswith("run-late-")]
     await sim.run_until_final(60)
@@ -2018,7 +2075,7 @@ async def test_spec_gap_deleted_intent_job_runs_twice(make_sim: MakeSim) -> None
 
 
 async def test_a_hanging_stuck_job_doesnt_stop_the_grants(make_sim: MakeSim) -> None:
-    """A stuck Job whose GET always times out stays counted (nothing proves it ended), but phase 2 still runs."""
+    """A stuck Job whose GET always times out stays counted (nothing proves it ended), but granting still runs."""
     sim = make_sim(caps(3))
     sim.cluster.duration = lambda name: 400 if "-stuck-" in name else 2
     sim.cluster.refusing.add("run-stuck-task-0")

@@ -193,7 +193,7 @@ def list_role_bindings(
         typer.Option(
             "--filter",
             metavar="FILTER_JSON",
-            help="Use --filter with JSON for complex/nested queries, or --filter.FIELD options for simple fields. Both can be combined, with field options taking precedence.\nJSON-only fields:\n  granted_at: {gte: str, lte: str}\n  revoked_at: {gte: str, lte: str}\n\nFilter role bindings by principal, workspace, role, granted_by, is_active, granted_at, and revoked_at.",
+            help="Use --filter with JSON for complex/nested queries, or --filter.FIELD options for simple fields. Both can be combined, with field options taking precedence.\nJSON-only fields:\n  granted_at: {$gte: str, $lte: str}\n  revoked_at: {$gte: str, $lte: str}\n\nFilter role bindings by principal, workspace, role, granted_by, is_active, granted_at, and revoked_at.",
             rich_help_panel=_FILTER_PANEL,
         ),
     ] = None,

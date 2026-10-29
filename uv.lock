@@ -4372,7 +4372,7 @@ provides-extras = ["service"]
 
 [[package]]
 name = "nemo-compass"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4391,7 +4391,7 @@ dependencies = [
     { name = "tokenizers" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/ee/76faf85ebcabc83d4234f135aeab6730e4c369b0e423697ec479596e12e4/nemo_compass-0.1.0-py3-none-any.whl", hash = "sha256:6b50a6cc8b13991af5dce5469f5eb8e97103e77f3d59e6f2b90d8a9b4762a0a4", size = 4597979, upload-time = "2026-10-19T23:44:39.516Z" },
+    { url = "https://files.pythonhosted.org/packages/94/d9/1fa09ce6ea6d25a2791a9615274d01fcc474d989ce14cddac8cd00ceb4e6/nemo_compass-0.2.0-py3-none-any.whl", hash = "sha256:964a38caa7d618d158f4669bafb1f694aa7adb7689ce55ea6490d795d9bfabd6", size = 4627291, upload-time = "2026-10-26T21:04:20.966Z" },
 ]
 
 [[package]]
@@ -4420,7 +4420,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14'", specifier = "==0.1.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14'", specifier = "==0.2.0" },
     { name = "nemo-fabric-adapter-contract", specifier = ">=0.5.0,<0.6.0" },
     { name = "nemo-fabric-adapters-common", specifier = ">=0.5.0,<0.6.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
@@ -6264,10 +6264,10 @@ requires-dist = [
     { name = "nemo-builder-plugin", marker = "extra == 'nemo-evals-plugin'", editable = "plugins/nemo-builder" },
     { name = "nemo-builder-plugin", marker = "extra == 'plugins'", editable = "plugins/nemo-builder" },
     { name = "nemo-builder-plugin", marker = "extra == 'services'", editable = "plugins/nemo-builder" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'all'", specifier = "==0.1.0" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'nemo-compass-plugin'", specifier = "==0.1.0" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = "==0.1.0" },
-    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'services'", specifier = "==0.1.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'all'", specifier = "==0.2.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'nemo-compass-plugin'", specifier = "==0.2.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = "==0.2.0" },
+    { name = "nemo-compass", marker = "python_full_version < '3.14' and extra == 'services'", specifier = "==0.2.0" },
     { name = "nemo-deployments-plugin", marker = "extra == 'all'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin'", editable = "plugins/nemo-deployments" },
     { name = "nemo-deployments-plugin", marker = "extra == 'nemo-agents-plugin-claude'", editable = "plugins/nemo-deployments" },
@@ -6876,9 +6876,9 @@ requires-dist = [
     { name = "wasmtime", marker = "extra == 'core-service'", specifier = ">=20.0.0" },
     { name = "wasmtime", marker = "extra == 'services'", specifier = ">=20.0.0" },
     { name = "xdg-base-dirs", marker = "extra == 'garak-service'", specifier = ">=6.0.1" },
-    { name = "yara-python", marker = "extra == 'all'", specifier = "==4.5.1" },
-    { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
-    { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
+    { name = "yara-python", marker = "extra == 'all'", specifier = "==4.5.4" },
+    { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.4" },
+    { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.4" },
 ]
 provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
@@ -8668,7 +8668,7 @@ requires-dist = [
     { name = "python-multipart", specifier = "~=0.0.9" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "uvicorn", specifier = ">=0.32.1" },
-    { name = "yara-python", specifier = "==4.5.1" },
+    { name = "yara-python", specifier = "==4.5.4" },
 ]
 
 [package.metadata.requires-dev]
@@ -13592,15 +13592,22 @@ wheels = [
 
 [[package]]
 name = "yara-python"
-version = "4.5.1"
+version = "4.5.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2f/3a/0d2970e76215ab7a835ebf06ba0015f98a9d8e11b9969e60f1ca63f04ba5/yara_python-4.5.1.tar.gz", hash = "sha256:52ab24422b021ae648be3de25090cbf9e6c6caa20488f498860d07f7be397930", size = 550202, upload-time = "2024-05-27T10:15:35.255Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/38/347d1fcde4edabd338d5872ca5759ccfb95ff1cf5207dafded981fd08c4f/yara_python-4.5.4.tar.gz", hash = "sha256:4c682170f3d5cb3a73aa1bd0dc9ab1c0957437b937b7a83ff6d7ffd366415b9c", size = 551142, upload-time = "2025-05-27T14:15:49.035Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/69/847b0699c64beaea8de549ef806064420df54cf58e94fcd2f651d9963b7a/yara_python-4.5.1-cp312-cp312-macosx_10_9_universal2.whl", hash = "sha256:7eb27c1cd2f6f93f68e23e676ede28357c1fc8b9ec7deefe86f2cfef4abd877c", size = 414622, upload-time = "2024-05-27T10:13:37.487Z" },
-    { url = "https://files.pythonhosted.org/packages/41/14/af54ca86186aa265a4c722324f1f0aca8dd5fdef59ff9c9a81c8679bc3ed/yara_python-4.5.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:77011bed905f3786755da7de7ba9082790db654a241e13746fa3fc325b9ad966", size = 2245644, upload-time = "2024-05-27T10:13:40.44Z" },
-    { url = "https://files.pythonhosted.org/packages/b1/cd/1a6a0b8d70cb4b117d6aeb3e62b41ab85ab46717a15c74aa615e2beeb4fa/yara_python-4.5.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3431154fac7f41b4657edad91632717b5f1bab5be4ed6ce28d6e17e441d5c947", size = 2328876, upload-time = "2024-05-27T10:13:43.792Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/24/6027b35f4cea11537d6f0b8a5119933f405eb806c27f3c288e086b6e4f76/yara_python-4.5.1-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:7d5dc091235ded00b30f04a51d70e08352e44976122f8d45e63d25e96eae27d9", size = 1957556, upload-time = "2024-05-27T10:13:45.51Z" },
-    { url = "https://files.pythonhosted.org/packages/aa/8f/11785bb3256151b8584e27557ea7747b54cf3a28e0f12980555458734a8e/yara_python-4.5.1-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:bb65c17657b4cdbe5adee7a6e617ee05e214e8afdbc82b195885354a72a16476", size = 2061924, upload-time = "2024-05-27T10:13:48.502Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/cc/deaf10b6b31ee81842176affce79d57c3b6df50e894cf6cdbb1f0eb12af2/yara_python-4.5.4-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:ade234700c492bce0efda96c1cdcd763425016e40df4a8d30c4c4e6897be5ace", size = 2471771, upload-time = "2025-05-27T14:14:47.381Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/0d/1f2e054f7ddf9fd4c873fccf63a08f2647b205398e11ea75cf44c161e702/yara_python-4.5.4-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:92b233aae320ee9e59728ee23f9faf4a423ae407d4768b47c8f0e472a34dbae2", size = 2478413, upload-time = "2025-05-27T14:14:50.205Z" },
+    { url = "https://files.pythonhosted.org/packages/df/7d/e51ecb0db87094976904a52eb521e3faf9c18f7c889b9d5cf996ae3bb680/yara_python-4.5.4-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d29d0e137e0d77dd110186369276e88381f784bdc45b5932a2fb3463e2a1b1c7", size = 2245326, upload-time = "2025-05-27T14:14:53.338Z" },
+    { url = "https://files.pythonhosted.org/packages/52/06/104c4daa22e34a7edb49051798126c37f6280d4f1ea7e8888b043314e72d/yara_python-4.5.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e5eae935b05a9f8dc71df55a79c38f52abd93f8840310fe4e0d75fbd78284f24", size = 2332343, upload-time = "2025-05-27T14:14:56.424Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/38/4b788b8fe15faca08e4a52c0b3dc8787953115ce1811e7bf9439914b6a5b/yara_python-4.5.4-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:30fc7959394532c6e3f48faf59337f5da124f1630668258276b6cfa54e555a6e", size = 2949346, upload-time = "2025-05-27T14:14:57.924Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/cc/c6366d6d047f73594badd5444f6a32501e8b20ab1a7124837d305c08b42b/yara_python-4.5.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:a3c7bc8cd0db5fb87ab579c755de83723030522f3c0cd5b3374044055a8ce6c6", size = 2639871, upload-time = "2025-05-27T14:15:02.63Z" },
+    { url = "https://files.pythonhosted.org/packages/74/7f/9bf4864fee85f86302d78d373c93793419c080222b5e18badadebb959263/yara_python-4.5.4-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:fe8ad189843c729eae74be3b8447a4753fac2cebe705e5e2a7280badfcc7e3b4", size = 2471811, upload-time = "2025-05-27T14:15:07.55Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/4c/997be6898cdda211cb601ae2af40a2dbd89a48ba9889168ddd3993636e97/yara_python-4.5.4-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:4537f8499d166d22a54739f440fb306f65b0438be2c6c4ecb2352ecb5adb5f1c", size = 2478416, upload-time = "2025-05-27T14:15:10.58Z" },
+    { url = "https://files.pythonhosted.org/packages/87/9b/e21f534f33062f2e5f6dceec3cb4918f4923264b1609652adc0c83fe2bde/yara_python-4.5.4-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:93f5f5aba88e2ed2aaebfbb697433a0c8020c6a6c6a711e900a29e9b512d5c3a", size = 2245135, upload-time = "2025-05-27T14:15:13.569Z" },
+    { url = "https://files.pythonhosted.org/packages/99/ee/21477d4c83e7f267ff7d61a518eb1b2d3eb7877031c5c07bd1dc0a54eb95/yara_python-4.5.4-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9d9a58b7dc87411a2443d2e0382a111bd892aef9f6db2a1ebb4a9215eef0db71", size = 2331976, upload-time = "2025-05-27T14:15:17.138Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/5d/2680831aa43d181a0cc023ba89132ff6f03a0532f220cde27bccd60d54e2/yara_python-4.5.4-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:0b9de86fbe8a646c0644df9e1396d6941dc6ed0f89be2807e6c52ab39161fd9f", size = 2949066, upload-time = "2025-05-27T14:15:18.822Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/28/9499649cb2cb42592c13ca6a15163e0cbf132c2974394de171aa5f8b49e4/yara_python-4.5.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:cb0f0e7183165426b09e2b1235e70909e540ac18e2c6be96070dfe17d7db4d78", size = 2639628, upload-time = "2025-05-27T14:15:22.142Z" },
 ]
 
 [[package]]

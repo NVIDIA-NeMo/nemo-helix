@@ -197,8 +197,9 @@ if __name__ == "__main__":  # Fabric starts the runner with `python -m`
 ```
 
 **2. Describe it** in `acme-agent.fabric-adapter.json`. `config.accepts` lists the `agent.yaml` fields
-the runtime applies; Fabric rejects a config that sets anything else. NeMo Helix accepts only adapter
-IDs that start with `nvidia.fabric.`.
+the runtime applies; Fabric rejects a config that sets anything else. NeMo Helix accepts a harness
+`kind` naming a built-in harness or the `adapter_id` of an installed descriptor, and rejects any other
+`kind` when you deploy the agent or create a job.
 
 ```json
 {
@@ -213,7 +214,13 @@ IDs that start with `nvidia.fabric.`.
 }
 ```
 
-**3. Package the descriptor with your code,** so Fabric discovers it wherever the package is installed:
+**3. Package the descriptor with your code.** Fabric discovers descriptors installed under
+`share/nemo-fabric` in the Python environment, and NeMo Helix accepts a harness `kind` only when its
+descriptor is installed there. The `shared-data` table below puts it there when the wheel is
+installed. Install the package into the environment itself; an overlay such as `uv run --with` hides
+the descriptor. See Fabric's
+[registration and discovery guide](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.5.0/docs/adapter-contract/tutorials/registration-and-discovery.md)
+for details.
 
 ```toml
 [project]
@@ -247,13 +254,20 @@ harnesses:
   agent against its adapter.
 - The platform's Python environment, for subprocess deployments. If you installed NeMo Helix with
   `uv tool install`, add your package to that tool environment with `--with`.
-- The agent image, for Docker and Kubernetes deployments. Package with `--pyproject` so the image
-  installs your project; the `nemo agents package-agent` platform job cannot.
+- The agent image, for Docker and Kubernetes deployments and execute jobs. Package with `--pyproject`
+  so the image installs your project, or with a `--template` Dockerfile that installs the adapter; the
+  `nemo agents package-agent` platform job can do neither. Without either flag, `nemo agents package`
+  rejects an adapter the image doesn't install.
+
+The platform checks each harness `kind` against the adapters installed in its own Python environment
+when you deploy the agent or create an execute job. When a Docker or Kubernetes deployment, or an
+execute job, names an `image`, the platform can't see which adapters that image installs, so it skips
+this check at create time and the agent checks its `kind` inside the image when it starts.
 
 Automatic trace export and streaming depend on what the descriptor declares; see the
 [adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.5.0/docs/adapter-contract). The
 Compass plugin's
-[`nvidia.fabric.insights-analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-compass)
+[`nvidia.helix.compass.analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-compass)
 adapter is a complete example.
 
 ### Model Access

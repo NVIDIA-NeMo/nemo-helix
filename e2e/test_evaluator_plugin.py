@@ -51,11 +51,13 @@ from nhx.testing.utils import ensure_passthrough_virtual_model
 from nhx_evals_sdk import (
     ExactMatchMetric,
     InferenceParams,
+    Model,
     ModelRef,
     RunConfig,
     RunConfigOnlineModel,
 )
 from nhx_evals_sdk.agent_eval.runtimes.gym import GymRewardMetric, discover_gym_tasks
+from nhx_evals_sdk.enums import ModelFormat
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.string_check import StringCheckMetric
 from nhx_evals_sdk.metrics.tool_calling import ToolCallingMetric
@@ -635,10 +637,12 @@ def test_tool_calling_metric_preserves_structured_references(evaluator_client: N
         _cleanup_evaluator_job(evaluator_client, job.name)
 
 
+@pytest.mark.parametrize("use_model_ref", [False, True], ids=["inline-model", "model-ref"])
 def test_online_evaluate_job_uses_mock_provider(
     client: NemoClient,
     evaluator_client: NemoClient,
     evaluator_workspace: str,
+    use_model_ref: bool,
 ) -> None:
     model_name = short_unique_name("eval-model")
     _create_ready_mock_model(
@@ -647,8 +651,17 @@ def test_online_evaluate_job_uses_mock_provider(
         name=model_name,
         mock_response_body=_chat_completion("Paris"),
     )
-    # A ref the server resolves to the in-cluster gateway, as Studio now submits it.
-    target = ModelRef(root=f"{evaluator_workspace}/{model_name}")
+    # A ref is resolved by the server to the in-cluster gateway, as Studio submits it; an inline model
+    # names that route directly.
+    target = (
+        ModelRef(root=f"{evaluator_workspace}/{model_name}")
+        if use_model_ref
+        else Model(
+            url=_internal_model_route(evaluator_workspace, model_name),
+            name=model_name,
+            format=ModelFormat.OPEN_AI,
+        )
+    )
 
     job = _evaluator(evaluator_client).submit(
         metric=_exact_match_metric(candidate=None),

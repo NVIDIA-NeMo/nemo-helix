@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any, TypeVar
 
 import httpx
 import pytest
+from nemo_agents_plugin.fabric import adapters
 from nemo_helix_plugin import cli_state as cli_state_module
 from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -264,3 +266,20 @@ def _released_contract_version(monkeypatch: pytest.MonkeyPatch) -> None:
     import nemo_agents_plugin.container.template as template
 
     monkeypatch.setattr(template, "get_contract_version", lambda: "1.0.0")
+
+
+@pytest.fixture
+def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Install a manifest root laid out like the real one, so tests don't depend on which plugins are installed."""
+    root = tmp_path / "nemo-fabric"
+    for relative_path, adapter_id in {
+        "adapters/helix/compass/analyst.fabric-adapter.json": "nvidia.helix.compass.analyst",
+        "adapters/nooa/nooa.fabric-adapter.json": "nvidia.fabric.nooa",
+        "adapters/nooa/nooa-bench.fabric-adapter.json": "nvidia.fabric.nooa.bench-agent",
+    }.items():
+        manifest = root / relative_path
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps({"adapter_id": adapter_id}), encoding="utf-8")
+    monkeypatch.setattr(adapters, "ADAPTER_MANIFEST_ROOT", root)
+    monkeypatch.delenv(adapters.ADAPTER_PYTHON_ENV, raising=False)
+    return root

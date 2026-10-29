@@ -1,7 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared, value-free provider configuration for OpenShell execution backends."""
+"""Configure service credentials for Helix workloads running in OpenShell.
+
+An OpenShell provider supplies credentials for a service. Its profile defines where
+and how credentials are injected.
+The Helix credential driver retrieves the values for those providers from Secrets.
+"""
 
 from pathlib import Path
 from typing import Literal
@@ -10,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class GatewayWorkload(BaseModel):
+    """Identify the job step/attempt or deployment whose lifecycle permits secret use."""
+
     model_config = ConfigDict(extra="forbid", frozen=True, str_min_length=1)
 
     kind: Literal["job", "deployment"]
@@ -21,6 +28,8 @@ class GatewayWorkload(BaseModel):
 
 
 class GatewayProviderBinding(BaseModel):
+    """Select a provider profile and map its credential slots to Helix secret references."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     profile: str = Field(min_length=1)
@@ -28,7 +37,7 @@ class GatewayProviderBinding(BaseModel):
 
 
 class GatewayInjectionProfile(BaseModel):
-    """Operator approval of a gateway profile for selected Helix workspaces."""
+    """Limit a provider profile to approved Helix workspaces and credential slots."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,7 +51,7 @@ class ProviderAccessRevoked(RuntimeError):
 
 
 class GatewayCredentialConfig(BaseModel):
-    """Trusted controller configuration; never copied into a workload."""
+    """Configure backend provider registration: gateway identity, signing key and profiles."""
 
     model_config = ConfigDict(extra="forbid")
 

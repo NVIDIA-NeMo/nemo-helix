@@ -1,11 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenShell provider registration, renewal and cleanup for deployments.
-
-Only reference metadata is persisted in Helix. Tickets travel directly to the
-gateway, and provider values are resolved by the external credential driver.
-"""
+"""Manage OpenShell service access for deployments using credentials stored in Helix Secrets."""
 
 from __future__ import annotations
 
@@ -74,14 +70,15 @@ def _rpc_code(error: grpc.RpcError) -> grpc.StatusCode | None:
 
 
 class DeploymentProviderProvisioner:
-    """Idempotent provisioning through the gateway's supported provider RPCs.
+    """Manage the OpenShell providers used by a deployment's sandbox.
 
-    Uses the caller's async gRPC channel and RPC timeout. The caller creates
-    and closes the channel on the event loop running these operations.
+    The Deployments backend calls prepare to register or renew provider credentials,
+    and cleanup after sandbox deletion. Registration sends signed secret references
+    to the gateway; the Helix credential driver resolves the actual values.
 
-    Ownership labels and a binding fingerprint prevent name collisions from
-    borrowing another workload's provider. Cleanup discovers providers from
-    gateway state, so controller restarts do not lose the cleanup inventory.
+    Provider labels identify the owning workload and credential configuration.
+    Renewal timestamps and revocation markers live on the gateway so another
+    controller can resume the work after a restart.
     """
 
     def __init__(
@@ -94,6 +91,7 @@ class DeploymentProviderProvisioner:
         tickets: RegistrationTickets | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
+        """Borrow the backend's async channel; the backend owns its lifetime."""
         self.config = config
         self.workspace = workspace
         self.client = ProviderGatewayClient(channel, timeout=timeout)
@@ -118,6 +116,16 @@ class DeploymentProviderProvisioner:
         renew: bool = False,
         auth_enabled: bool = True,
     ) -> list[str]:
+        """Return provider names for the backend to attach, or renew attached providers.
+
+        Initial calls create providers or reuse matching registrations. With
+        renew=True, Helix-managed renewal rechecks access and replaces credentials
+        using fresh signed requests; it never recreates a missing provider.
+
+        Permission loss during renewal records revocation before detaching and
+        deleting the affected provider. This removes service access, not the
+        sandbox process; the caller receives ProviderAccessRevoked.
+        """
         if workload.kind != "deployment":
             raise ProviderProvisioningError("Expected a deployment credential binding.")
         if renew and self.config.renewal_mode != "helix":
@@ -322,6 +330,7 @@ class DeploymentProviderProvisioner:
         return names
 
     async def _issue_ticket(self, scope: BindingScope, *, requester_secrets: AsyncSecretsClient) -> SecretStr:
+        """Check creator permission and secret metadata before signing the registration request."""
         await authorize_secret_binding(
             workspace=scope.secret_workspace,
             name=scope.secret_name,
@@ -331,7 +340,7 @@ class DeploymentProviderProvisioner:
         return self.tickets.sign(scope)
 
     async def _finish_revocation(self, name: str, sandbox_name: str) -> None:
-        """Detach using fresh sandbox state, then delete the credential binding."""
+        """Detach the provider from the sandbox, then delete the provider from OpenShell."""
         try:
             sandbox = (
                 await self.client.get_sandbox(pb.GetSandboxRequest(workspace_scope=self._scope(), name=sandbox_name))
@@ -352,7 +361,11 @@ class DeploymentProviderProvisioner:
         await self._delete(name)
 
     async def cleanup(self, *, workload_workspace: str, workload_id: str) -> None:
-        """Call after sandbox deletion is acknowledged; retry errors on reconciliation."""
+        """Delete this workload's providers after the backend confirms sandbox deletion.
+
+        Gateway ownership labels identify the providers even after a controller
+        restart. The backend must retry failed cleanup on a later reconciliation.
+        """
         owner = _digest([self.config.gateway_id, workload_workspace, workload_id])
         providers = await self._list_providers()
         for provider in providers:
@@ -360,10 +373,11 @@ class DeploymentProviderProvisioner:
                 await self._delete(provider.metadata.name)
 
     async def cleanup_unused(self) -> None:
-        """Recover providers abandoned before sandbox creation or after deletion.
+        """Finish pending revocations and delete providers whose sandboxes are missing.
 
-        The grace period excludes in-flight provisioning. Deletion itself is
-        guarded by OpenShell, which refuses to delete an attached provider.
+        Unmarked providers get a ten-minute grace period for sandbox creation.
+        Revocation markers are processed immediately. OpenShell refuses deletion
+        while a provider remains attached.
         """
         for provider in await self._list_providers():
             labels: Mapping[str, str] = provider.metadata.labels

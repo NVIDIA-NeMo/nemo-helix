@@ -19,7 +19,7 @@ Unsloth-specific:
 | Hardware | `hardware.gpus` `"0"`, `hardware.precision` `bf16` (selection only, single GPU) |
 | Model load | `load_in_4bit: true`, `dtype: "auto"` |
 | Batch | `batch.per_device_train_batch_size` 2, `batch.gradient_accumulation_steps` 4 (effective batch 8; see `references/batch-sizing.md` for ≥48 GB ramp) |
-| Optimizer | `learning_rate` 5e-5, `optim` `adamw_8bit` |
+| Optimizer | `optim` `adamw_8bit`; `learning_rate` unset |
 | Output | `save_method: "lora"` (adapter-only) unless user asks for merged checkpoint |
 | Gradient checkpointing | `training.use_gradient_checkpointing: "unsloth"` |
 
@@ -33,7 +33,7 @@ rl-specific (DPO):
 | Schedule (if user gives none) | small demo run: `max_steps` 20, which finishes fast and proves the pipeline. A real run sets `epochs`. |
 | Parallelism | 1 node, 1 GPU (`parallelism.num_nodes`/`num_gpus_per_node`) |
 | Batch | `batch_size` 32, `micro_batch_size` 1 |
-| Optimizer | `learning_rate` 5e-6 (DPO uses a low LR), AdamW + cosine |
+| Optimizer | AdamW + cosine; `learning_rate` unset |
 | DPO | `ref_policy_kl_penalty` (β) 0.05, `sft_loss_weight` 0.0 |
 | Max sequence length | 1024 |
 | Output | full-weight model entity (`output.name`); no adapter |
@@ -54,7 +54,7 @@ rl-specific (GRPO) — values below are a **real 8×H100 LoRA configuration**, n
 | Batch | `batch_size` 512, `micro_batch_size` 1, `num_prompts_per_step` 32, `num_generations_per_prompt` 16 |
 | Dynamic sampling | `use_dynamic_sampling` true, `batch_multiplier` 2.0, `dynamic_sampling_max_gen_batches` 10 |
 | Sequence | `max_seq_length` 3072, `max_new_tokens` 2048, `temperature` 1.0, `activation_checkpointing` true |
-| Optimizer | `learning_rate` 1e-5, `min_learning_rate` 9e-6, `adam_eps` 1e-8, `warmup_steps` 10, `weight_decay` 0.01 |
+| Optimizer | `learning_rate` unset, `min_learning_rate` 9e-6, `adam_eps` 1e-8, `warmup_steps` 10, `weight_decay` 0.01 |
 | Schedule | `epochs` 1 (a full pass). `max_steps` 200 only if the user explicitly wants a bounded first run |
 | GRPO loss | `ref_policy_kl_penalty` 0.0, `ratio_clip_min`/`max`/`c` 0.2 / 0.28 / 10.0, `normalize_rewards` true, `use_leave_one_out_baseline` true, `max_rollout_turns` 1 |
 | Importance sampling | `truncated_importance_sampling_type` `"tis"`, ratio 2.0, `use_importance_sampling_correction` true |

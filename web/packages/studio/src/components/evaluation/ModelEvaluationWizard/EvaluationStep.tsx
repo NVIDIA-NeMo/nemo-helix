@@ -20,9 +20,10 @@ export const EvaluationStep: FC = () => {
   return (
     <Stack gap="density-2xl" className="w-full min-w-0">
       <JudgeModelSelect<EvaluationFormValues>
+        allowAdapters
         formFieldName="model"
         slotLabel="Model to Evaluate"
-        placeholder="Select a model"
+        placeholder="Select a model or adapter"
       />
 
       <Panel elevation="higher" slotHeading="Live Test (optional)" className="min-w-0">

@@ -48,13 +48,16 @@ export const useUploadSubmit = ({
   onSubmitRef.current = onSubmit;
 
   const submit = useCallback(async (): Promise<boolean> => {
-    const { dataset, selectedFiles, activeTab } = stateRef.current;
+    const { dataset, selectedFiles, activeTab, acceptableFileTypes, invalidFileMode } =
+      stateRef.current;
     const onSubmitFn = onSubmitRef.current;
 
     const errors = validateUploadForm({
       selectedFiles,
       selectedDataset: dataset,
       isDatasetRequired: includeDataset || (includeTabs && activeTab === 'dataset'),
+      acceptableFileTypes,
+      invalidFileMode,
     });
     if (Object.keys(errors).length > 0) {
       dispatch({ type: 'SET_ERRORS', payload: errors });

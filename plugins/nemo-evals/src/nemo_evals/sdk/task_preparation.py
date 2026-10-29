@@ -11,7 +11,11 @@ from nemo_evals.api.schemas import (
     TaskInput,
     TaskInputs,
 )
-from nemo_evals.harbor.publication import publish_harbor_task_archive, publish_harbor_task_archive_async
+from nemo_evals.harbor.publication import (
+    describe_harbor_task_archive,
+    publish_harbor_task_archive,
+    publish_harbor_task_archive_async,
+)
 from nemo_evals.shared.metric_bundles.bundles import MetricBundlePackager, bundle_metric
 from nemo_evals.shared.metric_bundles.defaults import resolve_default_metric_bundle_packager
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
@@ -156,6 +160,24 @@ def prepare_task(
         fileset_ref=fileset_ref if fileset_ref is not None else f"{workspace}/harbor-tasks",
         path_prefix=path_prefix or "",
         verify_against=task,
+    )
+    definition.metrics = metrics
+    definition.views = task.views.copy()
+    return TaskInput(spec=definition, metadata=metadata)
+
+
+def describe_harbor_task(task: HarborAgentEvalTask, *, workspace: str) -> TaskInput:
+    """The input :func:`prepare_task` would build for ``task`` with default options, without uploading its archive.
+
+    Same validation, metrics, views and metadata; the archive is packed locally only. Equal to a stored task's
+    ``spec`` and ``metadata`` means publishing ``task`` again would change nothing.
+
+    Raises:
+        ValueError: Task validation fails.
+    """
+    _, metrics, metadata = _scoring(task, None)
+    definition = describe_harbor_task_archive(
+        task.source_dir, fileset_ref=f"{workspace}/harbor-tasks", verify_against=task
     )
     definition.metrics = metrics
     definition.views = task.views.copy()

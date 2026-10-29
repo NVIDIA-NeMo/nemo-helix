@@ -23,16 +23,6 @@ export const projectNameInputSchema = z
   )
   .regex(/[a-zA-Z0-9]/, 'Name must contain at least one alphanumeric character.');
 
-export const workspaceInputSchema = z
-  .string()
-  .min(1, { message: 'Name is required' })
-  .max(255)
-  .regex(
-    /^[\w.-]*$/,
-    'Name must only contain alphanumeric characters, dashes, underscores, or dots.'
-  )
-  .regex(/[a-zA-Z0-9]/, 'Name must contain at least one alphanumeric character.');
-
 export const URN_REGEX = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 export const URNSchema = z
   .string()
@@ -86,11 +76,6 @@ export const projectCreateSchema = z.object({
 });
 
 export const projectUpdateSchema = z.object({
-  description: z.string().optional(),
-});
-
-export const workspaceCreateSchema = z.object({
-  name: workspaceInputSchema,
   description: z.string().optional(),
 });
 

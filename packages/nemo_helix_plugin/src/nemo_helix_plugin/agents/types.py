@@ -556,6 +556,14 @@ class CreateExecuteJobRequest(AgentJobRequest):
     spec: JsonObject = Field(description="ExecuteAgentJobConfig payload owned by the Agents plugin.")
 
 
+class PostRunActionInfo(BaseModel):
+    """A post-run action installed on the platform, as set on an execute job's ``post_run_action.kind``."""
+
+    kind: str = Field(description="Kind to set on post_run_action.kind; the action's entry-point name.")
+    title: str = Field(description="Human-readable name of the action.")
+    description: str = Field(description="One-line summary of what the action does after the agent runs.")
+
+
 class AgentJob(BaseModel):
     """Agents job response with collection-specific spec kept as JSON."""
 

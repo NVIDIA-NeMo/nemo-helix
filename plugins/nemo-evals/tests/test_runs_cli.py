@@ -20,6 +20,7 @@ from nemo_evals.api.schemas import AgentEvalResult
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
+    SUBMIT_TIMEOUT_SECONDS,
     BundleJobView,
     Candidate,
     CreatedTaskset,
@@ -38,6 +39,7 @@ from nemo_evals.runs_cli import (
     download_git_tasks,
     job_error,
     newest_bundle_job,
+    publish_tasks,
     rollup_scores,
     run_request,
     run_task_jobs,
@@ -48,6 +50,7 @@ from nemo_evals.runs_cli import (
 )
 from nemo_evals.sdk.resources import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 from typer.testing import CliRunner
 
@@ -145,7 +148,7 @@ def _image_build(build_id: str = "1", status: str = "ready") -> ImageBuild:
         status=status,  # ty: ignore[invalid-argument-type]
         job=f"task-image-build-{build_id}",
         allowed_registries=[],
-        images=[BuildImage(role="main", source="prebuilt")] if status == "ready" else [],
+        images=[BuildImage(type="main", source="prebuilt")] if status == "ready" else [],
         error="no Dockerfile" if status == "failed" else None,
     )
 
@@ -220,7 +223,11 @@ def test_the_wrapper_follows_one_retry_and_never_submits_after_a_failed_build(
     def get_image_build(name, build_id, revision, workspace):
         return _image_build(build_id, "failed" if int(build_id) <= failures else "ready")
 
-    submitting_tasks = SimpleNamespace(build_images=build_images, get_image_build=get_image_build)
+    submitting_tasks = SimpleNamespace(
+        build_images=build_images,
+        get_image_build=get_image_build,
+        list_image_builds=lambda name, revision, workspace: SimpleNamespace(data=[]),
+    )
     monkeypatch.setattr(
         "nemo_evals.runs_cli.Evaluator",
         SimpleNamespace(from_client=lambda _: SimpleNamespace(tasks=submitting_tasks)),
@@ -527,6 +534,69 @@ def test_a_failed_submit_names_its_key_so_a_rerun_finishes_the_run():
     )
     with pytest.raises(RuntimeError, match="rerun the same command with --idempotency-key k-123$"):
         submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+
+
+@pytest.mark.parametrize("error", [httpx.ReadTimeout(""), httpx.RemoteProtocolError("Server disconnected")])
+def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(error):
+    timeouts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"]["read"])
+        raise error
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="the run may still be accepted.*--idempotency-key k-123$"):
+        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+    assert timeouts == [SUBMIT_TIMEOUT_SECONDS]  # sent once, with the long timeout
+
+
+@pytest.fixture
+def publishing(monkeypatch):
+    """``publish_tasks`` over fake discovery and a fake evaluator holding one stored task, ``deep-swe-a``."""
+    expected = SimpleNamespace(spec="spec-v1", metadata=[])
+    monkeypatch.setattr(
+        "nhx_evals_sdk.agent_eval.runtimes.harbor.runtime.discover_harbor_tasks", lambda path: [path.name]
+    )
+    monkeypatch.setattr("nemo_evals.sdk.task_preparation.describe_harbor_task", lambda source, workspace: expected)
+    seen = SimpleNamespace(replaced=[], stored={"deep-swe-a": SimpleNamespace(spec="spec-v1", metadata=[], revision=3)})
+
+    def retrieve(name, workspace):
+        if name not in seen.stored:
+            raise NotFoundError(httpx.Response(404, json={"detail": "no task"}))
+        return seen.stored[name]
+
+    def replace(name, task, workspace):
+        seen.replaced.append(name)
+        return SimpleNamespace(revision=4)
+
+    revisions = lambda name, workspace, page_size: SimpleNamespace(  # noqa: E731
+        data=[SimpleNamespace(revision=r, content_hash=f"{r}" * 64) for r in (3, 4)]
+    )
+    seen.evaluator = SimpleNamespace(
+        tasks=SimpleNamespace(retrieve=retrieve, replace=replace, list_revisions=revisions)
+    )
+    return seen
+
+
+def test_an_unchanged_task_is_pinned_without_publishing(publishing, tmp_path):
+    lines = []
+    refs = publish_tasks(publishing.evaluator, [tmp_path / "a"], prefix="deep-swe", workspace="ac9", echo=lines.append)
+    assert publishing.replaced == [] and refs == ["ac9/deep-swe-a#" + "3" * 64]
+    assert lines == ["Unchanged task ac9/deep-swe-a#" + "3" * 64]
+
+
+@pytest.mark.parametrize("stored", [None, SimpleNamespace(spec="spec-v0", metadata=[], revision=3)])
+def test_a_new_or_changed_task_is_published(publishing, tmp_path, stored):
+    if stored is None:
+        publishing.stored.clear()
+    else:
+        publishing.stored["deep-swe-a"] = stored
+    lines = []
+    refs = publish_tasks(publishing.evaluator, [tmp_path / "a"], prefix="deep-swe", workspace="ac9", echo=lines.append)
+    assert publishing.replaced == ["deep-swe-a"] and refs == ["ac9/deep-swe-a#" + "4" * 64]
+    assert lines == ["Published task ac9/deep-swe-a#" + "4" * 64]
 
 
 @pytest.mark.parametrize("spec_key", [None, "from-file"])

@@ -11,7 +11,7 @@ const {
   finishSmoke,
 } = require("../release-smoke.cjs");
 
-test("resolves exact stable, prerelease and nightly artifacts", () => {
+test("resolves exact stable, prerelease and rc artifacts", () => {
   assert.deepEqual(resolveRelease("0.8.0"), {
     chart_version: "0.8.0",
     wheel_version: "0.8.0",
@@ -21,17 +21,18 @@ test("resolves exact stable, prerelease and nightly artifacts", () => {
     chart_repository: "https://helm.ngc.nvidia.com/nvidia/nemo-helix",
   });
   assert.equal(resolveRelease("0.8.0-rc1").wheel_version, "0.8.0rc1");
-  const nightly = resolveRelease("0.8.0-nightly-20261021010203");
-  assert.equal(nightly.wheel_version, "0.8.0.dev20261021010203");
-  assert.equal(nightly.image_tag, "nightly-20261021010203");
-  assert.equal(nightly.image_registry, "ghcr.io/nvidia-nemo/nemo-helix");
-  assert.equal(nightly.wheel_index, "https://pypi.nvidia.com");
-  assert.match(nightly.chart_repository, /^oci:\/\/ghcr.io\//);
+  const rc = resolveRelease("0.8.0-rc-20261021010203");
+  assert.equal(rc.wheel_version, "0.8.0.dev20261021010203");
+  assert.equal(rc.image_tag, "rc-20261021010203");
+  assert.equal(rc.image_registry, "ghcr.io/nvidia-nemo/nemo-helix");
+  assert.equal(rc.wheel_index, "https://pypi.nvidia.com");
+  assert.match(rc.chart_repository, /^oci:\/\/ghcr.io\//);
   for (const version of [
     "latest",
+    "0.8.0-nightly-20261021010203",
     "v0.8.0",
-    "0.8.0-nightly",
-    "0.8.0-nightly-20261021",
+    "0.8.0-rc",
+    "0.8.0-rc-20261021",
     "0.8.0;echo bad",
     "0.8.0\n",
   ]) {
@@ -45,7 +46,7 @@ test("full published releases are eligible without an opt-in, regardless of Slac
     RELEASE_TYPE: "stable",
     POLL_RESULT: "success",
   };
-  for (const releaseType of ["stable", "nightly"]) {
+  for (const releaseType of ["stable", "rc"]) {
     for (const notification of ["success", "failure", "skipped"]) {
       assert.equal(
         smokeEligible({
@@ -60,6 +61,7 @@ test("full published releases are eligible without an opt-in, regardless of Slac
   for (const change of [
     { RELEASE_SCOPE: "containers" },
     { RELEASE_TYPE: "custom" },
+    { RELEASE_TYPE: "nightly" },
     { POLL_RESULT: "failure" },
     { POLL_RESULT: "skipped" },
     { DRY_RUN: "true" },

@@ -2022,8 +2022,8 @@ nemo-anonymizer==0.4.0 ; (platform_machine == 'arm64' and sys_platform == 'darwi
     # via
     #   nemo-anonymizer-plugin
     #   nemo-helix
-nemo-compass==0.1.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:6b50a6cc8b13991af5dce5469f5eb8e97103e77f3d59e6f2b90d8a9b4762a0a4
+nemo-compass==0.2.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:964a38caa7d618d158f4669bafb1f694aa7adb7689ce55ea6490d795d9bfabd6
     # via
     #   nemo-compass-plugin
     #   nemo-helix
@@ -4425,13 +4425,20 @@ xxhash==3.8.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   langgraph
     #   langsmith
     #   wandb
-yara-python==4.5.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:3431154fac7f41b4657edad91632717b5f1bab5be4ed6ce28d6e17e441d5c947 \
-    --hash=sha256:52ab24422b021ae648be3de25090cbf9e6c6caa20488f498860d07f7be397930 \
-    --hash=sha256:77011bed905f3786755da7de7ba9082790db654a241e13746fa3fc325b9ad966 \
-    --hash=sha256:7d5dc091235ded00b30f04a51d70e08352e44976122f8d45e63d25e96eae27d9 \
-    --hash=sha256:7eb27c1cd2f6f93f68e23e676ede28357c1fc8b9ec7deefe86f2cfef4abd877c \
-    --hash=sha256:bb65c17657b4cdbe5adee7a6e617ee05e214e8afdbc82b195885354a72a16476
+yara-python==4.5.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:0b9de86fbe8a646c0644df9e1396d6941dc6ed0f89be2807e6c52ab39161fd9f \
+    --hash=sha256:30fc7959394532c6e3f48faf59337f5da124f1630668258276b6cfa54e555a6e \
+    --hash=sha256:4537f8499d166d22a54739f440fb306f65b0438be2c6c4ecb2352ecb5adb5f1c \
+    --hash=sha256:4c682170f3d5cb3a73aa1bd0dc9ab1c0957437b937b7a83ff6d7ffd366415b9c \
+    --hash=sha256:92b233aae320ee9e59728ee23f9faf4a423ae407d4768b47c8f0e472a34dbae2 \
+    --hash=sha256:93f5f5aba88e2ed2aaebfbb697433a0c8020c6a6c6a711e900a29e9b512d5c3a \
+    --hash=sha256:9d9a58b7dc87411a2443d2e0382a111bd892aef9f6db2a1ebb4a9215eef0db71 \
+    --hash=sha256:a3c7bc8cd0db5fb87ab579c755de83723030522f3c0cd5b3374044055a8ce6c6 \
+    --hash=sha256:ade234700c492bce0efda96c1cdcd763425016e40df4a8d30c4c4e6897be5ace \
+    --hash=sha256:cb0f0e7183165426b09e2b1235e70909e540ac18e2c6be96070dfe17d7db4d78 \
+    --hash=sha256:d29d0e137e0d77dd110186369276e88381f784bdc45b5932a2fb3463e2a1b1c7 \
+    --hash=sha256:e5eae935b05a9f8dc71df55a79c38f52abd93f8840310fe4e0d75fbd78284f24 \
+    --hash=sha256:fe8ad189843c729eae74be3b8447a4753fac2cebe705e5e2a7280badfcc7e3b4
     # via
     #   nemo-helix
     #   nhx-guardrails

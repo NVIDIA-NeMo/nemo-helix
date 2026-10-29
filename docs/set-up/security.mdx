@@ -30,42 +30,22 @@ Refer to the [NVIDIA Product Security](https://www.nvidia.com/en-us/security/psi
 </Note>
 ## Default Network Ports
 
-The following table lists the default network ports for each microservice or default database. You can override these port numbers during deployment.
+The following table lists the network ports that the NeMo Helix Helm Chart opens with the default values. All of them are cluster-internal (`ClusterIP`) services. You can override these port numbers during deployment.
 
-| Network Port | Microservice |
-| --- | --- |
-| 443/TCP | NeMo Admission Service API |
-| 3000/TCP | NeMo Data Store API |
-| 7331/TCP | NeMo Helix Evals API |
-| 7331/TCP | NeMo Guardrails API |
-| 8000/TCP | NIM API |
-| 8000/TCP | NeMo Retriever Text Embedding API |
-| 8000/TCP | NeMo Retriever Text Reranking API |
-| 8000/TCP | NeMo Customizer API |
-| 8000/TCP | NeMo Entity Store API |
-| 8443/TCP | NeMo Operator metrics |
-| 8080/TCP | Volcano Scheduler metrics |
-| 9009/TCP | NeMo Customizer callback |
+| Network Port | Service | Helm value |
+| --- | --- | --- |
+| 8080/TCP | NeMo Helix API | `api.service.port` |
+| 8080/TCP | NeMo Helix core controller (headless service) | `core.controller.service.port` |
 
-By default, NeMo Helix Helm Chart configures databases with the following network ports.
-Alternatively, you can configure each microservice to use an external database during installation.
+By default, the NeMo Helix Helm Chart also deploys the following databases.
+Alternatively, you can disable each one and use an external database during installation (`externalDatabase`, `externalClickhouse`).
 
-| Network Port | Database |
-| --- | --- |
-| 5432/TCP | NeMo Customizer Database |
-| 5432/TCP | NeMo Data Store Database  |
-| 5432/TCP | NeMo Helix Evals Database |
-| 5432/TCP | NeMo Entity Store Database |
-| 9091/TCP | Milvus metrics |
-| 19530/TCP | Milvus API |
+| Network Port | Database | Helm value |
+| --- | --- | --- |
+| 5432/TCP | PostgreSQL (`postgresql.enabled`) | `postgresql.service.port` |
+| 8123/TCP | ClickHouse HTTP interface (`clickhouse.enabled`) | `clickhouse.service.httpPort` |
+| 9000/TCP | ClickHouse native protocol (`clickhouse.enabled`) | `clickhouse.service.nativePort` |
 
-By default, NeMo Helix Helm Chart installs an open telemetry collector, which uses the following network ports:
-
-- 4317/TCP
-- 4318/TCP
-- 6831/UDP
-- 9411/TCP
-- 14250/TCP
-- 14268/TCP
-
-Refer to the [OpenTelemetry Documentation](https://opentelemetry.io/docs/) for more information.
+The NeMo Helix Helm Chart does not install an OpenTelemetry collector or a Milvus instance.
+To export traces and metrics, point `telemetry.OTEL_EXPORTER_OTLP_ENDPOINT` at a collector that you run; refer to [Observability](/documentation/kubernetes-deployment/setup/observability).
+For NeMo Helix Evals retrieval and RAG evaluations, connect an existing Milvus instance; refer to [Milvus](/documentation/kubernetes-deployment/setup/milvus).
