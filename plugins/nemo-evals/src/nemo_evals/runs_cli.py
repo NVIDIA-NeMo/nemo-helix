@@ -498,9 +498,9 @@ def submit_run(
 ) -> dict[str, Any]:
     """POST the run, retrying a 503 (an outage before the run was accepted) with the same idempotency key.
 
-    A POST that gets no answer is not resent: the server may still be accepting it, and a second POST would redo
-    that work while the API is at its slowest. The error names the key, so a rerun replays the run instead of
-    starting another.
+    A POST that never connected is retried too: nothing reached the server. A POST that gets no answer is not
+    resent: the server may still be accepting it, and a second POST would redo that work while the API is at its
+    slowest. The error names the key, so a rerun replays the run instead of starting another.
     """
     url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
     for attempt in range(1, RETRY_ATTEMPTS + 1):
@@ -508,6 +508,15 @@ def submit_run(
             response = client.http_client.post(
                 url, json=body, headers=client.request_headers(None, url=url), timeout=SUBMIT_TIMEOUT_SECONDS
             )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            if attempt == RETRY_ATTEMPTS:
+                raise RuntimeError(
+                    f"could not reach the platform to submit ({type(exc).__name__}: {exc}); nothing was sent. "
+                    f"Rerun the same command with --idempotency-key {body.get('idempotency_key')}"
+                ) from exc
+            echo(f"could not reach the platform ({type(exc).__name__}); retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
+            sleep(2**attempt)
+            continue
         except httpx.TransportError as exc:
             reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             raise RuntimeError(
