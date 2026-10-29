@@ -239,7 +239,13 @@ async def build_next_request(
         headers["content-length"] = str(len(body_bytes))
 
     if auth_token:
-        header_name, header_value = render_auth_header(auth_token, auth_header_format)
+        try:
+            header_name, header_value = render_auth_header(auth_token, auth_header_format)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Invalid provider authentication configuration: {exc}",
+            ) from exc
         headers[header_name] = header_value
 
     return NextRequestInfo(
