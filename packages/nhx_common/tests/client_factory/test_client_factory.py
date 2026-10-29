@@ -73,6 +73,86 @@ def _mock_client(sink: list[httpx.Request]) -> httpx.Client:
 # ---------------------------------------------------------------------------
 
 
+def test_factory_sync_clients_close_distinct_owned_transports() -> None:
+    first, second = cf.get_nemo_client(), cf.get_nemo_client()
+    try:
+        assert first._http is not second._http
+        with first:
+            assert not first._http.is_closed
+        with second:
+            assert not second._http.is_closed
+        assert first._http.is_closed
+        assert second._http.is_closed
+    finally:
+        first._http.close()
+        second._http.close()
+
+
+async def test_factory_async_clients_close_distinct_owned_transports() -> None:
+    first, second = cf.get_async_nemo_client(), cf.get_async_nemo_client()
+    try:
+        assert first._http is not second._http
+        async with first:
+            assert not first._http.is_closed
+        async with second:
+            assert not second._http.is_closed
+        assert first._http.is_closed
+        assert second._http.is_closed
+    finally:
+        await first._http.aclose()
+        await second._http.aclose()
+
+
+def test_factory_sync_borrowed_clones_preserve_parent_transport() -> None:
+    parent = cf.get_nemo_client()
+    try:
+        with patch.object(parent._http, "close", wraps=parent._http.close) as close:
+            with parent:
+                with JobsClient.from_client(parent) as typed:
+                    assert typed._http is parent._http
+                with parent.with_headers({"X-Test": "clone"}) as clone:
+                    assert clone._http is parent._http
+                assert not parent._http.is_closed
+                close.assert_not_called()
+            assert parent._http.is_closed
+            close.assert_called_once()
+    finally:
+        if not parent._http.is_closed:
+            parent._http.close()
+
+
+async def test_factory_async_borrowed_clones_preserve_parent_transport() -> None:
+    parent = cf.get_async_nemo_client()
+    try:
+        with patch.object(parent._http, "aclose", wraps=parent._http.aclose) as close:
+            async with parent:
+                async with AsyncNemoClient.from_client(parent) as typed:
+                    assert typed._http is parent._http
+                async with parent.with_headers({"X-Test": "clone"}) as clone:
+                    assert clone._http is parent._http
+                assert not parent._http.is_closed
+                close.assert_not_called()
+            assert parent._http.is_closed
+            close.assert_called_once()
+    finally:
+        if not parent._http.is_closed:
+            await parent._http.aclose()
+
+
+def test_factory_sync_supplied_transport_stays_open() -> None:
+    with httpx.Client() as supplied:
+        with cf.get_nemo_client(http_client=supplied):
+            pass
+        assert not supplied.is_closed
+
+
+async def test_factory_async_supplied_transport_stays_open() -> None:
+    async with httpx.AsyncClient() as supplied:
+        async with cf.get_async_nemo_client(http_client=supplied):
+            pass
+        assert not supplied.is_closed
+
+
 class TestSyncConstruction:
     def test_base_url_from_config(self):
         client = cf.get_nemo_client()
