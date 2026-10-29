@@ -188,19 +188,9 @@ Analyzed 6 traces: 0 new insights, 0 existing insights with new evidence. Some o
 | `- skipped: <stream> (<reason>)` | An evidence stream did not run. The reason says why. |
 
 The summary line appears both in the report and in the job's Fabric run
-result. The Fabric run result also holds the full change-set the run produced,
-under `output.compass_result`.
-
-### Preview a Run Without Filing Insights
-
-Analysis runs save their findings with the `compass.persist`
-[post-run action](/documentation/agents/execute-agents-as-jobs#post-run-actions).
-Its counterpart, `compass.preview`, files nothing: its `analysis-report` lists
-the Insights the run would create, with their descriptions, ratings, and
-evidence, and the existing Insights that would gain evidence. Neither action
-takes config. Both act on the agent named in the Compass agent config and on
-the job's own workspace. When any observation falls below a threshold, the summary ends with the
-sentence about minimum recurrence thresholds.
+result. When any observation falls below a threshold, the summary ends with the
+sentence about minimum recurrence thresholds. The Fabric run result also holds
+the full change-set the run produced, under `output.compass_result`.
 
 When the report shows a `below threshold` line, you can:
 
@@ -210,6 +200,17 @@ When the report shows a `below threshold` line, you can:
   independent cases.
 - Supply the missing input for a skipped stream, such as `--ethos` or
   evaluator results.
+
+### Preview a Run Without Filing Insights
+
+Analysis runs save their findings with the `compass.persist`
+[post-run action](/documentation/agents/execute-agents-as-jobs#post-run-actions).
+Its counterpart, `compass.preview`, files nothing: its `analysis-report` lists
+the Insights the run would create, with their descriptions, ratings, and
+evidence, and the existing Insights that would gain evidence. If persisting
+would fail because the run adds evidence to another agent's Insight, the
+report says so at the top. Neither action takes config. Both act on the agent
+named in the Compass agent config and on the job's own workspace.
 
 ## Run Analysis on a Schedule
 

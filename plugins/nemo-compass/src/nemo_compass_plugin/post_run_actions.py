@@ -26,7 +26,7 @@ from typing import Any, ClassVar
 
 from nemo_compass_plugin.analysis.agent_config import COMPASS_ADAPTER_ID
 from nemo_compass_plugin.analysis.backend import InsightNotFoundError, RemoteCompassBackend
-from nemo_compass_plugin.analysis.result import CompassResult, NewInsight
+from nemo_compass_plugin.analysis.result import CompassResult, InsightUpdate, NewInsight
 from nemo_compass_plugin.evidence import TraceEvidence
 from nemo_helix_plugin.agents.post_run_actions import PostRunActionContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -56,6 +56,14 @@ class CompassActionConfig(BaseModel):
 class AnalysisTarget:
     agent: str
     workspace: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingInsight:
+    title: str
+    # False when the insight belongs to another workspace or agent: persisting
+    # evidence to it fails the job.
+    owned: bool
 
 
 class _CompassAction(ABC):
@@ -104,8 +112,8 @@ class CompassPreviewAction(_CompassAction):
 
     async def _report(self, *, target: AnalysisTarget, result: CompassResult) -> str:
         async with get_async_task_nemo_client("compass") as client:
-            titles = await _existing_titles(client, target=target, result=result)
-        return render_preview(result, existing_titles=titles)
+            existing = await _existing_insights(client, target=target, result=result)
+        return render_preview(result, existing=existing)
 
 
 def target_agent(agent_config: Mapping[str, Any]) -> str:
@@ -128,13 +136,29 @@ def target_agent(agent_config: Mapping[str, Any]) -> str:
     return agent
 
 
-def render_preview(result: CompassResult, *, existing_titles: Mapping[str, str | None]) -> str:
+def render_preview(result: CompassResult, *, existing: Mapping[str, ExistingInsight | None]) -> str:
     """Render a change-set as a readable report of what persisting would do.
 
-    *existing_titles* maps each updated insight's id to its title, or to
+    *existing* maps each updated insight's id to what the lookup found, or to
     ``None`` when no such insight exists; persisting would skip those.
     """
-    lines = ["Preview: no insights were saved.", "", result.summary]
+    found: list[tuple[InsightUpdate, ExistingInsight]] = []
+    missing: list[InsightUpdate] = []
+    foreign: list[tuple[InsightUpdate, ExistingInsight]] = []
+    for upd in result.updated_insights:
+        insight = existing.get(upd.id)
+        if insight is None:
+            missing.append(upd)
+        # Persisting checks ownership only when it adds evidence.
+        elif upd.evidence and not insight.owned:
+            foreign.append((upd, insight))
+        else:
+            found.append((upd, insight))
+
+    lines = ["Preview: no insights were saved."]
+    if foreign:
+        lines.append("Persisting this change-set would fail: it adds evidence to another agent's insights.")
+    lines += ["", result.summary]
 
     lines += ["", f"Proposed new insights ({len(result.new_insights)})"]
     if not result.new_insights:
@@ -142,16 +166,16 @@ def render_preview(result: CompassResult, *, existing_titles: Mapping[str, str |
     for position, new in enumerate(result.new_insights, start=1):
         lines += ["", *_render_new_insight(position, new)]
 
-    found = [upd for upd in result.updated_insights if existing_titles.get(upd.id)]
-    missing = [upd for upd in result.updated_insights if not existing_titles.get(upd.id)]
     lines += ["", f"Existing insights that would gain evidence ({len(found)})"]
     if not found:
         lines.append("- none")
-    for upd in found:
-        lines.append(f"- {existing_titles[upd.id]} [{upd.id}]: {_evidence_summary(upd.evidence)}")
+    for upd, insight in found:
+        lines.append(f"- {insight.title} [{upd.id}]: {_evidence_summary(upd.evidence)}")
         lines += _render_evidence(upd.evidence)
     for upd in missing:
         lines.append(f"- would skip (insight not found): {upd.id}")
+    for upd, insight in foreign:
+        lines.append(f"- would fail (insight belongs to another agent): {insight.title} [{upd.id}]")
 
     if result.notes:
         lines += ["", "Notes"]
@@ -189,27 +213,29 @@ def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-async def _existing_titles(
+async def _existing_insights(
     client: AsyncNemoClient, *, target: AnalysisTarget, result: CompassResult
-) -> dict[str, str | None]:
-    """Look up the title of each insight the change-set would add evidence to.
+) -> dict[str, ExistingInsight | None]:
+    """Look up each insight the change-set would add evidence to.
 
-    An id is not readable on its own. Uses the same lookup ``compass.persist``
-    does, so a preview shows ``None`` (would skip) exactly where persisting
-    would skip.
+    An id is not readable on its own, so this fetches the title. Uses the same
+    lookup and ownership check ``compass.persist`` does, so a preview shows
+    ``None`` (would skip) and unowned insights (would fail) exactly where
+    persisting would.
     """
     backend = RemoteCompassBackend(client)
-    titles: dict[str, str | None] = {}
+    existing: dict[str, ExistingInsight | None] = {}
     for upd in result.updated_insights:
-        if upd.id in titles:
+        if upd.id in existing:
             continue
         try:
             insight = await backend.get_insight(workspace=target.workspace, insight_id=upd.id)
         except InsightNotFoundError:
-            titles[upd.id] = None
+            existing[upd.id] = None
         else:
-            titles[upd.id] = insight.title
-    return titles
+            owned = insight.workspace == target.workspace and insight.agent == target.agent
+            existing[upd.id] = ExistingInsight(title=insight.title, owned=owned)
+    return existing
 
 
 def _compass_result_from_fabric_output(output: Any) -> CompassResult:
