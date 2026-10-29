@@ -92,7 +92,8 @@ class DeploymentsRunnerConfig(BaseModel):
         default=None,
         description=(
             "Platform base URL baked into deployed agents as their inference endpoint, used verbatim "
-            "for every container mode. When unset, the deploy path derives a container-reachable URL: "
+            "for every container mode, and by eval trials in OpenSandbox sandboxes. When unset, the deploy "
+            "path derives a container-reachable URL: "
             "docker rewrites loopback hosts to host.docker.internal; k8s uses k8s_internal_base_url; "
             "openshell uses the executor's platform_egress host and port."
         ),
