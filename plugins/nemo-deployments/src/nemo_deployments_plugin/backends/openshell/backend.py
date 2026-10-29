@@ -83,10 +83,11 @@ _OPENSHELL_IMPORT_ERROR: ImportError | None = None
 try:
     import grpc
     from google.protobuf.message import Message
-    from nemo_helix_plugin.openshell.provisioning import ProviderProvisioner
     from openshell._proto import datamodel_pb2 as dm
     from openshell._proto import openshell_pb2 as pb
     from openshell._proto import openshell_pb2_grpc as pb_grpc
+
+    from .provisioning import DeploymentProviderProvisioner
 except ImportError as exc:
     _OPENSHELL_IMPORT_ERROR = exc
 
@@ -638,7 +639,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Sandbox {sandbox_name} deleted")
 
     @asynccontextmanager
-    async def _provider_provisioner(self) -> AsyncGenerator[ProviderProvisioner]:
+    async def _provider_provisioner(self) -> AsyncGenerator[DeploymentProviderProvisioner]:
         config = self._executor_config.gateway_credentials
         if config is None:
             raise ValueError("Gateway credentials are not configured.")
@@ -649,7 +650,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             else grpc.aio.secure_channel(target, self._channel_credentials())
         )
         async with channel:
-            yield ProviderProvisioner(
+            yield DeploymentProviderProvisioner(
                 config,
                 self._executor_config.workspace,
                 channel,

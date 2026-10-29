@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Controller-side provider registration shared by jobs and deployments.
+"""OpenShell provider registration, renewal and cleanup for deployments.
 
 Only reference metadata is persisted in Helix. Tickets travel directly to the
 gateway, and provider values are resolved by the external credential driver.
@@ -32,7 +32,9 @@ from nemo_helix_plugin.openshell.types import (
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
-from pydantic import JsonValue
+from pydantic import JsonValue, SecretStr
+
+from .authorization import authorize_secret_binding
 
 _OWNER = "nemo-helix/provider-owner"
 _BINDING = "nemo-helix/provider-binding"
@@ -71,7 +73,7 @@ def _rpc_code(error: grpc.RpcError) -> grpc.StatusCode | None:
     return status if isinstance(status, grpc.StatusCode) else None
 
 
-class ProviderProvisioner:
+class DeploymentProviderProvisioner:
     """Idempotent provisioning through the gateway's supported provider RPCs.
 
     Uses the caller's async gRPC channel and RPC timeout. The caller creates
@@ -116,6 +118,8 @@ class ProviderProvisioner:
         renew: bool = False,
         auth_enabled: bool = True,
     ) -> list[str]:
+        if workload.kind != "deployment":
+            raise ProviderProvisioningError("Expected a deployment credential binding.")
         if renew and self.config.renewal_mode != "helix":
             return []
         if not self.config.credential_refresh_verified:
@@ -230,7 +234,7 @@ class ProviderProvisioner:
             try:
                 for key, ref in binding.credentials.items():
                     secret_workspace, secret_name = parse_qualified_name(ref, default_workspace=workload_workspace)
-                    ticket = await self.tickets.issue(
+                    ticket = await self._issue_ticket(
                         BindingScope(
                             gateway_id=self.config.gateway_id,
                             gateway_workspace=self.workspace,
@@ -316,6 +320,15 @@ class ProviderProvisioner:
         if revoked:
             raise ProviderAccessRevoked("Gateway provider access was removed. Start a new workload to restore access.")
         return names
+
+    async def _issue_ticket(self, scope: BindingScope, *, requester_secrets: AsyncSecretsClient) -> SecretStr:
+        await authorize_secret_binding(
+            workspace=scope.secret_workspace,
+            name=scope.secret_name,
+            principal_id=scope.principal_id,
+            secrets_client=requester_secrets,
+        )
+        return self.tickets.sign(scope)
 
     async def _finish_revocation(self, name: str, sandbox_name: str) -> None:
         """Detach using fresh sandbox state, then delete the credential binding."""
