@@ -29,6 +29,8 @@ from nemo_agents_plugin.entities import (
     DeploymentStatus,
 )
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
+from nemo_deployments_plugin.entities import Deployment
+from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
@@ -40,6 +42,11 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
 
 NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def policy_auth_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(response_policy, "current_auth_client", lambda request: SimpleNamespace(auth_enabled=False))
 
 
 def _fabric_agent_config() -> dict[str, Any]:
@@ -120,6 +127,7 @@ def _test_client(mock_entity_client: AsyncMock, mock_files_client: AsyncMock | N
     )
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
     app.dependency_overrides[get_files_client] = lambda: mock_files_client or _files_client()
+
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -641,6 +649,59 @@ class TestCreateDeployment:
         assert error in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "request_fields",
+        [
+            {"deployment_mode": "subprocess"},
+            # A subprocess runs in the platform's own environment, whatever image the request names.
+            {"deployment_mode": "subprocess", "image": "acme-agent:1"},
+            # A blank image names no image.
+            {"deployment_mode": "docker", "image": "   "},
+        ],
+    )
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_create_rejects_an_unknown_adapter_id(self, request_fields: dict[str, str]) -> None:
+        config = _fabric_agent_config()
+        config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.hermess"
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep", **request_fields},
+        )
+
+        assert resp.status_code == 400
+        assert "Harness 'hermes': Unsupported harness kind 'nvidia.fabric.hermess'" in resp.json()["detail"]
+        assert "accepted when the request names that image" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_create_leaves_adapter_ids_to_a_requested_image(self) -> None:
+        """The API can't see a custom image's adapters, so the container checks harness kinds itself."""
+        config = _fabric_agent_config()
+        config["harnesses"]["hermes"]["kind"] = "acme.custom.native"
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
+
+        async def _save_deployment(deployment: AgentDeployment) -> AgentDeployment:
+            deployment._id = f"deployment-{deployment.name}-id"
+            deployment._created_at = NOW
+            return deployment
+
+        mock_entity_client.create = AsyncMock(side_effect=_save_deployment)
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "docker", "image": "acme-agent:1"},
+        )
+
+        assert resp.status_code == 201
+        created_deployment: AgentDeployment = mock_entity_client.create.call_args[0][0]
+        assert created_deployment.config["harnesses"]["hermes"]["kind"] == "acme.custom.native"
+
     def test_create_returns_422_when_the_store_rejects_the_name(self) -> None:
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
@@ -718,6 +779,50 @@ class TestDeleteDeployment:
 
         assert resp.status_code == 409
         assert mock_entity_client.update.await_count == deployments_router_module._DELETE_MARK_ATTEMPTS  # noqa: SLF001
+
+    def test_delete_reopens_timed_out_backend_teardown_when_already_deleting(self) -> None:
+        agent_dep = _make_deployment(status="deleting")
+        agent_dep.deployment_mode = "docker"
+        backend_dep = Deployment(
+            name="fabric-dep",
+            workspace="default",
+            deployment_config="fabric-dep",
+            status="FAILED",
+            error_details={"reason": "deleting_timeout"},
+        )
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(side_effect=lambda cls, **_: backend_dep if cls is Deployment else agent_dep)
+        client = _test_client(mock_entity_client)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/deployments/fabric-dep")
+
+        assert resp.status_code == 204
+        assert backend_dep.status == "DELETING"
+        mock_entity_client.update.assert_awaited_once_with(backend_dep)
+
+    @pytest.mark.parametrize(("error_details", "reopened"), [({"reason": "deleting_timeout"}, True), (None, False)])
+    def test_delete_reopens_only_timed_out_backend_teardown(
+        self, error_details: dict[str, Any] | None, reopened: bool
+    ) -> None:
+        agent_dep = _make_deployment(status="failed")
+        agent_dep.deployment_mode = "docker"
+        backend_dep = Deployment(
+            name="fabric-dep",
+            workspace="default",
+            deployment_config="fabric-dep",
+            status="FAILED",
+            error_details=error_details,
+        )
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(side_effect=lambda cls, **_: backend_dep if cls is Deployment else agent_dep)
+        client = _test_client(mock_entity_client)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/deployments/fabric-dep")
+
+        assert resp.status_code == 204
+        assert (backend_dep.status == "DELETING") is reopened
+        assert agent_dep.status == "deleting"
+        assert mock_entity_client.update.await_count == (2 if reopened else 1)
 
 
 class TestListDeploymentModes:

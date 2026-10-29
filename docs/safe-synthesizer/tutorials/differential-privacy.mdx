@@ -45,7 +45,7 @@ Differential privacy (DP) provides mathematical guarantees that synthetic data d
     - **Recommended starting range: ε ∈ [8, 12]** - adjust downward based on privacy needs
 
 - **Delta (δ)**: Probability of privacy breach
-    - Typically set to 1/n^1.2 where n is dataset size
+    - This tutorial uses the heuristic 1/n^1.2, where n is the final sampled input size; this is a parameter choice, not a universal DP requirement
     - Use `"auto"` for automatic calculation (recommended)
     - Manual values typically between 1e-6 and 1e-4
 
@@ -113,8 +113,9 @@ import kagglehub  # type: ignore[import-not-found]
 
 path = kagglehub.dataset_download("sobhanmoosavi/us-accidents")
 df = pd.read_csv(f"{path}/US_Accidents_March23.csv", index_col=0)
-recommended_delta = 1 / len(df) ** 2
 df = df.sample(n=26250, random_state=318)
+# Use the final sampled input size for this tutorial's manual delta heuristic.
+recommended_delta = 1 / len(df) ** 1.2
 
 print(f"Dataset size: {len(df)} records")
 print(f"Recommended delta: {recommended_delta:.2e}")
@@ -446,7 +447,7 @@ check_data_requirements(len(df))
 - Typical values fall in **ε ∈ [4, 12]**; values below 4 may make training convergence difficult
 - Reduce epsilon gradually if stronger privacy is required
 - Monitor SQS scores to understand quality impact
-- Delta calculation: use `"auto"` or `1/n^1.2` where n is dataset size
+- Delta calculation: use `"auto"` (based on the training split size) or this tutorial's manual heuristic `1/n^1.2` with n equal to the final sampled input size
 
 ### Training Optimization
 

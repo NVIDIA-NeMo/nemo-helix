@@ -27,6 +27,7 @@ from nhx_evals_sdk.agent_eval.trials import (
 from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from pydantic import ValidationError
 
 # --- fakes ------------------------------------------------------------------
@@ -739,3 +740,155 @@ async def test_a_partly_rejected_otlp_batch_fails_the_trial_instead_of_scoring_i
         )
 
     assert intake.evaluator_result_requests == [], "scores must not attach to a trace Intake only partly stored"
+
+
+# --- OTLP request budget ------------------------------------------------------
+
+_CHILD_SPAN_IDS = ["1111111111111111", "2222222222222222", "3333333333333333"]
+
+
+def _large_otlp_trial(child_payload_bytes: int, trial_id: str = "t-1") -> AgentEvalTrial:
+    """A root span and three children, each child carrying ``child_payload_bytes`` of attribute text."""
+    children = [
+        {
+            "traceId": _OTLP_TRACE_ID,
+            "spanId": span_id,
+            "parentSpanId": _OTLP_SPAN_ID,
+            "name": f"child-{index}",
+            "attributes": [{"key": "payload", "value": {"stringValue": "x" * child_payload_bytes}}],
+        }
+        for index, span_id in enumerate(_CHILD_SPAN_IDS)
+    ]
+    return _otlp_trial(trial_id, extra_spans=children)
+
+
+def _sent_bodies(intake: InMemoryIntakeService) -> list[bytes]:
+    bodies = []
+    for request in intake.otlp_requests:
+        body = request["body"]
+        assert isinstance(body, bytes)
+        bodies.append(body)
+    return bodies
+
+
+def _span_ids(body: bytes) -> list[str]:
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(body)
+    return [
+        span.span_id.hex() for resource in sent.resource_spans for scope in resource.scope_spans for span in scope.spans
+    ]
+
+
+def _sent_span_ids(intake: InMemoryIntakeService) -> list[list[str]]:
+    return [_span_ids(body) for body in _sent_bodies(intake)]
+
+
+async def test_a_trace_over_the_default_budget_is_sent_as_several_requests() -> None:
+    # Three ~2 MiB children: together over Intake's 5 MiB default body limit, each well under it.
+    intake = InMemoryIntakeService()
+
+    report = await publish_to_intake(
+        _result(
+            [_large_otlp_trial(2 * 1024 * 1024)], [_score("t-1", "accuracy", [MetricOutput(name="score", value=1.0)])]
+        ),
+        client=intake.client(),
+        experiment_id="exp-1",
+        agent_name="a",
+    )
+
+    assert len(intake.otlp_requests) > 1
+    assert all(len(body) <= 4 * 1024 * 1024 for body in _sent_bodies(intake))
+    assert [span_id for batch in _sent_span_ids(intake) for span_id in batch] == [_OTLP_SPAN_ID, *_CHILD_SPAN_IDS]
+    assert report.published_trials[0].span_id == _OTLP_SPAN_ID
+    assert len(intake.evaluator_result_requests) == 1
+
+
+async def test_a_trace_within_the_budget_is_sent_as_one_request() -> None:
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(
+        _result([_large_otlp_trial(1000)], []),
+        client=intake.client(),
+        experiment_id="exp-1",
+        agent_name="a",
+        max_otlp_request_bytes=1024 * 1024,
+    )
+
+    assert _sent_span_ids(intake) == [[_OTLP_SPAN_ID, *_CHILD_SPAN_IDS]]
+
+
+async def test_an_overridden_budget_splits_a_trace_the_default_would_send_whole() -> None:
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(
+        _result([_large_otlp_trial(1000)], []),
+        client=intake.client(),
+        experiment_id="exp-1",
+        agent_name="a",
+        max_otlp_request_bytes=2500,
+    )
+
+    assert len(intake.otlp_requests) > 1
+    assert all(len(body) <= 2500 for body in _sent_bodies(intake))
+    assert [span_id for batch in _sent_span_ids(intake) for span_id in batch] == [_OTLP_SPAN_ID, *_CHILD_SPAN_IDS]
+
+
+async def test_a_span_too_large_for_the_budget_fails_the_trial_before_any_of_it_is_sent() -> None:
+    intake = InMemoryIntakeService()
+
+    with pytest.raises(PublishError, match="max_otlp_request_bytes") as raised:
+        await publish_to_intake(
+            _result(
+                [_large_otlp_trial(1000), _trial("t-2")],
+                [
+                    _score("t-1", "accuracy", [MetricOutput(name="score", value=1.0)]),
+                    _score("t-2", "accuracy", [MetricOutput(name="score", value=1.0)]),
+                ],
+            ),
+            client=intake.client(),
+            experiment_id="exp-1",
+            agent_name="a",
+            max_otlp_request_bytes=800,
+        )
+
+    assert intake.otlp_requests == [], "no part of an unsendable trace may land"
+    assert {row["session_id"] for row in intake.evaluator_result_requests} == {"run-1:t-2"}
+    assert raised.value.report is not None
+    assert [trial.trial_id for trial in raised.value.report.published_trials] == ["t-2"]
+
+
+async def test_a_rejection_in_a_later_request_fails_the_trial_before_its_scores() -> None:
+    last_child = _CHILD_SPAN_IDS[-1]
+    intake = InMemoryIntakeService()
+    intake.otlp_rejects = lambda body: [f"span {last_child}: rejected"] if last_child in _span_ids(body) else []
+
+    with pytest.raises(PublishError, match=r"OTLP request (\d+) of \1:"):
+        await publish_to_intake(
+            _result([_large_otlp_trial(1000)], [_score("t-1", "accuracy", [MetricOutput(name="score", value=1.0)])]),
+            client=intake.client(),
+            experiment_id="exp-1",
+            agent_name="a",
+            max_otlp_request_bytes=2500,
+        )
+
+    sent = _sent_span_ids(intake)
+    assert len(sent) > 1
+    assert last_child not in sent[0], "the rejected span must arrive in a later request than the first"
+    assert intake.evaluator_result_requests == []
+
+
+@pytest.mark.parametrize("budget", [0, -1])
+async def test_a_non_positive_otlp_budget_is_rejected_before_any_request(budget: int) -> None:
+    intake = InMemoryIntakeService()
+
+    with pytest.raises(ValueError, match="max_otlp_request_bytes must be positive"):
+        await publish_to_intake(
+            _result([_otlp_trial()], []),
+            client=intake.client(),
+            experiment_id="exp-1",
+            agent_name="a",
+            max_otlp_request_bytes=budget,
+        )
+
+    assert intake.evaluation_lookups == []
+    assert intake.otlp_requests == []

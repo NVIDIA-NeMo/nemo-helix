@@ -1410,8 +1410,8 @@ def _entity_client_with_headers(headers: dict[str, str]) -> EntityClient:
     return EntityClient(typed)
 
 
-class TestAuthContextSanitization:
-    def test_sanitizes_auth_context_for_regular_user(self):
+class TestAuthContextConversion:
+    def test_preserves_returned_auth_context_for_regular_user(self):
         now = datetime.now()
         client = _entity_client_with_headers({"X-NHX-Principal-Id": "user@example.com"})
 
@@ -1420,6 +1420,16 @@ class TestAuthContextSanitization:
             _EntityWithAuthContext,
         )
 
+        assert result.auth_context is not None
+        assert result.auth_context.principal_id == "creator@example.com"
+
+    def test_redacted_response_keeps_auth_context_unset(self):
+        client = _entity_client_with_headers({"X-NHX-Principal-Id": "user@example.com"})
+        entity = _make_entity_with_auth_context(datetime.now()).model_copy(update={"data": {"source": "test-source"}})
+
+        result = client._convert_api_entity_to_model(entity, _EntityWithAuthContext)
+
+        assert result.source == "test-source"
         assert result.auth_context is None
 
     def test_keeps_auth_context_for_service_principal(self):
@@ -1436,7 +1446,7 @@ class TestAuthContextSanitization:
         assert result.auth_context.principal_email == "creator@example.com"
         assert result.auth_context.principal_groups == ["team-alpha"]
 
-    def test_sanitizes_auth_context_when_no_principal_header(self):
+    def test_preserves_returned_auth_context_without_principal_header(self):
         now = datetime.now()
         client = _entity_client_with_headers({})
 
@@ -1445,7 +1455,8 @@ class TestAuthContextSanitization:
             _EntityWithAuthContext,
         )
 
-        assert result.auth_context is None
+        assert result.auth_context is not None
+        assert result.auth_context.principal_id == "creator@example.com"
 
     def test_no_effect_on_entity_without_auth_context(self):
         class EntityNoAuth(EntityBase):

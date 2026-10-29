@@ -519,6 +519,18 @@ def test_nim_sglang_model_free_omits_flags_sglang_rejects() -> None:
     assert env["NIM_MODEL_PATH"] == "/model-store"
 
 
+@pytest.mark.parametrize("image_name", [None, _SGLANG_MODEL_FREE_NIM])
+@pytest.mark.parametrize("runtime", [Runtime.KUBERNETES, Runtime.DOCKER])
+def test_nim_readiness_probe_outlasts_the_sglang_health_check(image_name: str | None, runtime: Runtime) -> None:
+    # SGLang's health check takes just over a second, which a 1s probe timeout never sees succeed.
+    resolved = _resolved("nim", lora=True, runtime=runtime)
+    resolved.view.image_name = image_name
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    probe = compiled.server_config.containers[0].readiness_probe
+    assert probe is not None
+    assert probe.timeout_seconds == 5
+
+
 def test_nim_sglang_model_free_rejects_a_tool_parser_plugin() -> None:
     resolved = replace(_resolved("nim"), huggingface_model_puller="nvcr.io/nvidia/model-puller:latest")
     resolved.view.image_name = _SGLANG_MODEL_FREE_NIM

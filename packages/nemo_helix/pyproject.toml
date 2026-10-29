@@ -173,7 +173,7 @@ guardrails-service = [
   "langchain-openai>=1.3.5,<2.0.0",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
   "nhx-common",
-  "yara-python==4.5.1",
+  "yara-python==4.5.4",
   "alembic>=1.10.4,<2.0.0",
   "opentelemetry-sdk>=1.27.0,<2.0.0",
   "opentelemetry-instrumentation-requests>=0.64b0",
@@ -452,7 +452,7 @@ nemo-helix-ext = [
 nemo-helix-plugin = [
   "anthropic>=0.88.0",
   "certifi>=2026.10.19",
-  "fastapi>=0.115.4",
+  "fastapi>=0.121.1",
   "filesets",
   "httpx>=0.27.0,<1",
   "jsonschema>=4.0.0",
@@ -694,8 +694,9 @@ fileset-seed-datasets = "data_designer_nemo.plugins:fileset_seed_datasets_plugin
 nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_exporter"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.agents.execute_extensions"]
-"insights.analysis" = "nemo_compass_plugin.execute_extensions:CompassAnalysisExtension"
+[project.entry-points."nemo.agents.post_run_actions"]
+"agents.noop" = "nemo_agents_plugin.jobs.post_run_actions:NoopPostRunAction"
+"insights.analysis" = "nemo_compass_plugin.post_run_actions:CompassAnalysisAction"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli"]
@@ -896,7 +897,7 @@ nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_de
 nemo-evals-plugin = { source = "../../plugins/nemo-evals/src/nemo_evals", module = "nemo_evals", inherit = { "entry-points" = ["nemo.*"] } }
 # shared_data mirrors the standalone plugin's wheel shared-data: Fabric resolves
 # adapter descriptors from <sys.prefix>/share/nemo-fabric/adapters at runtime.
-nemo-compass-plugin = { source = "../../plugins/nemo-compass/src/nemo_compass_plugin", module = "nemo_compass_plugin", inherit = { "entry-points" = ["nemo.*"] }, shared_data = { "../../compass.fabric-adapter.json" = "share/nemo-fabric/adapters/compass/compass.fabric-adapter.json" } }
+nemo-compass-plugin = { source = "../../plugins/nemo-compass/src/nemo_compass_plugin", module = "nemo_compass_plugin", inherit = { "entry-points" = ["nemo.*"] }, shared_data = { "../../analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/helix/compass/analyst.fabric-adapter.json" } }
 # Supplies the `nat` optimization strategy that `nemo agents optimize` dispatches to. Discovered
 # through its nemo.jobs entry point; nemo-agent-optimization-plugin does not depend on it.
 nemo-optimization-plugin = { source = "../../plugins/nemo-optimization/src/nemo_optimization", module = "nemo_optimization", inherit = { "entry-points" = ["nemo.*"] } }

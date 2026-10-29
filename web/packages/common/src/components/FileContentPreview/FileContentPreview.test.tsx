@@ -146,6 +146,18 @@ describe('FileContentPreview', () => {
       );
       expect(screen.getByTestId('markdown-content')).toHaveTextContent('text');
     });
+
+    it('treats an uppercase .MD extension as markdown', () => {
+      render(
+        <FileContentPreview
+          file={{ path: 'README.MD' }}
+          isLoading={false}
+          error={null}
+          content="# Heading"
+        />
+      );
+      expect(screen.getByTestId('markdown-content')).toHaveTextContent('# Heading');
+    });
   });
 
   describe('CSV files', () => {
@@ -162,6 +174,19 @@ describe('FileContentPreview', () => {
       expect(screen.getByText('age')).toBeInTheDocument();
       expect(screen.getByText('Alice')).toBeInTheDocument();
       expect(screen.getByText('30')).toBeInTheDocument();
+    });
+
+    it('treats an uppercase .CSV extension as CSV', () => {
+      render(
+        <FileContentPreview
+          file={{ path: 'DATA.CSV' }}
+          isLoading={false}
+          error={null}
+          content={'name,age\nAlice,30'}
+        />
+      );
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+      expect(screen.queryByTestId('code-editor')).toBeNull();
     });
   });
 

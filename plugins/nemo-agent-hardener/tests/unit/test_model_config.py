@@ -72,6 +72,15 @@ def test_build_model_env_maps_the_safety_endpoint_and_key() -> None:
     assert env == {"AGENT_HARDENER_SAFETY_BASE_URL": "http://10.0.0.5:8000/v1", "AGENT_HARDENER_SAFETY_API_KEY": "SK"}
 
 
+@pytest.mark.parametrize("secrets", [{}, {"ana-key": ""}])
+def test_build_model_env_rejects_a_missing_or_empty_explicit_secret(secrets: dict[str, str]) -> None:
+    models = WarGameModels(analysis=ModelChoice(model="ana/model", api_key_secret="ana-key"))
+    with pytest.raises(_common.AgentHardenerRunError) as exc_info:
+        _common.build_model_env(models, sdk=_sdk(secrets), workspace="default")
+    assert exc_info.value.category == _common.CATEGORY_MISSING_CREDENTIAL
+    assert "default/ana-key" in str(exc_info.value)
+
+
 def test_build_model_env_none_is_empty() -> None:
     assert _common.build_model_env(None, sdk=_sdk({}), workspace="default") == {}
 

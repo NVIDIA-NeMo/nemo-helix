@@ -22,7 +22,7 @@ from nemo_evals.harbor.compose.models import (
     ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.parser import parse_compose
-from nhx_sandbox.harbor_opensandbox_services import RESERVED_NAMES, RESERVED_PORTS, ComposeServices
+from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, RESERVED_NAMES, RESERVED_PORTS, ComposeServices
 from pydantic import ValidationError
 
 # The bounds of ``MainReadiness.timeout_sec`` in ``ComposeServices``.
@@ -38,8 +38,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
 
     The input comes from :func:`parse_compose` and still speaks Compose: services by name, ``entrypoint`` and
     ``command``, Compose healthcheck timings. OpenSandbox can't run Compose, so each service becomes an extra
-    container in the sandbox pod. The task Job passes the result to ``NemoOpenSandboxEnvironment`` as
-    ``compose_services``, and submit checks it early through :func:`check_compose_task`.
+    container in the sandbox pod. A file that only changes ``main`` gives a spec with no services. The task Job
+    passes the result to ``NemoOpenSandboxEnvironment`` as ``compose_services``, and submit checks it early through
+    :func:`check_compose_task`.
 
     Args:
         task: The parsed compose file.
@@ -47,15 +48,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
             entry runs by its normalized tag; a built service needs one.
 
     Raises:
-        ComposeError: The file defines only ``main``, a service has no image, or the spec breaks a rule of
-            ``ComposeServices`` (``compose_unsupported``: the parser has already refused what Compose itself would).
+        ComposeError: A service has no image, or the spec breaks a rule of ``ComposeServices``
+            (``compose_unsupported``: the parser has already refused what Compose itself would).
     """
-    if not task.services:
-        raise ComposeError(
-            "compose_override_only",
-            "the file defines only `main`, which Harbor already provides; there are no services to run",
-            compose_path=task.compose_path,
-        )
     _check_reserved(task)
 
     # One wait budget covers every service, since the sandbox waits for them together.
@@ -84,7 +79,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
         ) from error
 
 
-def compose_services_kwarg(task_dir: Path, images: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+def compose_services_kwarg(
+    task_dir: Path, images: Mapping[str, str] | None = None, *, read_entrypoint: bool = True
+) -> dict[str, Any] | None:
     """Build the ``environment.kwargs.compose_services`` value for a task directory; None for a single-container task.
 
     The task Job calls this on the materialized task with the images its run prepared. From compose file to spec:
@@ -98,8 +95,11 @@ def compose_services_kwarg(task_dir: Path, images: Mapping[str, str] | None = No
     5. :func:`to_compose_services` maps that to ``ComposeServices``: a container per service, ``main``'s readiness
        wait, and each service's image from ``images``.
     6. The spec is returned as the plain data ``NemoOpenSandboxEnvironment`` takes.
+
+    ``read_entrypoint=False`` leaves ``main``'s entrypoint to the compose file alone, for a caller that knows the
+    image's own ``ENTRYPOINT`` from its config; otherwise it's guessed from ``main``'s Dockerfile.
     """
-    task = parse_compose(task_dir)
+    task = parse_compose(task_dir, read_entrypoint=read_entrypoint)
     if task is None:
         return None
     return to_compose_services(task, images).model_dump(mode="json", by_alias=True, exclude_defaults=True)
@@ -125,19 +125,42 @@ def compose_provenance(services: ComposeServices) -> dict[str, str]:
 
 
 def _check_reserved(task: ComposeTask) -> None:
-    """Raise if a service exposes a port the sandbox pod uses, or takes the name of one of the pod's containers."""
-    reserved_ports = [
-        f"{name}.{port.source} = {port.port}"
-        for name, service in task.services.items()
-        for port in service.ports
-        if port.port in RESERVED_PORTS
-    ]
+    """Raise if a container uses a port the sandbox pod needs, ``main`` shares a port with a service, or a service
+    takes the name of one of the pod's containers.
+
+    Compose gives each service its own network, so two services can listen on the same port. In the sandbox every
+    container shares the pod's network, so the second one to listen on a port fails to start.
+    """
+    ports_by_container = {MAIN_SERVICE: task.main.ports}
+    for name, service in task.services.items():
+        ports_by_container[name] = service.ports
+
+    reserved_ports = []
+    for name, ports in ports_by_container.items():
+        for port in ports:
+            if port.port in RESERVED_PORTS:
+                reserved_ports.append(f"{name}.{port.source} = {port.port}")
     if reserved_ports:
         raise ComposeError(
             "compose_reserved_port",
             "these ports are used by the sandbox pod",
             compose_path=task.compose_path,
             paths=tuple(reserved_ports),
+        )
+
+    # `ComposeServices` already refuses two services on one port, but it never sees `main`'s ports, so check those here.
+    service_ports = set()
+    for service in task.services.values():
+        service_ports.update(port.port for port in service.ports)
+    shared_ports = [
+        f"{MAIN_SERVICE}.{port.source} = {port.port}" for port in task.main.ports if port.port in service_ports
+    ]
+    if shared_ports:
+        raise ComposeError(
+            "compose_unsupported",
+            "`main` and a service use the same port; every container in the sandbox pod shares one network",
+            compose_path=task.compose_path,
+            paths=tuple(shared_ports),
         )
 
     if reserved_names := [name for name in task.services if name in RESERVED_NAMES]:
@@ -199,6 +222,10 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: 
     spec: dict[str, Any] = {}
     if main.entrypoint:
         spec["entrypoint"] = main.entrypoint
+    if main.command:
+        spec["command"] = main.command
+    if main.working_dir:
+        spec["working_dir"] = main.working_dir
     if main.env:
         spec["env"] = main.env
     if main.volume_mounts:

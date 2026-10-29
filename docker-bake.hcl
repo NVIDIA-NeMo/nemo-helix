@@ -380,6 +380,7 @@ group "docker-cpu" {
     "nhx-tasks-docker",
     "nhx-tasks-openshell-docker",
     "nhx-gym-tasks-docker",
+    "nhx-agent-hardener-tasks-docker",
     "nhx-builder-tasks-docker",
     "nhx-kaniko-docker",
   ]
@@ -394,6 +395,7 @@ group "docker-cpu-ci" {
     "nhx-tasks-smoke-test",
     "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
+    "nhx-agent-hardener-tasks-smoke-test",
     "nhx-builder-tasks-docker",
     "nhx-builder-tasks-smoke-test",
     "nhx-kaniko-docker",
@@ -877,6 +879,33 @@ target "nhx-gym-tasks-smoke-test" {
   cache-from = maybe_registry_cache_from("nhx-gym-tasks")
   output     = ["type=cacheonly"]
   platforms  = get_platforms()
+}
+
+# Agent Hardener war-game image: nhx-tasks plus the agent-hardener and garak venvs and the openshell CLI.
+target "nhx-agent-hardener-tasks-docker" {
+  target     = "runtime"
+  context    = "."
+  dockerfile = "docker/Dockerfile.nhx-agent-hardener-tasks"
+  contexts = {
+    nhx-python-base = "target:nhx-python-base"
+    nhx-tasks       = "target:nhx-tasks-docker"
+  }
+  args = {
+    NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+  }
+  cache-to   = maybe_registry_cache_to("nhx-agent-hardener-tasks")
+  cache-from = maybe_registry_cache_from("nhx-agent-hardener-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-agent-hardener-tasks")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+target "nhx-agent-hardener-tasks-smoke-test" {
+  inherits = ["nhx-agent-hardener-tasks-docker"]
+  target   = "smoke-test"
+  tags     = []
+  cache-to = []
+  output   = ["type=cacheonly"]
 }
 
 # Sandboxed Gym host. Evaluator provisions this image through OpenSandbox so

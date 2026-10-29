@@ -13,7 +13,7 @@ helpers in isolation, so the verb-specific tests in
 from __future__ import annotations
 
 import inspect
-from typing import Optional
+from typing import Any, Optional
 
 import pytest
 import typer
@@ -28,7 +28,8 @@ from nemo_helix_plugin._spec_flags import (
     make_field_param,
     walk_spec_leaves,
 )
-from pydantic import BaseModel, Field
+from nemo_helix_plugin.refs import FilesetRef
+from pydantic import BaseModel, Field, RootModel
 
 
 class _Inner(BaseModel):
@@ -159,6 +160,92 @@ class TestWalkSpecLeaves:
         leaves = walk_spec_leaves(_Outer)
         names = [leaf.param_name for leaf in leaves]
         assert len(names) == len(set(names))
+
+
+class _FilesetRef(RootModel[str]):
+    root: str = Field(description="Fileset reference (workspace/name).")
+
+
+class _RootModelSpec(BaseModel):
+    dataset: _FilesetRef
+    baseline: _FilesetRef | None = None
+    labelled: _FilesetRef = Field(_FilesetRef("ws/default"), description="Labelled split.")
+
+
+class TestRootModelFields:
+    def test_root_model_field_is_a_flag_for_the_field_itself(self) -> None:
+        leaves = {leaf.flag: leaf for leaf in walk_spec_leaves(_RootModelSpec)}
+        assert set(leaves) == {"--dataset", "--baseline", "--labelled"}
+        assert all(leaf.python_type is str for leaf in leaves.values())
+        assert leaves["--dataset"].required is True
+        assert leaves["--baseline"].required is False
+
+    def test_overlay_sends_bare_root_value(self) -> None:
+        leaves = walk_spec_leaves(_RootModelSpec)
+        raw = {leaf.param_name: f"ws/{leaf.path[-1]}" for leaf in leaves}
+        overlay = build_overlay(leaves, raw)
+        assert overlay == {"dataset": "ws/dataset", "baseline": "ws/baseline", "labelled": "ws/labelled"}
+        spec = _RootModelSpec.model_validate(overlay)
+        assert spec.dataset.root == "ws/dataset"
+
+    def test_description_falls_back_to_root_field(self) -> None:
+        leaves = {leaf.flag: leaf for leaf in walk_spec_leaves(_RootModelSpec)}
+        assert leaves["--dataset"].description == "Fileset reference (workspace/name)."
+        assert leaves["--labelled"].description == "Labelled split."
+
+    def test_root_model_default_is_unwrapped(self) -> None:
+        leaves = {leaf.flag: leaf for leaf in walk_spec_leaves(_RootModelSpec)}
+        assert leaves["--labelled"].default == "ws/default"
+
+    def test_unsupported_root_is_unavailable_at_field_path(self) -> None:
+        class _Blob(RootModel[dict[str, Any]]):
+            pass
+
+        class _WithBlob(BaseModel):
+            blob: _Blob
+            name: str = "x"
+
+        unavailable: list[str] = []
+        leaves = walk_spec_leaves(_WithBlob, unavailable=unavailable)
+        assert [leaf.flag for leaf in leaves] == ["--name"]
+        assert unavailable == ["blob"]
+
+    def test_mixed_union_root_keeps_scalar_arm_at_field_path(self) -> None:
+        class _Inline(BaseModel):
+            value: str
+
+        class _AgentRef(RootModel[str | _Inline]):
+            pass
+
+        class _WithAgent(BaseModel):
+            agent: _AgentRef
+
+        unavailable: list[str] = []
+        leaves = walk_spec_leaves(_WithAgent, unavailable=unavailable)
+        assert [(leaf.flag, leaf.python_type, leaf.partial) for leaf in leaves] == [("--agent", str, True)]
+        assert unavailable == ["agent (other union forms)"]
+
+    def test_metavar_falls_back_to_root_annotation(self) -> None:
+        class _WrappedRef(RootModel[FilesetRef]):
+            pass
+
+        class _WithRef(BaseModel):
+            ref: _WrappedRef
+
+        leaf = walk_spec_leaves(_WithRef)[0]
+        assert (leaf.flag, leaf.python_type, leaf.metavar) == ("--ref", str, "FILESET_REF")
+
+    def test_root_model_of_submodel_recurses_at_field_path(self) -> None:
+        class _Wrapped(RootModel[_Inner]):
+            pass
+
+        class _WithWrapped(BaseModel):
+            target: _Wrapped
+
+        leaves = walk_spec_leaves(_WithWrapped)
+        assert {leaf.flag for leaf in leaves} == {"--target.url", "--target.timeout-seconds"}
+        overlay = build_overlay(leaves, {leaf.param_name: "1" if leaf.python_type is int else "u" for leaf in leaves})
+        assert _WithWrapped.model_validate(overlay).target.root.url == "u"
 
 
 class TestOverlayAndMerge:

@@ -145,3 +145,90 @@ describe('model evaluation submit body', () => {
     }
   );
 });
+
+function SubmitAdapterEvaluation({ model }: { model: string }) {
+  const { createEvaluation } = useCreateEvaluation(model);
+  return (
+    <button
+      onClick={() =>
+        createEvaluation(
+          { ...EVALUATION_FORM_DEFAULTS, configSource: 'saved-config', model },
+          bindings
+        )
+      }
+    >
+      Run Evaluation
+    </button>
+  );
+}
+
+describe('model evaluation target', () => {
+  const adapterValue = `${DEFAULT_WORKSPACE}/test-model::my-lora`;
+
+  const renderAt = (model: string) =>
+    renderRoute(undefined, {
+      history: `/studio/workspaces/${DEFAULT_WORKSPACE}/evaluation/new`,
+      routes: [
+        {
+          path: '/studio/workspaces/:workspace/evaluation/new',
+          element: <SubmitAdapterEvaluation model={model} />,
+        },
+        // A successful submit navigates to the new run; the destination only has
+        // to exist for the router, since the assertions are on what was posted.
+        { path: '/workspaces/:workspace/evaluation/results/:id', element: <div /> },
+      ],
+    });
+
+  const submitted = () => {
+    const specs: Record<string, unknown>[] = [];
+    server.use(
+      http.get('*/apis/models/v2/workspaces/:workspace/models/:name', ({ params }) =>
+        HttpResponse.json({
+          name: 'test-model',
+          workspace: params.workspace,
+          // Deliberately no `model_providers`: an adapter rides whatever serves
+          // its base model, so the target must not depend on one being listed.
+          adapters: [{ name: 'my-lora', workspace: 'adapter-ws' }],
+        })
+      ),
+      http.post('*/apis/evals/v2/workspaces/:workspace/evaluate/jobs', async ({ request }) => {
+        const body = (await request.json()) as { name: string; spec: Record<string, unknown> };
+        specs.push(body.spec);
+        return HttpResponse.json({ name: body.name });
+      })
+    );
+    return specs;
+  };
+
+  it('targets an adapter inline, routed on its base model', async () => {
+    const specs = submitted();
+    renderAt(adapterValue);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Run Evaluation' }));
+
+    await vi.waitFor(() => expect(specs).toHaveLength(1));
+    // A ref cannot name an adapter, so this one target stays inline.
+    // Routed on the base model, with the composite in the model field -- the
+    // same addressing chat uses, so the adapter inherits the base VM's
+    // middleware and the run is attributed to the adapter, not to its base.
+    expect(specs[0].target).toEqual({
+      url: expect.stringContaining(`/workspaces/${DEFAULT_WORKSPACE}/model/test-model/-/v1`),
+      name: 'test-model&adapters/adapter-ws/my-lora',
+    });
+  });
+
+  it("routes on the base model's own workspace, not the page's", async () => {
+    const specs = submitted();
+    renderAt('other-ws/test-model::my-lora');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Run Evaluation' }));
+
+    await vi.waitFor(() => expect(specs).toHaveLength(1));
+    // The gateway finds the base VirtualModel by the URL's workspace, so routing
+    // on the page's would miss it -- or reach a same-named model there instead.
+    expect(specs[0].target).toEqual({
+      url: expect.stringContaining('/workspaces/other-ws/model/test-model/-/v1'),
+      name: 'test-model&adapters/adapter-ws/my-lora',
+    });
+  });
+});

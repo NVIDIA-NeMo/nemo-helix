@@ -7,6 +7,7 @@ import json
 
 import pytest
 from httpx import AsyncClient
+from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE
 
 
 @pytest.mark.integration
@@ -640,6 +641,16 @@ class TestEntityValidation:
         )
         assert response.status_code == 422
         assert "does not exist" in response.json()["detail"].lower()
+        assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
+
+    async def test_update_entity_nonexistent_workspace_fails(self, client: AsyncClient):
+        """Test updating an entity in a non-existent workspace returns 422 with the workspace_not_found code."""
+        response = await client.put(
+            "/apis/entities/v2/workspaces/nonexistent-workspace/entities/model/test",
+            json={"data": {}},
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
 
     async def test_list_entities_nonexistent_workspace_fails(self, client: AsyncClient):
         """Test listing entities in non-existent workspace returns 404."""

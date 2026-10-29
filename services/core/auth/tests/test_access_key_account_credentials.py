@@ -15,7 +15,8 @@ from nhx.core.entities.app.repository import AccountCredentialStore, AccountIden
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-NOW = datetime(2026, 9, 29, tzinfo=UTC)
+# Relative to the real clock, which the registry's active check reads, so the keys stay unexpired.
+NOW = datetime.now(UTC)
 
 
 @pytest_asyncio.fixture
@@ -98,3 +99,64 @@ async def test_missing_new_and_legacy_records_fail_closed(credential_backend) ->
     registry = AccessKeyRegistry(legacy_client, adapter)
 
     assert await registry.is_active("ak_missing", "alice") is False
+
+
+@pytest.mark.asyncio
+async def test_a_stored_key_keeps_its_service_attributes(credential_backend) -> None:
+    adapter, owner_account_id = credential_backend
+    registry = AccessKeyRegistry(AsyncMock(), adapter)
+    attributes = {"evals": {"kind": "trial", "attempt": 1, "policy": {"model_access": "closed"}}}
+
+    await registry.add(
+        _key().model_copy(update={"service_attributes": attributes}),
+        owner_principal="alice",
+        owner_account_id=owner_account_id,
+    )
+
+    stored = await registry.get_status("ak_new", "alice")
+    assert stored.service_attributes == attributes
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_record_never_vouches_for_service_attributes(credential_backend) -> None:
+    """Legacy records are writable through the generic Entities API, so rotating one must not sign their attributes."""
+    adapter, _owner_account_id = credential_backend
+    forged = AccessKeyEntity(
+        name="ak_legacy",
+        workspace="system",
+        principal="alice",
+        issued_at=NOW,
+        expires_at=datetime.now(tz=UTC) + timedelta(days=1),
+        issuer="https://platform.example.com/apis/auth",
+        audiences=["nemo-helix-access-key"],
+        service_attributes={"evals": {"policy": "forged"}},
+    )
+    legacy_client = AsyncMock()
+    legacy_client.get.return_value = forged
+    registry = AccessKeyRegistry(legacy_client, adapter)
+
+    rotatable = await registry.get_rotatable("ak_legacy", "alice")
+
+    assert rotatable.service_attributes == {}
+
+
+@pytest.mark.asyncio
+async def test_without_a_credential_store_entity_records_keep_their_attributes() -> None:
+    """Then the entity store holds new keys, and is the only record of what a service vouched for."""
+    record = AccessKeyEntity(
+        name="ak_only",
+        workspace="system",
+        principal="alice",
+        issued_at=NOW,
+        expires_at=datetime.now(tz=UTC) + timedelta(days=1),
+        issuer="https://platform.example.com/apis/auth",
+        audiences=["nemo-helix-access-key"],
+        service_attributes={"evals": {"kind": "trial"}},
+    )
+    entity_client = AsyncMock()
+    entity_client.get.return_value = record
+    registry = AccessKeyRegistry(entity_client)
+
+    rotatable = await registry.get_rotatable("ak_only", "alice")
+
+    assert rotatable.service_attributes == {"evals": {"kind": "trial"}}

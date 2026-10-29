@@ -89,6 +89,57 @@ test("discovers and sorts branch lines, not tag snapshots or local-only branches
   assert.match(readFileSync(join(f.checkout, "docs/fern/versions/v0.9.yml"), "utf8"), /generated\/release-versions\/v0.9\/overview.mdx/);
 });
 
+for (const basepath of ["", "/nemo-helix"]) {
+  test(`links Latest to the newest released branch only (basepath '${basepath}')`, (t) => {
+    const f = fixture(t);
+    const config = join(f.checkout, "docs/fern/docs.yml");
+    const latest = parse(readFileSync(join(fernDir, "docs.yml"), "utf8")).versions[0];
+    const warning = latest.announcement.message;
+    assert.equal(latest["display-name"], "Latest");
+    assert.match(warning, /unreleased development docs/);
+    assert.ok(!warning.includes("](")); // Authored fallback makes no release claim.
+    writeFileSync(config, readFileSync(config, "utf8")
+      + `    announcement:\n      message: ${JSON.stringify(warning)}\n`
+      + (basepath ? `instances:\n  - url: example.com/other\n    custom-domain: docs.example.com${basepath}\n` : ""));
+    f.branch("release/0.8"); // The fixture's reachable 0.8.0 tag marks this line released.
+    f.commit("0.9 development");
+    f.branch("release/0.9");
+    f.commit("0.10 development");
+    f.branch("release/0.10");
+
+    const check = (stable, slugs, availability) => {
+      const versions = f.versions();
+      const message = warning + (stable
+        ? ` See the [latest released docs](${basepath}/${stable}/documentation/home).`
+        : "");
+      assert.deepEqual(versions[0], { ...latest, announcement: { message } });
+      assert.deepEqual(versions.map((v) => v.slug), ["latest", ...slugs]);
+      assert.deepEqual(versions.slice(1).map((v) => v.availability), availability);
+      assert.ok(versions.every((v) => !("default" in v)));
+      assert.ok(versions.slice(1).every((v) => !("announcement" in v)));
+    };
+    f.run();
+    check("v0.8", ["v0.10", "v0.9", "v0.8"], ["preview", "preview", undefined]);
+    const first = readFileSync(config, "utf8");
+    f.run();
+    assert.equal(readFileSync(config, "utf8"), first);
+
+    // Tag the actual 0.9 branch tip, not the later 0.10 development commit.
+    git(f.seed, "tag", "0.9.0", "HEAD~1");
+    git(f.seed, "push", "origin", "--tags");
+    f.run();
+    check("v0.9", ["v0.10", "v0.9", "v0.8"], ["preview", undefined, undefined]);
+
+    // Removing all stable candidates must discard the previously generated link.
+    git(f.seed, "push", "origin", ":refs/heads/release/0.8", ":refs/tags/0.9.0");
+    f.run();
+    check(undefined, ["v0.10", "v0.9"], ["preview", "preview"]);
+    const fallback = readFileSync(config, "utf8");
+    f.run();
+    assert.equal(readFileSync(config, "utf8"), fallback);
+  });
+}
+
 test("only reachable stable tags from the branch's own release line remove preview", (t) => {
   const f = fixture(t);
   f.commit("0.9 release work");
@@ -236,6 +287,70 @@ test("preserves authored redirects and refreshes generated aliases idempotently"
   git(f.seed, "push", "origin", "--delete", "release/0.8");
   f.run();
   assert.deepEqual(f.redirects(), [{ source: "/v0.8.0", destination: "/manual" }]);
+});
+
+test("mirrors each release branch's retired-page redirects under its version slug", (t) => {
+  const f = fixture(t);
+  put(f.seed, "docs/fern/docs.yml", [
+    "versions:",
+    "  - display-name: Latest",
+    "    path: versions/latest.yml",
+    "    slug: latest",
+    "redirects:",
+    "  - source: /documentation/old-page",
+    "    destination: /documentation/new-page",
+    "  - source: /latest/documentation/old-page",
+    "    destination: /latest/documentation/new-page",
+    "  - source: /latest/documentation/legacy/:path*",
+    "    destination: /latest/documentation/current/:path*",
+    "  - source: /latest/documentation/elsewhere",
+    "    destination: https://example.com/elsewhere",
+    "",
+  ].join("\n"));
+  git(f.seed, "add", ".");
+  git(f.seed, "commit", "-m", "0.8 redirects without basepath");
+  f.branch("release/0.8");
+  put(f.seed, "docs/fern/docs.yml", [
+    "versions:",
+    "  - display-name: Latest",
+    "    path: versions/latest.yml",
+    "    slug: latest",
+    "redirects:",
+    "  - source: /latest/documentation/old-page",
+    "    destination: /nemo-helix/latest/documentation/new-page",
+    "  - source: /latest/documentation/only-in-09",
+    "    destination: /nemo-helix/latest/documentation/renamed-in-09",
+    "",
+  ].join("\n"));
+  git(f.seed, "add", ".");
+  git(f.seed, "commit", "-m", "0.9 redirects with basepath");
+  f.branch("release/0.9");
+  const config = join(f.checkout, "docs/fern/docs.yml");
+  writeFileSync(
+    config,
+    "instances:\n  - url: example.com/nemo-helix\n    custom-domain: docs.example.com/nemo-helix\n"
+      + readFileSync(config, "utf8")
+      + "redirects:\n  - source: /v0.9/documentation/only-in-09\n    destination: /manual\n",
+  );
+  f.run();
+  const find = (source) => f.redirects().find((r) => r.source === source);
+  assert.deepEqual(find("/v0.8/documentation/old-page"), {
+    source: "/v0.8/documentation/old-page", destination: "/nemo-helix/v0.8/documentation/new-page",
+  });
+  assert.deepEqual(find("/v0.8/documentation/legacy/:path*"), {
+    source: "/v0.8/documentation/legacy/:path*", destination: "/nemo-helix/v0.8/documentation/current/:path*",
+  });
+  assert.deepEqual(find("/v0.9/documentation/old-page"), {
+    source: "/v0.9/documentation/old-page", destination: "/nemo-helix/v0.9/documentation/new-page",
+  });
+  // Authored redirects win, unversioned sources are not mirrored, and external targets are skipped.
+  assert.equal(find("/v0.9/documentation/only-in-09").destination, "/manual");
+  assert.equal(find("/v0.8/documentation/only-in-09"), undefined);
+  assert.equal(find("/v0.8/documentation/elsewhere"), undefined);
+  assert.ok(!f.redirects().some((r) => r.source.startsWith("/v0.8/latest") || r.source === "/v0.8/old-page"));
+  const first = f.redirects();
+  f.run();
+  assert.deepEqual(f.redirects(), first);
 });
 
 test("does not redirect away an existing patch-branch version, even a preview", (t) => {

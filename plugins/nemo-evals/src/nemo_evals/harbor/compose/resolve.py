@@ -282,13 +282,15 @@ class Interpolator:
         return cls(variables, problems, host_only)
 
     def with_dotenv_lines(self, lines: dict[str, str]) -> Interpolator:
-        """Return an interpolator for a dotenv file that looks in its ``lines`` read so far first, then in this one's.
+        """Return an interpolator for a dotenv file that looks in this one's variables first, then in its ``lines``.
 
-        ``lines`` is read as it changes, so each line of the file can see the lines above it.
+        Compose fills in a dotenv line from the variables it already has before the file's earlier lines: with
+        ``REGISTRY`` set in ``task.toml``, ``.env``'s ``REGISTRY=other`` then ``IMAGE=${REGISTRY}/redis`` still uses
+        ``task.toml``'s registry. ``lines`` is read as it changes, so each line of the file can see the lines above it.
         """
         # A ChainMap looks a name up in each mapping in turn, and holds `lines` itself rather than a copy, so a line
         # added to it later is found too.
-        return Interpolator(ChainMap(lines, dict(self._variables)), self._problems, self._host_only)
+        return Interpolator(ChainMap(dict(self._variables), lines), self._problems, self._host_only)
 
     def variable_value(self, name: str, path: str) -> str | None:
         """Return the value Compose has for variable ``name``, or None if it has none.

@@ -93,7 +93,7 @@ class FakeBuilds:
         )
         update: dict = {"status": status, "updated_at": T0 + timedelta(minutes=2, seconds=14)}
         if status == "ready":
-            update["images"] = [BuildImage(role="main", source="prebuilt")]
+            update["images"] = [BuildImage(type="main", source="prebuilt")]
         if status == "failed":
             update["error"] = "no Dockerfile"
         attempts[index] = build.model_copy(update=update)

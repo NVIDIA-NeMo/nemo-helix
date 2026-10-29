@@ -6,25 +6,6 @@ import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSel
 import { FileListItem } from '@nemo/common/src/components/FileList';
 
 /**
- * Returns the extension of a file.
- */
-export const getFileExtension = (file: File | string): string | null => {
-  let fileName: string;
-
-  if (typeof file !== 'string') {
-    fileName = file.name;
-  } else {
-    fileName = file;
-  }
-
-  const hasFileExtension = fileName.includes('.');
-
-  if (!hasFileExtension) return null;
-
-  return fileName.substring(fileName.lastIndexOf('.'));
-};
-
-/**
  * Parse fileset URL format (fileset://workspace/name/filepath) into a FileListItem.
  * Note: dataset field is not included since we only have workspace/name from the URL.
  * The caller should fetch the full FilesetOutput if needed.

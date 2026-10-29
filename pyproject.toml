@@ -243,6 +243,7 @@ functional-services = [
   "nhx-intake",
   "nhx-hello-world",
   "nhx-platform-seed",
+  "nemo-agent-hardener-plugin",
 ]
 
 # nhx-api variant used only to deploy DeepAgents in container E2E tests.
@@ -260,7 +261,7 @@ cpu-tasks = [
   # agents.execute task module plus the harnesses that can coexist in the
   # managed CPU task environment. Hermes requires a separate execution image.
   "nemo-agents-plugin[claude,codex,deepagents]",
-  # Compass Fabric adapter and compass.analysis execute extension.
+  # Compass Fabric adapter and insights.analysis post-run action.
   { include-group = "compass" },
   "nemo-evals-plugin",
   # nemo-evals' bind_task_image rewrites task.toml with it; scaled-evals pins the same version.
@@ -272,6 +273,8 @@ cpu-tasks = [
   # Ships the switchyard strategy job the optimize task imports in the nhx-tasks image.
   "nemo-switchyard-plugin",
   "nhx-hello-world",
+  # Task modules for nhx-agent-hardener-tasks, which layers the agent-hardener and garak venvs on this image.
+  "nemo-agent-hardener-plugin",
 ]
 
 # GPU task dependencies (for nhx-gpu-tasks container)
@@ -418,6 +421,8 @@ url = "https://nvidia-nemo.github.io/DataDesignerPlugins/simple/"
 explicit = true
 
 [tool.uv.sources]
+# Pin the official OpenShell release artifact.
+openshell = { url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" }
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 nhx-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }
@@ -639,6 +644,8 @@ extra-paths = [
   "plugins/nemo-guardrails/tests",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
+  # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
+  "plugins/nemo-deployments/tests/unit",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",

@@ -35,7 +35,7 @@ from nemo_evals.config import HarborTaskJobsConfig, get_config
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparation,
-    ImageRole,
+    ImageType,
     PreparationClients,
     PreparationErrorCode,
     PreparationErrorInfo,
@@ -395,27 +395,28 @@ class FakePreparer:
             return TaskPreparation(
                 status="failed", error=PreparationErrorInfo(code=self.fail[task.id], detail="scripted")
             )
-        roles: tuple[ImageRole, ...] = ("agent", "verifier") if task.id in self.with_verifier else ("agent",)
+        image_types: tuple[ImageType, ...] = ("agent", "verifier") if task.id in self.with_verifier else ("agent",)
         if recorded is None and not self.ready_at_once:
             return TaskPreparation(
                 status="pending",
                 resource_class="cpu",
                 images={
-                    r: ImagePreparation(role=r, preparation_key=_key(task.id, r), source="prebuilt") for r in roles
+                    r: ImagePreparation(type=r, preparation_key=_key(task.id, r), source="prebuilt")
+                    for r in image_types
                 },
             )
         if task.id in self.stay_pending:
             assert recorded is not None
             return recorded
-        prepared = {r: _prepared(task.id, r) for r in roles}
+        prepared = {r: _prepared(task.id, r) for r in image_types}
         return TaskPreparation(
             status="ready",
             resource_class="cpu",
             images={
-                r: ImagePreparation(role=r, preparation_key=_key(task.id, r), source="prebuilt", prepared=prepared[r])
-                for r in roles
+                r: ImagePreparation(type=r, preparation_key=_key(task.id, r), source="prebuilt", prepared=prepared[r])
+                for r in image_types
             },
-            environment=prepared_environment(task.id, with_verifier="verifier" in roles),
+            environment=prepared_environment(task.id, with_verifier="verifier" in image_types),
         )
 
 
@@ -433,10 +434,10 @@ def _key(task_id: str, part: str) -> str:
     return hashlib.sha256(f"{task_id}:{part}".encode()).hexdigest()
 
 
-def _prepared(task_id: str, role: ImageRole) -> PreparedImage:
+def _prepared(task_id: str, image_type: ImageType) -> PreparedImage:
     return PreparedImage(
-        image_ref=f"registry.invalid/fake/{task_id}-{role}@sha256:{_key(task_id, role)}",
-        preparation_key=_key(task_id, role),
+        image_ref=f"registry.invalid/fake/{task_id}-{image_type}@sha256:{_key(task_id, image_type)}",
+        preparation_key=_key(task_id, image_type),
     )
 
 

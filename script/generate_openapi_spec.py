@@ -28,6 +28,7 @@ from nhx.common.api.utils import clear_query_param_schemas, register_query_param
 from nhx.common.version import platform_api_version
 from uvicorn.importer import import_from_string
 
+from .openapi_helper.code_samples import add_code_samples
 from .openapi_helper.openapi_tools import (
     copy_tags,
     fix_openai_streaming_endpoints,
@@ -792,6 +793,8 @@ def process_single_platform_spec_in_memory(services: list[ServiceConfig]) -> boo
         spec = order_endpoints_by_tags(spec)
 
     spec = fix_ref_with_additional_props(spec)
+    # Replace Fern snippets that cannot run as written (bodyless 204s, missing auth/body).
+    spec = add_code_samples(spec)
 
     dangling = validate_refs(spec)
     if dangling:

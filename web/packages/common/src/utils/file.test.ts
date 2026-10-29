@@ -4,8 +4,10 @@
 import {
   triggerDownload,
   findMessagesArray,
+  getFileExtension,
   getFirstRow,
   extractUserFriendlyKeysFromRow,
+  isAcceptedFileType,
   resolveKeyPath,
 } from './file';
 
@@ -915,5 +917,37 @@ describe('resolveKeyPath', () => {
 
   it('matches string-valued fields only', () => {
     expect(resolveKeyPath({ items: [{ done: true }] }, 'items[done=true]')).toBeUndefined();
+  });
+});
+
+describe('getFileExtension', () => {
+  it('returns the extension of a string path or File, last dot wins', () => {
+    expect(getFileExtension('data.csv')).toBe('.csv');
+    expect(getFileExtension(new File(['x'], 'test.json'))).toBe('.json');
+    expect(getFileExtension('archive.tar.gz')).toBe('.gz');
+    expect(getFileExtension('/absolute/path/data.jsonl')).toBe('.jsonl');
+  });
+
+  it('returns null for files without an extension', () => {
+    expect(getFileExtension('README')).toBeNull();
+    expect(getFileExtension('Makefile')).toBeNull();
+  });
+});
+
+describe('isAcceptedFileType', () => {
+  it('matches case-insensitively, accepts everything for an empty list, rejects extensionless files', () => {
+    expect(isAcceptedFileType('data.CSV', ['.csv'])).toBe(true);
+    expect(isAcceptedFileType('dir/data.jsonl', ['.json', '.csv'])).toBe(false);
+    expect(isAcceptedFileType(new File([''], 'a.jsonl'), ['.jsonl'])).toBe(true);
+    expect(isAcceptedFileType('README', ['.csv'])).toBe(false);
+    expect(isAcceptedFileType('README.md', [])).toBe(true);
+    expect(isAcceptedFileType('README.md', undefined)).toBe(true);
+  });
+});
+
+describe('getFileExtension casing', () => {
+  it('always returns the extension in lowercase so callers can compare against literals', () => {
+    expect(getFileExtension('DATA.CSV')).toBe('.csv');
+    expect(getFileExtension(new File(['x'], 'Notes.MD'))).toBe('.md');
   });
 });

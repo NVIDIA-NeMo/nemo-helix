@@ -33,26 +33,16 @@ from nemo_helix_plugin.agents.validation import require_registered_agent_config
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
-    InternalServerError,
-    NemoResponseValidationError,
-    NemoTransportError,
     NotFoundError,
 )
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
-    ContainerSpec,
-    CPUExecutionProviderSpec,
-    ExecutorSpec,
     HelixJobSpec,
     HelixJobStep,
-    SubprocessExecutionProviderSpec,
 )
-from nemo_helix_plugin.jobs.client import AsyncJobsClient
-from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
-from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.executor import resolve_task_executor
 from nemo_helix_plugin.refs import parse_entity_ref
 from prompt_master_plugin.runner import PromptMasterOutcome, build_optimizer_agent, run_prompt_master
 from prompt_master_plugin.schemas.optimize import PromptMasterOptimizeSpec
@@ -128,7 +118,14 @@ class PromptMasterOptimizeJob(NemoJob):
             steps=[
                 HelixJobStep(
                     name=STRATEGY_NAME,
-                    executor=await _resolve_executor(profile=profile or "default", async_sdk=async_sdk),
+                    executor=await resolve_task_executor(
+                        profile=profile or "default",
+                        async_sdk=async_sdk,
+                        image=TASK_IMAGE,
+                        entrypoint=TASK_ENTRYPOINT,
+                        command=TASK_COMMAND,
+                        step="prompt-master",
+                    ),
                     config=config,
                 ),
             ],
@@ -230,48 +227,3 @@ def write_artifacts(
         "response": outcome.response,
     }
     (results_dir / SUMMARY_FILENAME).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-
-
-async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> ExecutorSpec:
-    """Pick the executor for *profile* from the backends the platform actually registered.
-
-    ``subprocess`` is preferred: the one-shot Fabric run needs a venv carrying the Deep Agents
-    harness adapter, which the platform host's own environment has.  Deployments that register
-    no subprocess backend (Helm / Minikube) get the ``cpu`` provider instead, which the platform
-    maps to whichever container backend it registered for that profile.
-    """
-    try:
-        profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
-    except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
-        raise HelixJobDependencyUnavailableError(
-            f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
-            "unavailable.  Retry the submission."
-        ) from exc
-
-    if any(
-        isinstance(candidate, SubprocessJobExecutionProfile) and candidate.profile == profile for candidate in profiles
-    ):
-        return SubprocessExecutionProviderSpec(
-            provider="subprocess",
-            profile=profile,
-            command=[*TASK_ENTRYPOINT, *TASK_COMMAND],
-        )
-
-    # Jobs keys execution profiles by (provider, profile); "cpu" is whatever container backend
-    # the deployment registered under that name.
-    if any(candidate.provider == "cpu" and candidate.profile == profile for candidate in profiles):
-        return CPUExecutionProviderSpec(
-            provider="cpu",
-            profile=profile,
-            container=ContainerSpec(
-                image=get_qualified_image(TASK_IMAGE),
-                entrypoint=TASK_ENTRYPOINT,
-                command=TASK_COMMAND,
-            ),
-        )
-
-    available = sorted({f"{candidate.provider}/{candidate.profile}" for candidate in profiles})
-    raise HelixJobCompilationError(
-        f"No 'subprocess' or 'cpu' execution profile named {profile!r} is registered, so the "
-        f"prompt-master step has nowhere to run.  Available profiles: {available or ['<none>']}."
-    )

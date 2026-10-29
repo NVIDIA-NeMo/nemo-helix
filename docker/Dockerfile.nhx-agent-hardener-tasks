@@ -1,0 +1,90 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# NHX Agent Hardener Tasks - the nhx-tasks image plus what `nemo agent-hardener setup` leaves on a host:
+# agent-hardener's venv, the garak venv it spawns, and the openshell CLI that drives the OpenShell gateway.
+# Both venvs stay out of /app/.venv because garak's pins conflict with the platform's.
+
+ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_CPU_TASKS_BASE=nhx-tasks
+
+FROM ${NHX_PYTHON_BASE} AS builder
+ARG TARGETARCH
+ARG OPENSHELL_VERSION=0.1.2
+ARG OPENSHELL_SHA256_AMD64=7eb6917285331a09e3300266a0558616481a5e9927cae2612ea07c4045b6dd6f
+ARG OPENSHELL_SHA256_ARM64=9880c5776688231d5242deb046cdee361734f94901b9123949a0baf29fdadd9e
+ENV UV_PYTHON_INSTALL_DIR=/opt/agent-hardener/python \
+    AGENT_HARDENER_GARAK_PYTHON=/opt/agent-hardener/garak-venv/bin/python
+COPY docker/locks/nhx-agent-hardener-tasks /opt/agent-hardener-lock
+# The agent-hardener venv installs from its committed lock. The garak venv comes from agent-hardener's own
+# provisioner, as on a host after `nemo agent-hardener setup`, so its garak pin stays the single source of truth.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv venv --python 3.12 /opt/agent-hardener/venv && \
+    UV_PROJECT_ENVIRONMENT=/opt/agent-hardener/venv uv sync \
+        --project /opt/agent-hardener-lock \
+        --locked \
+        --no-dev \
+        --no-install-project && \
+    /opt/agent-hardener/venv/bin/python -c \
+        "from agent_hardener.garak_venv import provision_garak_venv; provision_garak_venv()"
+RUN set -eux; \
+    case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) target="x86_64-unknown-linux-musl"; sha256="${OPENSHELL_SHA256_AMD64}" ;; \
+        arm64|aarch64) target="aarch64-unknown-linux-musl"; sha256="${OPENSHELL_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH:-unknown}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/openshell.tar.gz \
+        "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/openshell-${target}.tar.gz"; \
+    echo "${sha256}  /tmp/openshell.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/openshell.tar.gz -C /usr/local/bin openshell; \
+    rm /tmp/openshell.tar.gz; \
+    /usr/local/bin/openshell --version
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eu; \
+    mkdir -p /opt/agent-hardener/.source-distributions; \
+    for venv in venv garak-venv; do \
+        uv run --no-project --python /app/.venv/bin/python \
+            /usr/local/bin/collect-python-sdists.py \
+            --python "/opt/agent-hardener/${venv}/bin/python" \
+            --output /opt/agent-hardener/.source-distributions \
+            --label "agent-hardener-${venv}"; \
+    done
+
+FROM ${NHX_CPU_TASKS_BASE} AS runtime
+COPY --chown=1000:1000 --from=builder /opt/agent-hardener/python /opt/agent-hardener/python
+COPY --chown=1000:1000 --from=builder /opt/agent-hardener/venv /opt/agent-hardener/venv
+COPY --chown=1000:1000 --from=builder /opt/agent-hardener/garak-venv /opt/agent-hardener/garak-venv
+COPY --chown=1000:1000 --from=builder /opt/agent-hardener/.source-distributions/ /usr/share/nemo-helix/source-distributions/nhx-agent-hardener-tasks/
+COPY --from=builder /usr/local/bin/openshell /usr/local/bin/openshell
+ENV NEMO_AGENT_HARDENER_VENV_PATH=/opt/agent-hardener/venv \
+    NEMO_AGENT_HARDENER_GARAK_VENV_PATH=/opt/agent-hardener/garak-venv
+# The base image's root build steps leave root-owned dirs under HOME; garak writes ~/.cache/garak on import.
+RUN mkdir -p /home/nvs/.cache && chown -R 1000:1000 /home/nvs
+# agent-hardener keeps per-run state under <cwd>/.agent-hardener; /app is the root-owned venv.
+WORKDIR /home/nvs
+
+FROM runtime AS smoke-test
+# The war-game fails minutes in, after the run record exists, when any of these is missing, so check
+# them at build time as the uid task pods run as: the task entrypoints import, both venvs run, the
+# openshell CLI accepts the plain and mTLS registrations the job makes (an unreachable endpoint only
+# warns), and the per-run state dir is writable.
+USER 1000
+RUN set -eux; \
+    python -c "import nemo_agent_hardener_plugin.tasks.war_game.__main__, nemo_agent_hardener_plugin.tasks.synth_benign.__main__"; \
+    /opt/agent-hardener/venv/bin/agent-hardener --help >/dev/null; \
+    /opt/agent-hardener/garak-venv/bin/python -c "import garak"; \
+    cfg="$(mktemp -d)"; \
+    XDG_CONFIG_HOME="${cfg}/plain" openshell gateway add http://127.0.0.1:9 --name auto-defender; \
+    test -f "${cfg}/plain/openshell/gateways/auto-defender/metadata.json"; \
+    mtls="${cfg}/mtls/openshell/gateways/auto-defender/mtls"; \
+    mkdir -p "${mtls}"; \
+    for f in ca.crt tls.crt tls.key; do echo pem > "${mtls}/${f}"; done; \
+    XDG_CONFIG_HOME="${cfg}/mtls" openshell gateway add https://127.0.0.1:9 --name auto-defender --local; \
+    test -f "${cfg}/mtls/openshell/gateways/auto-defender/metadata.json"; \
+    rm -rf "${cfg}"; \
+    echo ok > .w && rm .w
+
+FROM runtime

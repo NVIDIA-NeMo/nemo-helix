@@ -6,6 +6,7 @@
 from typing import Annotated
 
 from fastapi import Depends
+from nemo_helix_plugin.auth.access import AuthContextAccessRule
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import get_auth_client
 from nhx.core.entities.app.repository import (
@@ -15,14 +16,22 @@ from nhx.core.entities.app.repository import (
     dep_workspace_repository,
     get_async_session_maker,
 )
+from nhx.core.entities.app.repository.field_policy import ProtectedEntityField
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+AUTH_CONTEXT_FIELD = ProtectedEntityField("_auth_context")
 
 
 def dep_entity_repository_with_session(
     session_maker: async_sessionmaker[AsyncSession] = Depends(get_async_session_maker),
+    auth_client: AuthClient = Depends(get_auth_client),
 ) -> EntityRepositoryInterface:
     """Dependency function for Entity repository with injected session maker."""
-    return dep_entity_repository(session_maker)
+    access = AuthContextAccessRule.from_auth_client(auth_client)
+    policy = AUTH_CONTEXT_FIELD.bind(
+        policy_enabled=access.policy_enabled, can_read=access.can_read, can_write=access.can_write
+    )
+    return dep_entity_repository(session_maker, policy)
 
 
 def dep_workspace_repository_with_session(

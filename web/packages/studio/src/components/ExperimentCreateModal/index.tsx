@@ -13,6 +13,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import {
   getListExperimentsQueryKey,
@@ -32,7 +33,7 @@ import {
 } from '@studio/components/ExperimentCreateModal/constants';
 import { AxiosError } from 'axios';
 import { type FC } from 'react';
-import { useForm, type SubmitHandler } from 'react-hook-form';
+import { useController, useForm, type SubmitHandler } from 'react-hook-form';
 
 export interface ExperimentCreateModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
@@ -45,17 +46,22 @@ export const ExperimentCreateModal: FC<ExperimentCreateModalProps> = ({
 }) => {
   const {
     reset,
-    register,
     handleSubmit,
-    formState: { errors, isSubmitting },
-    setValue,
+    formState: { errors, isSubmitted, isSubmitting, touchedFields },
     setError,
     control,
   } = useForm<ExperimentCreateFormFields>({
     resolver: zodResolver(experimentCreateSchema),
-    mode: 'onChange',
+    mode: 'onTouched',
     defaultValues: experimentCreateDefaults,
   });
+
+  const {
+    field: { value: nameValue, onChange: onNameChange, onBlur: onNameBlur },
+  } = useController({ control, name: 'name' });
+
+  const preview = toValidEntityName(nameValue, '');
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
 
   const formDisabled = isSubmitting;
 
@@ -128,19 +134,23 @@ export const ExperimentCreateModal: FC<ExperimentCreateModalProps> = ({
       <Stack gap="density-2xl" className="w-full min-w-0">
         <FormField
           slotLabel="Name"
-          slotError={errors.name?.message}
-          status={errors.name && 'error'}
+          slotError={nameError}
+          slotHelp={
+            nameError ? undefined : preview ? (
+              <>
+                Your experiment will be created as <span className="text-primary">{preview}</span>
+              </>
+            ) : undefined
+          }
+          status={nameError ? 'error' : undefined}
         >
           <TextInput
             autoFocus
             disabled={formDisabled}
-            status={errors.name && 'error'}
-            {...register('name')}
-            onChange={(e) =>
-              setValue('name', (e.target as HTMLInputElement).value.replace(/[\s-]+/g, '-'), {
-                shouldValidate: true,
-              })
-            }
+            status={nameError ? 'error' : undefined}
+            value={nameValue}
+            onChange={(e) => onNameChange((e.target as HTMLInputElement).value)}
+            onBlur={onNameBlur}
           />
         </FormField>
 
