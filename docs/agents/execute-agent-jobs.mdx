@@ -389,13 +389,36 @@ A context that does not match fails the create request.
 
 An Agent entity can declare the runs it accepts, so a caller learns about a
 mistake when it creates the job rather than when the agent misreads it. Set
-these fields when you register the agent through the API:
+these fields under `registration` in the `agent.yaml` you pass to
+`nemo agents register`, or as top-level fields of the register request when you
+use the API:
 
 | Field | Default | Description |
 | --- | --- | --- |
 | `context_schema` | None (any context) | A JSON Schema the job's `context` must match. Also accepted on an [inline agent](#inline-agents). |
 | `default_input` | None | The prompt a job uses when it omits `input`. |
 | `post_run_actions` | `["agents.noop"]` | The [post-run action](#post-run-actions) kinds a job may choose. Must name at least one installed kind. |
+
+<Tabs>
+<Tab title="agent.yaml">
+
+```yaml
+config_format: nemo-agents-spec-v1
+name: analyst
+registration:
+  context_schema:
+    type: object
+    properties:
+      since: {type: string, format: date-time}
+    required: [since]
+    additionalProperties: false
+  default_input: Analyze recent runs.
+  post_run_actions: [insights.analysis]
+# ...harnesses, models, and the rest of the agent config
+```
+
+</Tab>
+<Tab title="API">
 
 ```json
 {
@@ -411,6 +434,12 @@ these fields when you register the agent through the API:
   "post_run_actions": ["insights.analysis"]
 }
 ```
+
+A `registration` block inside the request's `config` is rejected: over the API,
+these are fields of the agent, not of its config.
+
+</Tab>
+</Tabs>
 
 With this agent, a job can omit `input`, must pass `context.since` as an
 RFC 3339 timestamp, and is rejected if it misspells a key such as `sinse`.
@@ -431,8 +460,10 @@ A job that omits `post_run_action` gets one from the agent's declaration:
 <Note>
 An Agent registered without `post_run_actions`, including one registered before
 the field existed, allows only `agents.noop`. A job for that agent that names
-any other action is rejected. Re-register the agent with the actions its jobs
-need.
+any other action is rejected. Add the actions its jobs need under
+`registration.post_run_actions` in its `agent.yaml`, then run
+`nemo agents delete` and `nemo agents register` again. For a deployed agent,
+`nemo agents redeploy` does both and redeploys it.
 </Note>
 
 <a id="post-run-actions"></a>

@@ -17,6 +17,13 @@ from typing import Any, Literal, Self
 
 import yaml
 from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
+from nemo_helix_plugin.agents.types import (
+    CONTEXT_SCHEMA_DESCRIPTION,
+    DEFAULT_INPUT_DESCRIPTION,
+    POST_RUN_ACTIONS_DESCRIPTION,
+    PostRunActionKinds,
+    ReferenceConfig,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
@@ -153,10 +160,29 @@ class ToolsConfig(BaseModel):
     blocked: list[str] = Field(default_factory=list)
 
 
+class AgentRegistration(BaseModel):
+    """Agent entity fields set from agent.yaml, rather than config the harness runs.
+
+    ``nemo agents register`` lifts this block out of the file and sends each
+    field as its own request field, so a stored ``Agent.config`` never holds it.
+    Fields left unset take the API's defaults.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
+    context_schema: dict[str, Any] | None = Field(default=None, description=CONTEXT_SCHEMA_DESCRIPTION)
+    default_input: str | None = Field(default=None, description=DEFAULT_INPUT_DESCRIPTION)
+    post_run_actions: PostRunActionKinds | None = Field(default=None, description=POST_RUN_ACTIONS_DESCRIPTION)
+
+
 class AgentConfig(BaseModel):
     """Platform-owned agent.yaml config for nemo-agents-spec-v1."""
 
     model_config = ConfigDict(extra="forbid")
+
+    # Read by the CLI at registration; the harness never sees it.
+    registration: AgentRegistration | None = None
 
     config_format: Literal["nemo-agents-spec-v1"]
     name: str
@@ -207,7 +233,6 @@ def load_agent_config(path: str | Path) -> AgentConfig:
     if not isinstance(data, dict):
         raise AgentConfigLoadError(f"Agent config {config_path} root must be a YAML mapping.")
 
-    data.pop("reference", None)
     try:
         return AgentConfig.model_validate(data)
     except ValidationError as error:

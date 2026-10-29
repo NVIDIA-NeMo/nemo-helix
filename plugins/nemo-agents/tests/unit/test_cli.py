@@ -393,7 +393,10 @@ def test_register_name_only(tmp_path: Path, config_text: str | None) -> None:
 @pytest.mark.parametrize("config_format", [None, "nemo-agents-spec-v1", "nat-workflow-v1"])
 def test_register_references_without_runtime_config(tmp_path: Path, config_format: str | None) -> None:
     config = tmp_path / "agent.yaml"
-    text = "name: calc\nreference:\n  fileset: team-a/source\n  container_image: nvcr.io/my-org/agent:1.0\n"
+    text = (
+        "name: calc\nregistration:\n  reference:\n"
+        "    fileset: team-a/source\n    container_image: nvcr.io/my-org/agent:1.0\n"
+    )
     if config_format is not None:
         text += f"config_format: {config_format}\n"
     config.write_text(text)
@@ -463,7 +466,8 @@ def test_register_resolves_default_model_placeholder(tmp_path, placeholder: str)
         ("[]", "root must be a YAML mapping"),
         ("false", "root must be a YAML mapping"),
         ("config_format: []", "Input should be a valid string"),
-        ("reference: []", "Input should be a valid dictionary"),
+        ("registration:\n  reference: []", "Input should be a valid dictionary"),
+        ("registration:\n  default_inptu: hi", "Extra inputs are not permitted"),
     ],
 )
 def test_register_reports_invalid_agent_config_without_traceback(tmp_path, config_text: str, error: str) -> None:
@@ -483,8 +487,8 @@ def test_register_reports_invalid_agent_config_without_traceback(tmp_path, confi
     assert ".venv" not in result.stderr
 
 
-@pytest.mark.parametrize("with_reference", [False, True])
-def test_register_validates_platform_agent_config_before_post(tmp_path, with_reference: bool) -> None:
+@pytest.mark.parametrize("with_registration", [False, True])
+def test_register_validates_platform_agent_config_before_post(tmp_path, with_registration: bool) -> None:
     import json as _json
 
     config = tmp_path / "agent.yaml"
@@ -513,8 +517,23 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_ref
         "models": {"default": {"provider": "nvidia", "model": "user-default-model"}},
         "environment": {"provider": "local"},
     }
-    if with_reference:
-        config.write_text(config.read_text() + "reference:\n  fileset: default/agent-source\n")
+    if with_registration:
+        config.write_text(
+            config.read_text()
+            + "\n".join(
+                [
+                    "registration:",
+                    "  reference:",
+                    "    fileset: default/agent-source",
+                    "  context_schema:",
+                    "    type: object",
+                    "    additionalProperties: false",
+                    "  default_input: Analyze recent runs.",
+                    "  post_run_actions: [insights.analysis, agents.noop]",
+                    "",
+                ]
+            )
+        )
     captured: dict[str, Any] = {}
 
     async def _validate_platform_agent_config(config_dict: dict[str, Any], *, base_dir: Path):
@@ -543,11 +562,18 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_ref
     assert captured["base_dir"] == tmp_path
     assert captured["validated_config"]["config_format"] == "nemo-agents-spec-v1"
     assert captured["validated_config"]["models"]["default"]["model"] == "user-default-model"
-    assert "reference" not in captured["validated_config"]
-    if with_reference:
-        assert sent["reference"] == {"fileset": "default/agent-source"}
+    # The block is lifted out before validation and sent as the agent's own fields.
+    assert "registration" not in captured["validated_config"]
+    registration_fields = ("reference", "context_schema", "default_input", "post_run_actions")
+    if with_registration:
+        assert {key: sent[key] for key in registration_fields} == {
+            "reference": {"fileset": "default/agent-source"},
+            "context_schema": {"type": "object", "additionalProperties": False},
+            "default_input": "Analyze recent runs.",
+            "post_run_actions": ["agents.noop", "insights.analysis"],
+        }
     else:
-        assert "reference" not in sent
+        assert not set(registration_fields) & sent.keys()
     assert sent["config"] == normalized_config
     assert sent["config_format"] == "nemo-agents-spec-v1"
     mock_upload.assert_called_once_with(
@@ -879,7 +905,9 @@ def test_register_nat_does_not_upload_ethos_fileset(tmp_path, with_reference: bo
     config = tmp_path / "agent.yml"
     config.write_text("llms:\n  llm:\n    _type: openai\n    model_name: nvidia-nemotron-3-super-v3\n")
     if with_reference:
-        config.write_text(config.read_text() + "reference:\n  container_image: nvcr.io/my-org/agent:1.0\n")
+        config.write_text(
+            config.read_text() + "registration:\n  reference:\n    container_image: nvcr.io/my-org/agent:1.0\n"
+        )
 
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.method == "POST"
@@ -1003,7 +1031,10 @@ def test_local_invoke_runs_fabric_config_once(tmp_path: Path, with_reference: bo
         )
     )
     if with_reference:
-        config.write_text(config.read_text() + "reference:\n  fileset: default/source\n  container_image: agent:1\n")
+        config.write_text(
+            config.read_text()
+            + "registration:\n  reference:\n    fileset: default/source\n    container_image: agent:1\n"
+        )
     captured: dict[str, Any] = {}
 
     async def _invoke_agent_config_once(agent_config: Any, inputs: list[Any], *, base_dir: Path):

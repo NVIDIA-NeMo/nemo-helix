@@ -118,7 +118,7 @@ format retain the legacy `nat-workflow-v1` default.
 |---|---|
 | `config_format` | Always `nemo-agents-spec-v1`. |
 | `name`, `description` | Agent metadata. |
-| `reference` | Optional registration metadata for a fileset and container image; see [Register with References](#register-with-references). |
+| `registration` | Optional fields of the Agent itself rather than harness config: `reference` (see [Register with References](#register-with-references)), and `context_schema`, `default_input`, and `post_run_actions` (see [Declare How an Agent Runs](/documentation/agents/execute-agent-jobs#declare-how-an-agent-runs)). `nemo agents register` sends them as the agent's own fields; they are not stored in its config or passed to the harness. |
 | `default_harness`, `harnesses` | The harness that runs the agent. Each entry sets a `kind` (`deepagents`, `claude`, `codex`, `hermes`, `nooa-bench-agent`, `remote-agent`), plus optional `settings` and a harness-specific `model`. |
 | `models` | Named model bindings. A harness uses `models.default` unless it sets its own `model`. |
 | `instructions.system.content` | The system prompt, shared by every harness. |
@@ -311,15 +311,16 @@ environment.
 
 ## Register with References
 
-Add an optional top-level `reference` block to the YAML passed to `nemo agents register`.
+Add an optional `reference` block under `registration` in the YAML passed to `nemo agents register`.
 The fileset references the agent's source code and supporting files, which may include an `agent.yaml`.
 Both fields are optional, and an agent can have either or both:
 
 ```yaml
 name: support-agent
-reference:
-  fileset: default/support-agent-source
-  container_image: nvcr.io/my-org/support-agent:1.0
+registration:
+  reference:
+    fileset: default/support-agent-source
+    container_image: nvcr.io/my-org/support-agent:1.0
 ```
 
 Save this as `agent.yaml`, then register it:
@@ -333,8 +334,8 @@ configuration, as above, or include both in the same YAML.
 
 | Field | Registration validation |
 |---|---|
-| `reference.fileset` | An existing fileset as `name` or `workspace/name`. A bare name resolves in the agent's workspace and is stored as `workspace/name`. Registration checks that the caller can access the fileset; it does not require an `agent.yaml` inside it. |
-| `reference.container_image` | Image syntax only. Shorthand and untagged names such as `alpine` or `org/agent`, tagged names, and SHA-256 digest references are accepted. The supplied string is preserved; registration does not contact the registry or check image existence or access. |
+| `registration.reference.fileset` | An existing fileset as `name` or `workspace/name`. A bare name resolves in the agent's workspace and is stored as `workspace/name`. Registration checks that the caller can access the fileset; it does not require an `agent.yaml` inside it. |
+| `registration.reference.container_image` | Image syntax only. Shorthand and untagged names such as `alpine` or `org/agent`, tagged names, and SHA-256 digest references are accepted. The supplied string is preserved; registration does not contact the registry or check image existence or access. |
 
 For Python SDK registration, pass `reference` separately from `config`:
 
