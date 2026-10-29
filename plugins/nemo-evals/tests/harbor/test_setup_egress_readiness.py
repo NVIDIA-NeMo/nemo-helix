@@ -3,6 +3,7 @@
 
 """The lookup that checks an opened setup egress window, run under /bin/sh with fake resolver tools."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,15 +18,18 @@ def _tool(directory: Path, name: str, body: str) -> None:
 
 
 def _resolve(bin_dir: Path, hosts: str, attempts: int = 3) -> subprocess.CompletedProcess[str]:
-    # bin_dir comes first so its fakes win over any real tool; /bin keeps sh and sleep.
-    env = {"PATH": f"{bin_dir}:/bin", "HOSTS": hosts, "ATTEMPTS": str(attempts), "DELAY": "0"}
+    # PATH is bin_dir alone, so the host's own getent or python (in /bin on merged-/usr systems) is never found.
+    env = {"PATH": str(bin_dir), "HOSTS": hosts, "ATTEMPTS": str(attempts), "DELAY": "0"}
     return subprocess.run(["/bin/sh", "-c", RESOLVE_HOSTS_SCRIPT], env=env, capture_output=True, text=True, timeout=30)
 
 
 @pytest.fixture
 def bin_dir(tmp_path: Path) -> Path:
+    """The fakes' directory, holding the only real tools the script and the fakes need."""
     directory = tmp_path / "bin"
     directory.mkdir()
+    for tool in ("sleep", "cat"):
+        (directory / tool).symlink_to(shutil.which(tool) or f"/bin/{tool}")
     return directory
 
 
