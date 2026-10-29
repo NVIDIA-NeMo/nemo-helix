@@ -54,6 +54,8 @@ import {
   ACTION_SEARCH_PARAM,
   type AgentDetailTab,
   DEFAULT_TAB,
+  DEPLOYMENT_STATUS_TABS,
+  EVAL_TABS,
   isAgentDetailTab,
   isOptimizationView,
   OptimizationView,
@@ -115,7 +117,13 @@ export const AgentDetailRoute: FC = () => {
     healthyDeployments,
     isDeploying,
     isDeploymentsLoading,
-  } = useAgentDetails({ workspace, agentName, selectedDeploymentName });
+  } = useAgentDetails({
+    workspace,
+    agentName,
+    selectedDeploymentName,
+    evalsEnabled: EVAL_TABS.has(selectedTab),
+    pollDeployments: DEPLOYMENT_STATUS_TABS.has(selectedTab),
+  });
   const { data: specFileset } = useAgentSpecFileset(workspace, agentName);
   const specSource = agentSpecSource(specFileset);
 
