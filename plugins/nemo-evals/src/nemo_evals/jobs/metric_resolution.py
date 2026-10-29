@@ -46,12 +46,14 @@ from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.protocol import Metric, MetricWithModels
 from nhx_evals_sdk.metrics.resolution import model_ref_fields
 from nhx_evals_sdk.resolver_protocols import ModelResolver, SecretResolver
-from nhx_evals_sdk.values import Model, ModelRef
+from nhx_evals_sdk.values import AgentBase, Model, ModelRef
 from nhx_evals_sdk.values.common import SecretRef
 from pydantic import BaseModel
 
 #: The path every Inference Gateway route a ``ModelRef`` resolves to starts with.
 _GATEWAY_PATH_PREFIX = "/apis/inference-gateway/"
+#: The path every agent route Studio targets (``/apis/agents/v2/workspaces/{ws}/agents/{name}/-/...``) starts with.
+_AGENTS_PATH_PREFIX = "/apis/agents/"
 #: Workspace segment of the placeholder refs `_rebind_models` routes a metric's models through.
 _REBIND_REF_WORKSPACE = "job-auth-proxy"
 #: The read paths ``authorize_source_read`` checks for a model and a VirtualModel.
@@ -119,6 +121,12 @@ def _calls_gateway_unkeyed(model: Model) -> bool:
     A model with ``api_key_secret`` is called as configured: its owner chose the credential.
     """
     return model.api_key_secret is None and urlsplit(model.url).path.startswith(_GATEWAY_PATH_PREFIX)
+
+
+def _calls_platform_unkeyed(target: Model | AgentBase) -> bool:
+    """Whether ``target`` calls a platform gateway or agent route with no credential of its own."""
+    prefixes = (_GATEWAY_PATH_PREFIX, _AGENTS_PATH_PREFIX) if isinstance(target, AgentBase) else (_GATEWAY_PATH_PREFIX,)
+    return target.api_key_secret is None and urlsplit(target.url).path.startswith(prefixes)
 
 
 def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> MetricBundle:
@@ -372,8 +380,8 @@ def _rebind_models(metric: MetricWithModels, models: dict[str, Model]) -> None:
     run_sync(lambda: metric.resolve_models(_BoundModels(parked)))
 
 
-def _via_proxy(model: Model, origin: str) -> Model:
-    """A copy of ``model`` that calls the same gateway path on the proxy ``origin``."""
+def _via_proxy[EndpointT: Model | AgentBase](model: EndpointT, origin: str) -> EndpointT:
+    """A copy of ``model`` that calls the same platform path on the proxy ``origin``."""
     proxy = urlsplit(origin)
     return model.model_copy(
         update={"url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()}
@@ -381,7 +389,9 @@ def _via_proxy(model: Model, origin: str) -> Model:
 
 
 @contextmanager
-def gateway_models_as_job(metrics: Sequence[Metric], target: Model | None = None) -> Generator[Model | None]:
+def gateway_models_as_job[TargetT: Model | AgentBase](
+    metrics: Sequence[Metric], target: TargetT | None = None
+) -> Generator[TargetT | None]:
     """Call Inference Gateway from the metrics' models and the target as this job, for the duration of the block.
 
     A ``ModelRef`` is resolved at submit to a gateway route on the API's own platform URL, with no
@@ -394,9 +404,13 @@ def gateway_models_as_job(metrics: Sequence[Metric], target: Model | None = None
     since they were first proxied: the proxy calls as the job on behalf of its submitter, and the
     gateway holds that to what the submitter may call.
 
+    An agent target on the platform's agents route is proxied the same way. Studio builds its URL from
+    the browser's origin, which a job pod may not reach (the public hostname can hairpin to a plain-HTTP
+    listener), and the agents service needs the caller's identity anyway.
+
     Yields:
-        The target to call: a proxied copy of ``target`` when it calls the gateway with no key of its
-        own, else ``target`` itself, which is never changed.
+        The target to call: a proxied copy of ``target`` when it calls the gateway or an agent route
+        with no key of its own, else ``target`` itself, which is never changed.
 
     Does nothing when no model calls the gateway, or when the job has no identity to forward
     (an auth-disabled platform), which is how those models were called before.
@@ -406,7 +420,7 @@ def gateway_models_as_job(metrics: Sequence[Metric], target: Model | None = None
         for metric in metrics
         if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
     ]
-    gateway_target = target if target is not None and _calls_gateway_unkeyed(target) else None
+    gateway_target = target if target is not None and _calls_platform_unkeyed(target) else None
     if not bound and gateway_target is None:
         yield target
         return

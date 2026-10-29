@@ -125,7 +125,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
-from nhx_evals_sdk.values import RunConfigOnline, RunConfigOnlineModel
+from nhx_evals_sdk.values import AgentBase, Model, RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -621,8 +621,9 @@ class _AgentEvalJobBase(NemoJob):
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
+        endpoint = target if isinstance(target, Model | AgentBase) else None
         with (
-            gateway_models_as_job([metric for task in tasks for metric in task.metrics]),
+            gateway_models_as_job([metric for task in tasks for metric in task.metrics], endpoint) as called_target,
             capture_evaluator_request_logs() as request_logs,
         ):
             with capture_agent_evaluation_usage(
@@ -631,8 +632,12 @@ class _AgentEvalJobBase(NemoJob):
                 include_trial_measurements=include_trial_measurements,
             ) as usage_capture:
                 result = usage_capture.record(
-                    evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+                    evaluator.run_sync(
+                        tasks=tasks, trials=spec.trials, target=called_target or target, config=run_config
+                    )
                 )
+        if endpoint is not None and called_target is not endpoint and result.metadata.target is not None:
+            result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
