@@ -1,14 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 from abc import ABC
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
 from urllib.parse import urlparse
 
-from jinja2 import Environment
-from jinja2 import nodes as jinja_nodes
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth import AuthContext
@@ -375,38 +374,29 @@ _AUTH_HEADER_FORMAT_DESCRIPTION = (
 )
 
 
+# ``auth_header_format`` is NOT a template engine input. It must be literal text around exactly one
+# ``{{ auth_secret }}`` placeholder; no other ``{``/``}`` characters (and no CR/LF) are allowed. The
+# header is built by plain string substitution, so user input is never evaluated.
+_AUTH_HEADER_FORMAT_RE = re.compile(r"([^{}\r\n]*)\{\{\s*auth_secret\s*\}\}([^{}\r\n]*)")
+
+
 def _validate_auth_header_format(v: str | None) -> str | None:
-    """Validate that an auth_header_format value is a well-formed Jinja2 template
-    containing exactly one ``{{ auth_secret }}`` substitution and that it renders
-    to a ``<Header-Name>: <Header-Value>`` shape the IGW proxy can split on
-    ``": "``.
+    """Validate an ``auth_header_format`` value.
 
-    Two checks beyond Jinja2 syntax:
-
-    1. **Exactly one** ``auth_secret`` substitution. A duplicate placeholder
-       would leak the resolved secret into the rendered header twice, which is
-       never intended and a security concern.
-    2. **Renderable to ``<Header-Name>: <Header-Value>``.** A dry-run render
-       with a sentinel value must produce a string that ``str.partition(": ")``
-       splits into two non-empty parts. Otherwise the runtime proxy silently
-       sends an empty header value to the upstream.
+    The value is literal text with exactly one ``{{ auth_secret }}`` placeholder (optional
+    whitespace inside the braces) and no other template syntax. It is never evaluated by a template
+    engine; the proxy substitutes the secret with plain string concatenation. The result must also
+    have the ``<Header-Name>: <Header-Value>`` shape the IGW proxy splits on ``": "``.
     """
     if v is None:
         return v
-    # Validates an auth-header template (rendered to HTTP, not HTML).
-    # Autoescape would corrupt secrets containing `&`, `<`, `>`, or quotes.
-    env = Environment(autoescape=False)  # noqa: S701  # nosec B701
-    try:
-        ast = env.parse(v)
-    except Exception as exc:
-        raise ValueError(f"Invalid Jinja2 template: {exc}") from exc
-    variable_names = [node.name for node in ast.find_all(jinja_nodes.Name)]
-    if set(variable_names) != {"auth_secret"} or len(variable_names) != 1:
-        found = ", ".join(sorted(set(variable_names))) if variable_names else "none"
+    match = _AUTH_HEADER_FORMAT_RE.fullmatch(v)
+    if match is None:
         raise ValueError(
-            f"auth_header_format must contain exactly one Jinja2 variable named 'auth_secret' (found: {found})"
+            "auth_header_format must contain exactly one '{{ auth_secret }}' placeholder "
+            "and no other template syntax ('{' or '}' characters or line breaks)"
         )
-    rendered = env.from_string(v).render(auth_secret="__AUTH_SECRET__")
+    rendered = match.group(1) + "__AUTH_SECRET__" + match.group(2)
     header_name, sep, header_value = rendered.partition(": ")
     if not sep or not header_name.strip() or not header_value.strip():
         raise ValueError("auth_header_format must render to '<Header-Name>: <Header-Value>'")
