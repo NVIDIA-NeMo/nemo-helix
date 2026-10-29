@@ -31,10 +31,10 @@ export const useEvaluationJob = (
   workspace: string,
   evaluationName: string,
   evaluation?: EvaluationResponse
-): { job?: EvalJobRow; status?: string } => {
+): { job?: EvalJobRow; status?: string; isLoading: boolean } => {
   const published = isPublished(evaluation);
 
-  const { data: job } = useQuery({
+  const { data: job, isLoading } = useQuery({
     queryKey: ['evaluation-job', workspace, evaluationName] as const,
     queryFn: async ({ signal }) => {
       const matches = (candidate: HelixJobResponse) =>
@@ -55,5 +55,6 @@ export const useEvaluationJob = (
   return {
     job: job ?? undefined,
     status: job?.status ?? (published ? 'completed' : undefined),
+    isLoading,
   };
 };

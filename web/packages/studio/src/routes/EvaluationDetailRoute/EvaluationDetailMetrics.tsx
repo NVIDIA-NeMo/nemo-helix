@@ -102,7 +102,7 @@ export const EvaluationDetailMetrics: FC<EvaluationDetailMetricsProps> = ({ eval
           <>
             <KVPair
               label="Deployment"
-              value={<EvalDeploymentValue workspace={workspace} deployment={job.deployment} />}
+              value={<EvalDeploymentValue deployment={job.deployment} />}
               orientation="vertical"
             />
             <Divider orientation="vertical" className="grow-0 self-stretch" />

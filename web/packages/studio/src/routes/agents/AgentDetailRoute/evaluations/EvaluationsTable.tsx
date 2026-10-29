@@ -211,12 +211,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           header: 'Deployment',
           size: 200,
           cell: ({ row }) => {
-            const deployment = row.original.job?.deployment;
-            return deployment ? (
-              <EvalDeploymentValue workspace={workspace} deployment={deployment} />
-            ) : (
-              <Text>—</Text>
-            );
+            return <EvalDeploymentValue deployment={row.original.job?.deployment} />;
           },
         }),
         accessor((row) => row.job?.status ?? (row.evaluation ? 'completed' : undefined), {

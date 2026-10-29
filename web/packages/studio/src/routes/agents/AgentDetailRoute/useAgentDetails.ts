@@ -82,8 +82,8 @@ export const useAgentDetails = ({
     // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
     // so the panel reflects controller-side progress; fall back to the long interval
     // otherwise to match the agents table.
-    refetchInterval: (deployments) =>
-      deployments.some(
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some(
         (d) => d.status === 'pending' || d.status === 'starting' || d.status === 'deleting'
       )
         ? JOB_POLLING_INTERVAL_MS

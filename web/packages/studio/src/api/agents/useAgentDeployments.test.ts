@@ -40,6 +40,17 @@ describe('useAgentDeployments', () => {
       { wrapper: TestProviders }
     );
 
-    expect(result.current).toEqual({ deployments: [], isLoading: false });
+    expect(result.current).toEqual({ deployments: [], isLoading: false, isUnavailable: false });
+  });
+
+  it('reports the list as unavailable when it cannot be loaded', async () => {
+    server.use(http.get(AGENT_DEPLOYMENTS_URL, () => HttpResponse.json({}, { status: 500 })));
+    const { result } = renderHook(
+      () => useAgentDeployments({ workspace: 'default', agent: 'my-agent', refetchInterval: 0 }),
+      { wrapper: TestProviders }
+    );
+
+    await waitFor(() => expect(result.current.isUnavailable).toBe(true));
+    expect(result.current.deployments).toEqual([]);
   });
 });

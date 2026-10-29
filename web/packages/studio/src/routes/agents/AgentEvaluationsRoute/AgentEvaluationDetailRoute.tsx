@@ -253,12 +253,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
               <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} loading={isLoadingJob} />
               <KVPair
                 label="Deployment"
-                value={
-                  <EvalDeploymentValue
-                    workspace={workspace}
-                    deployment={deploymentForEvalSpec(job.spec)}
-                  />
-                }
+                value={<EvalDeploymentValue deployment={deploymentForEvalSpec(job.spec)} />}
                 loading={isLoadingJob}
               />
               <KVPair

@@ -8,7 +8,7 @@ import {
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import type { AgentsListDeploymentsParams } from '@nemo/sdk/generated/agents/schema/AgentsListDeploymentsParams';
-import { skipToken, useQuery } from '@tanstack/react-query';
+import { skipToken, type UseQueryOptions, useQuery } from '@tanstack/react-query';
 
 // The API accepts `filter`, but the generated params type omits it.
 type AgentFilteredParams = AgentsListDeploymentsParams & { filter: { agent: string } };
@@ -18,7 +18,7 @@ const NO_DEPLOYMENTS: AgentDeployment[] = [];
 interface UseAgentDeploymentsParams {
   workspace: string;
   agent?: string;
-  refetchInterval: number | ((deployments: AgentDeployment[]) => number);
+  refetchInterval: UseQueryOptions<AgentDeployment[]>['refetchInterval'];
 }
 
 export const useAgentDeployments = ({
@@ -26,7 +26,7 @@ export const useAgentDeployments = ({
   agent,
   refetchInterval,
 }: UseAgentDeploymentsParams) => {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: [...getAgentsListDeploymentsQueryKey(workspace), { agent }],
     queryFn: agent
       ? ({ signal }) =>
@@ -35,11 +35,12 @@ export const useAgentDeployments = ({
             return agentsListDeployments(workspace, params, signal);
           })
       : skipToken,
-    refetchInterval: (query) =>
-      typeof refetchInterval === 'number'
-        ? refetchInterval
-        : refetchInterval(query.state.data ?? NO_DEPLOYMENTS),
+    refetchInterval,
   });
 
-  return { deployments: data ?? NO_DEPLOYMENTS, isLoading };
+  return {
+    deployments: data ?? NO_DEPLOYMENTS,
+    isLoading,
+    isUnavailable: isError && data === undefined,
+  };
 };

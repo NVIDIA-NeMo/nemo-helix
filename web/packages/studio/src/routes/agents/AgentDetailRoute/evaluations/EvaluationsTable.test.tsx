@@ -101,7 +101,11 @@ describe('EvaluationsTable Deployment column', () => {
     renderTable(
       [],
       [
-        jobCalling('pinned-run', { kind: 'deployment', name: 'my-agent-k8s' }),
+        jobCalling('pinned-run', {
+          kind: 'deployment',
+          workspace: 'default',
+          name: 'my-agent-k8s',
+        }),
         jobCalling('routed-run', { kind: 'automatic' }),
       ]
     );
