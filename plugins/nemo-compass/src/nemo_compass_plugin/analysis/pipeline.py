@@ -209,14 +209,15 @@ async def analyze_snapshot(
     """Run package-owned signals and compilation with Platform model clients."""
     with TemporaryDirectory(prefix="nemo-compass-") as directory:
         config = CompassSignalsConfig()
-        if ethos and config.ethos_divergence is not None:
-            path = Path(directory) / "ETHOS.md"
-            path.write_text(ethos, encoding="utf-8")
-            config.ethos_divergence = config.ethos_divergence.model_copy(update={"ethos_path": path})
+        ethos_path = None
+        if ethos:
+            ethos_path = Path(directory) / "ETHOS.md"
+            ethos_path.write_text(ethos, encoding="utf-8")
         registry = registered_builtin_signals(
             anomaly_and_patterns=config.anomaly_and_patterns,
             tool_issues=config.tool_issues,
             ethos_divergence=config.ethos_divergence,
+            ethos_path=ethos_path,
             grader_failure_patterns=config.grader_failure_patterns,
             user_sentiment=config.user_sentiment,
             llm_factory=lambda: BorrowedModelClient(model_clients.fast),

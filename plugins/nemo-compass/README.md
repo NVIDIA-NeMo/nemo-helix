@@ -15,6 +15,12 @@ Use a running NeMo Helix with Intake, Compass, Jobs, and a configured
 Run `nemo setup` to select default and fast Platform models, or supply
 `--default-model` and `--fast-model` when submitting analysis.
 
+For Compass analysis, use **NVIDIA Nemotron 3.5 Super VL** instead of Nemotron
+3.5 Lightning 30B, which has known tool-calling failures. Selecting Nemotron 3.5
+Lightning 30B produces a nonblocking warning; Helix keeps your selected model. The CLI and Studio recognize
+this model's full name in model references, including normalized Helix names. Jobs also check the resolved served-model names,
+so aliases are checked at runtime, with warnings in job logs and completed analysis reports.
+
 ## Install from the monorepo
 
 ```bash
@@ -29,7 +35,7 @@ The plugin is installed by default through the root workspace's `enabled-plugins
 uv tool install --python 3.13 "nemo-helix[all]"
 ```
 
-The `nemo-compass-plugin` extra includes `nemo-compass==0.1.0`, which bundles Compass's
+The `nemo-compass-plugin` extra includes `nemo-compass==0.2.0`, which bundles Compass's
 analysis code and `trace_ingest` loaders. Compass execution requires Python
 3.12 or 3.13; Compass does not yet support Python 3.14.
 

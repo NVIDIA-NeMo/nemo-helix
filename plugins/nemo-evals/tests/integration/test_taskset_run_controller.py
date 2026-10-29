@@ -318,6 +318,19 @@ async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_sub
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
+async def test_service_client_lists_jobs_without_any_binding(auth_subprocess_platform: str) -> None:
+    """Settling's one list per run needs no binding either: it finds the run's Job, and leaves out a name with none."""
+    async with _controller_client(auth_subprocess_platform) as service:
+        space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
+        task_job = f"{run.name}-task-0"
+        assert await JobsServiceRunJobs(service, service, space.workspace).create(_sleep_job(task_job)) is not None
+        await _unbind_group(auth_subprocess_platform, space)
+        reading = JobsServiceRunJobs(service, None, space.workspace)
+        listed = await reading.list_named([task_job, f"{run.name}-task-9"])
+        assert list(listed) == [task_job] and listed[task_job].name == task_job
+        await _cancel_and_wait(reading, task_job)
+
+
 async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service(
     auth_subprocess_platform: str,
 ) -> None:

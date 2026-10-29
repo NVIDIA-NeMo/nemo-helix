@@ -93,6 +93,7 @@ class ComposeBuild(BaseModel):
     dockerfile: str = Field(default="Dockerfile", description="The Dockerfile, relative to `context_path`.")
     args: dict[str, str] = Field(default_factory=dict, description="Compose `build.args`: the build's `ARG` values.")
     target: str | None = Field(default=None, description="Compose `build.target`: the Dockerfile stage to build.")
+    no_cache: bool = Field(default=False, description="Compose `build.no_cache`: build without the layer cache.")
 
 
 ComposeImageSource = Annotated[ComposeImage | ComposeBuild, Field(discriminator="kind")]
@@ -123,6 +124,16 @@ class ComposeReadiness(BaseModel):
     )
 
 
+class ComposeVolumeMount(BaseModel):
+    """A named volume mounted into a container."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(description="A volume declared under the compose file's top-level `volumes`.")
+    mount_path: str = Field(description="Where it appears inside the container.")
+    read_only: bool = Field(default=False, description="Whether the mount ends in `:ro` or sets `read_only: true`.")
+
+
 class ComposeService(BaseModel):
     """One service other than ``main``: its image source, how it starts, and how it runs."""
 
@@ -130,6 +141,9 @@ class ComposeService(BaseModel):
 
     name: str = Field(description="The service's compose name. Other containers in the pod reach it by this name.")
     source: ComposeImageSource = Field(description="Where its image comes from: a published image or a build.")
+    platform: str | None = Field(
+        default=None, description="Compose `platform`, as written: the platform its image is built or pulled for."
+    )
     role: Literal["sidecar", "run_once", "after_main"] = Field(
         default="sidecar",
         description=(
@@ -152,6 +166,17 @@ class ComposeService(BaseModel):
     readiness: ComposeReadiness | None = Field(
         default=None, description="Its healthcheck; None when it has none, or when it is `run_once`."
     )
+    limits: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Kubernetes resource limits (`cpu`, `memory`) from `cpus`, `mem_limit` and `deploy.resources.limits`."
+        ),
+    )
+    requests: dict[str, str] = Field(
+        default_factory=dict, description="Kubernetes resource requests from `deploy.resources.reservations`."
+    )
+    volume_mounts: list[ComposeVolumeMount] = Field(default_factory=list, description="The named volumes it mounts.")
+    shm_size: str | None = Field(default=None, description="The size of `/dev/shm`, as a Kubernetes quantity.")
 
 
 class ComposeMainSettings(BaseModel):
@@ -168,8 +193,34 @@ class ComposeMainSettings(BaseModel):
     readiness: ComposeReadiness | None = Field(
         default=None, description="`main`'s healthcheck. The sandbox waits for it before the agent starts."
     )
+    add_capabilities: list[Literal["SYS_PTRACE"]] = Field(
+        default_factory=list,
+        description=(
+            "Linux capabilities from `cap_add`. Only `SYS_PTRACE` is allowed: broader ones could bypass egress."
+        ),
+    )
+    volume_mounts: list[ComposeVolumeMount] = Field(
+        default_factory=list, description="The named volumes `main` shares with services."
+    )
     entrypoint: list[str] | None = Field(
         default=None, description="The last exec-form `ENTRYPOINT` of `main`'s Dockerfile, or the compose override."
+    )
+    ports: list[ComposePort] = Field(
+        default_factory=list,
+        description=(
+            "The ports `main` `expose`s or publishes. The sandbox doesn't publish them; they're kept so a service "
+            "or the sandbox's own containers can't listen on the same port in the shared pod network."
+        ),
+    )
+    command: list[str] | None = Field(
+        default=None,
+        description="Compose `command` on `main`, which runs after its entrypoint in place of Harbor's keep-alive.",
+    )
+    working_dir: str | None = Field(
+        default=None, description="Compose `working_dir` on `main`: where it starts, and where commands run by default."
+    )
+    platform: str | None = Field(
+        default=None, description="Compose `platform` on `main`, as written: the platform its image is built for."
     )
 
 
@@ -199,3 +250,7 @@ class ComposeTask(BaseModel):
         description="Every service other than `main`, by name, in start order (each after what it depends on)."
     )
     main: ComposeMainSettings = Field(description="What the compose file changes about `main`.")
+    volumes: list[str] = Field(
+        default_factory=list,
+        description="The declared volumes something mounts, in file order. Each becomes an empty pod volume.",
+    )

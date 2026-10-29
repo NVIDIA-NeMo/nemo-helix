@@ -28,12 +28,13 @@ def _deploy_and_score(
 ) -> float:
     deployment, config = jobs.deploy_vllm_model(client, workspace, entity, lora_enabled=False)
     try:
+        model_id = ceval.base_model_field(workspace, entity)
+        jobs.wait_until_entity_routable(client, workspace, model_id)
         return ceval.score_rows(
             rows,
             base_url,
             workspace,
-            deployment,
-            ceval.base_model_field(workspace, entity),
+            model_id,
             metric="f1",
         )
     finally:
@@ -64,7 +65,6 @@ def test_rl_dpo_uplift(
                 "epochs": 1,
                 "batch_size": 32,
                 "micro_batch_size": 1,
-                "learning_rate": 5e-6,
                 "max_seq_length": 1024,
                 "ref_policy_kl_penalty": 0.05,
                 "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},

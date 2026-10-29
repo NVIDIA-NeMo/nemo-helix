@@ -10,12 +10,14 @@ feature a pod can't run with :meth:`ComposeProblems.unsupported`. Neither raises
 
 from __future__ import annotations
 
+import math
 import re
 import shlex
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
-from nemo_evals.harbor.compose.models import ComposePort, ComposeProblems, ComposeReadiness
+from nemo_evals.harbor.compose.models import ComposePort, ComposeProblems, ComposeReadiness, ComposeVolumeMount
+from nhx_sandbox.harbor_opensandbox_services import quantity_value
 
 _CONDITIONS = ("service_started", "service_healthy", "service_completed_successfully")
 
@@ -26,6 +28,23 @@ _HEALTHCHECK_KEYS = frozenset({"test", "interval", "timeout", "retries", "start_
 
 _DURATION_PART = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)")
 _DURATION_UNIT_SECONDS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
+
+# The strings Compose reads as a boolean, in any case: `"true"`, which a variable fills in as, is True.
+_TRUE_STRINGS = frozenset({"true", "yes", "y", "on"})
+_FALSE_STRINGS = frozenset({"false", "no", "n", "off"})
+
+# Compose sizes are binary (`512m` is 512 MiB), so they map to Kubernetes' binary suffixes, not `M` or `G`.
+_MEMORY_SUFFIXES = {None: "", "b": "", "k": "Ki", "kb": "Ki", "m": "Mi", "mb": "Mi", "g": "Gi", "gb": "Gi"}
+
+
+def parse_boolean(value: Any, path: str, problems: ComposeProblems) -> bool | None:
+    """Read a compose boolean as Compose does: ``true`` or a string like ``"yes"``; None when it isn't set."""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in _TRUE_STRINGS | _FALSE_STRINGS:
+        return value.lower() in _TRUE_STRINGS
+    problems.invalid(path, f"not a boolean: {value!r}")
+    return None
 
 
 def _scalar(value: Any) -> str | None:
@@ -277,3 +296,241 @@ def parse_ports(raw_service: Mapping[str, Any], path: str, problems: ComposeProb
             if port is not None and all(existing.port != port for existing in ports):
                 ports.append(ComposePort(port=port, source=f"{key}[{index}]"))
     return ports
+
+
+def parse_memory_quantity(
+    value: Any, path: str, problems: ComposeProblems, *, strings_only: bool = False
+) -> str | None:
+    """Read a compose size as a Kubernetes quantity: ``"512m"`` is ``"512Mi"``, ``"1gb"`` is ``"1Gi"``, ``1024`` is ``"1024"``.
+
+    ``strings_only`` is for ``deploy.resources``, where Compose refuses a number.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+    if strings_only and isinstance(value, (int, float)):
+        problems.invalid(path, "must be a string")
+        return None
+    # Compose ignores a float `mem_limit` or `shm_size` (`2.0`, `.inf` and `.nan` alike) as if it weren't set.
+    if isinstance(value, float):
+        return None
+
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(b|k|kb|m|mb|g|gb)?", str(value).strip().lower())
+    if match is None:
+        problems.invalid(path, f"not a size: {value!r}")
+        return None
+
+    number, unit = match.groups()
+    return f"{number}{_MEMORY_SUFFIXES[unit]}"
+
+
+def _cpu_quantity(value: Any, path: str, problems: ComposeProblems) -> str | None:
+    """Read a compose CPU count as a Kubernetes quantity; a whole number drops its decimal point (``2.0`` is ``"2"``)."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        problems.invalid(path, "expected a number")
+        return None
+
+    # `float()` also accepts "inf", "nan" and "1e3", none of which Compose takes as a CPU count.
+    if isinstance(value, str) and not re.fullmatch(r"(?:\d+\.?\d*|\.\d+)", value.strip()):
+        problems.invalid(path, f"not a number: {value!r}")
+        return None
+
+    try:
+        number = float(value)
+    # An integer too large for a float, which Compose refuses as out of range, raises OverflowError.
+    except (ValueError, OverflowError):
+        problems.invalid(path, f"not a number: {value!r}")
+        return None
+    if not math.isfinite(number) or number <= 0:
+        problems.invalid(path, f"not a positive number: {value!r}")
+        return None
+    return str(int(number)) if number == int(number) else str(number)
+
+
+def _resource_section(value: Any, path: str, problems: ComposeProblems) -> dict[str, str]:
+    """Read one ``deploy.resources`` section (``limits`` or ``reservations``) as Kubernetes ``cpu`` and ``memory``.
+
+    ``{cpus: "0.5", memory: 512M}`` gives ``{"cpu": "0.5", "memory": "512Mi"}``.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        problems.invalid(path, "expected a mapping")
+        return {}
+
+    # Kubernetes sizes a container by CPU and memory only; `pids` and `devices` (such as GPUs) have no equivalent here.
+    for key in value:
+        if key not in ("cpus", "memory"):
+            problems.unsupported(f"{path}.{key}")
+
+    quantities: dict[str, str] = {}
+    if (cpu := _cpu_quantity(value.get("cpus"), f"{path}.cpus", problems)) is not None:
+        quantities["cpu"] = cpu
+    if (
+        memory := parse_memory_quantity(value.get("memory"), f"{path}.memory", problems, strings_only=True)
+    ) is not None:
+        quantities["memory"] = memory
+    return quantities
+
+
+def parse_resources(
+    raw_service: Mapping[str, Any], path: str, problems: ComposeProblems
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Read a service's resources as ``(limits, requests)`` from ``cpus``, ``mem_limit`` and ``deploy.resources``.
+
+    ``cpus`` and ``mem_limit`` are limits. ``deploy.resources.limits`` adds to them, and
+    ``deploy.resources.reservations`` become the requests.
+    """
+    limits: dict[str, str] = {}
+    requests: dict[str, str] = {}
+    if (cpu := _cpu_quantity(raw_service.get("cpus"), f"{path}.cpus", problems)) is not None:
+        limits["cpu"] = cpu
+    if (memory := parse_memory_quantity(raw_service.get("mem_limit"), f"{path}.mem_limit", problems)) is not None:
+        limits["memory"] = memory
+
+    deploy = raw_service.get("deploy")
+    if deploy is None:
+        return limits, requests
+    if not isinstance(deploy, dict):
+        problems.invalid(f"{path}.deploy", "expected a mapping")
+        return limits, requests
+
+    # The rest of `deploy` (replicas, placement, restart policy) is for Swarm and has no meaning in one pod.
+    for key in deploy:
+        if key != "resources":
+            problems.unsupported(f"{path}.deploy.{key}")
+
+    resources = deploy.get("resources")
+    if resources is not None and not isinstance(resources, dict):
+        problems.invalid(f"{path}.deploy.resources", "expected a mapping")
+        return limits, requests
+
+    resources = resources or {}
+    deploy_limits = _resource_section(resources.get("limits"), f"{path}.deploy.resources.limits", problems)
+    # Compose refuses a `cpus` or `mem_limit` that differs from `deploy.resources.limits`; the same value twice is fine.
+    for resource, key, deploy_key in (("cpu", "cpus", "cpus"), ("memory", "mem_limit", "memory")):
+        limit, deploy_limit = limits.get(resource), deploy_limits.get(resource)
+        if limit is not None and deploy_limit is not None and quantity_value(limit) != quantity_value(deploy_limit):
+            problems.invalid(
+                f"{path}.{key}", f"can't set distinct values on '{key}' and 'deploy.resources.limits.{deploy_key}'"
+            )
+    limits.update(deploy_limits)
+    requests.update(_resource_section(resources.get("reservations"), f"{path}.deploy.resources.reservations", problems))
+    return limits, requests
+
+
+def _mount_entry(
+    entry: Any, path: str, declared_volumes: set[str], problems: ComposeProblems
+) -> ComposeVolumeMount | None:
+    """Read one ``volumes`` entry as a mount of a declared named volume; bind mounts and anonymous volumes are refused.
+
+    ``"data:/var/lib/db:ro"`` and ``{type: volume, source: data, target: /var/lib/db, read_only: true}`` both
+    mount ``data`` read-only; ``"./data:/db"`` is a bind mount and ``"/db"`` an anonymous volume.
+    """
+    source: Any
+    target: Any
+    read_only = False
+
+    # Short form `source:target[:ro]`, or long form `{type, source, target, read_only}`.
+    if isinstance(entry, str):
+        parts = entry.split(":")
+        # A lone path, such as "/data", asks Compose for a fresh unnamed volume there.
+        if len(parts) == 1:
+            problems.unsupported(f"{path}: anonymous volume")
+            return None
+        # The third part is a comma-separated list of options, such as "ro,z"; only `ro` changes anything here.
+        source, target = parts[0], parts[1]
+        read_only = len(parts) > 2 and "ro" in parts[2].split(",")
+    elif isinstance(entry, dict):
+        if entry.get("type", "volume") != "volume":
+            problems.unsupported(f"{path}: {entry.get('type')} mount")
+            return None
+        source, target = entry.get("source"), entry.get("target")
+        read_only = bool(parse_boolean(entry.get("read_only"), f"{path}.read_only", problems))
+        # A pod's volume starts empty, as `nocopy` asks; any other option, such as `subpath`, would mount something else.
+        options = entry.get("volume") or {}
+        if not isinstance(options, dict):
+            problems.invalid(f"{path}.volume", "expected a mapping")
+        else:
+            for option in options:
+                if option != "nocopy":
+                    problems.unsupported(f"{path}.volume.{option}")
+    else:
+        problems.invalid(path, "expected a string or a mapping")
+        return None
+
+    # What a pod can't do: a volume with no name, a host path, or a volume the file never declared.
+    if not isinstance(source, str) or not isinstance(target, str) or not source:
+        problems.unsupported(f"{path}: anonymous volume")
+    elif source.startswith((".", "/", "~")):
+        problems.unsupported(f"{path}: bind mount {source}")
+    elif source not in declared_volumes:
+        problems.invalid(path, f"volume {source!r} is not declared under the top-level volumes")
+    else:
+        return ComposeVolumeMount(name=source, mount_path=target, read_only=read_only)
+    return None
+
+
+def parse_volume_mounts(
+    value: Any, path: str, declared_volumes: set[str], problems: ComposeProblems
+) -> list[ComposeVolumeMount]:
+    """Read a service's ``volumes`` as mounts of the top-level named volumes in ``declared_volumes``."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        problems.invalid(path, "expected a list")
+        return []
+
+    mounts = (_mount_entry(entry, f"{path}[{index}]", declared_volumes, problems) for index, entry in enumerate(value))
+    return [mount for mount in mounts if mount is not None]
+
+
+def parse_platform(value: Any, path: str, problems: ComposeProblems) -> str | None:
+    """Read a service's ``platform``, such as ``linux/amd64``, as written; None when it names none.
+
+    Image planning pins the service's image to it, so the image is built or pulled for the platform Compose would
+    use. Planning also checks that it names a real platform. An empty value, as ``platform: ${PLATFORM}`` gives
+    when the variable is unset, names none: Compose then uses its default platform.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        problems.invalid(path, "expected a platform such as linux/amd64")
+        return None
+    return value or None
+
+
+def parse_working_dir(value: Any, path: str, problems: ComposeProblems) -> str | None:
+    """Read ``working_dir`` as an absolute path in the container; None when it sets none.
+
+    A relative one would be resolved against the image's ``WORKDIR``, which isn't known here, so it's unsupported.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        problems.invalid(path, "expected a path")
+        return None
+    if not value.startswith("/"):
+        problems.unsupported(f"{path}: a relative working directory")
+        return None
+    return value
+
+
+def parse_capabilities(
+    raw_service: Mapping[str, Any], path: str, problems: ComposeProblems
+) -> list[Literal["SYS_PTRACE"]]:
+    """Read the capabilities ``main`` adds with ``cap_add``; only ``SYS_PTRACE`` is supported."""
+    capabilities = raw_service.get("cap_add")
+    if capabilities is None:
+        return []
+    if not isinstance(capabilities, list):
+        problems.invalid(f"{path}.cap_add", "expected a list")
+        return []
+
+    # SYS_PTRACE only lets `main` debug its own processes. Anything broader, such as NET_ADMIN, could let the agent
+    # rewrite the pod's network rules and get around the egress policy.
+    for capability in capabilities:
+        if capability != "SYS_PTRACE":
+            problems.unsupported(f"{path}.cap_add: {capability}")
+    return ["SYS_PTRACE"] if "SYS_PTRACE" in capabilities else []

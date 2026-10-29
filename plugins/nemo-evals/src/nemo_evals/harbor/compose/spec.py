@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import math
+import re
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -17,9 +19,10 @@ from nemo_evals.harbor.compose.models import (
     ComposeMainSettings,
     ComposeService,
     ComposeTask,
+    ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.parser import parse_compose
-from nhx_sandbox.harbor_opensandbox_services import RESERVED_NAMES, RESERVED_PORTS, ComposeServices
+from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, RESERVED_NAMES, RESERVED_PORTS, ComposeServices
 from pydantic import ValidationError
 
 # The bounds of ``MainReadiness.timeout_sec`` in ``ComposeServices``.
@@ -35,8 +38,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
 
     The input comes from :func:`parse_compose` and still speaks Compose: services by name, ``entrypoint`` and
     ``command``, Compose healthcheck timings. OpenSandbox can't run Compose, so each service becomes an extra
-    container in the sandbox pod. The task Job passes the result to ``NemoOpenSandboxEnvironment`` as
-    ``compose_services``, and submit checks it early through :func:`check_compose_task`.
+    container in the sandbox pod. A file that only changes ``main`` gives a spec with no services. The task Job
+    passes the result to ``NemoOpenSandboxEnvironment`` as ``compose_services``, and submit checks it early through
+    :func:`check_compose_task`.
 
     Args:
         task: The parsed compose file.
@@ -44,25 +48,26 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
             entry runs by its normalized tag; a built service needs one.
 
     Raises:
-        ComposeError: The file defines only ``main``, a service has no image, or the spec breaks a rule of
-            ``ComposeServices`` (``compose_unsupported``: the parser has already refused what Compose itself would).
+        ComposeError: A service has no image, or the spec breaks a rule of ``ComposeServices``
+            (``compose_unsupported``: the parser has already refused what Compose itself would).
     """
-    if not task.services:
-        raise ComposeError(
-            "compose_override_only",
-            "the file defines only `main`, which Harbor already provides; there are no services to run",
-            compose_path=task.compose_path,
-        )
     _check_reserved(task)
 
     # One wait budget covers every service, since the sandbox waits for them together.
     wait_budget_sec = _wait_budget_sec(task)
+    volume_names = _pod_volume_names(task.volumes, task.compose_path)
     spec: dict[str, Any] = {
         "services": [
-            _service_spec(name, service, images or {}, task.compose_path) for name, service in task.services.items()
+            _service_spec(name, service, images or {}, volume_names, task.compose_path)
+            for name, service in task.services.items()
         ],
-        "main": _main_spec(task.main, wait_budget_sec),
+        "main": _main_spec(task.main, wait_budget_sec, volume_names),
     }
+    if task.volumes:
+        spec["volumes"] = [volume_names[volume] for volume in task.volumes]
+    if task.main.readiness is None and wait_budget_sec > MIN_READY_TIMEOUT_SEC:
+        # With no readiness check on `main`, there's nowhere else to carry a wait longer than the default.
+        spec["services_timeout_sec"] = _clamped_timeout_sec(wait_budget_sec)
 
     # `ComposeServices` is the sandbox's own model, so whatever it rejects would also fail on the server. The parser
     # has already refused what Compose would, so anything rejected here is a limit of the sandbox, not of Compose.
@@ -74,7 +79,9 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
         ) from error
 
 
-def compose_services_kwarg(task_dir: Path, images: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+def compose_services_kwarg(
+    task_dir: Path, images: Mapping[str, str] | None = None, *, read_entrypoint: bool = True
+) -> dict[str, Any] | None:
     """Build the ``environment.kwargs.compose_services`` value for a task directory; None for a single-container task.
 
     The task Job calls this on the materialized task with the images its run prepared. From compose file to spec:
@@ -88,8 +95,11 @@ def compose_services_kwarg(task_dir: Path, images: Mapping[str, str] | None = No
     5. :func:`to_compose_services` maps that to ``ComposeServices``: a container per service, ``main``'s readiness
        wait, and each service's image from ``images``.
     6. The spec is returned as the plain data ``NemoOpenSandboxEnvironment`` takes.
+
+    ``read_entrypoint=False`` leaves ``main``'s entrypoint to the compose file alone, for a caller that knows the
+    image's own ``ENTRYPOINT`` from its config; otherwise it's guessed from ``main``'s Dockerfile.
     """
-    task = parse_compose(task_dir)
+    task = parse_compose(task_dir, read_entrypoint=read_entrypoint)
     if task is None:
         return None
     return to_compose_services(task, images).model_dump(mode="json", by_alias=True, exclude_defaults=True)
@@ -115,19 +125,42 @@ def compose_provenance(services: ComposeServices) -> dict[str, str]:
 
 
 def _check_reserved(task: ComposeTask) -> None:
-    """Raise if a service exposes a port the sandbox pod uses, or takes the name of one of the pod's containers."""
-    reserved_ports = [
-        f"{name}.{port.source} = {port.port}"
-        for name, service in task.services.items()
-        for port in service.ports
-        if port.port in RESERVED_PORTS
-    ]
+    """Raise if a container uses a port the sandbox pod needs, ``main`` shares a port with a service, or a service
+    takes the name of one of the pod's containers.
+
+    Compose gives each service its own network, so two services can listen on the same port. In the sandbox every
+    container shares the pod's network, so the second one to listen on a port fails to start.
+    """
+    ports_by_container = {MAIN_SERVICE: task.main.ports}
+    for name, service in task.services.items():
+        ports_by_container[name] = service.ports
+
+    reserved_ports = []
+    for name, ports in ports_by_container.items():
+        for port in ports:
+            if port.port in RESERVED_PORTS:
+                reserved_ports.append(f"{name}.{port.source} = {port.port}")
     if reserved_ports:
         raise ComposeError(
             "compose_reserved_port",
             "these ports are used by the sandbox pod",
             compose_path=task.compose_path,
             paths=tuple(reserved_ports),
+        )
+
+    # `ComposeServices` already refuses two services on one port, but it never sees `main`'s ports, so check those here.
+    service_ports = set()
+    for service in task.services.values():
+        service_ports.update(port.port for port in service.ports)
+    shared_ports = [
+        f"{MAIN_SERVICE}.{port.source} = {port.port}" for port in task.main.ports if port.port in service_ports
+    ]
+    if shared_ports:
+        raise ComposeError(
+            "compose_unsupported",
+            "`main` and a service use the same port; every container in the sandbox pod shares one network",
+            compose_path=task.compose_path,
+            paths=tuple(shared_ports),
         )
 
     if reserved_names := [name for name in task.services if name in RESERVED_NAMES]:
@@ -158,19 +191,59 @@ def _clamped_timeout_sec(seconds: float) -> int:
     return min(MAX_READY_TIMEOUT_SEC, max(MIN_READY_TIMEOUT_SEC, math.ceil(seconds)))
 
 
-def _main_spec(main: ComposeMainSettings, wait_budget_sec: float) -> dict[str, Any]:
+def _pod_volume_names(volumes: list[str], compose_path: str) -> dict[str, str]:
+    """Give each compose volume a name the pod accepts: lowercase, with ``_`` and ``.`` as ``-``.
+
+    Compose allows names like ``agent1_out``, but a pod volume's name is a Kubernetes DNS label, so ``agent1_out``
+    becomes ``agent1-out``. Returns each compose name's pod name.
+
+    Raises:
+        ComposeError: Two volumes would end up with the same name, as ``data_1`` and ``data.1`` would.
+    """
+    names = {volume: re.sub(r"[_.]", "-", volume.lower()) for volume in volumes}
+    clashing = [name for name, count in Counter(names.values()).items() if count > 1]
+    if clashing:
+        raise ComposeError(
+            "compose_invalid",
+            "these volumes would have the same name in the pod",
+            compose_path=compose_path,
+            paths=tuple(volume for volume, name in names.items() if name in clashing),
+        )
+    return names
+
+
+def _mount_spec(mount: ComposeVolumeMount, volume_names: Mapping[str, str]) -> dict[str, Any]:
+    """Render a volume mount as the plain data ``ComposeServices`` takes, naming its volume as the pod does."""
+    return {"name": volume_names[mount.name], "mount_path": mount.mount_path, "read_only": mount.read_only}
+
+
+def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: Mapping[str, str]) -> dict[str, Any]:
     """Render ``main``'s part of the spec; ``wait_budget_sec`` becomes its readiness timeout when it has a readiness check."""
     spec: dict[str, Any] = {}
     if main.entrypoint:
         spec["entrypoint"] = main.entrypoint
+    if main.command:
+        spec["command"] = main.command
+    if main.working_dir:
+        spec["working_dir"] = main.working_dir
     if main.env:
         spec["env"] = main.env
+    if main.volume_mounts:
+        spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in main.volume_mounts]
+    if main.add_capabilities:
+        spec["add_capabilities"] = main.add_capabilities
     if main.readiness is not None:
         spec["readiness"] = {"exec": main.readiness.exec_, "timeout_sec": _clamped_timeout_sec(wait_budget_sec)}
     return spec
 
 
-def _service_spec(name: str, service: ComposeService, images: Mapping[str, str], compose_path: str) -> dict[str, Any]:
+def _service_spec(
+    name: str,
+    service: ComposeService,
+    images: Mapping[str, str],
+    volume_names: Mapping[str, str],
+    compose_path: str,
+) -> dict[str, Any]:
     """Render one service as the plain data ``ComposeServices`` takes, on the image ``images`` names for it.
 
     Raises:
@@ -200,6 +273,14 @@ def _service_spec(name: str, service: ComposeService, images: Mapping[str, str],
         spec["ports"] = [port.port for port in service.ports]
     if service.readiness is not None and service.role != "run_once":
         spec["readiness"] = {"exec": [_literal(argument) for argument in service.readiness.exec_]}
+    if service.limits or service.requests:
+        spec["resources"] = {
+            key: value for key, value in (("limits", service.limits), ("requests", service.requests)) if value
+        }
+    if service.volume_mounts:
+        spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in service.volume_mounts]
+    if service.shm_size is not None:
+        spec["shm_size"] = service.shm_size
     return spec
 
 

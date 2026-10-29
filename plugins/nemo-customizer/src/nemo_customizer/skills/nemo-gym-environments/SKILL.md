@@ -64,17 +64,18 @@ Each of these invalidates the work if it turns out false:
 
 | Check | How | If it fails |
 |---|---|---|
-| The platform can run GRPO at all | The **nemo-customizer** skill's `rl` runtime gate: execution profiles report `backend: kubernetes_job` | Stop; GRPO needs a Kubernetes-runtime platform |
+| The platform can run GRPO at all | The **nemo-customizer** skill's `rl` runtime gate: execution profiles report `backend: kubernetes_job` or `volcano_job` | Stop; GRPO needs a Kubernetes-runtime platform |
 | The cluster runs sandboxed Gym | Operator confirms `sandbox_cluster_capable` and the job-storage PVC claim (`../nemo-customizer/references/rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**) | Stop; submit fails and no package change helps |
 | Whether the sandbox has egress | Operator confirms `NHX_RL_SANDBOX_ALLOW_INTERNET` | Decides `native-v1` vs `wheels-v1`; settle it **before** the layout |
 | Which Gym agent runs the environment | A `verifiers` env runs `verifiers_agent`; a resources server usually runs `simple_agent` | Decides the format and every row's `agent_ref.name` |
 | The training image's `nemo-gym`, `ray` and `openai` versions | `references/dependencies.md` § **Vendoring a wheel closure** | Needed only for a `wheels-v1` closure |
 
-**Get the converter.** Run `pi-to-gym-conversion --help`. It ships with the `nhx-rl` package that the `rl` plugin installs. If it is not on `PATH`, build it in a dedicated environment from a nemo-helix checkout, not the project `.venv`: the converter installs the hub wheel into the interpreter that runs it.
+**Get the converter.** `pi-to-gym-conversion` is an example script in the nemo-helix repository, not part of the installed `nemo` CLI or the `rl` plugin. Run it from a nemo-helix checkout, in a dedicated environment rather than the project `.venv`: the converter installs the hub wheel into the interpreter that runs it.
 
 ```bash
 UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
-.venv-conversion/bin/pi-to-gym-conversion --help
+export PATH="$PWD/.venv-conversion/bin:$PATH"
+pi-to-gym-conversion --help
 ```
 
 Converting a hub environment needs that `conversion` extra; `--validate-only` does not.
@@ -100,9 +101,12 @@ All three run on the same Gym runtime. The format decides only where dependencie
 ```bash
 pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
+  --nemo-rl-root ~/workspace/RL \
   --out-dir ./ascii-tree-pkg --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
 ```
+
+**Pass `--nemo-rl-root`**: a NeMo-RL checkout, submodules included, at the commit `NEMO_RL_REF` pins in `docker-bake.hcl`. The converter reads the training image's `nemo-gym`, `ray` and `openai` versions from it; without it the package needs sandbox egress to start.
 
 **Pin `--hub-version`.** Unset, the converter takes whatever the index offers now, and a later release can narrow `Requires-Python` or ship code the training image's Python cannot run.
 

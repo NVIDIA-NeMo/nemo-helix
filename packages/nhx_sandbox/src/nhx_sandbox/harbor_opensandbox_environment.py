@@ -55,7 +55,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, override
+from typing import Any, Literal, override
 
 import httpx
 from harbor.environments.base import BaseEnvironment, ExecResult
@@ -63,6 +63,7 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from nhx_sandbox.compose_env import expand_env
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_cleanup import applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import (
@@ -76,10 +77,12 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
+    COMPOSE_MAIN_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
     SandboxAgentBundle,
+    keep_alive_entrypoint,
     parse_compose_services,
 )
 from nhx_sandbox.opensandbox_policy import (
@@ -172,6 +175,16 @@ def _local_write_mode(path: Path) -> int:
     return int(format(stat.S_IMODE(path.stat().st_mode), "o"))
 
 
+#: The runtime the OpenSandbox server starts sandboxes with, which decides how a container's command and env are read.
+SandboxRuntime = Literal["kubernetes", "docker"]
+
+
+def _literal(text: str) -> str:
+    """``text`` as Kubernetes passes it on unchanged: a container's command and env expand ``$(VAR)``
+    and turn ``$$`` into ``$``, which Docker never does, so every ``$`` is doubled."""
+    return text.replace("$", "$$")
+
+
 class NemoOpenSandboxEnvironment(BaseEnvironment):
     """One OpenSandbox sandbox per Harbor environment, with trusted egress, applied-policy verification, cleanup, and compose services.
 
@@ -200,12 +213,21 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             make its pod unschedulable. ``None`` applies the task's value as given.
         compose_services: The evaluation profile's ``compose_services``. Applied only when the
             environment directory has a Compose file, so a separate verifier environment (built
-            from the task's ``tests/``) gets a plain sandbox.
+            from the task's ``tests/``) gets a plain sandbox. A variable's value may be a
+            ``${NEMO_COMPOSE_ENV_<n>}`` template, which this process's environment fills in (see
+            ``nhx_sandbox.compose_env``); Harbor then persists the template, not the value.
         agent_bundle: The evaluation's agent bundle, as a ``SandboxAgentBundle``. Only the agent's
             sandbox gets it, never a separate verifier's. The server extension installs it into
             ``/installed-agent`` before the sandbox starts; ``start`` then puts its executable on
             ``PATH``, so Harbor finds the agent already installed and skips its own install,
             which needs root.
+        image_entrypoints: Each image's own ``ENTRYPOINT``, by the pinned reference ``task.toml``'s
+            ``docker_image`` names, with an empty list for an image that has none. OpenSandbox
+            replaces the container's entrypoint, so the sandbox restores its image's, unless the
+            compose file gives ``main`` its own. An image missing here starts as before.
+        runtime: The OpenSandbox server's runtime. Kubernetes expands ``$`` in a container's
+            command and env, so they're escaped for it; Docker passes them on as written. NeMo Evals
+            only runs on the in-cluster Kubernetes server; set ``docker`` for a Docker-runtime server.
 
     Any other keyword argument is Harbor's and goes to ``BaseEnvironment`` unchanged.
     """
@@ -235,14 +257,19 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         max_disk_mb: int | None = None,
         compose_services: dict[str, Any] | None = None,
         agent_bundle: dict[str, Any] | None = None,
+        image_entrypoints: dict[str, list[str]] | None = None,
+        runtime: SandboxRuntime = "kubernetes",
         **kwargs: Any,
     ) -> None:
         """Store this environment's settings, then let ``BaseEnvironment`` validate the task against them."""
         # BaseEnvironment.__init__ runs the definition, capability and network policy validators,
         # which read these, so they are set first.
         has_compose_file = any((environment_dir / name).is_file() for name in COMPOSE_FILENAMES)
+        # Expanded after validation, so an invalid spec's error shows the templates and never a value.
         self._services: ComposeServices | None = (
-            parse_compose_services(compose_services) if compose_services is not None and has_compose_file else None
+            expand_env(parse_compose_services(compose_services), os.environ)
+            if compose_services is not None and has_compose_file
+            else None
         )
 
         # The bundle is the agent's alone; a separate verifier's sandbox runs the task image as is.
@@ -266,6 +293,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
         self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
+        self._image_entrypoints = dict(image_entrypoints or {})
+        self._runtime: SandboxRuntime = runtime
         self._egress_verification: EgressVerificationMode = egress_verification
         self._enforce_disk_limit = enforce_disk_limit
         self._max_disk_mb = max_disk_mb
@@ -422,6 +451,10 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             extensions[EXTENSION_KEY] = self._services.to_json()
         return extensions
 
+    def _as_written(self, text: str) -> str:
+        """``text`` escaped so the runtime starts the container with it exactly as written."""
+        return _literal(text) if self._runtime == "kubernetes" else text
+
     async def _create_sandbox(self) -> Any:
         """Create the sandbox, then verify its egress; it is killed if the policy can't be read or doesn't match."""
         uses_extension = self._services is not None or self._agent_bundle is not None
@@ -429,12 +462,14 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             await self._require_extension()
 
         egress_policy = self.egress_policy()
+        entrypoint = self._sandbox_entrypoint()
         sandbox = await self._driver.create(
             CreateRequest(
                 # _validate_definition guarantees the task names a prebuilt image.
                 image=str(self.task_env_config.docker_image),
-                # Applied at create so the entrypoint sees it too, not only exec'd commands.
-                env=dict(self._persistent_env),
+                # Applied at create so the entrypoint sees it too, not only exec'd commands. Escaped
+                # here only: commands run in the sandbox later get the env as is, unexpanded.
+                env={name: self._as_written(value) for name, value in self._persistent_env.items()},
                 metadata={
                     **self._metadata,
                     "session_id": self.session_id,
@@ -447,7 +482,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 expires_at=self._sandbox_expires_at,
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
-                entrypoint=self._services.sandbox_entrypoint() if self._services is not None else None,
+                entrypoint=[self._as_written(argument) for argument in entrypoint] if entrypoint is not None else None,
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its
@@ -472,6 +507,13 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             raise
         self._record_applied_egress(recorded_id, egress_policy, ip=ip, started_at=started_at)
         return sandbox
+
+    def _sandbox_entrypoint(self) -> list[str] | None:
+        """The sandbox container's entrypoint: the compose file's for ``main``, else its image's own; None for neither."""
+        image_entrypoint = self._image_entrypoints.get(str(self.task_env_config.docker_image)) or None
+        if self._services is not None:
+            return self._services.sandbox_entrypoint(image_entrypoint)
+        return keep_alive_entrypoint(image_entrypoint)
 
     async def _sandbox_ip(self, recorded_id: str) -> str | None:
         """The pod IP from execd's direct endpoint, or ``None`` if the server doesn't report one."""
@@ -666,11 +708,19 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
             )
 
+        features = response.json().get("features") or []
         # An extension from before agent bundles answers the health check too, but would drop the bundle.
-        if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in (response.json().get("features") or []):
+        if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in features:
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
                 "the version in plugins/_temporary-scaled-evals/opensandbox_ext."
+            )
+        # An extension from before them would refuse a spec with no services, or main's command or working directory.
+        if self._services is not None and self._services.uses_main_settings() and COMPOSE_MAIN_FEATURE not in features:
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
+                "change main, or main's command and working directory; upgrade it to the version in "
+                "plugins/_temporary-scaled-evals/opensandbox_ext."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
@@ -895,7 +945,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         timeout_sec: int | None = None,
         user: str | int | None = None,
     ) -> ExecResult:
-        """Run a command; explicit ``cwd``, then the task's workdir, then the image's WORKDIR."""
+        """Run a command; explicit ``cwd``, then the task's workdir, then ``main``'s compose ``working_dir``, then the image's WORKDIR."""
         sandbox = self._require_sandbox()
         requested_uid = self._numeric_uid(self._resolve_user(user))
         # Learn the image's uid before the first root command, so it can be mapped below.
@@ -904,12 +954,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         result = await self._driver.run(
             sandbox,
             command,
-            cwd=cwd or self.task_env_config.workdir or None,
+            cwd=cwd or self.task_env_config.workdir or self._compose_working_dir() or None,
             env=self._merge_env(env),
             timeout_sec=timeout_sec,
             uid=self._uid_for(requested_uid),
         )
         return ExecResult(stdout=result.stdout, stderr=result.stderr, return_code=result.exit_code)
+
+    def _compose_working_dir(self) -> str | None:
+        """``main``'s ``working_dir`` from the compose file, or None."""
+        return self._services.main.working_dir if self._services is not None else None
 
     def _numeric_uid(self, user: str | int | None) -> int | None:
         """The uid execd should switch to: integers, digit strings and ``root``; ``None`` for anything else.

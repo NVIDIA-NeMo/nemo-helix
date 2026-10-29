@@ -11,9 +11,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, Principal, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 from nhx.core.models.api.service.model_entity_service import ModelEntityService
 from nhx.core.models.api.v2.models import router, start_update_model_spec_job
@@ -71,6 +73,9 @@ def test_app(mock_model_entity_service, mock_adapter_entity_service, mock_auth_c
     )
 
     app = FastAPI()
+    # The deployed service registers these through the service base; entity
+    # store validation errors rely on them to become 422 responses.
+    register_sdk_exception_handlers(app)
 
     def override_model_entity_service():
         return mock_model_entity_service
@@ -334,6 +339,38 @@ def test_list_models_adapters_exists_preserves_relationship_field(client, mock_m
     assert parsed_filter.operation.to_dict() == {"adapters": {"$exists": True}}
 
 
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("filter[adapters]=true", {"adapters": {"$exists": True}}),
+        ("filter[adapters]=false", {"adapters": {"$exists": False}}),
+        ('filter={"adapters":false}', {"adapters": {"$exists": False}}),
+    ],
+)
+def test_list_models_adapters_boolean_becomes_relationship_exists(
+    client, mock_model_entity_service, sample_page, query, expected
+):
+    """Regression: the generic null check on the ``adapters`` relationship inverted true and false."""
+    mock_model_entity_service.list_model_entities.return_value = sample_page
+
+    response = client.get(f"/apis/models/v2/workspaces/nvidia/models?{query}")
+
+    assert response.status_code == 200, response.text
+    parsed_filter = mock_model_entity_service.list_model_entities.call_args.kwargs["parsed_filter"]
+    assert parsed_filter.operation.to_dict() == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["filter[adapters]=lora", "filter[adapters][finetuning_type]=lora", "filter[base_model][name]=llama-3"],
+)
+def test_list_models_rejects_unsupported_adapter_and_base_model_filters(client, mock_model_entity_service, query):
+    response = client.get(f"/apis/models/v2/workspaces/nvidia/models?{query}")
+
+    assert response.status_code == 400, response.text
+    mock_model_entity_service.list_model_entities.assert_not_called()
+
+
 def test_list_models_studio_custom_models_default_filter(client, mock_model_entity_service, sample_page):
     """Studio's default Custom Models filter: $or of has-base-model and has-adapters.
 
@@ -452,6 +489,18 @@ def test_create_model_entity_validation_error_returns_422(client, mock_model_ent
     assert "name must match pattern" in response.json()["detail"]
 
 
+def test_create_model_relays_entity_store_error_code(client, mock_model_entity_service):
+    """The entity store's code survives the Models API so callers can act on it."""
+    mock_model_entity_service.create_model_entity.side_effect = EntityValidationError(
+        "Workspace 'nvidia' does not exist. Please create the workspace first.", code=WORKSPACE_NOT_FOUND_CODE
+    )
+
+    response = client.post("/apis/models/v2/workspaces/nvidia/models", json={"name": "my-model"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
+
+
 @pytest.mark.asyncio
 async def test_model_spec_job_transport_failure_does_not_fail_persisted_model(sample_model_entity):
     request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/nvidia/jobs")
@@ -482,6 +531,20 @@ def test_update_model_entity_validation_error_returns_422(client, mock_model_ent
 
     assert response.status_code == 422
     assert "name must match pattern" in response.json()["detail"]
+
+
+def test_update_model_relays_entity_store_error_code(client, mock_model_entity_service, sample_model_entity):
+    """The entity store's code survives a Models API update, as it does a create."""
+    mock_model_entity_service.entity_client.get.return_value = Mock()
+    mock_model_entity_service.get_model_entity.return_value = sample_model_entity
+    mock_model_entity_service.update_model_entity.side_effect = EntityValidationError(
+        "Workspace 'nvidia' does not exist. Please create the workspace first.", code=WORKSPACE_NOT_FOUND_CODE
+    )
+
+    response = client.patch("/apis/models/v2/workspaces/nvidia/models/my-model", json={"description": "updated"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == WORKSPACE_NOT_FOUND_CODE
 
 
 def test_update_model_default_verbose_false(client, mock_model_entity_service, sample_model_entity):

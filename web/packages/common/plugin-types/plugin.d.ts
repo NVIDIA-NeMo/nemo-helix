@@ -5852,7 +5852,7 @@ declare namespace external_d_exports {
 //#endregion
 //#region src/components/CreateSecretModal/index.d.ts
 declare const secretFormSchema: ZodObject<{
-  name: ZodEffects<ZodString, string, string>;
+  name: ZodEffects<ZodEffects<ZodString, string, string>, string, string>;
   description: ZodOptional<ZodString>;
   value: ZodString;
 }, "strip", ZodTypeAny, {
@@ -9702,6 +9702,8 @@ interface Props$4<DataType> {
 export declare const StudioDataView: <DataType>({ attributes, children, makeColumns, dataViewState, onRowClick, maxTwoLines, renderBulkActions, scrollContainerRef, searchField, toolbarSlotStart, toolbarSlotEnd }: Props$4<DataType>) => import("react/jsx-runtime").JSX.Element;
 //#endregion
 //#region src/utils/logs.d.ts
+/** Whether more lines may still arrive (`live`) or the log has ended (`ended`). */
+type LogStatus = 'live' | 'ended';
 /**
  * Incremental state of a multi-page log fetch. `total` is the server-side line count
  * for the whole job, known once the first page resolves.
@@ -9723,6 +9725,8 @@ interface LogViewerProps {
   /** Progress of the initial multi-page fetch, shown beneath the loading spinner.
    *  Ignored once logs are on screen. Callers that fetch in one shot can omit it. */
   loadProgress?: LogLoadProgress | null;
+  /** Badges the header as Live or Ended. Omit when the caller can't tell. */
+  logStatus?: LogStatus;
   /** Where the copy confirmation goes. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
 }
@@ -11084,4 +11088,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, index_d_exports as DataView, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, index_d_exports as DataView, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };

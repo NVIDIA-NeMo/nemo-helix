@@ -295,6 +295,20 @@ function updateReleaseRedirects(doc, releases) {
   const basepath = instanceUrl
     ? new URL(instanceUrl.includes("://") ? instanceUrl : `https://${instanceUrl}`).pathname.replace(/\/$/, "")
     : "";
+  const pushGenerated = (source, destination) => {
+    if (existingSources.has(source)) {
+      return; // Authored redirects take precedence.
+    }
+    const redirect = doc.createNode({ source, destination });
+    redirect.commentBefore = marker;
+    redirects.items.push(redirect);
+    existingSources.add(source);
+  };
+  for (const release of releases) {
+    for (const { source, destination } of releaseBranchPageRedirects(release, basepath)) {
+      pushGenerated(source, destination);
+    }
+  }
   const aliases = new Map();
   const activeSlugs = new Set(releases.map((release) => release.slug));
   for (const release of releases) {
@@ -316,16 +330,48 @@ function updateReleaseRedirects(doc, releases) {
       continue;
     }
     for (const suffix of ["", "/:path*"]) {
-      const source = `/${alias}${suffix}`;
-      if (existingSources.has(source)) {
-        continue; // Authored redirects take precedence.
-      }
-      const redirect = doc.createNode({ source, destination: `${basepath}/${target}${suffix}` });
-      redirect.commentBefore = marker;
-      redirects.items.push(redirect);
-      existingSources.add(source);
+      pushGenerated(`/${alias}${suffix}`, `${basepath}/${target}${suffix}`);
     }
   }
+}
+
+// A release branch's docs.yml redirects its retired pages under `/latest/...`,
+// the only slug that branch publishes as. Once materialized as `/v<line>/...`,
+// those pages need the same redirects under the release slug, or old links into
+// a versioned snapshot 404. Read them from the branch itself so each version only
+// redirects pages that branch actually retired. Older branches wrote
+// destinations without the instance basepath; normalize both spellings.
+function releaseBranchPageRedirects(release, basepath) {
+  const branchDocsYml = git(["show", `${release.ref}:docs/fern/docs.yml`]);
+  const branchDoc = parseDocument(branchDocsYml);
+  assertValidYaml(branchDoc, `${release.branch}:docs/fern/docs.yml`);
+  const branchRedirects = branchDoc.toJS()?.redirects;
+  if (!Array.isArray(branchRedirects)) {
+    return [];
+  }
+  const latestPrefix = "/latest/";
+  const mounted = `${basepath}${latestPrefix}`;
+  const generated = [];
+  for (const redirect of branchRedirects) {
+    const source = redirect?.source;
+    const destination = redirect?.destination;
+    if (typeof source !== "string" || typeof destination !== "string" || !source.startsWith(latestPrefix)) {
+      continue;
+    }
+    let rest;
+    if (basepath && destination.startsWith(mounted)) {
+      rest = destination.slice(mounted.length);
+    } else if (destination.startsWith(latestPrefix)) {
+      rest = destination.slice(latestPrefix.length);
+    } else {
+      continue; // Cross-version or external destinations are not page renames.
+    }
+    generated.push({
+      source: `/${release.slug}/${source.slice(latestPrefix.length)}`,
+      destination: `${basepath}/${release.slug}/${rest}`,
+    });
+  }
+  return generated;
 }
 
 function syncColabLinks(release, outputRoot) {

@@ -48,7 +48,7 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.agents.types import (
     RegisterAgentRequest as RegisterAgentRequest,
 )
-from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import BaseModel, Field
@@ -91,8 +91,6 @@ class AgentFilter(NemoFilter):
 
         def _walk(op: FilterOperation) -> FilterOperation:
             if isinstance(op, ComparisonOperation):
-                if op.field == _LABELS_FIELD:
-                    return _expand_label_pairs(op)
                 if op.field.startswith(_LABELS_PREFIX):
                     return op.model_copy(update={"field": f"data.{op.field}"})
                 mapped = field_map.get(op.field)
@@ -102,21 +100,6 @@ class AgentFilter(NemoFilter):
             return op
 
         return _walk(operation)
-
-
-def _expand_label_pairs(op: ComparisonOperation) -> FilterOperation:
-    """Rewrite the bracket form ``filter[labels][<key>]=<value>`` into one comparison per key."""
-    if op.operator != FilterOperator.EQ or not isinstance(op.value, dict) or not op.value:
-        raise ValueError("'labels' filters take key/value pairs, e.g. 'labels.<key>' or 'labels[<key>]'")
-    pairs: list[FilterOperation] = []
-    for key, value in op.value.items():
-        field = f"data.{_LABELS_PREFIX}{key}"
-        operands = value.items() if isinstance(value, dict) else [(FilterOperator.EQ.value, value)]
-        pairs.extend(
-            ComparisonOperation(operator=FilterOperator(operator), field=field, value=operand)
-            for operator, operand in operands
-        )
-    return pairs[0] if len(pairs) == 1 else LogicalOperation(operator=FilterOperator.AND, operations=pairs)
 
 
 class DeploymentFilter(NemoFilter):

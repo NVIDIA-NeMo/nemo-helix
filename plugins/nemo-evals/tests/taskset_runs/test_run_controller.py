@@ -3,6 +3,8 @@
 
 """Controller cycles over in-memory records and Jobs: members, slots, registration, settling, stops, bundling."""
 
+import asyncio
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -14,8 +16,13 @@ import pytest
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.taskset_runs.controller import (
+    LIST_CHUNK,
     TERMINAL_JOB_STATUSES,
+    GuardedRunJobs,
+    JobsBreaker,
     JobsServiceRunJobs,
+    JobsUnavailableError,
+    StuckJob,
     TasksetRunReconciler,
 )
 from nemo_evals.taskset_runs.entities import (
@@ -162,6 +169,14 @@ class FakeRunJobs:
             raise self.broken[name]
         return self.jobs.get(name)
 
+    async def list_named(self, names):
+        assert len(names) <= LIST_CHUNK, "GuardedRunJobs chunks the names"
+        await self._scripted("list")
+        broken = next((self.broken[name] for name in names if name in self.broken), None)
+        if broken is not None:
+            raise broken  # one Job that can't be read fails the whole list, as its page would
+        return {name: self.jobs[name] for name in names if name in self.jobs}
+
     async def result(self, job, name):
         await self._scripted("result")
         return self.results.get((job, name))
@@ -288,7 +303,10 @@ def sized(plan: TasksetRunPlan, tasks: int, *, cap: int | None = None) -> Taskse
 
 
 def config(**caps: Any) -> RunControllerConfig:
-    return RunControllerConfig.model_validate({"default_max_concurrent_task_jobs": None, **caps})
+    """Caps for a test; the create budget is unbounded unless a test sets ``max_creates_per_cycle``."""
+    return RunControllerConfig.model_validate(
+        {"default_max_concurrent_task_jobs": None, "max_creates_per_cycle": 10_000, **caps}
+    )
 
 
 @pytest.fixture
@@ -621,7 +639,9 @@ async def test_a_run_whose_jobs_client_wont_open_for_its_creates_doesnt_stop_the
     async def failing_for_a_creates(workspace, run):
         if run is not None:
             opens[run.name] = opens.get(run.name, 0) + 1
-            if run.name == a.name and opens[a.name] == 2:  # phase 1's open worked; phase 2's fails (no token)
+            if (
+                run.name == a.name and opens[a.name] == 2
+            ):  # the settle phase's open worked; the grant phase's fails (no token)
                 raise RuntimeError("token unavailable")
         async with real(workspace, run) as inner:
             yield inner
@@ -937,17 +957,92 @@ async def test_a_task_settled_under_an_unreadable_plan_records_what_its_job_publ
     assert member.publication.evaluation_id == "eval-1"
 
 
+async def test_a_cycle_reads_each_runs_jobs_with_one_list(make_harness, harbor_plan, jobs):
+    harness = make_harness(max_cluster_concurrent_jobs=15)
+    runs = [await harness.submit(sized(harbor_plan, 5), name=f"run-{n}") for n in "abc"]
+    await harness.cycle()
+    jobs.finish(task(runs[0], 0), "completed")
+    jobs.calls.clear()
+    report = await harness.cycle()
+    assert jobs.calls.count("list") == 3 and "get" not in jobs.calls
+    assert report.jobs_reads == 4  # 3 lists and the completed Job's result
+    assert (await harness.phases(runs[0]))[0] == "succeeded"
+
+
+async def test_a_failed_list_reads_the_runs_jobs_one_at_a_time_until_every_one_answers(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 3), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "completed")
+    jobs.broken[task(run, 1)] = http_error(InternalServerError, 500)  # fails its list, then its own GET
+    jobs.calls.clear()
+    await harness.cycle()
+    reads = [call for call in jobs.calls if call in ("list", "get")]
+    assert reads == ["list", "get", "get", "get"]  # the same cycle reads them one at a time
+    assert await harness.phases(run) == ["succeeded", "registered", "registered"]  # task 1 keeps its slot
+    jobs.calls.clear()
+    await harness.cycle()
+    assert "list" not in jobs.calls  # task 1 still didn't answer: one at a time again
+    del jobs.broken[task(run, 1)]
+    await harness.cycle()  # every Job answers
+    jobs.calls.clear()
+    await harness.cycle()
+    assert jobs.calls == ["list"]
+
+
+async def test_a_list_skipped_by_another_runs_timeout_keeps_its_run_on_one_list(make_harness, harbor_plan, jobs):
+    harness = make_harness(settle_concurrency=1)
+    for name in ("run-a", "run-b"):
+        await harness.submit(sized(harbor_plan, 1), name=name)
+    await harness.cycle()
+    jobs.script("list", timeout())  # the first run's list times out; the second run's is never sent
+    jobs.calls.clear()
+    await harness.cycle()
+    assert jobs.calls.count("list") == 1
+    jobs.calls.clear()
+    await harness.cycle()
+    # Only the run whose list timed out reads one at a time; the skipped run lists again.
+    assert sorted(call for call in jobs.calls if call in ("list", "get")) == ["get", "list"]
+
+
+async def test_the_guarded_list_sends_at_most_100_names_per_call_and_finds_every_job(harbor_plan, harbor_run, jobs):
+    base = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
+    requests = [base.model_copy(update={"name": f"run-a-task-{n}"}) for n in range(150)]
+    for request in requests:
+        jobs.put(request, "active")
+    jobs.finish("run-a-task-0", "completed")
+    # Jobs deletes an ended Job between the two calls: with offset pages, that would shift a running Job off both.
+    jobs.script("list", None, lambda: jobs.jobs.pop("run-a-task-0"))
+    listed = await GuardedRunJobs(jobs, JobsBreaker()).list_named([r.name for r in requests if r.name])
+    assert jobs.calls == ["list", "list"]
+    assert set(listed) == {f"run-a-task-{n}" for n in range(150)}  # task 0 was read before it was deleted
+
+
+async def test_a_failing_second_chunk_fails_the_whole_list(jobs):
+    names = [f"run-a-task-{n}" for n in range(150)]
+    jobs.script("list", None, http_error(InternalServerError, 500))
+    with pytest.raises(InternalServerError):
+        await GuardedRunJobs(jobs, JobsBreaker()).list_named(names)
+
+
+async def test_another_runs_timeout_while_a_chunk_is_in_flight_stops_the_next_chunk(jobs):
+    breaker = JobsBreaker()
+    jobs.script("list", breaker.trip)  # another run's read times out while chunk 1 is in flight
+    with pytest.raises(JobsUnavailableError):
+        await GuardedRunJobs(jobs, breaker).list_named([f"run-a-task-{n}" for n in range(150)])
+    assert jobs.calls == ["list"]
+
+
 async def test_a_jobs_timeout_in_phase_1_stops_its_reads_but_not_the_grants(make_harness, harbor_plan, jobs):
     harness = make_harness(max_cluster_concurrent_jobs=4)
     run = await harness.submit(sized(harbor_plan, 3), name="run-a")
     await harness.cycle()
     jobs.finish_all()
     later = await harness.submit(sized(harbor_plan, 1), name="run-b")
-    jobs.script("get", timeout())
+    jobs.script("list", timeout())
     jobs.calls.clear()
     report = await harness.cycle()
-    # One read, then the cutoff; phase 2 bounds itself, so a hanging read doesn't stop the free slot's grant.
-    assert jobs.calls == ["get", "create"] and report.jobs_timeouts == 1 and report.phase2_skipped is None
+    # One list, then the cutoff; the grant phase bounds itself, so a hanging read doesn't stop the free slot's grant.
+    assert jobs.calls == ["list", "create"] and report.jobs_timeouts == 1 and report.grant_skipped is None
     assert await harness.phases(run) == ["registered"] * 3  # members keep their state
     assert await harness.phases(later) == ["registered"]
 
@@ -960,7 +1055,9 @@ async def test_a_hanging_read_doesnt_starve_another_runs_finished_tasks(harness,
     jobs.finish(task(b, 2), "completed")
     jobs.broken[task(a, 2)] = timeout()  # every read of these two times out
     jobs.broken[task(b, 1)] = timeout()
-    for _ in range(6):  # each run's reads resume just past the one that tripped the cutoff
+    # A list another read's timeout skips doesn't demote its run; once b lists first, its own hanging list does.
+    # From then on each run's reads resume just past the one that tripped the cutoff: 3 rotations of [a, b, stuck].
+    for _ in range(9):
         await harness.cycle()
     assert await harness.phases(b) == ["succeeded", "registered", "succeeded"]
     assert await harness.phases(a) == ["registered"] * 3
@@ -1382,6 +1479,190 @@ async def test_a_start_write_slower_than_the_budget_sends_no_job(harness, harbor
     assert stored.error == "1 of 1 tasks expired at the execution deadline, 1 of them still queued"
 
 
+# ---- 20 open runs: runs settle concurrently, the grant phase spends one create budget ------------------------
+
+CONFLICT = http_error(ConflictError, 409, "scripted conflict")  # with no Job under the name: the create stays pending
+
+
+async def pending_intents(harness: Harness, run: TasksetRunEntity, jobs: FakeRunJobs, count: int) -> None:
+    """``count`` create intents of ``run`` whose Job isn't there: each create answered 409, then GET 404."""
+    jobs.script("create", *[CONFLICT] * count)
+    await harness.cycle()
+    assert [m.phase for m in await harness.members(run)][:count] == [MemberPhase.IMAGE_READY] * count
+    assert all(m.task_job for m in (await harness.members(run))[:count])
+
+
+def budget(harness: Harness, creates: int, **caps: Any) -> None:
+    harness.reconciler.config = config(max_creates_per_cycle=creates, **caps)
+
+
+async def test_settle_phase_settles_up_to_settle_concurrency_runs_at_once(make_harness, harbor_plan, jobs):
+    harness = make_harness(settle_concurrency=4)
+    for n in range(20):
+        await harness.submit(sized(harbor_plan, 1), name=f"run-{n:02}")
+    settle = harness.reconciler._settle
+    running, most = 0, 0
+
+    async def counted(run, now, breaker):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.001)  # every run's records take a moment, as over HTTP
+        try:
+            return await settle(run, now, breaker)
+        finally:
+            running -= 1
+
+    harness.reconciler._settle = counted
+    report = await harness.cycle()
+    assert most == 4 and report.open_runs == 20 and report.created == 20
+
+
+async def test_one_runs_hanging_list_never_starves_the_others_finished_jobs(make_harness, harbor_plan, jobs):
+    harness = make_harness(settle_concurrency=8)
+    runs = [await harness.submit(sized(harbor_plan, 1), name=f"run-{n:02}") for n in range(20)]
+    await harness.cycle()
+    bad, others = runs[0], runs[1:]
+    jobs.broken[task(bad, 0)] = timeout()  # every read of its Job times out: its list, then its own GET
+    for run in others:
+        jobs.finish(task(run, 0), "completed")
+    for _ in range(21):  # one full rotation of 20 runs and the stuck-Job reads
+        await harness.cycle()
+    assert [await harness.phases(run) for run in others] == [["succeeded"]] * len(others)
+    assert await harness.phases(bad) == ["registered"]
+
+
+async def test_workers_take_runs_in_a_rotation_that_moves_by_one_each_cycle(make_harness, harbor_plan, jobs):
+    harness = make_harness(settle_concurrency=1)
+    runs = [await harness.submit(sized(harbor_plan, 1), name=f"run-{n}") for n in range(3)]
+    taken: list[list[str]] = []
+    settle, refresh = harness.reconciler._settle, harness.reconciler._refresh_stuck
+
+    async def recorded(run, now, breaker):
+        taken[-1].append(run.name)
+        return await settle(run, now, breaker)
+
+    async def recorded_refresh(breaker):
+        taken[-1].append("stuck")
+        await refresh(breaker)
+
+    harness.reconciler._settle = recorded
+    harness.reconciler._refresh_stuck = recorded_refresh
+    for _ in range(4):
+        taken.append([])
+        await harness.cycle()
+    r0, r1, r2 = (run.name for run in runs)
+    # [*runs, the stuck-Job reads] starting one later each cycle: no run, and not the stuck reads, always goes first.
+    assert taken == [[r1, r2, "stuck", r0], [r2, "stuck", r0, r1], ["stuck", r0, r1, r2], [r0, r1, r2, "stuck"]]
+
+
+async def test_a_shutdown_while_the_first_runs_settle_starts_no_other_run(entity_store, store, jobs, harbor_plan):
+    stopping = False
+    harness = Harness(entity_store, store, jobs, config(settle_concurrency=2))
+    harness.reconciler._stop_requested = lambda: stopping
+    for n in range(5):
+        await harness.submit(sized(harbor_plan, 1), name=f"run-{n}")
+    settle = harness.reconciler._settle
+    started: list[str] = []
+
+    async def stopped_midway(run, now, breaker):
+        nonlocal stopping
+        started.append(run.name)
+        await asyncio.sleep(0)  # let the second worker take its run
+        stopping = True  # the controller is told to stop while the first two runs settle
+        await asyncio.sleep(0.001)
+        return await settle(run, now, breaker)
+
+    harness.reconciler._settle = stopped_midway  # ty: ignore[invalid-assignment]
+    report = await harness.cycle()
+    assert len(started) == 2 and report.created == 0 and not jobs.created
+
+
+async def test_a_stuck_entry_put_back_while_the_refresh_reads_it_is_kept(harness, harbor_plan, harbor_run, jobs):
+    request = await task_job_request(harbor_plan, harbor_run, 0, harbor_plan.task_environments[0])
+    job = jobs.put(request, "active")
+    jobs.finish(job.name, "cancelled")
+    key = ("default", job.name)
+    old = StuckJob("default", job.name, "user:alice", job_id=job.id)
+    new = StuckJob("default", job.name, "user:alice", sent_at=T0)  # a force settle re-adds the name meanwhile
+    harness.reconciler.stuck[key] = old
+    jobs.script("get", lambda: harness.reconciler.stuck.__setitem__(key, new))
+    await harness.reconciler._refresh_stuck(JobsBreaker())
+    assert harness.reconciler.stuck[key] is new
+
+
+async def test_a_cycle_makes_at_most_its_budget_of_grants_alternating_creators(make_harness, harbor_plan, jobs):
+    harness = make_harness(max_cluster_concurrent_jobs=25, max_creates_per_cycle=10)
+    for n, creator in enumerate(["user:a", "user:b", "user:c", "user:d"]):
+        await harness.submit(sized(harbor_plan, 7), name=f"run-{n}", creator=creator)
+    created = []
+    for _ in range(4):
+        created.append((await harness.cycle()).created)
+    assert created == [10, 10, 5, 0]
+    first = [job.name.rsplit("-task-", 1)[0] for job in jobs.created[:4]]
+    assert first == ["run-0", "run-1", "run-2", "run-3"]  # one per creator, then round again
+
+
+async def test_retries_rotate_so_every_pending_create_is_tried_within_three_cycles(make_harness, harbor_plan, jobs):
+    harness = make_harness(max_cluster_concurrent_jobs=25)
+    run = await harness.submit(sized(harbor_plan, 25), name="run-a")
+    await pending_intents(harness, run, jobs, 25)  # nothing left to grant
+    budget(harness, 10, max_cluster_concurrent_jobs=25)
+    tried: list[list[str]] = []
+    for _ in range(3):
+        before = len(jobs.creates)
+        jobs.script("create", *[CONFLICT] * 10)
+        await harness.cycle()
+        tried.append(jobs.creates[before:])
+    assert [len(names) for names in tried] == [10, 10, 10]
+    assert {name for names in tried for name in names} == {task(run, n) for n in range(25)}
+    assert all(m.task_job and m.phase is MemberPhase.IMAGE_READY for m in await harness.members(run))
+
+
+@pytest.mark.parametrize(("pending", "queued", "grants", "retries"), [(3, 40, 7, 3), (25, 25, 5, 5), (25, 4, 4, 6)])
+async def test_retries_get_up_to_half_the_budget_and_whatever_grants_leave(
+    make_harness, harbor_plan, jobs, pending, queued, grants, retries
+):
+    harness = make_harness(max_cluster_concurrent_jobs=200)
+    old = await harness.submit(sized(harbor_plan, pending), name="run-a")
+    await pending_intents(harness, old, jobs, pending)
+    new = await harness.submit(sized(harbor_plan, queued), name="run-b", creator="user:bob")
+    budget(harness, 10, max_cluster_concurrent_jobs=200)
+    before = len(jobs.creates)
+    jobs.script("create", *[None] * grants, *[CONFLICT] * retries)  # grants are made first, then retries
+    report = await harness.cycle()
+    names = jobs.creates[before:]
+    assert [name.startswith(new.name) for name in names] == [True] * grants + [False] * retries
+    assert report.created == grants
+
+
+async def test_an_ambiguous_retry_still_moves_the_rotation_on(make_harness, harbor_plan, jobs):
+    harness = make_harness(max_cluster_concurrent_jobs=10)
+    run = await harness.submit(sized(harbor_plan, 3), name="run-a")
+    await pending_intents(harness, run, jobs, 3)
+    budget(harness, 10, max_cluster_concurrent_jobs=10)
+    tried = []
+    for _ in range(3):
+        before = len(jobs.creates)
+        jobs.script("create", timeout())  # every retry times out: it ends its drain after one attempt
+        report = await harness.cycle()
+        tried += jobs.creates[before:]
+        assert report.jobs_timeouts == 1
+    assert sorted(tried) == [task(run, n) for n in range(3)]  # each once, not the first three times
+
+
+async def test_both_drains_end_at_their_own_timeout_within_the_budget(make_harness, harbor_plan, jobs):
+    harness = make_harness(max_cluster_concurrent_jobs=10)
+    old = await harness.submit(sized(harbor_plan, 2), name="run-a")
+    await pending_intents(harness, old, jobs, 2)
+    await harness.submit(sized(harbor_plan, 3), name="run-b", creator="user:bob")
+    budget(harness, 10, max_cluster_concurrent_jobs=10)
+    before = len(jobs.creates)
+    jobs.script("create", timeout(), timeout())  # the first grant, then the first retry
+    report = await harness.cycle()
+    assert len(jobs.creates) - before == 2 and report.jobs_timeouts == 2 and report.created == 0
+
+
 # ---- unreadable plans and isolation ---------------------------------------------------------------------
 
 
@@ -1487,8 +1768,8 @@ async def test_a_member_listing_failure_skips_phase_2(harness, harbor_plan, jobs
 
     monkeypatch.setattr(harness.store, "list_all_members", broken)
     report = await harness.cycle()
-    assert report.phase2_skipped and not jobs.created
-    assert len(await real(await harness.run(other))) == 2  # phase 1 still settled the other run
+    assert report.grant_skipped and not jobs.created
+    assert len(await real(await harness.run(other))) == 2  # the settle phase still settled the other run
 
 
 # ---- the real Jobs adapter ------------------------------------------------------------------------------
@@ -1611,3 +1892,31 @@ def test_the_controller_creates_on_behalf_of_the_stored_principal(harbor_run):
     principal = on_behalf_of(harbor_run.with_auth_context(snapshot))
     assert not isinstance(principal, str)
     assert (principal.id, principal.email, list(principal.groups or [])) == ("user:bob", "bob@ac9.test", ["ac9-users"])
+
+
+async def test_the_jobs_adapter_lists_up_to_100_names_in_one_request(harbor_plan, harbor_run):
+    fake = FakeRunJobs()
+    names = []
+    for index in range(2):
+        request = await task_job_request(harbor_plan, harbor_run, index, harbor_plan.task_environments[index])
+        names.append(fake.put(request, "active").name)
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        asked = json.loads(request.url.params["filter"])["name"]["$in"]
+        data = [fake.jobs[name].model_dump(mode="json") for name in asked if name in fake.jobs]
+        pagination = {"page": 1, "page_size": LIST_CHUNK, "current_page_size": len(data), "total_pages": 1}
+        return httpx.Response(200, json={"data": data, "pagination": pagination | {"total_results": len(data)}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        async with AsyncNemoClient(base_url="http://platform.test", http_client=http_client) as client:
+            adapter = JobsServiceRunJobs(client, client, "default")
+            listed = await adapter.list_named([*names, "run-gone-task-9"])
+            with pytest.raises(ValueError, match="at most 100"):
+                await adapter.list_named([f"n-{n}" for n in range(LIST_CHUNK + 1)])
+    assert set(listed) == set(names) and all(listed[name].id == fake.jobs[name].id for name in names)
+    (request,) = seen  # the 101-name call never reached Jobs
+    assert request.url.path == "/apis/jobs/v2/workspaces/default/jobs"
+    assert request.url.params["page_size"] == str(LIST_CHUNK)
+    assert json.loads(request.url.params["filter"]) == {"name": {"$in": [*names, "run-gone-task-9"]}}

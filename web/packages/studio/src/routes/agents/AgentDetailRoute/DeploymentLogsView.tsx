@@ -7,7 +7,7 @@ import {
   getAgentsStreamDeploymentLogsQueryKey,
   useAgentsGetDeploymentLogs,
 } from '@nemo/sdk/generated/agents/agent-deployments';
-import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema';
+import type { AgentDeployment, AgentDeploymentStatus } from '@nemo/sdk/generated/agents/schema';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { withHelixBrowserAuthRequest } from '@nemo/sdk/src/utils/platformRequest';
 import { Block, Stack, Text } from '@nvidia/foundations-react-core';
@@ -25,7 +25,11 @@ interface DeploymentLogsViewProps {
 export const DeploymentLogsView: FC<DeploymentLogsViewProps> = ({ workspace, deployment }) =>
   deployment?.name ? (
     <Block className="h-full min-h-0 w-full" paddingX="2">
-      <LogsForDeployment workspace={workspace} deploymentName={deployment.name} />
+      <LogsForDeployment
+        workspace={workspace}
+        deploymentName={deployment.name}
+        status={deployment.status}
+      />
     </Block>
   ) : (
     <Stack gap="density-md" padding="density-md">
@@ -38,12 +42,13 @@ export const DeploymentLogsView: FC<DeploymentLogsViewProps> = ({ workspace, dep
 interface LogsForDeploymentProps {
   workspace: string;
   deploymentName: string;
+  status?: AgentDeploymentStatus;
 }
 
 const TAIL_LINES = 500;
 const MAX_STREAMED_LINES = 5000;
 
-const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentName }) => {
+const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentName, status }) => {
   const { data, isLoading } = useAgentsGetDeploymentLogs(
     workspace,
     deploymentName,
@@ -52,6 +57,8 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
   );
 
   const [streamedLines, setStreamedLines] = useState<HelixJobLog[]>([]);
+  // streamSse gives up on non-retryable responses (e.g. 401/403); the log is no longer live then.
+  const [streamStopped, setStreamStopped] = useState(false);
 
   const accessToken = useOidcBearerToken();
   const tailOffset = data?.next_offset;
@@ -67,6 +74,7 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
     if (!deploymentName || isLoading) return;
     const url = `${PLATFORM_BASE_URL}${getAgentsStreamDeploymentLogsQueryKey(workspace, deploymentName)[0]}`;
     const controller = new AbortController();
+    setStreamStopped(false);
     void (async () => {
       try {
         const request = await withHelixBrowserAuthRequest({
@@ -96,9 +104,11 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
             logger.warn(`Log stream interrupted for deployment ${deploymentName}; retrying`, err);
           },
         });
+        if (!controller.signal.aborted) setStreamStopped(true);
       } catch (error) {
         if (!controller.signal.aborted) {
           logger.warn(`Unable to start log stream for deployment ${deploymentName}`, error);
+          setStreamStopped(true);
         }
       }
     })();
@@ -122,6 +132,10 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
     <LogViewer
       logs={logs}
       isLoading={isLoading && logs.length === 0}
+      // The server keeps the SSE open for failed/deleting deployments, so the status decides.
+      logStatus={
+        streamStopped ? undefined : status === 'failed' || status === 'deleting' ? 'ended' : 'live'
+      }
       downloadFilename={`${deploymentName}.log`}
       rows={40}
       emptyMessage="No log output yet — the deployment may not have started writing."

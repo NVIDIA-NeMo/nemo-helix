@@ -102,19 +102,21 @@ def test_automodel_nemotron_lightning_lora_uplift(
         additional_args=["--tensor-parallel-size", str(NUM_SERVING_GPUS)],
     )
     try:
+        base_id = ceval.base_model_field(ws, base_entity)
+        jobs.wait_until_entity_routable(client, ws, base_id)
         base_score = ceval.score_rows(
             squad_val_rows,
             platform_base_url,
             ws,
-            deployment,
-            ceval.base_model_field(ws, base_entity),
+            base_id,
         )
+        adapter_id = ceval.adapter_model_id(ws, base_entity, output_name)
+        jobs.wait_until_entity_routable(client, ws, adapter_id)
         tuned_score = ceval.score_rows(
             squad_val_rows,
             platform_base_url,
             ws,
-            deployment,
-            ceval.lora_model_field(ws, output_name),
+            adapter_id,
         )
     finally:
         jobs.delete_deployment(client, ws, deployment, config)

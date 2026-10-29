@@ -89,7 +89,7 @@ Full template (every section, defaults inline):
     "gradient_accumulation_steps": 4
   },
   "optimizer": {
-    "learning_rate": 5e-5,
+    "learning_rate": 2e-4,
     "weight_decay": 0.0,
     "optim": "adamw_8bit",
     "adam_beta1": 0.9,
@@ -204,7 +204,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `2e-4` (schema default; skill uses `5e-5` for LoRA SFT) | See LR table below. |
+| `learning_rate` | `2e-4` (LoRA); `2e-5` when `finetuning_type` is `all_weights` | Unsloth's guidance; see below. |
 | `weight_decay` | `0.0` | L2-style regularization. |
 | `optim` | `"adamw_8bit"` | `"adamw_torch"`, `"adamw_torch_fused"` (Hopper+), `"adamw_8bit"`, `"paged_adamw_8bit"`, `"sgd"`. `adamw_8bit` has the smallest optimizer state and is Unsloth's notebook default. |
 | `adam_beta1` | `0.9` | Adam/AdamW beta1. |
@@ -241,17 +241,9 @@ After `to_spec`, the canonical `OutputResponse` also carries `type` (`"adapter"`
 
 VRAM / batch tuning is in **`batch-sizing.md` § Batch sizing — unsloth**. Below covers non-batch fields.
 
-### Unsloth learning rate (LoRA SFT, starting points)
+### Unsloth learning rate
 
-Same scale as automodel (the underlying optimizer math is the same):
-
-| Model scale | Suggested `learning_rate` |
-|-------------|---------------------------|
-| ≤ 3B | `5e-5` – `1e-4` |
-| 3B – 8B | `2e-5` – `5e-5` |
-| > 8B | `1e-5` – `2e-5` |
-
-Schema default is `2e-4` (Unsloth notebook default — works for small adapters with `adamw_8bit`). Skill defaults are conservative `5e-5`.
+Leave `learning_rate` unset to get Unsloth's guidance: `2e-4` for LoRA, which suits small adapters with `adamw_8bit`, and `2e-5` for `all_weights`. If LoRA loss spikes or diverges, lower it toward `5e-5`.
 
 ### Unsloth LoRA rank / alpha
 

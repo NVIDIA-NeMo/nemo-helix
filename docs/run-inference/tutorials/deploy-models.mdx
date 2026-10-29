@@ -646,10 +646,13 @@ A deployment loads adapters up to a maximum rank and refuses adapters of a highe
 | Engine and Image | Default Maximum Rank | To Raise It |
 | ---------------- | -------------------- | ----------- |
 | vLLM | 16 | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
-| Model-free NIM (vLLM or SGLang) | 16 | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Model-free NIM, vLLM | 16 | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
+| Model-free NIM, SGLang | 16 if the server starts with no adapters; otherwise the highest rank among the adapters present when it starts | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM | 32 | `executor_config.additional_envs`: `{"NIM_MAX_LORA_RANK": "<rank>"}` |
 
 vLLM accepts `--max-lora-rank` values of 1, 8, 16, 32, 64, 128, 256, 320, and 512.
+
+Each adapter is served under the name `<workspace>--<adapter-name>`. On the SGLang model-free NIM, the served name is `<base-model>:<workspace>--<adapter-name>`, for example `default/qwen3-1-7b:default--linear-algebra`, because SGLang answers a bare adapter name with the base model. The model provider's `served_models` lists the served name of each adapter.
 
 This example serves the [linear-algebra LoRA](https://huggingface.co/premjatin/qwen-linear-algebra-coder) on top of Qwen3-1.7B.
 

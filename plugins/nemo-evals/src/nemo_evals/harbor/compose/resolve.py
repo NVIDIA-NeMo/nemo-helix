@@ -23,6 +23,7 @@ from typing import Any
 
 import yaml
 from harbor.environments.docker import COMPOSE_BUILD_PATH, COMPOSE_PREBUILT_PATH
+from harbor.models.trial.paths import EnvironmentPaths
 from harbor.utils.env import get_required_host_vars, is_env_template
 from nemo_evals.harbor.compose.models import ComposeError, ComposeProblems
 from nemo_evals.harbor.compose.service_options import parse_depends_on, parse_environment
@@ -48,6 +49,22 @@ _TOP_LEVEL_KEYS = frozenset({"services", "volumes", "networks", "version", "name
 # Compose merges these sequences by appending; every other sequence is replaced.
 _APPENDED_KEYS = frozenset({"expose", "ports", "cap_add", "env_file"})
 
+# Harbor's log directories, which older task templates mount themselves as `${HOST_X_PATH}:${ENV_X_PATH}`: each `X`,
+# the directory it is in every container, and the pod volume that stands in for the host directory Harbor binds.
+HARBOR_LOG_DIRECTORIES = {
+    "VERIFIER_LOGS": (str(EnvironmentPaths.verifier_dir), "harbor-verifier-logs"),
+    "AGENT_LOGS": (str(EnvironmentPaths.agent_dir), "harbor-agent-logs"),
+    "ARTIFACTS": (str(EnvironmentPaths.artifacts_dir), "harbor-artifacts"),
+}
+
+# `${HOST_VERIFIER_LOGS_PATH}:${ENV_VERIFIER_LOGS_PATH}`, optionally `:ro` or `:rw`, braces optional; the same
+# directory on both sides.
+_LOG_MOUNT = re.compile(
+    r"\$\{?HOST_(?P<directory>VERIFIER_LOGS|AGENT_LOGS|ARTIFACTS)_PATH\}?"
+    r":\$\{?ENV_(?P=directory)_PATH\}?"
+    r"(?::(?P<mode>ro|rw))?"
+)
+
 
 @dataclass(frozen=True)
 class ResolvedCompose:
@@ -68,6 +85,14 @@ class ResolvedCompose:
     services: dict[str, dict[str, Any]]
     """Every service of the task's file other than ``main``, by name."""
 
+    harbor_log_mounts: dict[str, dict[str, bool]]
+    """The Harbor log directories each service mounted itself, taken out of its ``volumes``: by service, each
+    directory's key in :data:`HARBOR_LOG_DIRECTORIES` and whether the mount was read-only."""
+
+    task_limits: dict[str, str]
+    """``task.toml``'s CPUs and memory as compose would write them on ``main`` (``cpus``, ``mem_limit``); the
+    sandbox already sizes ``main`` from them."""
+
     interpolator: Interpolator
     """The variables Compose has for this task, to read ``env_file`` and look up value-less ``environment`` entries."""
 
@@ -78,11 +103,12 @@ def resolve_compose(
     """Build the compose document ``docker compose`` would run for this task.
 
     1. Read the task's compose file, under the size and alias caps.
-    2. Pick Harbor's base file: the prebuilt one when ``task.toml`` names a ``docker_image``, else the build one.
-    3. Collect the variables Harbor would give Compose (see :meth:`Interpolator.for_task`).
-    4. Fill in ``${VAR}`` references in both files.
-    5. Record top-level keys a sandbox has no equivalent for, such as ``secrets``.
-    6. Merge Harbor's ``main`` with the task's, as Compose would (see :func:`merge_documents`).
+    2. Take out the services' own mounts of Harbor's log directories (see :func:`_take_harbor_log_mounts`).
+    3. Pick Harbor's base file: the prebuilt one when ``task.toml`` names a ``docker_image``, else the build one.
+    4. Collect the variables Harbor would give Compose (see :meth:`Interpolator.for_task`).
+    5. Fill in ``${VAR}`` references in both files.
+    6. Record top-level keys a sandbox has no equivalent for, such as ``secrets``.
+    7. Merge Harbor's ``main`` with the task's, as Compose would (see :func:`merge_documents`).
 
     Each service is returned still as raw YAML, for the parser to read. ``compose_path`` names the file in errors,
     and problems found along the way are recorded in ``problems``.
@@ -97,6 +123,9 @@ def resolve_compose(
     task_document = _read_yaml(compose_file, compose_path)
     if not isinstance(task_document.get("services"), dict):
         raise ComposeError("compose_invalid", "no `services` mapping", compose_path=compose_path)
+
+    # Harbor's own log mounts are recognized by their variable names, so take them out before those are filled in.
+    harbor_log_mounts = _take_harbor_log_mounts(task_document)
 
     # Harbor picks its base file by whether `task.toml` names a prebuilt image.
     task_environment = _task_environment(task_dir)
@@ -122,6 +151,8 @@ def resolve_compose(
         harbor_main=harbor_main,
         main=merge_documents(harbor_main, task_services.get(MAIN_SERVICE, {})),
         services={name: service for name, service in task_services.items() if name != MAIN_SERVICE},
+        harbor_log_mounts=harbor_log_mounts,
+        task_limits=_task_limits(task_environment),
         interpolator=interpolator,
     )
 
@@ -199,8 +230,8 @@ class Interpolator:
         """Build an interpolator with the variables Harbor gives Compose for this task.
 
         Lowest priority first: ``environment/.env``, then ``task.toml``'s ``[environment] env``, then Harbor's own
-        (``CONTEXT_DIR``, ``MAIN_IMAGE_NAME``, ``PREBUILT_IMAGE_NAME``, ``CPUS``, ``MEMORY``). Values in ``.env`` may
-        refer to its earlier lines and to the other two.
+        (``CONTEXT_DIR``, ``MAIN_IMAGE_NAME``, ``PREBUILT_IMAGE_NAME``, ``CPUS``, ``MEMORY``, ``ENV_*_PATH``).
+        Values in ``.env`` may refer to its earlier lines and to the other two.
         """
         # Harbor fills in a `task.toml` value that is all `${VAR}` or `${VAR:-default}` from the host before Compose
         # sees it (`resolve_env_vars`). The host isn't known here, so it takes its default, and without one it's
@@ -225,14 +256,18 @@ class Interpolator:
                     value = default
                 task_variables[name] = value
 
-        # Harbor's own variables win over anything the task defines.
+        # Harbor's own variables win over anything the task defines. `ENV_*_PATH` name its log directories, which
+        # Harbor still defines for older templates; their `HOST_*_PATH` partners name host paths a sandbox doesn't have.
         harbor_variables = {"CONTEXT_DIR": ".", "MAIN_IMAGE_NAME": f"hb__{task_dir.name}"}
+        harbor_variables.update({f"ENV_{key}_PATH": path for key, (path, _volume) in HARBOR_LOG_DIRECTORIES.items()})
         if task_environment.get("docker_image"):
             harbor_variables["PREBUILT_IMAGE_NAME"] = str(task_environment["docker_image"])
-        if task_environment.get("cpus") is not None:
-            harbor_variables["CPUS"] = str(task_environment["cpus"])
-        if task_environment.get("memory_mb") is not None:
-            harbor_variables["MEMORY"] = f"{task_environment['memory_mb']}M"
+
+        limits = _task_limits(task_environment)
+        if "cpus" in limits:
+            harbor_variables["CPUS"] = limits["cpus"]
+        if "mem_limit" in limits:
+            harbor_variables["MEMORY"] = limits["mem_limit"]
         # The variables that override `.env`; Harbor's come last, so they win over the task's.
         later_variables = {**task_variables, **harbor_variables}
 
@@ -247,13 +282,15 @@ class Interpolator:
         return cls(variables, problems, host_only)
 
     def with_dotenv_lines(self, lines: dict[str, str]) -> Interpolator:
-        """Return an interpolator for a dotenv file that looks in its ``lines`` read so far first, then in this one's.
+        """Return an interpolator for a dotenv file that looks in this one's variables first, then in its ``lines``.
 
-        ``lines`` is read as it changes, so each line of the file can see the lines above it.
+        Compose fills in a dotenv line from the variables it already has before the file's earlier lines: with
+        ``REGISTRY`` set in ``task.toml``, ``.env``'s ``REGISTRY=other`` then ``IMAGE=${REGISTRY}/redis`` still uses
+        ``task.toml``'s registry. ``lines`` is read as it changes, so each line of the file can see the lines above it.
         """
         # A ChainMap looks a name up in each mapping in turn, and holds `lines` itself rather than a copy, so a line
         # added to it later is found too.
-        return Interpolator(ChainMap(lines, dict(self._variables)), self._problems, self._host_only)
+        return Interpolator(ChainMap(dict(self._variables), lines), self._problems, self._host_only)
 
     def variable_value(self, name: str, path: str) -> str | None:
         """Return the value Compose has for variable ``name``, or None if it has none.
@@ -548,6 +585,58 @@ def _task_environment(task_dir: Path) -> dict[str, Any]:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise ComposeError("compose_invalid", f"can't read task.toml: {error}") from error
     return environment if isinstance(environment, dict) else {}
+
+
+def _task_limits(task_environment: Mapping[str, Any]) -> dict[str, str]:
+    """Write ``task.toml``'s ``cpus`` and ``memory_mb`` as compose service options, the way Harbor passes them.
+
+    Harbor gives them to compose as ``CPUS`` and ``MEMORY`` (``2048M``), so a file that sets ``main``'s limits from
+    those variables is only repeating them. ``{cpus = 2, memory_mb = 2048}`` gives ``{"cpus": "2", "mem_limit":
+    "2048M"}``.
+    """
+    limits: dict[str, str] = {}
+    if task_environment.get("cpus") is not None:
+        limits["cpus"] = str(task_environment["cpus"])
+    if task_environment.get("memory_mb") is not None:
+        limits["mem_limit"] = f"{task_environment['memory_mb']}M"
+    return limits
+
+
+def _take_harbor_log_mounts(task_document: dict[str, Any]) -> dict[str, dict[str, bool]]:
+    """Remove Harbor's own log mounts from each service's ``volumes``, and return them by service.
+
+    Older task templates mount Harbor's log directories themselves, as ``${HOST_VERIFIER_LOGS_PATH}:
+    ${ENV_VERIFIER_LOGS_PATH}``; Harbor still defines those variables so the mounts keep working. They bind a host
+    directory a sandbox doesn't have, so they are taken out here, and the parser gives each one an equivalent: on
+    ``main`` the sandbox already creates the directories, and another service gets a volume shared with ``main``.
+    Only a mount written exactly this way is taken; any other bind mount is still refused.
+
+    ``{"verifier": {"VERIFIER_LOGS": False}}`` means the ``verifier`` service mounted the verifier logs read-write.
+    """
+    mounts: dict[str, dict[str, bool]] = {}
+    services = task_document["services"]
+    for name, service in list(services.items()):
+        volumes = service.get("volumes") if isinstance(service, dict) else None
+        if not isinstance(volumes, list):
+            continue
+
+        kept = []
+        for entry in volumes:
+            # The long form is rebuilt as the short one, so both are recognized by the same pattern.
+            if isinstance(entry, dict) and entry.get("type", "bind") == "bind":
+                suffix = ":ro" if entry.get("read_only") is True else ""
+                entry_text = f"{entry.get('source')}:{entry.get('target')}{suffix}"
+            else:
+                entry_text = entry if isinstance(entry, str) else ""
+
+            match = _LOG_MOUNT.fullmatch(entry_text.strip())
+            if match is None:
+                kept.append(entry)
+            else:
+                mounts.setdefault(str(name), {})[match["directory"]] = match["mode"] == "ro"
+        # A new mapping, not an edit: a YAML alias can share one mapping between services.
+        services[name] = {**service, "volumes": kept}
+    return mounts
 
 
 def _load_services(document: Mapping[str, Any], problems: ComposeProblems, *, what: str) -> dict[str, dict[str, Any]]:

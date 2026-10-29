@@ -91,9 +91,18 @@ LoRA parameters (`training.lora`):
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `optimizer.learning_rate` | Step size for weight updates | `5e-6` |
+| `optimizer.learning_rate` | Step size for weight updates. Left unset, it depends on `finetuning_type` | `5e-5` (LoRA), `5e-6` (`all_weights`) |
 | `optimizer.weight_decay` | L2 regularization strength | `0.01` |
 | `optimizer.warmup_steps` | Linear warmup steps before the main schedule | `0` |
+
+Retrieval recipes replace the batch and optimizer defaults above. When `training.recipe` resolves to `bi_encoder` or `cross_encoder`, either set explicitly or chosen by `auto` from the checkpoint head, each of these fields you leave unset takes the recipe's value:
+
+| Parameter | `bi_encoder` | `cross_encoder` |
+|-----------|--------------|-----------------|
+| `batch.global_batch_size` | `256` | `128` |
+| `batch.micro_batch_size` | `8` | `8` |
+| `optimizer.learning_rate` | `1e-5` | `3e-6` |
+| `optimizer.warmup_steps` | `5` | `100` |
 
 ### Parallelism
 
@@ -228,7 +237,7 @@ LoRA parameters (`training.lora`):
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `optimizer.learning_rate` | Step size for weight updates | `2e-4` |
+| `optimizer.learning_rate` | Step size for weight updates. Left unset, it follows Unsloth's guidance for the `finetuning_type` | `2e-4` (LoRA), `2e-5` (`all_weights`) |
 | `optimizer.weight_decay` | L2 regularization strength | `0.0` |
 | `optimizer.optim` | Optimizer (`adamw_torch`, `adamw_torch_fused`, `adamw_8bit`, `paged_adamw_8bit`, `sgd`). 8-bit optimizers reduce optimizer-state memory | `adamw_8bit` |
 | `optimizer.adam_beta1` | Adam/AdamW first-moment decay | `0.9` |
@@ -296,7 +305,7 @@ Unlike the other backends, `model`, `dataset`, and (for GRPO) `environment` are 
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `learning_rate` | Peak learning rate. DPO uses a low value (`5e-6`–`1e-5`); GRPO lower still | `1e-4` |
+| `learning_rate` | Peak learning rate. Left unset, it depends on the method and `finetuning_type` | DPO `5e-6`; GRPO `5e-6` (`all_weights`), `1e-5` (LoRA) |
 | `epochs` | Passes over the dataset | `1` |
 | `max_steps` | Global step cap. Caps the run at `min(max_steps, epochs × steps_per_epoch)` | `null` |
 | `batch_size` / `micro_batch_size` | Global batch across all GPUs / per-GPU micro batch | `32` / `1` |
