@@ -72,6 +72,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.env import (
     warn_unscrubbed_secret_keys,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
+from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import SetupSlots, default_slot_dir, max_concurrent_setups
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import (
     HARBOR_DATASET_PATH_KEY,
     HARBOR_TASK_DIR_KEY,
@@ -1073,6 +1074,9 @@ def _build_native_job(
             if value is not None
         }
 
+        # Local Docker trials of every run on this machine share these, so concurrent setups don't time out.
+        setup_slots = SetupSlots(max_concurrent_setups(), default_slot_dir())
+
         async def _run_harbor_job(
             agent: Any, *, name: str, parent: Path, selected: Sequence[str] | None, environment: Any
         ) -> None:
@@ -1095,6 +1099,7 @@ def _build_native_job(
 
             async def _attempt() -> None:
                 job = await Job.create(job_config)
+                setup_slots.attach(job)
                 async with job_scope(job) if job_scope is not None else contextlib.nullcontext():
                     await job.run()
 
