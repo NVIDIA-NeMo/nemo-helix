@@ -3,6 +3,8 @@
 
 """Dispatcher-level tests for job groups: CRUD, bulk-create expansion, timeout propagation, status aggregation."""
 
+import asyncio
+
 import pytest
 from nemo_helix_plugin.jobs.schemas import JobGroupStatus
 from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
@@ -64,6 +66,63 @@ async def _set_member_status(store: EntityClient, member: HelixJob, status: Heli
     for step in steps.data:
         step.status = status
         await store.update(step)
+
+
+async def _fail_member_via_rollup(dispatcher: JobDispatcher, store: EntityClient, member: HelixJob) -> None:
+    """Drive a member to ERROR through the dispatcher roll-up path (not a direct write).
+
+    Fail-fast rides the member status write, so the trigger must go through
+    ``update_job_status_from_step`` -- the same path a controller uses -- rather
+    than flipping the attempt/step rows directly like :func:`_set_member_status`.
+    """
+    assert member.current_attempt_id is not None
+    steps = await store.list(
+        HelixJobStep, filter_obj={"attempt_id": member.current_attempt_id}, workspace=member.workspace, page_size=1000
+    )
+    assert steps.data, "member has no step to drive to ERROR"
+    await dispatcher.update_job_status_from_step(steps.data[0], HelixJobStatus.ERROR)
+
+
+async def _member_status(store: EntityClient, member: HelixJob) -> HelixJobStatus:
+    """Read a member's current effective status from its attempt."""
+    fresh = await store.get_by_id(HelixJob, member.id)
+    assert fresh.current_attempt_id is not None
+    return (await store.get_by_id(HelixJobAttempt, fresh.current_attempt_id)).status
+
+
+async def _drive_member_via_rollup(
+    dispatcher: JobDispatcher, store: EntityClient, member: HelixJob, status: HelixJobStatus
+) -> None:
+    """Drive a member to ``status`` through the dispatcher roll-up path (not a direct write).
+
+    Group status persistence rides the member status write, so a test must go through
+    ``update_job_status_from_step`` (the controller's path) rather than flipping rows directly.
+    The default template is single-step. COMPLETED is not reachable from CREATED in one hop
+    (the step state machine requires CREATED -> ACTIVE -> COMPLETED), so walk through ACTIVE
+    first; ERROR/ACTIVE/CANCELLED are each reachable directly from CREATED.
+    """
+    assert member.current_attempt_id is not None
+    steps = await store.list(
+        HelixJobStep, filter_obj={"attempt_id": member.current_attempt_id}, workspace=member.workspace, page_size=1000
+    )
+    assert steps.data, "member has no step to drive"
+    step = steps.data[0]
+    if status == HelixJobStatus.COMPLETED and step.status == HelixJobStatus.CREATED:
+        await dispatcher.update_job_status_from_step(step, HelixJobStatus.ACTIVE)
+        step = await store.get_by_id(HelixJobStep, step.id)
+    await dispatcher.update_job_status_from_step(step, status)
+
+
+async def _group_status(dispatcher: JobDispatcher, store: EntityClient, group_id: str) -> JobGroupStatus:
+    """Read the group's PERSISTED status straight off the entity (what GET returns)."""
+    return (await store.get_by_id(JobGroup, group_id)).status
+
+
+def _failfast_request(fail_fast: bool, member_count: int = 3) -> CreateJobGroupRequest:
+    return _create_request(
+        fail_fast=fail_fast,
+        members=[JobGroupMember(name=f"member-{i}", config_patch={"k": str(i)}) for i in range(member_count)],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -288,3 +347,269 @@ async def test_delete_group_refuses_while_a_member_is_non_terminal(mock_dispatch
 @pytest.mark.asyncio
 async def test_delete_missing_group_returns_false(mock_dispatcher, mock_store):
     assert await mock_dispatcher.delete_job_group("nope", DEFAULT_WORKSPACE) is False
+
+
+# ---------------------------------------------------------------------------
+# fail_fast roll-up: a member reaching ERROR sweeps its siblings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_cancels_non_terminal_siblings_when_a_member_errors(mock_dispatcher, mock_store):
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    # The failed member stays ERROR; the siblings are swept into cancellation.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) in (
+            HelixJobStatus.CANCELLING,
+            HelixJobStatus.CANCELLED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_disabled_leaves_siblings_untouched(mock_dispatcher, mock_store):
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=False), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) == HelixJobStatus.CREATED
+
+
+@pytest.mark.asyncio
+async def test_member_cancelled_not_error_does_not_trigger_fail_fast(mock_dispatcher, mock_store):
+    """A user cancelling one member must NOT sweep the group -- only ERROR triggers fail_fast."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    # Cancel one member through the real roll-up path.
+    steps = await mock_store.list(
+        HelixJobStep,
+        filter_obj={"attempt_id": members[0].current_attempt_id},
+        workspace=DEFAULT_WORKSPACE,
+        page_size=1000,
+    )
+    await mock_dispatcher.update_job_status_from_step(steps.data[0], HelixJobStatus.CANCELLED)
+
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.CANCELLED
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) == HelixJobStatus.CREATED
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_leaves_already_terminal_siblings_alone(mock_dispatcher, mock_store):
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    # One sibling already completed before the failure.
+    await _set_member_status(mock_store, members[1], HelixJobStatus.COMPLETED)
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    # The completed sibling is untouched; the still-running one is swept.
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.COMPLETED
+    assert await _member_status(mock_store, members[2]) in (
+        HelixJobStatus.CANCELLING,
+        HelixJobStatus.CANCELLED,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_is_idempotent_across_repeated_member_error_writes(mock_dispatcher, mock_store):
+    """A replayed member-ERROR write must not re-fan-out cancels on siblings already cancelling."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+    siblings_after_first = {m.id: await _member_status(mock_store, m) for m in members[1:]}
+
+    # Replay the same member's ERROR write (as a controller retry would). The
+    # transition is now a no-op (already ERROR), so fail_fast must not fire again
+    # and the siblings' cancellation states are untouched.
+    steps = await mock_store.list(
+        HelixJobStep,
+        filter_obj={"attempt_id": (await mock_store.get_by_id(HelixJob, members[0].id)).current_attempt_id},
+        workspace=DEFAULT_WORKSPACE,
+        page_size=1000,
+    )
+    await mock_dispatcher.update_job_status_from_step(steps.data[0], HelixJobStatus.ERROR)
+
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) == siblings_after_first[sibling.id]
+
+
+@pytest.mark.asyncio
+async def test_cancel_group_members_helper_skips_trigger_and_terminal(mock_dispatcher, mock_store):
+    """The shared fan-out helper is reusable: it cancels only cancellable members and honors the exclude."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    await _set_member_status(mock_store, members[2], HelixJobStatus.COMPLETED)
+
+    cancelled = await mock_dispatcher.cancel_group_members(group.id, DEFAULT_WORKSPACE, exclude_job_id=members[0].id)
+
+    # Excluded member not cancelled, already-terminal member skipped; only member[1] swept.
+    assert cancelled == [members[1].id]
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.CREATED
+    assert await _member_status(mock_store, members[2]) == HelixJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_concurrent_same_group_failures_do_not_deadlock(mock_dispatcher, mock_store):
+    """Two members of a fail_fast group failing concurrently must not deadlock.
+
+    The sibling fan-out runs after the failed member's own lock is released, so
+    task A (holding no lock during its sweep) can take member B's lock while task
+    B takes member A's -- there is no lock-while-holding-lock to form an AB-BA
+    cycle. Regression guard for that fix; a reintroduced in-lock sweep would hang
+    here (and trip the test timeout).
+    """
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True, member_count=4), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    # Drive two members into ERROR concurrently through the real roll-up path.
+    await asyncio.wait_for(
+        asyncio.gather(
+            _fail_member_via_rollup(mock_dispatcher, mock_store, members[0]),
+            _fail_member_via_rollup(mock_dispatcher, mock_store, members[1]),
+        ),
+        timeout=20,
+    )
+
+    # Both triggers ended in ERROR; every other member was swept into cancellation.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.ERROR
+    for sibling in members[2:]:
+        assert await _member_status(mock_store, sibling) in (
+            HelixJobStatus.CANCELLING,
+            HelixJobStatus.CANCELLED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_skips_sweep_when_group_already_terminal(mock_dispatcher, mock_store):
+    """If every other member already settled before the error write, the aggregate-terminal guard skips the sweep."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True, member_count=2), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    # The only sibling already completed, so once members[0] errors every member is terminal.
+    await _set_member_status(mock_store, members[1], HelixJobStatus.COMPLETED)
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    # Nothing to cancel: the completed sibling is left exactly as it was.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_re_reads_group_flag_so_clearing_it_before_the_sweep_disables_it(mock_dispatcher, mock_store):
+    """The post-lock sweep re-reads fail_fast from fresh state; clearing it before the error write disables the sweep."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    # Turn fail_fast off after creation but before any member errors.
+    await mock_dispatcher.update_job_group(group.id, DEFAULT_WORKSPACE, UpdateJobGroupRequest(fail_fast=False))
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) == HelixJobStatus.CREATED
+
+
+# ---------------------------------------------------------------------------
+# Group status roll-up: member transitions persist the group's denormalized status
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_group_rolls_up_to_running_when_a_member_goes_active(mock_dispatcher, mock_store):
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=False), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.PENDING
+
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ACTIVE)
+
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_group_rolls_up_to_completed_when_the_last_member_completes(mock_dispatcher, mock_store):
+    """The headline case: all members complete -> the group's persisted status becomes COMPLETED."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=3), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.COMPLETED)
+    # Not everyone is done yet -> still RUNNING.
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.RUNNING
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[1], HelixJobStatus.COMPLETED)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.RUNNING
+
+    # Last member completes -> group flips to COMPLETED, persisted on the entity.
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[2], HelixJobStatus.COMPLETED)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.COMPLETED
+    # And a GET reads exactly that stored value.
+    assert (await mock_dispatcher.get_job_group(group.id, DEFAULT_WORKSPACE)).status == JobGroupStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_group_rolls_up_to_failed_when_a_member_errors_and_rest_terminal(mock_dispatcher, mock_store):
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.COMPLETED)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[1], HelixJobStatus.ERROR)
+
+    # One errored, all terminal -> FAILED (persisted).
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_group_rollup_does_not_write_cancelling_or_cancelled(mock_dispatcher, mock_store):
+    """1432 owns created/pending/running/completed/error only; cancel lifecycle is 1433's.
+
+    A member cancelled directly must not make this layer persist a CANCELLING/CANCELLED group
+    status -- the roll-up leaves the stored value at a non-cancel state for the remaining members.
+    """
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ACTIVE)
+
+    # Cancel one member directly through the roll-up path (as a single-member cancel would).
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[1], HelixJobStatus.CANCELLED)
+
+    # The group's persisted status reflects the live roll-up. With one member ACTIVE and one
+    # CANCELLED, aggregate yields CANCELLING -- but 1432 must never WRITE a cancel state, so the
+    # stored status stays at the last non-cancel roll-up (RUNNING). Cancel propagation is 1433.
+    stored = await _group_status(mock_dispatcher, mock_store, group.id)
+    assert stored not in (JobGroupStatus.CANCELLING, JobGroupStatus.CANCELLED)
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_persists_failed_group_status_after_sweep(mock_dispatcher, mock_store):
+    """Fail_fast + persistence together: a member errors, siblings get cancelled, group persists FAILED.
+
+    The erroring member's own roll-up persists the group status from members; because the error
+    makes the aggregate FAILED once the swept siblings settle, the stored status lands on FAILED.
+    """
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True, member_count=3), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ERROR)
+
+    # Siblings swept to cancellation by fail_fast.
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) in (HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED)
+    # The persisted group status reflects the error (not left at PENDING/RUNNING).
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.FAILED

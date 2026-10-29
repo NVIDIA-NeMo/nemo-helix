@@ -4,7 +4,11 @@
 """Unit tests for the pure job-group helpers: status aggregation, spec expansion, timeout resolution."""
 
 import pytest
-from nemo_helix_plugin.jobs.schemas import JobGroupStatus, aggregate_job_group_status
+from nemo_helix_plugin.jobs.schemas import (
+    JobGroupStatus,
+    aggregate_job_group_status,
+    aggregate_job_group_status_from_counts,
+)
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.dispatcher import (
     _deep_merge,
@@ -74,6 +78,47 @@ def test_terminals_are_terminal(status):
 @pytest.mark.parametrize("status", [JobGroupStatus.PENDING, JobGroupStatus.RUNNING, JobGroupStatus.CANCELLING])
 def test_non_terminals_are_not_terminal(status):
     assert not status.is_terminal()
+
+
+# ---------------------------------------------------------------------------
+# aggregate_job_group_status_from_counts (count-driven; must match the list-based aggregate)
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_from_counts_empty_group_is_pending():
+    assert aggregate_job_group_status_from_counts(0, {}) == JobGroupStatus.PENDING
+
+
+def test_aggregate_from_counts_treats_unprobed_members_as_created():
+    # total 3, only 1 bucket given -> the other 2 are implicitly CREATED -> still RUNNING.
+    assert aggregate_job_group_status_from_counts(3, {HelixJobStatus.ACTIVE: 1}) == JobGroupStatus.RUNNING
+
+
+@pytest.mark.parametrize(
+    "total, counts",
+    [
+        (3, {HelixJobStatus.COMPLETED: 3}),
+        (3, {HelixJobStatus.COMPLETED: 2, HelixJobStatus.ERROR: 1}),
+        (3, {HelixJobStatus.ERROR: 1}),
+        (2, {HelixJobStatus.CANCELLING: 1}),
+        (4, {}),
+        (2, {HelixJobStatus.ACTIVE: 1}),
+        (3, {HelixJobStatus.COMPLETED: 1, HelixJobStatus.CANCELLED: 2}),
+        (5, {HelixJobStatus.COMPLETED: 3, HelixJobStatus.ERROR: 1, HelixJobStatus.CANCELLED: 1}),
+        (2, {HelixJobStatus.CREATED: 2}),
+    ],
+)
+def test_aggregate_from_counts_matches_list_based(total, counts):
+    """The count-driven aggregate must equal the list-based one for the same member multiset.
+
+    This pins the shared-precedence contract: the dispatcher rolls group status up from cheap
+    per-status counts, and that must never diverge from deriving it over a full status list.
+    """
+    representative: list[HelixJobStatus] = []
+    for status, count in counts.items():
+        representative.extend([status] * count)
+    representative.extend([HelixJobStatus.CREATED] * (total - len(representative)))
+    assert aggregate_job_group_status_from_counts(total, counts) == aggregate_job_group_status(representative)
 
 
 # ---------------------------------------------------------------------------

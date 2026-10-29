@@ -207,6 +207,34 @@ def aggregate_job_group_status(member_statuses: list[HelixJobStatus]) -> JobGrou
     return JobGroupStatus.RUNNING
 
 
+def aggregate_job_group_status_from_counts(total: int, status_counts: dict[HelixJobStatus, int]) -> JobGroupStatus:
+    """Roll up a group's status from per-status member COUNTS, not a full status list.
+
+    Equivalent to :func:`aggregate_job_group_status` but driven by cheap count
+    queries (``count(parent=group AND status=X)``) so a roll-up never fans a read
+    out over every member -- which matters for groups with thousands of members.
+    The precedence rules live in one place: this reconstructs a minimal
+    representative status multiset from the counts and delegates to
+    :func:`aggregate_job_group_status`, so the two can never diverge.
+
+    ``total`` is the member count (from the list pagination envelope).
+    ``status_counts`` need only carry the buckets the caller probed; any member
+    not covered by the provided buckets is treated as ``CREATED`` (the lowest-
+    precedence state), so a caller may omit buckets it has proven empty.
+    """
+    if total <= 0:
+        return JobGroupStatus.PENDING
+    representative: list[HelixJobStatus] = []
+    for status, count in status_counts.items():
+        representative.extend([status] * max(count, 0))
+    accounted = len(representative)
+    if accounted < total:
+        # Members not covered by a probed bucket are CREATED (lowest precedence);
+        # padding with CREATED keeps the aggregate correct without reading them.
+        representative.extend([HelixJobStatus.CREATED] * (total - accounted))
+    return aggregate_job_group_status(representative)
+
+
 class HelixJobTaskStatusResponse(BaseModel):
     id: str
     name: str
