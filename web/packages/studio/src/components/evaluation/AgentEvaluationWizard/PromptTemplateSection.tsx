@@ -8,7 +8,10 @@ import {
   type VariableTextAreaHandle,
 } from '@nemo/common/src/components/form/VariableTextArea';
 import { Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { templateFields } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
+import {
+  itemRef,
+  templateFields,
+} from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
 import { hasMalformedBraces } from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
 import { ComponentProps, FC, useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -59,7 +62,7 @@ export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({
 
   const variables = useMemo<VariableDef[]>(
     () => [
-      ...columns.map((column) => ({ name: `item.${column}`, description: 'Dataset field' })),
+      ...columns.map((column) => ({ name: itemRef(column), description: 'Dataset field' })),
       ...(withResponse
         ? [{ name: 'sample.output_text', description: "The agent's response" }]
         : []),
