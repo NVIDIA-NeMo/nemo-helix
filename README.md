@@ -110,7 +110,7 @@ nemo setup --auto --workspace default --start-services --install-skills
 
 </details>
 
-## What is in the box
+## What you can do
 
 ### Capabilities
 
