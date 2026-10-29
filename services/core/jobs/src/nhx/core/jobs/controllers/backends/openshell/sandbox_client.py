@@ -10,8 +10,8 @@ imports this module lazily (see ``backend._ensure_openshell``).
 from __future__ import annotations
 
 from openshell import SandboxClient
-from openshell._proto import datamodel_pb2 as dm  # ty: ignore[unresolved-import]
-from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
+from openshell._proto import datamodel_pb2 as dm
+from openshell._proto import openshell_pb2 as pb
 
 
 class JobsSandboxClient(SandboxClient):
@@ -24,7 +24,7 @@ class JobsSandboxClient(SandboxClient):
     """
 
     def get_sandbox(self, name: str, *, workspace: str) -> pb.Sandbox:
-        response = self._stub.GetSandbox(
+        response: pb.SandboxResponse = self._stub.GetSandbox(
             pb.GetSandboxRequest(workspace_scope=dm.WorkspaceSelector(workspace=workspace), name=name),
             timeout=self._timeout,
         )
