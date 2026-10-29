@@ -44,10 +44,11 @@ Each middleware entry names a plugin, a `config_type`, and either an inline `con
 {"name": "nemo-guardrails", "config_type": "guardrail_config", "config_id": "default/my-rails"}
 ```
 
-NeMo Helix ships three middleware plugins: `nemo-switchyard` for
+NeMo Helix ships four middleware plugins: `nemo-switchyard` for
 [routing](#route-across-models-with-switchyard), `nemo-guardrails` for
-[safety rails](#add-guardrails), and `nemo-evals-closed-book` for
-[closed-book evaluations](#keep-evaluations-closed-book). To write your own, see
+[safety rails](#add-guardrails), `nemo-evals-closed-book` for
+[closed-book evaluations](#keep-evaluations-closed-book), and `nemo-evals-trial-recording` for
+[recording evaluation trials](#record-evaluation-trials). To write your own, see
 [Virtual Model Plugins](/documentation/reference/plugin-architecture#virtual-model-plugins).
 
 ## Call a Virtual Model
@@ -327,8 +328,8 @@ The `nemo-evals-closed-book` middleware closes that path for the request the gat
   requests through its `default_extra_body` or `required_extra_body`. It also refuses a model it
   cannot resolve to a provider, since it cannot check what that model is.
 - It refuses with `403` a Responses request that continues provider-stored history through
-  `previous_response_id` or `conversation`, since that history may hold search results it cannot
-  see. Send the conversation history in the request instead.
+  `previous_response_id`, `conversation`, or `item_reference` input items, since that history may
+  hold search results it cannot see. Send the conversation history in the request instead.
 - It refuses with `403` a model whose provider calls models back through the gateway with a
   platform credential, such as a router registered as a model provider with a platform access key,
   since it can't see the calls that provider makes. A model provider's own API key isn't a platform
@@ -354,6 +355,100 @@ The middleware covers Chat Completions,
 Responses, and Anthropic Messages requests, streaming or not. It does not cover model calls that
 another middleware makes on its own, such as the judge calls of the `nemo-switchyard`
 `llm_classifier` router.
+
+### Close a Router's Own Model Calls
+
+A router registered as a model provider, such as a Switchyard server, picks a model for each call
+and calls it back through the gateway with the credential its provider holds. Give that provider a
+router key: a credential that reaches only the closed-book virtual models you name, whatever the
+router's own configuration says. The router needs no closed-book settings of its own.
+
+```bash
+nemo evals router-keys create --secret switchyard-closed-key   --model default/cb-strong --model default/cb-weak --model default/cb-judge
+```
+
+Each `--model` must be a closed-book virtual model with a `default_model_entity`; list the router's
+targets and judges. The command stores the key in the platform secret you name and prints the
+secret, the models, and when the key expires (30 days unless you pass `--expires-in-days`), never
+the key itself. Register the router as a model provider with that secret as its
+`api_key_secret_name`, and make it send the credential back with each call (Switchyard's
+`forward_auth`). Every call through that registration is then held to the key, so serve open
+evaluations from a separate router deployment with differently named routes. With platform auth on,
+the key is a Scoped Access Key the platform signs, so
+[Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) must be enabled.
+
+## Record Evaluation Trials
+
+An agent evaluation gives each Harbor trial that calls a gateway model its own trial token, a
+credential that names the trial and the models it may call. That covers Harbor's built-in agents given a gateway model and
+registered Fabric agents whose default model goes through the gateway; such an agent gets the token in the key
+variable of every model it calls through the gateway. The `nemo-evals-trial-recording` middleware reads the token to
+record each of the trial's model calls in Intake, as a span in the trial's trace with the token usage
+the provider reported. The span names the model the call asked for (`gen_ai.request.model`) and the
+model the response says served it (`gen_ai.response.model`), which differ when a routing provider
+picks the model. It doesn't change, delay or fail the
+call, and calls made with any other credential aren't recorded. With platform auth on, it trusts
+only trial tokens the platform signed.
+
+When a call carries a valid W3C `traceparent`, its span goes into the caller's trace beneath the
+caller's span instead. The session, evaluation and test case still come from the trial token, never
+from headers.
+
+Intake counts each call's usage once. In a trace that holds gateway call spans, their usage replaces
+the agent's own spans for the same calls, as long as every gateway span in the trace recorded usage;
+if one didn't, the trace counts the agent's own numbers instead. When the agent's trace is separate, the evaluation marks
+the published trace as superseded, so the session and trace metrics count the gateway's usage. The
+agent's own totals stay on its trace for inspection, and a metric the gateway doesn't report, such as
+cost, still counts from it. The evaluation marks the trace only when every model the agent calls is a
+virtual model that records trials. If one isn't, the session counts both the agent's trace and the
+gateway's spans.
+
+It takes no settings. Add it to `request_middleware`, so a call's span starts when the call arrives,
+and to `response_middleware`, where each call is recorded:
+
+```bash
+nemo inference virtual-models create recorded-model \
+  --default-model-entity default/<model-entity> \
+  --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]' \
+  --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
+```
+
+To add recording to an existing virtual model, update it with its current middleware lists plus
+these entries. Each list you pass replaces the old one. To combine it with closed-book, put both
+entries in `request_middleware`, closed-book last.
+
+When the evaluation's gateway model doesn't list the middleware, the job logs a warning and runs
+without recording. With platform auth on, each trial calls the gateway with a Scoped Access Key
+minted for it, so [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys)
+must be enabled. If a key can't be minted, the job fails before any trial runs. Each key lives up to
+24 hours from the start of the job, so a trial still queued after that can't call the gateway.
+Calls the model provider rejects aren't recorded either, nor are calls the closed-book middleware
+refuses: the gateway stops those before the response middleware that records them runs.
+
+### Hold Trials to Their Models
+
+A trial token lists the virtual models the trial's agent was configured with: the one a built-in
+agent's `model` names, or every gateway model a registered agent's config names. The token is
+closed when every one of them is closed-book. A router key lists the models it was minted for and is
+always closed. The `nemo-evals-access` middleware, which comes with the evals plugin and which no
+virtual model lists, checks every call made with either credential, on every route and before any
+virtual model's middleware runs. It refuses:
+
+| Call | Status |
+|---|---|
+| Any call on the `provider` route, which skips every virtual model's middleware | `403` |
+| A virtual model the credential doesn't list, by URL or by the `model` in an `openai` route body, or a LoRA adapter served through a listed one | `403` |
+| A listed virtual model with no `default_model_entity`, since its caller could name any model through it | `403` |
+| With a closed credential, a listed virtual model whose `request_middleware` no longer ends with `nemo-evals-closed-book` | `403` |
+| A credential that claims an evals policy the platform didn't sign | `403` |
+| A credential the gateway can't verify right now | `503` |
+| With platform auth off, a call without an evals credential to a virtual model that lists `nemo-evals-trial-recording` | `401` |
+
+A refused trial call is recorded in the trial as a failed call with zero tokens, with the reason in
+`nemo.evals.refusal.reason`. Calls made with any other credential are left alone. With platform
+auth off, tokens are unsigned, so an agent that writes its own token, or calls a model that doesn't
+record trials with no token, isn't stopped; run evaluations that must hold against a misbehaving agent
+with auth on.
 
 ## Manage Virtual Models
 

@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
+import re
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit, urlunsplit
 
 from harbor.models.task.config import NetworkMode, TaskConfig
@@ -16,21 +18,30 @@ from harbor.trial.network_policy import resolve_agent_phase_policy
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
-from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource
+from nemo_evals.gateway.middleware.closed_book import ends_closed_book
+from nemo_evals.gateway.middleware.trial_recording import MIDDLEWARE_NAME
+from nemo_evals.gateway.policy import ModelAccess
+from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource, registered_agent_config
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evals.jobs.secret_env import SecretEnvError
+from nemo_evals.jobs.utils import run_with_isolated_async_client
 from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_source_read
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import model_entity_route_openai_url, parse_workspace_name_ref
-from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient, VirtualModelsClient
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborEnvironmentConfig, HarborRuntimeConfig
+from nhx_evals_sdk.values import ModelRef
 from nhx_evals_sdk.values.common import SecretRef
+
+logger = logging.getLogger(__name__)
 
 
 async def check_gateway_model(
@@ -42,18 +53,13 @@ async def check_gateway_model(
     """Refuse a Harbor target whose gateway model is missing, unreadable by the caller, or uncallable.
 
     Raises:
-        ValueError: No model or VirtualModel has the name, or platform auth is on and the agent can't
-            authenticate to the gateway.
+        ValueError: No model or VirtualModel has the name, or platform auth is on and the agent has no key for
+            the gateway.
     """
     if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
         return
     env = target.gateway_agent_env
     assert env is not None
-    if platform_auth_enabled() and env.api_style == "anthropic":
-        raise ValueError(
-            "platform auth is on, and an Anthropic-style agent can't authenticate to the Inference Gateway: it sends "
-            "its key as `x-api-key`, and the gateway accepts only bearer tokens"
-        )
     if platform_auth_enabled() and env.api_key_env not in target.env_secrets:
         raise ValueError(
             f"platform auth is on, so the agent needs a key to call the Inference Gateway: put a Helix access key "
@@ -137,6 +143,94 @@ def add_gateway_key_placeholder(environment: list[EnvironmentVariable], target: 
     return [*environment, EnvironmentVariable(name=env.api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
 
 
+#: The gateway routes a Fabric model can name: a model's own route, or the OpenAI route with the model in the body.
+_FABRIC_GATEWAY_ROUTE = re.compile(
+    r"/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/(?:model/(?P<name>[^/]+)/-|openai/-)(?:/|$)"
+)
+#: Where a registered agent reads its gateway key when its model names no ``api_key_env``.
+FABRIC_GATEWAY_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
+
+
+def _fabric_base_url(model: Mapping[str, Any]) -> str:
+    """The URL a Fabric model config calls, read as the runtime reads it."""
+    settings = model.get("settings")
+    url = model.get("base_url") or (settings.get("base_url") if isinstance(settings, Mapping) else None)
+    return url if isinstance(url, str) else ""
+
+
+def _fabric_gateway_model(model: object) -> ModelRef | None:
+    """The gateway model one Fabric model config calls, or ``None`` if it doesn't call the Inference Gateway."""
+    if not isinstance(model, Mapping):
+        return None
+    match = _FABRIC_GATEWAY_ROUTE.search(_fabric_base_url(model))
+    name = (match["name"] or model.get("model")) if match is not None else None
+    if not isinstance(name, str) or not name:
+        return None
+    assert match is not None
+    return ModelRef(name if "/" in name else f"{match['workspace']}/{name}")
+
+
+def fabric_gateway_route(config: Mapping[str, Any]) -> tuple[ModelRef, str] | None:
+    """The gateway model a Fabric config's default model calls, and the variable it reads its key from.
+
+    ``None`` when the default model doesn't call the Inference Gateway.
+    """
+    model = (config.get("models") or {}).get("default")
+    ref = _fabric_gateway_model(model)
+    if ref is None:
+        return None
+    assert isinstance(model, Mapping)
+    return ref, str(model.get("api_key_env") or FABRIC_GATEWAY_KEY_ENV)
+
+
+def fabric_gateway_key_envs(config: Mapping[str, Any]) -> list[str]:
+    """The variables a Fabric config's gateway models read their key from, the default model's first, each once."""
+    shared = config.get("models") or {}
+    models = [shared.get("default"), *(model for name, model in shared.items() if name != "default")]
+    models += [
+        harness.get("model") for harness in (config.get("harnesses") or {}).values() if isinstance(harness, Mapping)
+    ]
+    envs = [
+        str(model.get("api_key_env") or FABRIC_GATEWAY_KEY_ENV)
+        for model in models
+        if isinstance(model, Mapping) and _fabric_gateway_model(model) is not None
+    ]
+    return list(dict.fromkeys(envs))
+
+
+def _fabric_models(config: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """A Fabric config's shared and harness model configs."""
+    models = list((config.get("models") or {}).values())
+    models += [
+        harness.get("model") for harness in (config.get("harnesses") or {}).values() if isinstance(harness, Mapping)
+    ]
+    return [model for model in models if isinstance(model, Mapping)]
+
+
+def fabric_gateway_models(config: Mapping[str, Any]) -> list[ModelRef]:
+    """Every gateway model a Fabric config's shared and harness models call, each once.
+
+    Raises:
+        ValueError: A model's URL is a template, or calls the gateway on a route that names no virtual model.
+    """
+    refs: list[ModelRef] = []
+    for model in _fabric_models(config):
+        url = _fabric_base_url(model)
+        if "$" in url:
+            raise ValueError(f"a model's base_url {url!r} is a template, so where it calls can't be checked")
+        ref = _fabric_gateway_model(model)
+        if ref is None and urlsplit(url).path.startswith("/apis/inference-gateway/"):
+            raise ValueError(f"a model calls the gateway at {urlsplit(url).path!r}, which names no virtual model")
+        if ref is not None and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def fabric_calls_only_gateway(config: Mapping[str, Any]) -> bool:
+    """Whether every shared and harness model of a Fabric config calls the Inference Gateway."""
+    return all(_fabric_gateway_model(model) is not None for model in _fabric_models(config))
+
+
 def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dict[str, Any], origin: str) -> None:
     """Point a registered agent's gateway URLs, in ``agent_kwargs["fabric_config"]``, at ``origin``."""
     config = agent_kwargs.get("fabric_config")
@@ -167,14 +261,38 @@ async def require_closed_book_route(
     no_network = no_network_task_ids(tasks)
     if not no_network or (isinstance(target, HarborRunnerTarget) and target.agent_name in MODEL_FREE_HARBOR_AGENTS):
         return
-    model = target.gateway_model if isinstance(target, HarborRunnerTarget) else None
-    if model is None:
+    try:
+        models = _gateway_models(target)
+    except ValueError as exc:
+        raise ValueError(
+            f"closed_book_required: no-network tasks {no_network} need a closed-book model route: {exc}"
+        ) from exc
+    if not models:
         raise ValueError(
             f"closed_book_required: no-network tasks {no_network} need the agent's model calls to go through a "
-            f'closed-book VirtualModel: give a built-in agent one as `model: {{"ref": ...}}`'
+            f'closed-book VirtualModel: give a built-in agent one as `model: {{"ref": ...}}`, or point a registered '
+            "agent's models at one through the Inference Gateway"
         )
     if async_sdk is None:
         raise ValueError("checking a closed-book model route requires a platform client")
+    for model in models:
+        await _require_closed_book_model(model, no_network, async_sdk=async_sdk, authorize=authorize)
+
+
+def _gateway_models(target: object) -> list[ModelRef]:
+    """The gateway models an agent's calls go to: a built-in agent's one, or every one a registered agent's config names."""
+    if not isinstance(target, HarborRunnerTarget):
+        return []
+    if target.gateway_model is not None:
+        return [target.gateway_model]
+    if isinstance(target.source, RegisteredAgentSource) and (config := registered_agent_config(target)) is not None:
+        return fabric_gateway_models(config)
+    return []
+
+
+async def _require_closed_book_model(
+    model: ModelRef, no_network: list[str], *, async_sdk: AsyncHelixClient, authorize: SourceReadAuthorizer | None
+) -> None:
     workspace, name = parse_workspace_name_ref(model.root, label="Gateway model")
     await authorize_source_read(authorize, "virtual_model", workspace, name)
     try:
@@ -185,15 +303,17 @@ async def require_closed_book_route(
         ).data()
     except NotFoundError:
         virtual_model = None
-    if (
-        virtual_model is None
-        or not virtual_model.request_middleware
-        or (virtual_model.request_middleware[-1].name != CLOSED_BOOK_MIDDLEWARE)
-    ):
+    if virtual_model is None or not ends_closed_book(virtual_model.request_middleware):
         raise ValueError(
             f"closed_book_required: no-network tasks {no_network} need a closed-book model route, and {model.root} "
             f"isn't one: make `{CLOSED_BOOK_MIDDLEWARE}` the last entry of its VirtualModel's request_middleware"
         )
+
+
+def gateway_model_id(model: ModelRef) -> str:
+    """``workspace/name`` of the VirtualModel a gateway model reference names, as the gateway identifies it."""
+    workspace, name = parse_workspace_name_ref(model.root, label="Gateway model")
+    return f"{workspace}/{name}"
 
 
 def no_network_task_ids(tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> list[str]:
@@ -252,3 +372,58 @@ def agent_channel_name(host: str, agent_channel: Sequence[str]) -> str | None:
         except ValueError:
             continue
     return next((entry for entry in entries if host and entry.startswith(f"{host}.")), None)
+
+
+def trial_recording_gap(virtual_model: VirtualModel) -> str | None:
+    """Why calls through ``virtual_model`` aren't fully recorded in their trials; ``None`` when they are."""
+    if not any(call.name == MIDDLEWARE_NAME for call in virtual_model.response_middleware):
+        return (
+            f"it doesn't list {MIDDLEWARE_NAME} in response_middleware, so the run's gateway calls won't "
+            "be recorded in their trials"
+        )
+    if not any(call.name == MIDDLEWARE_NAME for call in virtual_model.request_middleware):
+        return (
+            f"it lists {MIDDLEWARE_NAME} in response_middleware but not request_middleware, so each "
+            "call's span starts when the gateway has the reply rather than when the call arrived"
+        )
+    return None
+
+
+class TrialRoute(NamedTuple):
+    model_access: ModelAccess
+    records_calls: bool
+
+
+def check_trial_route(client: NemoClient | AsyncNemoClient, gateway_model: ModelRef) -> TrialRoute:
+    """What the gateway model's route gives trials, warning when it won't record their calls.
+
+    The route is closed-book when its VirtualModel ends its request middleware with the closed-book middleware, and
+    records calls when it lists the trial-recording middleware in its response middleware. A VirtualModel that can't
+    be read is open and records nothing.
+    """
+    workspace, name = parse_workspace_name_ref(gateway_model.root, label="Gateway model")
+
+    async def get(async_client: AsyncNemoClient) -> VirtualModel:
+        models = AsyncVirtualModelsClient.from_client(async_client)
+        return (await models.get_virtual_model(workspace=workspace, name=name)).data()
+
+    try:
+        if isinstance(client, AsyncNemoClient):
+            virtual_model = run_with_isolated_async_client(client, get)
+        else:
+            virtual_model = (
+                VirtualModelsClient.from_client(client).get_virtual_model(workspace=workspace, name=name).data()
+            )
+    except NemoClientError as e:
+        logger.warning(
+            "Couldn't read virtual model %s to check that it records the run's gateway calls in their trials: %s",
+            gateway_model.root,
+            e,
+        )
+        return TrialRoute(ModelAccess.OPEN, records_calls=False)
+    if (gap := trial_recording_gap(virtual_model)) is not None:
+        logger.warning("Virtual model %s: %s", gateway_model.root, gap)
+    return TrialRoute(
+        ModelAccess.CLOSED if ends_closed_book(virtual_model.request_middleware) else ModelAccess.OPEN,
+        records_calls=any(call.name == MIDDLEWARE_NAME for call in virtual_model.response_middleware),
+    )

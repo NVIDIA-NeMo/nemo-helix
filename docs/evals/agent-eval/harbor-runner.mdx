@@ -779,18 +779,29 @@ An agent that declares no model connection, or a provider the gateway doesn't se
   already uses the key variable's name; that job is refused rather than handing the agent the other
   secret. With platform authentication enabled, put a Helix access key scoped to `inference` in
   `env_secrets` under the key variable; a target without one is refused.
-- With platform authentication enabled, `claude-code` can't call the gateway yet, so its target is
-  refused: it sends its key as `x-api-key`, and the gateway accepts only bearer tokens.
+- Each trial calls the gateway with its own trial token, which names the trial and the models it
+  may call; the gateway refuses the trial's calls to any other model. With platform
+  authentication disabled, it is an unsigned token. With it enabled, it is a key minted for the trial
+  from yours, scoped to `inference`, signed by the platform with the trial's details, and revoked once
+  Harbor won't run the trial again. The job fails if a key can't be minted. A virtual model that
+  runs the `nemo-evals-trial-recording` middleware reads the token to record the trial's model calls
+  in Intake; see
+  [Record Evaluation Trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials)
+  and [Hold Trials to Their Models](/documentation/models-and-inference/virtual-models#hold-trials-to-their-models).
+- With platform authentication enabled, `claude-code` sends its access key as `x-api-key`, which
+  the gateway accepts on model routes like a bearer token.
 
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.
 
 A taskset run on Kubernetes enforces this for tasks whose agent runs with `network_mode = "no-network"`,
 whether set under `[environment]`, `[agent]` or one of the task's steps. Their sandbox still reaches
-the agent's model route, so the run is refused at submit, naming those tasks, unless the agent's
-`model` is a `ref` to a virtual model whose `request_middleware` ends with `nemo-evals-closed-book`,
-and you can read that virtual model. Agents that call no model, `oracle` and `nop`, are exempt. A
-built-in agent with a model by `name`, an imported agent, and a registered agent are refused for such
+the agent's model route, so the run is refused at submit, naming those tasks, unless every model the
+agent calls through the gateway is a virtual model whose `request_middleware` ends with
+`nemo-evals-closed-book`, and you can read each one. For a built-in agent that's the virtual model its
+`model` names as a `ref`; for a registered agent it's each shared and harness model whose `base_url`
+is a gateway route. Agents that call no model, `oracle` and `nop`, are exempt. A built-in agent with a
+model by `name`, an imported agent, and a registered agent with no gateway model are refused for such
 tasks, since evals can't check where their model calls go.
 
 ## How scoring works

@@ -9171,6 +9171,7 @@ nemo evals [OPTIONS] COMMAND [ARGS]...
 * `metric-types`: Print available evaluator metric names or a metric JSON...
 * `runs`: Kubernetes taskset runs: one Job per Harbor task.
 * `tasksets`: Harbor tasksets for Kubernetes runs: publish, build images.
+* `router-keys`: Closed credentials for routers, such as Switchyard, that...
 
 *Jobs:*
 
@@ -9475,6 +9476,45 @@ nemo evals tasksets build-images [OPTIONS] REF
 * `--wait`: Follow the builds until each is ready or failed.
 * `--status`: Only read the builds; start none. Exit 0 when all are ready, 1 when one failed or was never requested, 3 while some are building.
 * `--poll-seconds <FLOAT>`: Polling interval with `--wait`. [default: 10.0]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo evals router-keys
+
+Closed credentials for routers, such as Switchyard, that call models back through the gateway.
+
+**Usage:**
+
+```shell
+nemo evals router-keys [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `create`: Mint a router key that reaches only the given closed-book...
+
+##### nemo evals router-keys create
+
+Mint a router key that reaches only the given closed-book models, and store it in a platform secret.
+
+**Usage:**
+
+```shell
+nemo evals router-keys create [OPTIONS]
+```
+
+**Options:**
+
+* `--secret`: Platform secret to store the key in; give it to the router's ModelProvider.
+* `--model`: A closed-book VirtualModel the router may call, workspace/name. Repeat for each.
+* `--expires-in-days <INTEGER RANGE>`: The key's lifetime in days. [default: 30]
+* `--workspace`: Workspace for the secret; default: the configured workspace.
 
 **Help:**
 

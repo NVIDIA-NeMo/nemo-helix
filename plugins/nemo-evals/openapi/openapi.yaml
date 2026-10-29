@@ -2542,6 +2542,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/router-keys:
+    post:
+      tags:
+      - Evals Plugin Router Key Routes
+      summary: Create Router Key
+      description: 'Mint a router key limited to closed-book VirtualModels and store
+        it in a platform secret.
+
+
+        Give the secret to a router''s ModelProvider as its `api_key_secret_name`.
+        The router then calls models back through
+
+        the gateway with the key, which reaches only the listed models, and closed-book
+        evaluations may use the router.'
+      operationId: create_router_key_route_apis_evals_v2_workspaces__workspace__router_keys_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouterKeyCreate'
+      responses:
+        '201':
+          description: The secret the router key was stored in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouterKey'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/tasks:
     get:
       tags:
@@ -8425,6 +8466,65 @@ components:
       required:
       - data
       title: RevisionsPage
+    RouterKey:
+      properties:
+        secret:
+          type: string
+          title: Secret
+          description: The platform secret holding the key, as `workspace/name`.
+        models:
+          items:
+            type: string
+          type: array
+          title: Models
+          description: The VirtualModels the key may call.
+        expires_at:
+          title: Expires At
+          description: When the key stops working.
+          type: string
+          format: date-time
+        access_key_id:
+          title: Access Key Id
+          description: The Scoped Access Key's id (`jti`), with platform auth on,
+            to revoke it by.
+          type: string
+      type: object
+      required:
+      - secret
+      - models
+      title: RouterKey
+      description: A router key, stored in a platform secret. The key itself is never
+        returned.
+    RouterKeyCreate:
+      properties:
+        secret:
+          type: string
+          pattern: ^[\w\-\.]+$
+          title: Secret
+          description: Platform secret in the path's workspace to store the key in;
+            created, or its value replaced. Name it as the router's ModelProvider
+            `api_key_secret_name`.
+        models:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Models
+          description: 'The closed-book VirtualModels the router may call, as `workspace/name`:
+            its targets and judges.'
+        expires_in_seconds:
+          type: integer
+          minimum: 60.0
+          title: Expires In Seconds
+          description: The key's lifetime.
+          default: 2592000
+      additionalProperties: false
+      type: object
+      required:
+      - secret
+      - models
+      title: RouterKeyCreate
+      description: A router key to mint and store in a platform secret.
     RowIntakePublicationSpec:
       properties:
         evaluation_id:

@@ -154,6 +154,7 @@ async def _publish(
     agent_name: str,
     model_name: str | None,
     record_durations: bool = True,
+    usage_superseded_by_gateway: bool = False,
 ) -> PublishReport:
     """Check the Evaluation exists, publish under it, then record how long both took (``record_durations``)."""
     # Measured before the publish so the two durations stay disjoint — for a result that carries only
@@ -174,6 +175,7 @@ async def _publish(
         agent_version=spec.agent_version,
         model_name=model_name,
         max_otlp_request_bytes=spec.max_otlp_request_bytes,
+        usage_superseded_by_gateway=usage_superseded_by_gateway,
     )
     publish_duration_sec = time.monotonic() - publish_started
     if not record_durations:
@@ -207,6 +209,7 @@ def publish_agent_eval_result(
     workspace: str,
     intake: AsyncIntakeClient | None,
     record_durations: bool = True,
+    usage_superseded_by_gateway: bool = False,
 ) -> PublicationOutcome:
     """Publish a finished run to Intake and describe what happened.
 
@@ -216,6 +219,9 @@ def publish_agent_eval_result(
 
     ``record_durations=False`` leaves the Evaluation's metadata alone: a taskset run's task Jobs share
     one Evaluation, so each writing its own duration would race, and the run controller writes the run's.
+
+    ``usage_superseded_by_gateway`` says the Inference Gateway recorded the run's model calls in each trial's
+    session, so each published trace is marked for Intake to count the gateway's usage instead of its own.
     """
     derived_agent_name, model_name = target_agent_identity(target)
     # Spec validation guarantees one of these is set (see `_require_resolvable_publication_identity`).
@@ -252,6 +258,7 @@ def publish_agent_eval_result(
                 agent_name=agent_name,
                 model_name=model_name,
                 record_durations=record_durations,
+                usage_superseded_by_gateway=usage_superseded_by_gateway,
             ),
         )
     except PublishError as error:

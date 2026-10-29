@@ -1097,7 +1097,7 @@ def _spy_on_run_job(monkeypatch: pytest.MonkeyPatch, calls: list[bool]) -> None:
     """
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 
@@ -1265,6 +1265,43 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
         assert agent_config.name == "oracle"
     else:
         assert agent_config.import_path is not None and agent_config.import_path.endswith(":WrappedAgent")
+
+
+@pytest.mark.asyncio
+async def test_the_job_scope_holds_each_planned_job_while_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller can change a planned job's trials before any runs, and clean up after the last."""
+    import contextlib
+
+    import harbor.job
+
+    events: list[str] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            events.append("create")
+            return cls()
+
+        async def run(self) -> None:
+            events.append("run")
+
+    @contextlib.asynccontextmanager
+    async def scope(job: Any) -> Any:
+        assert isinstance(job, FakeJob)
+        events.append("enter")
+        yield
+        events.append("exit")
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="scoped")
+    _, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="scoped", env_templates={}, job_scope=scope
+    )
+    await run_job()
+
+    assert events == ["create", "enter", "run", "exit"]
 
 
 @pytest.mark.asyncio
@@ -1620,7 +1657,7 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     config = config.model_copy(update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir})
     (job_dir / harbor_runtime.CACHE_STAMP_FILENAME).unlink()
 
-    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
         async def run_job() -> None:
             (agent_dir / "wrapper.py").write_text("v2-EDITED-MID-RUN\n")
 
@@ -3309,7 +3346,7 @@ def _capture_env_templates(monkeypatch: pytest.MonkeyPatch, captured: list[Mappi
     """Replace the native job build, recording the templates ``run_tasks`` computed for it."""
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
         captured.append(dict(env_templates))
 
         async def run_job() -> None:

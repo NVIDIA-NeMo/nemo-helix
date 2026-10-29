@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
+from nemo_helix_plugin.intake.span_attributes import USAGE_SUPERSEDED_ATTRIBUTE
 from nemo_helix_plugin.intake.types import (
     AtifAgentParam,
     AtifCreateParams,
@@ -171,6 +172,7 @@ async def otlp_ingest_for_trial(
     evaluation_name: str,
     measurements: TrialMeasurements,
     started_at: datetime,
+    usage_superseded: bool = False,
 ) -> tuple[bytes, str] | None:
     """Return the trial's OTLP payload stamped with evaluation identity, and its root span id.
 
@@ -181,7 +183,8 @@ async def otlp_ingest_for_trial(
     otherwise stores it against the ingest clock and start time is part of the key its spans
     table replaces on — so a re-publish would insert rather than replace. A root span with no
     end of its own gets the trial's measured runtime, as the ATIF path does, so Intake's latency
-    rollup does not read 0 for a run whose duration is known.
+    rollup does not read 0 for a run whose duration is known. ``usage_superseded`` marks the root as a trace whose
+    model calls the Inference Gateway recorded in the session (``USAGE_SUPERSEDED_ATTRIBUTE``).
 
     Identity is written onto spans rather than resource attributes because Intake merges the
     layers as ``{**resource, **span}``. An agent that records its own ``gen_ai.conversation.id``
@@ -216,7 +219,10 @@ async def otlp_ingest_for_trial(
             TEST_CASE_NAME_ATTRIBUTE: trial.task_id,
         },
     )
-    set_root_span_attributes(resource_spans, _trial_totals(trial, measurements))
+    set_root_span_attributes(
+        resource_spans,
+        {**_trial_totals(trial, measurements), **({USAGE_SUPERSEDED_ATTRIBUTE: True} if usage_superseded else {})},
+    )
     if trial.error is not None:
         set_root_span_error(resource_spans, message=trial.error.message)
     fill_missing_start_times(resource_spans, start_time_unix_nano=int(started_at.timestamp() * 1_000_000_000))
@@ -398,6 +404,7 @@ def trial_to_atif_ingest(
     final_metrics: AtifFinalMetricsParam | None = None,
     ended_at: datetime | None = None,
     steps: RecordedSteps | None = None,
+    usage_superseded: bool = False,
 ) -> AtifCreateParams:
     """Build the ATIF ingest params for a single Trial.
 
@@ -414,6 +421,9 @@ def trial_to_atif_ingest(
     falls back to the server's per-request ingest clock — so the same trajectory sent
     twice lands as two rows that never collapse. An explicit timestamp makes the root
     span's ``start_time`` a function of the run, not of when it was published.
+
+    ``usage_superseded`` marks the trajectory as one whose model calls the Inference Gateway recorded in the session
+    (``USAGE_SUPERSEDED_ATTRIBUTE``).
     """
     output_text = trial.output.output_text if trial.output is not None else None
     if agent_version == DEFAULT_AGENT_VERSION and steps is not None and steps.agent_version:
@@ -449,11 +459,16 @@ def trial_to_atif_ingest(
         "steps": step_payload,
         "evaluation_context": run_task_to_evaluation_context(trial, evaluation_name=evaluation_name),
     }
+    extra: dict[str, object] = {}
     if trial.error is not None:
         error: dict[str, object] = {"type": trial.error.type}
         if trial.error.message is not None:
             error["message"] = trial.error.message
-        body["extra"] = {"error": error}
+        extra["error"] = error
+    if usage_superseded:
+        extra[USAGE_SUPERSEDED_ATTRIBUTE] = True
+    if extra:
+        body["extra"] = extra
     if final_metrics is not None:
         body["final_metrics"] = final_metrics
     return body

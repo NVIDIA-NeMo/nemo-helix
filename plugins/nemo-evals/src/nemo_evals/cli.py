@@ -12,6 +12,7 @@ from types import UnionType
 from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
 
 import typer
+from nemo_evals.router_keys_cli import add_router_keys_commands
 from nemo_evals.runs_cli import add_runs_commands
 from nemo_evals.tasksets_cli import add_tasksets_commands
 from nemo_helix_plugin.cli import NemoCLI
@@ -136,4 +137,5 @@ class EvaluatorPluginCLI(NemoCLI):
 
         add_runs_commands(app, lambda: shared_cli_client(NemoClient))
         add_tasksets_commands(app, lambda: shared_cli_client(NemoClient))
+        add_router_keys_commands(app, lambda: shared_cli_client(NemoClient))
         return app
