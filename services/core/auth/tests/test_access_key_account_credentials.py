@@ -15,7 +15,7 @@ from nhx.core.entities.app.repository import AccountCredentialStore, AccountIden
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-NOW = datetime(2026, 9, 29, tzinfo=UTC)
+NOW = datetime.now()
 
 
 @pytest_asyncio.fixture
