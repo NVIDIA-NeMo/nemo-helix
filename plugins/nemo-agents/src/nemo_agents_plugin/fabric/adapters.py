@@ -6,7 +6,7 @@
 A kind is accepted when it is a stock short name, a stock adapter ID, or the ID
 declared by an adapter manifest installed anywhere below the Python environment's
 ``share/nemo-fabric/`` data directory. Plugins ship their adapters there (Compass
-installs ``adapters/compass/compass.fabric-adapter.json``), and Fabric discovers
+installs ``adapters/compass/analyst.fabric-adapter.json``), and Fabric discovers
 installed adapters from the same tree, so an ID accepted here is one Fabric can load.
 
 When ``ADAPTER_PYTHON`` names another interpreter, Fabric discovers adapters

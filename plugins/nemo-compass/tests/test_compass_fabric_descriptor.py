@@ -23,7 +23,7 @@ from nemo_compass_plugin.analysis.agent_config import COMPASS_ADAPTER_ID, build_
 from nemo_fabric_adapter_contract import models as contract
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-DESCRIPTOR = _PLUGIN_ROOT / "compass.fabric-adapter.json"
+DESCRIPTOR = _PLUGIN_ROOT / "analyst.fabric-adapter.json"
 
 
 _REINSTALL_HINT = "Refresh it with: uv sync --reinstall-package nemo-compass-plugin"
