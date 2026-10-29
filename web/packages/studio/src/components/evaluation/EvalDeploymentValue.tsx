@@ -8,22 +8,19 @@ import type { FC } from 'react';
 import { Link } from 'react-router';
 
 interface EvalDeploymentValueProps {
-  workspace: string;
-  deployment: EvalJobDeployment | null;
+  deployment: EvalJobDeployment | null | undefined;
 }
 
-export const EvalDeploymentValue: FC<EvalDeploymentValueProps> = ({ workspace, deployment }) => {
-  if (!deployment) return <>-</>;
+export const EvalDeploymentValue: FC<EvalDeploymentValueProps> = ({ deployment }) => {
+  if (!deployment) {
+    return <Text>—</Text>;
+  }
   if (deployment.kind === 'automatic') {
-    return (
-      <Text kind="body/regular/sm" title="The gateway picked a running deployment for each request">
-        Automatic
-      </Text>
-    );
+    return <Text title="The gateway picked a running deployment for each request">Automatic</Text>;
   }
   return (
     <Link
-      to={getAgentDeploymentDetailRoute(workspace, deployment.name)}
+      to={getAgentDeploymentDetailRoute(deployment.workspace, deployment.name)}
       className="text-primary underline"
     >
       {deployment.name}

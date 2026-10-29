@@ -11,7 +11,11 @@ import {
   evaluationConfigError,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
-import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
+import {
+  AGENT_DEPLOYMENTS_URL,
+  agentDeployment,
+  agentDeploymentsHandler,
+} from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
@@ -377,6 +381,17 @@ describe('AgentEvaluationWizard', () => {
 
     expect(
       await screen.findByText('Evaluation deleted-run no longer exists. Pick another.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+  });
+
+  it('says the deployments could not be loaded and holds Run Evaluation', async () => {
+    mockLists();
+    server.use(http.get(AGENT_DEPLOYMENTS_URL, () => HttpResponse.json({}, { status: 500 })));
+    renderWizard({ sourceEvaluation: 'baseline' });
+
+    expect(
+      await screen.findByText(`Couldn't load the deployments of ${AGENT}. Retrying...`)
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
   });

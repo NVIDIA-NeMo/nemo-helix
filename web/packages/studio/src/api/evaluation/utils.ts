@@ -11,7 +11,9 @@ import { isPlainObject } from '@studio/util/functions';
 
 export type EvalJobKind = 'task' | 'dataset';
 
-export type EvalJobDeployment = { kind: 'deployment'; name: string } | { kind: 'automatic' };
+export type EvalJobDeployment =
+  | { kind: 'deployment'; workspace: string; name: string }
+  | { kind: 'automatic' };
 
 export interface EvalJobRow {
   id: string;
@@ -56,15 +58,26 @@ export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
   return stripWorkspacePrefix(name, job.workspace);
 };
 
-const GATEWAY_ROUTE = /\/apis\/agents\/v2\/workspaces\/[^/]+\/(deployments|agents)\/([^/]+)\/-\//;
+const GATEWAY_ROUTE = /\/apis\/agents\/v2\/workspaces\/([^/]+)\/(deployments|agents)\/([^/]+)\/-\//;
+
+const decodeSegment = (segment: string): string => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+};
 
 export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null => {
   const target = asRecord(asRecord(spec)?.target);
   const endpoint = target?.kind === 'agent' ? asRecord(target.agent) : target;
   const match = asNonEmptyString(endpoint?.url)?.match(GATEWAY_ROUTE);
-  if (!match) return null;
-  return match[1] === 'deployments'
-    ? { kind: 'deployment', name: decodeURIComponent(match[2]) }
+  if (!match) {
+    return null;
+  }
+  const [, workspace, route, name] = match;
+  return route === 'deployments'
+    ? { kind: 'deployment', workspace: decodeSegment(workspace), name: decodeSegment(name) }
     : { kind: 'automatic' };
 };
 

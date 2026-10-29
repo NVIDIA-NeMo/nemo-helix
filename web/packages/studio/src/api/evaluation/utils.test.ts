@@ -84,17 +84,51 @@ describe('deploymentForEvalSpec', () => {
         agent: { url: `${gateway}/deployments/my-agent-k8s/-/v1/chat/completions` },
       },
     };
-    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'deployment', name: 'my-agent-k8s' });
+    expect(deploymentForEvalSpec(spec)).toEqual({
+      kind: 'deployment',
+      workspace: 'default',
+      name: 'my-agent-k8s',
+    });
   });
 
   it('reads the deployment from a dataset job, whose target is the endpoint itself', () => {
     const spec = { target: { url: `${gateway}/deployments/my-agent-k8s/-/v1/chat/completions` } };
-    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'deployment', name: 'my-agent-k8s' });
+    expect(deploymentForEvalSpec(spec)).toEqual({
+      kind: 'deployment',
+      workspace: 'default',
+      name: 'my-agent-k8s',
+    });
   });
 
   it('decodes an encoded deployment name', () => {
     const spec = { target: { url: `${gateway}/deployments/my%20agent/-/v1/chat/completions` } };
-    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'deployment', name: 'my agent' });
+    expect(deploymentForEvalSpec(spec)).toEqual({
+      kind: 'deployment',
+      workspace: 'default',
+      name: 'my agent',
+    });
+  });
+
+  it('keeps a malformed encoded name as written rather than throwing', () => {
+    const spec = { target: { url: `${gateway}/deployments/foo%zz/-/v1/chat/completions` } };
+    expect(deploymentForEvalSpec(spec)).toEqual({
+      kind: 'deployment',
+      workspace: 'default',
+      name: 'foo%zz',
+    });
+  });
+
+  it('keeps the workspace the URL names', () => {
+    const spec = {
+      target: {
+        url: 'https://helix.example.com/apis/agents/v2/workspaces/team-b/deployments/my-agent-k8s/-/v1/chat/completions',
+      },
+    };
+    expect(deploymentForEvalSpec(spec)).toEqual({
+      kind: 'deployment',
+      workspace: 'team-b',
+      name: 'my-agent-k8s',
+    });
   });
 
   it('reports the by-agent route as automatic', () => {
