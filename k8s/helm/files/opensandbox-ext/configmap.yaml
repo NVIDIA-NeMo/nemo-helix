@@ -793,8 +793,7 @@ data:
 
     A Compose task (one that ships ``docker-compose.yaml``) runs helper services next to ``main``.
     OpenSandbox can't run Compose, so the evaluation profile lists the services with prebuilt
-    images, and the OpenSandbox server's NeMo extension (``plugins/_temporary-scaled-evals/opensandbox_ext``)
-    adds them to the sandbox pod as extra containers:
+    images, and the OpenSandbox server's NeMo extension adds them to the sandbox pod as extra containers:
 
     .. code-block:: yaml
 
