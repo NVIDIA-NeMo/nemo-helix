@@ -20,6 +20,7 @@ from typing import Any, Optional
 import torch
 import yaml
 from huggingface_hub import hf_hub_download
+from nhx.core.models.parallelism.checkpoint import iter_config_blocks
 from nhx.core.models.schemas import (
     MambaConfig,
     ModelSpec,
@@ -216,8 +217,18 @@ def detect_moe_config_from_cfg(cfg: PretrainedConfig) -> Optional[MoEConfig]:
     """
     Detect and return MoE configuration if present.
 
-    Uses config attributes rather than family name checks.
+    Uses config attributes rather than family name checks. Experts may sit on a
+    nested language config (Nemotron Omni keeps them on ``text_config``), so the
+    root is searched first and then those nested blocks.
     """
+    for block in iter_config_blocks(cfg):
+        found = _detect_moe_on_block(block)
+        if found is not None:
+            return found
+    return None
+
+
+def _detect_moe_on_block(cfg: Any) -> Optional[MoEConfig]:
     # Check various expert count attributes (different models use different names)
     num_experts = (
         getattr(cfg, "num_local_experts", None)
