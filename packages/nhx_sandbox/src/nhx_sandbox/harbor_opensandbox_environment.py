@@ -956,8 +956,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Run a command; explicit ``cwd``, then the task's workdir, then ``main``'s compose ``working_dir``, then the image's WORKDIR."""
         sandbox = self._require_sandbox()
         requested_uid = self._numeric_uid(self._resolve_user(user))
-        # Learn the image's uid before the first root command, so it can be mapped below.
-        if not self._image_uid_probed and requested_uid == 0:
+        # Learn the sandbox's own uid before the first command that names one, so `_uid_for` can compare them.
+        if not self._image_uid_probed and requested_uid is not None:
             await self._probe_image_uid()
         result = await self._driver.run(
             sandbox,
@@ -990,8 +990,17 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         return None
 
     def _uid_for(self, uid: int | None) -> int | None:
-        """The uid to send for a requested one: unchanged, except that root on a non-root image runs as the image's user."""
-        if uid != 0 or self._image_uid in (None, 0):
+        """The uid to send for a requested one; None runs the command as the sandbox's own user.
+
+        * The sandbox's own uid isn't sent. execd switches identity whenever it gets a uid, even to the one it already
+          runs as, and the switch needs ``CAP_SETGID``: on a sandbox that drops every capability, root commands on a
+          root image would all fail before they start.
+        * Root on a non-root image runs as the image's user, since execd can't switch to root there.
+        * Any other uid is sent as is.
+        """
+        if uid is None or uid == self._image_uid:
+            return None
+        if uid != 0 or self._image_uid is None:
             return uid
         if not self._warned_root_unavailable:
             self._warned_root_unavailable = True
