@@ -350,10 +350,13 @@ async def test_recreated_workload_gets_distinct_provider_and_cannot_borrow_exist
 
 
 async def test_orphan_sweep_preserves_attached_and_recent_providers(setup):
+    now = [1000.0]
+    setup.provisioner.clock = lambda: now[0]
     names = await setup.provisioner.prepare(binding(), **setup.kwargs)
+    now[0] += 599
     await setup.provisioner.cleanup_unused()
     assert names[0] in setup.gateway.providers
-    setup.gateway.providers[names[0]].metadata.labels["nemo-helix/created"] = "1"
+    now[0] += 1
     setup.gateway.attached.add("sandbox-1")
     await setup.provisioner.cleanup_unused()
     assert names[0] in setup.gateway.providers
