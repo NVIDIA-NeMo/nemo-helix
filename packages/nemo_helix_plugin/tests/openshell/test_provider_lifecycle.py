@@ -126,7 +126,6 @@ class Gateway:
                 if provider.metadata.resource_version != previous.metadata.resource_version:
                     raise Conflict()
                 assert not provider.credential_handles
-                self.updates.append(request)
                 # Renewal must not depend on metadata updates being applied.
                 provider.metadata.CopyFrom(previous.metadata)
             else:
@@ -152,6 +151,14 @@ class Gateway:
                 )
                 provider.credential_handles[key].CopyFrom(dm.CredentialHandle(**wire.data(response)["handle"]))
             provider.credentials.clear()
+            if isinstance(request, pb.UpdateProviderRequest):
+                # Credential storage yields; compare against the committed winner.
+                if (
+                    request.provider.metadata.resource_version
+                    != self.providers[provider.metadata.name].metadata.resource_version
+                ):
+                    raise Conflict()
+                self.updates.append(request)
             self.providers[provider.metadata.name] = provider
             if previous:
                 for key in updated_keys:
