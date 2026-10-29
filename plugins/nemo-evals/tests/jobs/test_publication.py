@@ -68,6 +68,7 @@ from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values import Model, RunConfigOnline, RunConfigOnlineModel
 from nhx_evals_sdk.values.agents import NemoAgentToolkitAgent
+from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult  # noqa: F401
 from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
 from pydantic import ValidationError
@@ -792,20 +793,42 @@ def test_a_non_positive_otlp_request_budget_is_rejected(spec_type: type[IntakePu
         spec_type(evaluation_id="eval-1", max_otlp_request_bytes=budget)
 
 
-def test_agent_publication_forwards_the_otlp_request_budget(
-    intake: InMemoryIntakeService, mocker: MockerFixture
-) -> None:
-    forwarded = mocker.patch("nemo_evals.jobs.publication.publish_to_intake", wraps=publish_to_intake)
+def test_agent_publication_splits_otlp_traces_at_the_spec_budget(intake: InMemoryIntakeService) -> None:
+    trace_id, root_id = "0123456789abcdef0123456789abcdef", "0102030405060708"
+    spans = [{"traceId": trace_id, "spanId": root_id, "name": "agent run"}] + [
+        {
+            "traceId": trace_id,
+            "spanId": f"{index:016x}",
+            "parentSpanId": root_id,
+            "name": f"child-{index}",
+            "attributes": [{"key": "payload", "value": {"stringValue": "x" * 1000}}],
+        }
+        for index in range(1, 4)
+    ]
+    trace = EvidenceDescriptor(
+        kind="trace", format="otlp", data={"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+    )
+    result = _result()
+    result = result.model_copy(
+        update={
+            "trials": [
+                result.trials[0].model_copy(update={"evidence": CandidateEvidence(descriptors={"trace": trace})})
+            ]
+        }
+    )
 
-    publish_agent_eval_result(
-        _result(),
-        spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", max_otlp_request_bytes=2_097_152),
+    outcome = publish_agent_eval_result(
+        result,
+        spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", max_otlp_request_bytes=2500),
         target=None,
         workspace="default",
         intake=intake.client(),
     )
 
-    assert forwarded.call_args.kwargs["max_otlp_request_bytes"] == 2_097_152
+    assert outcome.status == HelixJobStatus.COMPLETED
+    bodies = [request["body"] for request in intake.otlp_requests]
+    assert len(bodies) > 1
+    assert all(isinstance(body, bytes) and len(body) <= 2500 for body in bodies)
 
 
 def test_evaluate_job_forwards_the_otlp_request_budget(

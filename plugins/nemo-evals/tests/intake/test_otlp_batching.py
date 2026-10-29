@@ -135,6 +135,27 @@ def test_each_emitted_request_is_exactly_as_large_as_accounted() -> None:
     assert requests[0] == exact
 
 
+def test_size_accounting_is_exact_across_scope_and_resource_boundaries() -> None:
+    # The first request opens a second scope and then a second resource; it fills the budget
+    # exactly only if each of those transitions is accounted to the byte.
+    resources = [
+        _resource("a", [("a1", [_span(1, payload_bytes=20_000), _span(2, payload_bytes=129)]), ("a2", [_span(3)])]),
+        _resource("b", [("b1", [_span(4, payload_bytes=200), _span(5, payload_bytes=5_000)])]),
+    ]
+    payload = ExportTraceServiceRequest(resource_spans=resources).SerializeToString()
+    first = ExportTraceServiceRequest(
+        resource_spans=[
+            resources[0],
+            _resource("b", [("b1", [resources[1].scope_spans[0].spans[0]])]),
+        ]
+    ).SerializeToString()
+
+    requests = split_otlp_request(payload, max_request_bytes=len(first))
+
+    assert requests[0] == first
+    assert [span.name for _, _, span in _flatten(requests)] == [f"span-{index}" for index in range(1, 6)]
+
+
 def test_a_span_too_large_for_any_request_fails_without_returning_a_batch() -> None:
     spans = [_span(1), _span(2, parent=1, payload_bytes=1000), _span(3, parent=1, payload_bytes=10_000)]
     payload = ExportTraceServiceRequest(resource_spans=[_resource("r", [("s", spans)])]).SerializeToString()
