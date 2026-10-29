@@ -76,6 +76,9 @@ outputs:
   jobs-openshell:
     description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
     value: ${{ steps.filter.outputs.jobs-openshell }}
+  job-secret-auth:
+    description: "'true' if launcher Secret authentication or delegated workload authorization changed"
+    value: ${{ steps.filter.outputs.job-secret-auth }}
   ngc-metadata:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
@@ -262,6 +265,20 @@ runs:
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
             - 'packages/nemo_helix_plugin/**'
+          job-secret-auth:
+            - 'services/core/jobs/**'
+            - 'services/core/auth/**'
+            - 'services/core/secrets/**'
+            - 'packages/nhx_common/**'
+            - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_testing/**'
+            - 'packages/nhx_platform_runner/**'
+            - 'contrib/auth/authentik/gateway/envoy.yaml'
+            - 'tools/go/**'
+            - 'conftest.py'
+            - 'pytest.ini'
+            - '.github/workflows/ci.yaml'
+            - '.github/actions/changes/action.yaml'
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'
