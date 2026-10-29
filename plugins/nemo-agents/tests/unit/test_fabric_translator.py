@@ -551,7 +551,7 @@ class TestTranslateAgentConfig:
             "nvidia.fabric.claude",
             # Installed manifests with no stock short name.
             "nvidia.fabric.nooa",
-            "nvidia.fabric.insights-analyst",
+            "nvidia.helix.compass.analyst",
         ],
     )
     @pytest.mark.usefixtures("installed_adapter_manifests")

@@ -606,9 +606,9 @@ class TestRenderFabricDockerfile:
     @pytest.mark.parametrize(
         "harnesses",
         [
-            "  analyst:\n    kind: nvidia.fabric.insights-analyst\n",
+            "  analyst:\n    kind: nvidia.helix.compass.analyst\n",
             # Not the default, but a deployment may still select it.
-            "  main:\n    kind: codex\n  analyst:\n    kind: nvidia.fabric.insights-analyst\n",
+            "  main:\n    kind: codex\n  analyst:\n    kind: nvidia.helix.compass.analyst\n",
         ],
     )
     @pytest.mark.usefixtures("installed_adapter_manifests")
@@ -621,7 +621,7 @@ class TestRenderFabricDockerfile:
 
         with pytest.raises(
             ValueError,
-            match=r"Harness 'analyst' uses Fabric adapter 'nvidia.fabric.insights-analyst', "
+            match=r"Harness 'analyst' uses Fabric adapter 'nvidia.helix.compass.analyst', "
             r"which an image packaged without --pyproject doesn't install\. Run it with `nemo agents execute`, "
             r"or package with --pyproject for a project that installs the adapter \(or --template for a Dockerfile "
             r"that does\)",
@@ -660,7 +660,7 @@ class TestRenderFabricDockerfile:
 
         (tmp_path / "pyproject.toml").write_text('[project]\nname = "acme"\nversion = "0.1.0"\n')
         config = tmp_path / "agent.yaml"
-        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: nvidia.fabric.insights-analyst\n")
+        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: nvidia.helix.compass.analyst\n")
 
         result = render_fabric_dockerfile(config, tmp_path / "pyproject.toml")
 

@@ -65,7 +65,7 @@ def installed_adapter_ids(root: Path | None = None) -> frozenset[str]:
     an adapter means installing a package, which already takes a restart to load.
 
     The ID comes from the manifest, not its directory (``compass/`` holds
-    ``nvidia.fabric.insights-analyst``), and one directory may hold several
+    ``nvidia.helix.compass.analyst``), and one directory may hold several
     manifests (``nooa/`` holds ``nooa`` and ``nooa-bench``). An unreadable
     manifest is skipped so one broken plugin can't block every other adapter.
     """
