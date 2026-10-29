@@ -143,6 +143,7 @@ const nameAndRun = async (user: ReturnType<typeof userEvent.setup>) => {
     expect(screen.getByLabelText('Evaluation Name')).toBeInTheDocument();
   });
   await user.type(screen.getByLabelText('Evaluation Name'), 'run-1');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
   await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 };
 

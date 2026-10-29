@@ -58,6 +58,7 @@ from nemo_agents_plugin.schema import (
     DeploymentPage,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
+from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
@@ -398,6 +399,8 @@ async def _mark_deployment_deleting_once(
         logger.exception("Failed to look up deployment '%s' before delete", name)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc
 
+    if is_container_deployment_mode(dep.deployment_mode):
+        await _reopen_timed_out_backend_delete(entity_client, workspace=workspace, name=name)
     if dep.status == "deleting":
         return
 
@@ -407,3 +410,14 @@ async def _mark_deployment_deleting_once(
     except NemoEntityNotFoundError:
         logger.info("Deployment '%s' already deleted before status update", name)
         return
+
+
+async def _reopen_timed_out_backend_delete(entity_client: NemoEntitiesClient, *, workspace: str, name: str) -> None:
+    """Retry a backend teardown that timed out; the runner leaves it FAILED until the user deletes again."""
+    try:
+        backend_dep = await entity_client.get(Deployment, name=name, workspace=workspace)
+    except NemoEntityNotFoundError:
+        return
+    if backend_dep.delete_timed_out():
+        backend_dep.status = "DELETING"
+        await entity_client.update(backend_dep)

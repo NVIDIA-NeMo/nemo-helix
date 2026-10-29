@@ -56,7 +56,7 @@ def profiles(*execution_profiles: Any) -> Generator[None, None, None]:
 
     client = MagicMock()
     client.get_execution_profiles = _get_execution_profiles
-    with patch.object(optimize_module, "client_from_platform", return_value=client):
+    with patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=client):
         yield
 
 
@@ -157,7 +157,7 @@ async def test_compile_prefers_the_subprocess_executor_and_stamps_the_spec() -> 
 async def test_compile_falls_back_to_the_cpu_container() -> None:
     with (
         profiles(CPU_PROFILE),
-        patch.object(optimize_module, "get_qualified_image", return_value="reg.example/nhx-tasks:test"),
+        patch("nemo_helix_plugin.jobs.executor.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         job_spec = await compile_spec(staged_spec(), profile="default")
 
@@ -181,7 +181,7 @@ async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     client = MagicMock()
     client.get_execution_profiles = _boom
     with (
-        patch.object(optimize_module, "client_from_platform", return_value=client),
+        patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=client),
         pytest.raises(HelixJobDependencyUnavailableError, match="temporarily unavailable"),
     ):
         await compile_spec(staged_spec())

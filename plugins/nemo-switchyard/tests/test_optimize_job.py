@@ -74,7 +74,10 @@ def platform(
     client.get_execution_profiles = _get_execution_profiles
     client.get_agent.return_value.data.return_value = SimpleNamespace(config=agent)
     client.create_virtual_model.side_effect = _create_virtual_model
-    with patch.object(optimize_module, "client_from_platform", return_value=client):
+    with (
+        patch.object(optimize_module, "client_from_platform", return_value=client),
+        patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=client),
+    ):
         yield client
 
 
@@ -110,7 +113,7 @@ async def test_compile_prefers_the_subprocess_executor_and_stamps_the_workspace(
 async def test_compile_falls_back_to_the_cpu_container() -> None:
     with (
         platform(CPU_PROFILE),
-        patch.object(optimize_module, "get_qualified_image", return_value="reg.example/nhx-tasks:test"),
+        patch("nemo_helix_plugin.jobs.executor.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         (step,) = (await compile_spec(profile="default")).steps
 

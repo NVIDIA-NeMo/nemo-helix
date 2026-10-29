@@ -243,6 +243,7 @@ functional-services = [
   "nhx-intake",
   "nhx-hello-world",
   "nhx-platform-seed",
+  "nemo-agent-hardener-plugin",
 ]
 
 # nhx-api variant used only to deploy DeepAgents in container E2E tests.
@@ -272,6 +273,8 @@ cpu-tasks = [
   # Ships the switchyard strategy job the optimize task imports in the nhx-tasks image.
   "nemo-switchyard-plugin",
   "nhx-hello-world",
+  # Task modules for nhx-agent-hardener-tasks, which layers the agent-hardener and garak venvs on this image.
+  "nemo-agent-hardener-plugin",
 ]
 
 # GPU task dependencies (for nhx-gpu-tasks container)
@@ -641,6 +644,8 @@ extra-paths = [
   "plugins/nemo-guardrails/tests",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
+  # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
+  "plugins/nemo-deployments/tests/unit",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",

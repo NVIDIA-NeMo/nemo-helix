@@ -23,14 +23,6 @@ logger = logging.getLogger(__name__)
 _DELETE_COMPLETE_STATUSES = frozenset({"SUCCEEDED", "DELETED"})
 
 
-def _is_terminal_deleting_timeout_failure(deployment: Deployment) -> bool:
-    """Return True when delete reconciliation already recorded a deleting timeout."""
-    if deployment.status != "FAILED":
-        return False
-    details = deployment.error_details
-    return isinstance(details, dict) and details.get("reason") == "deleting_timeout"
-
-
 def deployment_id(deployment: Deployment) -> str:
     return f"{deployment.workspace}/{deployment.name}"
 
@@ -207,25 +199,25 @@ class DeploymentReconciler:
     async def _reconcile_delete(self, deployment: Deployment) -> None:
         dep_id = deployment_id(deployment)
         self._drift_cache.remove(dep_id)
-        if _is_terminal_deleting_timeout_failure(deployment):
+        if deployment.delete_timed_out():
             return
+        if not _last_event_is_deleting(deployment):
+            deployment = await self._record_status(
+                deployment,
+                BackendStatusUpdate(status="DELETING", status_message="Stopping deployment"),
+            )
         timeout_update = self._check_deleting_timeout(deployment)
         if timeout_update is not None:
             await self._update_deployment_status(deployment, timeout_update)
             return
 
         backend = self._try_resolve_backend(deployment)
-        if deployment.status != "DELETING":
-            await self._update_deployment_status(
-                deployment,
-                BackendStatusUpdate(status="DELETING", status_message="Stopping deployment"),
-            )
-
         if backend is not None:
             try:
                 status_update = await backend.delete_deployment(deployment.workspace, deployment.name)
-            except Exception:
+            except Exception as exc:
                 logger.warning("Backend delete failed for %s — will retry", dep_id, exc_info=True)
+                await self._update_deleting_message(deployment, str(exc))
                 return
             if status_update.status not in _DELETE_COMPLETE_STATUSES:
                 logger.debug(
@@ -234,6 +226,7 @@ class DeploymentReconciler:
                     status_update.status,
                     status_update.status_message,
                 )
+                await self._update_deleting_message(deployment, status_update.status_message)
                 return
         else:
             logger.warning("No executor for delete of %s — removing entity only", dep_id)
@@ -409,16 +402,18 @@ class DeploymentReconciler:
         if elapsed < timeout:
             return None
         elapsed_int = int(elapsed)
+        last_message = deployment.status_message
         return BackendStatusUpdate(
             status="FAILED",
             status_message=(
                 f"Deployment stuck in DELETING for {elapsed_int}s (timeout: {timeout}s). "
-                "Backend resources were not removed."
+                "Backend resources were not removed." + (f" Last status: {last_message}" if last_message else "")
             ),
             error_details={
                 "reason": "deleting_timeout",
                 "elapsed_seconds": elapsed_int,
                 "timeout_seconds": timeout,
+                **({"last_status_message": last_message} if last_message else {}),
             },
         )
 
@@ -430,13 +425,22 @@ class DeploymentReconciler:
             BackendStatusUpdate(status="PENDING", status_message=message),
         )
 
+    async def _update_deleting_message(self, deployment: Deployment, reason: str) -> None:
+        """Surface why a delete is still retrying without a history event, which would reset the delete timeout."""
+        message = "Waiting for backend to delete deployment" + (f": {reason}" if reason else "")
+        if deployment.status_message == message:
+            return
+        deployment.status_message = message
+        await self._save(deployment)
+
     async def _update_deployment_status_failure(self, deployment: Deployment, message: str) -> None:
         await self._update_deployment_status(
             deployment,
             BackendStatusUpdate(status="FAILED", status_message=message),
         )
 
-    async def _update_deployment_status(self, deployment: Deployment, update: BackendStatusUpdate) -> None:
+    async def _update_deployment_status(self, deployment: Deployment, update: BackendStatusUpdate) -> Deployment:
+        """Apply the update and return the saved entity, or the input unchanged when nothing differs."""
         if (
             deployment.status == update.status
             and deployment.status_message == update.status_message
@@ -444,8 +448,11 @@ class DeploymentReconciler:
             and deployment.exit_code == update.exit_code
             and deployment.error_details == update.error_details
         ):
-            return
+            return deployment
+        return await self._record_status(deployment, update)
 
+    async def _record_status(self, deployment: Deployment, update: BackendStatusUpdate) -> Deployment:
+        """Apply the update, append a history event, and return the saved entity."""
         deployment.status = update.status
         deployment.status_message = update.status_message
         deployment.endpoints = update.endpoints
@@ -458,10 +465,10 @@ class DeploymentReconciler:
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
         )
-        await self._save(deployment)
+        return await self._save(deployment)
 
-    async def _save(self, deployment: Deployment) -> None:
-        await self._entities.update(deployment)
+    async def _save(self, deployment: Deployment) -> Deployment:
+        return await self._entities.update(deployment)
 
 
 def _starting_timestamp(deployment: Deployment) -> datetime | None:
@@ -477,6 +484,10 @@ def _starting_timestamp(deployment: Deployment) -> datetime | None:
     if deployment.status_history and deployment.status_history[0].timestamp:
         return datetime.fromisoformat(deployment.status_history[0].timestamp)
     return None
+
+
+def _last_event_is_deleting(deployment: Deployment) -> bool:
+    return bool(deployment.status_history) and deployment.status_history[-1].status == "DELETING"
 
 
 def _deleting_timestamp(deployment: Deployment) -> datetime | None:

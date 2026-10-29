@@ -37,9 +37,11 @@ from nhx.common.jobs.schemas import (
 )
 from nhx.core.files.app.backends.base import StorageImpl
 from nhx.core.files.exceptions import InvalidFilterError
+from opentelemetry import trace
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 DuckDBQueryParam = str | int | datetime
 
@@ -157,19 +159,38 @@ class DuckDBLogRepository:
 
     @classmethod
     def _connect(cls, storage: StorageImpl) -> duckdb.DuckDBPyConnection:
-        conn = duckdb.connect(
-            ":memory:",
-            config={
-                "autoload_known_extensions": "false",
-                "autoinstall_known_extensions": "false",
-            },
-        )
-        from nhx.core.files.app.backends.s3 import S3StorageImpl
+        with tracer.start_as_current_span("logs.duckdb.connect"):
+            conn = duckdb.connect(
+                ":memory:",
+                config={
+                    "autoload_known_extensions": "false",
+                    "autoinstall_known_extensions": "false",
+                },
+            )
+            from nhx.core.files.app.backends.s3 import S3StorageImpl
 
-        if isinstance(storage, S3StorageImpl):
-            cls._load_s3_extensions(conn)
-            cls._configure_s3_secret(conn, storage.config)
-        return conn
+            if isinstance(storage, S3StorageImpl):
+                with tracer.start_as_current_span("logs.duckdb.load_s3_extensions"):
+                    cls._load_s3_extensions(conn)
+                with tracer.start_as_current_span("logs.duckdb.configure_s3_secret"):
+                    cls._configure_s3_secret(conn, storage.config)
+            return conn
+
+    @classmethod
+    def _run_query(
+        cls, conn: duckdb.DuckDBPyConnection, query: str, params: list[DuckDBQueryParam], mode: str
+    ) -> list[QueriedLogEntry]:
+        """Execute a log query, timing DuckDB execution separately from row fetch/validation."""
+        with tracer.start_as_current_span("logs.duckdb.query") as span:
+            span.set_attribute("logs.query.mode", mode)
+            with tracer.start_as_current_span("logs.duckdb.execute"):
+                result = conn.execute(query, params)
+            with tracer.start_as_current_span("logs.duckdb.fetch") as fetch_span:
+                rows = cls._fetch_queried_logs(result)
+                fetch_span.set_attribute("logs.rows_returned", len(rows))
+            if rows:
+                span.set_attribute("logs.total_count", rows[0].total_count)
+            return rows
 
     @staticmethod
     def _load_s3_extensions(conn: duckdb.DuckDBPyConnection) -> None:
@@ -436,7 +457,7 @@ class DuckDBLogRepository:
             """
             cls._ensure_single_statement(query)
             query_params: list[DuckDBQueryParam] = [*params, page_size + 1, offset]
-            logs = cls._fetch_queried_logs(conn.execute(query, query_params))
+            logs = cls._run_query(conn, query, query_params, mode="offset")
 
             # Extract total count from first row (all rows have same _total_count).
             total_count = logs[0].total_count if logs else 0
@@ -492,7 +513,7 @@ class DuckDBLogRepository:
             query = cls._build_tail_query(base_table, where_clause)
             cls._ensure_single_statement(query)
             query_params: list[DuckDBQueryParam] = [*params, page_size + 1]
-            rows = cls._fetch_queried_logs(conn.execute(query, query_params))
+            rows = cls._run_query(conn, query, query_params, mode="tail")
 
             total_count = rows[0].total_count if rows else 0
             has_previous_window = len(rows) > page_size
@@ -531,17 +552,17 @@ class DuckDBLogRepository:
             base_table, where_clause, params = cls._prepare_query(base_path, filters)
             query = cls._build_cursor_v1_query(base_table, where_clause)
             cls._ensure_single_statement(query)
-            rows = cls._fetch_queried_logs(
-                conn.execute(
-                    query,
-                    [
-                        *params,
-                        cursor.boundary_timestamp,
-                        cursor.boundary_timestamp,
-                        cursor.boundary_row_hash,
-                        page_size + cursor.emitted_boundary_rows + 1,
-                    ],
-                )
+            rows = cls._run_query(
+                conn,
+                query,
+                [
+                    *params,
+                    cursor.boundary_timestamp,
+                    cursor.boundary_timestamp,
+                    cursor.boundary_row_hash,
+                    page_size + cursor.emitted_boundary_rows + 1,
+                ],
+                mode="cursor_v1",
             )
 
             total_count = rows[0].total_count if rows else 0
