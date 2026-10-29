@@ -343,8 +343,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             return self._create_step_update(step, metadata)
         ttl_seconds = step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
         if self.check_step_ttl(step, ttl_seconds):
+            if not self._terminate_process(metadata, force=True):
+                return self._create_step_update(step, metadata)
             message = f"Job timed out after reaching max TTL of {ttl_seconds} seconds"
-            self._terminate_process(metadata, force=True)
+            self._finish_logs(metadata)
             self._update_task(
                 step,
                 metadata,
@@ -668,20 +670,22 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             pass
         return details
 
-    def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> None:
+    def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> bool:
+        """Signal the process group; return False if the process had already exited."""
         if metadata.process.poll() is not None:
-            return
+            return False
         self._terminate_process_group(metadata.process, force=force)
         if force:
             try:
                 metadata.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
-            return
+            return True
         try:
             metadata.process.wait(timeout=self._execution_profile_config.graceful_shutdown_timeout_seconds)
         except subprocess.TimeoutExpired:
             self._terminate_process(metadata, force=True)
+        return True
 
     @staticmethod
     def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> None:

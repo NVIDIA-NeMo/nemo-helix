@@ -126,9 +126,9 @@ def test_first_sync_of_a_queued_step_does_not_kill_its_running_process(
     """Queue time before schedule() does not count against ttl_seconds_before_active."""
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
-    metadata = _schedule_step_created_ago(
-        backend, step, backend._execution_profile_config.ttl_seconds_before_active + 300
-    )
+    age_seconds = backend._execution_profile_config.ttl_seconds_before_active + 300
+    assert age_seconds < backend._execution_profile_config.ttl_seconds_active
+    metadata = _schedule_step_created_ago(backend, step, age_seconds)
     try:
         update = backend.sync(step)
 
@@ -170,6 +170,7 @@ def test_sync_kills_a_running_process_past_the_active_ttl(
         assert update.status == HelixJobStatus.ERROR
         assert update.error_details == {"message": f"Job timed out after reaching max TTL of {ttl_seconds} seconds"}
         assert metadata.process.wait(timeout=5) is not None
+        assert metadata.closed_logs
         assert mock_jobs_client.update_attempt_step_task.call_args.kwargs["body"].status == HelixJobStatus.ERROR
     finally:
         if metadata.process.poll() is None:
@@ -196,17 +197,49 @@ def test_sync_honors_the_step_active_ttl_for_a_pending_step(
 
 
 @pytest.mark.parametrize("status", [HelixJobStatus.PENDING, HelixJobStatus.ACTIVE])
+@pytest.mark.parametrize(
+    ("exit_code", "expected_status", "expected_error"),
+    [
+        (0, HelixJobStatus.COMPLETED, {}),
+        (7, HelixJobStatus.ERROR, {"message": "Job exited with code 7"}),
+    ],
+)
 def test_sync_reports_the_exit_code_of_a_process_that_finished_past_the_ttl(
-    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending, status
+    mock_nemo_client,
+    tmp_path,
+    mock_platform_config,
+    test_step_pending,
+    status,
+    exit_code,
+    expected_status,
+    expected_error,
 ):
     """A process that already exited is not timed out; its exit code decides."""
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", f"exit {exit_code}"])
+    metadata = _schedule_step_created_ago(backend, step, backend._execution_profile_config.ttl_seconds_active + 300)
+    assert metadata.process.wait(timeout=5) == exit_code
+    step.status = status
+
+    update = backend.sync(step)
+
+    assert update.status == expected_status
+    assert update.error_details == expected_error
+
+
+def test_sync_reports_the_exit_code_of_a_process_that_exits_before_the_ttl_kill(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    """A process that exits between the running check and the TTL kill is not reported as timed out."""
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
     metadata = _schedule_step_created_ago(backend, step, backend._execution_profile_config.ttl_seconds_active + 300)
     assert metadata.process.wait(timeout=5) == 0
-    step.status = status
+    real_poll = metadata.process.poll
+    polls = iter([None])
 
-    update = backend.sync(step)
+    with patch.object(metadata.process, "poll", side_effect=lambda: next(polls, real_poll())):
+        update = backend.sync(step)
 
     assert update.status == HelixJobStatus.COMPLETED
 
