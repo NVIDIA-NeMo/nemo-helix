@@ -334,15 +334,14 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 error_details={"message": message},
             )
 
-        # The TTLs bound running and scheduling time. A pausing step is bounded by its pause
-        # deadline, and a cancelling step was just terminated above, so neither is timed out here.
-        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
+        # The TTL bounds running time. A pausing step is bounded by its pause deadline, and a
+        # cancelling step was just terminated above, so neither is timed out here. A step stays
+        # pending until the first sync after schedule(), but its process is already running, so
+        # the active TTL applies rather than the before-active one. A process that has exited is
+        # not timed out: its exit code decides.
+        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING) or metadata.process.poll() is not None:
             return self._create_step_update(step, metadata)
-        ttl_seconds = (
-            step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
-            if step.status == HelixJobStatus.ACTIVE
-            else self._execution_profile_config.ttl_seconds_before_active
-        )
+        ttl_seconds = step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
         if self.check_step_ttl(step, ttl_seconds):
             message = f"Job timed out after reaching max TTL of {ttl_seconds} seconds"
             self._terminate_process(metadata, force=True)
