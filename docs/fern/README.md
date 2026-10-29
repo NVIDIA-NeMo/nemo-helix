@@ -123,6 +123,8 @@ The picker contains release lines, not individual patch releases. To preserve ol
 
 Redirect aliases are discovered from tags, not maintained in a JSON list. Authored redirects take precedence, generated aliases are refreshed idempotently, and a dedicated patch branch is never redirected away. No aliases are generated for versions before 0.5 or from 0.9 onward; newer release lines use branch-line URLs from the start.
 
+Retired-page redirects follow the same rule per version. A release branch's `docs.yml` lists its retired pages under `/latest/...`, the only slug it publishes as. Materialization mirrors each of those under the branch's version slug, so `/v0.9/documentation/agents/plugins-and-skills` redirects to `/nemo-helix/v0.9/documentation/reference/plugin-architecture` just as `/latest/...` does. Only redirects from that branch's own `docs.yml` are mirrored, so a version never redirects to a page it does not contain.
+
 Local materialization, CI previews, and production publishing use the same discovery and preview rules. Run `npm test` in this directory for isolated Git-fixture regression tests.
 
 ## Gated (unready) features

@@ -80,7 +80,6 @@ def test_automodel_sft_smoke(
             "training": {"training_type": "sft", "finetuning_type": finetuning_type, "max_seq_length": 1024},
             "schedule": {"epochs": 1, "max_steps": MAX_STEPS},
             "batch": {"global_batch_size": 8, "micro_batch_size": 1},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
             "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},
             "output": {"name": output},
             "deployment_config": f"{ws}/{vllm_lora_template}",
@@ -118,7 +117,6 @@ def test_unsloth_sft_smoke(
             },
             "training": {"finetuning_type": finetuning_type},
             "schedule": {"epochs": 1, "max_steps": MAX_STEPS},
-            "optimizer": {"learning_rate": 1e-4 if finetuning_type == "lora" else 5e-6},
             "output": output_spec,
             "deployment_config": f"{ws}/{vllm_lora_template}",
         }
@@ -149,7 +147,6 @@ def test_rl_dpo_smoke(
                 "max_steps": MAX_STEPS,
                 "batch_size": 8,
                 "micro_batch_size": 1,
-                "learning_rate": 5e-6,
                 "max_seq_length": 1024,
                 "parallelism": {"num_nodes": 1, "num_gpus_per_node": 1},
             },

@@ -253,6 +253,11 @@ class TestSchedule:
         spec = _create_request(backend).spec
         assert list(spec.providers) == ["owned-provider"]
         assert set(spec.policy.network_policies) == {"nemo_workload"}
+        rules = spec.policy.network_policies["nemo_workload"].endpoints[0].rules
+        assert (
+            "PATCH",
+            f"/apis/jobs/v2/workspaces/{step.workspace}/jobs/{step.job}/attempts/{step.attempt_id}/status-details",
+        ) in {(rule.allow.method, rule.allow.path) for rule in rules}
         assert "/app/bin/custom-jobs-launcher" in {
             binary.path for binary in spec.policy.network_policies["nemo_workload"].binaries
         }

@@ -22,6 +22,7 @@ import secrets
 from typing import Any, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
@@ -44,6 +45,7 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
+from nemo_agents_plugin.fabric.adapters import CUSTOM_IMAGE_HINT, UnknownAdapterError, validate_harness_kinds
 from nemo_agents_plugin.runner.deployments_backend import (
     image_entrypoint_unsupported_message,
     require_deployment_mode_available,
@@ -69,6 +71,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.schema import PaginationData
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +159,12 @@ async def create_deployment(
         await authorize_provider_references(
             merged.providers, workspace=workspace, secrets_client=AsyncSecretsClient.from_client(files_client)
         )
+    # A requested image may install adapters this server can't see; the container checks them itself.
+    if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
+        body.image.strip() and is_container_deployment_mode(body.deployment_mode)
+    ):
+        # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
+        await asyncio.to_thread(_validate_harness_kinds, merged.config)
 
     # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
     spec = SpecRevision()
@@ -206,6 +215,15 @@ def _resolve_deployment_config(agent: Agent, *, workspace: str) -> dict[str, Any
         )
     except AgentConfigFormatError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_harness_kinds(config: dict[str, Any]) -> None:
+    try:
+        validate_harness_kinds(AgentConfig.model_validate(config))
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent config: {exc}") from exc
+    except UnknownAdapterError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid agent config: {exc} {CUSTOM_IMAGE_HINT}") from exc
 
 
 async def _resolve_deployment_environment(

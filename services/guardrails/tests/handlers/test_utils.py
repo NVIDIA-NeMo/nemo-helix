@@ -16,7 +16,7 @@ from nhx.guardrails.app.handlers.utils import (
     set_main_model_merged_custom_headers_into_context,
     update_models_in_config,
 )
-from nhx.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.entities.values._private import Model, ModelParameters, RailsConfig
 from pytest_mock import MockerFixture
 
 default_llm_provider = os.getenv("DEFAULT_LLM_PROVIDER", "nim")
@@ -112,6 +112,34 @@ class TestUpdateModelsInConfig:
         # Parameters from config should be preserved
         assert main_model.parameters["base_url"] == "https://mock-nim/v1"
         assert main_model.parameters["temperature"] == 0.7
+
+    def test_updated_models_keep_model_parameters_type(self, mocker: MockerFixture):
+        """`model_copy` skips validation, so parameters must not be left as plain dicts."""
+        config_with_base_url = RailsConfig(
+            models=[
+                Model(type="main", engine="nim", parameters={"base_url": "https://mock-nim/v1"}).model_dump(),
+                Model(
+                    type="content_safety",
+                    engine="nim",
+                    model="nvidia/nemoguard",
+                    parameters={"base_url": "https://mock-nim/v1"},
+                ).model_dump(),
+            ]
+        )
+        mocker.patch(
+            "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
+            return_value={"x-custom": "value"},
+        )
+
+        updated_config = update_models_in_config(
+            config_with_base_url, Model(type="main", model="meta/llama-3.1-8b-instruct", engine="nim")
+        )
+        added_config = update_models_in_config(config_with_base_url, Model(type="new", model="model3", engine="nim"))
+
+        for model in [*updated_config.models, *added_config.models]:
+            assert isinstance(model.parameters, ModelParameters)
+        assert updated_config.models[0].parameters.base_url == "https://mock-nim/v1"
+        assert updated_config.models[1].parameters.default_headers == {"x-custom": "value"}
 
     def test_propagate_custom_headers_to_non_main_models(self, config: RailsConfig, mocker: MockerFixture):
         new_model = Model(type="type3", model="model3", engine="engine3")

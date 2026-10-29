@@ -551,6 +551,48 @@ class TestSpecFlagRename:
         assert result.exit_code == 0
         assert captured["spec"] == {"name": "FromYaml"}
 
+    def test_submit_spec_overlays_spec_file(self, tmp_path: Path, monkeypatch) -> None:
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+        spec_file = tmp_path / "spec.yaml"
+        spec_file.write_text("name: FromYaml\ndataset: default/base\ntarget:\n  url: http://file\n  retries: 3\n")
+        app = _app_with_jobs(_GreetJob)
+        result = runner.invoke(
+            app,
+            [
+                "greet",
+                "--spec-file",
+                str(spec_file),
+                "--spec",
+                '{"dataset": "default/other", "target": {"url": "http://inline"}}',
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["spec"] == {
+            "name": "FromYaml",
+            "dataset": "default/other",
+            "target": {"url": "http://inline", "retries": 3},
+        }
+
+    def test_submit_non_object_spec_with_spec_file_exits_cleanly(self, tmp_path: Path, monkeypatch) -> None:
+        def _fail(*_args, **_kwargs) -> dict:
+            raise AssertionError("submit must not be reached for invalid spec")
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _fail)
+        spec_file = tmp_path / "spec.yaml"
+        spec_file.write_text("name: FromYaml\n")
+        app = _app_with_jobs(_GreetJob)
+        result = runner.invoke(app, ["greet", "--spec-file", str(spec_file), "--spec", "[]"])
+        assert result.exit_code == 1
+        combined = (result.output or "") + (result.stderr or "")
+        assert "invalid spec" in combined
+        assert "list" in combined
+
     def test_submit_missing_spec_file_exits_cleanly(self, tmp_path: Path) -> None:
         missing_file = tmp_path / "missing.yaml"
         app = _app_with_jobs(_GreetJob)
@@ -877,6 +919,24 @@ class TestFunctionSubmitVerb:
         assert "/apis/" in captured_url[0]
         assert captured_body[0] == {"name": "Ada"}
         assert captured_headers[0]["X-Request-ID"] == "req-42"
+
+    def test_submit_spec_overlays_spec_file(self, tmp_path: Path, monkeypatch) -> None:
+        captured_body: list[dict] = []
+
+        def _fake_post(_url: str, body: dict, **_kwargs) -> None:
+            captured_body.append(body)
+
+        monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _fake_post)
+        spec_file = tmp_path / "spec.yaml"
+        spec_file.write_text("name: site-a\ntarget:\n  url: http://file\n  timeout_seconds: 5\n")
+        app = _app_with_functions(_NestedFunction)
+        result = runner.invoke(
+            app,
+            ["ping", "--spec-file", str(spec_file), "--spec", '{"target": {"url": "http://inline"}}'],
+            obj=_BaseUrlState("http://test"),
+        )
+        assert result.exit_code == 0, result.output
+        assert captured_body == [{"name": "site-a", "target": {"url": "http://inline", "timeout_seconds": 5}}]
 
     def test_submit_streams_ndjson_lines(self, monkeypatch) -> None:
         # Build an httpx.MockTransport that returns a chunked NDJSON body
@@ -1292,6 +1352,32 @@ class TestJobAutoSpecFlags:
         )
         assert result.exit_code == 0, result.output
         assert captured["spec"] == {"name": "from-flag", "loud": True}
+
+    def test_precedence_spec_file_then_spec_then_per_field(self, tmp_path: Path, monkeypatch) -> None:
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+        spec_file = tmp_path / "spec.json"
+        spec_file.write_text(json.dumps({"name": "from-file", "loud": False, "extra": "kept"}))
+        app = _app_with_jobs(_GreetSpecJob)
+        result = runner.invoke(
+            app,
+            [
+                "greet-spec",
+                "--spec-file",
+                str(spec_file),
+                "--spec",
+                '{"name": "from-spec", "loud": true}',
+                "--name",
+                "from-flag",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["spec"] == {"name": "from-flag", "loud": True, "extra": "kept"}
 
     def test_nested_field_uses_dotted_flag_name(self) -> None:
         app = _app_with_jobs(_NestedSpecJob)

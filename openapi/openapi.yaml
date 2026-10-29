@@ -201,7 +201,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/AccessKeyErrorResponse'
         '403':
-          description: Service-bound Scoped Access Keys require HelixAdmin
+          description: Service-bound Scoped Access Keys require HelixAdmin, or service_attributes
+            were set by a caller that isn't a platform service
           content:
             application/json:
               schema:
@@ -1277,11 +1278,12 @@ paths:
         '403':
           description: Not allowed to create entities in the requested workspace.
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     get:
       tags:
       - Entity Store
@@ -1549,11 +1551,12 @@ paths:
         '403':
           description: Not allowed to update entities in the requested workspace.
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Entity Store
@@ -8303,11 +8306,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     get:
       tags:
       - Models
@@ -8421,11 +8425,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Adapter'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
   /apis/models/v2/workspaces/{workspace}/models/{model_name}/adapters/{adapter}:
     delete:
       tags:
@@ -8504,11 +8509,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Adapter'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
   /apis/models/v2/workspaces/{workspace}/models/{name}:
     get:
       tags:
@@ -8603,11 +8609,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
         '422':
-          description: Validation Error
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Models
@@ -9420,6 +9427,18 @@ components:
           items:
             $ref: '#/components/schemas/AccessKeyWorkspaceGrant'
           type: array
+        service_attributes:
+          title: Service Attributes
+          description: Facts a platform service vouches for, signed into the token
+            under that service's name in the nhx_service_attributes claim. Only a
+            service principal, usually acting for a user, may set them. At most 32
+            names matching ^[A-Za-z][A-Za-z0-9_.-]{0,63}$, values nested at most one
+            object or array deep, strings of at most 256 characters, and 2048 bytes
+            as JSON.
+          nullable: true
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
       type: object
       title: AccessKeyCreateRequest
       description: Request body for creating a Scoped Access Key.
@@ -9500,6 +9519,15 @@ components:
           nullable: true
           type: string
           format: date-time
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes platform services signed into the key, by service
+            name. Read-only to the key's owner.
         token:
           type: string
           title: Token
@@ -9630,6 +9658,15 @@ components:
           nullable: true
           type: string
           format: date-time
+        service_attributes:
+          additionalProperties:
+            additionalProperties:
+              $ref: '#/components/schemas/JsonValue'
+            type: object
+          type: object
+          title: Service Attributes
+          description: Attributes platform services signed into the key, by service
+            name. Read-only to the key's owner.
       type: object
       required:
       - jti
@@ -10800,18 +10837,6 @@ components:
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
-    BaseModelFilter:
-      additionalProperties: false
-      description: Filter for base model properties.
-      properties:
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Filter by name of the base model.
-          title: Name
-      title: BaseModelFilter
-      type: object
     CPUExecutionProvider:
       properties:
         provider:
@@ -12742,6 +12767,23 @@ components:
           training_options:
             learning_rate: 0.01
         name: my-config
+    EntityErrorResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+        code:
+          title: Code
+          description: Set to workspace_not_found when the target workspace does not
+            exist.
+          nullable: true
+          type: string
+          const: workspace_not_found
+      type: object
+      required:
+      - detail
+      title: EntityErrorResponse
+      description: Error returned when an entity write is rejected by the entity store.
     EntityUpdate:
       properties:
         new_name:
@@ -12782,6 +12824,18 @@ components:
           target_id: llama-2-7b
           training_options:
             learning_rate: 0.02
+    EntityWriteValidationErrorResponse:
+      anyOf:
+      - $ref: '#/components/schemas/HTTPValidationError'
+      - $ref: '#/components/schemas/EntityErrorResponse'
+      title: EntityWriteValidationErrorResponse
+      description: 'Request validation error, or an entity write rejected by the entity
+        store.
+
+
+        Routes that write entities declare this for 422. Declaring any 422 model
+
+        replaces FastAPI''s request-validation schema, so the union keeps both shapes.'
     EnvironmentMetadataContent:
       properties:
         format:
@@ -14227,16 +14281,6 @@ components:
       - grpo
       title: FinetuningType
       description: Finetuning types.
-    FinetuningTypeFilter:
-      additionalProperties: false
-      description: Filter for PEFT-related properties.
-      properties:
-        finetuning_type:
-          allOf:
-          - $ref: '#/components/schemas/FinetuningType'
-          description: Filter models with adapters with this fine-tuning type.
-      title: FinetuningTypeFilter
-      type: object
     FloatFilter:
       additionalProperties: false
       properties:
@@ -14466,7 +14510,8 @@ components:
       - registration_key_file
       - profiles
       title: GatewayCredentialConfig
-      description: Trusted controller configuration; never copied into a workload.
+      description: 'Configure backend provider registration: gateway identity, signing
+        key and profiles.'
     GatewayInjectionProfile:
       properties:
         workspaces:
@@ -14493,7 +14538,8 @@ components:
       - workspaces
       - credential_keys
       title: GatewayInjectionProfile
-      description: Operator approval of a gateway profile for selected Helix workspaces.
+      description: Limit a provider profile to approved Helix workspaces and credential
+        slots.
     GatewayProviderBinding:
       properties:
         profile:
@@ -14512,6 +14558,8 @@ components:
       - profile
       - credentials
       title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     GenerationLog:
       properties:
         activated_rails:
@@ -18425,18 +18473,16 @@ components:
           type: string
         base_model:
           anyOf:
-          - $ref: '#/components/schemas/BaseModelFilter'
           - type: boolean
           - type: string
           description: 'Filter by base model: true = has a base model, false = no
-            base model, { name: string } or string = match base model name.'
+            base model, string = match base model name.'
           title: Base Model
         adapters:
-          anyOf:
-          - $ref: '#/components/schemas/FinetuningTypeFilter'
-          - type: boolean
-          description: Filter models with Parameter Efficient Fine-tuning Adapters.
+          description: 'Filter by Parameter Efficient Fine-tuning adapters: true =
+            has at least one adapter, false = has none.'
           title: Adapters
+          type: boolean
         finetuning_type:
           anyOf:
           - $ref: '#/components/schemas/FinetuningType'

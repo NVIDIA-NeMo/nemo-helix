@@ -78,7 +78,7 @@ def _deployments_response(
     }
 
 
-def _install_mock_transport(response: dict[str, Any]):
+def _install_mock_transport(response: dict[str, Any] | list[dict[str, Any]]):
     return lambda request: httpx.Response(200, request=request, json=response)
 
 
@@ -349,3 +349,37 @@ def test_get_supports_yaml_output(app, make_cli_state) -> None:
     assert result.exit_code == 0, result.output
     assert "name: nemo-agent" in result.stdout
     assert "config_format: nat-workflow-v1" in result.stdout
+
+
+def _post_run_actions_response() -> list[dict[str, Any]]:
+    return [
+        {"kind": "agents.noop", "title": "No action", "description": "Do nothing after the agent runs."},
+        {"kind": "insights.analysis", "title": "Compass analysis", "description": "Persist Compass insights."},
+    ]
+
+
+class TestListPostRunActionsOutput:
+    def test_lists_installed_actions_as_a_table(self, app, make_cli_state) -> None:
+        requests: list[httpx.Request] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, request=request, json=_post_run_actions_response())
+
+        with _on_a_terminal():
+            result = runner.invoke(app, ["post-run-actions", "list"], obj=make_cli_state(_handler))
+
+        assert result.exit_code == 0, result.output
+        assert requests[0].url.path == "/apis/agents/v2/post-run-actions"
+        assert "agents.noop" in result.output
+        assert "Compass analysis" in result.output
+
+    def test_lists_installed_actions_as_json(self, app, make_cli_state) -> None:
+        result = runner.invoke(
+            app,
+            ["post-run-actions", "list", "--output-format", "json"],
+            obj=make_cli_state(_install_mock_transport(_post_run_actions_response())),
+        )
+
+        assert result.exit_code == 0, result.output
+        assert [action["kind"] for action in json.loads(result.stdout)] == ["agents.noop", "insights.analysis"]

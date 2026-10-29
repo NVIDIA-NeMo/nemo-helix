@@ -1,42 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolve an AgentEnvironment and merge its EnvironmentSpec into agent config.
+"""Resolve environment references and merge their settings for agent launch.
 
-An AgentDeployment references an :class:`AgentEnvironment` (by name or inline).
-At create time the deployment route:
-
-1. resolves the environment - dereferencing any ``"workspace/name"`` refs for
-   the environment and its two specs into concrete inline specs;
-2. merges the resolved EnvironmentSpec into the Platform-owned agent config
-   (``nemo-agents-spec-v1``) so the Fabric translator sees a single config, and
-   collects the spec's secret-env references (top-level + per-MCP) for the
-   container backend to inject as secret-backed env vars; and
-3. snapshots the resolved ComputeSpec and the collected secrets onto the
-   deployment for the container backend.
-
-Provider fulfillments are resolved separately and their secret entries are
-excluded from process-env injection. Launch consumers must call
-``require_runtime_support`` before using a merge result; only configured
-OpenShell execution can consume provider bindings.
-
-Secret references are never written into the config as plaintext. Unconsumed
-top-level ``secrets`` and each declared MCP server's ``secrets`` are
-returned as an ENV_VAR_NAME -> ref map; the substrate injects the resolved value
-into the process env under that name, and MCP servers read their credentials
-from the process env by name (env-var-name indirection) rather than the config
-embedding a raw reference string.
-
-Merge precedence is **EnvironmentSpec wins over the Agent config**: the Agent
-config supplies defaults, and the EnvironmentSpec overrides them where it sets a
-value. Fields the EnvironmentSpec leaves unset fall back to the Agent's
-defaults, so an agent authored without an environment behaves identically.
-
-This ordering is the middle tier of an intended precedence chain
-``deployment overrides > EnvironmentSpec > Agent defaults``. A future
-deployment-specific override layer (e.g. an inline ``environment_overrides`` on
-the deployment) slots in by applying this same merge a second time with the
-higher-priority spec last, so each successive layer overrides the previous.
+EnvironmentSpec values override agent defaults. Jobs and deployment callers
+snapshot the result so later environment edits do not change a running workload.
+Secret references stay separate from agent config: process-env bindings go in
+``secrets`` and OpenShell injection bindings go in ``providers``. Callers check
+backend compatibility with ``require_runtime_support`` before launch.
 """
 
 from __future__ import annotations
@@ -74,17 +45,11 @@ class ResolvedEnvironment:
 
 @dataclass(frozen=True)
 class MergedEnvironment:
-    """Result of merging an EnvironmentSpec into an agent config.
+    """Merged agent config and the secret references its backend must supply.
 
-    ``config`` is the merged ``nemo-agents-spec-v1`` config. ``secrets`` maps
-    ENV_VAR_NAME -> Secrets-service ref, collected from both the EnvironmentSpec's
-    unconsumed top-level ``secrets`` and every declared MCP server's ``secrets``.
-    The caller snapshots ``secrets`` onto the deployment so the substrate injects the
-    resolved value into the process env (never plaintext); MCP servers read their
-    credentials from that process env by name (env-var-name indirection), rather
-    than the config embedding a raw secret reference as a literal value.
-    ``providers`` holds external-injection bindings separately. Callers must
-    check runtime support before launching; there is no env-injection fallback.
+    ``secrets`` maps process-env names to references, including declared MCP
+    credentials. ``providers`` maps OpenShell bindings to resolved references;
+    those credentials must not fall back to process-env injection.
     """
 
     config: dict[str, Any]
@@ -92,7 +57,7 @@ class MergedEnvironment:
     providers: dict[str, ResolvedProviderFulfillment] = field(default_factory=dict)
 
     def require_runtime_support(self, backend: str = "") -> None:
-        """Reserve provider bindings for the gateway-aware execution backend."""
+        """Reject providers on other backends and process-env secrets on OpenShell."""
         if backend == "openshell" and self.secrets:
             raise EnvironmentResolutionError(
                 "OpenShell secrets require external injection bindings in settings.openshell.providers; "

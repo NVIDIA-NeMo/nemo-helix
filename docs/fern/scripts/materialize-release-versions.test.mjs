@@ -238,6 +238,70 @@ test("preserves authored redirects and refreshes generated aliases idempotently"
   assert.deepEqual(f.redirects(), [{ source: "/v0.8.0", destination: "/manual" }]);
 });
 
+test("mirrors each release branch's retired-page redirects under its version slug", (t) => {
+  const f = fixture(t);
+  put(f.seed, "docs/fern/docs.yml", [
+    "versions:",
+    "  - display-name: Latest",
+    "    path: versions/latest.yml",
+    "    slug: latest",
+    "redirects:",
+    "  - source: /documentation/old-page",
+    "    destination: /documentation/new-page",
+    "  - source: /latest/documentation/old-page",
+    "    destination: /latest/documentation/new-page",
+    "  - source: /latest/documentation/legacy/:path*",
+    "    destination: /latest/documentation/current/:path*",
+    "  - source: /latest/documentation/elsewhere",
+    "    destination: https://example.com/elsewhere",
+    "",
+  ].join("\n"));
+  git(f.seed, "add", ".");
+  git(f.seed, "commit", "-m", "0.8 redirects without basepath");
+  f.branch("release/0.8");
+  put(f.seed, "docs/fern/docs.yml", [
+    "versions:",
+    "  - display-name: Latest",
+    "    path: versions/latest.yml",
+    "    slug: latest",
+    "redirects:",
+    "  - source: /latest/documentation/old-page",
+    "    destination: /nemo-helix/latest/documentation/new-page",
+    "  - source: /latest/documentation/only-in-09",
+    "    destination: /nemo-helix/latest/documentation/renamed-in-09",
+    "",
+  ].join("\n"));
+  git(f.seed, "add", ".");
+  git(f.seed, "commit", "-m", "0.9 redirects with basepath");
+  f.branch("release/0.9");
+  const config = join(f.checkout, "docs/fern/docs.yml");
+  writeFileSync(
+    config,
+    "instances:\n  - url: example.com/nemo-helix\n    custom-domain: docs.example.com/nemo-helix\n"
+      + readFileSync(config, "utf8")
+      + "redirects:\n  - source: /v0.9/documentation/only-in-09\n    destination: /manual\n",
+  );
+  f.run();
+  const find = (source) => f.redirects().find((r) => r.source === source);
+  assert.deepEqual(find("/v0.8/documentation/old-page"), {
+    source: "/v0.8/documentation/old-page", destination: "/nemo-helix/v0.8/documentation/new-page",
+  });
+  assert.deepEqual(find("/v0.8/documentation/legacy/:path*"), {
+    source: "/v0.8/documentation/legacy/:path*", destination: "/nemo-helix/v0.8/documentation/current/:path*",
+  });
+  assert.deepEqual(find("/v0.9/documentation/old-page"), {
+    source: "/v0.9/documentation/old-page", destination: "/nemo-helix/v0.9/documentation/new-page",
+  });
+  // Authored redirects win, unversioned sources are not mirrored, and external targets are skipped.
+  assert.equal(find("/v0.9/documentation/only-in-09").destination, "/manual");
+  assert.equal(find("/v0.8/documentation/only-in-09"), undefined);
+  assert.equal(find("/v0.8/documentation/elsewhere"), undefined);
+  assert.ok(!f.redirects().some((r) => r.source.startsWith("/v0.8/latest") || r.source === "/v0.8/old-page"));
+  const first = f.redirects();
+  f.run();
+  assert.deepEqual(f.redirects(), first);
+});
+
 test("does not redirect away an existing patch-branch version, even a preview", (t) => {
   const f = fixture(t);
   f.branch("release/0.8.1");

@@ -1182,6 +1182,8 @@ components:
       - profile
       - credentials
       title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     HTTPGetAction:
       properties:
         path:

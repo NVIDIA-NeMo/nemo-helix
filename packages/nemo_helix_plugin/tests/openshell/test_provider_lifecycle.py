@@ -30,6 +30,9 @@ from nemo_deployments_plugin.backends.openshell.policy import (
 )
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.jobs import endpoints as jobs_endpoints
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, JobStatusDetailsUpdate
 from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
 from nemo_helix_plugin.openshell.provider_client import ProviderGatewayClient
 from nemo_helix_plugin.openshell.registration import RegistrationDenied, RegistrationTickets
@@ -653,6 +656,7 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
         workspace="team",
         binaries=["/usr/bin/python"],
         job="job-1",
+        attempt="attempt-1",
         step="run",
         fileset="results",
     )
@@ -664,6 +668,87 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
     assert all("/secrets/" not in path and "/entities/" not in path and "/auth/" not in path for _, path in allowed)
     assert ("POST", "/apis/jobs/v2/workspaces/team/jobs") not in allowed
     assert restricted.landlock.compatibility == "hard_requirement"
+
+    # Compare the handwritten policy with requests built by the actual client contract.
+    requests = [
+        jobs_endpoints.update_job_attempt_status_details(
+            workspace="team", job="job-1", attempt="attempt-1", body=JobStatusDetailsUpdate({})
+        ),
+        jobs_endpoints.update_attempt_step_status(
+            workspace="team",
+            job="job-1",
+            attempt="attempt-1",
+            name="run",
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
+        ),
+        jobs_endpoints.update_attempt_step_task(
+            workspace="team",
+            job="job-1",
+            attempt="attempt-1",
+            step="run",
+            name="*",
+            body=HelixJobTaskUpdate(),
+        ),
+        jobs_endpoints.get_attempt_step_task(
+            workspace="team",
+            job="job-1",
+            attempt="attempt-1",
+            step="run",
+            name="*",
+        ),
+    ]
+    expected = {(request.method, request.path_template.format(**request.path_params)) for request in requests}
+    actual = {
+        (method, path)
+        for method, path in allowed
+        if "/attempts/" in path or path.endswith("/status-details") or method == "PUT" and "/tasks/" in path
+    }
+    assert actual == expected
+
+
+def test_policy_preserves_external_access_while_replacing_all_helix_endpoints():
+    data = generate_policy_dict(filesystem=SandboxFilesystem(), egress=None)
+    data["network_policies"] = {
+        "nemo_workload": {
+            "name": "user-services",
+            "endpoints": [
+                {"host": "api.github.com", "port": 443},
+                {"host": "HELIX.EXAMPLE.", "port": 443},
+            ],
+            "binaries": [{"path": "/usr/bin/python"}],
+        },
+        "other_platform_access": {"endpoints": [{"host": "helix.example", "port": 80}]},
+        "packages": {"endpoints": [{"host": "pypi.org", "port": 443}]},
+    }
+    policy = build_sandbox_policy(data)
+    original = policy.SerializeToString()
+    restricted = restricted_platform_policy(
+        policy, host="helix.example", port=443, workspace="team", binaries=["/usr/bin/python"]
+    )
+    assert policy.SerializeToString() == original
+    assert restricted.network_policies["packages"] == policy.network_policies["packages"]
+    expected = type(policy.network_policies["nemo_workload"])()
+    expected.CopyFrom(policy.network_policies["nemo_workload"])
+    del expected.endpoints[1:]
+    assert restricted.network_policies["nemo_workload"] == expected
+    assert "other_platform_access" not in restricted.network_policies
+    platform = restricted.network_policies["nemo_workload_"].endpoints[0]
+    assert platform.host == "helix.example"
+    assert platform.port == 443
+    assert platform.rules
+    assert all("/secrets/" not in rule.allow.path for rule in platform.rules)
+    assert restricted.filesystem == policy.filesystem
+    assert restricted.process == policy.process
+
+
+@pytest.mark.parametrize("host", ["*", "*.example", "HELIX.*"])
+def test_policy_rejects_wildcard_access_overlapping_helix(host):
+    data = generate_policy_dict(filesystem=SandboxFilesystem(), egress=None)
+    data["network_policies"] = {"broad": {"endpoints": [{"host": host, "port": 443}]}}
+    with pytest.raises(ValueError, match="wildcard network endpoint overlaps Helix"):
+        restricted_platform_policy(
+            build_sandbox_policy(data), host="helix.example", port=443, workspace="team", binaries=[]
+        )
 
 
 @pytest.mark.parametrize("secret_env,env_names", [({"ALIAS": "token"}, set()), ({}, {"API_TOKEN"})])

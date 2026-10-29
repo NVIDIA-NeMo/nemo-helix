@@ -286,6 +286,11 @@ async def test_provider_created_before_sandbox_and_attached(
         profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
     )
     openshell_backend._executor_config.platform_egress = HelixEgressConfig(host="platform")
+    openshell_backend._policy = openshell_backend._build_executor_policy()
+    external = openshell_backend._policy.network_policies["github"]
+    external.CopyFrom(openshell_backend._policy.network_policies["nemo_helix"])
+    external.endpoints[0].host = "api.github.com"
+    external.endpoints[0].port = 443
     provisioner = AsyncMock()
     provisioner.prepare.return_value = ["owned-provider"]
     with (
@@ -313,7 +318,9 @@ async def test_provider_created_before_sandbox_and_attached(
     assert provisioner.prepare.await_args.kwargs["auth_enabled"] is auth_enabled
     request = mock_stub.CreateSandbox.call_args.args[0]
     assert list(request.spec.providers) == ["owned-provider"]
-    assert set(request.spec.policy.network_policies) == {"nemo_workload"}
+    assert set(request.spec.policy.network_policies) == {"github", "nemo_workload"}
+    assert request.spec.policy.network_policies["github"] == external
+    assert request.spec.policy.network_policies["nemo_workload"].endpoints[0].host == "platform"
     assert request.labels["nemo-helix/workload-id"] == "deployment-1"
     assert "API_TOKEN" not in request.spec.environment
     assert provisioner.prepare.await_args.kwargs["workload"].id == "deployment-1"

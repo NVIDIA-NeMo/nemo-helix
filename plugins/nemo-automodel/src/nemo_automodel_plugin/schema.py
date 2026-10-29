@@ -351,7 +351,15 @@ class BatchSpec(AutomodelSchema):
 
 
 class OptimizerSpec(AutomodelSchema):
-    learning_rate: float = Field(default=5e-6, gt=0.0)
+    learning_rate: float = Field(
+        default=5e-5,
+        gt=0.0,
+        description=(
+            "Peak learning rate. Left unset, it depends on the job: the bi_encoder and cross_encoder "
+            "recipes use 1e-5 and 3e-6 whatever the finetuning_type; other recipes use 5e-5 for LoRA "
+            "and 5e-6 for finetuning_type 'all_weights'."
+        ),
+    )
     min_learning_rate: float | None = Field(
         default=None, ge=0.0, description="Minimum learning rate for the cosine decay schedule."
     )
@@ -456,7 +464,11 @@ class AutomodelJobInput(AutomodelSchema):
             learning_rate, warmup_steps = 3e-6, 100
             global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
-            return self.model_copy(update={"training": training})
+            # A full-weight run updates every weight, so it takes a smaller step than LoRA.
+            optimizer = self.optimizer
+            if training.finetuning_type == "all_weights" and "learning_rate" not in optimizer.model_fields_set:
+                optimizer = optimizer.model_copy(update={"learning_rate": 5e-6})
+            return self.model_copy(update={"training": training, "optimizer": optimizer})
 
         batch_updates: dict[str, int] = {}
         if "global_batch_size" not in self.batch.model_fields_set:

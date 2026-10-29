@@ -409,3 +409,33 @@ def test_get_code_prints_the_typed_client_call_without_sending(app: typer.Typer,
     assert api.requests == []
     assert "client.get_analysis_run(" in result.stdout
     assert f'name="{RUN_NAME}"' in result.stdout
+
+
+@pytest.mark.parametrize("flag", ["--default-model", "--fast-model"])
+@pytest.mark.parametrize(
+    "model, warns",
+    [
+        ("default/NVIDIA-Nemotron-3.5-Lightning-30B", True),
+        ("default/nvidia-nvidia-nemotron-3-5-lightning-30b", True),
+        ("default/nvidia_nemotron_3_5_lightning_30b", True),
+        ("default/nvidia_nvidia_nemotron_3_5_lightning_30b", True),
+        ("default/nvidia-nemotron_3.5-lightning_30b", True),
+        ("default/nvidia-nemotron-4-lightning-30b", False),
+        ("default/nvidia-nemotron-3-5-lightning-70b", False),
+        ("default/nvidia-nemotron-3-5-lightning-30b-custom", True),
+        ("default/nvidia-nemotron-3.5-lightning-30b-a3b", True),
+        ("default/nvidia_nemotron_3_5_lightning_30b_custom", True),
+        ("default/nemotron-3.5-super-vl", False),
+        ("default/other-lightning", False),
+    ],
+)
+def test_model_warning_does_not_block_submission(app, api, flag, model, warns):
+    api.on("POST", RUNS, run_response_json())
+    other_flag = "--fast-model" if flag == "--default-model" else "--default-model"
+    result = _create(app, flag, model, other_flag, "default/nemotron-super-vl")
+    assert result.exit_code == 0, result.output
+    assert ("known tool-calling failures" in result.stderr) is warns
+    if warns:
+        assert "NVIDIA Nemotron 3.5 Super VL" in result.stderr
+    assert api.requests[0].body[flag.removeprefix("--").replace("-", "_")] == model
+    assert json.loads(result.stdout)["run"]["name"] == RUN_NAME

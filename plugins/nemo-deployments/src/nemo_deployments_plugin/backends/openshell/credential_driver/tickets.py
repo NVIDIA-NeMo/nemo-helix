@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Registration contract shared by the gateway driver and execution backends."""
+"""Re-export the signed registration request types used by the credential driver."""
 
 from nemo_helix_plugin.openshell.registration import (
     MAX_BINDING_LIFETIME as MAX_BINDING_LIFETIME,

@@ -30,7 +30,6 @@ Commands and job JSON for the `rl` backend, after `SKILL.md` § **Pre-flight** a
     "temperature": 1.0,
     "activation_checkpointing": true,
 
-    "learning_rate": 1e-5,
     "min_learning_rate": 9e-6,
     "adam_eps": 1e-8,
     "warmup_steps": 10,
@@ -118,7 +117,6 @@ nemo files list "$DATASET" --workspace default
   "training": {
     "type": "dpo",
     "epochs": 1,
-    "learning_rate": 5e-6,
     "max_seq_length": 1024,
     "batch_size": 32,
     "micro_batch_size": 1,

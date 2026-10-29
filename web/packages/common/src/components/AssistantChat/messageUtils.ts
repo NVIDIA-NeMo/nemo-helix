@@ -8,6 +8,10 @@ import type {
   TextMessagePart,
   ThreadMessageLike,
 } from '@assistant-ui/react';
+import {
+  humanizeChatError,
+  type DescribeChatError,
+} from '@nemo/common/src/components/AssistantChat/describeChatError';
 import type {
   ChatCompletionContentPart,
   ChatCompletionMessageParam,
@@ -36,6 +40,19 @@ export const createTextMessage = (
   role,
   content: [{ type: 'text', text }],
   status,
+});
+
+/**
+ * The content and status of an assistant reply whose request failed: the explanation as the body
+ * (see `humanizeChatError`) and the raw error in the status, where the error banner and the copy
+ * action read it.
+ */
+export const getFailedReply = (
+  errorMessage: string,
+  describe?: DescribeChatError
+): { parts: TextMessagePart[]; status: MessageStatus } => ({
+  parts: [{ type: 'text', text: humanizeChatError(errorMessage, describe) }],
+  status: { type: 'incomplete', reason: 'error', error: errorMessage },
 });
 
 const isTextPart = (part: unknown): part is TextMessagePart => {

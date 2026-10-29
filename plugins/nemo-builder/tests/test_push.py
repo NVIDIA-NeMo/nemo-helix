@@ -16,11 +16,19 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from nemo_builder_plugin.client import BuilderClient
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
 from nemo_builder_plugin.registry import RegistryError
 from nemo_builder_plugin.run import push as push_module
 from nemo_builder_plugin.run import tools
-from nemo_builder_plugin.run.push import Builder, Credentials, Refused, _publish_all, _push_one, signer
+from nemo_builder_plugin.run.push import (
+    Builder,
+    Credentials,
+    Refused,
+    _publish_all,
+    _push_one,
+    read_runtime_config,
+    signer,
+)
 from nemo_builder_plugin.signing import SigningKey, key_fingerprint
 from nemo_builder_plugin.steps import (
     REGISTRY_PASSWORD_ENV,
@@ -40,10 +48,10 @@ PEM = KEY.private_bytes(
 ).decode()
 
 
-def _layout(root: Path) -> str:
+def _layout(root: Path, config: bytes = b"{}") -> str:
+    """An OCI layout of one image whose config is ``config``; returns its manifest digest."""
     blobs = root / "blobs" / "sha256"
     blobs.mkdir(parents=True)
-    config = b"{}"
     (blobs / hashlib.sha256(config).hexdigest()).write_bytes(config)
     manifest = json.dumps(
         {"schemaVersion": 2, "config": {"digest": f"sha256:{hashlib.sha256(config).hexdigest()}"}, "layers": []}
@@ -89,12 +97,14 @@ class FakeBuilder:
         self.digest = digest
         self.events = events
         self.statuses = statuses or {}
+        self.runtime_configs: dict[str, ImageRuntimeConfig | None] = {}
 
     def row(self, image: str) -> ContainerImage:
         return _row(image, status=self.statuses.get(image, "pending"))
 
-    def complete(self, image: str, digest: str) -> ContainerImage:
+    def complete(self, image: str, digest: str, runtime_config: ImageRuntimeConfig | None) -> ContainerImage:
         self.events.append(f"complete {image} {digest}")
+        self.runtime_configs[image] = runtime_config
         return _row(image, self.digest, "ready")
 
 
@@ -217,9 +227,11 @@ class TestTheBuilderClient:
         builder, seen, _ = self._builder(
             [httpx.Response(200, json=_row(digest=digest, status="ready").model_dump(mode="json"))]
         )
-        assert builder.complete("demo-1-0", digest).digest == digest
+        runtime_config = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])
+        assert builder.complete("demo-1-0", digest, runtime_config).digest == digest
         assert seen[0].url.path == f"{IMAGES}/demo-1-0/complete"
-        assert json.loads(seen[0].content) == {"digest": digest}
+        body = json.loads(seen[0].content)
+        assert (body["digest"], body["runtime_config"]["entrypoint"]) == (digest, ["/bin/bash", "-l", "-c"])
 
     def test_a_platform_that_is_briefly_down_is_retried(self) -> None:
         digest = "sha256:" + "d" * 64
@@ -229,7 +241,7 @@ class TestTheBuilderClient:
                 httpx.Response(200, json=_row(digest=digest, status="ready").model_dump(mode="json")),
             ]
         )
-        builder.complete("demo-1-0", digest)
+        builder.complete("demo-1-0", digest, None)
         assert sleeps == [1.0]
 
     def test_reading_a_row_is_retried_too(self) -> None:
@@ -242,13 +254,13 @@ class TestTheBuilderClient:
     def test_a_refusal_is_not_retried(self) -> None:
         builder, _, sleeps = self._builder([httpx.Response(409, json={"detail": "already ready at another digest"})])
         with pytest.raises(NemoHTTPError):
-            builder.complete("demo-1-0", "sha256:" + "d" * 64)
+            builder.complete("demo-1-0", "sha256:" + "d" * 64, None)
         assert sleeps == []
 
     def test_a_platform_that_stays_down_is_given_up_on(self) -> None:
         builder, _, sleeps = self._builder([httpx.Response(503, json={"detail": "down"}) for _ in range(5)])
         with pytest.raises(NemoHTTPError):
-            builder.complete("demo-1-0", "sha256:" + "d" * 64)
+            builder.complete("demo-1-0", "sha256:" + "d" * 64, None)
         assert sleeps == [1.0, 2.0, 4.0, 8.0]
 
 
@@ -265,6 +277,15 @@ class TestPushOne:
             f"sign demo-1-0 {digest}",
             f"complete demo-1-0 {digest}",
         ]
+
+    def test_the_image_is_completed_with_how_it_starts(self, tmp_path: Path, events: list[str]) -> None:
+        config = {"config": {"Entrypoint": ["/bin/bash", "-l", "-c"], "Cmd": ["/app/run.sh"], "WorkingDir": "/app"}}
+        digest = _layout(tmp_path / "out", json.dumps(config).encode())
+        builder = FakeBuilder(digest, events)
+        _push_one(_row(), _image(), tmp_path / "out", builder=builder, sign=None, plain_http=False)
+        assert builder.runtime_configs["demo-1-0"] == ImageRuntimeConfig(
+            entrypoint=["/bin/bash", "-l", "-c"], cmd=["/app/run.sh"], working_dir="/app"
+        )
 
     def test_an_image_the_deployment_does_not_sign_is_pushed_and_completed(
         self, tmp_path: Path, events: list[str]
@@ -405,3 +426,39 @@ class TestPushingACopy:
 
         _push_one(_row(), image, tmp_path / "out", builder=FakeBuilder(digest, events), sign=None, plain_http=False)
         assert events[-1] == f"complete demo-1-0 {digest}"
+
+
+class TestReadingHowTheImageStarts:
+    def test_the_config_s_entrypoint_cmd_and_working_dir_are_read(self, tmp_path: Path) -> None:
+        # What a build writes for an image that inherits all three from its base image.
+        config = {"architecture": "amd64", "config": {"Entrypoint": ["/bin/bash", "-l", "-c"], "WorkingDir": "/app"}}
+        digest = _layout(tmp_path, json.dumps(config).encode())
+        assert read_runtime_config(tmp_path, digest) == ImageRuntimeConfig(
+            entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app"
+        )
+
+    @pytest.mark.parametrize(
+        "config",
+        [b"{}", b'{"config": null}', b'{"config": {"Entrypoint": [], "Cmd": null, "WorkingDir": ""}}'],
+        ids=["no-config", "null-config", "empty-values"],
+    )
+    def test_an_image_that_sets_nothing_records_nothing(self, tmp_path: Path, config: bytes) -> None:
+        assert read_runtime_config(tmp_path, _layout(tmp_path, config)) == ImageRuntimeConfig()
+
+    def test_a_config_that_does_not_match_its_digest_records_none(self, tmp_path: Path) -> None:
+        digest = _layout(tmp_path, b'{"config": {"Entrypoint": ["/start"]}}')
+        config_file = next(
+            path for path in (tmp_path / "blobs" / "sha256").iterdir() if b"Entrypoint" in path.read_bytes()
+        )
+        config_file.write_bytes(b'{"config": {"Entrypoint": ["/evil"]}}')
+        assert read_runtime_config(tmp_path, digest) is None
+
+    @pytest.mark.parametrize(
+        "config",
+        [b"not json", b'{"config": {"Entrypoint": "/start"}}', b'{"config": {"Entrypoint": [1, 2]}}'],
+        ids=["not-json", "entrypoint-not-a-list", "entrypoint-not-strings"],
+    )
+    def test_a_config_that_cannot_be_read_records_none_without_refusing_the_push(
+        self, tmp_path: Path, config: bytes
+    ) -> None:
+        assert read_runtime_config(tmp_path, _layout(tmp_path, config)) is None

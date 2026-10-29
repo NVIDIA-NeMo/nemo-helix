@@ -10,6 +10,35 @@ import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
 
 describe('uploadModalReducer', () => {
   describe('SET_FILES with auto-select', () => {
+    it.each(['disable', 'hide'] as const)(
+      'should NOT auto-select a single unsupported file when invalidFileMode is %s',
+      (invalidFileMode) => {
+        const readme: UploadFile = {
+          id: 'readme',
+          type: 'existing',
+          file: { path: 'README.md', size: 1, file_ref: 'r' } as never,
+        };
+        const state: UploadModalState = {
+          ...initialState,
+          acceptableFileTypes: ['.json', '.jsonl', '.csv'],
+          invalidFileMode,
+        };
+
+        expect(
+          uploadModalReducer(state, { type: 'SET_FILES', payload: [readme] }).selectedFiles
+        ).toEqual([]);
+
+        const csv: UploadFile = {
+          ...readme,
+          id: 'csv',
+          file: { ...readme.file, path: 'DATA.CSV' } as never,
+        };
+        expect(
+          uploadModalReducer(state, { type: 'SET_FILES', payload: [csv] }).selectedFiles
+        ).toEqual([csv]);
+      }
+    );
+
     it('should auto-select a single file when allowMultipleFileSelection is false', () => {
       const mockFile: UploadFile = {
         id: 'file1',

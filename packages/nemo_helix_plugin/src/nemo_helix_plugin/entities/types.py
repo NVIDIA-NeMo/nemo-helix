@@ -14,9 +14,56 @@ server constant it needs is inlined with a pointer back to the original.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
+
+# ---------------------------------------------------------------------------
+# Error responses
+# ---------------------------------------------------------------------------
+
+WorkspaceNotFoundCode = Literal["workspace_not_found"]
+WORKSPACE_NOT_FOUND_CODE: WorkspaceNotFoundCode = "workspace_not_found"
+
+
+class EntityErrorResponse(BaseModel):
+    """Error returned when an entity write is rejected by the entity store."""
+
+    detail: str
+    code: WorkspaceNotFoundCode | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Set to workspace_not_found when the target workspace does not exist.",
+    )
+
+
+class ValidationError(BaseModel):
+    """FastAPI request validation error item.
+
+    Named to match FastAPI's own schema so OpenAPI shares one component.
+    """
+
+    loc: list[str | int] = Field(description="Location of the validation error.")
+    msg: str = Field(description="Validation error message.")
+    type: str = Field(description="Validation error type.")
+
+
+class HTTPValidationError(BaseModel):
+    """FastAPI request validation error response.
+
+    Named to match FastAPI's own schema so OpenAPI shares one component.
+    """
+
+    detail: list[ValidationError] | None = Field(default=None, description="Validation error details.")
+
+
+class EntityWriteValidationErrorResponse(RootModel[HTTPValidationError | EntityErrorResponse]):
+    """Request validation error, or an entity write rejected by the entity store.
+
+    Routes that write entities declare this for 422. Declaring any 422 model
+    replaces FastAPI's request-validation schema, so the union keeps both shapes.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Response types

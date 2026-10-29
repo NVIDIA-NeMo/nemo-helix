@@ -671,6 +671,59 @@ class TestCreateDeployment:
         assert error in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "request_fields",
+        [
+            {"deployment_mode": "subprocess"},
+            # A subprocess runs in the platform's own environment, whatever image the request names.
+            {"deployment_mode": "subprocess", "image": "acme-agent:1"},
+            # A blank image names no image.
+            {"deployment_mode": "docker", "image": "   "},
+        ],
+    )
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_create_rejects_an_unknown_adapter_id(self, request_fields: dict[str, str]) -> None:
+        config = _fabric_agent_config()
+        config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.hermess"
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep", **request_fields},
+        )
+
+        assert resp.status_code == 400
+        assert "Harness 'hermes': Unsupported harness kind 'nvidia.fabric.hermess'" in resp.json()["detail"]
+        assert "accepted when the request names that image" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_create_leaves_adapter_ids_to_a_requested_image(self) -> None:
+        """The API can't see a custom image's adapters, so the container checks harness kinds itself."""
+        config = _fabric_agent_config()
+        config["harnesses"]["hermes"]["kind"] = "acme.custom.native"
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
+
+        async def _save_deployment(deployment: AgentDeployment) -> AgentDeployment:
+            deployment._id = f"deployment-{deployment.name}-id"
+            deployment._created_at = NOW
+            return deployment
+
+        mock_entity_client.create = AsyncMock(side_effect=_save_deployment)
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "docker", "image": "acme-agent:1"},
+        )
+
+        assert resp.status_code == 201
+        created_deployment: AgentDeployment = mock_entity_client.create.call_args[0][0]
+        assert created_deployment.config["harnesses"]["hermes"]["kind"] == "acme.custom.native"
+
     def test_create_returns_422_when_the_store_rejects_the_name(self) -> None:
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())

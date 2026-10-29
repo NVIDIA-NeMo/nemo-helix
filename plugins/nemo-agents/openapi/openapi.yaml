@@ -3,6 +3,25 @@ info:
   title: agents (plugin)
   version: 0.0.0
 paths:
+  /apis/agents/v2/post-run-actions:
+    get:
+      tags:
+      - Agent Post-Run Actions
+      summary: List Post Run Actions
+      description: List every installed post-run action an execute-agent job can set
+        as ``post_run_action.kind``.
+      operationId: list_post_run_actions_apis_agents_v2_post_run_actions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/PostRunActionInfo'
+                type: array
+                title: Response List Post Run Actions Apis Agents V2 Post Run Actions
+                  Get
   /apis/agents/v2/sample-agent:
     post:
       tags:
@@ -4371,21 +4390,6 @@ components:
       - updated_at
       - -updated_at
       title: EvaluateJobsSortField
-    ExecuteAgentExtensionConfig:
-      properties:
-        kind:
-          type: string
-          title: Kind
-          description: Trusted extension kind registered by an installed NeMo plugin.
-        config:
-          additionalProperties: true
-          type: object
-          title: Config
-          description: Extension-owned configuration.
-      type: object
-      required:
-      - kind
-      title: ExecuteAgentExtensionConfig
     ExecuteAgentJobConfig:
       properties:
         agent:
@@ -4447,11 +4451,11 @@ components:
             agents.jobs.default_image, then to the jobs substrate's chain (the execution
             profile's default_task_image, then the platform CPU tasks image).
           default: ''
-        extension:
+        post_run_action:
           allOf:
-          - $ref: '#/components/schemas/ExecuteAgentExtensionConfig'
-          description: Optional trusted plugin extension to run during the execute-agent
-            lifecycle.
+          - $ref: '#/components/schemas/PostRunActionConfig'
+          description: Plugin-provided action to run after a successful agent invocation,
+            inside the execute step; its failure fails the job. Defaults to 'agents.noop'.
       type: object
       required:
       - agent
@@ -4480,8 +4484,8 @@ components:
             $ref: '#/components/schemas/GatewayProviderBinding'
           type: object
           title: Providers
-        extension:
-          $ref: '#/components/schemas/ExecuteAgentExtensionConfig'
+        post_run_action:
+          $ref: '#/components/schemas/PostRunActionConfig'
       type: object
       required:
       - request
@@ -4761,6 +4765,8 @@ components:
       - profile
       - credentials
       title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     HTTPValidationError:
       properties:
         detail:
@@ -5720,6 +5726,45 @@ components:
       - total_pages
       - total_results
       title: PaginationData
+    PostRunActionConfig:
+      properties:
+        kind:
+          type: string
+          title: Kind
+          description: Post-run action kind registered by an installed NeMo plugin.
+            List installed kinds with `nemo agents post-run-actions list`.
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Action-owned configuration.
+      type: object
+      required:
+      - kind
+      title: PostRunActionConfig
+    PostRunActionInfo:
+      properties:
+        kind:
+          type: string
+          title: Kind
+          description: Kind to set on post_run_action.kind; the action's entry-point
+            name.
+        title:
+          type: string
+          title: Title
+          description: Human-readable name of the action.
+        description:
+          type: string
+          title: Description
+          description: One-line summary of what the action does after the agent runs.
+      type: object
+      required:
+      - kind
+      - title
+      - description
+      title: PostRunActionInfo
+      description: A post-run action installed on the platform, as set on an execute
+        job's ``post_run_action.kind``.
     ReferenceConfigInput:
       properties:
         fileset:

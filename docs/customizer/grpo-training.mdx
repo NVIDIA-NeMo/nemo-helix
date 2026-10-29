@@ -178,10 +178,13 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra convers
 .venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
+  --nemo-rl-root <nemo-rl-checkout> \
   --out-dir ./ascii-tree-pkg \
   --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
 ```
+
+`--nemo-rl-root` is a NeMo-RL checkout, submodules included, at the commit `NEMO_RL_REF` pins in `docker-bake.hcl`. The converter reads the training image's `nemo-gym`, `ray` and `openai` versions from it; without it, the package needs sandbox egress to start.
 
 <Note>
   Pin `--hub-version`. Left unset, the converter takes whatever the index offers
@@ -234,9 +237,10 @@ For `native-v1` only the server-type prefix is checked, so `responses_api_models
 Custom implementations need `{server_type}/{implementation}/` (with `app.py` and `requirements.txt`) in the FileSet for `native-v1` and `wheels-v1`. YAML under `configs/` does not replace that directory, and a directory without `requirements.txt` or `pyproject.toml` is not recognised as a server at all. Details: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages).
 
 <Note>
-  `pi-to-gym-conversion` currently only vendors wheels for `x86_64` today. On an
-  `arm64` cluster, build the closure yourself with the `pip download` command
-  above and pass it via `--wheels-dir`.
+  `pi-to-gym-conversion` supports `x86_64` only, and it also rejects `aarch64`
+  wheels passed with `--wheels-dir`. On an `arm64` cluster, build a `wheels-v1`
+  package instead, with the closure from
+  [Vendoring a wheel closure](#vendoring-a-wheel-closure) and `ARCH=aarch64`.
 </Note>
 
 ### Validate before uploading, whichever format you built
@@ -396,7 +400,7 @@ Omitting the `lora` block while setting `finetuning_type: "lora"` is fine — de
 
 ### Using the adapter
 
-The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Route inference through the provider gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`); the model-entity path always resolves to the base model.
+The adapter hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true`, so there is no new deployment to create before evaluating it. Send inference to the gateway's OpenAI-compatible route with the adapter's entity ID, `model: default/<base model>&adapters/default/<adapter>`; the gateway routes it through the base model's deployment.
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 

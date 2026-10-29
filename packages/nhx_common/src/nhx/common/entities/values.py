@@ -199,7 +199,7 @@ class Filter(_PluginFilter):
         1. Translates filter field names for the entity store
            (e.g., ``model`` → ``data.model``).
         2. For fields whose type includes ``bool`` alongside other types
-           (e.g., ``Union[BaseModelFilter, bool, str]``), rewrites
+           (e.g., ``Union[bool, str]``), rewrites
            ``$eq "true"/"false"`` to null / not-null checks.
         """
         field_map = cls._get_entity_field_map()

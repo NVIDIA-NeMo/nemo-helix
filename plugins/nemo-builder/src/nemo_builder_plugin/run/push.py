@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -29,7 +30,7 @@ import httpx
 from cryptography.exceptions import UnsupportedAlgorithm
 from nemo_builder_plugin.client import BuilderClient
 from nemo_builder_plugin.completion import CompleteRequest
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
 from nemo_builder_plugin.registry import REGISTRY_TIMEOUT_SECONDS, Registry, registry_client
 from nemo_builder_plugin.registry_auth import login
 from nemo_builder_plugin.run.tools import run_tool
@@ -47,12 +48,13 @@ from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.client_provider import get_task_nemo_client
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
-#: Larger than any index or manifest kaniko writes; read whole, so capped.
+#: Larger than any index, manifest or image config kaniko writes; read whole, so capped.
 _MAX_JSON_BYTES = 4 * 1024 * 1024
 
 _ATTEMPTS = 5
@@ -69,7 +71,7 @@ class _Builder(Protocol):
 
     def row(self, image: str) -> ContainerImage: ...
 
-    def complete(self, image: str, digest: str) -> ContainerImage: ...
+    def complete(self, image: str, digest: str, runtime_config: ImageRuntimeConfig | None) -> ContainerImage: ...
 
 
 @dataclass(frozen=True)
@@ -139,6 +141,15 @@ def _require(layout: Path, path: Path, *, directory: bool) -> None:
 
 def _read_json(layout: Path, path: Path) -> object:
     """``path`` parsed, opened without following a symlink, and only if it's a small regular file."""
+    data = _read_small_file(layout, path)
+    try:
+        return json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LayoutRejected(f"{path.relative_to(layout)} is not JSON") from exc
+
+
+def _read_small_file(layout: Path, path: Path) -> bytes:
+    """``path``'s bytes, opened without following a symlink, and only if it's a small regular file."""
     name = path.relative_to(layout)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -154,10 +165,7 @@ def _read_json(layout: Path, path: Path) -> object:
         data = handle.read(_MAX_JSON_BYTES + 1)
     if len(data) > _MAX_JSON_BYTES:
         raise LayoutRejected(f"{name} is larger than {_MAX_JSON_BYTES} bytes")
-    try:
-        return json.loads(data)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise LayoutRejected(f"{name} is not JSON") from exc
+    return data
 
 
 def _digest(value: object, *, named_by: str) -> str:
@@ -208,6 +216,41 @@ def validate_layout(layout: Path) -> str:
     return digest
 
 
+def read_runtime_config(layout: Path, digest: str) -> ImageRuntimeConfig | None:
+    """Read how the image ``digest`` starts by default from its config in ``layout``; None if it can't be read.
+
+    The config holds the image's ``ENTRYPOINT``, ``CMD`` and ``WORKDIR`` as the build resolved them, including what
+    the image inherits from its base image. Call after :func:`validate_layout`. The config's bytes are checked
+    against the digest its manifest names, so the values describe the image being pushed. A config that can't be
+    read is logged and recorded as None rather than refusing the push: the image itself is fine.
+    """
+    blobs = layout / "blobs" / "sha256"
+    try:
+        manifest = _read_json(layout, blobs / digest.removeprefix("sha256:"))
+        descriptor = manifest.get("config") if isinstance(manifest, dict) else None
+        if not isinstance(descriptor, dict):
+            raise LayoutRejected(f"{digest} names no image config")
+        config_digest = _digest(descriptor.get("digest"), named_by="the manifest")
+        data = _read_small_file(layout, blobs / config_digest.removeprefix("sha256:"))
+        if f"sha256:{hashlib.sha256(data).hexdigest()}" != config_digest:
+            raise LayoutRejected(f"the image config doesn't match its digest {config_digest}")
+
+        document = json.loads(data)
+        # An image config keeps the runtime defaults under `config`, which may be missing or null.
+        settings = document.get("config") if isinstance(document, dict) else None
+        if not isinstance(settings, dict):
+            settings = {}
+        # An empty `Entrypoint` or `Cmd` means the image has none, the same as a missing one.
+        return ImageRuntimeConfig(
+            entrypoint=settings.get("Entrypoint") or None,
+            cmd=settings.get("Cmd") or None,
+            working_dir=settings.get("WorkingDir") or None,
+        )
+    except (OSError, LayoutRejected, ValidationError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("can't read how %s starts; recording none: %s", sanitize_for_log(digest), sanitize_for_log(exc))
+        return None
+
+
 class Builder:
     """This step's calls to the builder's routes, acting for the submitter, retrying what may be transient.
 
@@ -234,12 +277,11 @@ class Builder:
                 self._sleep(2.0**attempt)
         raise failure
 
-    def complete(self, image: str, digest: str) -> ContainerImage:
+    def complete(self, image: str, digest: str, runtime_config: ImageRuntimeConfig | None) -> ContainerImage:
+        body = CompleteRequest(digest=digest, runtime_config=runtime_config)
         return self._call(
             f"completing {image}",
-            lambda: self._client.complete_container_image(
-                workspace=self._workspace, name=image, body=CompleteRequest(digest=digest)
-            ).data(),
+            lambda: self._client.complete_container_image(workspace=self._workspace, name=image, body=body).data(),
         )
 
     def row(self, image: str) -> ContainerImage:
@@ -277,6 +319,7 @@ def _push_one(
     digest = validate_layout(layout)
     if image.expected_digest is not None and digest != image.expected_digest:
         raise Refused(f"{image.image} copies {image.expected_digest}, but its layout holds {digest}")
+    runtime_config = read_runtime_config(layout, digest)
 
     # Destinations come from the compiler: nothing read off the volume reaches this list.
     for ref in image.refs:
@@ -289,7 +332,7 @@ def _push_one(
         # Every annotation comes from the row, as the builder wrote it at submit.
         sign(row, digest)
 
-    done = builder.complete(image.image, digest)
+    done = builder.complete(image.image, digest, runtime_config)
     if done.status != "ready" or done.digest != digest:
         raise Refused(f"the builder completed {image.image} as {done.status} at {done.digest}, not ready at {digest}")
     logger.info(

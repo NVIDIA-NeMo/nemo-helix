@@ -173,12 +173,14 @@ const meta = {
     rows: 30,
     downloadFilename: 'job-demo-logs.txt',
     emptyMessage: 'No logs available yet',
+    logStatus: 'ended',
   },
   argTypes: {
     lineCount: { control: { type: 'number', min: 0, step: 100 } },
     streamIntervalMs: { control: { type: 'number', min: 0, step: 100 } },
     rows: { control: { type: 'number', min: 1 } },
     loadProgress: { control: 'object' },
+    logStatus: { control: 'select', options: ['live', 'ended', undefined] },
   },
 } satisfies Meta<StoryArgs>;
 
@@ -217,7 +219,7 @@ export const MultilineMessages: Story = {
 };
 
 export const CarriageReturns: Story = {
-  args: { carriageReturns: true, streamIntervalMs: 500 },
+  args: { carriageReturns: true, streamIntervalMs: 500, logStatus: 'live' },
 };
 
 export const FillHeight: Story = {
@@ -232,11 +234,11 @@ export const FillHeightLongLines: Story = {
 
 /** New lines keep the view pinned to the bottom until the reader scrolls up. */
 export const Streaming: Story = {
-  args: { lineCount: 100, streamIntervalMs: 500 },
+  args: { lineCount: 100, streamIntervalMs: 500, logStatus: 'live' },
 };
 
 export const StreamingFillHeight: Story = {
-  args: { lineCount: 100, streamIntervalMs: 500, fillHeight: true },
+  args: { lineCount: 100, streamIntervalMs: 500, fillHeight: true, logStatus: 'live' },
   decorators: [withFillContainer],
 };
 
@@ -246,6 +248,7 @@ export const StreamingFromEmpty: Story = {
     lineCount: 0,
     streamIntervalMs: 750,
     rows: 40,
+    logStatus: 'live',
     emptyMessage: 'No log output yet — the deployment may not have started writing.',
   },
 };

@@ -11,6 +11,7 @@ dataset: which column identifies a test case.
 from __future__ import annotations
 
 from nemo_evals.intake.mapping import DEFAULT_AGENT_VERSION
+from nemo_evals.intake.publish import DEFAULT_MAX_OTLP_REQUEST_BYTES
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -54,6 +55,16 @@ class IntakePublicationSpec(BaseModel):
         "publish does not report success with nothing in Experiments. The result bundle is saved "
         "before publication runs, so a failed job still leaves the results intact to re-publish. "
         "Set False to keep the job successful and report the failure in its output instead.",
+    )
+    max_otlp_request_bytes: int = Field(
+        default=DEFAULT_MAX_OTLP_REQUEST_BYTES,
+        gt=0,
+        description="Largest serialized OTLP request, envelope included, sent to Intake for one "
+        "trial's trace. A larger trace is split into several requests in span order, keeping each "
+        "span's ids, parent, and resource and scope metadata. Defaults to 4 MiB. Keep it within "
+        "Intake's and any proxy's request body limits; this setting does not change those limits. "
+        "A trial with a single span too large to fit fails publication before any of its trace "
+        "is sent.",
     )
 
 
