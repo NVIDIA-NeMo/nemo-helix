@@ -37,12 +37,16 @@ The examples use the agent `support-agent` and two candidates, `support-agent-ba
 ### Create One Evaluation per Candidate
 
 Create an Evaluation for each candidate in the same Experiment **before** you send its runs. Intake
-rejects ingest that names an Evaluation that does not exist or has been deleted. Use a new name for
-each candidate, and record what changed in the Evaluation's `metadata`. See
+rejects runs that name an Evaluation that does not exist. Use a new name for each candidate, and
+record what changed in the Evaluation's `metadata`. Do not reuse a deleted Evaluation's name: traces
+keep the name they were ingested with, so the new Evaluation would also select the deleted one's
+runs. See
 [Add an Evaluation to an Existing Experiment](/documentation/evaluate-models/experiments#add-an-evaluation-to-an-existing-experiment).
 
 If you run candidates as agent evaluation jobs, the job publishes each run and its scores to the
-Evaluation named by `publication.intake.evaluation_id`, which covers the next two steps. The
+Evaluation named by `publication.intake.evaluation_id`, which covers the next two steps. The job
+derives the recorded agent name from the target, so when candidates are separate targets, set
+`publication.intake.agent_name` to the shared agent name. The
 **Run Evaluation** wizard in [NeMo Studio Agents](/documentation/studio/agents#evaluate-an-agent)
 also creates the Experiment and Evaluation. See
 [Where Evaluations Come From](/documentation/evaluate-models/experiments#where-evaluations-come-from).
@@ -92,8 +96,7 @@ nemo intake traces list \
 ```
 
 Add `--filter.test-case-name refund-request-001` to list one test case. The traces API takes the
-same filter as `filter[evaluation_name]=support-agent-short-prompt`. Without a time filter, Intake
-reads the last 30 days.
+same filter as `filter[evaluation_name]=support-agent-short-prompt`.
 
 ### Analyze One Candidate with Compass
 
@@ -136,8 +139,8 @@ To rank candidates through the API instead, see
 
 | Symptom | Cause and fix |
 |---------|---------------|
-| Ingest returns `400` with `Evaluation '<name>' must be created before it can be logged.` | The Evaluation does not exist in this workspace. Create it first. |
-| Ingest returns `400` with `Evaluation '<name>' has been deleted and cannot accept new sessions.` | The Evaluation was deleted. Create a new Evaluation with a new name. |
+| ATIF or chat-completions ingest returns `400` with `Evaluation '<name>' must be created before it can be logged.` | The Evaluation does not exist in this workspace, or it was deleted. Create it first, or create a new Evaluation with a new name. |
+| OTLP traces for a candidate are missing | OTLP ingest drops spans whose `nemo.evaluation.name` names an Evaluation that does not exist, and still returns success. The response body's `errors` list carries the same message. Create the Evaluation, then send the traces again. |
 | A candidate's leaderboard row shows zero metrics | Its runs were ingested without `test_case_name`. See [Experiments Troubleshooting](/documentation/evaluate-models/experiments#troubleshooting). |
 | Compass reports `Analyzed 0 traces` | `--agent` does not match the traces' `agent_name`, or `--evaluation-id` is not the Evaluation name used at ingest. |
 
