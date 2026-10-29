@@ -145,7 +145,8 @@ class NemoService(_NamedPlugin):
         """Extra ``role -> [permission]`` grants beyond the suffix-based defaults.
 
         The derivation grants each catalog permission to roles by a suffix heuristic
-        (``.list``/``.read`` → Viewer + Editor; everything else → Editor only). Override this
+        (``.list``/``.read`` → Viewer + Editor; ``.admin`` → no automatic grant;
+        everything else → Editor only). Override this
         to grant a permission to a role that heuristic wouldn't reach — e.g. the agent gateway's
         ``.invoke`` permission, which a Viewer must hold to call a deployed agent even though its
         suffix isn't ``read``. Grants are **unioned** with the suffix defaults (never subtractive),
