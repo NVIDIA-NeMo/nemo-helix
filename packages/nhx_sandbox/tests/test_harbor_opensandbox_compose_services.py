@@ -27,6 +27,7 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
+from nhx_sandbox.compose_env import ComposeEnvError
 from nhx_sandbox.harbor_opensandbox_driver import CommandResult, OpenSandboxDriver
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, ServiceOperationsUnsupportedError
 from nhx_sandbox.harbor_opensandbox_services import (
@@ -198,6 +199,72 @@ async def test_create_sends_services_and_main_settings(tmp_path: Path, server: S
     assert str(health.url) == "http://opensandbox.example/v1/nemo-ext/health"
     assert health.headers["OPEN-SANDBOX-API-KEY"] == API_KEY
     assert health.headers["X-Client"] == "opensandbox-sdk"
+
+
+async def test_templated_env_values_reach_the_sandbox_and_the_services(
+    tmp_path: Path, server: Server, extension: _Extension, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Harbor persists the config, so it carries templates; the values come from this process's environment."""
+    spec = {
+        "services": [
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "env": {"POSTGRES_PASSWORD": "${NEMO_COMPOSE_ENV_0}"},
+            }
+        ],
+        "main": {"env": {"API_TOKEN": "${NEMO_COMPOSE_ENV_1}"}},
+    }
+    monkeypatch.setenv("NEMO_COMPOSE_ENV_0", "pg-pass")
+    monkeypatch.setenv("NEMO_COMPOSE_ENV_1", "api-token")
+    environment = _environment(_task(tmp_path), server, compose_services=spec)
+
+    await environment._create_sandbox()
+
+    create = server.creates[-1]
+    sent = ComposeServices.model_validate_json(create["extensions"][EXTENSION_KEY])
+    assert sent.services[0].env == {"POSTGRES_PASSWORD": "pg-pass"}
+    assert create["env"]["API_TOKEN"] == "api-token"
+    assert (environment._merge_env(None) or {})["API_TOKEN"] == "api-token"
+    assert "NEMO_COMPOSE_ENV" not in str(create)
+
+
+def test_a_template_without_its_variable_fails_naming_the_variable(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = {
+        "services": [
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "env": {"POSTGRES_PASSWORD": "${NEMO_COMPOSE_ENV_0}"},
+            }
+        ]
+    }
+    monkeypatch.delenv("NEMO_COMPOSE_ENV_0", raising=False)
+
+    with pytest.raises(ComposeEnvError, match="NEMO_COMPOSE_ENV_0"):
+        _environment(_task(tmp_path), server, compose_services=spec)
+
+
+def test_a_separate_verifier_without_a_compose_file_needs_none_of_the_variables(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Harbor builds the verifier's environment from the same config, but ``compose_services`` only applies with a Compose file."""
+    spec = {
+        "services": [
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "env": {"POSTGRES_PASSWORD": "${NEMO_COMPOSE_ENV_0}"},
+            }
+        ]
+    }
+    monkeypatch.delenv("NEMO_COMPOSE_ENV_0", raising=False)
+
+    environment = _environment(_task(tmp_path, compose=False), server, compose_services=spec)
+
+    assert environment.capabilities.docker_compose is False
 
 
 async def test_verifier_environment_without_compose_file_gets_a_plain_sandbox(

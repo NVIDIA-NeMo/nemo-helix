@@ -12,7 +12,7 @@ from typing import ClassVar, Literal
 from nemo_builder_plugin.identity import PLATFORM_PATTERN, ImageIdentityError, normalize_registry, platform_name
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_helix_plugin.entities import EntityBase
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 BuildStatus = Literal["pending", "running", "ready", "failed"]
 ImageStatus = Literal["pending", "building", "ready", "failed"]
@@ -30,11 +30,13 @@ class BuildImage(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: str = Field(
+    type: str = Field(
+        # Builds recorded before the rename stored this as `role`; read either so they still load.
+        validation_alias=AliasChoices("type", "role"),
         description=(
-            "The container the image runs as, named as Harbor names it: `main`, the agent's container; a compose "
-            "service's own name; or `verifier`, for a separate verifier."
-        )
+            "The container the image runs as: `main`, the agent's container; `verifier`, for a separate verifier; "
+            "or `service/<name>`, for a compose service."
+        ),
     )
     source: BuildImageSource = Field(
         description=(

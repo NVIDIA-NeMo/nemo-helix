@@ -148,7 +148,7 @@ def _image_build(build_id: str = "1", status: str = "ready") -> ImageBuild:
         status=status,  # ty: ignore[invalid-argument-type]
         job=f"task-image-build-{build_id}",
         allowed_registries=[],
-        images=[BuildImage(role="main", source="prebuilt")] if status == "ready" else [],
+        images=[BuildImage(type="main", source="prebuilt")] if status == "ready" else [],
         error="no Dockerfile" if status == "failed" else None,
     )
 

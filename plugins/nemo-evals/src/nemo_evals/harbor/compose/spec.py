@@ -22,7 +22,7 @@ from nemo_evals.harbor.compose.models import (
     ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.parser import parse_compose
-from nhx_sandbox.harbor_opensandbox_services import RESERVED_NAMES, RESERVED_PORTS, ComposeServices
+from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, RESERVED_NAMES, RESERVED_PORTS, ComposeServices
 from pydantic import ValidationError
 
 # The bounds of ``MainReadiness.timeout_sec`` in ``ComposeServices``.
@@ -125,19 +125,42 @@ def compose_provenance(services: ComposeServices) -> dict[str, str]:
 
 
 def _check_reserved(task: ComposeTask) -> None:
-    """Raise if a service exposes a port the sandbox pod uses, or takes the name of one of the pod's containers."""
-    reserved_ports = [
-        f"{name}.{port.source} = {port.port}"
-        for name, service in task.services.items()
-        for port in service.ports
-        if port.port in RESERVED_PORTS
-    ]
+    """Raise if a container uses a port the sandbox pod needs, ``main`` shares a port with a service, or a service
+    takes the name of one of the pod's containers.
+
+    Compose gives each service its own network, so two services can listen on the same port. In the sandbox every
+    container shares the pod's network, so the second one to listen on a port fails to start.
+    """
+    ports_by_container = {MAIN_SERVICE: task.main.ports}
+    for name, service in task.services.items():
+        ports_by_container[name] = service.ports
+
+    reserved_ports = []
+    for name, ports in ports_by_container.items():
+        for port in ports:
+            if port.port in RESERVED_PORTS:
+                reserved_ports.append(f"{name}.{port.source} = {port.port}")
     if reserved_ports:
         raise ComposeError(
             "compose_reserved_port",
             "these ports are used by the sandbox pod",
             compose_path=task.compose_path,
             paths=tuple(reserved_ports),
+        )
+
+    # `ComposeServices` already refuses two services on one port, but it never sees `main`'s ports, so check those here.
+    service_ports = set()
+    for service in task.services.values():
+        service_ports.update(port.port for port in service.ports)
+    shared_ports = [
+        f"{MAIN_SERVICE}.{port.source} = {port.port}" for port in task.main.ports if port.port in service_ports
+    ]
+    if shared_ports:
+        raise ComposeError(
+            "compose_unsupported",
+            "`main` and a service use the same port; every container in the sandbox pod shares one network",
+            compose_path=task.compose_path,
+            paths=tuple(shared_ports),
         )
 
     if reserved_names := [name for name in task.services if name in RESERVED_NAMES]:

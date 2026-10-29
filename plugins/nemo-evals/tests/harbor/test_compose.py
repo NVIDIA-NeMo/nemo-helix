@@ -1368,6 +1368,18 @@ def test_build_context_must_stay_under_environment(tmp_path: Path, build: str) -
             "same port",
             id="two-services-on-one-port",
         ),
+        pytest.param(
+            "services:\n  main:\n    expose: ['8080']\n  api:\n    image: redis\n    ports: ['9000:8080']\n",
+            "compose_unsupported",
+            "main.expose[0] = 8080",
+            id="main-and-a-service-on-one-port",
+        ),
+        pytest.param(
+            "services:\n  main:\n    ports: ['44772']\n  db:\n    image: redis\n",
+            "compose_reserved_port",
+            "main.ports[0] = 44772",
+            id="main-on-a-pod-port",
+        ),
     ],
 )
 def test_a_task_the_sandbox_spec_refuses_names_why(tmp_path: Path, compose: str, code: str, names: str) -> None:
@@ -1474,3 +1486,12 @@ def test_compose_services_kwarg_round_trips_through_the_environment_model(tmp_pa
 
     spec = _spec(tmp_path, "services:\n  db:\n    image: postgres:16\n")
     assert parse_compose_services(spec).names() == ["db"]
+
+
+def test_main_and_a_service_may_use_different_ports(tmp_path: Path) -> None:
+    task = _parsed(
+        tmp_path, "services:\n  main:\n    expose: ['8080']\n  api:\n    image: redis\n    expose: ['9000']\n"
+    )
+
+    assert [port.port for port in task.main.ports] == [8080]
+    to_compose_services(task)

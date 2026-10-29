@@ -4594,12 +4594,12 @@ components:
       description: Result of aggregating metric scores with full statistics.
     BuildImage:
       properties:
-        role:
+        type:
           type: string
-          title: Role
-          description: 'The container the image runs as, named as Harbor names it:
-            `main`, the agent''s container; a compose service''s own name; or `verifier`,
-            for a separate verifier.'
+          title: Type
+          description: 'The container the image runs as: `main`, the agent''s container;
+            `verifier`, for a separate verifier; or `service/<name>`, for a compose
+            service.'
         source:
           type: string
           enum:
@@ -4655,7 +4655,7 @@ components:
       additionalProperties: false
       type: object
       required:
-      - role
+      - type
       - source
       title: BuildImage
       description: One container image a task needs, and where its build stands.

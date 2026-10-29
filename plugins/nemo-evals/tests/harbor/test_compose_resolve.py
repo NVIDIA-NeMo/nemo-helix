@@ -314,6 +314,18 @@ def test_dotenv_values_refer_to_earlier_lines_and_task_toml_as_compose_reads_the
     assert resolved.services["db"]["image"] == "mirror/redis:7"
 
 
+def test_dotenv_values_prefer_task_toml_over_earlier_lines_as_compose_does(tmp_path: Path) -> None:
+    """`docker compose config` gives `task.example.com/redis:7` here: the variables Compose was given come first."""
+    resolved = _resolved(
+        tmp_path,
+        "services:\n  cache:\n    image: ${IMAGE}\n",
+        task_toml='[environment]\nenv = { REGISTRY = "task.example.com" }\n',
+        files={".env": "REGISTRY=dotenv.example.com\nIMAGE=${REGISTRY}/redis:7\n"},
+    )
+
+    assert resolved.services["cache"]["image"] == "task.example.com/redis:7"
+
+
 def test_value_less_environment_entries_are_kept_to_be_looked_up(tmp_path: Path) -> None:
     resolved = _resolved(
         tmp_path,

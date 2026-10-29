@@ -63,6 +63,7 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from nhx_sandbox.compose_env import expand_env
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_cleanup import applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import (
@@ -200,7 +201,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             make its pod unschedulable. ``None`` applies the task's value as given.
         compose_services: The evaluation profile's ``compose_services``. Applied only when the
             environment directory has a Compose file, so a separate verifier environment (built
-            from the task's ``tests/``) gets a plain sandbox.
+            from the task's ``tests/``) gets a plain sandbox. A variable's value may be a
+            ``${NEMO_COMPOSE_ENV_<n>}`` template, which this process's environment fills in (see
+            ``nhx_sandbox.compose_env``); Harbor then persists the template, not the value.
         agent_bundle: The evaluation's agent bundle, as a ``SandboxAgentBundle``. Only the agent's
             sandbox gets it, never a separate verifier's. The server extension installs it into
             ``/installed-agent`` before the sandbox starts; ``start`` then puts its executable on
@@ -241,8 +244,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         # BaseEnvironment.__init__ runs the definition, capability and network policy validators,
         # which read these, so they are set first.
         has_compose_file = any((environment_dir / name).is_file() for name in COMPOSE_FILENAMES)
+        # Expanded after validation, so an invalid spec's error shows the templates and never a value.
         self._services: ComposeServices | None = (
-            parse_compose_services(compose_services) if compose_services is not None and has_compose_file else None
+            expand_env(parse_compose_services(compose_services), os.environ)
+            if compose_services is not None and has_compose_file
+            else None
         )
 
         # The bundle is the agent's alone; a separate verifier's sandbox runs the task image as is.

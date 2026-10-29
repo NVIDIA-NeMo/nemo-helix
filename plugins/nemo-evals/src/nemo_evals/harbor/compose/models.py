@@ -205,6 +205,13 @@ class ComposeMainSettings(BaseModel):
     entrypoint: list[str] | None = Field(
         default=None, description="The last exec-form `ENTRYPOINT` of `main`'s Dockerfile, or the compose override."
     )
+    ports: list[ComposePort] = Field(
+        default_factory=list,
+        description=(
+            "The ports `main` `expose`s or publishes. The sandbox doesn't publish them; they're kept so a service "
+            "or the sandbox's own containers can't listen on the same port in the shared pod network."
+        ),
+    )
     platform: str | None = Field(
         default=None, description="Compose `platform` on `main`, as written: the platform its image is built for."
     )

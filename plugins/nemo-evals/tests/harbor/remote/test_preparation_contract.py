@@ -17,7 +17,7 @@ from pydantic import ValidationError
 DIGEST = "a" * 64
 IMAGE = PreparedImage(image_ref=f"registry.invalid/sort@sha256:{DIGEST}", preparation_key="k")
 ENVIRONMENT = PreparedHarborEnvironment(task_revision_digest="r", archive_digest="a", agent=IMAGE)
-AGENT = ImagePreparation(role="agent", preparation_key="k", source="prebuilt", prepared=IMAGE)
+AGENT = ImagePreparation(type="agent", preparation_key="k", source="prebuilt", prepared=IMAGE)
 
 
 def test_both_preparers_satisfy_the_protocol(fake_preparer):
@@ -34,7 +34,7 @@ def test_both_preparers_satisfy_the_protocol(fake_preparer):
         ({"status": "failed"}, "error is set exactly"),
         ({"status": "pending", "error": PreparationErrorInfo(code="build_failed", detail="x")}, "error is set exactly"),
         ({"status": "ready", "environment": ENVIRONMENT}, "a ready task has an agent image"),
-        ({"status": "pending", "images": {"verifier": AGENT}}, "has role 'agent'"),
+        ({"status": "pending", "images": {"verifier": AGENT}}, "has type 'agent'"),
     ],
 )
 def test_inconsistent_state_is_rejected(fields, match):
@@ -50,6 +50,15 @@ def test_unknown_error_code_is_rejected():
 def test_ready_state_round_trips():
     ready = TaskPreparation(status="ready", resource_class="cpu", images={"agent": AGENT}, environment=ENVIRONMENT)
     assert TaskPreparation.model_validate_json(ready.model_dump_json()) == ready
+
+
+def test_an_error_may_name_a_compose_service_but_an_image_record_may_not():
+    error = PreparationErrorInfo(code="image_unavailable", detail="no ready db image", image_type="service")
+    assert PreparationErrorInfo.model_validate_json(error.model_dump_json()) == error
+    with pytest.raises(ValidationError):
+        ImagePreparation(type="service", preparation_key="k", source="prebuilt")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValidationError):
+        TaskPreparation(status="pending", images={"service": AGENT})  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize(
