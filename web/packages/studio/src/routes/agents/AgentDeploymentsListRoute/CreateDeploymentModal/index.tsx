@@ -43,7 +43,7 @@ const deploymentFormSchema = z.object({
       if (sanitizeEntityName(value) === undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Name must contain at least one letter or number.',
+          message: 'Name must start with a letter and be at least 2 characters.',
         });
       }
     })

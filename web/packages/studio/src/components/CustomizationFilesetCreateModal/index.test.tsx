@@ -59,7 +59,7 @@ describe('CustomizationFilesetCreateModal', () => {
     await user.click(submitButton);
 
     const nameValidationErrorMessage = await screen.findByText(
-      'Name must contain at least one letter or number.'
+      'Name must start with a letter and be at least 2 characters.'
     );
     expect(nameValidationErrorMessage).toBeInTheDocument();
   });

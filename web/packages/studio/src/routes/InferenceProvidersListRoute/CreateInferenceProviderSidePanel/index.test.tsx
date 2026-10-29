@@ -134,7 +134,7 @@ describe('CreateInferenceProviderSidePanel', () => {
     it('shows an error after blur when the name contains no letters or numbers', async () => {
       await typeName('!!!');
       expect(
-        await screen.findByText('Name must contain at least one letter or number.')
+        await screen.findByText('Name must start with a letter and be at least 2 characters.')
       ).toBeInTheDocument();
     });
 

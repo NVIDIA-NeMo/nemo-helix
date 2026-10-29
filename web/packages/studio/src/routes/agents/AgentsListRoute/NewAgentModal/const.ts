@@ -46,7 +46,9 @@ export const agentNameSchema = z
     if (sanitizeEntityName(value) === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: value ? 'Name must contain at least one letter or number.' : 'Name is required.',
+        message: value
+          ? 'Name must start with a letter and be at least 2 characters.'
+          : 'Name is required.',
       });
     }
   })

@@ -149,7 +149,7 @@ describe('DeployTrialModal', () => {
     expect(captured.agent.config?.models?.default?.temperature).toBe(0.2);
   });
 
-  it('shows an error when the name has no letters or numbers', async () => {
+  it("shows an error when the name doesn't start with a lowercase letter", async () => {
     const user = userEvent.setup();
     mockHelix();
     renderModal();
@@ -158,9 +158,10 @@ describe('DeployTrialModal', () => {
     const name = within(dialog).getByRole('textbox');
     await user.clear(name);
     await user.type(name, '---');
+    await user.tab();
 
     expect(
-      await within(dialog).findByText('Name must contain at least one letter or number.')
+      await within(dialog).findByText('Name must start with a lowercase letter.')
     ).toBeInTheDocument();
   });
 
