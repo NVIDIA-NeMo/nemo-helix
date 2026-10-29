@@ -239,6 +239,7 @@ const leaveConfiguration = async (user: User) => {
 
 const nameAndRun = async (user: User) => {
   await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled());
   await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
 };
 

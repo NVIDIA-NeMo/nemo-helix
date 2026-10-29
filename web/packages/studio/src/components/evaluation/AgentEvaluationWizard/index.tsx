@@ -181,6 +181,14 @@ const MAX_PARALLELISM = 16;
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
 
+/** Why the step's primary action is disabled. A reason already shown under its field is not
+ *  repeated beside the action. */
+type StepBlocker = { kind: 'field' } | { kind: 'hint'; hint: string };
+
+const SHOWN_ON_FIELD: StepBlocker = { kind: 'field' };
+
+const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
+
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
   judgeModel: z.string(),
@@ -722,11 +730,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       : 'Names this run alongside the one it re-runs — say what changed, e.g. a new temperature.',
   });
 
-  // Only a conflict blocks here. The schema's own errors already stop handleSubmit; a conflict
-  // lives outside formState, so without this the request would fire and come back a 409.
-  const hasNameConflict =
-    recordNameStatus === 'conflict' || (isCreateMode && experimentNameStatus === 'conflict');
-
   // Mirrors injectJudgeModel's own guard, so the picker is shown exactly when a metric would
   // have a model written into it — not just for the llm-judge type. Every match is collected,
   // not just the first: the override rewrites all of them, so all of them must be checked.
@@ -915,39 +918,79 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // What the current step still needs before Next means anything. Kept separate from the zod
   // schema: the schema judges the whole submission, and a step must only answer for its own
   // fields — otherwise step one would refuse to advance over a field two steps away.
-  const stepBlocker = (): string | undefined => {
-    if (step === 'start') return selectedAgent ? undefined : 'Pick an agent to evaluate.';
+  const stepBlocker = (): StepBlocker | undefined => {
+    if (step === 'start') {
+      return selectedAgent ? undefined : blockedWith('Pick an agent to evaluate.');
+    }
     if (step === 'experiment') {
-      if (!experimentPreview) return 'Name the experiment to continue.';
-      if (experimentNameStatus === 'checking') return 'Checking the name...';
-      if (experimentNameStatus === 'conflict')
-        return `An experiment named ${experimentPreview} already exists.`;
-      return errors.newName?.message;
+      if (!experimentPreview) {
+        return blockedWith('Name the experiment to continue.');
+      }
+      if (experimentNameStatus === 'checking' || experimentNameStatus === 'conflict') {
+        return SHOWN_ON_FIELD;
+      }
+      return errors.newName ? SHOWN_ON_FIELD : undefined;
     }
     if (step === 'configuration') {
-      if (isReadingDataset || isLoadingFilesetConfig) return 'Reading the selected file...';
-      if (datasetError) return datasetError;
-      if (configIssues.length > 0)
-        return 'This eval config reads fields the dataset does not have.';
-      if (isLlmJudge && isJudgeModelsLoading) return 'Loading judge models...';
-      if (promptIssues.length > 0)
-        return 'The agent prompt reads fields the dataset does not have.';
-      if (judgePromptIssues.length > 0)
-        return 'The judge prompt reads fields the dataset does not have.';
+      if (isReadingDataset || isLoadingFilesetConfig) {
+        return blockedWith('Reading the selected file...');
+      }
+      if (datasetError) {
+        return blockedWith(datasetError);
+      }
+      if (configIssues.length > 0) {
+        return SHOWN_ON_FIELD;
+      }
+      if (isLlmJudge && isJudgeModelsLoading) {
+        return blockedWith('Loading judge models...');
+      }
+      if (promptIssues.length > 0 || judgePromptIssues.length > 0) {
+        return SHOWN_ON_FIELD;
+      }
     }
-    // The re-run path picks its source on this step too, so the source's own problems are
-    // reported here rather than swallowed by a Submit that quietly does nothing.
-    if (step === 'evaluation' && mode === MODE_EXPERIMENT) {
-      if (hasNoEvaluations) return NO_EVALUATIONS_MESSAGE;
-      if (isValidatingEvaluation) return 'Checking the saved eval config...';
-      return evaluationConfigIssue ?? undefined;
+    // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
+    // click. Schema errors stay out: those only show once a submit is tried.
+    if (step === 'evaluation') {
+      if (mode === MODE_EXPERIMENT) {
+        if (hasNoEvaluations) {
+          return SHOWN_ON_FIELD;
+        }
+        // Nothing can be picked, and a handed-in source cannot be resolved or checked, until the
+        // list arrives.
+        if (sources.isLoading) {
+          return blockedWith('Loading evaluations...');
+        }
+        if (evaluationName && !selectedEvaluation) {
+          return blockedWith(`Evaluation ${evaluationName} no longer exists. Pick another.`);
+        }
+        if (isValidatingEvaluation) {
+          return blockedWith('Checking the saved eval config...');
+        }
+        if (evaluationConfigIssue) {
+          return SHOWN_ON_FIELD;
+        }
+      }
+      // invalidModelRefs is empty while the list is in flight, so submitting inside that window
+      // would skip the judge-model check entirely.
+      if (mode === MODE_DEFAULT && isLlmJudge && isJudgeModelsLoading) {
+        return blockedWith('Loading judge models...');
+      }
+      if (recordNameStatus === 'checking' || recordNameStatus === 'conflict') {
+        return SHOWN_ON_FIELD;
+      }
+      // The experiment's name field is a step back, so its conflict is spelled out here.
+      if (isCreateMode && experimentNameStatus === 'conflict') {
+        return blockedWith(`An experiment named ${experimentPreview} already exists.`);
+      }
     }
     return undefined;
   };
   const blocker = stepBlocker();
 
   const goNext = async () => {
-    if (blocker) return;
+    if (blocker) {
+      return;
+    }
     if (step === 'configuration') {
       setSubmitAttempted(true);
       const valid = await trigger(
@@ -955,7 +998,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           ? ['parallelism', 'dataset', 'promptTemplate', 'body']
           : ['parallelism', 'dataset', 'judgeModel']
       );
-      if (!valid || (!isFormConfig && !pickedSpec)) return;
+      if (!valid || (!isFormConfig && !pickedSpec)) {
+        return;
+      }
     }
     setStep(nextStep(steps, step));
   };
@@ -966,10 +1011,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   };
 
   const onSubmit: SubmitHandler<SubmitEvaluationFormData> = async (formData) => {
-    // The resolver has passed; these are the gates held outside form state.
-    // isJudgeModelsLoading blocks too: invalidModelRefs is empty while the list is in flight, so
-    // submitting inside that window would skip the check entirely.
-    if (hasNameConflict) return;
+    // EvalWizard already drops clicks and Enter while blocked; this keeps a submit from ever
+    // skipping a gate.
+    if (blocker) {
+      return;
+    }
     if (
       mode === MODE_DEFAULT &&
       ((!isFormConfig && !pickedSpec) ||
@@ -980,12 +1026,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       setStep('configuration');
       return;
     }
-    if (mode === MODE_DEFAULT && isLlmJudge && isJudgeModelsLoading) return;
-    if (
-      mode === MODE_EXPERIMENT &&
-      (isValidatingEvaluation || !selectedEvaluation || evaluationConfigIssue)
-    )
-      return;
     try {
       await submitEvaluation(formData);
     } catch {
@@ -1059,7 +1099,8 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
       continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
       continueLoading={isPending}
-      canContinue={onLastStep || !blocker}
+      canContinue={!blocker}
+      blockedHint={blocker?.kind === 'hint' ? blocker.hint : undefined}
       onContinue={handleContinue}
     >
       <FormProvider {...methods}>
@@ -1338,12 +1379,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               />
               {mode === MODE_EXPERIMENT && parallelismField}
             </>
-          )}
-
-          {blocker && step !== 'start' && step !== 'experiment' && (
-            <Text className="text-secondary" kind="body/regular/sm">
-              {blocker}
-            </Text>
           )}
         </Stack>
       </FormProvider>
