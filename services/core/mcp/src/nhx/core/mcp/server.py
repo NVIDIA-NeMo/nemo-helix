@@ -27,12 +27,17 @@ from __future__ import annotations
 import logging
 
 from fastmcp import FastMCP
+from fastmcp.server.auth import AuthProvider
 from nhx.core.entities.mcp import create_server as create_entities_mcp
 
 logger = logging.getLogger(__name__)
 
 
-def create_server(base_url: str | None = None) -> FastMCP:
+def create_server(
+    base_url: str | None = None,
+    auth: AuthProvider | None = None,
+    enable_destructive_tools: bool = False,
+) -> FastMCP:
     """
     Create and configure the platform MCP aggregator.
 
@@ -41,6 +46,8 @@ def create_server(base_url: str | None = None) -> FastMCP:
 
     Args:
         base_url: Optional NeMo Helix base URL
+        auth: Optional auth provider; FastMCP applies it to HTTP transports only
+        enable_destructive_tools: Register tools that delete platform resources
 
     Returns:
         Configured FastMCP server instance with all service tools
@@ -49,10 +56,11 @@ def create_server(base_url: str | None = None) -> FastMCP:
     platform = FastMCP(
         "NeMo Helix",
         website_url="https://docs.nvidia.com/nemo-helix",
+        auth=auth,
     )
 
     # Mount per service MCP servers
-    platform.mount(create_entities_mcp(base_url))
+    platform.mount(create_entities_mcp(base_url, enable_destructive_tools=enable_destructive_tools))
 
     # Future: aggregate additional service MCP servers as they're implemented
     # from nhx.core.jobs.mcp import create_server as create_jobs_mcp
