@@ -588,16 +588,9 @@ completed
 - **`agent_model_name`** — the model slug handed to the agent.
 
   On the platform's `HarborRunnerTarget` these three are one field, `source`, so a spec names exactly
-  one agent: `{"name": "oracle", "model_name": ...}` for a built-in agent or
-  `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own. In both shapes
-  `model_name` is the slug that becomes `agent_model_name`.
-
-  <Note>
-  Starting in 0.10, a built-in agent names its model as `model: {"name": ...}` (or a gateway model,
-  `{"ref": ...}`) instead of the flat `model_name`. The 0.9 spelling `{"name": "oracle", "model_name": ...}`
-  is still accepted in 0.10 with a deprecation warning and will be removed in 0.11; giving both
-  `model_name` and `model` is an error. An imported agent keeps `model_name`, which is not deprecated.
-  </Note>
+  one agent: `{"name": "oracle", "model": {"name": ...}}` for a built-in agent or
+  `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own. A built-in agent can
+  also take a gateway model, `{"ref": ...}`; see [Run a closed-book evaluation](#run-a-closed-book-evaluation).
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
   Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
@@ -645,9 +638,8 @@ the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `Ag
 ```text
 HarborRuntimeConfig  (on the platform, HarborRunnerTarget.source fills the three agent lines)
         │
-        ├─ agent_name          → Harbor AgentConfig.name          (source.name; "oracle" when unset)
-        ├─ agent_import_path   → Harbor AgentConfig.import_path   (source.import_path; overrides agent_name)
-        ├─ agent_model_name    → Harbor AgentConfig.model_name    (source.model_name)
+        ├─ agent_import_path   → Harbor AgentConfig.import_path
+        ├─ agent_model_name    → Harbor AgentConfig.model_name
         ├─ agent_kwargs        → Harbor AgentConfig.kwargs
         └─ env_secrets/env_vars → Harbor AgentConfig.env ({NAME: "${<source var>}"} + literals)
                                        │
