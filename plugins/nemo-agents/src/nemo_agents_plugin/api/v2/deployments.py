@@ -61,6 +61,7 @@ from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -156,9 +157,14 @@ async def create_deployment(
         resolved_config, resolved_environment.environment_spec, workspace=workspace, backend=body.deployment_mode
     )
     if merged.providers:
-        await authorize_provider_references(
-            merged.providers, workspace=workspace, secrets_client=AsyncSecretsClient.from_client(files_client)
-        )
+        try:
+            await authorize_provider_references(
+                merged.providers, workspace=workspace, secrets_client=AsyncSecretsClient.from_client(files_client)
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="A provider secret was not found.") from exc
+        except PermissionDeniedError as exc:
+            raise HTTPException(status_code=403, detail="Access to a provider secret was denied.") from exc
     # A requested image may install adapters this server can't see; the container checks them itself.
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
         body.image.strip() and is_container_deployment_mode(body.deployment_mode)
