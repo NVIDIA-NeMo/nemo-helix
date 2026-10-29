@@ -260,6 +260,27 @@ class OIDCConfig(BaseSettings):
             raise ValueError("auth.oidc public_client and confidential_client must use the same scope_prefix")
         return self
 
+    @model_validator(mode="after")
+    def validate_audience_required(self) -> Self:
+        if self.enabled and not (self.audience and self.audience.strip()):
+            raise ValueError(
+                "auth.oidc.audience is required when auth.oidc.enabled is true: without it, tokens the "
+                "identity provider issued to any other application would be accepted. Set it to the "
+                "'aud' claim value your identity provider puts in access tokens for NeMo Helix."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_userinfo_resolution_unsupported(self) -> Self:
+        if self.resolve_opaque_tokens_via_userinfo:
+            raise ValueError(
+                "auth.oidc.resolve_opaque_tokens_via_userinfo is no longer supported: UserInfo responses "
+                "cannot be checked against auth.oidc.audience, which is now required when OIDC is enabled. "
+                "Remove it and set auth.oidc.introspect_opaque_tokens (with introspection_endpoint) "
+                "if your identity provider issues opaque access tokens."
+            )
+        return self
+
     @property
     def effective_scope_prefix(self) -> str | None:
         """Return the shared scope prefix used to normalize validated tokens."""
@@ -271,28 +292,21 @@ class OIDCConfig(BaseSettings):
 
     resolve_opaque_tokens_via_userinfo: bool = Field(
         default=False,
-        description="Fall back to the OIDC UserInfo endpoint when a bearer token is not a JWT "
-        "(some IdPs issue opaque access tokens and don't support introspecting them via RFC 7662). "
-        "Requires userinfo_endpoint to be set or discoverable. Takes priority over "
-        "introspect_opaque_tokens when both are enabled, except when oidc.audience is also "
-        "configured: UserInfo responses can't be checked against an audience, so validation "
-        "falls back to introspect_opaque_tokens (if enabled) instead. The token's original OAuth "
-        "scope grant also can't be recovered from UserInfo responses, so it goes unenforced for "
-        "tokens resolved this way (RBAC/permissions still apply). Enable only for IdPs that don't "
-        "issue narrower per-token scopes in practice.",
+        description="Removed. UserInfo responses carry no 'aud' claim, so they cannot be checked against "
+        "the required oidc.audience; setting this to true is rejected at config load. "
+        "Use introspect_opaque_tokens for IdPs that issue opaque access tokens.",
     )
 
     userinfo_endpoint: str | None = Field(
         default=None,
-        description="Override OIDC UserInfo endpoint (defaults to discovery). "
-        "Only used when resolve_opaque_tokens_via_userinfo is enabled.",
+        description="Unused. Retained so existing configs still load; UserInfo resolution was removed.",
     )
 
     # Token validation settings
     audience: str | None = Field(
         default=None,
-        description="Expected token audience. When set, tokens must include this value in their 'aud' claim. "
-        "When not set, audience validation is skipped entirely.",
+        description="Expected token audience. Required when OIDC is enabled; tokens must include this value "
+        "in their 'aud' claim.",
     )
 
     email_claim: str = Field(

@@ -31,6 +31,8 @@ auth:
   oidc:
     enabled: true
     issuer: "<your-idp-issuer-url>"
+    # Required: the 'aud' claim your IdP puts in access tokens for NeMo Helix.
+    audience: "<token-audience>"
     public_client:
       client_id: "<your-client-id>"
       default_scopes: "platform:read platform:write openid profile email offline_access"
