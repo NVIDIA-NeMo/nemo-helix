@@ -1381,6 +1381,7 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
         ),
     ],
 )
+@pytest.mark.parametrize("image_ref", [None, "registry.example/custom-tasks:metrics"])
 async def test_compile_produces_cpu_task_step_carrying_each_target(
     mocker: MockerFixture,
     target: Target,
@@ -1388,8 +1389,10 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     expected_endpoint_name: str | None,
     expected_image_name: str,
     expected_entrypoint: Sequence[str],
+    image_ref: str | None,
 ) -> None:
     _patch_execution_profiles(mocker, [])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", image_ref)
     mocker.patch("nemo_evals.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evals.jobs.agent_compiler.get_qualified_image",
@@ -1407,7 +1410,11 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     assert step.name == "agent-evaluate"
     _assert_agent_eval_step_entrypoint(
         job_spec,
-        expected_image=f"registry.example/{expected_image_name}:test",
+        expected_image=(
+            image_ref
+            if image_ref and expected_image_name == "nhx-tasks"
+            else f"registry.example/{expected_image_name}:test"
+        ),
         expected_entrypoint=expected_entrypoint,
     )
     config = cast(dict[str, Any], step.config)
@@ -1418,8 +1425,38 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
         assert endpoint["name"] == expected_endpoint_name
 
 
+@pytest.mark.parametrize("image_ref", [None, "registry.example/scorers@sha256:" + "a" * 64])
+async def test_compile_saved_trial_scoring_image(mocker: MockerFixture, image_ref: str | None) -> None:
+    _patch_execution_profiles(mocker, [])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", image_ref)
+    qualify = mocker.patch(
+        "nemo_evals.jobs.agent_compiler.get_qualified_image", return_value="registry.example/nhx-tasks:release"
+    )
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=None,
+        trials=[
+            AgentEvalTrial(
+                id="t-1", task_id="task-1", status=AgentEvalTrialStatus.COMPLETED, output=AgentOutput(output_text="4")
+            )
+        ],
+    )
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+    _assert_agent_eval_step_entrypoint(
+        HelixJobSpec.model_validate(compiled),
+        expected_image=image_ref or "registry.example/nhx-tasks:release",
+    )
+    if image_ref:
+        qualify.assert_not_called()
+    else:
+        qualify.assert_called_once_with("nhx-tasks")
+
+
 async def test_compile_gym_target_honors_configured_image_override(mocker: MockerFixture) -> None:
     _patch_execution_profiles(mocker, [])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", "registry.example/standard:custom")
     image = "ghcr.io/nvidia-nemo/nemo-helix/nhx-gym-tasks:internal-test"
     mocker.patch("nemo_evals.jobs.agent_compiler.config.gym_tasks_image", image)
     qualify = mocker.patch("nemo_evals.jobs.agent_compiler.get_qualified_image")
@@ -1481,8 +1518,12 @@ def _enable_fileset_sandbox(mocker: MockerFixture) -> None:
     )
 
 
-async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocker: MockerFixture) -> None:
+@pytest.mark.parametrize("image_ref", [None, "registry.example/eval-tasks:custom"])
+async def test_compile_gym_environment_adds_staging_step_before_evaluation(
+    mocker: MockerFixture, image_ref: str | None
+) -> None:
     _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", image_ref)
     mocker.patch("nemo_evals.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evals.jobs.agent_compiler.get_qualified_image",
@@ -1508,7 +1549,7 @@ async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocke
     assert stage_container.command == ["nemo_evals.tasks.stage_environment"]
     assert stage.config == {"environment": "dev/custom-gym"}
     evaluate_container = cast(Any, evaluate.executor).container
-    assert evaluate_container.image == "registry.example/nhx-tasks:test"
+    assert evaluate_container.image == (image_ref or "registry.example/nhx-tasks:test")
     assert evaluate_container.entrypoint == ["python", "-m"]
     assert evaluate_container.command == ["nemo_evals.tasks.agent_evaluate"]
     evaluate_config = cast(dict[str, Any], evaluate.config)

@@ -176,9 +176,10 @@ class EvaluatorConfig(NemoConfig):
         default=None,
         min_length=1,
         description=(
-            "Optional fully qualified image reference for standard evaluate job steps (online and offline). "
-            "When unset, uses platform.image_registry/nhx-tasks:platform.image_tag. Does not override "
-            "Gym, Harbor dispatcher, retrieval, or image-build jobs."
+            "Optional fully qualified image reference for evaluate and CPU agent-evaluate steps, including "
+            "saved-trial scoring and sandboxed Gym orchestration. When unset, uses "
+            "platform.image_registry/nhx-tasks:platform.image_tag. Does not override colocated Gym, "
+            "Gym sandbox hosts, Harbor taskset dispatchers, staging, retrieval, or image-build jobs."
         ),
     )
 
