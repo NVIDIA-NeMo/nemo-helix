@@ -1573,22 +1573,88 @@ class TestCompatibilityAuth:
             ("invalid-token", 401),
         ],
     )
-    def test_hf_endpoint_bearer_token(self, auth_config_enabled, token, expected_status):
-        """HF endpoints accept service:* Bearer tokens, reject invalid tokens."""
-        app = create_test_app(auth_config_enabled)
+    def test_hf_endpoint_bearer_token_auth_disabled(self, auth_config_disabled, token, expected_status):
+        """With auth disabled, HF endpoints keep accepting service:* Bearer tokens for local setups."""
+        app = create_test_app(auth_config_disabled)
         client = TestClient(app, raise_server_exceptions=False)
 
-        with patch("nhx.common.auth.client.AuthClient.authorize_request") as mock_authorize:
-            mock_authorize.return_value = MagicMock(allowed=expected_status == 200)
+        response = client.get(
+            "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
+        assert response.status_code == expected_status
+
+    @pytest.mark.parametrize("token", ["service:nim", "service:jobs", "service:not-a-real-service", "invalid-token"])
+    @pytest.mark.parametrize("config_fixture", ["auth_config_enabled", "auth_config_token_exchange"])
+    def test_hf_endpoint_rejects_unverified_bearer_when_auth_enabled(
+        self, request: pytest.FixtureRequest, config_fixture: str, token: str
+    ):
+        """A bare service:<name> string is not a credential: it must not reach the PDP as that service."""
+        app = create_test_app(request.getfixturevalue(config_fixture))
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with (
+            patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock(return_value=None)),
+            patch("nhx.common.auth.middleware.resolve_workload_access_token", new=AsyncMock(return_value=None)),
+            patch("nhx.common.auth.middleware.resolve_workload_subject_token", new=AsyncMock(return_value=None)),
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
             response = client.get(
                 "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
                 headers={"Authorization": f"Bearer {token}"},
             )
 
-            assert response.status_code == expected_status
-            if expected_status == 200:
-                mock_authorize.assert_called_once()
+        assert response.status_code == 401
+        mock_authorize.assert_not_called()
+
+    def test_hf_endpoint_rejects_missing_credentials_when_auth_enabled(self, auth_config_enabled):
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
+            response = client.get("/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin")
+
+        assert response.status_code == 401
+        mock_authorize.assert_not_called()
+
+    def test_hf_endpoint_authorizes_verified_service_bearer(self, auth_config_token_exchange):
+        """A verified workload token for a service is authorized by the PDP as that service."""
+        app = create_test_app(auth_config_token_exchange)
+        client = TestClient(app, raise_server_exceptions=False)
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(subject="service:models", email=None, groups=[], scopes=[], raw_claims={}),
+            token_kind="workload_access_token",
+        )
+
+        with (
+            patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
+            mock_authorize.return_value = MagicMock(allowed=True)
+            response = client.get(
+                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+                headers={"Authorization": "Bearer signed-workload-token"},
+            )
+
+        assert response.status_code == 200
+        auth_client = mock_authorize.call_args.args[0]
+        assert auth_client.principal.id == "service:models"
+
+    def test_hf_endpoint_ignores_bearer_service_string_when_principal_header_present(self, auth_config_enabled):
+        """In-platform callers using trusted headers are authorized from the header, not the bearer string."""
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
+            mock_authorize.return_value = MagicMock(allowed=True)
+            response = client.get(
+                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+                headers={"Authorization": "Bearer service:jobs", "X-NHX-Principal-Id": "service:models"},
+            )
+
+        assert response.status_code == 200
+        assert mock_authorize.call_args.args[0].principal.id == "service:models"
 
     @pytest.mark.parametrize("token", ["service:", "service:has spaces", "service:/path", "service:*"])
     def test_hf_endpoint_rejects_malformed_service_bearer_token(self, auth_config_enabled, token: str):
@@ -1603,23 +1669,6 @@ class TestCompatibilityAuth:
 
         assert response.status_code == 401
         mock_authorize.assert_not_called()
-
-    def test_hf_endpoint_authorizes_as_bearer_service_principal(self, auth_config_enabled):
-        """The PDP receives the service principal synthesized from the HF Bearer token."""
-        app = create_test_app(auth_config_enabled)
-        client = TestClient(app, raise_server_exceptions=False)
-
-        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
-            mock_authorize.return_value = MagicMock(allowed=True)
-
-            response = client.get(
-                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
-                headers={"Authorization": "Bearer service:models"},
-            )
-
-        assert response.status_code == 200
-        auth_client = mock_authorize.call_args.args[0]
-        assert auth_client.principal.id == "service:models"
 
     def test_files_otlp_logs_upload_accepts_service_principal_header(self, auth_config_enabled):
         """Job log uploads accept the launcher fallback service principal header."""
