@@ -269,6 +269,7 @@ runs:
             - 'services/core/auth/**'
             - 'services/core/entities/**'
             - 'services/core/secrets/**'
+            - 'services/core/jobs/src/nhx/core/jobs/controllers/backends/openshell/**'
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'
