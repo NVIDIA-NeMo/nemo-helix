@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import aiohttp
 import anthropic.types as anthropic_types
@@ -27,6 +27,7 @@ from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
     InferenceMiddlewareContext,
+    InferenceMiddlewareError,
     InferenceRequest,
     InferenceResponse,
     NemoInferenceMiddleware,
@@ -1410,13 +1411,13 @@ async def test_proxy_request_network_error_records_none_upstream_502(mocker, moc
 
 
 @pytest.mark.asyncio
-async def test_fetch_proxy_response_success_records_counter(mocker, mock_proxy_client, next_request_info):
+async def test_fetch_proxy_response_success_does_not_record_counter(mocker, mock_proxy_client, next_request_info):
+    # Success is NOT counted inside fetch_proxy_response: the caller
+    # (virtual_model_proxy) finalizes the success count AFTER response middleware,
+    # so gateway_status can reflect the true post-middleware client status.
     record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
     await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
-    labels, upstream_status, gateway_status = _recorded(record)
-    _assert_labels_from_context(labels)
-    assert upstream_status == 200
-    assert gateway_status == 200
+    record.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1504,6 +1505,144 @@ async def test_fetch_proxy_response_non_object_json_records_upstream_status_and_
     _labels, upstream_status, gateway_status = _recorded(record)
     assert upstream_status == 200
     assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_success_records_final_client_status():
+    # The success count is finalized in virtual_model_proxy AFTER response
+    # middleware. An ImmediateResponse (response_status=200) that passes a
+    # response plugin records (200, 200).
+    class _PassthroughResponsePlugin(NemoInferenceMiddleware):
+        async def process_response(
+            self,
+            ctx: InferenceMiddlewareContext,
+            response: InferenceResponse,
+            middleware_config: object,
+        ) -> InferenceResponse:
+            return response
+
+    class _ImmediatePlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> ImmediateResponse:
+            return ImmediateResponse(
+                data={
+                    "id": "raw",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "llama",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                    ],
+                },
+            )
+
+    workspace = "e2e-test"
+    vm_name = "success-metric-router"
+    registry = MiddlewareRegistry(
+        plugins={"request-plugin": _ImmediatePlugin(), "response-plugin": _PassthroughResponsePlugin()}
+    )
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="request-plugin", config_type="t", resolved_config={})
+    ]
+    registry.response_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="response-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    with patch("nhx.core.inference_gateway.api.proxy.record_upstream_request") as record:
+        await virtual_model_proxy(
+            request=request,
+            workspace=workspace,
+            vm_name=vm_name,
+            virtual_model=VirtualModel(name=vm_name, workspace=workspace),
+            trailing_uri="v1/chat/completions",
+            json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
+            http_client=Mock(),
+            model_cache=ModelCache(),
+            registry=registry,
+        )
+    record.assert_called_once()
+    _labels, upstream_status, gateway_status = record.call_args.args
+    assert upstream_status == 200
+    assert gateway_status == 200
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_response_middleware_rejection_records_client_status():
+    # Response middleware rejecting a 2xx result must record gateway_status as the
+    # client-facing rejection status (400), with upstream_status still 200 -- the
+    # row an operator needs when a guardrails redaction turns a 200 into a 400.
+    class _RejectingResponsePlugin(NemoInferenceMiddleware):
+        async def process_response(
+            self,
+            ctx: InferenceMiddlewareContext,
+            response: InferenceResponse,
+            middleware_config: object,
+        ) -> InferenceResponse:
+            raise InferenceMiddlewareError(status_code=400, detail="blocked by guardrails")
+
+    class _ImmediatePlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> ImmediateResponse:
+            return ImmediateResponse(
+                data={
+                    "id": "raw",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "llama",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                    ],
+                },
+            )
+
+    workspace = "e2e-test"
+    vm_name = "reject-metric-router"
+    registry = MiddlewareRegistry(
+        plugins={"request-plugin": _ImmediatePlugin(), "response-plugin": _RejectingResponsePlugin()}
+    )
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="request-plugin", config_type="t", resolved_config={})
+    ]
+    registry.response_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="response-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    with patch("nhx.core.inference_gateway.api.proxy.record_upstream_request") as record:
+        with pytest.raises(HTTPException) as exc_info:
+            await virtual_model_proxy(
+                request=request,
+                workspace=workspace,
+                vm_name=vm_name,
+                virtual_model=VirtualModel(name=vm_name, workspace=workspace),
+                trailing_uri="v1/chat/completions",
+                json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
+                http_client=Mock(),
+                model_cache=ModelCache(),
+                registry=registry,
+            )
+    assert exc_info.value.status_code == 400
+    record.assert_called_once()
+    _labels, upstream_status, gateway_status = record.call_args.args
+    assert upstream_status == 200
+    assert gateway_status == 400
 
 
 @pytest.mark.asyncio

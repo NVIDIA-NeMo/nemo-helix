@@ -39,14 +39,20 @@ METRIC_LABEL_UNKNOWN = "unknown"
 # both status codes. ``upstream.requests.total`` reads as "requests the gateway
 # made to an upstream provider"; "requests" (not "responses") is the term
 # operators expect for this RED-style metric.
+#
+# NOTE on the emitted name: ``create_counter`` runs the subsystem+name through
+# ``_format_metric_name``, which replaces underscores with dots, so the OTel
+# instrument name is ``nhx.inference.gateway.upstream.requests.total`` and the
+# Prometheus-scraped name is ``nhx_inference_gateway_upstream_requests_total``
+# (Prometheus turns the dots back into underscores). Query the Prometheus name.
 upstream_requests_counter = create_counter(
     meter=meter,
     subsystem="inference_gateway",
     name="upstream.requests.total",
     description=(
         "Total upstream inference requests proxied by the gateway, labeled by workspace, "
-        "model, model provider, the true upstream HTTP status, and the HTTP status the "
-        "gateway returned to the client."
+        "model, model provider, the true upstream HTTP status, and the proxy-stage HTTP "
+        "status the gateway produced for that response."
     ),
 )
 
@@ -79,11 +85,16 @@ def record_upstream_request(
             ``None`` when the gateway never received an upstream response (a
             network error or an internal gateway error). ``None`` is recorded as
             :data:`METRIC_LABEL_UNKNOWN`.
-        gateway_status: The HTTP status the gateway returns to the client. This
-            differs from *upstream_status* on the wrapped-rejection path (an
-            upstream 401/403/404 is returned to the client as 424) and on the
-            network/internal-error paths (502 / 500), and equals it for the
-            pass-through 429/5xx and 2xx cases.
+        gateway_status: The HTTP status the gateway's PROXY STAGE produced for this
+            upstream response. It differs from *upstream_status* on the
+            wrapped-rejection path (an upstream 401/403/404 is surfaced as 424) and
+            on the network/internal-error paths (502 / 500), and equals it for the
+            pass-through 429/5xx and 2xx cases. NOTE: this is the proxy-stage status,
+            NOT necessarily the final status the client receives -- response
+            middleware runs in the caller (``virtual_model_proxy``) AFTER the proxy
+            stage and can still turn a recorded 2xx into a client-facing 4xx/5xx.
+            Measuring the final client status is deliberately out of scope for this
+            upstream-focused counter.
     """
     labels = labels or UpstreamRequestLabels()
     upstream_requests_counter.add(

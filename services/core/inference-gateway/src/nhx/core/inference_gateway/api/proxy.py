@@ -699,6 +699,16 @@ async def fetch_proxy_response(
 
     Raises:
         HTTPException: Same conditions as :func:`proxy_request`.
+
+    Metrics:
+        Records the upstream-requests counter for every PROXY-STAGE failure
+        (an upstream 4xx/5xx, a 424-wrapped rejection, a network 502, an
+        internal 500, or a 2xx-with-unusable-body 502) — these never reach the
+        caller's response middleware, so the proxy-stage status IS the client
+        status. The SUCCESS path is deliberately NOT recorded here: the caller
+        (:func:`virtual_model_proxy`) runs response middleware AFTER this returns,
+        which can turn a 2xx into a client-facing 4xx/5xx, so the success count
+        is finalized there against the true post-middleware client status.
     """
     response: aiohttp.ClientResponse | None = None
     metric_labels = _upstream_request_labels(upstream_context)
@@ -784,7 +794,6 @@ async def fetch_proxy_response(
                     ),
                 )
 
-        record_upstream_request(metric_labels, status_code, status_code)
         return result, response_headers, status_code
 
     except HTTPException:
@@ -1162,6 +1171,12 @@ async def virtual_model_proxy(
     backend_format = ctx.backend_format or BackendFormat.OPENAI_CHAT
     ctx.backend_format = backend_format
 
+    # Routing context for the upstream-requests metric + the 424 enrichment. Left
+    # as None on the ImmediateResponse path (no upstream was contacted, so the
+    # routing labels are legitimately unknown) and populated in the real-backend
+    # branch below once the provider is resolved.
+    upstream_context: UpstreamProviderContext | None = None
+
     # ImmediateResponse → skip proxy.
     if isinstance(modified_request, ImmediateResponse):
         inference_response = InferenceResponse(
@@ -1347,7 +1362,14 @@ async def virtual_model_proxy(
             response_body_annotations=dict(ctx.response_body_annotations),
         )
 
-    # Response middleware chain.
+    # Response middleware chain. The upstream-requests counter's SUCCESS path is
+    # finalized here (not in fetch_proxy_response / the mock branch) because
+    # response middleware runs AFTER the proxy stage and can turn a 2xx upstream
+    # result into a client-facing 4xx/5xx (e.g. a guardrails rejection). Recording
+    # here lets gateway_status reflect the TRUE status the client receives.
+    # (Proxy-stage FAILURES — upstream 4xx/5xx, 424 wraps, 502/500 — never reach
+    # this point; they are recorded at their own site in fetch_proxy_response.)
+    metric_labels = _upstream_request_labels(upstream_context)
     response_middleware_calls = registry.response_middleware_calls.get((workspace, vm_name), [])
     if response_middleware_calls:
         inference_response = build_inference_response(
@@ -1364,7 +1386,15 @@ async def virtual_model_proxy(
                 inference_response,
             )
         except InferenceMiddlewareError as exc:
+            # Response middleware rejected a 2xx upstream result; the client gets
+            # exc.status_code, so that is the gateway_status for this request.
+            record_upstream_request(metric_labels, response_status, exc.status_code)
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    # Response middleware passed (or there was none): the client receives
+    # response_status. Record the success once, here, so it is counted exactly
+    # once against the true post-middleware client status.
+    record_upstream_request(metric_labels, response_status, response_status)
 
     # Build final streaming response.
     is_streaming = _is_streaming_response_result(inference_response)
