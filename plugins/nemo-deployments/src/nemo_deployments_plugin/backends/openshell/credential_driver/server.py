@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Standalone gateway-side process: python -m ...credential_driver.server."""
+"""Run the Helix credential driver beside OpenShell on a private Unix socket."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def read_private_file(path: Path) -> bytes:
 
 
 class FileTokenProvider:
-    """Reread a mounted bearer-token file so operator rotation takes effect."""
+    """Authenticate the driver's Helix requests with a token reread from a mounted file."""
 
     def __init__(self, path: Path) -> None:
         self.path = path

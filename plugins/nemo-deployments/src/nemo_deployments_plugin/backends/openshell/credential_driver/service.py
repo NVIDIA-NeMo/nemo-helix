@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenShell gRPC adapter. Stores references, resolves via the typed NeMo client."""
+"""Serve OpenShell credential requests using secrets stored in Helix."""
 
 from __future__ import annotations
 
@@ -63,6 +63,15 @@ class ResolveRequest(BaseModel):
 
 
 class CredentialDriver(driver_grpc.CredentialDriverServicer):
+    """Let OpenShell providers use Helix secrets through the credential-driver protocol.
+
+    StoreCredential accepts a signed registration request and returns a handle to
+    its stored secret reference. ResolveCredentials checks the binding, workload
+    and creator access, then reads the value using the driver's Helix identity.
+    Auth-disabled installations omit the creator permission check.
+    DeleteCredential revokes the handle without deleting the underlying secret.
+    """
+
     def __init__(
         self,
         registry: BindingRegistry,
