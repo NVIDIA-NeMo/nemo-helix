@@ -200,6 +200,44 @@ def test_security_narrows_each_container_and_tmpfs_gets_its_own_memory_volume() 
     ]
 
 
+@pytest.mark.parametrize(
+    ("where", "spec", "message"),
+    [
+        ("pod", {"main": {"security": {"run_as_user": 0}}}, "sandbox: the sandbox runs as runAsUser 1000"),
+        ("container", {"main": {"security": {"run_as_user": 0}}}, "sandbox: the sandbox runs as runAsUser 1000"),
+        (
+            "pod",
+            {"services": [{"name": "db", "image": "docker.io/x:1", "security": {"run_as_user": 0}}]},
+            "db: the sandbox runs as runAsUser 1000",
+        ),
+        (
+            "pod",
+            {"main": {"security": {"run_as_user": 1000, "run_as_group": 0}}},
+            "sandbox: the sandbox runs as runAsGroup 1000",
+        ),
+    ],
+)
+def test_a_task_cannot_replace_the_uid_or_gid_the_template_sets(where: str, spec: dict[str, Any], message: str) -> None:
+    pod_spec = stock_pod_spec()
+    identity = {"runAsUser": 1000, "runAsGroup": 1000}
+    if where == "pod":
+        pod_spec["securityContext"] = identity
+    else:
+        pod_spec["containers"][0]["securityContext"].update(identity)
+
+    with pytest.raises(ValueError, match=message):
+        add_services(pod_spec, parse_compose_services(spec), "IfNotPresent")
+
+
+def test_a_task_may_repeat_the_uid_the_template_sets() -> None:
+    pod_spec = stock_pod_spec()
+    pod_spec["securityContext"] = {"runAsUser": 1000}
+
+    add_services(pod_spec, parse_compose_services({"main": {"security": {"run_as_user": 1000}}}), "IfNotPresent")
+
+    assert pod_spec["containers"][0]["securityContext"]["runAsUser"] == 1000
+
+
 def test_sandbox_without_network_policy_has_no_egress_to_move() -> None:
     pod_spec = stock_pod_spec(egress=False)
 

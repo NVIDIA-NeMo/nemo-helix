@@ -129,19 +129,21 @@ class VolumeMount(_Strict):
 class Tmpfs(_Strict):
     """A memory-backed scratch directory in one container (Compose ``tmpfs``), as an ``emptyDir`` with medium ``Memory``.
 
-    What's written to it counts against the container's memory limit, as a tmpfs does under Docker.
+    What's written to it counts against the container's memory limit, as a tmpfs does under Docker. A container with
+    no memory limit, and no ``size_limit``, can fill it until the node is short of memory and the kubelet evicts the pod.
     """
 
     mount_path: AbsolutePath
-    # The tmpfs's size; None leaves it bounded only by the container's memory limit.
+    # The tmpfs's size; None leaves it bounded only by the container's memory limit, if it has one.
     size_limit: Quantity | None = None
 
 
 class Security(_Strict):
     """Restrictions on one container (Compose ``user``, ``read_only``, ``cap_drop`` and ``security_opt``).
 
-    Each one only narrows what the container may do. Nothing here can widen it: capabilities are only dropped, and
-    the one ``main`` may add is ``Main.add_capabilities``.
+    None of them grants a privilege the task's image couldn't already have: capabilities are only dropped (the one
+    ``main`` may add is ``Main.add_capabilities``), and a uid or gid, root included, is one the image could run as
+    anyway. One the sandbox's template already sets can't be replaced (see the server extension).
     """
 
     # Compose `user`, as numbers: Kubernetes can't look a user name up in the image.

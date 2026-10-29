@@ -73,19 +73,28 @@ def _mounts(mounts: list[VolumeMount]) -> list[dict[str, Any]]:
     return [{"name": f"nemo-vol-{m.name}", "mountPath": m.mount_path, "readOnly": m.read_only} for m in mounts]
 
 
-def _restrict(container: dict[str, Any], security: Security | None) -> None:
+def _restrict(pod_spec: dict[str, Any], container: dict[str, Any], security: Security | None) -> None:
     """Narrow ``container``'s ``securityContext`` by ``security``, keeping what it already sets.
 
     Capabilities already dropped stay dropped, and any already added (``main``'s ``SYS_PTRACE``) stay added:
     Kubernetes drops first, then adds, as Docker does with ``cap_drop: [ALL]`` and ``cap_add``.
+
+    A uid or gid the sandbox's template already sets, on the container or the whole pod, is the operator's, so a task
+    can't replace it: ``ValueError`` if it asks for a different one. A container's own value would override the pod's.
     """
     if security is None:
         return
     context: dict[str, Any] = container.setdefault("securityContext", {})
-    if security.run_as_user is not None:
-        context["runAsUser"] = security.run_as_user
-    if security.run_as_group is not None:
-        context["runAsGroup"] = security.run_as_group
+    pod_context: dict[str, Any] = pod_spec.get("securityContext") or {}
+    for key, value in (("runAsUser", security.run_as_user), ("runAsGroup", security.run_as_group)):
+        if value is None:
+            continue
+        existing = context.get(key, pod_context.get(key))
+        if existing is not None and existing != value:
+            raise ValueError(
+                f"{container['name']}: the sandbox runs as {key} {existing}; a task can't change it to {value}"
+            )
+        context[key] = value
     if security.read_only_root_filesystem:
         context["readOnlyRootFilesystem"] = True
     if security.no_new_privileges:
@@ -153,7 +162,6 @@ def service_container(svc: Service, image_pull_policy: str) -> dict[str, Any]:
             container["startupProbe"] = _probe(svc.readiness, STARTUP_PROBE_FAILURES)
     if svc.role != "run_once" and svc.readiness is not None:
         container["readinessProbe"] = _probe(svc.readiness, READINESS_PROBE_FAILURES)
-    _restrict(container, svc.security)
     return container
 
 
@@ -269,6 +277,7 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
     # Services in spec order: init containers start one at a time, which gives depends_on order.
     for svc in services.services:
         container = service_container(svc, image_pull_policy)
+        _restrict(pod_spec, container, svc.security)
         _add_tmpfs(pod_spec, container, svc.tmpfs)
         (containers if svc.role == "after_main" else init).append(container)
 
@@ -292,7 +301,7 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
     if services.main.add_capabilities:
         caps = sandbox.setdefault("securityContext", {}).setdefault("capabilities", {})
         caps["add"] = sorted(set(caps.get("add") or []) | set(services.main.add_capabilities))
-    _restrict(sandbox, services.main.security)
+    _restrict(pod_spec, sandbox, services.main.security)
     _add_tmpfs(pod_spec, sandbox, services.main.tmpfs)
 
     # Every container shares the pod network, so each Compose name is 127.0.0.1.
