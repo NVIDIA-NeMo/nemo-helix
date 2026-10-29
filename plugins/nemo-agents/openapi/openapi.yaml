@@ -3381,7 +3381,6 @@ components:
           title: Db Version
           description: Database version of the entity for optimistic locking.
           readOnly: true
-      additionalProperties: false
       type: object
       required:
       - workspace

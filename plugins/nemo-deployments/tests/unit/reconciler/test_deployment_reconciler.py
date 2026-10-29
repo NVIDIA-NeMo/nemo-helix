@@ -592,6 +592,7 @@ async def test_delete_timeout_before_boundary_stays_deleting(
 
     assert dep.status == "DELETING"
     mock_entities.delete.assert_not_awaited()
+    mock_entities.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -278,7 +278,10 @@ def validate_job_spec(
         ):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Gateway providers require an OpenShell execution profile with gateway_credentials configured.",
+                detail=(
+                    "Gateway providers require an OpenShell execution profile with gateway_credentials configured "
+                    "and credential_refresh_verified set to true."
+                ),
             )
 
         if step.requires_persistent_storage and not execution_profile.supports_persistent_storage:

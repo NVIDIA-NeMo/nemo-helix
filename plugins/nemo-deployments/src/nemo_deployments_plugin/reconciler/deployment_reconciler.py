@@ -255,7 +255,11 @@ class DeploymentReconciler:
                 logger.warning("Backend delete failed for %s — will retry", dep_id, exc_info=True)
                 return
             if status_update.status not in _DELETE_COMPLETE_STATUSES:
-                if status_update.status == "DELETING":
+                if (
+                    status_update.status == "DELETING"
+                    and status_update.error_details
+                    and status_update.error_details.get("reason") == "provider_cleanup_pending"
+                ):
                     await self._update_deployment_status(deployment, status_update)
                 logger.debug(
                     "Backend delete not complete for %s: %s — %s",
