@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
-import type { HelixJobLog, HelixJobLogPage } from '@nemo/sdk/generated/platform/schema';
+import {
+  HelixJobStatus,
+  type HelixJobLog,
+  type HelixJobLogPage,
+} from '@nemo/sdk/generated/platform/schema';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -240,6 +244,41 @@ describe('useJobLogs', () => {
     expect(mockJobsPageJobLogs).toHaveBeenCalledTimes(1);
     expect(data?.logs).toEqual(logs);
   });
+  describe('logStatus', () => {
+    it.each([
+      [HelixJobStatus.active, 'live'],
+      [HelixJobStatus.pending, 'live'],
+      [HelixJobStatus.completed, 'ended'],
+      [HelixJobStatus.error, 'ended'],
+      [HelixJobStatus.cancelled, 'ended'],
+      // Legacy aliases some callers (e.g. agent eval jobs) may still report.
+      ['succeeded' as HelixJobStatus, 'ended'],
+      ['failed' as HelixJobStatus, 'ended'],
+      ['canceled' as HelixJobStatus, 'ended'],
+    ])('is %s -> %s', async (jobStatus, expected) => {
+      mockJobsPageJobLogs.mockResolvedValue(makePage([], 0));
+
+      const { result } = renderHook(
+        () => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME, jobStatus }),
+        { wrapper: createWrapper() }
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.logStatus).toBe(expected);
+    });
+
+    it('is undefined when the job status is unknown', async () => {
+      mockJobsPageJobLogs.mockResolvedValue(makePage([], 0));
+
+      const { result } = renderHook(() => useJobLogs({ workspace: WORKSPACE, name: JOB_NAME }), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.logStatus).toBeUndefined();
+    });
+  });
+
   describe('loadProgress', () => {
     // The page walk reports progress via setState from inside the queryFn, so each
     // step has to be flushed inside act() rather than awaited with waitFor.

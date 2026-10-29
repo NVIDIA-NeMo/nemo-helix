@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LogEditor } from '@nemo/common/src/components/LogViewer/LogEditor';
+import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { triggerDownload } from '@nemo/common/src/utils/file';
@@ -9,8 +10,9 @@ import {
   formatLogs,
   formatLogsForDisplay,
   type LogLoadProgress,
+  type LogStatus,
 } from '@nemo/common/src/utils/logs';
-import { ArrowUp, CopyGeneric, Download, Paragraph } from '@nemo/icons/icons';
+import { ArrowUp, CopyGeneric, Download, Paragraph, Record as RecordIcon } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
@@ -68,6 +70,8 @@ interface LogViewerProps {
   /** Progress of the initial multi-page fetch, shown beneath the loading spinner.
    *  Ignored once logs are on screen. Callers that fetch in one shot can omit it. */
   loadProgress?: LogLoadProgress | null;
+  /** Badges the header as Live or Ended. Omit when the caller can't tell. */
+  logStatus?: LogStatus;
   /** Where the copy confirmation goes. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
 }
@@ -80,6 +84,7 @@ export const LogViewer: FC<LogViewerProps> = ({
   fillHeight = false,
   emptyMessage = 'No logs available yet',
   loadProgress,
+  logStatus,
   onNotify,
 }) => {
   const [showAllLogs, setShowAllLogs] = useState(fillHeight);
@@ -153,10 +158,21 @@ export const LogViewer: FC<LogViewerProps> = ({
       >
         <CodeSnippetActions>
           <Flex className="w-full" justify="between" wrap="wrap">
-            <Text kind="mono/md">
-              {displayedLogs.length.toLocaleString()}{' '}
-              {!showAllLogs && hasMoreLogs && `of ${logs.length.toLocaleString()}`} lines
-            </Text>
+            <Flex gap="density-sm" align="center">
+              <Text kind="mono/md">
+                {displayedLogs.length.toLocaleString()}{' '}
+                {!showAllLogs && hasMoreLogs && `of ${logs.length.toLocaleString()}`} lines
+              </Text>
+              {logStatus && (
+                <StatusBadge
+                  status={logStatus}
+                  statusConfig={{
+                    live: { label: 'Live', color: 'green', icon: RecordIcon },
+                    ended: { label: 'Ended', color: 'gray' },
+                  }}
+                />
+              )}
+            </Flex>
             <Flex gap="0.25">
               <Button
                 size="tiny"

@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
+import { logStatusForJob } from '@nemo/common/src/utils/logs';
 import {
   useAnonymizerGetRunJob,
   useAnonymizerGetRunJobLogs,
@@ -118,6 +119,7 @@ export const AnonymizerJobDetailRoute: FC | null = ANONYMIZER_ENABLED
                     <LogViewer
                       logs={logs?.data ?? []}
                       isLoading={isLoadingLogs}
+                      logStatus={logStatusForJob(job?.status)}
                       downloadFilename={`anonymizer-${anonymizerJobName}-logs.txt`}
                     />
                   )}
