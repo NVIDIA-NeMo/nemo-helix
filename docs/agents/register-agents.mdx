@@ -275,8 +275,8 @@ adapter is a complete example.
 Platform-routed models go through the [Inference Gateway](/documentation/models-and-inference),
 which holds the provider credentials:
 
-- Set `provider` to `nvidia`, `openai`, or `openai-compatible`, and leave `base_url` unset. NeMo
-  Helix fills in the gateway URL when it runs the agent.
+- Set `provider` to `nvidia`, `openai`, `openai-compatible`, or `anthropic`, and leave `base_url`
+  unset. NeMo Helix fills in the gateway URL when it runs the agent.
 - Set `model` to a model entity from `nemo models list` (for example,
   `nvidia-nemotron-3-5-lightning-30b-a3b`) or a
   [virtual model](/documentation/models-and-inference/virtual-models) in the same workspace.

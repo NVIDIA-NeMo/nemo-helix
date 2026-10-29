@@ -162,15 +162,22 @@ class TestInjectFabricGatewayUrl:
         }
 
         result = inject_fabric_gateway_url(config, "test-workspace", base_url="http://platform:8080")
-        expected_url = "http://platform:8080/apis/inference-gateway/v2/workspaces/test-workspace/openai/-/v1"
+        route = "http://platform:8080/apis/inference-gateway/v2/workspaces/test-workspace/openai/-"
 
-        assert result["models"]["default"]["base_url"] == expected_url
-        assert result["harnesses"]["hermes"]["model"]["base_url"] == expected_url
-        assert "base_url" not in result["harnesses"]["claude"]["model"]
+        assert result["models"]["default"]["base_url"] == f"{route}/v1"
+        assert result["harnesses"]["hermes"]["model"]["base_url"] == f"{route}/v1"
+        assert result["harnesses"]["claude"]["model"]["base_url"] == route
         assert "settings" not in result["models"]["default"]
         assert "settings" not in result["harnesses"]["hermes"]["model"]
         assert "settings" not in config["models"]["default"]
         assert "settings" not in config["harnesses"]["hermes"]["model"]
+
+    def test_leaves_other_providers_on_their_own_endpoint(self) -> None:
+        config = {"models": {"default": {"provider": "bedrock", "model": "anthropic.claude"}}}
+
+        result = inject_fabric_gateway_url(config, "test-workspace", base_url="http://platform:8080")
+
+        assert "base_url" not in result["models"]["default"]
 
     def test_preserves_explicit_top_level_endpoint_and_input(self) -> None:
         config = {
