@@ -3,6 +3,7 @@
 
 import { ActionBarPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
+import { useCopyToClipboard } from '@nemo/common/src/hooks/useCopyToClipboard';
 import { Check, CopyGeneric } from '@nemo/icons/icons';
 import { Tooltip } from '@nvidia/foundations-react-core';
 import { useEffect, useState } from 'react';
@@ -28,21 +29,16 @@ type CopyState = 'idle' | 'copied' | 'failed';
 // or the document is not focused. A failure is shown in the tooltip instead of a false check mark.
 const CopyErrorAction = ({ error }: CopyErrorActionProps) => {
   const [copyState, setCopyState] = useState<CopyState>('idle');
+  const { copyToClipboard } = useCopyToClipboard({
+    onSuccess: () => setCopyState('copied'),
+    onError: () => setCopyState('failed'),
+  });
 
   useEffect(() => {
     if (copyState === 'idle') return undefined;
     const timeout = setTimeout(() => setCopyState('idle'), COPIED_DURATION_MS);
     return () => clearTimeout(timeout);
   }, [copyState]);
-
-  const copyError = async () => {
-    try {
-      await navigator.clipboard.writeText(error);
-      setCopyState('copied');
-    } catch {
-      setCopyState('failed');
-    }
-  };
 
   return (
     <Tooltip
@@ -54,7 +50,7 @@ const CopyErrorAction = ({ error }: CopyErrorActionProps) => {
         type="button"
         aria-label="Copy error"
         className={ACTION_BUTTON_CLASS}
-        onClick={() => void copyError()}
+        onClick={() => void copyToClipboard(error)}
       >
         {copyState === 'copied' ? <Check size="16" /> : <CopyGeneric size="16" />}
       </button>
