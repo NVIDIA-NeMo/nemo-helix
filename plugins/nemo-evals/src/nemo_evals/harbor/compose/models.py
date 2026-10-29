@@ -132,6 +132,37 @@ class ComposeVolumeMount(BaseModel):
     name: str = Field(description="A volume declared under the compose file's top-level `volumes`.")
     mount_path: str = Field(description="Where it appears inside the container.")
     read_only: bool = Field(default=False, description="Whether the mount ends in `:ro` or sets `read_only: true`.")
+    anonymous: bool = Field(
+        default=False,
+        description="Whether it's an anonymous volume (`/data`), which only this container mounts; `name` is generated.",
+    )
+
+
+class ComposeTmpfs(BaseModel):
+    """A memory-backed scratch directory, from one entry of a service's ``tmpfs``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mount_path: str = Field(description="Where it appears inside the container.")
+    size: str | None = Field(
+        default=None, description="Its `size=` option as a Kubernetes quantity; None when the entry sets none."
+    )
+
+
+class ComposeSecurity(BaseModel):
+    """How a service narrows what its container may do: Compose ``user``, ``read_only``, ``cap_drop`` and ``security_opt``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    user: int | None = Field(default=None, description="The uid from `user: uid[:gid]`.")
+    group: int | None = Field(default=None, description="The gid from `user: uid:gid`; None when it names only a uid.")
+    read_only: bool = Field(default=False, description="Compose `read_only`: the image's filesystem can't be written.")
+    cap_drop: list[str] = Field(
+        default_factory=list, description="Compose `cap_drop`, without `CAP_` and in capitals: `NET_RAW`, or `ALL`."
+    )
+    no_new_privileges: bool = Field(
+        default=False, description="Whether `security_opt` sets `no-new-privileges`, so setuid programs don't elevate."
+    )
 
 
 class ComposeService(BaseModel):
@@ -177,6 +208,8 @@ class ComposeService(BaseModel):
     )
     volume_mounts: list[ComposeVolumeMount] = Field(default_factory=list, description="The named volumes it mounts.")
     shm_size: str | None = Field(default=None, description="The size of `/dev/shm`, as a Kubernetes quantity.")
+    security: ComposeSecurity | None = Field(default=None, description="Its restrictions; None when it sets none.")
+    tmpfs: list[ComposeTmpfs] = Field(default_factory=list, description="Its memory-backed scratch directories.")
 
 
 class ComposeMainSettings(BaseModel):
@@ -222,6 +255,8 @@ class ComposeMainSettings(BaseModel):
     platform: str | None = Field(
         default=None, description="Compose `platform` on `main`, as written: the platform its image is built for."
     )
+    security: ComposeSecurity | None = Field(default=None, description="`main`'s restrictions; None when it sets none.")
+    tmpfs: list[ComposeTmpfs] = Field(default_factory=list, description="`main`'s memory-backed scratch directories.")
 
 
 class ComposeTask(BaseModel):
@@ -252,5 +287,8 @@ class ComposeTask(BaseModel):
     main: ComposeMainSettings = Field(description="What the compose file changes about `main`.")
     volumes: list[str] = Field(
         default_factory=list,
-        description="The declared volumes something mounts, in file order. Each becomes an empty pod volume.",
+        description=(
+            "The declared volumes something mounts, in file order, then each anonymous volume. Each becomes an empty "
+            "pod volume."
+        ),
     )
