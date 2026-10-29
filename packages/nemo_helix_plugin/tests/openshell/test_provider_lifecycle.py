@@ -706,6 +706,51 @@ def test_policy_allows_workload_operations_without_broad_platform_access():
     assert actual == expected
 
 
+def test_policy_preserves_external_access_while_replacing_all_helix_endpoints():
+    data = generate_policy_dict(filesystem=SandboxFilesystem(), egress=None)
+    data["network_policies"] = {
+        "nemo_workload": {
+            "name": "user-services",
+            "endpoints": [
+                {"host": "api.github.com", "port": 443},
+                {"host": "HELIX.EXAMPLE.", "port": 443},
+            ],
+            "binaries": [{"path": "/usr/bin/python"}],
+        },
+        "other_platform_access": {"endpoints": [{"host": "helix.example", "port": 80}]},
+        "packages": {"endpoints": [{"host": "pypi.org", "port": 443}]},
+    }
+    policy = build_sandbox_policy(data)
+    original = policy.SerializeToString()
+    restricted = restricted_platform_policy(
+        policy, host="helix.example", port=443, workspace="team", binaries=["/usr/bin/python"]
+    )
+    assert policy.SerializeToString() == original
+    assert restricted.network_policies["packages"] == policy.network_policies["packages"]
+    expected = type(policy.network_policies["nemo_workload"])()
+    expected.CopyFrom(policy.network_policies["nemo_workload"])
+    del expected.endpoints[1:]
+    assert restricted.network_policies["nemo_workload"] == expected
+    assert "other_platform_access" not in restricted.network_policies
+    platform = restricted.network_policies["nemo_workload_"].endpoints[0]
+    assert platform.host == "helix.example"
+    assert platform.port == 443
+    assert platform.rules
+    assert all("/secrets/" not in rule.allow.path for rule in platform.rules)
+    assert restricted.filesystem == policy.filesystem
+    assert restricted.process == policy.process
+
+
+@pytest.mark.parametrize("host", ["*", "*.example", "HELIX.*"])
+def test_policy_rejects_wildcard_access_overlapping_helix(host):
+    data = generate_policy_dict(filesystem=SandboxFilesystem(), egress=None)
+    data["network_policies"] = {"broad": {"endpoints": [{"host": host, "port": 443}]}}
+    with pytest.raises(ValueError, match="wildcard network endpoint overlaps Helix"):
+        restricted_platform_policy(
+            build_sandbox_policy(data), host="helix.example", port=443, workspace="team", binaries=[]
+        )
+
+
 @pytest.mark.parametrize("secret_env,env_names", [({"ALIAS": "token"}, set()), ({}, {"API_TOKEN"})])
 def test_reject_provider_secret_env_aliases(secret_env, env_names):
     with pytest.raises(ValueError):
