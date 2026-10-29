@@ -78,6 +78,8 @@ class InMemoryIntakeService:
         self.atif_delay_sec: float = 0.0
         #: Ingest errors reported back for every OTLP request.
         self.otlp_errors: list[str] = []
+        #: When set, returns extra ingest errors for an OTLP request from its protobuf body.
+        self.otlp_rejects: Callable[[bytes], list[str]] | None = None
         #: Session ids whose evaluator results fail with a 500.
         self.failing_evaluator_result_sessions: set[str] = set()
         #: Whether the evaluation exists; ``False`` answers evaluation lookups with 404.
@@ -101,7 +103,8 @@ class InMemoryIntakeService:
             return await self._atif(request, unquote(match["workspace"]))
         if match := _OTLP.match(path):
             self.otlp_requests.append({"workspace": unquote(match["workspace"]), "body": request.content})
-            return httpx.Response(200, json=IngestResponse(errors=list(self.otlp_errors)).model_dump(mode="json"))
+            errors = [*self.otlp_errors, *(self.otlp_rejects(request.content) if self.otlp_rejects else [])]
+            return httpx.Response(200, json=IngestResponse(errors=errors).model_dump(mode="json"))
         if match := _EVALUATOR_RESULTS.match(path):
             return self._evaluator_result(request, unquote(match["workspace"]))
         if match := _TRACES.match(path):

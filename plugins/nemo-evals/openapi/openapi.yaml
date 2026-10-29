@@ -6795,6 +6795,18 @@ components:
             leaves the results intact to re-publish. Set False to keep the job successful
             and report the failure in its output instead.
           default: true
+        max_otlp_request_bytes:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Otlp Request Bytes
+          description: Largest serialized OTLP request, envelope included, sent to
+            Intake for one trial's trace. A larger trace is split into several requests
+            in span order, keeping each span's ids, parent, and resource and scope
+            metadata. Defaults to 4 MiB. Keep it within Intake's and any proxy's request
+            body limits; this setting does not change those limits. A trial with a
+            single span too large to fit fails publication before any of its trace
+            is sent.
+          default: 4194304
       additionalProperties: false
       type: object
       required:
@@ -8436,6 +8448,18 @@ components:
             leaves the results intact to re-publish. Set False to keep the job successful
             and report the failure in its output instead.
           default: true
+        max_otlp_request_bytes:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Otlp Request Bytes
+          description: Largest serialized OTLP request, envelope included, sent to
+            Intake for one trial's trace. A larger trace is split into several requests
+            in span order, keeping each span's ids, parent, and resource and scope
+            metadata. Defaults to 4 MiB. Keep it within Intake's and any proxy's request
+            body limits; this setting does not change those limits. A trial with a
+            single span too large to fit fails publication before any of its trace
+            is sent.
+          default: 4194304
         test_case_id_field:
           title: Test Case Id Field
           description: "Dataset column identifying each row, recorded as the published\

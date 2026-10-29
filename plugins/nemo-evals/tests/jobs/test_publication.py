@@ -18,6 +18,7 @@ import pytest
 import respx
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
+from nemo_evals.intake.publish import publish_to_intake
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
@@ -774,3 +775,49 @@ def test_row_agent_target_derives_its_name() -> None:
         publication=RowPublicationSpec(intake=RowIntakePublicationSpec(evaluation_id="eval-1")),
     )
     assert target_agent_identity(spec.target) == ("my-agent", None)
+
+
+# --- OTLP request budget ------------------------------------------------------
+
+
+@pytest.mark.parametrize("spec_type", [IntakePublicationSpec, RowIntakePublicationSpec])
+def test_otlp_request_budget_defaults_to_4_mib(spec_type: type[IntakePublicationSpec]) -> None:
+    assert spec_type(evaluation_id="eval-1").max_otlp_request_bytes == 4 * 1024 * 1024
+
+
+@pytest.mark.parametrize("spec_type", [IntakePublicationSpec, RowIntakePublicationSpec])
+@pytest.mark.parametrize("budget", [0, -1])
+def test_a_non_positive_otlp_request_budget_is_rejected(spec_type: type[IntakePublicationSpec], budget: int) -> None:
+    with pytest.raises(ValidationError, match="max_otlp_request_bytes"):
+        spec_type(evaluation_id="eval-1", max_otlp_request_bytes=budget)
+
+
+def test_agent_publication_forwards_the_otlp_request_budget(
+    intake: InMemoryIntakeService, mocker: MockerFixture
+) -> None:
+    forwarded = mocker.patch("nemo_evals.jobs.publication.publish_to_intake", wraps=publish_to_intake)
+
+    publish_agent_eval_result(
+        _result(),
+        spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", max_otlp_request_bytes=2_097_152),
+        target=None,
+        workspace="default",
+        intake=intake.client(),
+    )
+
+    assert forwarded.call_args.kwargs["max_otlp_request_bytes"] == 2_097_152
+
+
+def test_evaluate_job_forwards_the_otlp_request_budget(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
+    mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
+    forwarded = mocker.patch("nemo_evals.jobs.publication.publish_to_intake", wraps=publish_to_intake)
+
+    AsyncEvaluateJob().run(
+        _evaluate_spec(max_otlp_request_bytes=2_097_152).model_dump(),
+        ctx=_job_context(tmp_path, job_id="job-1"),
+        async_client=intake.client(),
+    )
+
+    assert forwarded.call_args.kwargs["max_otlp_request_bytes"] == 2_097_152
