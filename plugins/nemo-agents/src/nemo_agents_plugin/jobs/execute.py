@@ -70,6 +70,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 )
 from nemo_helix_plugin.agents.post_run_actions import PostRunActionContext
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.job import NemoJob
@@ -350,6 +351,7 @@ class ExecuteAgentStepConfig(BaseModel):
     compute: ComputeSpecInline | None = None
     secrets: dict[str, str] = Field(default_factory=dict)
     providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
+    stage_ethos_fileset: bool = True
     post_run_action: PostRunActionConfig = Field(default_factory=_make_noop_post_run_action_config)
 
     @model_validator(mode="before")
@@ -434,6 +436,7 @@ class ExecuteAgentJob(NemoJob):
         except EnvironmentResolutionError as exc:
             raise ValueError(str(exc)) from exc
 
+        stage_ethos_fileset = True
         if merged.providers:
             merged.require_runtime_support("openshell")
             if is_local:
@@ -443,6 +446,11 @@ class ExecuteAgentJob(NemoJob):
                 workspace=workspace,
                 secrets_client=AsyncSecretsClient.from_client(cast(AsyncNemoClient, async_sdk)),
             )
+            files_client = AsyncFilesClient.from_client(cast(AsyncNemoClient, async_sdk))
+            try:
+                await files_client.get_fileset(workspace=source.workspace, name=ethos_fileset_name(source.name))
+            except NotFoundError:
+                stage_ethos_fileset = False
 
         # Validate the merged config: an EnvironmentSpec can override the harness
         # provider, so validation must run after the merge to reject e.g. a spec
@@ -476,6 +484,7 @@ class ExecuteAgentJob(NemoJob):
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
             providers=merged.providers,
+            stage_ethos_fileset=stage_ethos_fileset,
             post_run_action=post_run_action,
         )
 
@@ -528,7 +537,8 @@ class ExecuteAgentJob(NemoJob):
 
         read_filesets: set[str] = set()
         if step_config.providers:
-            read_filesets.add(f"{step_config.agent.workspace}/{ethos_fileset_name(step_config.agent.name)}")
+            if step_config.stage_ethos_fileset:
+                read_filesets.add(f"{step_config.agent.workspace}/{ethos_fileset_name(step_config.agent.name)}")
             if step_config.workdir:
                 refs = [mount.ref for mount in step_config.workdir.artifact_mounts]
                 if step_config.workdir.base_workdir:
@@ -623,7 +633,7 @@ class ExecuteAgentJob(NemoJob):
             # and the default workspace is one of those children.
             logger.info("Staging stored agent files for %s.", agent_ref)
             _stage_stored_agent_ethos(
-                sdk,
+                sdk if step_config.stage_ethos_fileset else None,
                 workspace=step_config.agent.workspace,
                 agent_name=step_config.agent.name,
                 agent_config=agent_config,

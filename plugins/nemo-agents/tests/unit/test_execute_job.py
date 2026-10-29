@@ -16,6 +16,7 @@ from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from urllib.parse import urlsplit
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -65,6 +66,7 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 )
 from nemo_agents_plugin.telemetry import intake_export
 from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.job_context import JobContext
@@ -1039,8 +1041,12 @@ async def test_to_spec_rejects_local_provider_credentials_before_workdir_access(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("with_workdir", [False, True])
-async def test_provider_bindings_survive_remote_compilation_without_env_secrets(with_workdir: bool) -> None:
+@pytest.mark.parametrize(
+    "with_workdir,ethos_status", [(False, 200), (True, 200), (False, 404), (True, 404), (False, 403)]
+)
+async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
+    with_workdir: bool, ethos_status: int
+) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _agent()
     environment = AgentEnvironmentInline(
@@ -1055,17 +1061,30 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
             },
         )
     )
-    with patch("nemo_agents_plugin.jobs.execute.authorize_provider_references", new=AsyncMock()) as authorize:
+    client = _sdk_with_files()
+    lookup = AsyncMock()
+    if ethos_status != 200:
+        error = NotFoundError if ethos_status == 404 else PermissionDeniedError
+        lookup.side_effect = error(httpx.Response(ethos_status))
+    with (
+        patch("nemo_agents_plugin.jobs.execute.authorize_provider_references", new=AsyncMock()) as authorize,
+        patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.get_fileset", new=lookup),
+        pytest.raises(PermissionDeniedError) if ethos_status == 403 else nullcontext(),
+    ):
         spec = await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent="calc", input="hello", environment=environment),
             workspace="default",
             entity_client=entity_client,
-            async_sdk=_sdk_with_files(),
+            async_sdk=client,
             is_local=False,
         )
+    if ethos_status == 403:
+        return
     authorize.assert_awaited_once()
     assert isinstance(spec, ExecuteAgentStepConfig)
     assert spec.secrets == {}
+    assert spec.stage_ethos_fileset == (ethos_status == 200)
+    lookup.assert_awaited_once_with(workspace=spec.agent.workspace, name=f"{spec.agent.name}-ethos")
     if with_workdir:
         spec.workdir = AgentWorkdir(base_workdir="other/source", artifact_mounts=[])
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
@@ -1081,7 +1100,8 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
     step = compiled.steps[0]
     assert step.gateway_providers["service"].credentials == {"API_TOKEN": "default/service-token"}
     assert step.gateway_read_filesets == sorted(
-        [f"{spec.agent.workspace}/{spec.agent.name}-ethos"] + (["other/source"] if with_workdir else [])
+        ([f"{spec.agent.workspace}/{spec.agent.name}-ethos"] if ethos_status == 200 else [])
+        + (["other/source"] if with_workdir else [])
     )
     assert step.executor.profile == "sandbox"
     assert not step.environment
@@ -3065,3 +3085,31 @@ def test_a_new_request_setting_extension_is_still_rejected_by_the_create_route()
 
     assert response.status_code == 422
     assert "'extension' was renamed to 'post_run_action'" in response.text
+
+
+@pytest.mark.parametrize("needs_skill", [False, True])
+def test_run_without_optional_ethos_does_not_request_it(
+    ctx: JobContext, monkeypatch: pytest.MonkeyPatch, needs_skill: bool
+) -> None:
+    _use_real_ethos_stage(monkeypatch)
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_agent_with_probe_skill() if needs_skill else _resolved_agent(),
+        stage_ethos_fileset=False,
+    )
+    client = _sdk_opening_async_client()
+    with (
+        patch("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", new=AsyncMock()) as download,
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=client.files),
+        patch(
+            "nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once",
+            new=AsyncMock(return_value=FabricRuntimeResult(status="succeeded", response="done")),
+        ) as invoke,
+    ):
+        if needs_skill:
+            with pytest.raises(FabricArtifactStagingError):
+                ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=client)
+            invoke.assert_not_awaited()
+        else:
+            assert ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=client)["status"] == "completed"
+        download.assert_not_awaited()
