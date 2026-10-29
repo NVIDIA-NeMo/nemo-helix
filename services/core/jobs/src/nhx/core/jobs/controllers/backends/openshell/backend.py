@@ -70,6 +70,7 @@ from nhx.core.jobs.controllers.backends.base import (
     get_job_runtime_shared_envvars,
     get_logs_endpoint_from_fileset,
     step_ttl_seconds_active,
+    validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.openshell.policy import (
     DEFAULT_EGRESS_BINARIES,
@@ -348,6 +349,10 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             env.update(auth_context.to_principal().get_env_var())
 
         # Step env vars (non-secret values).
+        validate_no_reserved_managed_job_environment_variable_names(
+            (envvar.name for envvar in step_spec.environment or []),
+            source="Job step environment keys",
+        )
         for envvar in step_spec.environment or []:
             if envvar.value is not None:
                 env[envvar.name] = envvar.value

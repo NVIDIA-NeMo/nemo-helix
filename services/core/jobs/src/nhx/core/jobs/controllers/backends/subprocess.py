@@ -45,6 +45,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
     step_ttl_seconds_active,
+    validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -502,6 +503,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         env.update(otlp_logs_endpoint.to_env())
 
         if spec and spec.environment:
+            validate_no_reserved_managed_job_environment_variable_names(
+                (envvar.name for envvar in spec.environment),
+                source="Job step environment keys",
+            )
             for envvar in spec.environment:
                 if envvar.value is None:
                     continue

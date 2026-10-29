@@ -78,6 +78,9 @@ RESERVED_MANAGED_JOB_AUTH_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset
         "NEMO_WORKLOAD_TOKEN",
         "NEMO_WORKLOAD_TOKEN_FILE",
         WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+        # Delegated identity and secret references are injected by the platform; a step must not override them.
+        NHX_PRINCIPAL_ENVVAR,
+        NEMO_JOB_SECRETS_ENVVAR,
     }
 )
 
