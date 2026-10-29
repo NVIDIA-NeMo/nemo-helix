@@ -790,6 +790,85 @@ class JobDispatcher:
         """The status a freshly-created member contributes to the group's initial rollup."""
         return member.status
 
+    async def _member_current_status(self, member: HelixJob) -> HelixJobStatus:
+        """Return a member job's effective status from its current attempt.
+
+        A member with no attempt yet is treated as ``CREATED``, mirroring how
+        :meth:`_build_job_group_response` derives the group's aggregate status.
+        """
+        if member.current_attempt_id is None:
+            return HelixJobStatus.CREATED
+        try:
+            attempt = await self.store.get_by_id(HelixJobAttempt, member.current_attempt_id)
+        except EntityNotFoundError:
+            return HelixJobStatus.CREATED
+        return attempt.status
+
+    async def cancel_group_members(
+        self, group_id: str, workspace: str, *, exclude_job_id: str | None = None
+    ) -> list[str]:
+        """Cancel every cancellable member of a group, returning the IDs cancelled.
+
+        Shared fan-out used both by bottom-up fail-fast (a member reaching
+        ``ERROR`` sweeps its siblings) and, later, by a top-down group-cancel
+        request. Only members that are still non-terminal and not already
+        cancelling are cancelled, so repeated calls while cancels are in flight
+        are naturally idempotent. ``exclude_job_id`` skips the member that
+        triggered the sweep (it is already terminal and must not cancel itself).
+
+        Cancellation reuses :meth:`cancel_job`, which acquires each member's own
+        mutation lock. Members are distinct jobs from any lock the caller holds,
+        so the per-member fan-out does not deadlock against the caller.
+        """
+        cancelled: list[str] = []
+        skip_statuses = (HelixJobStatus.CANCELLING, *HelixJobStatus.terminals())
+        for member in await self._list_group_members(group_id, workspace):
+            if member.id == exclude_job_id:
+                continue
+            if await self._member_current_status(member) in skip_statuses:
+                continue
+            try:
+                await self.cancel_job(member.id, workspace)
+                cancelled.append(member.id)
+            except (JobOperationConflictError, StateTransitionConflictError):
+                # The member advanced to a terminal/cancelling state between the
+                # status read and the cancel; nothing left to do for it.
+                logger.debug(
+                    "Skipping group-member cancel; member already advanced",
+                    extra={"job": member.id, "group": group_id, "workspace": workspace},
+                )
+        return cancelled
+
+    async def _apply_fail_fast_on_member_error(self, member: HelixJob) -> None:
+        """Fan a fail-fast cancel across a group when a member reaches ``ERROR``.
+
+        Called from the member status roll-up once a member attempt has just
+        transitioned into ``ERROR``. If the member belongs to a group whose
+        ``fail_fast`` is set, the group's other non-terminal members are
+        cancelled. The trigger is ``ERROR`` only: a user cancelling a single
+        member must not sweep the group (group-wide cancel is a separate path).
+        """
+        group_id = member.parent
+        if group_id is None:
+            return
+        try:
+            group = await self.store.get_by_id(JobGroup, group_id)
+        except EntityNotFoundError:
+            return
+        if not isinstance(group, JobGroup) or not group.fail_fast:
+            return
+        cancelled = await self.cancel_group_members(group_id, member.workspace, exclude_job_id=member.id)
+        if cancelled:
+            logger.info(
+                "Applied JobGroup fail_fast: cancelled siblings of failed member",
+                extra={
+                    "group": group_id,
+                    "failed_member": member.id,
+                    "cancelled_count": len(cancelled),
+                    "workspace": member.workspace,
+                },
+            )
+
     async def update_job(
         self,
         identifier: str,
@@ -1748,6 +1827,18 @@ class JobDispatcher:
         if new_attempt_status != attempt.status:
             attempt, changed = await self._save_attempt_status(attempt, new_attempt_status, saved_step, step_spec_name)
             if changed:
+                if attempt.status == HelixJobStatus.ERROR and previous_attempt_status != HelixJobStatus.ERROR:
+                    # The member just transitioned INTO error. If it belongs to a
+                    # fail_fast group, sweep-cancel its siblings. Anchoring on the
+                    # changed transition (not merely "status is error") keeps this
+                    # firing once per member, so in-flight sibling cancels are not
+                    # re-fanned on later replayed writes.
+                    try:
+                        member = await self.store.get_by_id(HelixJob, attempt.job)
+                    except EntityNotFoundError:
+                        member = None
+                    if member is not None:
+                        await self._apply_fail_fast_on_member_error(member)
                 if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
                         job = await self.store.get_by_id(HelixJob, attempt.job)
