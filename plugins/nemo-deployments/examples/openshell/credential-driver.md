@@ -37,7 +37,7 @@ Use a private directory outside the checkout. It must contain two regular, non-s
 - `registration.key`: at least 32 random bytes. Share this exact key only with the trusted Helix controller. It signs registration tickets; it is not a service credential. Preserve it with the binding database.
 - `helix.token`: a platform-issued service workload access token accepted by the Auth policy-evaluation endpoint. Its identity needs Secrets value access and read access to the relevant Jobs and deployment entities. Ordinary user/access-key tokens are not sufficient. The driver checks the signed creator’s permission explicitly before reading a value; it does not impersonate the creator through request headers.
 
-Keep the source directory mode 0700 and both files mode 0600. The initializer creates private destination files and never prints their contents. It refuses to overwrite an existing signing key with different bytes. Token replacement is allowed and atomic.
+Keep the source directory mode 0700 and both files mode 0600. Each file must be no larger than 64 KiB. The initializer creates private destination files and never prints their contents. It refuses to overwrite an existing signing key with different bytes. Token replacement is allowed and atomic.
 
 Set these variables, replacing the credential directory and Helix URL with your actual values:
 
@@ -91,6 +91,8 @@ Starting the sidecar alone does not enable controller renewal. Keep `credential_
 ## Restart, rotate and stop
 
 The driver has `restart: unless-stopped`. On process startup it takes an exclusive socket lock. It can remove its own stale socket after a crash, but refuses to replace a live listener, a symlink, a regular file or another user's socket. The binding database survives container recreation.
+
+The SQLite registry stores binding metadata and revocation tombstones, never raw tickets or credential values. Keep it on a persistent local volume on one host; shared network filesystems and multiple driver replicas are unsupported. Tombstones have no automatic compaction.
 
 After replacing the source `helix.token`, restage it:
 

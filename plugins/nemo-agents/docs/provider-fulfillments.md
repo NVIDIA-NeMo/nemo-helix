@@ -34,7 +34,7 @@ Compilation rejects missing aliases, duplicate slots, plaintext env conflicts, a
 
 1. The Helix controller checks the profile approval and secret access, then creates a dedicated OpenShell provider for each workload binding using a signed registration ticket.
 2. The credential driver validates the ticket and stores reference and ownership metadata in a persistent registry. Registration does not fetch the secret value.
-3. On credential resolution, the driver checks the owning job attempt/step or deployment and reads the secret. With platform auth enabled, it delegates the read to the workload creator. OpenShell receives the value; the sandbox receives a placeholder.
+3. On credential resolution, the driver checks the owning job attempt/step or deployment and reads the secret. With platform auth enabled, it checks the signed creator's current permission through Auth, then reads using the driver's service identity. OpenShell receives the value; the sandbox receives a placeholder.
 4. Controllers attach providers before launch and remove them after sandbox deletion. Ownership labels support retries and cleanup after controller restarts; an orphan sweep reclaims unattached providers after a ten-minute grace period.
 
 Provider-bearing sandboxes have a restricted platform REST allowlist enforced by OpenShell. It permits required workload operations, declared filesets, inference and telemetry, while excluding secret reads, entity access, token minting and new job submission. The gateway's network policy, TLS inspection and attachment authorization must remain enforced. Gateway administrators are trusted.
@@ -68,7 +68,7 @@ The gateway ID and signing key must match the driver. Install profiles through O
 
 Before enabling, verify that requests using the original startup placeholder continue beyond the configured credential lifetime; rotation reaches those requests; permission denial or secret deletion removes the provider; outages do not extend cached credentials; and sandbox requests to disallowed platform endpoints are blocked. Keep the original placeholder throughout validation: a fresh process environment can mask a failure affecting a running agent.
 
-With platform auth enabled, provisioning checks the creator's permission and the driver delegates secret reads to that creator. With auth disabled, provisioning checks secret existence; start the driver explicitly with `--auth-disabled`. Tickets from the other auth mode are rejected. Signed scopes, profile approval, workload checks and sandbox network restrictions apply in both modes. Auth-disabled installations provide no per-user access control, so reachable platform APIs remain a trusted administrative surface.
+With platform auth enabled, the creator's permission is required at both provisioning and credential resolution. With auth disabled, provisioning checks secret existence; start the driver explicitly with `--auth-disabled`. Tickets from the other auth mode are rejected. Signed scopes, profile approval, workload checks and sandbox network restrictions apply in both modes. Auth-disabled installations provide no per-user access control, so reachable platform APIs remain a trusted administrative surface.
 
 ## Rotation, revocation and limits
 
@@ -76,6 +76,6 @@ The driver has no value cache. OpenShell is trusted to hold resolved credentials
 
 In Helix renewal mode, confirmed permission denial or a missing secret records cleanup intent, then detaches and deletes the affected provider. Cleanup retries after failure or controller restart. Restoring permission does not undo recorded cleanup or recreate a missing provider during renewal; start a new workload to restore access. Other providers remain independently renewable. Temporary outages retry without extending existing expiry.
 
-Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Source-service token revocation is separate. Ordinary workload controllers retain responsibility for job and deployment lifecycle.
+Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Removing a provider leaves the underlying Helix secret intact. Source-service token revocation is separate. Ordinary workload controllers retain responsibility for job and deployment lifecycle.
 
 Upgrade all environment consumers before storing these specs. Older consumers that discard `settings.openshell` may inject the referenced secrets into process environments; mixed-version consumers are unsupported. The credential driver accepts registration tickets only, so its gateway cannot also serve unrelated raw provider credentials.
