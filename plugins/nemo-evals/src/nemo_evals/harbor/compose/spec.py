@@ -219,24 +219,20 @@ def _mount_spec(mount: ComposeVolumeMount, volume_names: Mapping[str, str]) -> d
     return {"name": volume_names[mount.name], "mount_path": mount.mount_path, "read_only": mount.read_only}
 
 
-def _security_spec(security: ComposeSecurity | None, tmpfs: list[ComposeTmpfs]) -> dict[str, Any]:
+def _security_and_tmpfs_spec(security: ComposeSecurity | None, tmpfs: list[ComposeTmpfs]) -> dict[str, Any]:
     """Render a container's restrictions and ``tmpfs`` as the ``security`` and ``tmpfs`` keys ``ComposeServices`` takes."""
     spec: dict[str, Any] = {}
     if security is not None:
-        # Only what the file sets, so the spec the extension reads stays as small as the file. Each is checked on its
-        # own: uid 0 is a setting, even though it's falsy.
-        rendered: dict[str, Any] = {}
-        if security.user is not None:
-            rendered["run_as_user"] = security.user
-        if security.group is not None:
-            rendered["run_as_group"] = security.group
-        if security.read_only:
-            rendered["read_only_root_filesystem"] = True
-        if security.cap_drop:
-            rendered["drop_capabilities"] = security.cap_drop
-        if security.no_new_privileges:
-            rendered["no_new_privileges"] = True
-        spec["security"] = rendered
+        # Only what the file sets, so the spec the extension reads stays as small as the file. `or None` drops a
+        # False or empty setting, but uid and gid are passed as they are: 0 is root, not unset.
+        settings = {
+            "run_as_user": security.user,
+            "run_as_group": security.group,
+            "read_only_root_filesystem": security.read_only or None,
+            "drop_capabilities": security.cap_drop or None,
+            "no_new_privileges": security.no_new_privileges or None,
+        }
+        spec["security"] = {key: value for key, value in settings.items() if value is not None}
     if tmpfs:
         spec["tmpfs"] = [
             {"mount_path": mount.mount_path, **({"size_limit": mount.size} if mount.size else {})} for mount in tmpfs
@@ -261,7 +257,7 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: 
         spec["add_capabilities"] = main.add_capabilities
     if main.readiness is not None:
         spec["readiness"] = {"exec": main.readiness.exec_, "timeout_sec": _clamped_timeout_sec(wait_budget_sec)}
-    spec.update(_security_spec(main.security, main.tmpfs))
+    spec.update(_security_and_tmpfs_spec(main.security, main.tmpfs))
     return spec
 
 
@@ -309,7 +305,7 @@ def _service_spec(
         spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in service.volume_mounts]
     if service.shm_size is not None:
         spec["shm_size"] = service.shm_size
-    spec.update(_security_spec(service.security, service.tmpfs))
+    spec.update(_security_and_tmpfs_spec(service.security, service.tmpfs))
     return spec
 
 

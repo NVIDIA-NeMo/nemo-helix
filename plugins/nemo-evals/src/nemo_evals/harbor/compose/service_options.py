@@ -493,7 +493,7 @@ def _anonymous_mount(
     return ComposeVolumeMount(name=name, mount_path=target, read_only=read_only, anonymous=True)
 
 
-def anonymous_volume_name(service: str, index: int) -> str:
+def _anonymous_volume_name(service: str, index: int) -> str:
     """The name the anonymous volume at ``index`` in ``service``'s ``volumes`` gets: ``main-anon-0`` for main's first."""
     return f"{service}-anon-{index}"
 
@@ -503,7 +503,7 @@ def parse_volume_mounts(
 ) -> list[ComposeVolumeMount]:
     """Read ``service``'s ``volumes`` as mounts of the top-level named volumes in ``declared_volumes``.
 
-    An anonymous volume is named by :func:`anonymous_volume_name`.
+    An anonymous volume is named by :func:`_anonymous_volume_name`.
     """
     if value is None:
         return []
@@ -512,7 +512,7 @@ def parse_volume_mounts(
         return []
 
     mounts = (
-        _mount_entry(entry, f"{path}[{index}]", declared_volumes, anonymous_volume_name(service, index), problems)
+        _mount_entry(entry, f"{path}[{index}]", declared_volumes, _anonymous_volume_name(service, index), problems)
         for index, entry in enumerate(value)
     )
     return [mount for mount in mounts if mount is not None]
@@ -583,11 +583,13 @@ def _parse_user(value: Any, path: str, problems: ComposeProblems) -> tuple[int |
         problems.invalid(path, "expected a user such as 1000 or 1000:1000")
         return None, None
 
-    user, _, group = str(value).partition(":")
-    if not (user.isascii() and user.isdigit()) or not (group == "" or (group.isascii() and group.isdigit())):
+    # `[0-9]`, not `\d`, which also matches digits like `²` that `int` can't read.
+    match = re.fullmatch(r"([0-9]+)(?::([0-9]+))?", str(value))
+    if match is None:
         problems.unsupported(f"{path}: {value!r} (only a numeric uid[:gid])")
         return None, None
-    return int(user), int(group) if group else None
+    uid, gid = match.groups()
+    return int(uid), int(gid) if gid is not None else None
 
 
 def _parse_cap_drop(value: Any, path: str, problems: ComposeProblems) -> list[str]:
@@ -600,7 +602,7 @@ def _parse_cap_drop(value: Any, path: str, problems: ComposeProblems) -> list[st
 
     capabilities: list[str] = []
     for index, entry in enumerate(value):
-        name = str(entry).upper().removeprefix("CAP_") if isinstance(entry, str) else ""
+        name = entry.upper().removeprefix("CAP_") if isinstance(entry, str) else ""
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
             problems.invalid(f"{path}[{index}]", f"not a capability: {entry!r}")
         elif name not in capabilities:
@@ -646,8 +648,8 @@ def parse_security(raw_service: Mapping[str, Any], path: str, problems: ComposeP
     return None if security == ComposeSecurity() else security
 
 
-# Options an ``emptyDir`` already behaves as. Its mode is 0777, which lacks only ``1777``'s sticky bit.
-_TMPFS_NO_OP_OPTIONS = frozenset({"rw", "exec", "suid", "dev", "mode=777", "mode=0777", "mode=1777", "mode=01777"})
+# tmpfs options an ``emptyDir`` already behaves as. Its mode is 0777, which lacks only ``1777``'s sticky bit.
+_NO_EFFECT_TMPFS_OPTIONS = frozenset({"rw", "exec", "suid", "dev", "mode=777", "mode=0777", "mode=1777", "mode=01777"})
 
 
 def _tmpfs_entry(
@@ -668,23 +670,24 @@ def _tmpfs_entry(
         problems.invalid(path, f"{mount_path!r} is not an absolute path")
         return None
 
-    # Each mount option a pod can't set, what makes it hold anyway, and whether the service does that. With
-    # no-new-privileges a setuid program raises no privileges; without MKNOD nothing can create a device file.
-    drops = set(security.cap_drop) if security is not None else set()
-    guards = {
-        "nosuid": ("security_opt: [no-new-privileges]", security is not None and security.no_new_privileges),
-        "nodev": ("cap_drop: [MKNOD] or [ALL]", bool({"ALL", "MKNOD"} & drops)),
+    # An emptyDir can't be mounted nosuid or nodev, but the service's own settings give the same protection:
+    # with no-new-privileges a setuid program raises no privileges, and without MKNOD nothing can create a device
+    # file. For each option, the setting the service is missing, or None when it has it.
+    no_new_privileges = security is not None and security.no_new_privileges
+    drops_mknod = security is not None and bool({"ALL", "MKNOD"} & set(security.cap_drop))
+    missing_setting = {
+        "nosuid": None if no_new_privileges else "security_opt: [no-new-privileges]",
+        "nodev": None if drops_mknod else "cap_drop: [MKNOD] or [ALL]",
     }
 
     size = None
     for option in filter(None, (option.strip() for option in options.split(","))):
         if option.startswith("size="):
             size = parse_memory_quantity(option.removeprefix("size="), f"{path}.size", problems)
-        elif option in guards:
-            requirement, holds = guards[option]
-            if not holds:
-                problems.unsupported(f"{path}: {option} without {requirement}")
-        elif option not in _TMPFS_NO_OP_OPTIONS:
+        elif option in missing_setting:
+            if missing_setting[option] is not None:
+                problems.unsupported(f"{path}: {option} without {missing_setting[option]}")
+        elif option not in _NO_EFFECT_TMPFS_OPTIONS:
             problems.unsupported(f"{path}: {option}")
     return ComposeTmpfs(mount_path=mount_path, size=size)
 

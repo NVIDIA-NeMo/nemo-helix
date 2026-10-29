@@ -97,7 +97,7 @@ class ResolvedCompose:
     interpolator: Interpolator
     """The variables Compose has for this task, to read ``env_file`` and look up value-less ``environment`` entries."""
 
-    network_disabled: bool
+    no_network_in_every_phase: bool
     """Whether ``task.toml`` makes every phase ``no-network``, so the sandbox already denies all egress."""
 
     workdir: str | None
@@ -161,7 +161,7 @@ def resolve_compose(
         harbor_log_mounts=harbor_log_mounts,
         task_limits=_task_limits(task_environment),
         interpolator=interpolator,
-        network_disabled=_network_disabled(task_dir),
+        no_network_in_every_phase=_no_network_in_every_phase(task_dir),
         workdir=str(task_environment["workdir"]) if task_environment.get("workdir") else None,
     )
 
@@ -596,7 +596,7 @@ def _task_environment(task_dir: Path) -> dict[str, Any]:
     return environment if isinstance(environment, dict) else {}
 
 
-def _network_disabled(task_dir: Path) -> bool:
+def _no_network_in_every_phase(task_dir: Path) -> bool:
     """Whether ``task.toml`` sets ``no-network`` for the environment and no phase overrides it with anything else.
 
     Read with Harbor's own model, so the deprecated ``allow_internet = false`` counts too. A ``task.toml`` that

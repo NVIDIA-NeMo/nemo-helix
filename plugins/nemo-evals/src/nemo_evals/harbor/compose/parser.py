@@ -13,7 +13,7 @@ lists every offending key.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from harbor.models.trial.paths import EnvironmentPaths
@@ -97,7 +97,7 @@ _MAIN_KEYS = _COMMON_KEYS | _SECURITY_KEYS | {"cap_add", "cpus", "mem_limit", "d
 
 # Where Harbor writes in `main`: the log directories `start()` creates, and where it uploads the tests and the
 # solution. A read-only `main` must mount something writable over each.
-_HARBOR_WRITABLE_PATHS = tuple(
+_PATHS_HARBOR_WRITES = tuple(
     str(path)
     for path in (
         EnvironmentPaths.agent_dir,
@@ -151,7 +151,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
     for name in sorted(declared_volumes & {volume for _path, volume in HARBOR_LOG_DIRECTORIES.values()}):
         problems.invalid(f"volumes.{name}", "this name is reserved for Harbor's log directories")
     _check_networks(resolved.document, {MAIN_SERVICE: resolved.main, **resolved.services}, problems)
-    _check_main_network_mode(resolved.main, resolved.services, resolved.network_disabled, problems)
+    _check_main_network_mode(resolved.main, resolved.services, resolved.no_network_in_every_phase, problems)
 
     # Parse every service before raising, so a task with several problems reports all of them.
     service_parser = ServiceParser(task_dir, declared_volumes, resolved.interpolator, problems)
@@ -225,7 +225,7 @@ class ServiceParser:
 
         environment = self._environment(raw_service, path)
         limits, requests = parse_resources(raw_service, path, self._problems)
-        security, tmpfs = self._security(raw_service, path)
+        security, tmpfs = self._security_and_tmpfs(raw_service, path)
         return ComposeService(
             name=name,
             source=source,
@@ -287,7 +287,7 @@ class ServiceParser:
                     self._task_dir, str(dockerfile_path(build)), f"{path}.build", self._problems
                 )
 
-        security, tmpfs = self._security(raw_main, path)
+        security, tmpfs = self._security_and_tmpfs(raw_main, path)
         settings = ComposeMainSettings(
             depends_on=parse_dependency_conditions(raw_main.get("depends_on"), f"{path}.depends_on", self._problems),
             env=environment,
@@ -335,7 +335,9 @@ class ServiceParser:
         }
         return self._interpolator.fill_in_value_less_entries(environment, f"{path}.environment")
 
-    def _security(self, raw_service: Mapping[str, Any], path: str) -> tuple[ComposeSecurity | None, list[ComposeTmpfs]]:
+    def _security_and_tmpfs(
+        self, raw_service: Mapping[str, Any], path: str
+    ) -> tuple[ComposeSecurity | None, list[ComposeTmpfs]]:
         """Read a service's restrictions and its ``tmpfs``, whose ``nosuid`` and ``nodev`` depend on them."""
         security = parse_security(raw_service, path, self._problems)
         return security, parse_tmpfs(raw_service.get("tmpfs"), f"{path}.tmpfs", security, self._problems)
@@ -367,9 +369,8 @@ class ServiceParser:
                 self._problems.unsupported(f"services.{name}.{key}")
 
         # `main`'s `network_mode: none` is checked by `_check_main_network_mode`.
-        if _shares_a_network_namespace(raw_service) is False and not (
-            name == MAIN_SERVICE and raw_service.get("network_mode") == "none"
-        ):
+        main_without_network = name == MAIN_SERVICE and raw_service.get("network_mode") == "none"
+        if _shares_a_network_namespace(raw_service) is False and not main_without_network:
             self._problems.unsupported(f"services.{name}.network_mode")
 
 
@@ -391,7 +392,7 @@ def _declared_volumes(document: Mapping[str, Any], problems: ComposeProblems) ->
 def _check_main_network_mode(
     raw_main: Mapping[str, Any],
     raw_services: Mapping[str, Mapping[str, Any]],
-    network_disabled: bool,
+    no_network_in_every_phase: bool,
     problems: ComposeProblems,
 ) -> None:
     """Record ``network_mode: none`` on ``main`` unless the sandbox would isolate ``main`` as much.
@@ -404,7 +405,7 @@ def _check_main_network_mode(
     """
     if raw_main.get("network_mode") != "none":
         return
-    if not network_disabled:
+    if not no_network_in_every_phase:
         problems.unsupported(
             f'services.{MAIN_SERVICE}.network_mode: none, unless task.toml sets network_mode = "no-network" '
             "for every phase"
@@ -423,20 +424,21 @@ def _check_read_only_main(main: ComposeMainSettings, workdir: str | None, compos
     if main.security is None or not main.security.read_only:
         return
 
-    writable = [mount.mount_path for mount in main.tmpfs]
-    writable += [mount.mount_path for mount in main.volume_mounts if not mount.read_only]
-    required = [*_HARBOR_WRITABLE_PATHS, *([workdir] if workdir and workdir != "/" else [])]
-    missing = [
+    writable_mounts = [mount.mount_path for mount in main.tmpfs]
+    writable_mounts += [mount.mount_path for mount in main.volume_mounts if not mount.read_only]
+    paths_written = [*_PATHS_HARBOR_WRITES, *([workdir] if workdir and workdir != "/" else [])]
+    # A path is writable when it's a writable mount or sits under one.
+    unwritable_paths = [
         path
-        for path in required
-        if not any(path == mount or path.startswith(f"{mount.rstrip('/')}/") for mount in writable)
+        for path in paths_written
+        if not any(PurePosixPath(path).is_relative_to(mount) for mount in writable_mounts)
     ]
-    if missing:
+    if unwritable_paths:
         raise ComposeError(
             "compose_unsupported",
             "main is read_only, but Harbor writes to these paths; mount a tmpfs or a volume over each",
             compose_path=compose_path,
-            paths=tuple(missing),
+            paths=tuple(unwritable_paths),
         )
 
 
