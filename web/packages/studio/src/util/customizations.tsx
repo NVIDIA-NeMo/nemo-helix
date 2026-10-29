@@ -421,6 +421,7 @@ const TERMINAL_TASK_STATUSES: Record<string, true> = {
 /** Step statuses where the pod's own phase would be stale or wrong, so the status is the detail. */
 const STEP_STATUS_DETAILS: Record<string, string> = {
   created: 'starting',
+  queued: 'starting',
   pending: 'starting',
   resuming: 'resuming',
   pausing: 'pausing',

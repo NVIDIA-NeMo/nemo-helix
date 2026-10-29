@@ -28,6 +28,7 @@ import { useEffect, useMemo, useRef } from 'react';
  */
 export const IN_PROGRESS_JOB_STATUSES: HelixJobStatus[] = [
   HelixJobStatus.created,
+  HelixJobStatus.queued,
   HelixJobStatus.pending,
   HelixJobStatus.active,
   HelixJobStatus.cancelling,

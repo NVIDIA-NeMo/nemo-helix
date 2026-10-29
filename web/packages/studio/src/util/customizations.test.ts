@@ -796,6 +796,13 @@ describe('getCurrentStage', () => {
     ).toEqual({ label: 'Uploading Model', detail: 'starting' });
   });
 
+  it('says a queued step is starting', () => {
+    expect(getCurrentStage([step('training', 'queued')])).toEqual({
+      label: 'Training',
+      detail: 'starting',
+    });
+  });
+
   it('reads the phase from whichever task reports one on a multi-node step', () => {
     expect(
       getCurrentStage([

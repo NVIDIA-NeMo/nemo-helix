@@ -68,7 +68,7 @@ By default, a failed job keeps its storage for 4 hours. After that, rerun return
 
 | Job status | Pause | Resume | Rerun |
 | --- | --- | --- | --- |
-| `created`, `pending`, `active` | Yes, if the current step supports pausing, otherwise `409` | Has no effect on `active`, otherwise `409` | `409` |
+| `created`, `queued`, `pending`, `active` | Yes, if the current step supports pausing, otherwise `409` | Has no effect on `active`, otherwise `409` | `409` |
 | `pausing` | Has no effect | `409` | `409` |
 | `paused` | Has no effect | Yes | `409`: use resume |
 | `error` | `409` | `409`: use rerun | Yes |

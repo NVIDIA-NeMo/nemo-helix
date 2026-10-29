@@ -283,6 +283,8 @@ jobs:
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # Maximum number of jobs admitted to run concurrently on this executor. | default: 8
+      max_active_jobs: 8
       # Docker storage configuration
       storage:
         # Name of the Docker volume for persistent storage | default: 'nemo-jobs-storage'
@@ -311,6 +313,8 @@ jobs:
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # Maximum number of jobs admitted to run concurrently on this executor. | default: 500
+      max_active_jobs: 500
       # How long a pod may spend in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 600
       ttl_seconds_image_pull: 600
       # Kubernetes namespace to submit the job to. If not set, it will be determined from the environment.
@@ -395,6 +399,8 @@ jobs:
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # Maximum number of jobs admitted to run concurrently on this executor. | default: 500
+      max_active_jobs: 500
       # How long a pod may spend in image-pull backoff before the pull is treated as unrecoverable and the step fails naming the image. 0 disables it. | default: 600
       ttl_seconds_image_pull: 600
       # Kubernetes namespace to submit the job to. If not set, it will be determined from the environment.
@@ -487,6 +493,8 @@ jobs:
       default_task_image:
       # Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys must not conflict with platform-reserved names. Job steps may override these variables.
       env: {}
+      # Maximum number of jobs admitted to run concurrently on this executor. | default: 8
+      max_active_jobs: 8
       # Root directory for subprocess job state, config, storage, and logs. | default: '/tmp/nhx-subprocess-jobs'
       working_directory: /tmp/nhx-subprocess-jobs
       # How long to wait after SIGTERM before force killing the process group. | default: 10
@@ -495,6 +503,10 @@ jobs:
   reconcile_interval_seconds: 2
   # Interval in seconds for the job scheduler to run | default: 5
   schedule_interval_seconds: 5
+  # Default maximum number of jobs a single user may have admitted concurrently. | default: 50
+  max_active_jobs_per_user: 50
+  # Default maximum number of jobs a single workspace may have admitted concurrently. | default: 200
+  max_active_jobs_per_workspace: 200
   # Register the subprocess/default execution profile. When unset, defaults to true for docker/none runtimes and false for kubernetes.
   enable_subprocess_executor:
   # How long paused and failed jobs keep their storage.

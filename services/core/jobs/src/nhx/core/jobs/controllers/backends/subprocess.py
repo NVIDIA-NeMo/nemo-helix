@@ -74,6 +74,11 @@ _ERR_COMMAND_REQUIRED = "subprocess requires command to be set"
 
 
 class SubprocessJobExecutionProfileConfig(JobExecutionProfileConfig):
+    max_active_jobs: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum number of jobs admitted to run concurrently on this executor.",
+    )
     working_directory: str = Field(
         default="/tmp/nhx-subprocess-jobs",
         description="Root directory for subprocess job state, config, storage, and logs.",

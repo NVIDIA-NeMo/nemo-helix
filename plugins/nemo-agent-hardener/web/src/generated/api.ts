@@ -32,11 +32,15 @@ import type {
   AgentHardenerGetEventsParams,
   AgentHardenerGetJobLogsParams,
   AgentHardenerGetSynthBenignJobLogsParams,
+  AgentHardenerListJobAttemptsParams,
+  AgentHardenerListJobResultsParams,
   AgentHardenerListJobsParams,
   AgentHardenerListManifests200,
   AgentHardenerListManifestsParams,
   AgentHardenerListRuns200,
   AgentHardenerListRunsParams,
+  AgentHardenerListSynthBenignJobAttemptsParams,
+  AgentHardenerListSynthBenignJobResultsParams,
   AgentHardenerListSynthBenignJobsParams,
   AgentHardenerManifest,
   AgentHardenerRun,
@@ -60,12 +64,18 @@ import type {
   ManifestUpdate,
   ModelConfigDefaults,
   SynthBenignJob,
+  SynthBenignJobAttempt,
+  SynthBenignJobAttemptsPage,
   SynthBenignJobRequest,
+  SynthBenignJobUpdate,
   SynthBenignJobsPage,
   ValidateModelRequest,
   ValidateModelResponse,
   WarGameJob,
+  WarGameJobAttempt,
+  WarGameJobAttemptsPage,
   WarGameJobRequest,
+  WarGameJobUpdate,
   WarGameJobsPage
 } from './schema';
 
@@ -970,6 +980,76 @@ export function useAgentHardenerGetJobSuspense<TData = Awaited<ReturnType<typeof
 
 
 /**
+ * @summary Update Job
+ */
+export const agentHardenerUpdateJob = (
+    workspace: string,
+    name: string,
+    warGameJobUpdate: WarGameJobUpdate,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<WarGameJob>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: warGameJobUpdate, signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerUpdateJobMutationKey = () => ['agentHardenerUpdateJob'] as const;
+
+export const getAgentHardenerUpdateJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateJob>>, TError,AgentHardenerUpdateJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateJob>>, TError,AgentHardenerUpdateJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerUpdateJobMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerUpdateJob>>, AgentHardenerUpdateJobMutationVariables> = (props) => {
+          const {workspace,name,data} = props ?? {};
+
+          return  agentHardenerUpdateJob(workspace,name,data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AgentHardenerUpdateJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerUpdateJob>>>
+    export type AgentHardenerUpdateJobMutationBody = WarGameJobUpdate
+    export type AgentHardenerUpdateJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerUpdateJobMutationVariables = {workspace: string;name: string;data: WarGameJobUpdate}
+
+    /**
+ * @summary Update Job
+ */
+export const useAgentHardenerUpdateJob = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateJob>>, TError,AgentHardenerUpdateJobMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof agentHardenerUpdateJob>>,
+        TError,
+        AgentHardenerUpdateJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAgentHardenerUpdateJobMutationOptions(options), queryClient);
+    }
+
+/**
  * @summary Delete Job
  */
 export const agentHardenerDeleteJob = (
@@ -1035,6 +1115,351 @@ export const useAgentHardenerDeleteJob = <TError = ErrorType<void | HTTPValidati
       > => {
       return useMutation(getAgentHardenerDeleteJobMutationOptions(options), queryClient);
     }
+
+/**
+ * @summary List Job Attempts
+ */
+export const agentHardenerListJobAttempts = (
+    workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<WarGameJobAttemptsPage>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/attempts`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerListJobAttemptsQueryKey = (workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams,) => {
+    return [
+    `/apis/agent-hardener/v2/workspaces/${workspace}/jobs/${name}/attempts`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getAgentHardenerListJobAttemptsQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListJobAttemptsQueryKey(workspace,name,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>> = ({ signal }) => agentHardenerListJobAttempts(workspace,name,params, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: workspace !== null && workspace !== undefined && name !== null && name !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerListJobAttemptsQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>>
+export type AgentHardenerListJobAttemptsQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerListJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params: undefined |  AgentHardenerListJobAttemptsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerListJobAttempts>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerListJobAttempts>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerListJobAttempts>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerListJobAttempts>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Job Attempts
+ */
+
+export function useAgentHardenerListJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerListJobAttemptsQueryOptions(workspace,name,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getAgentHardenerListJobAttemptsSuspenseQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListJobAttemptsQueryKey(workspace,name,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>> = ({ signal }) => agentHardenerListJobAttempts(workspace,name,params, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerListJobAttemptsSuspenseQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>>
+export type AgentHardenerListJobAttemptsSuspenseQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerListJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params: undefined |  AgentHardenerListJobAttemptsParams, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Job Attempts
+ */
+
+export function useAgentHardenerListJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerListJobAttemptsSuspenseQueryOptions(workspace,name,params,options)
+
+  const query = useSuspenseQuery(queryOptions, queryClient) as  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
+ * @summary Get Job Attempt
+ */
+export const agentHardenerGetJobAttempt = (
+    workspace: string,
+    name: string,
+    attempt: string,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<WarGameJobAttempt>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/attempts/${encodeURIComponent(String(attempt))}`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerGetJobAttemptQueryKey = (workspace: string,
+    name: string,
+    attempt: string,) => {
+    return [
+    `/apis/agent-hardener/v2/workspaces/${workspace}/jobs/${name}/attempts/${attempt}`
+    ] as const;
+    }
+
+
+export const getAgentHardenerGetJobAttemptQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerGetJobAttemptQueryKey(workspace,name,attempt);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>> = ({ signal }) => agentHardenerGetJobAttempt(workspace,name,attempt, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: workspace !== null && workspace !== undefined && name !== null && name !== undefined && attempt !== null && attempt !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerGetJobAttemptQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>>
+export type AgentHardenerGetJobAttemptQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerGetJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Job Attempt
+ */
+
+export function useAgentHardenerGetJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerGetJobAttemptQueryOptions(workspace,name,attempt,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getAgentHardenerGetJobAttemptSuspenseQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerGetJobAttemptQueryKey(workspace,name,attempt);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>> = ({ signal }) => agentHardenerGetJobAttempt(workspace,name,attempt, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerGetJobAttemptSuspenseQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>>
+export type AgentHardenerGetJobAttemptSuspenseQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerGetJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Job Attempt
+ */
+
+export function useAgentHardenerGetJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerGetJobAttemptSuspenseQueryOptions(workspace,name,attempt,options)
+
+  const query = useSuspenseQuery(queryOptions, queryClient) as  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 /**
  * @summary Cancel Job
@@ -1282,12 +1707,14 @@ export function useAgentHardenerGetJobLogsSuspense<TData = Awaited<ReturnType<ty
 export const agentHardenerListJobResults = (
     workspace: string,
     name: string,
+    params?: AgentHardenerListJobResultsParams,
  signal?: AbortSignal
 ) => {
 
 
       return customFetch<HelixJobListResultResponse>(
-      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/results`, method: 'GET', signal
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/jobs/${encodeURIComponent(String(name))}/results`, method: 'GET',
+        params, signal
     },
       );
     }
@@ -1296,24 +1723,26 @@ export const agentHardenerListJobResults = (
 
 
 export const getAgentHardenerListJobResultsQueryKey = (workspace: string,
-    name: string,) => {
+    name: string,
+    params?: AgentHardenerListJobResultsParams,) => {
     return [
-    `/apis/agent-hardener/v2/workspaces/${workspace}/jobs/${name}/results`
+    `/apis/agent-hardener/v2/workspaces/${workspace}/jobs/${name}/results`, ...(params ? [params] : [])
     ] as const;
     }
 
 
 export const getAgentHardenerListJobResultsQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListJobResultsQueryKey(workspace,name);
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListJobResultsQueryKey(workspace,name,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListJobResults>>> = ({ signal }) => agentHardenerListJobResults(workspace,name, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListJobResults>>> = ({ signal }) => agentHardenerListJobResults(workspace,name,params, signal);
 
 
 
@@ -1328,7 +1757,8 @@ export type AgentHardenerListJobResultsQueryError = ErrorType<HTTPValidationErro
 
 export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>> & Pick<
+    name: string,
+    params: undefined |  AgentHardenerListJobResultsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof agentHardenerListJobResults>>,
           TError,
@@ -1339,7 +1769,8 @@ export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>> & Pick<
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof agentHardenerListJobResults>>,
           TError,
@@ -1350,7 +1781,8 @@ export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1359,11 +1791,12 @@ export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof
 
 export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getAgentHardenerListJobResultsQueryOptions(workspace,name,options)
+  const queryOptions = getAgentHardenerListJobResultsQueryOptions(workspace,name,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1376,16 +1809,17 @@ export function useAgentHardenerListJobResults<TData = Awaited<ReturnType<typeof
 
 
 export const getAgentHardenerListJobResultsSuspenseQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListJobResultsQueryKey(workspace,name);
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListJobResultsQueryKey(workspace,name,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListJobResults>>> = ({ signal }) => agentHardenerListJobResults(workspace,name, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListJobResults>>> = ({ signal }) => agentHardenerListJobResults(workspace,name,params, signal);
 
 
 
@@ -1400,17 +1834,20 @@ export type AgentHardenerListJobResultsSuspenseQueryError = ErrorType<HTTPValida
 
 export function useAgentHardenerListJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params: undefined |  AgentHardenerListJobResultsParams, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1419,11 +1856,12 @@ export function useAgentHardenerListJobResultsSuspense<TData = Awaited<ReturnTyp
 
 export function useAgentHardenerListJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getAgentHardenerListJobResultsSuspenseQueryOptions(workspace,name,options)
+  const queryOptions = getAgentHardenerListJobResultsSuspenseQueryOptions(workspace,name,params,options)
 
   const query = useSuspenseQuery(queryOptions, queryClient) as  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -4101,6 +4539,76 @@ export function useAgentHardenerGetSynthBenignJobSuspense<TData = Awaited<Return
 
 
 /**
+ * @summary Update Job
+ */
+export const agentHardenerUpdateSynthBenignJob = (
+    workspace: string,
+    name: string,
+    synthBenignJobUpdate: SynthBenignJobUpdate,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<SynthBenignJob>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: synthBenignJobUpdate, signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerUpdateSynthBenignJobMutationKey = () => ['agentHardenerUpdateSynthBenignJob'] as const;
+
+export const getAgentHardenerUpdateSynthBenignJobMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateSynthBenignJob>>, TError,AgentHardenerUpdateSynthBenignJobMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateSynthBenignJob>>, TError,AgentHardenerUpdateSynthBenignJobMutationVariables, TContext> => {
+
+const mutationKey = getAgentHardenerUpdateSynthBenignJobMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerUpdateSynthBenignJob>>, AgentHardenerUpdateSynthBenignJobMutationVariables> = (props) => {
+          const {workspace,name,data} = props ?? {};
+
+          return  agentHardenerUpdateSynthBenignJob(workspace,name,data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AgentHardenerUpdateSynthBenignJobMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerUpdateSynthBenignJob>>>
+    export type AgentHardenerUpdateSynthBenignJobMutationBody = SynthBenignJobUpdate
+    export type AgentHardenerUpdateSynthBenignJobMutationError = ErrorType<HTTPValidationError>
+    export type AgentHardenerUpdateSynthBenignJobMutationVariables = {workspace: string;name: string;data: SynthBenignJobUpdate}
+
+    /**
+ * @summary Update Job
+ */
+export const useAgentHardenerUpdateSynthBenignJob = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerUpdateSynthBenignJob>>, TError,AgentHardenerUpdateSynthBenignJobMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof agentHardenerUpdateSynthBenignJob>>,
+        TError,
+        AgentHardenerUpdateSynthBenignJobMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAgentHardenerUpdateSynthBenignJobMutationOptions(options), queryClient);
+    }
+
+/**
  * @summary Delete Job
  */
 export const agentHardenerDeleteSynthBenignJob = (
@@ -4166,6 +4674,351 @@ export const useAgentHardenerDeleteSynthBenignJob = <TError = ErrorType<void | H
       > => {
       return useMutation(getAgentHardenerDeleteSynthBenignJobMutationOptions(options), queryClient);
     }
+
+/**
+ * @summary List Job Attempts
+ */
+export const agentHardenerListSynthBenignJobAttempts = (
+    workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<SynthBenignJobAttemptsPage>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/attempts`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerListSynthBenignJobAttemptsQueryKey = (workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams,) => {
+    return [
+    `/apis/agent-hardener/v2/workspaces/${workspace}/synth-benign/jobs/${name}/attempts`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getAgentHardenerListSynthBenignJobAttemptsQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListSynthBenignJobAttemptsQueryKey(workspace,name,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>> = ({ signal }) => agentHardenerListSynthBenignJobAttempts(workspace,name,params, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: workspace !== null && workspace !== undefined && name !== null && name !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerListSynthBenignJobAttemptsQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>>
+export type AgentHardenerListSynthBenignJobAttemptsQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerListSynthBenignJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params: undefined |  AgentHardenerListSynthBenignJobAttemptsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListSynthBenignJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListSynthBenignJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Job Attempts
+ */
+
+export function useAgentHardenerListSynthBenignJobAttempts<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerListSynthBenignJobAttemptsQueryOptions(workspace,name,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getAgentHardenerListSynthBenignJobAttemptsSuspenseQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListSynthBenignJobAttemptsQueryKey(workspace,name,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>> = ({ signal }) => agentHardenerListSynthBenignJobAttempts(workspace,name,params, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerListSynthBenignJobAttemptsSuspenseQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>>
+export type AgentHardenerListSynthBenignJobAttemptsSuspenseQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerListSynthBenignJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params: undefined |  AgentHardenerListSynthBenignJobAttemptsParams, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListSynthBenignJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerListSynthBenignJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List Job Attempts
+ */
+
+export function useAgentHardenerListSynthBenignJobAttemptsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    params?: AgentHardenerListSynthBenignJobAttemptsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobAttempts>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerListSynthBenignJobAttemptsSuspenseQueryOptions(workspace,name,params,options)
+
+  const query = useSuspenseQuery(queryOptions, queryClient) as  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
+ * @summary Get Job Attempt
+ */
+export const agentHardenerGetSynthBenignJobAttempt = (
+    workspace: string,
+    name: string,
+    attempt: string,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<SynthBenignJobAttempt>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/attempts/${encodeURIComponent(String(attempt))}`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerGetSynthBenignJobAttemptQueryKey = (workspace: string,
+    name: string,
+    attempt: string,) => {
+    return [
+    `/apis/agent-hardener/v2/workspaces/${workspace}/synth-benign/jobs/${name}/attempts/${attempt}`
+    ] as const;
+    }
+
+
+export const getAgentHardenerGetSynthBenignJobAttemptQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerGetSynthBenignJobAttemptQueryKey(workspace,name,attempt);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>> = ({ signal }) => agentHardenerGetSynthBenignJobAttempt(workspace,name,attempt, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: workspace !== null && workspace !== undefined && name !== null && name !== undefined && attempt !== null && attempt !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerGetSynthBenignJobAttemptQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>>
+export type AgentHardenerGetSynthBenignJobAttemptQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerGetSynthBenignJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetSynthBenignJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>,
+          TError,
+          Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetSynthBenignJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Job Attempt
+ */
+
+export function useAgentHardenerGetSynthBenignJobAttempt<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerGetSynthBenignJobAttemptQueryOptions(workspace,name,attempt,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getAgentHardenerGetSynthBenignJobAttemptSuspenseQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerGetSynthBenignJobAttemptQueryKey(workspace,name,attempt);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>> = ({ signal }) => agentHardenerGetSynthBenignJobAttempt(workspace,name,attempt, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentHardenerGetSynthBenignJobAttemptSuspenseQueryResult = NonNullable<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>>
+export type AgentHardenerGetSynthBenignJobAttemptSuspenseQueryError = ErrorType<HTTPValidationError>
+
+
+export function useAgentHardenerGetSynthBenignJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetSynthBenignJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentHardenerGetSynthBenignJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Job Attempt
+ */
+
+export function useAgentHardenerGetSynthBenignJobAttemptSuspense<TData = Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError = ErrorType<HTTPValidationError>>(
+ workspace: string,
+    name: string,
+    attempt: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerGetSynthBenignJobAttempt>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentHardenerGetSynthBenignJobAttemptSuspenseQueryOptions(workspace,name,attempt,options)
+
+  const query = useSuspenseQuery(queryOptions, queryClient) as  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 /**
  * @summary Cancel Job
@@ -4413,12 +5266,14 @@ export function useAgentHardenerGetSynthBenignJobLogsSuspense<TData = Awaited<Re
 export const agentHardenerListSynthBenignJobResults = (
     workspace: string,
     name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams,
  signal?: AbortSignal
 ) => {
 
 
       return customFetch<HelixJobListResultResponse>(
-      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/results`, method: 'GET', signal
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/synth-benign/jobs/${encodeURIComponent(String(name))}/results`, method: 'GET',
+        params, signal
     },
       );
     }
@@ -4427,24 +5282,26 @@ export const agentHardenerListSynthBenignJobResults = (
 
 
 export const getAgentHardenerListSynthBenignJobResultsQueryKey = (workspace: string,
-    name: string,) => {
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams,) => {
     return [
-    `/apis/agent-hardener/v2/workspaces/${workspace}/synth-benign/jobs/${name}/results`
+    `/apis/agent-hardener/v2/workspaces/${workspace}/synth-benign/jobs/${name}/results`, ...(params ? [params] : [])
     ] as const;
     }
 
 
 export const getAgentHardenerListSynthBenignJobResultsQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListSynthBenignJobResultsQueryKey(workspace,name);
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListSynthBenignJobResultsQueryKey(workspace,name,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>> = ({ signal }) => agentHardenerListSynthBenignJobResults(workspace,name, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>> = ({ signal }) => agentHardenerListSynthBenignJobResults(workspace,name,params, signal);
 
 
 
@@ -4459,7 +5316,8 @@ export type AgentHardenerListSynthBenignJobResultsQueryError = ErrorType<HTTPVal
 
 export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>> & Pick<
+    name: string,
+    params: undefined |  AgentHardenerListSynthBenignJobResultsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>,
           TError,
@@ -4470,7 +5328,8 @@ export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<Return
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>> & Pick<
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>,
           TError,
@@ -4481,7 +5340,8 @@ export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<Return
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -4490,11 +5350,12 @@ export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<Return
 
 export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getAgentHardenerListSynthBenignJobResultsQueryOptions(workspace,name,options)
+  const queryOptions = getAgentHardenerListSynthBenignJobResultsQueryOptions(workspace,name,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -4507,16 +5368,17 @@ export function useAgentHardenerListSynthBenignJobResults<TData = Awaited<Return
 
 
 export const getAgentHardenerListSynthBenignJobResultsSuspenseQueryOptions = <TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
 ) => {
 
 const {query: queryOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListSynthBenignJobResultsQueryKey(workspace,name);
+  const queryKey =  queryOptions?.queryKey ?? getAgentHardenerListSynthBenignJobResultsQueryKey(workspace,name,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>> = ({ signal }) => agentHardenerListSynthBenignJobResults(workspace,name, signal);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>> = ({ signal }) => agentHardenerListSynthBenignJobResults(workspace,name,params, signal);
 
 
 
@@ -4531,17 +5393,20 @@ export type AgentHardenerListSynthBenignJobResultsSuspenseQueryError = ErrorType
 
 export function useAgentHardenerListSynthBenignJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params: undefined |  AgentHardenerListSynthBenignJobResultsParams, options: { query:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListSynthBenignJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useAgentHardenerListSynthBenignJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
   ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -4550,11 +5415,12 @@ export function useAgentHardenerListSynthBenignJobResultsSuspense<TData = Awaite
 
 export function useAgentHardenerListSynthBenignJobResultsSuspense<TData = Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError = ErrorType<HTTPValidationError>>(
  workspace: string,
-    name: string, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
+    name: string,
+    params?: AgentHardenerListSynthBenignJobResultsParams, options?: { query?:Partial<UseSuspenseQueryOptions<Awaited<ReturnType<typeof agentHardenerListSynthBenignJobResults>>, TError, TData>>, }
  , queryClient?: QueryClient
  ):  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getAgentHardenerListSynthBenignJobResultsSuspenseQueryOptions(workspace,name,options)
+  const queryOptions = getAgentHardenerListSynthBenignJobResultsSuspenseQueryOptions(workspace,name,params,options)
 
   const query = useSuspenseQuery(queryOptions, queryClient) as  UseSuspenseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
