@@ -279,7 +279,11 @@ def split_otlp_request(payload: bytes, *, max_request_bytes: int) -> list[bytes]
 
 @dataclass(frozen=True)
 class _Envelope[M: (ResourceSpans, ScopeSpans)]:
-    """A ResourceSpans or ScopeSpans with its children cleared, and that envelope's encoded size."""
+    """A ResourceSpans or ScopeSpans without its child spans, and that envelope's encoded size.
+
+    Copies the resource or scope and the schema URL. The batch appends the source message's
+    child spans, so packing does not copy those span bodies.
+    """
 
     message: M
     size: int
@@ -287,11 +291,13 @@ class _Envelope[M: (ResourceSpans, ScopeSpans)]:
     @classmethod
     def of(cls, message: M) -> _Envelope[M]:
         envelope = type(message)()
-        envelope.CopyFrom(message)
-        if isinstance(envelope, ResourceSpans):
-            envelope.ClearField("scope_spans")
-        else:
-            envelope.ClearField("spans")
+        if isinstance(envelope, ResourceSpans) and isinstance(message, ResourceSpans):
+            if message.HasField("resource"):
+                envelope.resource.CopyFrom(message.resource)
+        elif isinstance(envelope, ScopeSpans) and isinstance(message, ScopeSpans):
+            if message.HasField("scope"):
+                envelope.scope.CopyFrom(message.scope)
+        envelope.schema_url = message.schema_url
         return cls(envelope, envelope.ByteSize())
 
 

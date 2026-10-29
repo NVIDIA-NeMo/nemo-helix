@@ -513,8 +513,9 @@ runs to NeMo Experiments.
   under Intake's default 5 MiB OTLP body limit. A larger trace is split into several requests in
   span order, and each span keeps its IDs, parent, and resource and scope metadata. Agent and
   dataset evaluation jobs accept the same field, and `publish_to_intake(..., max_otlp_request_bytes=...)`
-  takes the same budget. Set a positive value within the request body limits of Intake and any proxy
-  in front of it; this setting does not change those limits.
+  takes the same budget. Taskset runs use this default and do not accept the field on the run input.
+  Set a positive value within the request body limits of Intake and any proxy in front of it; this
+  setting does not change those limits.
 
   ```yaml
   publication:
