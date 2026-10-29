@@ -9625,7 +9625,7 @@ nemo evals retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--dataset.root`: Reference to a Fileset (format: workspace/fileset-name).
+* `--dataset`: Fileset containing a BEIR test split.
 
 **Spec Source:**
 
@@ -10115,7 +10115,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.wandb.entity`: W&B entity (team or username).
 * `--integrations.wandb.notes`: W&B notes/description for the run.
 * `--integrations.wandb.base-url`: Base URL for self-hosted W&B server (e.g., 'https://wandb.mycompany.com'). If not provided, uses the default W&B cloud service.
-* `--integrations.wandb.api-key-secret.root`: Reference to a secret. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
+* `--integrations.wandb.api-key-secret`: Reference to a secret containing the WANDB_API_KEY. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
 * `--integrations.mlflow.experiment-name`: MLflow experiment name (groups related runs). Defaults to output.name if not set.
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
@@ -10186,7 +10186,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.wandb.entity`: W&B entity (team or username).
 * `--integrations.wandb.notes`: W&B notes/description for the run.
 * `--integrations.wandb.base-url`: Base URL for self-hosted W&B server (e.g., 'https://wandb.mycompany.com'). If not provided, uses the default W&B cloud service.
-* `--integrations.wandb.api-key-secret.root`: Reference to a secret. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
+* `--integrations.wandb.api-key-secret`: Reference to a secret containing the WANDB_API_KEY. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
 * `--integrations.mlflow.experiment-name`: MLflow experiment name (groups related runs). Defaults to output.name if not set.
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
@@ -10293,7 +10293,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.wandb.entity`: W&B entity (team or username).
 * `--integrations.wandb.notes`: W&B notes/description for the run.
 * `--integrations.wandb.base-url`: Base URL for self-hosted W&B server (e.g., 'https://wandb.mycompany.com'). If not provided, uses the default W&B cloud service.
-* `--integrations.wandb.api-key-secret.root`: Reference to a secret. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
+* `--integrations.wandb.api-key-secret`: Reference to a secret containing the WANDB_API_KEY. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
 * `--integrations.mlflow.experiment-name`: MLflow experiment name (groups related runs). Defaults to output.name if not set.
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
