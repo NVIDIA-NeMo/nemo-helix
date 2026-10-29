@@ -182,7 +182,7 @@ class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # Read by the CLI at registration; the harness never sees it.
-    registration: AgentRegistration | None = None
+    helix_registration: AgentRegistration | None = None
 
     config_format: Literal["nemo-agents-spec-v1"]
     name: str

@@ -3147,7 +3147,7 @@ def _validate_agent_config_for_register(
         raise typer.Exit(code=1)
     # The registration block becomes the agent's own fields, never part of its stored config.
     try:
-        registration = AgentRegistration.model_validate(config_dict.pop("registration", None) or {})
+        registration = AgentRegistration.model_validate(config_dict.pop("helix_registration", None) or {})
     except ValidationError as error:
         typer.echo(f"Error: invalid registration in agent config {agent_config}: {error}", err=True)
         raise typer.Exit(code=1) from error

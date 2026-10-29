@@ -852,10 +852,10 @@ class TestAgentRunDeclarations:
         self, client: TestClient, mock_entity_client: AsyncMock
     ) -> None:
         """Nothing reads it from a stored config, so accepting it would silently drop the caller's intent."""
-        config = {**_fabric_agent_config(), "registration": {"default_input": "hello"}}
+        config = {**_fabric_agent_config(), "helix_registration": {"default_input": "hello"}}
 
         resp = client.post("/apis/agents/v2/workspaces/default/agents", json={"name": "fabric-agent", "config": config})
 
         assert resp.status_code == 400
-        assert "'registration' belongs in agent.yaml only" in resp.json()["detail"]
+        assert "'helix_registration' belongs in agent.yaml only" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()

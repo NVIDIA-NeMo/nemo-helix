@@ -627,9 +627,9 @@ def test_job_config_rejects_an_inline_agent_with_an_invalid_context_schema() -> 
 
 @pytest.mark.asyncio
 async def test_to_spec_rejects_a_registration_block_in_an_inline_config() -> None:
-    config = {**_agent_config(), "registration": {"default_input": "hello"}}
+    config = {**_agent_config(), "helix_registration": {"default_input": "hello"}}
 
-    with pytest.raises(ValueError, match="'registration' belongs in agent.yaml only"):
+    with pytest.raises(ValueError, match="'helix_registration' belongs in agent.yaml only"):
         await _step_config_for(AgentInline(config=config, config_format="nemo-agents-spec-v1"), input="hello")
 
 

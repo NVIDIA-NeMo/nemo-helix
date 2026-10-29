@@ -305,10 +305,10 @@ class TestLoadAgentConfig:
 
         assert config == AgentConfig.model_validate(payload)
 
-    def test_load_agent_config_reads_the_registration_block(self, tmp_path: Path) -> None:
+    def test_load_agent_config_reads_the_helix_registration_block(self, tmp_path: Path) -> None:
         config_path = tmp_path / "agent.yaml"
         payload = _example_yaml_config()
-        payload["registration"] = {
+        payload["helix_registration"] = {
             "reference": {"fileset": "default/source", "container_image": "agent:1"},
             "context_schema": {"type": "object"},
             "default_input": "Analyze recent runs.",
@@ -318,18 +318,20 @@ class TestLoadAgentConfig:
 
         config = load_agent_config(config_path)
 
-        assert config.registration == AgentRegistration(
+        assert config.helix_registration == AgentRegistration(
             reference=ReferenceConfig(fileset="default/source", container_image="agent:1"),
             context_schema={"type": "object"},
             default_input="Analyze recent runs.",
             post_run_actions={"agents.noop", "insights.analysis"},
         )
-        assert config.model_copy(update={"registration": None}) == AgentConfig.model_validate(_example_yaml_config())
+        assert config.model_copy(update={"helix_registration": None}) == AgentConfig.model_validate(
+            _example_yaml_config()
+        )
 
     def test_load_agent_config_rejects_an_unknown_registration_key(self, tmp_path: Path) -> None:
         config_path = tmp_path / "agent.yaml"
         payload = _example_yaml_config()
-        payload["registration"] = {"default_inptu": "hello"}
+        payload["helix_registration"] = {"default_inptu": "hello"}
         _write_agent_yaml(config_path, payload)
 
         with pytest.raises(AgentConfigLoadError, match="default_inptu"):
@@ -365,7 +367,7 @@ class TestLoadAgentConfig:
     def test_validation_error_reports_load_error(self, tmp_path: Path, field: str) -> None:
         config_path = tmp_path / "agent.yaml"
         payload = _example_yaml_config()
-        payload["registration"] = {"reference": {"fileset": "default/source"}}
+        payload["helix_registration"] = {"reference": {"fileset": "default/source"}}
         if field == "default_harness":
             del payload[field]
         else:
