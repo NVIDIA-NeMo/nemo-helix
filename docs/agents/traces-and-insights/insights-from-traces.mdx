@@ -132,6 +132,10 @@ Useful options:
 The models are checked when you submit the run. A model that does not
 exist or uses an unsupported backend is rejected before anything is recorded.
 
+To analyze one candidate of an agent, pass its Evaluation name to `--evaluation-id` rather than
+bounding the run with `--since`. Refer to
+[Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates).
+
 An on-demand run does not have a minimum trace count. A run that finds no traces
 still completes, files nothing, and reports `Analyzed 0 traces`.
 
@@ -343,6 +347,7 @@ When `nemo setup` has not stored a model pair, pass `--default-model` and
 
 - [NeMo Studio Insights](/documentation/studio/insights)
 - [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
+- [Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates)
 - [Optimize Agents](/documentation/agents/optimize-agents)
 - [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs)
 - [Full CLI Reference](/documentation/reference/cli-reference/full-cli-reference#nemo-compass)
