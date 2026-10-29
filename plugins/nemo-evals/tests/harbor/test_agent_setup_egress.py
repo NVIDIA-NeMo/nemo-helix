@@ -8,8 +8,9 @@ import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from harbor.agents.factory import AgentFactory
@@ -254,38 +255,70 @@ class _FlakyCodexInstallEnvironment(_CodexInstallEnvironment):
         return [open_ for command, open_ in self.commands if CODEX_DOWNLOAD in command]
 
 
-def _codex(tmp_path, monkeypatch) -> Any:
-    monkeypatch.setattr(agent_setup_egress, "SETUP_RETRY_DELAY_SEC", 0)
+@pytest.fixture
+def sleep(monkeypatch) -> AsyncMock:
+    """Records the retry delay instead of waiting it out; only the wrapper's module sees the stand-in."""
+    sleep = AsyncMock()
+    monkeypatch.setattr(agent_setup_egress, "asyncio", SimpleNamespace(sleep=sleep))
+    return sleep
+
+
+def _codex(tmp_path) -> Any:
     agent = _agent(tmp_path, inner="codex", hosts=SETUP_HOSTS)
     agent.logger = Mock()
     return agent
 
 
-async def test_a_failed_install_is_retried_once_inside_the_same_window(tmp_path, monkeypatch):
-    agent = _codex(tmp_path, monkeypatch)
+def _warning(agent: Any) -> str:
+    (warning,) = agent.logger.warning.call_args_list
+    return warning.args[0] % warning.args[1:]
+
+
+async def test_a_failed_install_is_retried_once_inside_the_same_window(tmp_path, sleep):
+    agent = _codex(tmp_path)
     environment = _FlakyCodexInstallEnvironment(failures=1)
     await agent.setup(environment)
     assert environment.downloads() == [True, True]
     assert environment.opens == 1 and not environment.open
-    (warning,) = agent.logger.warning.call_args_list
-    assert "attempt 1 of 2" in warning.args[0] % warning.args[1:]
+    sleep.assert_awaited_once_with(20.0)
+    assert _warning(agent).startswith("Agent setup failed (attempt 1 of 2), retrying in 20 s: Command failed (exit 1)")
 
 
-async def test_a_second_failed_install_raises_and_closes_the_window(tmp_path, monkeypatch):
-    agent = _codex(tmp_path, monkeypatch)
+async def test_a_second_failed_install_raises_and_closes_the_window(tmp_path, sleep):
+    agent = _codex(tmp_path)
     environment = _FlakyCodexInstallEnvironment(failures=2)
     with pytest.raises(NonZeroAgentExitCodeError, match="ENETUNREACH"):
         await agent.setup(environment)
     assert environment.downloads() == [True, True]
     assert environment.opens == 1 and not environment.open
+    sleep.assert_awaited_once_with(20.0)
 
 
-async def test_an_install_that_succeeds_runs_once(tmp_path, monkeypatch):
-    agent = _codex(tmp_path, monkeypatch)
+async def test_an_install_that_succeeds_runs_once(tmp_path, sleep):
+    agent = _codex(tmp_path)
     environment = _FlakyCodexInstallEnvironment(failures=0)
     await agent.setup(environment)
     assert environment.downloads() == [True]
     agent.logger.warning.assert_not_called()
+    sleep.assert_not_awaited()
+
+
+async def test_a_setup_error_without_a_message_is_retried_and_named(tmp_path, monkeypatch, sleep):
+    from harbor.agents.installed.codex import Codex
+
+    events: list[str] = []
+    attempts = iter([NonZeroAgentExitCodeError(), None])
+
+    async def setup(self, environment) -> None:
+        events.append("setup")
+        if error := next(attempts):
+            raise error
+
+    monkeypatch.setattr(Codex, "setup", setup)
+    agent = _codex(tmp_path)
+    await agent.setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "setup", "close"]
+    assert _warning(agent).endswith("retrying in 20 s: NonZeroAgentExitCodeError")
 
 
 class _HangingCodexInstallEnvironment(_FlakyCodexInstallEnvironment):
@@ -298,18 +331,18 @@ class _HangingCodexInstallEnvironment(_FlakyCodexInstallEnvironment):
         return await super().exec(command, **kwargs)
 
 
-async def test_an_install_that_times_out_is_not_retried(tmp_path, monkeypatch):
-    agent = _codex(tmp_path, monkeypatch)
+async def test_an_install_that_times_out_is_not_retried(tmp_path, sleep):
+    agent = _codex(tmp_path)
     environment = _HangingCodexInstallEnvironment(failures=0)
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(agent.setup(environment), timeout=0.1)  # as Harbor's setup timeout does
     assert environment.downloads() == [True]
     assert not environment.open
+    sleep.assert_not_awaited()
 
 
-async def test_a_failed_setup_of_an_agent_that_is_not_installed_is_not_retried(tmp_path, monkeypatch):
+async def test_a_failed_setup_of_an_agent_that_is_not_installed_is_not_retried(tmp_path, monkeypatch, sleep):
     events: list[str] = []
-    monkeypatch.setattr(agent_setup_egress, "SETUP_RETRY_DELAY_SEC", 0)
 
     async def setup(self, environment) -> None:
         events.append("setup")
@@ -319,9 +352,10 @@ async def test_a_failed_setup_of_an_agent_that_is_not_installed_is_not_retried(t
     with pytest.raises(NonZeroAgentExitCodeError):
         await _agent(tmp_path).setup(_WindowEnvironment(events))
     assert events == ["open", "setup", "close"]
+    sleep.assert_not_awaited()
 
 
-async def test_a_dynamic_policy_environment_retries_inside_one_policy_switch(tmp_path, monkeypatch):
+async def test_a_dynamic_policy_environment_retries_inside_one_policy_switch(tmp_path, monkeypatch, sleep):
     from harbor.agents.installed.codex import Codex
 
     events: list[Any] = []
@@ -334,9 +368,10 @@ async def test_a_dynamic_policy_environment_retries_inside_one_policy_switch(tmp
 
     monkeypatch.setattr(Codex, "setup", setup)
     environment = _PolicyEnvironment(events)
-    await _codex(tmp_path, monkeypatch).setup(environment)
+    await _codex(tmp_path).setup(environment)
     opened = _allowlist(*SETUP_HOSTS)
     assert events == ["list", opened, ("setup", opened), ("setup", opened), NO_NETWORK, ("kill", KEEP)]
+    sleep.assert_awaited_once_with(20.0)
 
 
 async def test_a_failed_setup_still_closes_the_window(tmp_path, monkeypatch):

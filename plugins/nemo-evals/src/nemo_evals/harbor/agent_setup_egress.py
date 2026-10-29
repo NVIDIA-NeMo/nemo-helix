@@ -226,7 +226,7 @@ async def _setup_with_retry(
                 attempt,
                 SETUP_ATTEMPTS,
                 SETUP_RETRY_DELAY_SEC,
-                str(exc).splitlines()[0],
+                str(exc).partition("\n")[0] or type(exc).__name__,
             )
             await asyncio.sleep(SETUP_RETRY_DELAY_SEC)
 
