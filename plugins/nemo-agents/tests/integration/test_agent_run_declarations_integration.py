@@ -36,7 +36,12 @@ _CONTEXT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$defs": {"timestamp": {"type": "string", "format": "date-time"}},
     "type": "object",
-    "properties": {"since": {"$ref": "#/$defs/timestamp"}},
+    "properties": {
+        "since": {"$ref": "#/$defs/timestamp"},
+        # Never fetched: only a job whose context sets ``remote`` reaches it, and
+        # then it is rejected as unresolvable rather than requested.
+        "remote": {"$ref": "http://169.254.169.254/latest/meta-data/schema.json"},
+    },
     "required": ["since"],
     "additionalProperties": False,
 }
@@ -142,6 +147,11 @@ def test_a_job_that_omits_input_stores_and_reads_back_the_default(ctx: ClientCon
         ),
         pytest.param({"context": {"since": "yesterday"}}, "is not a 'date-time'", id="malformed-date-time"),
         pytest.param({"context": {}}, "'since' is a required property", id="missing-required-key"),
+        pytest.param(
+            {"context": {"since": "2026-10-01T00:00:00Z", "remote": "x"}},
+            "context_schema has a $ref that cannot be resolved",
+            id="remote-ref",
+        ),
     ],
 )
 def test_a_context_that_does_not_match_the_schema_fails_job_create(

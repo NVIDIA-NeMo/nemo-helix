@@ -18,6 +18,8 @@ from typing import Any
 from jsonschema import FormatChecker
 from jsonschema.exceptions import SchemaError
 from jsonschema.validators import Draft202012Validator, validator_for
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 # RFC 3339 ``date-time``. jsonschema only checks this format when the optional
 # ``rfc3339-validator`` package is installed and otherwise passes every string,
@@ -29,6 +31,13 @@ _RFC3339_DATE_TIME = re.compile(
 )
 
 _FORMAT_CHECKER = FormatChecker()
+
+# The schema is caller-supplied, and without a registry jsonschema fetches any
+# remote ``$ref`` over HTTP while validating - a request to whatever host the
+# caller names, made from the server. An empty registry resolves only
+# references within the schema itself (and the bundled JSON Schema
+# metaschemas, which jsonschema always adds), so a remote one is unresolvable.
+_NO_REMOTE_REFS = Registry()
 
 
 @_FORMAT_CHECKER.checks("date-time", raises=ValueError)
@@ -58,8 +67,14 @@ def check_context_schema(schema: dict[str, Any]) -> None:
 def validate_context(context: dict[str, Any], schema: dict[str, Any]) -> None:
     """Raise ``ValueError`` listing every way *context* violates *schema*."""
     validator_cls = validator_for(schema, default=Draft202012Validator)
-    validator = validator_cls(schema, format_checker=_FORMAT_CHECKER)
-    errors = sorted(validator.iter_errors(context), key=lambda error: [str(part) for part in error.absolute_path])
+    validator = validator_cls(schema, format_checker=_FORMAT_CHECKER, registry=_NO_REMOTE_REFS)
+    try:
+        errors = sorted(validator.iter_errors(context), key=lambda error: [str(part) for part in error.absolute_path])
+    except Unresolvable as exc:
+        raise ValueError(
+            f"context_schema has a $ref that cannot be resolved: {exc.ref!r}. "
+            "Only references within the schema are supported."
+        ) from exc
     if not errors:
         return
     messages = "; ".join(f"{_location(error.absolute_path)}: {error.message}" for error in errors)
