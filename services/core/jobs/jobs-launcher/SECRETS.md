@@ -16,6 +16,10 @@ The feature uses these environment variables:
 
 When a workload token file is configured, Secret requests use the exchanged bearer token, with caching and refresh between requests. Delegated identity comes from the verified token claims, not `NHX_PRINCIPAL` or legacy identity headers. Discovery or token exchange failures stop the launcher without falling back to legacy headers. Authenticated Secret requests do not follow redirects.
 
+For Job workloads, the auth service includes a Job attestation from the validated, auth-owned delegation record in the signed access token. Policy uses this verified evidence only to allow the Secret-value GET route; the Job does not become a service principal or gain general `secrets.access` permissions. The Secret service still checks the delegated creator's `secrets.read` permission in the requested workspace. Cross-workspace references work only when that creator can read secrets in the target workspace. `JobRunner` alone, an actor name, an IdP claim, or a non-delegated token does not grant Secret-value access.
+
+This path requires the updated auth service, authorization middleware, and policy together. Tokens minted before the Job attestation was introduced must be exchanged again; requests without it remain denied.
+
 Without a workload token file, the launcher retains the legacy `service:jobs` and on-behalf-of headers derived from `NHX_PRINCIPAL`. These headers alone cannot authenticate requests through a bearer-authenticated gateway.
 
 ## Usage Example
@@ -67,6 +71,22 @@ The launcher will exit with an error if:
 - A secret reference has an invalid format
 - The API returns an error (e.g., secret not found, authentication failure)
 - Network connectivity issues occur
+
+## Authentication regression tests
+
+Run the signed-token, gateway authentication handler, policy, and Secret service tests from the repository root:
+
+```bash
+uv run --frozen pytest services/core/jobs/tests/integration/test_workload_secret_authorization.py -v
+```
+
+To also exercise the built Go launcher through real Envoy on Linux, start Docker and cache `envoyproxy/envoy:v1.37.0`, then run with Go available:
+
+```bash
+NHX_TEST_WORKLOAD_GATEWAY=1 uv run --frozen pytest services/core/jobs/tests/integration/test_workload_secret_authorization.py -v
+```
+
+The opt-in test uses temporary data, a loopback HTTP listener (not TLS), and a local IdP discovery stub. It verifies that an authorized creator's Job receives the injected Secret and starts, while an unauthorized creator's Job receives 403 and never starts. It does not exercise Kubernetes TokenReview.
 
 ## Logging
 

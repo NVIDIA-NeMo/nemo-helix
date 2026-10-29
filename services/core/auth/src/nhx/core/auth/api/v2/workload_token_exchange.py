@@ -763,6 +763,16 @@ def _build_delegated_claims(
     if verified_subject.groups:
         actor_claims["groups"] = ",".join(verified_subject.groups)
     claims["act"] = actor_claims
+
+    # Only the auth-owned delegation row can attest that this is a Job. Do not
+    # infer runtime capabilities from an actor name or untrusted subject claims.
+    # Older Job rows predate workload_kind but contain the complete Job tuple.
+    if delegation.workload_kind in (None, "job") and delegation.job_id and delegation.attempt_id and delegation.step_id:
+        claims["nhx_workload"] = {
+            "kind": "job",
+            "workspace": delegation.workload_workspace,
+            "job_id": delegation.job_id,
+        }
     return claims
 
 
