@@ -102,9 +102,6 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evals/agent-eval/harbor-runner.mdx
-              - page: Run Harbor Tasksets on Kubernetes
-                slug: kubernetes-taskset-runs
-                path: ../../evals/agent-eval/kubernetes-taskset-runs.mdx
               - page: Run a NeMo Fabric Agent inside Harbor
                 slug: harbor-fabric-agent
                 path: ../../evals/agent-eval/harbor-fabric-agent.mdx
