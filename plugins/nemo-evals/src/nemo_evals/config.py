@@ -172,6 +172,16 @@ class EvaluatorConfig(NemoConfig):
         description="Operator execution timeout defaults, maximum request budget and finalization grace for taskset runs.",
     )
 
+    container_image_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional fully qualified image reference for standard evaluate job steps (online and offline). "
+            "When unset, uses platform.image_registry/nhx-tasks:platform.image_tag. Does not override "
+            "Gym, Harbor dispatcher, retrieval, or image-build jobs."
+        ),
+    )
+
     gym_tasks_image: str | None = Field(
         default=None,
         description=(
