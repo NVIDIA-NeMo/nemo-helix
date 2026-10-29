@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from nemo_helix_plugin.intake.span_attributes import USAGE_SUPERSEDED_ATTRIBUTE
 from nhx.intake.config import DEFAULT_ATIF_MAX_SUBAGENT_DEPTH, MAX_ATIF_MAX_SUBAGENT_DEPTH
 from nhx.intake.spans.domain import (
     NEMO_STEP_ID_ATTRIBUTE,
@@ -305,6 +306,7 @@ def _trajectory_to_span(
         cost_total_usd=cost_total_usd,
         error_type=error_type,
         error_message=error_message,
+        usage_superseded_by_gateway=(trajectory.extra or {}).get(USAGE_SUPERSEDED_ATTRIBUTE) is True or None,
         raw_attributes=raw_attributes,
     )
     trajectory_started_at = _trajectory_started_at(trajectory, ingested_at)
@@ -638,6 +640,7 @@ def _span_attributes(
     cached_tokens: int | None = None,
     total_tokens: int | None = None,
     cost_total_usd: Decimal | None = None,
+    usage_superseded_by_gateway: bool | None = None,
     raw_attributes: dict[str, Any] | None = None,
 ) -> SpanAttributeBags:
     """Build normalized semantic and raw attribute bags for an ATIF span."""
@@ -655,6 +658,7 @@ def _span_attributes(
         cached_tokens=cached_tokens,
         total_tokens=total_tokens,
         cost_total_usd=cost_total_usd,
+        usage_superseded_by_gateway=usage_superseded_by_gateway,
     )
     attribute_bags = semantic_attributes.to_bags()
     if raw_attributes is not None:

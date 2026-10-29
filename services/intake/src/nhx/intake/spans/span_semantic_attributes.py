@@ -45,6 +45,8 @@ class SpanSemanticAttributes(BaseModel):
     cost_total_usd: Decimal | None = None
     cost_input_usd: Decimal | None = None
     cost_output_usd: Decimal | None = None
+    gateway_call: bool | None = None
+    usage_superseded_by_gateway: bool | None = None
 
     @classmethod
     def from_source_attributes(cls, attributes: Mapping[str, Any]) -> tuple[Self, set[str]]:
@@ -59,6 +61,12 @@ class SpanSemanticAttributes(BaseModel):
                 if value is not None:
                     values[spec.field.value] = value
                     break
+            chosen = values.get(spec.field.value)
+            consumed_keys.difference_update(
+                key
+                for key in spec.distinct_source_keys
+                if key in attributes and to_semantic_value(attributes[key], spec) not in (None, chosen)
+            )
         return cls(**values), consumed_keys
 
     @classmethod
