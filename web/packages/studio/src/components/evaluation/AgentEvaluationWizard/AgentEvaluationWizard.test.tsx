@@ -107,6 +107,21 @@ const mockLists = () => {
   );
 };
 
+/** Holds the evaluation list request until the returned function is called. */
+const holdEvaluationsList = (): (() => void) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.use(
+    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), async () => {
+      await held;
+      return HttpResponse.json({ data: EVALUATIONS });
+    })
+  );
+  return release;
+};
+
 const renderWizard = (props: Partial<React.ComponentProps<typeof AgentEvaluationWizard>> = {}) =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
@@ -326,18 +341,26 @@ describe('AgentEvaluationWizard', () => {
 
   it('waits for the evaluation list before a handed-in source can run', async () => {
     mockLists();
-    let releaseList: () => void = () => {};
-    const listHeld = new Promise<void>((resolve) => {
-      releaseList = resolve;
-    });
-    server.use(
-      http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), async () => {
-        await listHeld;
-        return HttpResponse.json({ data: EVALUATIONS });
-      })
-    );
+    const releaseList = holdEvaluationsList();
     renderWizard({ sourceEvaluation: 'baseline' });
 
+    expect(await screen.findByText('Loading evaluations...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+
+    releaseList();
+    await waitFor(() =>
+      expect(screen.queryByText('Loading evaluations...')).not.toBeInTheDocument()
+    );
+  });
+
+  it('holds Run Evaluation while the list loads, before anything can be picked', async () => {
+    mockLists();
+    const releaseList = holdEvaluationsList();
+    const user = userEvent.setup();
+    renderWizard();
+
+    await user.click(await screen.findByRole('radio', { name: /Re-run an existing evaluation/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByText('Loading evaluations...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
 

@@ -848,14 +848,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (step === 'evaluation') {
       if (mode === MODE_EXPERIMENT) {
         if (hasNoEvaluations) return SHOWN_ON_FIELD;
-        // A handed-in source is only a name until the list resolves, and its config check
-        // cannot start before then.
+        // Nothing can be picked, and a handed-in source cannot be resolved or checked, until the
+        // list arrives.
+        if (sources.isLoading) return blockedWith('Loading evaluations...');
         if (evaluationName && !selectedEvaluation) {
-          return blockedWith(
-            sources.isLoading
-              ? 'Loading evaluations...'
-              : `Evaluation ${evaluationName} no longer exists. Pick another.`
-          );
+          return blockedWith(`Evaluation ${evaluationName} no longer exists. Pick another.`);
         }
         if (isValidatingEvaluation) return blockedWith('Checking the saved eval config...');
         if (evaluationConfigIssue) return SHOWN_ON_FIELD;
