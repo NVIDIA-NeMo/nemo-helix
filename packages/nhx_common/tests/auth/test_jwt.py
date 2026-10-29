@@ -141,6 +141,7 @@ class TestOIDCConfigClaimDefaults:
         """Microsoft issuer URL does not imply special claim names; set them explicitly in config."""
         config = OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://login.microsoftonline.com/43083d15-7273-40c1-b7db-39efd9ccc17a/v2.0",
             public_client=OIDCPublicClientConfig(client_id="test"),
         )
@@ -152,6 +153,7 @@ class TestOIDCConfigClaimDefaults:
         """Non-Azure issuer keeps standard claim names."""
         config = OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="test"),
         )
@@ -619,49 +621,6 @@ class TestJWTValidator:
             assert result.groups == ["cognito-admin", "cognito-users"]
 
     @pytest.mark.asyncio
-    async def test_validate_token_skips_audience_when_not_configured(self):
-        """Test that audience validation is skipped when audience is not configured."""
-        config = OIDCConfig(
-            enabled=True,
-            issuer="https://sso.example.com",
-            public_client=OIDCPublicClientConfig(client_id="test-client"),
-            # audience is intentionally left as None
-        )
-        auth_cfg = AuthConfig(
-            enabled=True,
-            policy_decision_point_base_url="http://localhost:8181",
-            oidc=config,
-        )
-        validator = JWTValidator(auth_cfg)
-
-        valid_claims = {
-            "sub": "user123",
-            "email": "user@example.com",
-            "exp": int(time.time()) + 3600,
-            "iat": int(time.time()),
-            "aud": "some-other-audience",
-            "iss": "https://sso.example.com",
-        }
-
-        with patch.object(validator, "_get_jwks_client") as mock_get_jwks:
-            mock_jwks = MagicMock()
-            mock_signing_key = MagicMock()
-            mock_signing_key.key = "test-key"
-            mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
-            mock_get_jwks.return_value = mock_jwks
-
-            with patch("jwt.decode", return_value=valid_claims) as mock_decode:
-                result = await validator.validate_token("valid.token.here")
-
-            # Verify audience=None and verify_aud=False were passed
-            call_kwargs = mock_decode.call_args
-            assert call_kwargs[1]["audience"] is None
-            assert call_kwargs[1]["options"]["verify_aud"] is False
-
-        assert result is not None
-        assert result.subject == "user123"
-
-    @pytest.mark.asyncio
     async def test_validate_token_validates_audience_when_configured(self):
         """Test that audience is validated when explicitly configured."""
         config = OIDCConfig(
@@ -844,7 +803,7 @@ class TestOpaqueTokenIntrospection:
             enabled=True,
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="test-client"),
-            **oidc_overrides,
+            **{"audience": "test-audience", **oidc_overrides},
         )
         auth_cfg = AuthConfig(
             enabled=True,
@@ -873,6 +832,7 @@ class TestOpaqueTokenIntrospection:
         )
         introspection_response = {
             "active": True,
+            "aud": "test-audience",
             "sub": "user123",
             "email": "user@example.com",
             "groups": ["admin"],
@@ -956,7 +916,7 @@ class TestOpaqueTokenIntrospection:
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "test-audience"}).encode("utf-8")
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
@@ -982,7 +942,7 @@ class TestOpaqueTokenIntrospection:
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "test-audience"}).encode("utf-8")
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
@@ -1091,7 +1051,7 @@ class TestOpaqueTokenIntrospection:
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "test-audience"}).encode("utf-8")
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
@@ -1142,7 +1102,7 @@ class TestOpaqueTokenIntrospection:
         }
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "test-audience"}).encode("utf-8")
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
@@ -1173,228 +1133,19 @@ class TestOpaqueTokenIntrospection:
         assert result is None
 
 
-class TestOpaqueTokenUserInfoResolution:
-    """Tests for OIDC UserInfo fallback on non-JWT (opaque) access tokens."""
+class TestOpaqueTokenWithoutIntrospection:
+    """Opaque (non-JWT) access tokens are rejected unless RFC 7662 introspection is enabled."""
 
-    @staticmethod
-    def _validator(**oidc_overrides) -> JWTValidator:
+    @pytest.mark.asyncio
+    async def test_opaque_token_without_introspection_returns_none(self):
         config = OIDCConfig(
             enabled=True,
             issuer="https://sso.example.com",
+            audience="nemo-api",
             public_client=OIDCPublicClientConfig(client_id="test-client"),
-            **oidc_overrides,
         )
-        auth_cfg = AuthConfig(
-            enabled=True,
-            policy_decision_point_base_url="http://localhost:8181",
-            oidc=config,
-        )
-        return JWTValidator(auth_cfg)
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_without_userinfo_enabled_returns_none(self):
-        """Default behavior is unchanged: an opaque token is rejected, no UserInfo call is made."""
-        validator = self._validator()
-
-        with patch.object(http_clients, "shared_async_http_client") as mock_shared_client:
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is None
-        mock_shared_client.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_resolves_via_userinfo_when_enabled(self):
-        """An opaque token is resolved via UserInfo when resolve_opaque_tokens_via_userinfo is set."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-        )
-        userinfo_response = {
-            "sub": "user123",
-            "email": "user@example.com",
-            "groups": ["admin"],
-        }
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps(userinfo_response).encode("utf-8")
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is not None
-        assert result.subject == "user123"
-        assert result.email == "user@example.com"
-        assert result.groups == ["admin"]
-        mock_client.get.assert_called_once()
-        call_args = mock_client.get.call_args
-        assert call_args[0][0] == "https://sso.example.com/userinfo"
-        assert call_args[1]["headers"] == {"Authorization": "Bearer opaque-access-token"}
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_resolved_via_userinfo_has_no_scopes(self, caplog):
-        """UserInfo responses carry no scope claim (per OIDC Core 5.3 and Starfleet's docs), so
-        resolved claims have empty scopes and a warning is logged flagging that OAuth-scope
-        enforcement is skipped for the request (RBAC/permissions still apply separately)."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-        )
-        userinfo_response = {"sub": "user123", "email": "user@example.com"}
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps(userinfo_response).encode("utf-8")
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        with (
-            caplog.at_level("WARNING"),
-            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
-        ):
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is not None
-        assert result.scopes == []
-        assert any("scope enforcement is skipped" in record.message for record in caplog.records)
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_userinfo_rejects_401(self):
-        """A 401 from the UserInfo endpoint (invalid/expired/revoked token) is treated as invalid."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-        )
-
-        mock_request = httpx.Request("GET", "https://sso.example.com/userinfo")
-        mock_response = httpx.Response(401, request=mock_request)
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
-            result = await validator.validate_token("revoked-token")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_userinfo_propagates_non_401_errors(self):
-        """A non-401 error status from the UserInfo endpoint is not swallowed as an invalid token."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-        )
-
-        mock_request = httpx.Request("GET", "https://sso.example.com/userinfo")
-        mock_response = httpx.Response(500, request=mock_request)
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_userinfo_falls_back_to_discovery(self):
-        """When no userinfo_endpoint override is set, it is discovered like jwks_uri."""
-        validator = self._validator(resolve_opaque_tokens_via_userinfo=True)
-
-        discovery_doc = {
-            "issuer": "https://sso.example.com",
-            "userinfo_endpoint": "https://sso.example.com/discovered-userinfo",
-        }
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"sub": "user123"}).encode("utf-8")
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        with patch.object(
-            validator,
-            "_discover_oidc_config",
-            new=AsyncMock(return_value=discovery_doc),
-        ):
-            with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
-                result = await validator.validate_token("opaque-access-token")
-
-        assert result is not None
-        call_args = mock_client.get.call_args
-        assert call_args[0][0] == "https://sso.example.com/discovered-userinfo"
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_userinfo_without_endpoint_returns_none(self):
-        """resolve_opaque_tokens_via_userinfo without a resolvable endpoint fails closed."""
-        validator = self._validator(resolve_opaque_tokens_via_userinfo=True)
-
-        with patch.object(
-            validator,
-            "_discover_oidc_config",
-            new=AsyncMock(return_value={"issuer": "https://sso.example.com"}),
-        ):
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_userinfo_takes_priority_over_introspection_when_both_enabled(self):
-        """When both fallbacks are enabled, UserInfo is tried and introspection is not."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-            introspect_opaque_tokens=True,
-            introspection_endpoint="https://sso.example.com/introspect",
-        )
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"sub": "user123"}).encode("utf-8")
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-
-        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is not None
-        assert result.subject == "user123"
-        mock_client.get.assert_called_once()
-        mock_client.post.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_userinfo_skipped_in_favor_of_introspection_when_audience_configured(self):
-        """UserInfo can't be checked against oidc.audience, so a configured audience routes
-        opaque-token validation through introspection even when UserInfo is also enabled."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-            introspect_opaque_tokens=True,
-            introspection_endpoint="https://sso.example.com/introspect",
-            audience="nemo-api",
-        )
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "nemo-api"}).encode("utf-8")
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-
-        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
-            result = await validator.validate_token("opaque-access-token")
-
-        assert result is not None
-        assert result.subject == "user123"
-        mock_client.post.assert_called_once()
-        mock_client.get.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_opaque_token_rejected_when_only_userinfo_enabled_and_audience_configured(self):
-        """With only UserInfo enabled and an audience configured, an opaque token is rejected
-        rather than validated without audience enforcement."""
-        validator = self._validator(
-            resolve_opaque_tokens_via_userinfo=True,
-            userinfo_endpoint="https://sso.example.com/userinfo",
-            audience="nemo-api",
+        validator = JWTValidator(
+            AuthConfig(enabled=True, policy_decision_point_base_url="http://localhost:8181", oidc=config)
         )
 
         with patch.object(http_clients, "shared_async_http_client") as mock_shared_client:

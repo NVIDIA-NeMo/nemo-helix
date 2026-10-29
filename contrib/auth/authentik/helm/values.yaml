@@ -279,6 +279,10 @@ nemo-helix:
       oidc:
         enabled: true
         issuer: '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-user/'
+        # Authentik sets aud to the issuing provider's client_id; "nemo-helix" is the
+        # nemo-helix provider (setup/e2e tokens). Tokens from nemo-helix-user and nemo-helix-cli
+        # carry their own client_id as aud.
+        audience: "nemo-helix"
         additional_issuers:
           - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo/'
           - '{{ include "nemo-helix-authentik.serviceUrl" (dict "root" . "serviceName" "authentik-server" "scheme" "http") }}/application/o/nemo-cli/'

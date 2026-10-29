@@ -157,80 +157,7 @@ class JWTValidator:
             return expected in claim_audience
         return False
 
-    async def _userinfo_endpoint(self) -> str | None:
-        """Return the configured or discovered OIDC UserInfo endpoint, if any."""
-        if self.config.oidc.userinfo_endpoint:
-            return self.config.oidc.userinfo_endpoint
-        discovery = await self._discover_oidc_config()
-        endpoint = discovery.get("userinfo_endpoint")
-        return endpoint if isinstance(endpoint, str) and endpoint else None
-
-    async def _resolve_via_userinfo(self, token: str) -> JsonObject | None:
-        """Resolve an opaque access token to claims via the OIDC UserInfo endpoint.
-
-        Unlike RFC 7662 introspection, the UserInfo endpoint (OIDC Core 5.3) is
-        authenticated with the access token itself (no separate client credential)
-        and its response has no active/aud/scope claims: a successful response is
-        itself proof the token is valid for the caller, but audience and the
-        token's original OAuth scope grant cannot be recovered or enforced for
-        tokens resolved this way. Callers must not invoke this when oidc.audience
-        is configured — see validate_token, which skips this path in that case.
-
-        The scope gap matters: TokenClaims.scopes ends up empty for every token
-        resolved here, and the platform's scope check
-        (services/core/auth/src/nhx/core/auth/app/policies/scopes.rego,
-        scope_check_passed) treats an empty scope list as "no platform scopes
-        provided" and skips scope enforcement entirely, falling back to
-        RBAC/permissions only. A caller holding an access token that the IdP
-        scoped down (e.g. to a single read-only scope) is therefore not
-        restricted to that scope once resolved through this path — only their
-        role/group-based permissions apply. Enable this only for IdPs, like
-        Starfleet, that don't hand out narrower per-token scopes in practice.
-
-        Returns None when the UserInfo endpoint is unavailable or rejects the token.
-        """
-        userinfo_endpoint = await self._userinfo_endpoint()
-        if userinfo_endpoint is None:
-            logger.warning("Cannot resolve opaque token: no userinfo_endpoint configured or discoverable")
-            return None
-
-        client = http_clients.shared_async_http_client()
-        try:
-            response = await client.get(
-                userinfo_endpoint,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 401:
-                logger.warning("UserInfo endpoint rejected the token")
-                return None
-            raise
-
-        logger.warning(
-            "Resolved opaque token via UserInfo endpoint; the token's original OAuth scope "
-            "grant cannot be recovered, so scope enforcement is skipped for this request "
-            "(RBAC/permissions still apply)"
-        )
-        try:
-            return self._json_deserializer.deserialize(response.content)
-        except JsonObjectDeserializationError as exc:
-            raise jwt.InvalidTokenError("UserInfo response was not a JSON object") from exc
-
     async def _resolve_opaque_token(self, token: str) -> token_claims.TokenClaims | None:
-        if self.config.oidc.resolve_opaque_tokens_via_userinfo:
-            if self.config.oidc.audience:
-                logger.warning(
-                    "Skipping UserInfo resolution because oidc.audience is configured and "
-                    "UserInfo responses cannot be checked against it; falling back to "
-                    "introspection if enabled"
-                )
-            else:
-                claims = await self._resolve_via_userinfo(token)
-                if claims is None:
-                    return None
-                return self._claims_extractor.extract(claims)
         if self.config.oidc.introspect_opaque_tokens:
             claims = await self._introspect_token(token)
             if claims is None:
@@ -239,7 +166,7 @@ class JWTValidator:
         return None
 
     def _opaque_resolution_enabled(self) -> bool:
-        return self.config.oidc.resolve_opaque_tokens_via_userinfo or self.config.oidc.introspect_opaque_tokens
+        return self.config.oidc.introspect_opaque_tokens
 
     async def _get_jwks_client(self) -> AsyncJWKSClient:
         """Get or create JWKS client for token validation.

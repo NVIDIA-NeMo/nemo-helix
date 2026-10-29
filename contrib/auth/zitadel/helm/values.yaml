@@ -354,6 +354,8 @@ nemo-helix:
       oidc:
         enabled: true
         issuer: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}'
+        # Zitadel puts the project id in aud; the seed job substitutes it like the scope placeholders below.
+        audience: "__ZITADEL_PROJECT_ID__"
         additional_issuers:
           - '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "zitadel" "scheme" "http" "port" 8080) }}'
         public_client:
