@@ -40,6 +40,7 @@ _ATOF_EVENT_KINDS = frozenset({"scope", "mark"})
 # Content blocks carry reasoning under a key matching their type: LangChain uses
 # ``{"type": "reasoning", "reasoning": ...}`` and Anthropic ``{"type": "thinking", "thinking": ...}``.
 _REASONING_PART_TYPES = frozenset({"reasoning", "thinking"})
+_REASONING_FIELDS = ("reasoning_content", "reasoning")
 _ASSISTANT_MESSAGE_KEYS = ("__nemo_relay_integrations_langchain_model_response", "message", "data", "payload")
 _TEXT_EVENT_TYPES = frozenset(
     {
@@ -395,7 +396,7 @@ def _reasoning_from_message(message: Mapping[str, Any]) -> str | None:
     for source in (message, message.get("additional_kwargs")):
         if not isinstance(source, Mapping):
             continue
-        for key in ("reasoning_content", "reasoning"):
+        for key in _REASONING_FIELDS:
             value = source.get(key)
             if isinstance(value, str) and value:
                 return value
