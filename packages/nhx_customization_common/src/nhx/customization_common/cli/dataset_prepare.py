@@ -35,28 +35,56 @@ from nhx.customization_common.dataset_prepare import (
 
 _COLUMNS_PANEL = "Column mapping"
 
-_FORMATS_HELP = "\n\n".join(f"{fmt}: {TRAINED_BY[fmt]}." for fmt in DatasetFormat)
+_SHORT_HELP = "Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset."
 
-_HELP = (
-    "Convert a Parquet, CSV or JSONL table, such as Data Designer output, into a training dataset in the "
-    "format --format names, split it, and upload it to a new dataset fileset. Prints the references.\n\n"
-    f"Each format, and the backends that train on it:\n\n{_FORMATS_HELP}\n\n"
-    "GRPO datasets are not supported: GRPO trains on NeMo Gym rows that each environment builds, not on a table."
+#: What the help adds after a format's backends.
+_FORMAT_NOTES = {DatasetFormat.PROMPT_COMPLETION: " Raw text with no chat template, for base models."}
+
+# A bullet per format: command help strips each line's indentation, so the list cannot rely on it.
+_FORMATS_HELP = "Formats (--format), and the backends that train on each:\n" + "\n".join(
+    f"- {fmt}: {'; or '.join(TRAINED_BY[fmt])}.{_FORMAT_NOTES.get(fmt, '')}" for fmt in DatasetFormat
+)
+
+_GRPO_HELP = (
+    "GRPO is not supported: rl GRPO (training.type: grpo) trains on NeMo Gym rows that each environment "
+    "defines, not on a table. Write them for the environment and upload them with --upload-dataset "
+    "on the rl command."
+)
+
+_GROUP_HELP = (
+    f"{_SHORT_HELP}\n\n{_FORMATS_HELP}\n\n{_GRPO_HELP}\n\n"
+    "The prepare command's help lists the source, split and column options."
+)
+
+_PREPARE_HELP = (
+    f"{_SHORT_HELP}\n\n"
+    "Reads SOURCE on this machine: a local file or directory, or a fileset. Writes its rows in the format "
+    "--format names, drops rows with an empty field, and splits the rest with a seeded shuffle. Then uploads "
+    "the training and validation splits to the platform as a new dataset fileset, NAME (train.jsonl, "
+    "validation.jsonl), and the test split, when there is one, as a second fileset, NAME-test (test.jsonl). "
+    "Prints the fileset references as JSON, to put in the job JSON. It creates filesets, not a training job.\n\n"
+    f"{_FORMATS_HELP}\n\n{_GRPO_HELP}\n\n"
+    "Data Designer output: download the job's artifacts result (nemo jobs results download artifacts "
+    "--job JOB -o artifacts.tar), extract it, and pass its parquet-files directory."
 )
 
 
 def add_dataset_commands(app: typer.Typer) -> None:
     """Register ``nemo customization dataset prepare``."""
-    dataset = typer.Typer(name="dataset", help="Prepare a training dataset.", no_args_is_help=True)
+    dataset = typer.Typer(name="dataset", help=_GROUP_HELP, short_help=_SHORT_HELP, no_args_is_help=True)
 
-    @dataset.command("prepare", help=_HELP)
+    @dataset.command("prepare", help=_PREPARE_HELP, short_help=_SHORT_HELP)
     def prepare(
         typer_ctx: typer.Context,
         source: str = typer.Argument(
             ...,
             help="A local file or directory, or a fileset as WORKSPACE/NAME[#PATH]. Data Designer: its parquet-files.",
         ),
-        name: str = typer.Option(..., "--name", help="Dataset fileset to create. The test split goes to NAME-test."),
+        name: str = typer.Option(
+            ...,
+            "--name",
+            help="Dataset fileset to create on the platform and upload the splits to. The test split goes to NAME-test.",
+        ),
         dataset_format: DatasetFormat = typer.Option(
             ..., "--format", help="Row format to write; it decides which backends can train on the dataset."
         ),
@@ -241,7 +269,7 @@ def _prepare(
             files, name=test_name, source=out / test_name, workspace=workspace, exist_ok=exist_ok, report=report
         )
     result["format"] = str(dataset_format)
-    result["trained_by"] = TRAINED_BY[dataset_format]
+    result["trained_by"] = list(TRAINED_BY[dataset_format])
     result["columns"] = dict(mapping.columns)
     result["rows"] = {"train": len(splits.train), "validation": len(splits.validation), "test": len(splits.test)}
     if dropped:

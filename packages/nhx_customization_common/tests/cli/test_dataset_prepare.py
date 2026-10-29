@@ -71,7 +71,10 @@ def test_local_parquet_instruction_rows_become_chat_splits(tmp_path: Path) -> No
         "columns": {"prompt": "instruction", "response": "response"},
         "rows": {"train": 16, "validation": 2, "test": 2},
     }
-    assert report["trained_by"].startswith("automodel")
+    assert report["trained_by"] == [
+        "automodel, training.training_type sft or distillation",
+        "unsloth, with dataset.apply_chat_template: true",
+    ]
     assert sorted(uploaded["sft-data"]) == ["train.jsonl", "validation.jsonl"]
     assert sorted(uploaded["sft-data-test"]) == ["test.jsonl"]
     assert uploaded["sft-data"]["train.jsonl"][0]["messages"][1]["role"] == "assistant"
