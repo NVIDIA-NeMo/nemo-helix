@@ -11,13 +11,12 @@ export const TAB_SEARCH_PARAM = 'tab';
 
 export const DETAIL_TABS = [
   'overview',
-  'deployments',
-  'logs',
   'chat',
   'evaluations',
-  'optimizations',
   'insights',
-  'details',
+  'optimizations',
+  'deployments',
+  'logs',
 ] as const;
 
 export type AgentDetailTab = (typeof DETAIL_TABS)[number];

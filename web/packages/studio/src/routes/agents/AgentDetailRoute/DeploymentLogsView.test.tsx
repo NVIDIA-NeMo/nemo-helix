@@ -70,7 +70,7 @@ describe('DeploymentLogsView', () => {
   });
 
   it('streams deployment logs with server-session credentials and no stale bearer token', async () => {
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() => expect(withHelixBrowserAuthRequest).toHaveBeenCalled());
     await waitFor(() => expect(streamSse).toHaveBeenCalled());
@@ -85,7 +85,7 @@ describe('DeploymentLogsView', () => {
   it('logs an accurate setup failure when authentication request setup fails', async () => {
     mocks.withHelixBrowserAuthRequest.mockRejectedValue(new Error('discovery unavailable'));
 
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() =>
       expect(mocks.loggerWarn).toHaveBeenCalledWith(
@@ -100,7 +100,7 @@ describe('DeploymentLogsView', () => {
   it('badges the log as live while the stream is open', async () => {
     mocks.streamSse.mockReturnValue(new Promise(() => {}));
 
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() => expect(streamSse).toHaveBeenCalled());
     expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'live');
@@ -111,7 +111,7 @@ describe('DeploymentLogsView', () => {
     async (status) => {
       mocks.streamSse.mockReturnValue(new Promise(() => {}));
 
-      render(<DeploymentLogsView workspace="default" deployments={[{ ...deployment, status }]} />);
+      render(<DeploymentLogsView workspace="default" deployment={{ ...deployment, status }} />);
 
       await waitFor(() => expect(streamSse).toHaveBeenCalled());
       expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'ended');
@@ -123,7 +123,7 @@ describe('DeploymentLogsView', () => {
       options.onError?.(new Error('SSE request failed: 401'));
     });
 
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() =>
       expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'none')

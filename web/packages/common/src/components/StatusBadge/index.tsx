@@ -18,12 +18,26 @@ type AnyEntry = {
 
 const CONFIG_DEFAULT: AnyEntry = { label: 'Unknown', color: 'gray' };
 
-interface StatusBadgeProps<T = string> {
+export interface StatusBadgeProps<T = string> {
   status: BadgeStatus<T> | string | undefined;
   statusConfig?: Record<string, StatusConfigEntry>;
   fallback?: StatusConfigEntry;
   label?: string;
 }
+
+export const resolveStatusConfig = (
+  status: string | undefined,
+  statusConfig?: Record<string, StatusConfigEntry>,
+  fallback?: StatusConfigEntry
+): AnyEntry => {
+  if (statusConfig) {
+    return (status !== undefined ? statusConfig[status] : undefined) ?? fallback ?? CONFIG_DEFAULT;
+  }
+  const statusKey = status ? String(status).toLowerCase() : 'default';
+  return statusKey in badgeStatus
+    ? badgeStatus[statusKey as keyof typeof badgeStatus]
+    : badgeStatus.default;
+};
 
 export const StatusBadge = <T extends string = string>({
   status,
@@ -31,23 +45,7 @@ export const StatusBadge = <T extends string = string>({
   fallback,
   label: labelOverride,
 }: StatusBadgeProps<T>) => {
-  let config: AnyEntry;
-
-  if (statusConfig) {
-    config =
-      (status !== undefined ? statusConfig[status] : undefined) ?? fallback ?? CONFIG_DEFAULT;
-  } else {
-    if (!status) {
-      config = badgeStatus.default;
-    } else {
-      const statusKey = String(status).toLowerCase();
-      config =
-        statusKey in badgeStatus
-          ? badgeStatus[statusKey as keyof typeof badgeStatus]
-          : badgeStatus.default;
-    }
-  }
-
+  const config = resolveStatusConfig(status, statusConfig, fallback);
   const label = labelOverride ?? config.label;
   const Icon = config.icon;
 

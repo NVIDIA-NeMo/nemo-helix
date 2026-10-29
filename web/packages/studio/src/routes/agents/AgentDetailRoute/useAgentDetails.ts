@@ -179,7 +179,10 @@ export const useAgentDetails = ({
   });
 
   const agentDeployments = useMemo(
-    () => (deploymentsData ?? []).filter((d) => d.agent === agentName),
+    () =>
+      (deploymentsData ?? [])
+        .filter((d) => d.agent === agentName)
+        .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')),
     [deploymentsData, agentName]
   );
 
@@ -232,12 +235,15 @@ export const useAgentDetails = ({
     [agentDeployments]
   );
 
-  const chatDeployment = useMemo(() => {
-    if (selectedDeploymentName) {
-      return healthyDeployments.find((d) => d.name === selectedDeploymentName);
-    }
-    return healthyDeployments[0];
-  }, [healthyDeployments, selectedDeploymentName]);
+  // Any status is selectable (a failed deployment still has logs); without a pick, prefer a healthy one.
+  const selectedDeployment = useMemo(() => {
+    const named = agentDeployments.filter((d) => d.name);
+    return (
+      named.find((d) => d.name === selectedDeploymentName) ??
+      named.find((d) => d.status === 'running') ??
+      named[0]
+    );
+  }, [agentDeployments, selectedDeploymentName]);
 
   return {
     isDeploymentsLoading,
@@ -250,7 +256,7 @@ export const useAgentDetails = ({
     agentJobs,
     healthyDeployments,
     isDeploying,
-    chatDeployment,
+    selectedDeployment,
     deleteDeploymentMutation,
   };
 };
