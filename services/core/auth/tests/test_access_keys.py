@@ -2350,8 +2350,8 @@ def test_with_auth_off_no_caller_counts_as_a_service(client):
 def test_values_a_token_cant_carry_are_refused(client, value):
     """Python's JSON parser accepts these, but a token carrying them isn't valid JSON or UTF-8.
 
-    FastAPI's default handler can't render a validation error that echoes such an input, so the status is a server
-    error; what matters is that no key is minted or stored.
+    FastAPI's default 422 echoes the input, which it then can't render, so without the router's own handling this
+    would be a 500.
     """
     with _acting_as(_for_alice("evals")):
         response = TestClient(client.app, raise_server_exceptions=False).post(
@@ -2360,5 +2360,6 @@ def test_values_a_token_cant_carry_are_refused(client, value):
             headers={"Content-Type": "application/json"},
         )
 
-    assert response.status_code >= 400
+    assert response.status_code == 422
+    assert "service_attributes" in response.json()["detail"][0]["msg"]
     assert client.app.dependency_overrides[get_access_key_registry]().keys == {}
