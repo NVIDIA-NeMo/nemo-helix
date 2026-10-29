@@ -14,14 +14,19 @@ from nhx.testing import create_test_client
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch):
+def intake_service() -> IntakeService:
+    return IntakeService()
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch, intake_service: IntakeService):
     """Create an entity-focused test client without requiring a live ClickHouse."""
     monkeypatch.setattr(IntakeService, "is_ready", AsyncMock(return_value=True))
     intake_config = IntakeConfig(
         clickhouse_config=ClickHouseConfig(url="http://127.0.0.1:1"),
     )
     with create_test_client(
-        IntakeService,
+        lambda: intake_service,
         client_type=TestClient,
         dependency_overrides={get_evaluation_rollup_repository: lambda: None},
         service_configs={IntakeService: intake_config},

@@ -9,9 +9,10 @@ get_service_config_factory (which needs ServiceConfig type) is defined here.
 
 from __future__ import annotations
 
-from typing import Callable, TypeVar
+from dataclasses import dataclass
+from typing import Callable, Generic, TypeVar
 
-from fastapi import Request
+from fastapi import FastAPI, Request
 from nemo_helix_plugin.dependencies import get_effective_principal_id as get_effective_principal_id
 from nemo_helix_plugin.dependencies import get_entity_client as get_entity_client
 from nemo_helix_plugin.dependencies import get_nemo_client as get_nemo_client
@@ -19,8 +20,34 @@ from nemo_helix_plugin.dependencies import get_platform_config as get_platform_c
 from nemo_helix_plugin.dependencies import get_service_config as get_service_config
 from nemo_helix_plugin.dependencies import get_sync_nemo_client as get_sync_nemo_client
 from nhx.common.config import ServiceConfig
+from nhx.common.service.base import Service
 
 T = TypeVar("T", bound=ServiceConfig)
+TService = TypeVar("TService", bound=Service)
+
+
+@dataclass(frozen=True)
+class ServiceInstanceDependency(Generic[TService]):
+    """A service-specific FastAPI dependency bound to the running instance."""
+
+    name: str
+    service_type: type[TService]
+
+    def __call__(self) -> TService:
+        raise RuntimeError(f"Service {self.name!r} is not bound to this application")
+
+    def bind(self, app: FastAPI, instance: TService) -> None:
+        app.dependency_overrides[self] = lambda: instance
+
+
+def service_instance_dependency(name: str, service_type: type[TService]) -> ServiceInstanceDependency[TService]:
+    """Get an equal, hash-stable dependency key for one name and concrete type.
+
+    Use ``Annotated[MyService, Depends(service_instance_dependency("name", MyService))]``
+    in routes. The owning service binds the token during ``_setup_dependencies``;
+    an unbound token raises rather than selecting another service.
+    """
+    return ServiceInstanceDependency(name, service_type)
 
 
 def get_service_config_factory(config_class: type[T]) -> Callable[[Request], T]:

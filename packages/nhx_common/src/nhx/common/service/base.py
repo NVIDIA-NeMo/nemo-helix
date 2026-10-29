@@ -552,9 +552,6 @@ class Service(ABC, Generic[TConfig]):
         # Store reference to app for use in on_startup
         self._app = app
 
-        # Store service instance for access by endpoints
-        app.state.service = self
-
         # Setup dependency overrides (e.g., entity client factory)
         self._setup_dependencies(app)
 

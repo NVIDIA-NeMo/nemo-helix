@@ -29,6 +29,10 @@ unification is mechanical):
 - Supported leaf types: ``str``, ``int``, ``float``, ``bool``, plus
   ``Optional`` of any of those (``str | None`` syntax included).
 - Nested ``BaseModel`` fields recurse with a dotted prefix.
+- A bare or ``Optional`` ``RootModel`` field is classified by its
+  ``root`` annotation at the field's own path (``--dataset``, not
+  ``--dataset.root``), so the overlay carries the bare root value
+  that the model validates.
 - Same-base scalar union arms collapse to one flag of the shared
   base (``AgentRef | EndpointURL | None`` → one ``str`` flag); the
   runtime resolver disambiguates by shape, the wire format stays
@@ -51,10 +55,10 @@ import logging
 import types
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, Union, cast, get_args, get_origin
+from typing import Any, NamedTuple, Optional, Union, cast, get_args, get_origin
 
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
@@ -170,8 +174,7 @@ def _walk(
 ) -> None:
     for name, info in model.model_fields.items():
         path = (*prefix, name)
-        annotation = info.annotation
-        unwrapped, is_partial = _strip_optional(annotation)
+        unwrapped, is_partial, description, metavar = _resolve_field_type(info)
         if unwrapped is None:
             logger.debug(
                 "Skipping field %s on %s: unsupported union or unannotated.",
@@ -234,12 +237,41 @@ def _walk(
                 param_name=param_name,
                 python_type=unwrapped,
                 default=_extract_default(info),
-                description=info.description or "",
+                description=description,
                 required=_is_required(info),
-                metavar=_derive_metavar(annotation, info),
+                metavar=metavar,
                 partial=is_partial,
             )
         )
+
+
+class _ResolvedField(NamedTuple):
+    type_: Any | None
+    partial: bool
+    description: str
+    metavar: str | None
+
+
+def _resolve_field_type(info: FieldInfo) -> _ResolvedField:
+    """Resolve the CLI-renderable type, help text, and metavar for a spec field.
+
+    Like :func:`_strip_optional`, but a bare or ``Optional`` ``RootModel``
+    resolves to its ``root`` annotation: a ``RootModel`` serializes as
+    the bare root value, so the field is a leaf (or submodel) at its own
+    path rather than an object with a ``root`` key. A ``RootModel`` that
+    is one arm of a wider union is not unwrapped. The field's description
+    and metavar win; the root field's are the fallback.
+    """
+    unwrapped, is_partial = _strip_optional(info.annotation)
+    description = info.description or ""
+    metavar = _derive_metavar(info.annotation, info)
+    while isinstance(unwrapped, type) and issubclass(unwrapped, RootModel):
+        root_info = unwrapped.model_fields["root"]
+        description = description or root_info.description or ""
+        metavar = metavar or _derive_metavar(root_info.annotation, root_info)
+        unwrapped, root_partial = _strip_optional(root_info.annotation)
+        is_partial = is_partial or root_partial
+    return _ResolvedField(unwrapped, is_partial, description, metavar)
 
 
 def _strip_optional(annotation: Any) -> tuple[Any | None, bool]:
@@ -387,18 +419,28 @@ def _is_required(info: FieldInfo) -> bool:
 
 
 def _extract_default(info: FieldInfo) -> Any:
-    """Resolve a usable Typer default. Returns :data:`PydanticUndefined` for required."""
+    """Resolve a usable Typer default. Returns :data:`PydanticUndefined` for required.
+
+    A ``RootModel`` default is unwrapped to its plain ``root`` value, matching
+    the bare value the flag carries on the wire.
+    """
     if info.default is not PydanticUndefined:
-        return info.default
+        return _unwrap_root_value(info.default)
     if info.default_factory is not None:
         try:
-            return info.default_factory()  # ty: ignore[missing-argument]
+            return _unwrap_root_value(info.default_factory())  # ty: ignore[missing-argument]
         except TypeError:
             # Pydantic supports validated_data-aware factories; we can't
             # safely call those at CLI-build time. Treat as required so
             # the schema validates the missing-value case server-side.
             return PydanticUndefined
     return PydanticUndefined
+
+
+def _unwrap_root_value(value: Any) -> Any:
+    while isinstance(value, RootModel):
+        value = value.root
+    return value
 
 
 def _path_to_param_name(path: tuple[str, ...], *, used: set[str]) -> str:
