@@ -126,34 +126,16 @@ describe('CreateInferenceProviderSidePanel', () => {
       fireEvent.blur(nameInput);
     }
 
-    it('shows validation error for invalid name characters', async () => {
-      await typeName('invalid name!');
-      expect(await screen.findByText(/cannot contain spaces, "!"/)).toBeInTheDocument();
+    it('shows a live preview of the sanitized name for messy input', async () => {
+      await typeName('My Provider 2');
+      expect(await screen.findByText('my-provider-2')).toBeInTheDocument();
     });
 
-    it('shows a lowercase error with a suggestion for a capitalized name', async () => {
-      await typeName('Sparl');
-      expect(await screen.findByText(/Name must be lowercase\. Try "sparl"\./)).toBeInTheDocument();
-    });
-
-    it('shows a specific error for a name that does not start with a letter', async () => {
-      await typeName('1provider');
-      expect(await screen.findByText(/must start with a lowercase letter/)).toBeInTheDocument();
-    });
-
-    it('shows a specific error for consecutive hyphens', async () => {
-      await typeName('my--provider');
-      expect(await screen.findByText(/cannot contain consecutive hyphens/)).toBeInTheDocument();
-    });
-
-    it('shows a specific error for a trailing hyphen', async () => {
-      await typeName('myprovider-');
-      expect(await screen.findByText(/cannot end with a hyphen/)).toBeInTheDocument();
-    });
-
-    it('shows a specific error for a name that is too long', async () => {
-      await typeName('a'.repeat(64));
-      expect(await screen.findByText(/must be 63 characters or fewer/)).toBeInTheDocument();
+    it('shows an error after blur when the name contains no letters or numbers', async () => {
+      await typeName('!!!');
+      expect(
+        await screen.findByText('Name must start with a letter and be at least 2 characters.')
+      ).toBeInTheDocument();
     });
 
     it('shows an error when the name is already taken', async () => {

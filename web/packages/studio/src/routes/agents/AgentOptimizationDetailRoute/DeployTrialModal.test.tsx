@@ -149,7 +149,7 @@ describe('DeployTrialModal', () => {
     expect(captured.agent.config?.models?.default?.temperature).toBe(0.2);
   });
 
-  it('rejects a name the platform would not accept', async () => {
+  it("shows an error when the name doesn't start with a lowercase letter", async () => {
     const user = userEvent.setup();
     mockHelix();
     renderModal();
@@ -157,10 +157,11 @@ describe('DeployTrialModal', () => {
     const { dialog } = await deployButton();
     const name = within(dialog).getByRole('textbox');
     await user.clear(name);
-    await user.type(name, 'Hermes_Trial');
+    await user.type(name, '---');
+    await user.tab();
 
     expect(
-      await within(dialog).findByText('Use lowercase letters, numbers, and hyphens')
+      await within(dialog).findByText('Name must start with a lowercase letter.')
     ).toBeInTheDocument();
   });
 

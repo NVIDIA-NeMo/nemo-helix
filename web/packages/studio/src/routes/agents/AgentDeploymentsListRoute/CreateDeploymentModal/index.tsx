@@ -7,7 +7,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { ENTITY_NAME_HELP, entityNameSchema } from '@nemo/common/src/utils/entityName';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import {
   getAgentsListDeploymentsQueryKey,
   useAgentsCreateDeployment,
@@ -36,7 +36,18 @@ import { z } from 'zod';
 // Whether a container deployment needs an image depends on the server's configured
 // default, which only the server knows. It rejects the request; we surface that.
 const deploymentFormSchema = z.object({
-  name: z.literal('').or(entityNameSchema('Deployment name')).optional(),
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (!value) return;
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Name must start with a letter and be at least 2 characters.',
+        });
+      }
+    })
+    .transform((value) => (value ? toValidEntityName(value, value) : value)),
   agent: z.string().min(1, 'Agent is required'),
   deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode),
   image: z.string().optional(),
@@ -147,15 +158,18 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     handleSubmit,
     watch,
     setValue,
-    formState: { errors },
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm({
     resolver: zodResolver(deploymentFormSchema),
     defaultValues: makeDefaultValues(agentProp, initialImage, deploymentModes),
     disabled: isPending,
-    mode: 'onChange',
+    mode: 'onTouched',
   });
   const deploymentMode = watch('deploymentMode');
   const selectedAgent = watch('agent');
+  const rawDeploymentName = watch('name');
+  const deploymentPreview = rawDeploymentName ? toValidEntityName(rawDeploymentName, '') : '';
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
   const enteredImage = watch('image')?.trim();
 
   const { data: selectedAgentDetails, isLoading: isSelectedAgentLoading } = useAgentsGetAgent(
@@ -262,8 +276,14 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
           name="name"
           label="Deployment Name (optional)"
           formFieldProps={{
-            slotError: errors.name?.message,
-            slotInfo: ENTITY_NAME_HELP,
+            slotHelp: nameError ? undefined : deploymentPreview ? (
+              <>
+                Your deployment will be created as{' '}
+                <span className="text-primary">{deploymentPreview}</span>
+              </>
+            ) : undefined,
+            slotError: nameError,
+            status: nameError ? 'error' : undefined,
           }}
         />
         {/* Subprocess covers the common case and needs nothing else. Runtime and image

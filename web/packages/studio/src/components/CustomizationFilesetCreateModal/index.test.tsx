@@ -32,7 +32,7 @@ describe('CustomizationFilesetCreateModal', () => {
     await user.click(dialogSubmitButton);
 
     // Expect validation errors for required fields
-    const nameRequiredErrorMessage = await screen.findByText('Name is required');
+    const nameRequiredErrorMessage = await screen.findByText('Name is required.');
     const trainingFileRequiredErrorMessage = await screen.findByText('Training file is required');
     const validationFileRequiredErrorMessage = await screen.findByText(
       'Validation file is required'
@@ -42,23 +42,24 @@ describe('CustomizationFilesetCreateModal', () => {
     expect(validationFileRequiredErrorMessage).toBeInTheDocument();
   });
 
-  it('requires the fileset name to be alphanumeric with dots, dashes, and underscores', async () => {
+  it('requires the fileset name to contain at least one letter or number', async () => {
     const user = userEvent.setup();
     // Form validation errors are logged via WebsiteLogger.error — expected in validation tests
     suppressConsoleError('Customization Fileset Create Form Errors');
 
     render(<CustomizationFilesetCreateModal onFilesetCreated={vi.fn()} onClose={vi.fn()} open />);
 
-    // Enter an invalid name
+    // Enter a name with no letters or numbers — entity naming strips invalid chars, so
+    // only a name that sanitizes to empty triggers the error.
     const nameInput = await screen.findByRole('textbox', { name: 'Name' });
-    await user.type(nameInput, 'Invalid!Name!');
+    await user.type(nameInput, '!!!');
 
     // Try to submit the form to trigger validation
     const submitButton = screen.getByRole('button', { name: 'Add to Customization' });
     await user.click(submitButton);
 
     const nameValidationErrorMessage = await screen.findByText(
-      'Name must only contain alphanumeric characters, dashes, underscores, or dots'
+      'Name must start with a letter and be at least 2 characters.'
     );
     expect(nameValidationErrorMessage).toBeInTheDocument();
   });

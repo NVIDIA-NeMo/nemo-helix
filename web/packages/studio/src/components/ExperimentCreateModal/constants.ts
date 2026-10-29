@@ -10,19 +10,29 @@
  * its affiliates is strictly prohibited.
  */
 
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import {
   EXPERIMENT_SETTINGS_DEFAULTS,
   experimentSettingsSchemaShape,
 } from '@studio/components/evaluation/shared/experimentSettings';
-import { workspaceInputSchema } from '@studio/constants/zod';
 import { z } from 'zod';
 
-// The name is validated against the stricter workspace-name rules rather than the DTO's loose
-// string pattern, so the user sees a useful inline error instead of a 422 toast. Everything below
-// the name is the shared experiment-settings shape, so this form, the edit form, and the
-// evaluation form's "new experiment" path cannot drift apart.
+// Everything below the name is the shared experiment-settings shape, so this form, the edit form,
+// and the evaluation form's "new experiment" path cannot drift apart.
 export const experimentCreateSchema = z.object({
-  name: workspaceInputSchema,
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value
+            ? 'Name must start with a letter and be at least 2 characters.'
+            : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
   ...experimentSettingsSchemaShape,
 });
 

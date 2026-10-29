@@ -6,6 +6,7 @@ import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal
 import { FilesetFileUploadError } from '@nemo/common/src/datasets/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { TextInput, TextArea, FormField, Stack } from '@nvidia/foundations-react-core';
@@ -27,7 +28,7 @@ import { useCustomizationFilesPreview } from '@studio/hooks/useCustomizationFile
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { renameFile } from '@studio/util/files';
 import { FC, useState } from 'react';
-import { Controller, SubmitHandler, useForm } from 'react-hook-form';
+import { Controller, SubmitHandler, useController, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const isValidFileExtension = (file?: File) => {
@@ -37,8 +38,24 @@ const isValidFileExtension = (file?: File) => {
   );
 };
 
+const filesetFieldSchema = datasetSchema.extend({
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value
+            ? 'Name must start with a letter and be at least 2 characters.'
+            : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
+});
+
 const formSchema = z.object({
-  fileset: datasetSchema,
+  fileset: filesetFieldSchema,
   files: z.object({
     trainingFile: z
       .custom<File | null>()
@@ -171,8 +188,13 @@ export const CustomizationFilesetCreateModal: FC<CustomizationFilesetCreateModal
     });
   };
 
-  const filesetName = register('fileset.name');
+  const {
+    field: { value: filesetNameValue, onChange: onFilesetNameChange, onBlur: onFilesetNameBlur },
+  } = useController({ control, name: 'fileset.name' });
   const filesetDescription = register('fileset.description');
+
+  const filesetPreview = toValidEntityName(filesetNameValue ?? '', '');
+  const filesetNameError = errors.fileset?.name?.message;
 
   return (
     <FormModal
@@ -192,16 +214,25 @@ export const CustomizationFilesetCreateModal: FC<CustomizationFilesetCreateModal
       <Stack gap="density-md">
         <FormField
           slotLabel="Name"
-          slotError={errors.fileset?.name?.message || ''}
-          status={errors.fileset?.name ? 'error' : undefined}
+          slotError={filesetNameError || ''}
+          slotHelp={
+            filesetNameError ? undefined : filesetPreview ? (
+              <>
+                Your dataset will be created as{' '}
+                <span className="text-primary">{filesetPreview}</span>
+              </>
+            ) : undefined
+          }
+          status={filesetNameError ? 'error' : undefined}
         >
           <TextInput
             required
             autoFocus
             placeholder="Name this dataset"
-            status={errors.fileset?.name && 'error'}
-            defaultValue=""
-            {...filesetName}
+            status={filesetNameError ? 'error' : undefined}
+            value={filesetNameValue}
+            onChange={(e) => onFilesetNameChange((e.target as HTMLInputElement).value)}
+            onBlur={onFilesetNameBlur}
           />
         </FormField>
         <FormField
