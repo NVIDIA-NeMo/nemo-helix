@@ -3,6 +3,8 @@
 
 """Dispatcher-level tests for job groups: CRUD, bulk-create expansion, timeout propagation, status aggregation."""
 
+import asyncio
+
 import pytest
 from nemo_helix_plugin.jobs.schemas import JobGroupStatus
 from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
@@ -428,3 +430,65 @@ async def test_cancel_group_members_helper_skips_trigger_and_terminal(mock_dispa
     assert cancelled == [members[1].id]
     assert await _member_status(mock_store, members[0]) == HelixJobStatus.CREATED
     assert await _member_status(mock_store, members[2]) == HelixJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_concurrent_same_group_failures_do_not_deadlock(mock_dispatcher, mock_store):
+    """Two members of a fail_fast group failing concurrently must not deadlock.
+
+    The sibling fan-out runs after the failed member's own lock is released, so
+    task A (holding no lock during its sweep) can take member B's lock while task
+    B takes member A's -- there is no lock-while-holding-lock to form an AB-BA
+    cycle. Regression guard for that fix; a reintroduced in-lock sweep would hang
+    here (and trip the test timeout).
+    """
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True, member_count=4), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+
+    # Drive two members into ERROR concurrently through the real roll-up path.
+    await asyncio.wait_for(
+        asyncio.gather(
+            _fail_member_via_rollup(mock_dispatcher, mock_store, members[0]),
+            _fail_member_via_rollup(mock_dispatcher, mock_store, members[1]),
+        ),
+        timeout=20,
+    )
+
+    # Both triggers ended in ERROR; every other member was swept into cancellation.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.ERROR
+    for sibling in members[2:]:
+        assert await _member_status(mock_store, sibling) in (
+            HelixJobStatus.CANCELLING,
+            HelixJobStatus.CANCELLED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_skips_sweep_when_group_already_terminal(mock_dispatcher, mock_store):
+    """If every other member already settled before the error write, the aggregate-terminal guard skips the sweep."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True, member_count=2), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    # The only sibling already completed, so once members[0] errors every member is terminal.
+    await _set_member_status(mock_store, members[1], HelixJobStatus.COMPLETED)
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    # Nothing to cancel: the completed sibling is left exactly as it was.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_re_reads_group_flag_so_clearing_it_before_the_sweep_disables_it(mock_dispatcher, mock_store):
+    """The post-lock sweep re-reads fail_fast from fresh state; clearing it before the error write disables the sweep."""
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    # Turn fail_fast off after creation but before any member errors.
+    await mock_dispatcher.update_job_group(group.id, DEFAULT_WORKSPACE, UpdateJobGroupRequest(fail_fast=False))
+
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.ERROR
+    for sibling in members[1:]:
+        assert await _member_status(mock_store, sibling) == HelixJobStatus.CREATED
