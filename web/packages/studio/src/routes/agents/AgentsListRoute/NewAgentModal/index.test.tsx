@@ -185,10 +185,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
     openPromptTab(dialog);
-    // The prompt editor is a lazily imported chunk, so it can miss the default find timeout.
-    await user.click(
-      await within(dialog).findByRole('button', { name: 'Copy to clipboard' }, { timeout: 10_000 })
-    );
+    await user.click(await within(dialog).findByRole('button', { name: 'Copy code' }));
 
     const prompt = await navigator.clipboard.readText();
     expect(prompt).toContain('nemo-agent-config');

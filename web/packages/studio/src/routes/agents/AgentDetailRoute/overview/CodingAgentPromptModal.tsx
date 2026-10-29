@@ -10,11 +10,11 @@ interface CodingAgentPromptModalProps {
   onClose: () => void;
   heading: string;
   description: string;
-  /** Starting point for the prompt. Editable before copying. */
+  /** The prompt to display and copy. */
   prompt: string;
 }
 
-/** Shows the coding agent prompt for a "Get started" option, editable before copying. */
+/** Shows the coding agent prompt for a "Get started" option, with a copy button. */
 export const CodingAgentPromptModal: FC<CodingAgentPromptModalProps> = ({
   open,
   onClose,
