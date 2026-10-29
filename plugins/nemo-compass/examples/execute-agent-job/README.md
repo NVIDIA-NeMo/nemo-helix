@@ -177,7 +177,7 @@ cat analysis-report.txt
 A run against the demo corpus reports something like:
 
 ```text
-Produced by nemo-helix 0.9.0, nemo-compass 0.2.0
+Produced by nemo-helix x.y.z, nemo-compass a.b.c
 
 Analyzed 28 traces: 2 new insights, 0 existing insights with new evidence.
 

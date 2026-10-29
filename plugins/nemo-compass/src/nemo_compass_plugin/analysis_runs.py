@@ -331,9 +331,6 @@ def build_execute_agent_job_config(
             "agent": _inline_compass(request, base_url=base_url),
             "input": _analysis_prompt(request.agent),
             "context": build_compass_run_context(since=request.since, evaluation_id=request.evaluation_id),
-            # The action reads the agent under test from the inline agent
-            # config's harness settings and the workspace from the job, so it
-            # takes no config.
             "post_run_action": {"kind": COMPASS_PERSIST_ACTION_KIND},
         }
     )
