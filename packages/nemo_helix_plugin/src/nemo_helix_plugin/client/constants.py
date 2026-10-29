@@ -19,19 +19,24 @@ def is_workload_identity_token_file_set() -> bool:
 
 
 def get_env_access_token() -> str | None:
-    """Bearer token from ``NHX_ACCESS_TOKEN_FILE`` (re-read on every call) or ``NHX_ACCESS_TOKEN``.
+    """Bearer token a supervisor delegated to this process through ``NHX_ACCESS_TOKEN_FILE``.
 
-    The file form lets a supervisor rotate a short-lived token under a running process.
-    ``None`` when neither source yields a non-blank token.
+    The file is re-read on every call, so a supervisor can rotate a short-lived token under a running
+    process. ``NHX_ACCESS_TOKEN`` is deliberately ignored: it is the user-facing CLI override, and an
+    ambient copy of it must not replace a task's service identity. ``None`` when the file variable is
+    unset; raises when it is set but the file is missing or blank, rather than falling back to trusted
+    identity headers.
     """
-    if token_file := os.environ.get(ACCESS_TOKEN_FILE_ENVVAR):
-        try:
-            token = Path(token_file).read_text(encoding="utf-8").strip()
-        except OSError:
-            token = ""
-        if token:
-            return token
-    return os.environ.get(ACCESS_TOKEN_ENVVAR, "").strip() or None
+    token_file = os.environ.get(ACCESS_TOKEN_FILE_ENVVAR)
+    if not token_file:
+        return None
+    try:
+        token = Path(token_file).read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise RuntimeError(f"{ACCESS_TOKEN_FILE_ENVVAR} is set but {token_file} is unreadable") from error
+    if not token:
+        raise RuntimeError(f"{ACCESS_TOKEN_FILE_ENVVAR} is set but {token_file} holds no token")
+    return token
 
 
 def subject_token_type_for_exchange(subject_token: str) -> str:

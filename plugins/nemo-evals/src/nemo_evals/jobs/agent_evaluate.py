@@ -590,11 +590,10 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         self._prepared_tasks(tasks)
+        fabric_config = spec.target.fabric_config if spec.target is not None else None
         proxy = (
             platform_auth_proxy()
-            if isinstance(spec.target, FabricRunnerTarget)
-            and spec.target.config is not None
-            and routes_fabric_inference_through_gateway(spec.target.config)
+            if fabric_config is not None and routes_fabric_inference_through_gateway(fabric_config)
             else nullcontext(None)
         )
         with proxy as fabric_gateway_origin:

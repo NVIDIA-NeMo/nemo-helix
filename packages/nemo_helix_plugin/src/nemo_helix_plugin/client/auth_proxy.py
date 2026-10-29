@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
+from nemo_helix_plugin.client.tls import client_verify_from_env
 
 _READ_TIMEOUT_ENVVAR = "NHX_AUTH_PROXY_READ_TIMEOUT"
 _PRINCIPAL_ID_HEADER = "x-nhx-principal-id"
@@ -101,7 +102,13 @@ def build_auth_proxy_app(
     identity_headers = {name.lower(): value for name, value in (headers or {}).items()}
     read_timeout = float(os.environ.get(_READ_TIMEOUT_ENVVAR, "300"))
     timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=60.0, pool=10.0)
-    client = httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False, auth=auth)
+    client = httpx.AsyncClient(
+        base_url=base_url,
+        timeout=timeout,
+        follow_redirects=False,
+        auth=auth,
+        verify=client_verify_from_env(),
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:

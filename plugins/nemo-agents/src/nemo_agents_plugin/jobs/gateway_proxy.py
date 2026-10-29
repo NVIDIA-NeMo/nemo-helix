@@ -88,10 +88,17 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
     return runtime_config
 
 
-def _fabric_gateway_models(config: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    for model in (config.get("models") or {}).values():
-        if _is_gateway_url(model.get("base_url") or (model.get("settings") or {}).get("base_url")):
-            yield model
+def _fabric_gateway_models(config: dict[str, Any]) -> Iterator[tuple[dict[str, Any], str]]:
+    models = config.get("models")
+    if not isinstance(models, dict):
+        return
+    for model in models.values():
+        if not isinstance(model, dict):
+            continue
+        settings = model.get("settings")
+        base_url = model.get("base_url") or (settings.get("base_url") if isinstance(settings, dict) else None)
+        if isinstance(base_url, str) and _is_gateway_url(base_url):
+            yield model, base_url
 
 
 def routes_fabric_inference_through_gateway(config: dict[str, Any]) -> bool:
@@ -105,10 +112,11 @@ def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) ->
         return config
 
     runtime_config = copy.deepcopy(config)
-    for model in _fabric_gateway_models(runtime_config):
-        settings = model.get("settings") or {}
-        model["base_url"] = _onto_proxy(model.get("base_url") or settings["base_url"], origin)
-        settings.pop("base_url", None)
+    for model, original_url in _fabric_gateway_models(runtime_config):
+        model["base_url"] = _onto_proxy(original_url, origin)
+        settings = model.get("settings")
+        if isinstance(settings, dict):
+            settings.pop("base_url", None)
     return runtime_config
 
 

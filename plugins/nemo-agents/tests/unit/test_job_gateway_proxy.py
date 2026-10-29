@@ -119,6 +119,31 @@ def test_rebases_translated_fabric_config_without_mutating_input() -> None:
     assert config == before
 
 
+@pytest.mark.parametrize("models", [None, "not-a-mapping", {"default": "not-a-mapping", "bad": None}])
+def test_malformed_fabric_models_are_skipped_instead_of_crashing(models: object) -> None:
+    config = {"harness": {"adapter_id": "nvidia.fabric.deepagents"}, "models": models}
+
+    assert not gateway_proxy.routes_fabric_inference_through_gateway(config)
+    assert gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019") is config
+
+
+def test_fabric_model_with_non_mapping_settings_is_still_rebased() -> None:
+    config = {"models": {"default": {"base_url": f"http://platform{GATEWAY_PATH}", "settings": "oops"}}}
+
+    runtime = gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019")
+
+    assert runtime["models"]["default"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}"
+
+
+def test_ambient_user_access_token_does_not_start_a_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NHX_ACCESS_TOKEN is the user's CLI override, not a delegated job token."""
+    monkeypatch.delenv("NHX_ACCESS_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "user-cli-token")
+
+    with gateway_proxy.platform_auth_proxy() as origin:
+        assert origin is None
+
+
 @pytest.mark.parametrize("principal", [None, ""])
 def test_a_job_with_no_identity_runs_without_a_proxy(
     monkeypatch: pytest.MonkeyPatch, workload: Mock, principal: str | None

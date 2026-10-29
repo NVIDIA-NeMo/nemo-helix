@@ -17,6 +17,7 @@ import json
 
 import pytest
 from nemo_helix_plugin import client_provider as cp
+from nemo_helix_plugin.client.auth import EnvAccessToken
 from nemo_helix_plugin.client_provider import (
     DefaultNemoClientProvider,
     get_async_task_nemo_client,
@@ -104,8 +105,10 @@ def test_general_as_service_stays_undelegated(monkeypatch):
 # ---------------------------------------------------------------------------
 # Claim 2 — workload identity bootstraps bearer auth, drops trusted headers
 # ---------------------------------------------------------------------------
-def test_task_client_uses_injected_subprocess_access_token(monkeypatch):
-    monkeypatch.setenv("NHX_ACCESS_TOKEN", "subprocess-task-token")
+def test_task_client_uses_injected_subprocess_access_token(monkeypatch, tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    token_file.write_text("subprocess-task-token", encoding="utf-8")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(token_file))
     monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
 
     client = get_task_nemo_client("evals")
@@ -128,8 +131,35 @@ def test_task_client_reads_rotated_access_token_file(monkeypatch, tmp_path):
     assert client._auth.get_access_token() == "second-token"
 
 
-async def test_async_task_client_uses_injected_subprocess_access_token(monkeypatch):
-    monkeypatch.setenv("NHX_ACCESS_TOKEN", "subprocess-task-token")
+def test_ambient_user_access_token_does_not_replace_the_task_identity(monkeypatch):
+    # NHX_ACCESS_TOKEN is the user-facing CLI override; a shell that exports it must not turn a task
+    # (or a service started from that shell) into the human.
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "user-cli-token")
+    monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
+
+    client = get_task_nemo_client("evals")
+
+    assert not isinstance(client._auth, EnvAccessToken)
+    assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
+    assert client._default_headers["X-NHX-Principal-On-Behalf-Of"] == "user:alice@acme.com"
+
+
+@pytest.mark.parametrize("contents", [None, "  \n"], ids=["missing-file", "blank-file"])
+def test_unusable_access_token_file_fails_closed_instead_of_using_trusted_headers(monkeypatch, tmp_path, contents):
+    token_file = tmp_path / ".nhx-access-token"
+    if contents is not None:
+        token_file.write_text(contents, encoding="utf-8")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("NHX_PRINCIPAL", json.dumps(CREATOR))
+
+    with pytest.raises(RuntimeError, match="NHX_ACCESS_TOKEN_FILE"):
+        get_task_nemo_client("evals")
+
+
+async def test_async_task_client_uses_injected_subprocess_access_token(monkeypatch, tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    token_file.write_text("subprocess-task-token", encoding="utf-8")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(token_file))
     client = get_async_task_nemo_client("evals")
 
     assert client._auth is not None
@@ -161,11 +191,15 @@ def _stub_workload_exchange(monkeypatch):
     return captured
 
 
-def test_workload_identity_keeps_priority_over_an_ambient_access_token(monkeypatch, tmp_path, _stub_workload_exchange):
+def test_workload_identity_keeps_priority_over_a_delegated_access_token_file(
+    monkeypatch, tmp_path, _stub_workload_exchange
+):
     token_file = tmp_path / "token"
     token_file.write_text("subject-token")
+    access_token_file = tmp_path / ".nhx-access-token"
+    access_token_file.write_text("delegated-token", encoding="utf-8")
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
-    monkeypatch.setenv("NHX_ACCESS_TOKEN", "ambient-token")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(access_token_file))
 
     client = get_task_nemo_client("evals")
 

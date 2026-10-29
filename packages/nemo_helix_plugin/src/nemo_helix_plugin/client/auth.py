@@ -86,7 +86,7 @@ class EnvAccessToken:
     def get_access_token(self) -> str:
         token = get_env_access_token()
         if token is None:
-            raise RuntimeError("No access token available from NHX_ACCESS_TOKEN_FILE or NHX_ACCESS_TOKEN")
+            raise RuntimeError("No access token available: NHX_ACCESS_TOKEN_FILE is not set")
         return token
 
     def set_http_client(self, http_client: httpx.AsyncClient) -> None:

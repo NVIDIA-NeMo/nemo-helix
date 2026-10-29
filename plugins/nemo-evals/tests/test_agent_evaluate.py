@@ -2274,6 +2274,38 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
         assert getattr(fake.received_target, "name", None) == target.agent.name
 
 
+def test_only_fabric_targets_expose_a_fabric_config() -> None:
+    fabric_config = {"harness": {"adapter_id": "nvidia.fabric.codex"}}
+    fabric = FabricRunnerTarget(source=FabricConfigSource(config=fabric_config))
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    others = [
+        ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+        AgentTarget(agent=_agent()),
+        HarborRunnerTarget(),
+    ]
+
+    assert fabric.fabric_config == fabric_config
+    assert [target.fabric_config for target in others] == [None, None, None]
+
+
+def test_non_fabric_job_starts_no_auth_proxy(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch("nemo_evals.jobs.agent_evaluate.platform_auth_proxy")
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+    )
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity()
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_not_called()
+
+
 def test_sync_fabric_job_uses_auth_proxy_for_platform_model(tmp_path: Path, mocker: MockerFixture) -> None:
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)

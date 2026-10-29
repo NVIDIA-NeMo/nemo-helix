@@ -190,7 +190,9 @@ def write_task_access_token(token_file: Path, token: str) -> None:
     """Atomically replace *token_file* with *token*, readable only by this user."""
     token_file.parent.mkdir(parents=True, exist_ok=True)
     tmp = token_file.with_name(f".{token_file.name}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # The child shares this uid and can pre-plant the temp path: refuse to follow or reuse anything there.
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(token)
     os.replace(tmp, token_file)

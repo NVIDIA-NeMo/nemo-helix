@@ -25,6 +25,7 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     refresh_subprocess_task_auth,
     start_log_capture,
     task_access_token_refresh_interval,
+    write_task_access_token,
 )
 
 
@@ -155,6 +156,19 @@ def test_inject_subprocess_task_auth_withholds_token_without_delegable_principal
     assert "NHX_ACCESS_TOKEN" not in env
     assert "NHX_ACCESS_TOKEN_FILE" not in env
     assert not token_file.exists()
+
+
+def test_write_task_access_token_does_not_follow_a_pre_planted_temp_link(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    victim = tmp_path / "victim"
+    victim.write_text("keep", encoding="utf-8")
+    (tmp_path / ".nhx-access-token.tmp").symlink_to(victim)
+
+    write_task_access_token(token_file, "new-token")
+
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert token_file.read_text(encoding="utf-8") == "new-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
 
 
 def test_refresh_subprocess_task_auth_rotates_token_file(tmp_path):

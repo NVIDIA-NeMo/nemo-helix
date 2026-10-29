@@ -896,3 +896,131 @@ def test_refresh_task_auth_is_a_no_op_without_a_token_file(mock_nemo_client, tmp
         backend._refresh_task_auth(metadata)
 
     refresh.assert_not_called()
+
+
+def test_exited_process_has_its_task_token_file_removed(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = _auth_metadata(tmp_path, exited=True, refreshed_ago=200.0)
+    token_file = metadata.task_auth_token_file
+    token_file.write_text("last-token", encoding="utf-8")
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess.refresh_subprocess_task_auth") as refresh:
+        backend._refresh_task_auth(metadata)
+
+    refresh.assert_not_called()
+    assert not token_file.exists()
+    assert metadata.task_auth_token_file is None
+
+
+def test_shutdown_removes_the_task_token_file_of_a_running_process(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = _auth_metadata(tmp_path)
+    token_file = metadata.task_auth_token_file
+    token_file.write_text("last-token", encoding="utf-8")
+    backend._process_registry.set(SubprocessProcessKey("ws", "job", "1", "step"), metadata)
+
+    with (
+        patch.object(backend, "_terminate_process") as terminate,
+        patch.object(backend, "_finish_logs"),
+    ):
+        backend.shutdown()
+
+    terminate.assert_called_once_with(metadata, force=True)
+    assert not token_file.exists()
+    assert metadata.task_auth_token_file is None
+
+
+def test_init_removes_task_token_files_left_by_a_previous_run(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    config_dir = tmp_path / "ws" / "job" / "1" / "step" / "task-abc" / "config"
+    config_dir.mkdir(parents=True)
+    token_file = config_dir / ".nhx-access-token"
+    token_file.write_text("stale", encoding="utf-8")
+    kept = config_dir / "step-config.json"
+    kept.write_text("{}", encoding="utf-8")
+
+    backend.init()
+
+    assert not token_file.exists()
+    assert kept.exists()
+
+
+def test_failed_secret_injection_leaves_no_task_token_file(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "true"])
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess.inject_secret_env_vars", side_effect=RuntimeError("boom")),
+        patch("nhx.core.jobs.controllers.backends.subprocess.inject_subprocess_task_auth") as inject_auth,
+        pytest.raises(RuntimeError),
+    ):
+        backend._prepare_runtime(step)
+
+    inject_auth.assert_not_called()
+
+
+def test_task_token_file_removal_is_retried_after_a_failure(mock_nemo_client, tmp_path, mock_platform_config):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    metadata = _auth_metadata(tmp_path, exited=True)
+    token_file = metadata.task_auth_token_file
+
+    with patch("pathlib.Path.unlink", side_effect=PermissionError("denied")):
+        backend._refresh_task_auth(metadata)
+
+    assert metadata.task_auth_token_file == token_file
+
+
+def _schedule_with_delegated_token(backend: SubprocessJobBackend, step, token_file_name: str = ".nhx-access-token"):
+    def _inject(env: dict[str, str], token_file) -> dict[str, str]:
+        assert token_file.name == token_file_name
+        token_file.write_text("minted-token", encoding="utf-8")
+        env["NHX_ACCESS_TOKEN_FILE"] = str(token_file)
+        env["NHX_PRINCIPAL"] = '{"id": "creator"}'
+        return env
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess.inject_subprocess_task_auth", side_effect=_inject):
+        return _schedule_without_otel_export(backend, step)
+
+
+def test_schedule_registers_the_delegated_token_for_rotation(
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "exit 0"])
+
+    _schedule_with_delegated_token(backend, step)
+
+    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    metadata = backend._process_registry.get(key)
+    assert metadata is not None
+    metadata.process.wait(timeout=5)
+    assert metadata.task_auth_token_file is not None
+    assert metadata.task_auth_token_file.read_text(encoding="utf-8") == "minted-token"
+    assert metadata.task_auth_env == {"NHX_PRINCIPAL": '{"id": "creator"}'}
+
+
+def test_sync_rotates_the_token_of_a_running_process(
+    mock_nemo_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_pending, ["/bin/sh", "-c", "sleep 30"])
+    _schedule_with_delegated_token(backend, step)
+    key = SubprocessProcessKey(step.workspace, step.job, str(step.attempt_id), step.name)
+    metadata = backend._process_registry.get(key)
+    assert metadata is not None
+
+    try:
+        with (
+            patch("nhx.core.jobs.controllers.backends.subprocess.task_access_token_refresh_interval", return_value=0),
+            patch(
+                "nhx.core.jobs.controllers.backends.subprocess.refresh_subprocess_task_auth", return_value=True
+            ) as refresh,
+        ):
+            backend.sync(step)
+    finally:
+        metadata.process.kill()
+        metadata.process.wait(timeout=5)
+
+    refresh.assert_called_once_with(metadata.task_auth_env, metadata.task_auth_token_file)

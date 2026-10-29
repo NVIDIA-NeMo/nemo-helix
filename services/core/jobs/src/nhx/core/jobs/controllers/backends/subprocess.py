@@ -67,6 +67,7 @@ SUBPROCESS_PID_STATUS_KEY = "pid"
 SUBPROCESS_PGID_STATUS_KEY = "pgid"
 SUBPROCESS_PERSISTENT_STORAGE_STATUS_KEY = "subprocess_persistent_storage_path"
 _MISSING_METADATA_PENDING_GRACE_SECONDS = 5
+_TASK_ACCESS_TOKEN_FILE_NAME = ".nhx-access-token"
 SUBPROCESS_INHERITED_ENV_ALLOWLIST = frozenset(
     {
         "PATH",
@@ -169,10 +170,21 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         self._root_dir = Path(self._execution_profile_config.working_directory)
         self._root_dir.mkdir(parents=True, exist_ok=True)
         self._process_registry = SubprocessProcessRegistry()
+        self._remove_orphaned_task_tokens()
+
+    def _remove_orphaned_task_tokens(self) -> None:
+        # The registry is in memory, so after a restart nothing refreshes or removes the token files of
+        # the previous run's processes. Layout: <workspace>/<job>/<attempt>/<step>/<task>/config/<file>.
+        for token_file in self._root_dir.glob(f"*/*/*/*/*/config/{_TASK_ACCESS_TOKEN_FILE_NAME}"):
+            try:
+                token_file.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to remove orphaned subprocess task access token file", exc_info=True)
 
     def shutdown(self) -> None:
         for metadata in self._process_registry.values():
             self._terminate_process(metadata, force=True)
+            self._remove_task_auth_token_file(metadata)
             self._finish_logs(metadata)
 
     def schedule(self, executor_config: SubprocessExecutionProvider, step: HelixJobStepWithContext) -> JobUpdate:
@@ -331,6 +343,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if step.status == HelixJobStatus.PAUSING and pause_deadline_exceeded(step) and metadata.process.poll() is None:
             message = "Pause deadline exceeded"
             self._terminate_process(metadata, force=True)
+            self._remove_task_auth_token_file(metadata)
             self._finish_logs(metadata)
             self._update_task(
                 step,
@@ -360,6 +373,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if self.check_step_ttl(step, ttl_seconds):
             message = f"Job timed out after reaching max TTL of {ttl_seconds} seconds"
             self._terminate_process(metadata, force=True)
+            self._remove_task_auth_token_file(metadata)
             self._update_task(
                 step,
                 metadata,
@@ -376,10 +390,22 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         return self._create_step_update(step, metadata)
 
+    @staticmethod
+    def _remove_task_auth_token_file(metadata: SubprocessProcessMetadata) -> None:
+        if metadata.task_auth_token_file is None:
+            return
+        try:
+            metadata.task_auth_token_file.unlink(missing_ok=True)
+            metadata.task_auth_token_file = None
+        except OSError:
+            logger.warning("Failed to remove subprocess task access token file", exc_info=True)
+
     def _refresh_task_auth(self, metadata: SubprocessProcessMetadata) -> None:
         if metadata.task_auth_token_file is None or metadata.task_auth_env is None:
             return
         if metadata.process.poll() is not None:
+            # Nothing reads the token any more and it would otherwise sit on disk until job cleanup.
+            self._remove_task_auth_token_file(metadata)
             return
         if time.monotonic() - metadata.task_auth_refreshed_at < task_access_token_refresh_interval():
             return
@@ -559,8 +585,9 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             principal = auth_context.to_principal()
             env.update(principal.get_env_var())
 
-        inject_subprocess_task_auth(env, config_dir / ".nhx-access-token")
+        # The token file goes last: nothing after it can fail and leave it behind on a step that never registers.
         inject_secret_env_vars(env)
+        inject_subprocess_task_auth(env, config_dir / _TASK_ACCESS_TOKEN_FILE_NAME)
         return env, task_id, work_dir, log_path, persistent_dir
 
     @staticmethod
