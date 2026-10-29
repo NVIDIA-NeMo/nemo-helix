@@ -16,7 +16,9 @@ from nhx.customization_common.cli.uploads import (
     FilesUploadClient,
     SpecRefs,
     UploadError,
+    UploadReport,
     _upload_source,
+    create_dataset_fileset,
     create_resources,
     fileset_name_for,
     find_conflicts,
@@ -521,3 +523,43 @@ class TestConflicts:
         spec: dict[str, Any] = {"environment": "default/env"}
         conflicts = find_conflicts(spec, RL_REFS, model=False, dataset=False, environment=True)
         assert conflicts == ["environment (default/env)"]
+
+
+class TestCreateDatasetFileset:
+    """The named dataset fileset ``nemo customization dataset prepare`` uploads its splits to."""
+
+    def _splits(self, tmp_path: Path) -> Path:
+        (tmp_path / "train.jsonl").write_text("{}\n")
+        (tmp_path / "validation.jsonl").write_text("{}\n")
+        return tmp_path
+
+    def test_creates_a_dataset_fileset_with_the_given_name(self, tmp_path: Path) -> None:
+        files, report = _FakeFiles(), UploadReport()
+
+        ref = create_dataset_fileset(
+            files, name="sft-data", source=self._splits(tmp_path), workspace="ws", exist_ok=False, report=report
+        )
+
+        assert ref == "ws/sft-data"
+        assert files.created[0]["purpose"].value == "dataset"
+        assert files.uploaded == [("sft-data", "train.jsonl"), ("sft-data", "validation.jsonl")]
+
+    def test_an_existing_fileset_fails_without_exist_ok_and_is_left_alone_with_it(self, tmp_path: Path) -> None:
+        files = _FakeFiles(existing={"sft-data"})
+
+        with pytest.raises(UploadError, match="already exists"):
+            create_dataset_fileset(
+                files,
+                name="sft-data",
+                source=self._splits(tmp_path),
+                workspace="ws",
+                exist_ok=False,
+                report=UploadReport(),
+            )
+        report = UploadReport()
+        create_dataset_fileset(
+            files, name="sft-data", source=self._splits(tmp_path), workspace="ws", exist_ok=True, report=report
+        )
+
+        assert report.reused == ["ws/sft-data"]
+        assert files.uploaded == []

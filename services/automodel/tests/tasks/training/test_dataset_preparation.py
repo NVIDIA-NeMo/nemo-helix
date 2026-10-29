@@ -11,6 +11,14 @@ from nhx.automodel.tasks.training.datasets.preparation import (
     prepare_dataset,
     select_dataset_files,
 )
+from nhx.customization_common.dataset_prepare import (
+    SPLIT_FILES,
+    DatasetFormat,
+    map_columns,
+    split_rows,
+    to_training_rows,
+    write_split,
+)
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -99,3 +107,50 @@ def test_prepare_dataset_validates_on_the_datasets_validation_file(tmp_path: Pat
     assert (prepared.train_samples, prepared.validation_samples) == (4, 2)
     assert "held-out" in prepared.validation_file.read_text()
     assert "held-out" not in prepared.train_file.read_text()
+
+
+def _prepared(tmp_path: Path, dataset_format: DatasetFormat, rows: list[dict], **named: str) -> Path:
+    """Write *rows* the way ``nemo customization dataset prepare --format`` uploads them."""
+    training_rows, _ = to_training_rows(rows, map_columns(dataset_format, rows[0].keys(), named))
+    splits = split_rows(training_rows, val_fraction=0.2, test_fraction=0.0, seed=0)
+    write_split(splits.train, tmp_path / SPLIT_FILES["train"])
+    write_split(splits.validation, tmp_path / SPLIT_FILES["validation"])
+    return tmp_path
+
+
+def test_data_designer_instruction_output_is_found_and_validates_as_chat(tmp_path: Path) -> None:
+    """The Studio "Instruction fine-tuning" template, prepared by the CLI, trains as automodel CHAT."""
+    from nhx.automodel.entities.values import TrainingType
+    from nhx.automodel.tasks.training.datasets.preparation import DatasetSchema, detect_dataset_schema
+    from nhx.automodel.tasks.training.datasets.validation import DatasetValidator
+
+    rows = [{"domain": "d", "instruction": f"q{i}", "response": f"a{i}"} for i in range(10)]
+
+    train_files, val_files = discover_dataset_files(_prepared(tmp_path, DatasetFormat.CHAT, rows))
+
+    assert [f.name for f in train_files] == ["train.jsonl"]
+    assert [f.name for f in val_files] == ["validation.jsonl"]
+    assert detect_dataset_schema(train_files[0]) == (DatasetSchema.CHAT, None)
+    DatasetValidator(TrainingType.SFT).validate_dataset(str(train_files[0]))
+
+
+def test_prepared_prompt_completion_validates_as_sft(tmp_path: Path) -> None:
+    from nhx.automodel.entities.values import TrainingType
+    from nhx.automodel.tasks.training.datasets.preparation import DatasetSchema, detect_dataset_schema
+    from nhx.automodel.tasks.training.datasets.validation import DatasetValidator
+
+    rows = [{"question": f"q{i}", "answer": f"a{i}"} for i in range(10)]
+    dataset = _prepared(tmp_path, DatasetFormat.PROMPT_COMPLETION, rows, prompt="question", response="answer")
+
+    [train_file], _ = discover_dataset_files(dataset)
+    assert detect_dataset_schema(train_file) == (DatasetSchema.SFT, ("prompt", "completion"))
+    DatasetValidator(TrainingType.SFT).validate_dataset(str(train_file))
+
+
+def test_prepared_embedding_rows_are_detected_as_retrieval_triplets(tmp_path: Path) -> None:
+    from nhx.automodel.tasks.training.datasets.preparation import DatasetSchema, detect_dataset_schema
+
+    rows = [{"query": f"q{i}", "pos_doc": "p", "neg_doc": ["n1", "n2"]} for i in range(10)]
+
+    [train_file], _ = discover_dataset_files(_prepared(tmp_path, DatasetFormat.EMBEDDING, rows))
+    assert detect_dataset_schema(train_file) == (DatasetSchema.EMBEDDING, ("query", "pos_doc", "neg_doc"))

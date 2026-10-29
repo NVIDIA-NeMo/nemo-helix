@@ -290,6 +290,26 @@ def _create_model(
     return f"{workspace}/{name}"
 
 
+def create_dataset_fileset(
+    files: FilesUploadClient,
+    *,
+    name: str,
+    source: Path,
+    workspace: str,
+    exist_ok: bool,
+    report: UploadReport,
+) -> str:
+    """Create the dataset fileset *name* from a local file or directory, and return its reference.
+
+    The same create, reuse and upload rules as ``--upload-dataset``, for a caller that picks the name.
+    """
+    if _create_fileset(
+        files, name=name, purpose=FilesetPurpose.DATASET, workspace=workspace, exist_ok=exist_ok, report=report
+    ):
+        _upload_source(files, name=name, workspace=workspace, source=source)
+    return f"{workspace}/{name}"
+
+
 def _create_fileset_from_source(
     source: str,
     *,

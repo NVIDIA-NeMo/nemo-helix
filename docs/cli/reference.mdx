@@ -9691,6 +9691,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 **Commands:**
 
+* `dataset`: Prepare a training dataset.
 * `automodel`: Create an Automodel training job on the platform.
 * `rl`: Create a NeMo-RL training job on the platform.
 * `unsloth`: Create an Unsloth training job on the platform.
@@ -9700,6 +9701,80 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 * `automodel.jobs`: Automodel SFT, retrieval, and knowledge-distillation...
 * `rl.jobs`: NeMo-RL DPO and GRPO training jobs on the platform...
 * `unsloth.jobs`: Unsloth SFT (LoRA / full / merged) training jobs on the...
+
+#### nemo customization dataset
+
+Prepare a training dataset.
+
+**Usage:**
+
+```shell
+nemo customization dataset [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `prepare`: Convert a Parquet, CSV or JSONL table, such as Data...
+
+##### nemo customization dataset prepare
+
+Convert a Parquet, CSV or JSONL table, such as Data Designer output, into a training dataset in the format `--format` names, split it, and upload it to a new dataset fileset. Prints the references.
+
+Each format, and the backends that train on it:
+
+chat: automodel (sft, distillation); unsloth with dataset.apply_chat_template: true.
+
+preference: rl with training.type: dpo.
+
+prompt-completion: automodel; unsloth. Trains on raw text, with no chat template.
+
+embedding: automodel with training.recipe: bi_encoder or cross_encoder.
+
+text: unsloth, with dataset.text_field: text.
+
+GRPO datasets are not supported: GRPO trains on NeMo Gym rows that each environment builds, not on a table.
+
+**Usage:**
+
+```shell
+nemo customization dataset prepare [OPTIONS] SOURCE
+```
+
+**Arguments:**
+
+* `<SOURCE>`: A local file or directory, or a fileset as WORKSPACE/NAME[#PATH]. Data Designer: its parquet-files.
+
+**Options:**
+
+* `--name`: Dataset fileset to create. The test split goes to NAME-test.
+* `--format <CHOICE>`: Row format to write; it decides which backends can train on the dataset. [possible values: chat, preference, prompt-completion, embedding, text]
+* `--input-format <CHOICE>`: Format of the source files. Default: from the file extensions, which must all be the same. [possible values: parquet, csv, jsonl]
+* `--val-fraction <FLOAT>`: Share of rows for validation. [default: 0.1]
+* `--test-fraction <FLOAT>`: Share of rows held out for evaluation. Default: 0 for preference, else 0.1.
+* `--seed <INTEGER>`: Shuffle seed. The same seed gives the same split. [default: 42]
+* `--exist-ok`: Reuse a fileset that already exists. Its files are left as they are.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Column mapping:**
+
+* `--prompt-column`: The user prompt (chat, preference, prompt-completion). Default: instruction or prompt.
+* `--response-column`: The answer to train on (chat, prompt-completion). Default: response or completion.
+* `--system-column`: A system prompt added to each row (chat, preference). Default: none.
+* `--messages-column`: Whole chat conversations, as a list of \{role, content} (chat). Default: messages.
+* `--chosen-column`: The preferred answer (preference). Default: chosen.
+* `--rejected-column`: The dispreferred answer (preference). Default: rejected.
+* `--query-column`: The query (embedding). Default: query.
+* `--positive-column`: The document that matches the query (embedding). Default: pos_doc.
+* `--negatives-column`: A list of documents that do not match the query (embedding). Default: neg_doc.
+* `--text-column`: The text to train on (text). Default: text.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 #### nemo customization automodel
 

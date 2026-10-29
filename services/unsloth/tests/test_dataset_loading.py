@@ -16,6 +16,14 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nhx.customization_common.dataset_prepare import (
+    SPLIT_FILES,
+    DatasetFormat,
+    map_columns,
+    split_rows,
+    to_training_rows,
+    write_split,
+)
 from nhx.unsloth.tasks.training.backends.unsloth_sft import _load_datasets, _resolve_local_data_files
 
 
@@ -153,3 +161,27 @@ def test_the_chat_template_renders_both_splits(tmp_path: Path) -> None:
     train, validation = _load(tmp_path, _spec(apply_chat_template=True))
 
     assert (train["text"], validation["text"]) == (["q0", "q1", "q2", "q3"], ["q0"])
+
+
+def _prepared(tmp_path: Path, dataset_format: DatasetFormat, rows: list[dict], **named: str) -> Path:
+    """Write *rows* the way ``nemo customization dataset prepare --format`` uploads them."""
+    training_rows, _ = to_training_rows(rows, map_columns(dataset_format, rows[0].keys(), named))
+    splits = split_rows(training_rows, val_fraction=0.2, test_fraction=0.0, seed=0)
+    write_split(splits.train, tmp_path / SPLIT_FILES["train"])
+    write_split(splits.validation, tmp_path / SPLIT_FILES["validation"])
+    return tmp_path
+
+
+def test_data_designer_instruction_output_loads_each_split_as_messages(tmp_path: Path) -> None:
+    """The Studio "Instruction fine-tuning" template, prepared by the CLI, loads with apply_chat_template."""
+    import json
+
+    rows = [{"domain": "d", "instruction": f"q{i}", "response": f"a{i}"} for i in range(10)]
+    dataset = _prepared(tmp_path, DatasetFormat.CHAT, rows)
+
+    train = _resolve_local_data_files(str(dataset), split="train")
+    validation = _resolve_local_data_files(str(dataset), split="validation")
+
+    assert (train, validation) == (str(dataset / "train.jsonl"), str(dataset / "validation.jsonl"))
+    first = json.loads((dataset / "train.jsonl").read_text().splitlines()[0])
+    assert [message["role"] for message in first["messages"]] == ["user", "assistant"]

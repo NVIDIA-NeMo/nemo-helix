@@ -5690,6 +5690,7 @@ nhx-customization-common = [
     { name = "httpx" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
+    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "tenacity" },
@@ -6663,6 +6664,7 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'entities-service'", specifier = ">=2.9.10" },
     { name = "psycopg2-binary", marker = "extra == 'services'", specifier = ">=2.9.10" },
     { name = "pyarrow", marker = "extra == 'harbor'", specifier = ">=19.0.1" },
+    { name = "pyarrow", marker = "extra == 'nhx-customization-common'", specifier = ">=19.0.1" },
     { name = "pyarrow", marker = "extra == 'nhx-evals-sdk'", specifier = ">=19.0.1" },
     { name = "pydantic", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'all'", specifier = ">=2.9.2,<3.0.0" },
@@ -8387,6 +8389,7 @@ dependencies = [
     { name = "httpx" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
+    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "tenacity" },
@@ -8395,7 +8398,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -8406,6 +8408,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-common", editable = "packages/nhx_common" },
+    { name = "pyarrow", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pydantic-settings", specifier = ">=2.6.1" },
     { name = "tenacity", specifier = ">=8.5.0" },
@@ -8414,7 +8417,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=0.25.3" },
 ]

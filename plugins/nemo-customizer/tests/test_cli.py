@@ -126,7 +126,7 @@ def test_root_help_omits_contributors_without_a_cli(monkeypatch: pytest.MonkeyPa
 
     app = CustomizationCLI().get_cli()
 
-    assert {group.name for group in app.registered_groups} == {"fake"}
+    assert {group.name for group in app.registered_groups} == {"fake", "dataset"}
     help_text = app.info.help or ""
     assert "\nfake\n" in help_text
     assert "headless" not in help_text
@@ -229,6 +229,15 @@ def test_error_names_every_misplaced_flag(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert result.exit_code == 2
     assert "--upload-dataset, --workspace must come after the subcommand" in _flat(result.output)
+
+
+def test_a_flag_before_dataset_points_at_its_own_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _invoke_root(
+        ["-w", "team-a", "dataset", "prepare", "rows.parquet", "--name", "d", "--format", "chat"], monkeypatch
+    )
+
+    assert result.exit_code == 2
+    assert "nemo customization dataset prepare SOURCE --name NAME --format FORMAT [OPTIONS]" in _flat(result.output)
 
 
 def test_subcommand_without_group_flags_still_runs(monkeypatch: pytest.MonkeyPatch) -> None:

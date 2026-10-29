@@ -567,6 +567,7 @@ nhx-customization-common = [
   "pydantic-settings>=2.6.1",
   "httpx>=0.27.0",
   "tenacity>=8.5.0",
+  "pyarrow>=19.0.1",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
