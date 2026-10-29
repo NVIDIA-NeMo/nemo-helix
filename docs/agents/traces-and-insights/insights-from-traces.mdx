@@ -161,10 +161,13 @@ nemo jobs results download analysis-report --job <run-name> -o analysis-report.t
 cat analysis-report.txt
 ```
 
-A report has a summary line, then one line per Insight created or updated, then
-notes about what the run left out:
+A report starts with a line naming the Compass plugin and `nemo-compass`
+versions that produced it. A summary line follows, then one line per Insight
+created or updated, then notes about what the run left out:
 
 ```text
+Produced by nemo-helix 0.9.0, nemo-compass 0.2.0
+
 Analyzed 6 traces: 0 new insights, 0 existing insights with new evidence. Some observations did not meet minimum recurrence thresholds and were not promoted to insight candidates; see the analysis report for details.
 
 - no insights created or updated
@@ -185,7 +188,18 @@ Analyzed 6 traces: 0 new insights, 0 existing insights with new evidence. Some o
 | `- skipped: <stream> (<reason>)` | An evidence stream did not run. The reason says why. |
 
 The summary line appears both in the report and in the job's Fabric run
-result. When any observation falls below a threshold, the summary ends with the
+result. The Fabric run result also holds the full change-set the run produced,
+under `output.compass_result`.
+
+### Preview a Run Without Filing Insights
+
+Analysis runs save their findings with the `compass.persist`
+[post-run action](/documentation/agents/execute-agents-as-jobs#post-run-actions).
+Its counterpart, `compass.preview`, files nothing: its `analysis-report` lists
+the Insights the run would create, with their descriptions, ratings, and
+evidence, and the existing Insights that would gain evidence. Neither action
+takes config. Both act on the agent named in the Compass agent config and on
+the job's own workspace. When any observation falls below a threshold, the summary ends with the
 sentence about minimum recurrence thresholds.
 
 When the report shows a `below threshold` line, you can:

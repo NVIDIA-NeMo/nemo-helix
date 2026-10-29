@@ -149,8 +149,7 @@ def test_the_submitted_job_carries_the_compass_config_the_facade_built(
 
     spec = _backing_job(agents, created.run.name)["spec"]
 
-    assert spec["post_run_action"]["kind"] == "insights.analysis"
-    assert spec["post_run_action"]["config"]["agent"] == "scoped-agent"
+    assert spec["post_run_action"] == {"kind": "compass.persist", "config": {}}
     settings = spec["agent"]["config"]["harnesses"]["compass"]["settings"]
     assert settings["agent"] == "scoped-agent"
     assert settings["ethos"] == ETHOS

@@ -177,6 +177,8 @@ cat analysis-report.txt
 A run against the demo corpus reports something like:
 
 ```text
+Produced by nemo-helix 0.9.0, nemo-compass 0.2.0
+
 Analyzed 28 traces: 2 new insights, 0 existing insights with new evidence.
 
 - created: delegate_task requires conversation_summary [insights-insight-542UamS99TFJTt8TMb5Fy9] (6 trace refs)

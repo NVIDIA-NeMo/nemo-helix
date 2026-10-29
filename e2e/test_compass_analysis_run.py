@@ -10,7 +10,7 @@ needs to execute analysis in an operator's shell.
 
 The Compass's model is mocked, deliberately. What is under test is the wiring —
 run recorded, job submitted under the run's name, Fabric runs the inline
-Compass, the ``insights.analysis`` post-run action persists the change-set and saves
+Compass, the ``compass.persist`` post-run action persists the change-set and saves
 the report — not whether a real model reaches a good conclusion. Two seeded
 Intake traces pass through Compass's evidence streams and compilation,
 with deterministic Nooa model responses.

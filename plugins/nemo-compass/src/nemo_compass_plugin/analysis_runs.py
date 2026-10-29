@@ -33,6 +33,7 @@ from nemo_compass_plugin.analysis.agent_config import (
 from nemo_compass_plugin.authz import scope
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisRun
+from nemo_compass_plugin.post_run_actions import COMPASS_PERSIST_ACTION_KIND
 from nemo_compass_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
@@ -51,7 +52,6 @@ from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-COMPASS_ANALYSIS_ACTION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "compass-run-"
 
 router = APIRouter(tags=["Compass Analysis Runs"])
@@ -326,19 +326,15 @@ def build_execute_agent_job_config(
     request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
 ) -> JsonObject:
     """Translate a high-level Compass request into a generic execute-agent job config."""
-    action_config: JsonObject = {
-        "agent": request.agent,
-        "workspace": workspace,
-    }
     payload = _json_object(
         {
             "agent": _inline_compass(request, base_url=base_url),
             "input": _analysis_prompt(request.agent),
             "context": build_compass_run_context(since=request.since, evaluation_id=request.evaluation_id),
-            "post_run_action": {
-                "kind": COMPASS_ANALYSIS_ACTION_KIND,
-                "config": action_config,
-            },
+            # The action reads the agent under test from the inline agent
+            # config's harness settings and the workspace from the job, so it
+            # takes no config.
+            "post_run_action": {"kind": COMPASS_PERSIST_ACTION_KIND},
         }
     )
     if request.timeout_seconds is not None:

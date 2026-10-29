@@ -384,9 +384,10 @@ secrets; bind secrets through an [environment](#environments-secrets-and-compute
 ## Post-Run Actions
 
 A post-run action is plugin-owned work that turns the agent's output into
-something the plugin owns — for example, the Compass plugin's analysis runs
-attach an action that saves an `analysis-report` result and files the insights
-it found.
+something the plugin owns. For example, the Compass plugin's
+`compass.persist` action files the Insights a Compass run found and saves an
+`analysis-report` result, while `compass.preview` saves the same report
+without filing anything.
 
 - **When it runs.** After the agent invocation succeeds, inside the job's
   execute step. It does not run when the invocation fails, and it never runs

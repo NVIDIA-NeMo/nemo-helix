@@ -490,7 +490,7 @@ class RemoteCompassBackend(CompassBackend):
                         updated_date=upd.updated_date,
                     )
                 else:
-                    updated = await self._get(workspace=workspace, insight_id=upd.id)
+                    updated = await self.get_insight(workspace=workspace, insight_id=upd.id)
             except InsightNotFoundError:
                 lines.append(f"- skipped (insight not found): {upd.id}")
                 continue
@@ -555,7 +555,7 @@ class RemoteCompassBackend(CompassBackend):
         evidence: list[TraceEvidence],
         updated_date: datetime | None = None,
     ) -> Insight:
-        current = await self._get(workspace=workspace, insight_id=insight_id)
+        current = await self.get_insight(workspace=workspace, insight_id=insight_id)
         if current.workspace != workspace or current.agent != agent:
             raise ValueError(f"Insight {insight_id!r} no longer belongs to this workspace and agent")
         try:
@@ -570,7 +570,7 @@ class RemoteCompassBackend(CompassBackend):
                 raise InsightNotFoundError(insight_id) from exc
             raise
 
-    async def _get(self, *, workspace: str, insight_id: str) -> Insight:
+    async def get_insight(self, *, workspace: str, insight_id: str) -> Insight:
         try:
             return await self._insights.get(workspace=workspace, insight_id=insight_id)
         except (httpx.HTTPStatusError, NotFoundError) as exc:

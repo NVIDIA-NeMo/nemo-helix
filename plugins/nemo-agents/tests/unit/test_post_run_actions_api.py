@@ -26,4 +26,5 @@ def test_lists_the_installed_actions() -> None:
         "title": "No action",
         "description": "Do nothing after the agent runs; the job's results are the agent's own.",
     }
-    assert listed["insights.analysis"]["title"] == "Compass analysis"
+    assert listed["compass.persist"]["title"] == "Compass: save insights"
+    assert listed["compass.preview"]["title"] == "Compass: preview insights"

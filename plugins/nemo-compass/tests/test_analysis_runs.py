@@ -29,6 +29,7 @@ from nemo_compass_plugin.analysis_runs import (
 )
 from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisRun
+from nemo_compass_plugin.post_run_actions import target_agent
 from nemo_compass_plugin.schema import AnalysisRunPage
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -262,20 +263,19 @@ def test_execute_job_config_validates_against_the_real_job_schema() -> None:
     config = ExecuteAgentJobConfig.model_validate(spec)
 
     assert config.post_run_action is not None
-    assert config.post_run_action.kind == "insights.analysis"
+    assert config.post_run_action.kind == "compass.persist"
 
 
-def test_the_post_run_action_is_scoped_to_the_agent_and_workspace() -> None:
-    """The post-run action needs no run identity: nothing it writes is stamped with one."""
+def test_the_post_run_action_reads_its_target_from_the_agent_config() -> None:
+    """The action takes no config, so the agent config alone must name the agent under test."""
     spec = build_execute_agent_job_config(_request(), workspace="team-a", run_name=RUN_NAME)
 
     config = ExecuteAgentJobConfig.model_validate(spec)
 
     assert config.post_run_action is not None
-    assert config.post_run_action.config == {
-        "agent": "demo-agent",
-        "workspace": "team-a",
-    }
+    assert config.post_run_action.config == {}
+    assert isinstance(config.agent, AgentInline)
+    assert target_agent(config.agent.config) == "demo-agent"
 
 
 def test_compass_is_submitted_inline_with_the_requested_models() -> None:
@@ -354,8 +354,6 @@ def test_surrounding_whitespace_is_trimmed_before_it_reaches_the_job() -> None:
     assert settings["agent"] == "demo-agent"
     assert settings["ethos"] == "# Ethos"
     assert config.context["evaluation_id"] == "eval-123"
-    assert config.post_run_action is not None
-    assert config.post_run_action.config["agent"] == "demo-agent"
 
 
 def test_execute_job_config_omits_timeout_when_unset() -> None:

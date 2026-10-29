@@ -354,7 +354,7 @@ def test_get_supports_yaml_output(app, make_cli_state) -> None:
 def _post_run_actions_response() -> list[dict[str, Any]]:
     return [
         {"kind": "agents.noop", "title": "No action", "description": "Do nothing after the agent runs."},
-        {"kind": "insights.analysis", "title": "Compass analysis", "description": "Persist Compass insights."},
+        {"kind": "compass.persist", "title": "Compass: save insights", "description": "Save Compass insights."},
     ]
 
 
@@ -372,7 +372,7 @@ class TestListPostRunActionsOutput:
         assert result.exit_code == 0, result.output
         assert requests[0].url.path == "/apis/agents/v2/post-run-actions"
         assert "agents.noop" in result.output
-        assert "Compass analysis" in result.output
+        assert "Compass: save insights" in result.output
 
     def test_lists_installed_actions_as_json(self, app, make_cli_state) -> None:
         result = runner.invoke(
@@ -382,4 +382,4 @@ class TestListPostRunActionsOutput:
         )
 
         assert result.exit_code == 0, result.output
-        assert [action["kind"] for action in json.loads(result.stdout)] == ["agents.noop", "insights.analysis"]
+        assert [action["kind"] for action in json.loads(result.stdout)] == ["agents.noop", "compass.persist"]

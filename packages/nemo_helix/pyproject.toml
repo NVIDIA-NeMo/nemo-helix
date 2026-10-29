@@ -696,7 +696,8 @@ nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_export
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.agents.post_run_actions"]
 "agents.noop" = "nemo_agents_plugin.jobs.post_run_actions:NoopPostRunAction"
-"insights.analysis" = "nemo_compass_plugin.post_run_actions:CompassAnalysisAction"
+"compass.persist" = "nemo_compass_plugin.post_run_actions:CompassPersistAction"
+"compass.preview" = "nemo_compass_plugin.post_run_actions:CompassPreviewAction"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli"]

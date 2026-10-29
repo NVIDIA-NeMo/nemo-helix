@@ -453,7 +453,7 @@ async def test_local_persistence_converts_legacy_evidence(tmp_path):
 async def test_remote_persistence_merges_evidence_and_preserves_newer_date():
     date = datetime(2026, 10, 7, tzinfo=timezone.utc)
     backend = RemoteCompassBackend(MagicMock())
-    backend._get = AsyncMock(
+    backend.get_insight = AsyncMock(
         return_value=Insight(
             workspace="test",
             title="Issue",

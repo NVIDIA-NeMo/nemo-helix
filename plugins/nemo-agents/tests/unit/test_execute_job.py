@@ -51,6 +51,7 @@ from nemo_agents_plugin.jobs.execute import (
     _log_agent_stderr,
     _stage_stored_agent_ethos,
 )
+from nemo_agents_plugin.jobs.post_run_actions import list_post_run_actions, resolve_post_run_action
 from nemo_agents_plugin.runner.fabric_artifact_staging import (
     FabricArtifactStagingError,
     FabricEthosFilesetNotFound,
@@ -1288,6 +1289,42 @@ def test_run_invokes_post_run_action_on_success(ctx: JobContext) -> None:
     assert "post_run_action" not in result
     assert resolved == ["example.action"]
     assert len(contexts) == 1
+
+
+_INSTALLED_POST_RUN_ACTION_KINDS = [info.kind for info in list_post_run_actions()]
+
+
+def test_the_compass_actions_are_among_the_installed_kinds() -> None:
+    """Guards the parametrization below: it must cover a writing and a non-writing action."""
+    assert {"agents.noop", "compass.persist", "compass.preview"} <= set(_INSTALLED_POST_RUN_ACTION_KINDS)
+
+
+@pytest.mark.parametrize("kind", _INSTALLED_POST_RUN_ACTION_KINDS)
+def test_fabric_run_result_holds_the_fabric_output_whichever_action_runs(
+    kind: str, ctx: JobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The output is saved before the action runs, so even one that writes nothing leaves it in the results."""
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+        post_run_action=PostRunActionConfig(kind=kind),
+    )
+    change_set = {"compass_result": {"summary": "s", "new_insights": [], "updated_insights": []}}
+    action = resolve_post_run_action(kind)
+    ran: list[str] = []
+    # The real action is resolved and its config validated; only the side effect is stubbed.
+    monkeypatch.setattr(action, "after_invoke", lambda self, context: ran.append(kind))
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        return FabricRuntimeResult(status="succeeded", output=change_set)
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert result["status"] == "completed"
+    assert ran == [kind]
+    payload = json.loads((ctx.storage.persistent / "results" / FABRIC_RUN_RESULT_NAME).read_text())
+    assert payload["output"] == change_set
 
 
 def test_run_hands_the_post_run_action_the_create_time_agent_config(ctx: JobContext) -> None:
