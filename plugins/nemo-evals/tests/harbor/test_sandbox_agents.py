@@ -14,6 +14,7 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from nemo_evals.harbor import opensandbox_environment
 from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
+from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT, SetupEgressNotReadyError
 from nhx_sandbox import egress
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
 from nhx_sandbox.opensandbox_policy import EgressVerificationError
@@ -82,11 +83,16 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
     calls: list[str]
     execs: list[tuple[str, dict[str, Any]]]
     kill_exit: int
+    unresolved: tuple[str, ...]
 
     @override
     async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
         command = f"{opensandbox_environment.SHELL} -c {script}"
         self.execs.append((command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}}))
+        if script == RESOLVE_HOSTS_SCRIPT:
+            self.calls.append("resolve")
+            unresolved = [host for host in env["HOSTS"].split() if host in self.unresolved]
+            return ExecResult(stdout="".join(f"{host}\n" for host in unresolved), return_code=1 if unresolved else 0)
         if "kill -9" in command:
             self.calls.append("kill")
             return ExecResult(stdout="", stderr="could not kill: 9", return_code=self.kill_exit)
@@ -113,6 +119,7 @@ def _setup_environment(
     environment.calls = []
     environment.execs = []
     environment.kill_exit = kill_exit
+    environment.unresolved = ()
     environment._sandbox = _FakeSandbox(environment.egress_policy().rules, environment.calls)
     return environment
 
@@ -127,8 +134,29 @@ async def test_setup_window_opens_the_setup_hosts_only_inside_the_block(monkeypa
     async with environment.agent_setup_egress():
         assert _allowed_now(environment) == {IGW, *SETUP}
     assert _allowed_now(environment) == {IGW}
-    # Processes are listed before opening; rules leave before leftovers are killed, so nothing reconnects.
-    assert environment.calls == ["list", "patch", "delete", "kill"]
+    # Processes are listed before opening; the setup hosts must resolve before the block runs; rules leave
+    # before leftovers are killed, so nothing reconnects.
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
+
+
+async def test_only_the_setup_hostnames_are_looked_up(monkeypatch):
+    environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "*.pypi.org", "10.77.0.9"))
+    async with environment.agent_setup_egress():
+        pass
+    resolve_env = next(kwargs["env"] for command, kwargs in environment.execs if "getent" in command)
+    assert resolve_env["HOSTS"] == "registry.npmjs.org"
+
+
+async def test_a_setup_host_that_does_not_resolve_fails_before_setup_and_closes_the_window(monkeypatch):
+    environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "astral.sh"))
+    environment.unresolved = ("astral.sh",)
+    ran = False
+    with pytest.raises(SetupEgressNotReadyError, match="setup egress not ready .*astral.sh did not resolve"):
+        async with environment.agent_setup_egress():
+            ran = True
+    assert not ran
+    assert _allowed_now(environment) == {IGW}
+    assert environment.calls[-2:] == ["delete", "kill"]
 
 
 async def test_setup_window_closes_when_setup_fails(monkeypatch):

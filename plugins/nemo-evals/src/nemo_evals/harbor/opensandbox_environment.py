@@ -27,6 +27,13 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode
 from nemo_evals.harbor.remote.resources import effective_resources
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
+from nemo_evals.harbor.setup_egress_readiness import (
+    RESOLVE_ATTEMPTS,
+    RESOLVE_HOSTS_SCRIPT,
+    RESOLVE_RETRY_DELAY_SEC,
+    SetupEgressNotReadyError,
+    resolvable_hosts,
+)
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, sandbox_role
 from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_egress_target, verify_applied_egress
@@ -90,6 +97,9 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
     async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
         """Let the sandbox reach ``agent_setup_hosts`` for the duration of the block, then close them again.
 
+        Once the rules are applied, each setup hostname must resolve from inside the sandbox before the block
+        runs; :class:`SetupEgressNotReadyError` names the ones that don't.
+
         The egress sidecar keeps established connections across a rule change, so closing also kills every
         process started since entry that still holds a connection outside the sandbox. Until closing has finished, the sandbox refuses every other command:
         a close that was cancelled or failed must not leave task commands running with the hosts open.
@@ -108,6 +118,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         try:
             await self._switch_egress(sandbox, closed, opened, f"{label} (agent setup)")
             self._setup_egress_state = "open"
+            await self._require_setup_hosts_resolve(label)
             self.logger.info("Opened agent setup egress for %s", label)
             yield
         finally:
@@ -141,6 +152,23 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         await verify_applied_egress(sandbox, wanted, mode=self._egress_verification, label=label, require_readback=True)
         await self._verify_no_longer_allowed(sandbox, removed, label)
         return removed
+
+    async def _require_setup_hosts_resolve(self, label: str) -> None:
+        hosts = resolvable_hosts(self._agent_setup_hosts)
+        if not hosts:
+            return
+        result = await self._exec_cleanup(
+            RESOLVE_HOSTS_SCRIPT,
+            HOSTS=" ".join(hosts),
+            ATTEMPTS=str(RESOLVE_ATTEMPTS),
+            DELAY=str(RESOLVE_RETRY_DELAY_SEC),
+        )
+        if result.return_code != 0:
+            unresolved = (result.stdout or "").split() or list(hosts)
+            raise SetupEgressNotReadyError(
+                f"setup egress not ready for {label}: {', '.join(unresolved)} did not resolve from inside the "
+                f"sandbox after {RESOLVE_ATTEMPTS} attempts"
+            )
 
     @override
     async def exec(
