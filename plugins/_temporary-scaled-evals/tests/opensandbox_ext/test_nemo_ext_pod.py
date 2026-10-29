@@ -238,6 +238,97 @@ def test_a_task_may_repeat_the_uid_the_template_sets() -> None:
     assert pod_spec["containers"][0]["securityContext"]["runAsUser"] == 1000
 
 
+def template_pod_spec() -> dict[str, Any]:
+    """The stock pod built from the example BatchSandbox template, which mounts writable folders for Harbor."""
+    pod_spec = stock_pod_spec()
+    pod_spec["volumes"] += [
+        {"name": "harbor-logs", "emptyDir": {"sizeLimit": "2Gi"}},
+        {"name": "harbor-solution", "emptyDir": {"sizeLimit": "1Gi"}},
+        {"name": "harbor-installed-agent", "emptyDir": {"sizeLimit": "2Gi"}},
+    ]
+    pod_spec["containers"][0]["volumeMounts"] = [
+        {"name": "harbor-logs", "mountPath": "/logs"},
+        {"name": "harbor-solution", "mountPath": "/solution"},
+        {"name": "harbor-installed-agent", "mountPath": "/installed-agent"},
+    ]
+    return pod_spec
+
+
+def test_main_s_own_logs_and_solution_mounts_replace_the_template_s() -> None:
+    pod_spec = template_pod_spec()
+    services = parse_compose_services(
+        {
+            "volumes": ["main-anon-0"],
+            "main": {
+                "volume_mounts": [{"name": "main-anon-0", "mount_path": "/logs"}],
+                "tmpfs": [{"mount_path": "/solution/", "size_limit": "4Mi"}],
+            },
+        }
+    )
+
+    add_services(pod_spec, services, "IfNotPresent")
+
+    # One mount per path: the task's own at /logs and /solution, the template's at /installed-agent.
+    assert pod_spec["containers"][0]["volumeMounts"] == [
+        {"name": "harbor-installed-agent", "mountPath": "/installed-agent"},
+        {"name": "nemo-vol-main-anon-0", "mountPath": "/logs", "readOnly": False},
+        {"name": "nemo-t0-sandbox", "mountPath": "/solution/"},
+    ]
+
+
+def test_main_s_mounts_elsewhere_leave_the_template_s_alone() -> None:
+    pod_spec = template_pod_spec()
+
+    add_services(pod_spec, parse_compose_services({"main": {"tmpfs": [{"mount_path": "/tmp"}]}}), "IfNotPresent")
+
+    assert [mount["mountPath"] for mount in pod_spec["containers"][0]["volumeMounts"]] == [
+        "/logs",
+        "/solution",
+        "/installed-agent",
+        "/tmp",
+    ]
+
+
+@pytest.mark.parametrize("path", ["/installed-agent", "/installed-agent/bin"])
+def test_main_cannot_mount_over_the_agent_s_install(path: str) -> None:
+    with pytest.raises(ValueError, match="the agent is installed in /installed-agent"):
+        add_services(
+            template_pod_spec(), parse_compose_services({"main": {"tmpfs": [{"mount_path": path}]}}), "IfNotPresent"
+        )
+
+
+def test_main_cannot_replace_a_mount_the_sandbox_needs() -> None:
+    # A mount the server adds for itself, which a task's tmpfs would hide.
+    pod_spec = template_pod_spec()
+    pod_spec["containers"][0]["volumeMounts"].append({"name": "opensandbox-bin", "mountPath": "/opt/opensandbox"})
+    services = parse_compose_services({"main": {"tmpfs": [{"mount_path": "/opt/opensandbox"}]}})
+
+    with pytest.raises(ValueError, match=r"main can't mount \['/opt/opensandbox'\]: the sandbox already mounts"):
+        add_services(pod_spec, services, "IfNotPresent")
+
+
+def test_the_agent_bundle_and_main_s_logs_mount_fit_together() -> None:
+    # The bundle reuses the template's /installed-agent; main's own /logs then replaces the template's.
+    pod_spec = template_pod_spec()
+    bundle = SandboxAgentBundle(
+        image="registry.example.com/agent@sha256:" + "a" * 64, installer="/install", entrypoint="bin/agent"
+    )
+    add_agent_bundle(pod_spec, bundle, "IfNotPresent")
+    services = parse_compose_services(
+        {"volumes": ["main-anon-0"], "main": {"volume_mounts": [{"name": "main-anon-0", "mount_path": "/logs"}]}}
+    )
+
+    add_services(pod_spec, services, "IfNotPresent")
+
+    mounts = {mount["mountPath"]: mount for mount in pod_spec["containers"][0]["volumeMounts"]}
+    assert mounts["/logs"]["name"] == "nemo-vol-main-anon-0"
+    assert mounts["/installed-agent"] == {
+        "name": "harbor-installed-agent",
+        "mountPath": "/installed-agent",
+        "readOnly": True,
+    }
+
+
 def test_sandbox_without_network_policy_has_no_egress_to_move() -> None:
     pod_spec = stock_pod_spec(egress=False)
 

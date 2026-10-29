@@ -450,12 +450,15 @@ data:
 
     from __future__ import annotations
 
+    import posixpath
+    from pathlib import PurePosixPath
     from typing import Any
 
     from nhx_sandbox.harbor_opensandbox_services import (
         AGENT_BUNDLE_CONTAINER,
         INSTALLED_AGENT_DIR,
         ComposeServices,
+        Main,
         Readiness,
         SandboxAgentBundle,
         Security,
@@ -468,6 +471,9 @@ data:
     EGRESS_CONTAINER = "egress"
     # The volume the bundle is installed into when the template doesn't already mount /installed-agent.
     INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
+    # Folders the sandbox templates mount empty and writable for Harbor, so non-root images can write there. A task that
+    # mounts its own folder at one of them gets its own instead: both are empty writable folders.
+    REPLACEABLE_TEMPLATE_MOUNTS = frozenset({"/logs", "/solution"})
 
     # Probes run every second, so failure thresholds are roughly seconds while checks answer quickly: a
     # service gets ~10 minutes to become ready once it runs, egress 2 minutes.
@@ -686,6 +692,43 @@ data:
         return None, True
 
 
+    def _make_room_for_main_mounts(sandbox_container: dict[str, Any], main: Main) -> None:
+        """Remove the template's mounts that ``main``'s own volumes and tmpfs replace; ``ValueError`` where they can't.
+
+        Kubernetes rejects a container with two mounts at one path, and the sandbox templates already mount ``/logs``,
+        ``/solution`` and ``/installed-agent``. A task's own mount at ``/logs`` or ``/solution`` replaces the template's.
+        One at or inside ``/installed-agent`` is refused, since the agent is installed there and must stay read-only, as
+        is one at any other path the sandbox already mounts, which OpenSandbox itself may need.
+        """
+        # Where the task mounts its own folders in main. Paths are normalized, so `/logs/` and `/logs` count as the same.
+        task_mount_paths = {posixpath.normpath(mount.mount_path) for mount in [*main.volume_mounts, *main.tmpfs]}
+
+        # Nothing may be mounted over the agent's install, or inside it: a writable folder there would let the agent's
+        # files be replaced.
+        paths_in_agent_install = sorted(
+            path for path in task_mount_paths if PurePosixPath(path).is_relative_to(INSTALLED_AGENT_DIR)
+        )
+        if paths_in_agent_install:
+            raise ValueError(f"main can't mount {paths_in_agent_install}: the agent is installed in {INSTALLED_AGENT_DIR}")
+
+        # What the sandbox container already mounts: the template's folders, and the agent bundle's if it was added.
+        sandbox_mounts = sandbox_container.get("volumeMounts") or []
+        # Paths the task and the sandbox both mount; Kubernetes would reject the pod with both.
+        doubly_mounted_paths = task_mount_paths & {posixpath.normpath(mount["mountPath"]) for mount in sandbox_mounts}
+
+        # Only the template's empty Harbor folders can give way to the task's. Anything else the sandbox mounts may be
+        # something OpenSandbox needs, so it's never replaced.
+        unreplaceable_paths = sorted(doubly_mounted_paths - REPLACEABLE_TEMPLATE_MOUNTS)
+        if unreplaceable_paths:
+            raise ValueError(f"main can't mount {unreplaceable_paths}: the sandbox already mounts something there")
+
+        # Drop the sandbox's mount at each such path; add_services then adds the task's own in its place.
+        if doubly_mounted_paths:
+            sandbox_container["volumeMounts"] = [
+                mount for mount in sandbox_mounts if posixpath.normpath(mount["mountPath"]) not in doubly_mounted_paths
+            ]
+
+
     def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull_policy: str) -> None:
         """Add ``services`` to the BatchSandbox pod spec in place; ``ValueError`` if the pod isn't shaped as expected.
 
@@ -721,6 +764,10 @@ data:
         # main is the stock sandbox container; it only gains mounts, the one allowed capability, its working directory and
         # the restrictions the compose file puts on it.
         sandbox = containers[0]
+
+        # Ensure the main container can mount its own volumes and tmpfs
+        _make_room_for_main_mounts(sandbox, services.main)
+
         if services.main.working_dir is not None:
             # The stock server sets none, so the image's WORKDIR applied; Compose's `working_dir` replaces it.
             sandbox["workingDir"] = services.main.working_dir
@@ -729,7 +776,10 @@ data:
         if services.main.add_capabilities:
             caps = sandbox.setdefault("securityContext", {}).setdefault("capabilities", {})
             caps["add"] = sorted(set(caps.get("add") or []) | set(services.main.add_capabilities))
+
+        # Apply security context to the main container
         _restrict(pod_spec, sandbox, services.main.security)
+        # Mount tmpfs to the main container
         _add_tmpfs(pod_spec, sandbox, services.main.tmpfs)
 
         # Every container shares the pod network, so each Compose name is 127.0.0.1.
