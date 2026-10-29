@@ -9,10 +9,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from nemo_helix_plugin.jobs.spec import HelixJobSecretEnvironmentVariableRef
 from nhx.common.config import HelixConfig
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.app.providers import SubprocessExecutionProvider
-from nhx.core.jobs.app.schemas import StepLifecycle
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable, StepLifecycle
 from nhx.core.jobs.controllers.backends.base import (
     NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
@@ -87,6 +88,34 @@ def test_schedule_starts_process_and_stages_environment(
     assert metadata.work_dir.is_relative_to(tmp_path)
     assert metadata.persistent_dir.is_relative_to(tmp_path)
     mock_jobs_client.update_attempt_step_task.assert_called()
+
+
+@pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+def test_prepare_runtime_rejects_step_env_for_platform_injected_names(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending, name
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = test_step_pending.model_copy(deep=True)
+    step.step_spec.environment = [HelixJobEnvironmentVariable(name=name, value="attacker-chosen")]
+
+    with pytest.raises(ValueError, match=name):
+        backend._prepare_runtime(step)
+    assert not any(tmp_path.iterdir())
+
+
+def test_prepare_runtime_rejects_secret_env_name_that_injects_reserved_name(
+    mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
+):
+    backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
+    step = test_step_pending.model_copy(deep=True)
+    step.step_spec.environment = [
+        HelixJobEnvironmentVariable(
+            name="X=default/a,NHX_PRINCIPAL", from_secret=HelixJobSecretEnvironmentVariableRef(name="b")
+        )
+    ]
+
+    with pytest.raises(ValueError, match="must match"):
+        backend._prepare_runtime(step)
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -78,6 +79,9 @@ RESERVED_MANAGED_JOB_AUTH_ENVIRONMENT_VARIABLE_NAMES: frozenset[str] = frozenset
         "NEMO_WORKLOAD_TOKEN",
         "NEMO_WORKLOAD_TOKEN_FILE",
         WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+        # Delegated identity and secret references are injected by the platform; a step must not override them.
+        NHX_PRINCIPAL_ENVVAR,
+        NEMO_JOB_SECRETS_ENVVAR,
     }
 )
 
@@ -136,8 +140,19 @@ def find_reserved_managed_job_environment_variable_names(env_names: Iterable[str
     )
 
 
+_VALID_ENVIRONMENT_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def validate_no_reserved_managed_job_environment_variable_names(env_names: Iterable[str], *, source: str) -> None:
-    """Reject user-provided platform-managed env names for managed jobs."""
+    """Reject malformed or platform-reserved env names for managed jobs.
+
+    Names must be plain identifiers: secret-backed names are joined into NEMO_JOB_SECRETS
+    with ``,`` and ``=`` separators, so other characters could smuggle in extra entries.
+    """
+    env_names = list(env_names)
+    malformed = sorted({name for name in env_names if not _VALID_ENVIRONMENT_VARIABLE_NAME.fullmatch(name)})
+    if malformed:
+        raise ValueError(f"{source} must match [A-Za-z_][A-Za-z0-9_]*: {malformed}")
     conflicting = find_reserved_managed_job_environment_variable_names(env_names)
     if conflicting:
         raise ValueError(f"{source} must not use platform-reserved managed environment keys: {conflicting}")

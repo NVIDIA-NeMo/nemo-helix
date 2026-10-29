@@ -45,6 +45,7 @@ from nhx.core.jobs.controllers.backends.base import (
     JobUpdate,
     get_logs_endpoint_config_from_fileset,
     step_ttl_seconds_active,
+    validate_no_reserved_managed_job_environment_variable_names,
 )
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
@@ -456,6 +457,12 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
     def _prepare_runtime(self, step: HelixJobStepWithContext) -> tuple[dict[str, str], str, Path, Path, Path]:
         task_id = f"task-{uuid.uuid4().hex}"
+        spec = step.step_spec
+        if spec and spec.environment:
+            validate_no_reserved_managed_job_environment_variable_names(
+                (envvar.name for envvar in spec.environment),
+                source="Job step environment keys",
+            )
         job_dir = self._root_dir / step.workspace / step.job
         job_attempt_dir = job_dir / str(step.attempt_id)
         work_dir = job_attempt_dir / step.name / task_id
@@ -467,7 +474,6 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         ephemeral_dir.mkdir(parents=True, exist_ok=True)
         persistent_dir.mkdir(parents=True, exist_ok=True)
 
-        spec = step.step_spec
         config_path = config_dir / NEMO_JOB_STEP_CONFIG_FILE_NAME
         config_path.write_text(json.dumps(spec.config if spec else {}), encoding="utf-8")
         log_path = work_dir / "task.log.jsonl"

@@ -61,6 +61,7 @@ from nhx.core.jobs.app.schemas import (
     HelixJobSpec,
 )
 from nhx.core.jobs.config import config as jobs_config
+from nhx.core.jobs.controllers.backends.base import validate_no_reserved_managed_job_environment_variable_names
 from nhx.core.jobs.entities import (
     STEP_SPEC_NAME_CONFIG_KEY,
     HelixJob,
@@ -286,6 +287,15 @@ class JobDispatcher:
     # =========================================================================
 
     async def validate_job_secrets(self, job_spec: HelixJobSpec, job_workspace: str) -> None:
+        # Reject reserved or malformed env names at submit time rather than at schedule time.
+        for step in job_spec.steps:
+            try:
+                validate_no_reserved_managed_job_environment_variable_names(
+                    [env_var.name for env_var in step.environment or []],
+                    source="Job step environment keys",
+                )
+            except ValueError as exc:
+                raise JobSecretValidationError(str(exc)) from exc
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
             if not step.environment:
