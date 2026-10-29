@@ -249,8 +249,6 @@ def _prepare(
         raise DatasetPrepareError(f"All {dropped} rows have an empty field; none is left to train on.")
     if test_fraction is None:
         test_fraction = 0.0 if dataset_format is DatasetFormat.PREFERENCE else 0.1
-    if dataset_format is DatasetFormat.PREFERENCE and val_fraction == 0:
-        raise DatasetPrepareError("DPO needs a validation split. Set --val-fraction above 0.")
     splits = split_rows(training_rows, val_fraction=val_fraction, test_fraction=test_fraction, seed=seed)
 
     write_split(splits.train, out / name / SPLIT_FILES["train"])
