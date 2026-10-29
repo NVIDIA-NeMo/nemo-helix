@@ -28,7 +28,7 @@
 #
 # Usage:
 #   script/dev-install-fabric.sh                                # version matching the installed bindings
-#   NEMO_RELAY_VERSION=0.9.3 script/dev-install-fabric.sh        # pin a specific gateway release
+#   NEMO_RELAY_VERSION=0.10.4 script/dev-install-fabric.sh       # pin a specific gateway release
 set -euo pipefail
 
 VENV_PY=".venv/bin/python"
@@ -66,10 +66,15 @@ fi
 
 # Host platform -> NeMo-Relay release target triple. Every platform in the workspace's
 # [tool.uv] environments has a published asset.
+# Relay 0.10+ musl binaries need a host musl runtime to load native plugins, so use GNU on glibc.
+linux_libc=musl
+if getconf GNU_LIBC_VERSION >/dev/null 2>&1 || ldd --version 2>&1 | grep -Eq 'GLIBC|GNU libc'; then
+  linux_libc=gnu
+fi
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64) relay_target="aarch64-apple-darwin" ;;
-  Linux:x86_64) relay_target="x86_64-unknown-linux-musl" ;;
-  Linux:aarch64 | Linux:arm64) relay_target="aarch64-unknown-linux-musl" ;;
+  Linux:x86_64) relay_target="x86_64-unknown-linux-${linux_libc}" ;;
+  Linux:aarch64 | Linux:arm64) relay_target="aarch64-unknown-linux-${linux_libc}" ;;
   *)
     echo "No published nemo-relay gateway for $(uname -s):$(uname -m)." >&2
     echo "See https://github.com/NVIDIA/NeMo-Relay/releases for available targets." >&2
