@@ -376,7 +376,7 @@ class JobProviderProvisioner:
                 created = int(labels.get(_CREATED, ""))
             except ValueError:
                 continue
-            if time.time() - created < 600:
+            if self.clock() - created < 600:
                 continue
             try:
                 await self.client.get_sandbox(
