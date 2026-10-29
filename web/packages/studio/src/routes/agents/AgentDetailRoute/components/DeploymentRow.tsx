@@ -1,18 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ExpandableMessage } from '@nemo/common/src/components/ExpandableMessage';
 import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { StatusDot } from '@nemo/common/src/components/StatusDot';
+import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useAgentsGetDeployment } from '@nemo/sdk/generated/agents/agent-deployments';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Badge, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Badge, Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
 import {
   deploymentModeLabel,
   deploymentUrl,
   shortRevision,
 } from '@studio/routes/agents/AgentDetailRoute/helpers';
-import { useState, type FC } from 'react';
+import { type FC } from 'react';
 
 interface DeploymentRowProps {
   deployment: AgentDeployment;
@@ -38,9 +41,11 @@ const CommitLink: FC<{ source?: AgentSpecSource; revision: string }> = ({ source
   );
 
 /**
- * One deployment. A failure message is the row's most useful content and is
- * often longer than the row, so it collapses to two lines with a toggle rather
- * than being ellipsised into uselessness.
+ * One deployment. A failure or deletion message is the row's most useful content
+ * and is often longer than the row, so it truncates with a "Show more" toggle.
+ *
+ * The list endpoint withholds `error` (it can carry process logs), so failed and
+ * deleting rows read it from the detail endpoint, which requires read access.
  */
 export const DeploymentRow: FC<DeploymentRowProps> = ({
   deployment,
@@ -50,8 +55,16 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
   onDelete,
   onViewLogs,
 }) => {
-  const [isErrorExpanded, setIsErrorExpanded] = useState(false);
   const url = deploymentUrl(deployment);
+  const isDeleting = deployment.status === 'deleting';
+  const { workspace = '', name = '' } = deployment;
+  const { data: detail } = useAgentsGetDeployment(workspace, name, {
+    query: {
+      enabled: !!workspace && !!name && (isDeleting || deployment.status === 'failed'),
+      refetchInterval: isDeleting ? JOB_POLLING_INTERVAL_MS : false,
+    },
+  });
+  const message = detail?.error || deployment.error;
 
   return (
     <Flex align="start" gap="2" className={`px-4 py-3 ${isFirst ? '' : 'border-t border-base'}`}>
@@ -74,27 +87,19 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
             {deployment.image}
           </Text>
         )}
-        {deployment.error && (
-          <Stack gap="density-xs" className="mt-density-xs items-start">
-            <Text
-              kind="body/regular/xs"
-              className={
-                isErrorExpanded
-                  ? 'whitespace-pre-wrap break-words text-feedback-danger'
-                  : 'line-clamp-2 text-feedback-danger'
-              }
-            >
-              {deployment.error}
-            </Text>
-            <Button
-              kind="tertiary"
-              size="tiny"
-              aria-expanded={isErrorExpanded}
-              onClick={() => setIsErrorExpanded((open) => !open)}
-            >
-              {isErrorExpanded ? 'Show less' : 'Show full error'}
-            </Button>
-          </Stack>
+        {message && (
+          <Block className="mt-density-xs">
+            <ExpandableMessage
+              errorMessage={message}
+              characterLimit={150}
+              attributes={{
+                Text: {
+                  kind: 'body/regular/xs',
+                  className: 'text-feedback-danger whitespace-pre-wrap break-words',
+                },
+              }}
+            />
+          </Block>
         )}
         {deployment.spec_revision ? (
           <Text kind="body/regular/xs" className="truncate text-secondary">

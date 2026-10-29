@@ -66,7 +66,7 @@ def profiles(*execution_profiles: Any) -> Generator[None, None, None]:
 
     client = MagicMock()
     client.get_execution_profiles = _get_execution_profiles
-    with patch("nemo_optimization.jobs.optimize.client_from_platform", return_value=client):
+    with patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=client):
         yield
 
 
@@ -186,7 +186,7 @@ async def test_compile_prefers_the_subprocess_profile() -> None:
 async def test_compile_falls_back_to_the_cpu_profile_with_a_task_image() -> None:
     with (
         profiles(CPU_PROFILE),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
+        patch("nemo_helix_plugin.jobs.executor.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec())
 
@@ -209,7 +209,7 @@ async def test_compile_matches_the_requested_profile_name() -> None:
             SUBPROCESS_PROFILE,
             DockerJobExecutionProfile(provider="cpu", profile="high-mem", config=DockerJobExecutionProfileConfig()),
         ),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
+        patch("nemo_helix_plugin.jobs.executor.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec(), profile="high-mem")
 
@@ -237,7 +237,7 @@ async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
 
     client.get_execution_profiles = _boom
     with (
-        patch("nemo_optimization.jobs.optimize.client_from_platform", return_value=client),
+        patch("nemo_helix_plugin.jobs.executor.client_from_platform", return_value=client),
         pytest.raises(HelixJobDependencyUnavailableError, match="temporarily unavailable"),
     ):
         await compile_spec(staged_spec())

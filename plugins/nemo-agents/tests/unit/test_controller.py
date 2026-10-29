@@ -367,6 +367,35 @@ class TestReconcileOne:
         ctrl.entities.update.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_deleting_surfaces_backend_teardown_reason(self) -> None:
+        ctrl = _make_controller()
+        dep = _make_deployment(status="deleting", deployment_mode="docker")
+        dep.error = "Runtime went offline; the deployments plugin is recovering it."
+        ctrl.backend.delete_deployment.return_value = False
+        ctrl.backend.get_deployment_status.return_value = DeploymentInfo(
+            name=dep.name, status="deleting", error="Waiting for backend to delete deployment: docker paused"
+        )
+
+        await ctrl._reconcile_one(dep)
+
+        assert dep.error == "Waiting for backend to delete deployment: docker paused"
+
+    @pytest.mark.asyncio
+    async def test_deleting_marks_failed_when_backend_teardown_timed_out(self) -> None:
+        ctrl = _make_controller()
+        dep = _make_deployment(status="deleting", deployment_mode="docker")
+        ctrl.backend.delete_deployment.return_value = False
+        ctrl.backend.get_deployment_status.return_value = DeploymentInfo(
+            name=dep.name, status="failed", error="Deployment stuck in DELETING for 300s"
+        )
+
+        await ctrl._reconcile_one(dep)
+
+        assert dep.status == "failed"
+        assert dep.error == "Deployment stuck in DELETING for 300s"
+        ctrl.entities.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_health_timeout_saves_failed_even_if_cleanup_raises(self) -> None:
         ctrl = _make_controller(health_check_timeout_seconds=0, health_check_interval_seconds=0)
         dep = _make_deployment(status="starting", deployment_mode="docker")

@@ -7560,6 +7560,7 @@ dependencies = [
 
 [package.dev-dependencies]
 agents-deepagents-e2e-services = [
+    { name = "nemo-agent-hardener-plugin" },
     { name = "nemo-agents-plugin", extra = ["deepagents"] },
     { name = "nemo-anonymizer-plugin" },
     { name = "nemo-automodel-plugin" },
@@ -7637,6 +7638,7 @@ core-services = [
     { name = "nhx-secrets" },
 ]
 cpu-tasks = [
+    { name = "nemo-agent-hardener-plugin" },
     { name = "nemo-agent-optimization-plugin" },
     { name = "nemo-agents-plugin", extra = ["claude", "codex", "deepagents"] },
     { name = "nemo-anonymizer-plugin" },
@@ -7737,6 +7739,7 @@ enabled-plugins = [
     { name = "nhx-jobs", extra = ["openshell"] },
 ]
 functional-services = [
+    { name = "nemo-agent-hardener-plugin" },
     { name = "nemo-agents-plugin" },
     { name = "nemo-anonymizer-plugin" },
     { name = "nemo-automodel-plugin" },
@@ -7837,6 +7840,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 agents-deepagents-e2e-services = [
+    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-agents-plugin", extras = ["deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
@@ -7915,6 +7919,7 @@ core-services = [
     { name = "nhx-secrets", editable = "services/core/secrets" },
 ]
 cpu-tasks = [
+    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
     { name = "nemo-agent-optimization-plugin", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-agents-plugin", extras = ["claude", "codex", "deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
@@ -8017,6 +8022,7 @@ enabled-plugins = [
     { name = "nhx-jobs", extras = ["openshell"], editable = "services/core/jobs" },
 ]
 functional-services = [
+    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
     { name = "nemo-automodel-plugin", editable = "plugins/nemo-automodel" },

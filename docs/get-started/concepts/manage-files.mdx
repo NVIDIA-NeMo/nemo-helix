@@ -268,6 +268,53 @@ filesets = client.files.list_filesets(
 </Tab>
 
 </Tabs>
+### Inspect and Filter by Creator or Updater
+
+Fileset responses include `created_by` (the principal ID that created the fileset) and `updated_by` (the principal ID recorded for its last update). These are server-managed attribution fields, alongside `created_at` and `updated_at`, not entries in `metadata` or `custom_fields`. They are not editable creator/owner settings. The values can be `null` when attribution is unavailable; do not assume a principal ID is an email address or display name.
+
+First inspect a fileset you can read. The following uses `my-files` from [Creating Filesets](#creating-filesets), in the workspace selected by your CLI context:
+
+```bash
+nemo files filesets get my-files --output-format json
+```
+
+Copy a non-null `created_by` or `updated_by` value from the response. To find filesets attributed to that principal, replace `principal-id-from-response` below with that exact value:
+
+```bash
+nemo files filesets list --filter '{"created_by": "principal-id-from-response"}' --output-format json
+nemo files filesets list --filter '{"updated_by": "principal-id-from-response"}' --output-format json
+```
+
+Use the JSON `--filter` option: the 0.9 CLI does not have `--filter.created-by` or `--filter.updated-by` shortcuts for filesets. Filtering does not grant access to other users' data; results remain limited by the workspace and your permissions. Add `--workspace` consistently for another workspace, and use `--all-pages` if you need every matching page rather than the first page. JSON output exposes attribution fields that the default list table does not display.
+
+The Python SDK can reuse a returned identity without manually copying or JSON-escaping it:
+
+```python
+import json
+
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import ListFilesetsQueryParams
+
+client = NemoClient.from_config()
+fileset = client.files.get_fileset(name="my-files").data()
+print("Created by:", fileset.created_by, "Last updated by:", fileset.updated_by)
+
+if fileset.created_by is not None:
+    same_creator = client.files.list_filesets(
+        query_params=ListFilesetsQueryParams(
+            filter=json.dumps({"created_by": fileset.created_by})
+        )
+    )
+    for match in same_creator.items():
+        print(match.name, match.created_by, match.updated_by)
+else:
+    print("This fileset has no creator attribution to filter by.")
+```
+
+To filter by the last updater instead, use a non-null `fileset.updated_by` and the `updated_by` filter key. Supplying both keys matches filesets satisfying both conditions, not either condition. For more operators and filter composition, see [Filtering](/documentation/get-started/core-concepts/filtering).
+
+These fields describe the fileset entity's recorded attribution, not a per-file audit trail or proof of who authored every stored byte.
+
 ### Deleting Filesets
 
 Create and delete a disposable fileset, leaving `my-files` available for the file-management examples below:

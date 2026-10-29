@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Preview: opt-in Agent Hardener war-games against an independently installed OpenShell gateway.
+# Jobs run in the nhx-agent-hardener-tasks image and register this gateway with the openshell CLI.
+# The current agent-hardener release still builds its victim from a Dockerfile, which OpenShell 0.1.0+
+# rejects, so these jobs fail at sandbox creation until a release accepts a prebuilt victim image.
+# This plaintext endpoint is for an isolated evaluation gateway only; for an https:// endpoint also set
+# openshell_ca_secret, openshell_client_cert_secret and openshell_client_key_secret (NeMo Secret names).
+platformConfig:
+  agent_hardener:
+    container_jobs: true
+    openshell_gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
