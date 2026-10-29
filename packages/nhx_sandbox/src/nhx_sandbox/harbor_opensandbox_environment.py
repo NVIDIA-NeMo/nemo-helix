@@ -705,23 +705,20 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if response.status_code != 200:
             raise RuntimeError(
                 "The OpenSandbox server does not run the NeMo compose services extension; "
-                f"GET /v1/nemo-ext/health returned {response.status_code}. See "
-                "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
+                f"GET /v1/nemo-ext/health returned {response.status_code}."
             )
 
         features = response.json().get("features") or []
         # An extension from before agent bundles answers the health check too, but would drop the bundle.
         if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in features:
             raise RuntimeError(
-                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
-                "the version in plugins/_temporary-scaled-evals/opensandbox_ext."
+                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles."
             )
         # An extension from before them would refuse a spec with no services, or main's command or working directory.
         if self._services is not None and self._services.uses_main_settings() and COMPOSE_MAIN_FEATURE not in features:
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
-                "change main, or main's command and working directory; upgrade it to the version in "
-                "plugins/_temporary-scaled-evals/opensandbox_ext."
+                "change main, or main's command and working directory."
             )
         # An extension from before them would refuse the spec's `security` and `tmpfs` as unknown fields.
         if (
@@ -731,8 +728,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         ):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support a compose file's user, "
-                "read_only, cap_drop, security_opt or tmpfs; upgrade it to the version in "
-                "plugins/_temporary-scaled-evals/opensandbox_ext."
+                "read_only, cap_drop, security_opt or tmpfs."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
