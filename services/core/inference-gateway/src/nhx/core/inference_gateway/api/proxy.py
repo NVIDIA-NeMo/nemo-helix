@@ -747,6 +747,11 @@ async def fetch_proxy_response(
                     next_request_info.url,
                     exc_info=exc,
                 )
+                # Upstream returned a (2xx) status but an unparseable body, so the
+                # client gets a 502 despite a healthy upstream status. Count it the
+                # same way as the ClientPayloadError branch below so every
+                # client-facing response is recorded exactly once.
+                record_upstream_request(metric_labels, upstream_status_seen, 502)
                 raise HTTPException(
                     status_code=502,
                     detail=(
@@ -755,6 +760,7 @@ async def fetch_proxy_response(
                     ),
                 ) from exc
             if not isinstance(result, dict):
+                record_upstream_request(metric_labels, upstream_status_seen, 502)
                 raise HTTPException(
                     status_code=502,
                     detail=(

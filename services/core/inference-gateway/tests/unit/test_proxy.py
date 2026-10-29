@@ -1461,6 +1461,52 @@ async def test_fetch_proxy_response_network_error_records_none_upstream_502(
 
 
 @pytest.mark.asyncio
+async def test_fetch_proxy_response_payload_decode_failure_records_upstream_status_and_502(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # Upstream returned a 2xx status but the body could not be decoded; the client
+    # gets a 502. The true upstream status (200) is recorded, gateway status 502.
+    mock_proxy_response.read = AsyncMock(side_effect=aiohttp.ClientPayloadError("invalid gzip body"))
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 502
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 200
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_unparseable_json_records_upstream_status_and_502(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # 2xx status, body is not valid JSON -> client gets 502; still counted once.
+    mock_proxy_response.read = AsyncMock(return_value=b"not-json")
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 502
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 200
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_non_object_json_records_upstream_status_and_502(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # 2xx status, JSON parses but is not an object -> client gets 502; counted once.
+    mock_proxy_response.read = AsyncMock(return_value=b"[1, 2, 3]")
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 502
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 200
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
 async def test_proxy_request_without_context_records_unknown_labels(mocker, mock_proxy_client, next_request_info):
     record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
     await proxy_request(mock_proxy_client, next_request_info)
