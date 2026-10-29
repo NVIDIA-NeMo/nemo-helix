@@ -186,13 +186,26 @@ async def iter_fabric_chat_completion_sse(
 
 
 async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIterator[ChatCompletionStreamDelta]:
-    """Yield assistant deltas and validate the terminal Fabric result."""
+    """Yield the primary agent's assistant deltas and validate the terminal Fabric result.
+
+    LLM steps from subagents are skipped, and consecutive LLM steps are
+    separated by a blank line so they don't run together.
+    """
     emitted_text = False
+    emitted_reasoning = False
+    agents = _PrimaryAgentScopes()
     async for record in stream.records():
+        agents.observe(record)
+        is_llm_step = _is_atof_record(record) and _is_llm_output_scope(record)
+        if is_llm_step and not agents.is_primary(record):
+            continue
         delta = extract_assistant_delta(record)
         if delta is None:
             continue
+        if is_llm_step:
+            delta = _separate_from_previous_step(delta, after_text=emitted_text, after_reasoning=emitted_reasoning)
         emitted_text = emitted_text or delta.content is not None
+        emitted_reasoning = emitted_reasoning or delta.reasoning_content is not None
         yield delta
 
     result = await stream.result()
@@ -202,6 +215,51 @@ async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIter
         raise ValueError("Fabric invocation did not return a text response.")
     if not emitted_text and isinstance(result.response, str) and result.response:
         yield ChatCompletionStreamDelta(content=result.response)
+
+
+class _PrimaryAgentScopes:
+    """Track ATOF scope nesting to tell the primary agent's LLM steps from a subagent's.
+
+    The primary agent is the nearest ``agent`` scope of the first LLM step, since
+    a subagent only runs after the primary agent delegates to it.
+    """
+
+    def __init__(self) -> None:
+        self._scopes: dict[str, tuple[Any, Any]] = {}
+        self._primary_agent: str | None = None
+        self._primary_resolved = False
+
+    def observe(self, record: Mapping[str, Any]) -> None:
+        uuid = record.get("uuid")
+        if record.get("kind") == "scope" and record.get("scope_category") == "start" and isinstance(uuid, str):
+            self._scopes[uuid] = (record.get("category"), record.get("parent_uuid"))
+
+    def is_primary(self, record: Mapping[str, Any]) -> bool:
+        agent = self._nearest_agent(record.get("parent_uuid"))
+        if not self._primary_resolved:
+            self._primary_resolved = True
+            self._primary_agent = agent
+        return agent == self._primary_agent
+
+    def _nearest_agent(self, uuid: Any) -> str | None:
+        visited: set[str] = set()
+        while isinstance(uuid, str) and uuid in self._scopes and uuid not in visited:
+            visited.add(uuid)
+            category, parent_uuid = self._scopes[uuid]
+            if category == "agent":
+                return uuid
+            uuid = parent_uuid
+        return None
+
+
+def _separate_from_previous_step(
+    delta: ChatCompletionStreamDelta, *, after_text: bool, after_reasoning: bool
+) -> ChatCompletionStreamDelta:
+    content = f"\n\n{delta.content}" if after_text and delta.content else delta.content
+    reasoning = (
+        f"\n\n{delta.reasoning_content}" if after_reasoning and delta.reasoning_content else delta.reasoning_content
+    )
+    return delta.model_copy(update={"content": content, "reasoning_content": reasoning})
 
 
 def _to_sse_frame(chunk: ChatCompletionStreamResponse | ChatCompletionStreamErrorResponse | Mapping[str, Any]) -> str:
@@ -270,7 +328,11 @@ def _is_llm_output_scope(value: Mapping[str, Any]) -> bool:
 
 
 def _extract_llm_output_delta(record: Mapping[str, Any]) -> ChatCompletionStreamDelta | None:
-    """Build one delta from a completed LLM scope's text and reasoning."""
+    """Build one delta from a completed LLM scope's text and reasoning.
+
+    Text from a step that also requested tools is narration, not the answer, so
+    it is folded into the reasoning.
+    """
     data = record.get("data")
     profile = record.get("category_profile")
     annotated = profile.get("annotated_response") if isinstance(profile, Mapping) else None
@@ -280,6 +342,9 @@ def _extract_llm_output_delta(record: Mapping[str, Any]) -> ChatCompletionStream
 
     content = _extract_payload_text_delta(data) or _text_from_content(annotated.get("message"))
     reasoning = _reasoning_from_message(message)
+    if content is not None and _requested_tools(annotated, message):
+        reasoning = "\n\n".join(part for part in (reasoning, content) if part)
+        content = None
     if content is None and reasoning is None:
         return None
     return ChatCompletionStreamDelta(content=content, reasoning_content=reasoning)
@@ -306,6 +371,16 @@ def _find_assistant_message(value: Any) -> Mapping[str, Any] | None:
         if (message := _find_assistant_message(value.get(key))) is not None:
             return message
     return None
+
+
+def _requested_tools(annotated: Mapping[str, Any], message: Mapping[str, Any]) -> bool:
+    """Return true when an LLM step requested OpenAI/LangChain tool calls or Anthropic ``tool_use`` blocks."""
+    if annotated.get("tool_calls") or message.get("tool_calls"):
+        return True
+    content = message.get("content")
+    return isinstance(content, list) and any(
+        isinstance(part, Mapping) and part.get("type") == "tool_use" for part in content
+    )
 
 
 def _reasoning_from_message(message: Mapping[str, Any]) -> str | None:

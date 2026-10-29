@@ -348,7 +348,9 @@ def test_streaming_method_validates_remote_collector(configured: bool) -> None:
             resolve_streaming_method(plan, config)
 
 
-def _llm_end(data: object, *, annotated_response: dict[str, object] | None = None) -> dict[str, object]:
+def _llm_end(
+    data: object, *, annotated_response: dict[str, object] | None = None, parent_uuid: str | None = None
+) -> dict[str, object]:
     record: dict[str, object] = {
         "kind": "scope",
         "scope_category": "end",
@@ -358,7 +360,20 @@ def _llm_end(data: object, *, annotated_response: dict[str, object] | None = Non
     }
     if annotated_response is not None:
         record["category_profile"] = {"annotated_response": annotated_response, "model_name": "model"}
+    if parent_uuid is not None:
+        record["parent_uuid"] = parent_uuid
     return record
+
+
+def _scope_start(uuid: str, category: str, parent_uuid: str | None) -> dict[str, object]:
+    return {
+        "kind": "scope",
+        "scope_category": "start",
+        "category": category,
+        "name": uuid,
+        "uuid": uuid,
+        "parent_uuid": parent_uuid,
+    }
 
 
 # Shape captured from Relay's LangChain middleware for an AIMessage with reasoning and a tool call.
@@ -393,10 +408,7 @@ def test_extract_assistant_delta_from_relay_langchain_llm_scope() -> None:
     delta = extract_assistant_delta(_LANGCHAIN_TOOL_TURN)
 
     assert delta is not None
-    assert delta.model_dump(exclude_none=True) == {
-        "content": "Let me add.",
-        "reasoning_content": "Thinking about adding.",
-    }
+    assert delta.model_dump(exclude_none=True) == {"reasoning_content": "Thinking about adding.\n\nLet me add."}
 
 
 @pytest.mark.parametrize(
@@ -432,10 +444,17 @@ def test_extract_assistant_delta_from_relay_langchain_llm_scope() -> None:
                     {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"q": "x"}},
                 ],
             },
-            {"content": "Searching.", "reasoning_content": "hmm"},
+            {"reasoning_content": "hmm\n\nSearching."},
+        ),
+        (
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "hmm"}, {"type": "text", "text": "Done."}],
+            },
+            {"content": "Done.", "reasoning_content": "hmm"},
         ),
     ],
-    ids=["openai", "anthropic"],
+    ids=["openai", "anthropic-tool-step", "anthropic-final-step"],
 )
 def test_extract_assistant_delta_from_provider_llm_scopes(data: dict[str, object], expected: dict[str, object]) -> None:
     delta = extract_assistant_delta(_llm_end(data))
@@ -473,8 +492,51 @@ async def test_iter_fabric_assistant_deltas_omits_tool_calls() -> None:
     deltas = [delta.model_dump(exclude_none=True) async for delta in iter_fabric_assistant_deltas(stream)]
 
     assert deltas == [
-        {"content": "Let me add.", "reasoning_content": "Thinking about adding."},
+        {"reasoning_content": "Thinking about adding.\n\nLet me add."},
         {"content": "The answer is 3."},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_skips_subagent_llm_steps() -> None:
+    stream = _FakeFabricRuntimeStream(
+        [
+            _scope_start("request", "agent", None),
+            _scope_start("orchestrator", "agent", "request"),
+            _llm_end(
+                {"role": "assistant", "content": [{"type": "tool_use", "name": "task"}]}, parent_uuid="orchestrator"
+            ),
+            _scope_start("task", "tool", "orchestrator"),
+            _scope_start("lister", "agent", "orchestrator"),
+            _scope_start("ls", "tool", "lister"),
+            _llm_end({}, annotated_response={"message": "Subagent report.", "tool_calls": []}, parent_uuid="lister"),
+            _llm_end({}, annotated_response={"message": "Final answer."}, parent_uuid="orchestrator"),
+        ],
+        result=FabricRuntimeResult(status="succeeded", response="Final answer."),
+    )
+
+    deltas = [delta.model_dump(exclude_none=True) async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert deltas == [{"content": "Final answer."}]
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_separates_consecutive_llm_steps() -> None:
+    stream = _FakeFabricRuntimeStream(
+        [
+            _llm_end({"role": "assistant", "content": "Looking.", "reasoning_content": "first", "tool_calls": [{}]}),
+            _llm_end({"role": "assistant", "content": "Part one.", "reasoning_content": "second"}),
+            _llm_end({"role": "assistant", "content": "Part two."}),
+        ],
+        result=FabricRuntimeResult(status="succeeded", response="Part two."),
+    )
+
+    deltas = [delta.model_dump(exclude_none=True) async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert deltas == [
+        {"reasoning_content": "first\n\nLooking."},
+        {"content": "Part one.", "reasoning_content": "\n\nsecond"},
+        {"content": "\n\nPart two."},
     ]
 
 
