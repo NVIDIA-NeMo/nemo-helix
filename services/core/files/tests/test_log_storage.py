@@ -8,11 +8,15 @@ from unittest.mock import MagicMock
 import pytest
 from nhx.common.files.storage_config import LocalStorageConfig, S3StorageConfig
 from nhx.common.jobs.schemas import InvalidPageCursorError, LogPageCursorV1, PaginationDirection, decode_log_page_cursor
+from nhx.core.files.app import log_db
 from nhx.core.files.app.backends.local import LocalStorageImpl
 from nhx.core.files.app.backends.s3 import S3StorageImpl
 from nhx.core.files.app.log_db import DuckDBLogRepository
 from nhx.core.files.app.log_storage import LogEntry, LogStorage
 from nhx.core.files.exceptions import InvalidFilterError, InvalidPathError
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 
 @pytest.fixture
@@ -647,3 +651,21 @@ class TestS3LogStorage:
         assert "PROVIDER credential_chain" in call_args
         for fragment in expected_fragments:
             assert fragment in call_args
+
+
+async def test_tail_query_emits_timing_spans(log_storage, local_storage, sample_log_entries, monkeypatch):
+    """Tail queries emit connect/execute/fetch spans so slow log reads can be attributed."""
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(log_db, "tracer", provider.get_tracer("test"))
+
+    await log_storage.insert_logs(local_storage, sample_log_entries)
+    await log_storage.query_logs(local_storage, filters={"job": "job-123"}, tail=5)
+
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    assert {"logs.duckdb.connect", "logs.duckdb.query", "logs.duckdb.execute", "logs.duckdb.fetch"} <= spans.keys()
+    assert spans["logs.duckdb.query"].attributes["logs.query.mode"] == "tail"
+    assert spans["logs.duckdb.query"].attributes["logs.total_count"] == len(sample_log_entries)
+    # The tail query fetches tail + 1 rows to detect an earlier window.
+    assert spans["logs.duckdb.fetch"].attributes["logs.rows_returned"] == 6

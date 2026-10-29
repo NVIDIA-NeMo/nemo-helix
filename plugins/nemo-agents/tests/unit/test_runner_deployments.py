@@ -1764,6 +1764,27 @@ async def test_get_deployment_status_projects_endpoints() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_deployment_status_surfaces_deleting_message() -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        return_value=Deployment(
+            name="hello-dep",
+            workspace="default",
+            deployment_config="hello-dep",
+            status="DELETING",
+            status_message="Waiting for backend to delete deployment: docker paused",
+        )
+    )
+    backend._entities = entities
+
+    info = await backend.get_deployment_status("default", "hello-dep")
+    assert info is not None
+    assert info.status == "deleting"
+    assert info.error == "Waiting for backend to delete deployment: docker paused"
+
+
+@pytest.mark.asyncio
 async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     backend = _backend()
     entities = AsyncMock()
@@ -1792,6 +1813,26 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     assert delete_call is not None
     assert delete_call.args[0] is DeploymentConfig
     assert delete_call.kwargs["expected_db_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_leaves_timed_out_teardown_failed() -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        return_value=Deployment(
+            name="hello-dep",
+            workspace="default",
+            deployment_config="hello-dep",
+            status="FAILED",
+            error_details={"reason": "deleting_timeout"},
+        )
+    )
+    backend._entities = entities
+
+    assert not await backend.delete_deployment("default", "hello-dep")
+    entities.update.assert_not_awaited()
+    entities.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio

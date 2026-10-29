@@ -93,6 +93,15 @@ spec:
               {{- else }}
               value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
               {{- end }}
+            {{- $advertisedBaseUrl := include "nemo-helix.advertisedBaseUrl" . }}
+            {{- if and (include "nemo-helix.embeddedPdpEnabled" .) (regexMatch "^https?://" $advertisedBaseUrl) }}
+            # NHX_BASE_URL above is loopback so embedded auth can call back into this
+            # process. Keep the client-facing origin (workload token issuer, JWKS and
+            # token endpoints, OIDC discovery/redirects) identical to the controllers,
+            # which use the platform base URL.
+            - name: NHX_ADVERTISED_BASE_URL
+              value: {{ $advertisedBaseUrl | quote }}
+            {{- end }}
             - name: NHX_INTERNAL_BASE_URL
               value: {{ include "nemo-helix.platformBaseUrl" . | quote }}
             - name: NHX_AUTOMODEL_DEFAULT_TRAINING_EXECUTION_PROFILE
