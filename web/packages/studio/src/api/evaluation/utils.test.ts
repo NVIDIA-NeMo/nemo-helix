@@ -133,7 +133,7 @@ describe('deploymentForEvalSpec', () => {
 
   it('reports the by-agent route as automatic', () => {
     const spec = { target: { url: `${gateway}/agents/my-agent/-/v1/chat/completions` } };
-    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'automatic' });
+    expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'default' });
   });
 
   it('returns null for targets outside the Agents gateway', () => {

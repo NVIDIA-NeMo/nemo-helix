@@ -15,8 +15,12 @@ export const EvalDeploymentValue: FC<EvalDeploymentValueProps> = ({ deployment }
   if (!deployment) {
     return <Text>—</Text>;
   }
-  if (deployment.kind === 'automatic') {
-    return <Text title="The gateway picked a running deployment for each request">Automatic</Text>;
+  if (deployment.kind === 'default') {
+    return (
+      <Text title="This run called the agent's default route, so each request went to whichever deployment was running">
+        Default
+      </Text>
+    );
   }
   return (
     <Link
