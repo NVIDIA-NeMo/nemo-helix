@@ -17,7 +17,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JOB_FILESET_NAME_PREFIX, JobControl
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.api.filter import ComparisonOperation, FilterOperator
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.auth import AuthContext
 from nhx.common.entities import SYSTEM_WORKSPACE
@@ -27,7 +27,9 @@ from nhx.common.jobs.schemas import (
     HelixJobStatusResponse,
     HelixJobStepStatusResponse,
     HelixJobTaskStatusResponse,
+    JobGroupStatus,
     aggregate_job_group_status,
+    aggregate_job_group_status_from_counts,
 )
 from nhx.common.observability import create_counter
 from nhx.core.jobs.api.v2.jobs.schemas import (
@@ -789,6 +791,122 @@ class JobDispatcher:
     def _member_status(member: HelixJobResponse) -> HelixJobStatus:
         """The status a freshly-created member contributes to the group's initial rollup."""
         return member.status
+
+    async def _count_group_members_by_status(
+        self, group_id: str, workspace: str, statuses: list[HelixJobStatus]
+    ) -> int:
+        """Count group members whose job status is one of ``statuses`` -- without fetching them.
+
+        ANDs the base-column ``parent`` filter with a ``data.status`` ``$in`` filter and reads the
+        count off the pagination envelope (``page_size=1``), so a caller learns how many members
+        are in a given status set with a single one-row query rather than a member scan. ``status``
+        is copied onto each member job by :meth:`_save_job_status`, so it reflects the current attempt.
+        """
+        combined = LogicalOperation(
+            operator=FilterOperator.AND,
+            operations=[
+                ComparisonOperation(operator=FilterOperator.EQ, field="parent", value=group_id),
+                ComparisonOperation(
+                    operator=FilterOperator.IN,
+                    field="data.status",
+                    value=[s.value for s in statuses],
+                ),
+            ],
+        )
+        response = await self.store.list(HelixJob, filter_operation=combined, page=1, page_size=1, workspace=workspace)
+        return response.pagination.total_results
+
+    async def _rolled_up_group_status(self, group_id: str, workspace: str) -> JobGroupStatus:
+        """Compute a group's aggregate status from cheap per-status COUNTS, not a member scan.
+
+        O(1) in group size: a handful of count queries (each a ``page_size=1`` list) feed
+        :func:`aggregate_job_group_status_from_counts`, which shares its precedence rules with
+        the list-based aggregate. Probes are ordered so the common cases short-circuit early:
+
+        - total==0 -> PENDING (no members).
+        - all members terminal -> COMPLETED / FAILED / CANCELLED, disambiguated by the error and
+          cancelled bucket counts.
+        - otherwise non-terminal: a cancel in flight -> CANCELLING; nothing past CREATED -> PENDING;
+          else RUNNING. Only the buckets needed to decide are probed.
+        """
+        total = await self._count_group_members(group_id, workspace)
+        if total == 0:
+            return JobGroupStatus.PENDING
+        terminal_count = await self._count_group_members_by_status(group_id, workspace, HelixJobStatus.terminals())
+        if terminal_count >= total:
+            # Every member is terminal; the error/cancelled mix decides FAILED vs CANCELLED vs COMPLETED.
+            error_count = await self._count_group_members_by_status(group_id, workspace, [HelixJobStatus.ERROR])
+            cancelled_count = await self._count_group_members_by_status(group_id, workspace, [HelixJobStatus.CANCELLED])
+            return aggregate_job_group_status_from_counts(
+                total,
+                {
+                    HelixJobStatus.ERROR: error_count,
+                    HelixJobStatus.CANCELLED: cancelled_count,
+                    HelixJobStatus.COMPLETED: total - error_count - cancelled_count,
+                },
+            )
+        cancel_in_flight = await self._count_group_members_by_status(
+            group_id, workspace, [HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED]
+        )
+        if cancel_in_flight > 0:
+            # A cancel is sweeping the group while members still run.
+            return aggregate_job_group_status_from_counts(
+                total, {HelixJobStatus.CANCELLING: cancel_in_flight, HelixJobStatus.ACTIVE: total - cancel_in_flight}
+            )
+        created_count = await self._count_group_members_by_status(group_id, workspace, [HelixJobStatus.CREATED])
+        if created_count >= total:
+            return JobGroupStatus.PENDING
+        return JobGroupStatus.RUNNING
+
+    async def _persist_group_status_for_member(self, member_job_id: str, workspace: str) -> None:
+        """Recompute and persist a member's parent group's status after the member changed.
+
+        The group ``status`` is a denormalized field (1431): rather than deriving it per read,
+        each member transition rolls it up here and writes it through. Runs AFTER the member's
+        own per-job lock is released, and takes only the short ``group:`` lock around the
+        recompute-and-write so two members transitioning concurrently cannot lose-update the
+        group row. No member cancel happens under this lock (fail_fast fans out separately),
+        so it never nests a second per-job lock and cannot reintroduce the fan-out deadlock.
+        """
+        try:
+            member = await self.store.get_by_id(HelixJob, member_job_id)
+        except EntityNotFoundError:
+            return
+        group_id = member.parent
+        if group_id is None:
+            return
+        try:
+            group = await self.store.get_by_id(JobGroup, group_id)
+        except EntityNotFoundError:
+            return
+        async with _get_job_mutation_lock(f"group:{group.name}", workspace):
+            # Re-read under the lock: a concurrent roll-up may have advanced the stored status.
+            try:
+                group = await self.store.get_by_id(JobGroup, group_id)
+            except EntityNotFoundError:
+                return
+            new_status = await self._rolled_up_group_status(group_id, workspace)
+            if new_status in (JobGroupStatus.CANCELLING, JobGroupStatus.CANCELLED):
+                # Cancel lifecycle is 1433's: this bottom-up member roll-up owns
+                # pending/running/completed/failed only and must never write a cancel
+                # state (a single-member cancel must not flip the whole group). 1433
+                # writes the cancelling intent and the terminal cancelled top-down.
+                return
+            if group.status == new_status:
+                return
+            group.status = new_status
+            try:
+                await self.store.update(group)
+            except EntityConflictError:
+                logger.debug(
+                    "Group status write lost a version race; a concurrent roll-up will re-persist",
+                    extra={"group": group_id, "workspace": workspace},
+                )
+                return
+            logger.info(
+                "Rolled up JobGroup status from member change",
+                extra={"group": group_id, "status": new_status.value, "workspace": workspace},
+            )
 
     async def _member_current_status(self, member: HelixJob) -> HelixJobStatus:
         """Return a member job's effective status from its current attempt.
@@ -1696,16 +1814,21 @@ class JobDispatcher:
                 step, status, status_details, error_details
             )
 
-        # JobGroup fail_fast rides the member status write, but the fan-out runs
-        # AFTER the member's own lock is released: cancelling a sibling takes that
-        # sibling's per-job lock, and holding the member's lock while doing so would
-        # let two same-group members failing concurrently deadlock (A holds a, waits
-        # b; B holds b, waits a). Releasing first makes that ordering impossible.
-        # The trigger ("entered ERROR") is computed from the pre-lock status; the
-        # guard is re-asserted against fresh state inside the sweep, since the group
-        # or member can move in the post-lock gap.
-        if attempt.status == HelixJobStatus.ERROR and attempt_status_before != HelixJobStatus.ERROR:
-            await self._apply_fail_fast_on_member_error(attempt.job, job.workspace)
+        # JobGroup roll-ups ride the member status write but run AFTER the member's own lock is
+        # released. Two things happen here, both only when the member actually changed status:
+        #   1. fail_fast fan-out (fresh ERROR): cancelling a sibling takes that sibling's per-job
+        #      lock; holding the member's lock while doing so would let two same-group members
+        #      failing concurrently deadlock (A holds a, waits b; B holds b, waits a). Releasing
+        #      first makes that ordering impossible. "Entered ERROR" is computed from the pre-lock
+        #      status; the sweep re-asserts fresh state since the group/member can move in the gap.
+        #   2. group status roll-up (any transition): the group's denormalized status is re-rolled
+        #      from the members and persisted, so created/pending/running/completed/error stay
+        #      current without deriving on read. Cancel is 1433's; this never writes cancelling.
+        member_status_changed = attempt.status != attempt_status_before
+        if member_status_changed:
+            if attempt.status == HelixJobStatus.ERROR and attempt_status_before != HelixJobStatus.ERROR:
+                await self._apply_fail_fast_on_member_error(attempt.job, job.workspace)
+            await self._persist_group_status_for_member(attempt.job, job.workspace)
         return saved_step, attempt
 
     async def _update_job_status_from_step_locked(
