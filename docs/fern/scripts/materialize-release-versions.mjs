@@ -256,6 +256,17 @@ function updateDocsYml(releases, previousGeneratedVersionPaths) {
     throw new Error(`${docsYmlPath} must contain a versions/latest.yml entry`);
   }
 
+  // Discovery is semver-descending and marks only unshipped lines as preview.
+  // Rebuild the whole message so deleted or newly preview-only releases cannot
+  // leave a stale link from a previous materialization.
+  const stable = releases.find((release) => !release.availability);
+  const warning = "These are unreleased development docs from main and may differ from the released product.";
+  latestEntry.set("announcement", doc.createNode({
+    message: warning + (stable
+      ? ` See the [latest released docs](${instanceBasepath(doc)}/${stable.slug}/documentation/home).`
+      : ""),
+  }));
+
   if (releases.length > 0) {
     const generatedVersions = releases.map((release) => ({
       "display-name": release.displayName,
@@ -274,6 +285,14 @@ function updateDocsYml(releases, previousGeneratedVersionPaths) {
   writeFileSync(docsYmlPath, String(doc));
 }
 
+function instanceBasepath(doc) {
+  const instance = doc.toJS().instances?.[0];
+  const instanceUrl = instance?.["custom-domain"] ?? instance?.url;
+  return instanceUrl
+    ? new URL(instanceUrl.includes("://") ? instanceUrl : `https://${instanceUrl}`).pathname.replace(/\/$/, "")
+    : "";
+}
+
 // Fern adds the instance basepath to redirect sources, but destinations must
 // include it explicitly (the same convention as authored docs.yml redirects).
 function updateReleaseRedirects(doc, releases) {
@@ -290,11 +309,7 @@ function updateReleaseRedirects(doc, releases) {
   const existingSources = new Set(
     redirects.items.filter(isMap).map((item) => item.get("source")),
   );
-  const instance = doc.toJS().instances?.[0];
-  const instanceUrl = instance?.["custom-domain"] ?? instance?.url;
-  const basepath = instanceUrl
-    ? new URL(instanceUrl.includes("://") ? instanceUrl : `https://${instanceUrl}`).pathname.replace(/\/$/, "")
-    : "";
+  const basepath = instanceBasepath(doc);
   const pushGenerated = (source, destination) => {
     if (existingSources.has(source)) {
       return; // Authored redirects take precedence.
