@@ -12,7 +12,6 @@ interface EvalDeploymentValueProps {
   deployment: EvalJobDeployment | null;
 }
 
-/** A deployment deleted since the run still shows its name; the link opens a not-found page. */
 export const EvalDeploymentValue: FC<EvalDeploymentValueProps> = ({ workspace, deployment }) => {
   if (!deployment) return <>-</>;
   if (deployment.kind === 'automatic') {

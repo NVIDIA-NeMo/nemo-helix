@@ -26,4 +26,9 @@ export const agentDeployment = (
 });
 
 export const agentDeploymentsHandler = (deployments: MockAgentDeployment[]) =>
-  http.get(AGENT_DEPLOYMENTS_URL, () => HttpResponse.json({ data: deployments }));
+  http.get(AGENT_DEPLOYMENTS_URL, ({ request }) => {
+    const agent = new URL(request.url).searchParams.get('filter[agent]');
+    return HttpResponse.json({
+      data: agent ? deployments.filter((deployment) => deployment.agent === agent) : deployments,
+    });
+  });

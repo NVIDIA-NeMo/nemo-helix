@@ -18,11 +18,7 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
-import {
-  AGENT_DEPLOYMENTS_URL,
-  agentDeployment,
-  agentDeploymentsHandler,
-} from '@studio/mocks/handlers/agentDeployments';
+import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -269,21 +265,6 @@ describe('AgentEvaluationWizard deployment', () => {
     await submit(user);
 
     expect(submittedUrl()).toContain(`/deployments/${AGENT}-k8s/-/`);
-  });
-
-  it("asks the API for only the agent's running deployments", async () => {
-    const queries: URLSearchParams[] = [];
-    server.use(
-      http.get(AGENT_DEPLOYMENTS_URL, ({ request }) => {
-        queries.push(new URL(request.url).searchParams);
-        return HttpResponse.json({ data: [agentDeployment(AGENT, `${AGENT}-subprocess`)] });
-      })
-    );
-    renderWizard();
-
-    await waitFor(() => expect(queries.length).toBeGreaterThan(0));
-    expect(queries[0].get('filter[agent]')).toBe(AGENT);
-    expect(queries[0].get('filter[status]')).toBe('running');
   });
 
   it('holds the first step when the agent has no running deployment', async () => {

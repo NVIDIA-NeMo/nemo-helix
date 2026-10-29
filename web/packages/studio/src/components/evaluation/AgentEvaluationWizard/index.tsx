@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { isConflictError } from '@nemo/common/src/api/common/utils';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
+import { DEFAULT_DEBOUNCE_MS, JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
@@ -37,6 +37,7 @@ import {
   Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
+import { useAgentDeployments } from '@studio/api/agents/useAgentDeployments';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
@@ -52,7 +53,6 @@ import {
   type StoredDatasetFile,
 } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
 import { useEvaluationSources } from '@studio/components/evaluation/AgentEvaluationWizard/useEvaluationSources';
-import { useRunningDeployments } from '@studio/components/evaluation/AgentEvaluationWizard/useRunningDeployments';
 import {
   type EvaluationMode,
   isLastStep,
@@ -479,31 +479,31 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   }, [selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
 
   const deployment = useWatch({ control, name: 'deployment' });
-  const runningDeployments = useRunningDeployments({
+  const { deployments: agentDeployments, isLoading: isDeploymentsLoading } = useAgentDeployments({
     workspace,
-    agent: selectedAgent || undefined,
+    agent: selectedAgent ? bareName(selectedAgent) : undefined,
+    refetchInterval: JOB_POLLING_INTERVAL_LONG,
   });
-  const firstRunningDeployment = runningDeployments.deployments[0]?.name;
+  const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
+  const firstRunningDeployment = runningDeployments[0]?.name;
 
-  // Filled only while empty: a pick that later stops running is reported below, never swapped
-  // for another deployment behind the user's back.
   useEffect(() => {
     if (!deployment && firstRunningDeployment) setValue('deployment', firstRunningDeployment);
   }, [deployment, firstRunningDeployment, setValue]);
 
   const deploymentIssue = (() => {
-    if (!selectedAgent || runningDeployments.isLoading) return undefined;
-    if (runningDeployments.deployments.length === 0) {
+    if (!selectedAgent || isDeploymentsLoading) return undefined;
+    if (runningDeployments.length === 0) {
       return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
     }
-    if (!runningDeployments.deployments.some((d) => d.name === deployment)) {
+    if (!runningDeployments.some((d) => d.name === deployment)) {
       return deployment
         ? `Deployment ${deployment} is no longer running. Pick another.`
         : 'Pick a deployment to evaluate.';
     }
     return undefined;
   })();
-  const deploymentItems = runningDeployments.deployments.map((d) => ({
+  const deploymentItems = runningDeployments.map((d) => ({
     value: d.name ?? '',
     children: `${d.name} · ${deploymentModeLabel(d.deployment_mode)}`,
   }));
@@ -861,9 +861,8 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const stepBlocker = (): string | undefined => {
     if (step === 'start') {
       if (!selectedAgent) return 'Pick an agent to evaluate.';
-      // Caught here, not at submit, so nobody fills in a whole run for an agent nothing can answer.
-      if (runningDeployments.isLoading) return 'Loading deployments...';
-      if (runningDeployments.deployments.length === 0) return deploymentIssue;
+      if (isDeploymentsLoading) return 'Loading deployments...';
+      if (runningDeployments.length === 0) return deploymentIssue;
       return undefined;
     }
     if (step === 'experiment') {
@@ -908,7 +907,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     // isJudgeModelsLoading blocks too: invalidModelRefs is empty while the list is in flight, so
     // submitting inside that window would skip the check entirely.
     if (hasNameConflict) return;
-    if (runningDeployments.isLoading || deploymentIssue) return;
+    if (isDeploymentsLoading || deploymentIssue) return;
     if (mode === MODE_DEFAULT && !uploads) {
       setStep('configuration');
       return;
@@ -1195,7 +1194,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               <ControlledSelect
                 useControllerProps={{ control, name: 'deployment' }}
                 items={deploymentItems}
-                loading={runningDeployments.isLoading}
+                loading={isDeploymentsLoading}
                 disabled={isPending}
                 placeholder="Select a deployment"
                 formFieldProps={{

@@ -728,9 +728,11 @@ export const handlers = [
     HttpResponse.json({ data: [], total: 0 })
   ),
   ...agentDeploymentCapabilitiesHandlers,
-  http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
-    HttpResponse.json({
-      data: [
+  http.get(
+    `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`,
+    ({ request }) => {
+      const agent = new URL(request.url).searchParams.get('filter[agent]');
+      const deployments = [
         {
           name: 'rag-agent-prod',
           workspace: 'default',
@@ -758,8 +760,11 @@ export const handlers = [
           port: 8082,
           error: 'Connection timeout',
         },
-      ],
-    })
+      ];
+      return HttpResponse.json({
+        data: agent ? deployments.filter((deployment) => deployment.agent === agent) : deployments,
+      });
+    }
   ),
   // Agent evaluation jobs — exposed at the same prefix as the other agents-v2
   // routes so the AgentPanel's "Recent Evaluations" section and the
