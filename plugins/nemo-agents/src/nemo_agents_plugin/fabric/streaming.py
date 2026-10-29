@@ -26,8 +26,6 @@ from nemo_agents_plugin.fabric.serving_models import (
     ChatCompletionStreamError,
     ChatCompletionStreamErrorResponse,
     ChatCompletionStreamResponse,
-    ChatCompletionStreamToolCall,
-    ChatCompletionStreamToolCallFunction,
 )
 from nemo_fabric import FabricConfig, RunPlan
 
@@ -35,7 +33,7 @@ from nemo_fabric import FabricConfig, RunPlan
 # represent completed LLM work; the payload remains producer-defined, so the
 # extraction below only handles known assistant-output shapes. Relay also
 # attaches a provider-neutral ``category_profile.annotated_response`` to LLM
-# scopes, which is preferred for tool calls and used as a text fallback.
+# scopes, which is used as a text fallback.
 _ASSISTANT_ROLES = frozenset({"assistant", "ai"})
 _ATOF_EVENT_KINDS = frozenset({"scope", "mark"})
 # Content blocks carry reasoning under a key matching their type: LangChain uses
@@ -92,12 +90,13 @@ class FabricStreamResultError(RuntimeError):
 
 
 def extract_assistant_delta(record: Mapping[str, Any]) -> ChatCompletionStreamDelta | None:
-    """Extract assistant text, reasoning, and tool calls from a known ATOF record shape.
+    """Extract assistant text and reasoning from a known ATOF record shape.
 
     Fabric streams raw Relay ATOF dictionaries rather than a normalized delta
-    contract. Completed LLM scopes yield text, reasoning, and the tool calls the
-    agent issued; other records only yield known assistant text shapes.
-    Lifecycle, metadata, tool, and user-message records are skipped.
+    contract. Completed LLM scopes yield text and reasoning; other records only
+    yield known assistant text shapes. Lifecycle, metadata, tool, and
+    user-message records are skipped. Tool calls are omitted because Chat
+    Completions ``tool_calls`` asks the client to run them.
     """
     if _is_atof_record(record):
         return _extract_llm_output_delta(record) if _is_llm_output_scope(record) else None
@@ -187,20 +186,12 @@ async def iter_fabric_chat_completion_sse(
 
 
 async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIterator[ChatCompletionStreamDelta]:
-    """Yield assistant deltas and validate the terminal Fabric result.
-
-    Tool-call indices are assigned across the whole stream so clients can
-    accumulate every call the agent made within one assistant message.
-    """
+    """Yield assistant deltas and validate the terminal Fabric result."""
     emitted_text = False
-    tool_call_count = 0
     async for record in stream.records():
         delta = extract_assistant_delta(record)
         if delta is None:
             continue
-        for tool_call in delta.tool_calls or ():
-            tool_call.index = tool_call_count
-            tool_call_count += 1
         emitted_text = emitted_text or delta.content is not None
         yield delta
 
@@ -279,7 +270,7 @@ def _is_llm_output_scope(value: Mapping[str, Any]) -> bool:
 
 
 def _extract_llm_output_delta(record: Mapping[str, Any]) -> ChatCompletionStreamDelta | None:
-    """Build one delta from a completed LLM scope's text, reasoning, and tool calls."""
+    """Build one delta from a completed LLM scope's text and reasoning."""
     data = record.get("data")
     profile = record.get("category_profile")
     annotated = profile.get("annotated_response") if isinstance(profile, Mapping) else None
@@ -289,10 +280,9 @@ def _extract_llm_output_delta(record: Mapping[str, Any]) -> ChatCompletionStream
 
     content = _extract_payload_text_delta(data) or _text_from_content(annotated.get("message"))
     reasoning = _reasoning_from_message(message)
-    tool_calls = _normalize_tool_calls(annotated.get("tool_calls")) or _tool_calls_from_message(message)
-    if content is None and reasoning is None and not tool_calls:
+    if content is None and reasoning is None:
         return None
-    return ChatCompletionStreamDelta(content=content, reasoning_content=reasoning, tool_calls=tool_calls or None)
+    return ChatCompletionStreamDelta(content=content, reasoning_content=reasoning)
 
 
 def _find_assistant_message(value: Any) -> Mapping[str, Any] | None:
@@ -339,50 +329,6 @@ def _reasoning_from_message(message: Mapping[str, Any]) -> str | None:
         and isinstance(part.get(part["type"]), str)
     ]
     return "".join(parts) or None
-
-
-def _tool_calls_from_message(message: Mapping[str, Any]) -> list[ChatCompletionStreamToolCall]:
-    """Return OpenAI ``tool_calls`` or, when absent, Anthropic ``tool_use`` content blocks."""
-    tool_calls = _normalize_tool_calls(message.get("tool_calls"))
-    if tool_calls:
-        return tool_calls
-    content = message.get("content")
-    if not isinstance(content, list):
-        return []
-    return _normalize_tool_calls(
-        [part for part in content if isinstance(part, Mapping) and part.get("type") == "tool_use"]
-    )
-
-
-def _normalize_tool_calls(value: Any) -> list[ChatCompletionStreamToolCall]:
-    """Normalize flat, OpenAI-nested, LangChain, or Anthropic tool calls to OpenAI stream shape."""
-    if not isinstance(value, list):
-        return []
-    tool_calls = []
-    for call in value:
-        if not isinstance(call, Mapping):
-            continue
-        function = call.get("function")
-        if not isinstance(function, Mapping):
-            function = call
-        name = function.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        arguments = next(
-            (args for args in (function.get("arguments"), call.get("args"), call.get("input")) if args is not None),
-            {},
-        )
-        call_id = call.get("id")
-        tool_calls.append(
-            ChatCompletionStreamToolCall(
-                id=call_id if isinstance(call_id, str) and call_id else None,
-                function=ChatCompletionStreamToolCallFunction(
-                    name=name,
-                    arguments=arguments if isinstance(arguments, str) else json.dumps(arguments),
-                ),
-            )
-        )
-    return tool_calls
 
 
 def _extract_openai_choice_delta(value: Mapping[str, Any]) -> str | None:

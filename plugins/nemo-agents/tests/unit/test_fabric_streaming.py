@@ -396,14 +396,6 @@ def test_extract_assistant_delta_from_relay_langchain_llm_scope() -> None:
     assert delta.model_dump(exclude_none=True) == {
         "content": "Let me add.",
         "reasoning_content": "Thinking about adding.",
-        "tool_calls": [
-            {
-                "index": 0,
-                "id": "call_1",
-                "type": "function",
-                "function": {"name": "add", "arguments": '{"a": 1, "b": 2}'},
-            }
-        ],
     }
 
 
@@ -429,17 +421,7 @@ def test_extract_assistant_delta_from_relay_langchain_llm_scope() -> None:
                     }
                 ]
             },
-            {
-                "reasoning_content": "plan",
-                "tool_calls": [
-                    {
-                        "index": 0,
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "search", "arguments": '{"q":"x"}'},
-                    }
-                ],
-            },
+            {"reasoning_content": "plan"},
         ),
         (
             {
@@ -450,18 +432,7 @@ def test_extract_assistant_delta_from_relay_langchain_llm_scope() -> None:
                     {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"q": "x"}},
                 ],
             },
-            {
-                "content": "Searching.",
-                "reasoning_content": "hmm",
-                "tool_calls": [
-                    {
-                        "index": 0,
-                        "id": "toolu_1",
-                        "type": "function",
-                        "function": {"name": "search", "arguments": '{"q": "x"}'},
-                    }
-                ],
-            },
+            {"content": "Searching.", "reasoning_content": "hmm"},
         ),
     ],
     ids=["openai", "anthropic"],
@@ -487,7 +458,7 @@ def test_extract_assistant_delta_skips_tool_scopes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_iter_fabric_assistant_deltas_indexes_tool_calls_across_stream() -> None:
+async def test_iter_fabric_assistant_deltas_omits_tool_calls() -> None:
     stream = _FakeFabricRuntimeStream(
         [
             _LANGCHAIN_TOOL_TURN,
@@ -499,10 +470,12 @@ async def test_iter_fabric_assistant_deltas_indexes_tool_calls_across_stream() -
         result=FabricRuntimeResult(status="succeeded", response="The answer is 3."),
     )
 
-    deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
+    deltas = [delta.model_dump(exclude_none=True) async for delta in iter_fabric_assistant_deltas(stream)]
 
-    assert [delta.content for delta in deltas] == ["Let me add.", None, "The answer is 3."]
-    assert [[call.index for call in delta.tool_calls or ()] for delta in deltas] == [[0], [1], []]
+    assert deltas == [
+        {"content": "Let me add.", "reasoning_content": "Thinking about adding."},
+        {"content": "The answer is 3."},
+    ]
 
 
 @pytest.mark.asyncio
@@ -518,4 +491,4 @@ async def test_iter_fabric_assistant_deltas_falls_back_to_response_after_tool_on
 
     deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
 
-    assert [delta.content for delta in deltas] == [None, "final"]
+    assert [delta.content for delta in deltas] == ["final"]

@@ -347,61 +347,6 @@ describe('AssistantChat', () => {
     );
   });
 
-  it('groups streamed tool calls into work details before the stream completes', async () => {
-    let finishStream = () => {};
-    const streamDone = new Promise<void>((resolve) => {
-      finishStream = resolve;
-    });
-    const toolCallChunk = {
-      ...createCompletionChunk('Let me search.'),
-      choices: [
-        {
-          index: 0,
-          delta: {
-            content: 'Let me search.',
-            tool_calls: [{ index: 0, id: 'call_a', function: { name: 'search', arguments: '{}' } }],
-          },
-          finish_reason: null,
-          logprobs: null,
-        },
-      ],
-    } as ChatCompletionChunk;
-    const stream = {
-      controller: new AbortController(),
-      async *[Symbol.asyncIterator]() {
-        yield toolCallChunk;
-        await streamDone;
-      },
-    } as unknown as Stream<ChatCompletionChunk>;
-    mocks.createChatCompletion.mockResolvedValueOnce(stream);
-    const onMessageComplete = vi.fn();
-
-    renderAssistantChat(
-      <AssistantChat
-        model="test-model"
-        workspace="default"
-        onMessageComplete={onMessageComplete}
-        toolCallPartComponent={({ toolName, args }) => (
-          <div data-testid="tool-part">{`${toolName}:${String(args.label ?? '')}`}</div>
-        )}
-      />
-    );
-
-    await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Weather?');
-    await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
-
-    await waitFor(() =>
-      expect(screen.getByTestId('tool-part')).toHaveTextContent(
-        'AssistantCollapsedStudioDetails:Work details'
-      )
-    );
-    expect(onMessageComplete).not.toHaveBeenCalled();
-    expect(screen.queryByText('Let me search.')).not.toBeInTheDocument();
-
-    finishStream();
-    await waitFor(() => expect(onMessageComplete).toHaveBeenCalled());
-  });
-
   it(
     'clears the current thread',
     async () => {

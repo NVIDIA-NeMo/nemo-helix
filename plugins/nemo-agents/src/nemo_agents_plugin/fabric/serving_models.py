@@ -60,29 +60,12 @@ class ChatCompletionResponse(BaseModel):
     usage: dict[str, Any] | None = None
 
 
-class ChatCompletionStreamToolCallFunction(BaseModel):
-    """OpenAI-compatible streaming tool-call function."""
-
-    name: str
-    arguments: str
-
-
-class ChatCompletionStreamToolCall(BaseModel):
-    """OpenAI-compatible streaming tool call the agent already executed."""
-
-    index: int = 0
-    id: str | None = None
-    type: Literal["function"] = "function"
-    function: ChatCompletionStreamToolCallFunction
-
-
 class ChatCompletionStreamDelta(BaseModel):
     """OpenAI-compatible streaming response delta."""
 
     role: Literal["assistant"] | None = None
     content: str | None = None
     reasoning_content: str | None = None
-    tool_calls: list[ChatCompletionStreamToolCall] | None = None
 
 
 class ChatCompletionStreamChoice(BaseModel):
