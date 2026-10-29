@@ -230,6 +230,37 @@ allow_request if {
 	req_permissions == []
 }
 
+# A verified Job delegation may read Secret values without becoming a service
+# principal or acquiring secrets.access on any other API. The Secret handler
+# separately requires secrets.read for the delegated creator in the requested
+# workspace (including cross-workspace secret references).
+allow_request if {
+	delegated_job_secret_access
+	scope_check_passed
+}
+
+# This snapshot is supplied by bearer middleware only for Helix-signed workload
+# access tokens. Actor names, trusted headers, IdP claims and JobRunner alone do
+# not establish this capability. Keep this exception restricted to one GET route.
+default delegated_job_secret_access := false
+
+delegated_job_secret_access if {
+	extract_method == "GET"
+	endpoint_scan == "/apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access"
+	is_string(input.on_behalf_of_principal_id)
+	input.on_behalf_of_principal_id != ""
+	descriptor := input.identity_resolution.principal
+	descriptor.kind == "workload_access_token"
+	descriptor.subject_claim == "act.sub"
+	descriptor.subject == input.principal_id
+	workload := descriptor.claims_snapshot.nhx_workload
+	workload.kind == "job"
+	is_string(workload.workspace)
+	workload.workspace != ""
+	is_string(workload.job_id)
+	workload.job_id != ""
+}
+
 # DENY REQUEST RULES
 
 # Default allow (deny_request overrides allow_request when true)
@@ -266,9 +297,9 @@ path_under_denied_prefix(path, prefix) if {
 	substring(path, count(prefix), 1) == "/"
 }
 
-# Deny direct secret value access for non-service principals (including HelixAdmin).
-# Secret values must only be accessed through the service delegation pattern, where a
-# service principal reads the value on behalf of a user with secrets.access permission.
+# Deny direct secret value access for non-service principals (including HelixAdmin),
+# except the verified Job delegation above. The Secret handler enforces secrets.read
+# for the on-behalf-of user in either delegation path.
 # Matches: /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access
 deny_request if {
 	path := extract_path
@@ -280,6 +311,7 @@ deny_request if {
 	path_parts[8] == "access"
 
 	request_caller_kind != "service_principal"
+	not delegated_job_secret_access
 }
 
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).
