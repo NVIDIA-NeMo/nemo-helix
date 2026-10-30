@@ -13,9 +13,10 @@ lists every offending key.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from harbor.models.trial.paths import EnvironmentPaths
 from nemo_evals.harbor.compose.images import (
     dockerfile_path,
     parse_build_source,
@@ -27,8 +28,10 @@ from nemo_evals.harbor.compose.models import (
     ComposeError,
     ComposeMainSettings,
     ComposeProblems,
+    ComposeSecurity,
     ComposeService,
     ComposeTask,
+    ComposeTmpfs,
     ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.resolve import (
@@ -51,6 +54,8 @@ from nemo_evals.harbor.compose.service_options import (
     parse_ports,
     parse_readiness,
     parse_resources,
+    parse_security,
+    parse_tmpfs,
     parse_volume_mounts,
     parse_working_dir,
 )
@@ -85,8 +90,23 @@ _COMMON_KEYS = frozenset(
         "platform",
     }
 )
-_SERVICE_KEYS = _COMMON_KEYS | {"shm_size", "cpus", "mem_limit", "deploy"}
-_MAIN_KEYS = _COMMON_KEYS | {"cap_add", "cpus", "mem_limit", "deploy", "working_dir"}
+# Keys that only narrow what a container may do; see :func:`parse_security` and :func:`parse_tmpfs`.
+_SECURITY_KEYS = frozenset({"user", "read_only", "cap_drop", "security_opt", "tmpfs"})
+_SERVICE_KEYS = _COMMON_KEYS | _SECURITY_KEYS | {"shm_size", "cpus", "mem_limit", "deploy"}
+_MAIN_KEYS = _COMMON_KEYS | _SECURITY_KEYS | {"cap_add", "cpus", "mem_limit", "deploy", "working_dir"}
+
+# Where Harbor writes in `main`: the log directories `start()` creates, and where it uploads the tests and the
+# solution. A read-only `main` must mount something writable over each.
+_PATHS_HARBOR_WRITES = tuple(
+    str(path)
+    for path in (
+        EnvironmentPaths.agent_dir,
+        EnvironmentPaths.verifier_dir,
+        EnvironmentPaths.artifacts_dir,
+        EnvironmentPaths.tests_dir,
+        EnvironmentPaths.solution_dir,
+    )
+)
 
 
 def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTask | None:
@@ -131,6 +151,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
     for name in sorted(declared_volumes & {volume for _path, volume in HARBOR_LOG_DIRECTORIES.values()}):
         problems.invalid(f"volumes.{name}", "this name is reserved for Harbor's log directories")
     _check_networks(resolved.document, {MAIN_SERVICE: resolved.main, **resolved.services}, problems)
+    _check_main_network_mode(resolved.main, resolved.services, resolved.no_network_in_every_phase, problems)
 
     # Parse every service before raising, so a task with several problems reports all of them.
     service_parser = ServiceParser(task_dir, declared_volumes, resolved.interpolator, problems)
@@ -155,6 +176,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         compose_path=compose_path,
     )
     services, main, log_volumes = _share_harbor_log_mounts(services, main, resolved.harbor_log_mounts)
+    _check_harbor_paths_writable(main, resolved.workdir, compose_path)
 
     # Only a prebuilt task runs the image named in the compose file; a built `main` comes from its Dockerfile.
     main_image = resolved.main.get("image")
@@ -165,7 +187,11 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         main_image=str(main_image) if resolved.prebuilt and main_image else None,
         services=services,
         main=main,
-        volumes=[*_mounted_volumes(resolved.document, services, main), *log_volumes],
+        volumes=[
+            *_mounted_volumes(resolved.document, services, main),
+            *service_parser.anonymous_volumes,
+            *log_volumes,
+        ],
     )
 
 
@@ -183,6 +209,8 @@ class ServiceParser:
         self._declared_volumes = declared_volumes
         self._interpolator = interpolator
         self._problems = problems
+        # Every anonymous volume a service mounts, in parse order: each is its own pod volume.
+        self.anonymous_volumes: list[str] = []
 
     def service(self, name: str, raw_service: dict[str, Any], *, prebuilt: bool) -> ComposeService | None:
         """Read service ``name`` (any service but ``main``) of a task that is ``prebuilt`` or not.
@@ -197,6 +225,7 @@ class ServiceParser:
 
         environment = self._environment(raw_service, path)
         limits, requests = parse_resources(raw_service, path, self._problems)
+        security, tmpfs = self._security_and_tmpfs(raw_service, path)
         return ComposeService(
             name=name,
             source=source,
@@ -209,8 +238,10 @@ class ServiceParser:
             readiness=parse_readiness(raw_service.get("healthcheck"), f"{path}.healthcheck", self._problems),
             limits=limits,
             requests=requests,
-            volume_mounts=self._volume_mounts(raw_service, path),
+            volume_mounts=self._volume_mounts(name, raw_service, path),
             shm_size=parse_memory_quantity(raw_service.get("shm_size"), f"{path}.shm_size", self._problems),
+            security=security,
+            tmpfs=tmpfs,
         )
 
     def main(
@@ -256,17 +287,20 @@ class ServiceParser:
                     self._task_dir, str(dockerfile_path(build)), f"{path}.build", self._problems
                 )
 
+        security, tmpfs = self._security_and_tmpfs(raw_main, path)
         settings = ComposeMainSettings(
             depends_on=parse_dependency_conditions(raw_main.get("depends_on"), f"{path}.depends_on", self._problems),
             env=environment,
             readiness=parse_readiness(raw_main.get("healthcheck"), f"{path}.healthcheck", self._problems),
             add_capabilities=parse_capabilities(raw_main, path, self._problems),
-            volume_mounts=self._volume_mounts(raw_main, path),
+            volume_mounts=self._volume_mounts(MAIN_SERVICE, raw_main, path),
             entrypoint=entrypoint,
             ports=parse_ports(raw_main, path, self._problems),
             command=command or None,
             working_dir=parse_working_dir(raw_main.get("working_dir"), f"{path}.working_dir", self._problems),
             platform=parse_platform(raw_main.get("platform"), f"{path}.platform", self._problems),
+            security=security,
+            tmpfs=tmpfs,
         )
         return settings, build
 
@@ -301,11 +335,29 @@ class ServiceParser:
         }
         return self._interpolator.fill_in_value_less_entries(environment, f"{path}.environment")
 
-    def _volume_mounts(self, raw_service: Mapping[str, Any], path: str) -> list[ComposeVolumeMount]:
-        """Read a service's ``volumes`` as mounts of the compose file's declared named volumes."""
-        return parse_volume_mounts(
-            raw_service.get("volumes"), f"{path}.volumes", self._declared_volumes, self._problems
+    def _security_and_tmpfs(
+        self, raw_service: Mapping[str, Any], path: str
+    ) -> tuple[ComposeSecurity | None, list[ComposeTmpfs]]:
+        """Read a service's restrictions and its ``tmpfs``, whose ``nosuid`` and ``nodev`` depend on them."""
+        security = parse_security(raw_service, path, self._problems)
+        return security, parse_tmpfs(raw_service.get("tmpfs"), f"{path}.tmpfs", security, self._problems)
+
+    def _volume_mounts(self, name: str, raw_service: Mapping[str, Any], path: str) -> list[ComposeVolumeMount]:
+        """Read service ``name``'s ``volumes`` as mounts of the file's declared volumes, or of anonymous ones.
+
+        Each anonymous volume is recorded in ``anonymous_volumes``. One whose generated name the file also declares
+        is refused, since the two would share a pod volume.
+        """
+        mounts = parse_volume_mounts(
+            raw_service.get("volumes"), f"{path}.volumes", name, self._declared_volumes, self._problems
         )
+        for mount in mounts:
+            if not mount.anonymous:
+                continue
+            if mount.name in self._declared_volumes:
+                self._problems.invalid(f"volumes.{mount.name}", "this name is reserved for an anonymous volume")
+            self.anonymous_volumes.append(mount.name)
+        return mounts
 
     def _check_keys(self, name: str, raw_service: Mapping[str, Any], allowed_keys: frozenset[str]) -> None:
         """Record every key of service ``name`` that a pod can't honor: unknown keys and other network modes.
@@ -316,7 +368,9 @@ class ServiceParser:
             if key not in allowed_keys and key not in _NO_EFFECT_KEYS and not str(key).startswith("x-"):
                 self._problems.unsupported(f"services.{name}.{key}")
 
-        if _shares_a_network_namespace(raw_service) is False:
+        # `main`'s `network_mode: none` is checked by `_check_main_network_mode`.
+        main_without_network = name == MAIN_SERVICE and raw_service.get("network_mode") == "none"
+        if _shares_a_network_namespace(raw_service) is False and not main_without_network:
             self._problems.unsupported(f"services.{name}.network_mode")
 
 
@@ -333,6 +387,69 @@ def _declared_volumes(document: Mapping[str, Any], problems: ComposeProblems) ->
         if options not in (None, {}):
             problems.unsupported(f"volumes.{name}: options")
     return {str(name) for name in volumes}
+
+
+def _check_main_network_mode(
+    raw_main: Mapping[str, Any],
+    raw_services: Mapping[str, Mapping[str, Any]],
+    no_network_in_every_phase: bool,
+    problems: ComposeProblems,
+) -> None:
+    """Record ``network_mode: none`` on ``main`` unless the sandbox would isolate ``main`` as much.
+
+    A pod always has a network, which execd needs to take Harbor's commands, so ``main`` can't go without one. What
+    a pod can do is deny all egress, which the sandbox already does when ``task.toml`` is ``no-network``; Harbor
+    itself runs a ``no-network`` task by setting this same ``network_mode: none`` on ``main``. So it's accepted when
+    ``task.toml`` already says so for every phase. It's refused alongside any other service: under Compose those
+    can't reach ``main``, but in a pod they share its network.
+    """
+    if raw_main.get("network_mode") != "none":
+        return
+    if not no_network_in_every_phase:
+        problems.unsupported(
+            f'services.{MAIN_SERVICE}.network_mode: none, unless task.toml sets network_mode = "no-network" '
+            "for every phase"
+        )
+    if raw_services:
+        problems.unsupported(f"services.{MAIN_SERVICE}.network_mode: none, alongside other services")
+
+
+def _check_harbor_paths_writable(main: ComposeMainSettings, workdir: str | None, compose_path: str) -> None:
+    """Raise if Harbor couldn't write somewhere it needs to in ``main``.
+
+    Harbor writes its logs, and uploads the tests and the solution, into ``main``. The sandbox also creates
+    ``task.toml``'s ``workdir`` there when it starts, unless it's ``/``. Without this check such a task would only fail
+    later, when the sandbox starts or the verifier runs.
+
+    What decides is the closest mount over each path, as in the container: a read-only mount inside a writable one
+    wins over it. A path no mount covers is on the image's own filesystem, which is writable unless ``main`` is
+    ``read_only``.
+    """
+    main_is_read_only = main.security is not None and main.security.read_only
+    # Each mount over main, and whether it can be written.
+    mounts = [(PurePosixPath(mount.mount_path), True) for mount in main.tmpfs]
+    mounts += [(PurePosixPath(mount.mount_path), not mount.read_only) for mount in main.volume_mounts]
+
+    paths_written = [*_PATHS_HARBOR_WRITES, *([workdir] if workdir and workdir != "/" else [])]
+    unwritable_paths = []
+    for path in paths_written:
+        covering_mounts = [
+            (mount_path, writable) for mount_path, writable in mounts if PurePosixPath(path).is_relative_to(mount_path)
+        ]
+        if covering_mounts:
+            _closest_path, writable = max(covering_mounts, key=lambda mount: len(mount[0].parts))
+        else:
+            writable = not main_is_read_only
+        if not writable:
+            unwritable_paths.append(path)
+
+    if unwritable_paths:
+        raise ComposeError(
+            "compose_unsupported",
+            "Harbor writes to these paths in main, but they aren't writable; mount a writable tmpfs or volume over each",
+            compose_path=compose_path,
+            paths=tuple(unwritable_paths),
+        )
 
 
 def _shares_a_network_namespace(raw_service: Mapping[str, Any]) -> bool | None:

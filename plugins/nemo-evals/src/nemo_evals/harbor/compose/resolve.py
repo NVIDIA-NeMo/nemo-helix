@@ -23,6 +23,7 @@ from typing import Any
 
 import yaml
 from harbor.environments.docker import COMPOSE_BUILD_PATH, COMPOSE_PREBUILT_PATH
+from harbor.models.task.config import NetworkMode, TaskConfig
 from harbor.models.trial.paths import EnvironmentPaths
 from harbor.utils.env import get_required_host_vars, is_env_template
 from nemo_evals.harbor.compose.models import ComposeError, ComposeProblems
@@ -96,6 +97,12 @@ class ResolvedCompose:
     interpolator: Interpolator
     """The variables Compose has for this task, to read ``env_file`` and look up value-less ``environment`` entries."""
 
+    no_network_in_every_phase: bool
+    """Whether ``task.toml`` makes every phase ``no-network``, so the sandbox already denies all egress."""
+
+    workdir: str | None
+    """``task.toml``'s ``workdir``, which the sandbox creates in ``main`` when it starts; None when it sets none."""
+
 
 def resolve_compose(
     task_dir: Path, compose_file: Path, compose_path: str, problems: ComposeProblems
@@ -154,6 +161,8 @@ def resolve_compose(
         harbor_log_mounts=harbor_log_mounts,
         task_limits=_task_limits(task_environment),
         interpolator=interpolator,
+        no_network_in_every_phase=_no_network_in_every_phase(task_dir),
+        workdir=str(task_environment["workdir"]) if task_environment.get("workdir") else None,
     )
 
 
@@ -585,6 +594,25 @@ def _task_environment(task_dir: Path) -> dict[str, Any]:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise ComposeError("compose_invalid", f"can't read task.toml: {error}") from error
     return environment if isinstance(environment, dict) else {}
+
+
+def _no_network_in_every_phase(task_dir: Path) -> bool:
+    """Whether ``task.toml`` sets ``no-network`` for the environment and no phase overrides it with anything else.
+
+    Read with Harbor's own model, so the deprecated ``allow_internet = false`` counts too. A ``task.toml`` that
+    Harbor can't read counts as networked: the runner refuses it anyway.
+    """
+    task_toml = task_dir / "task.toml"
+    try:
+        config = TaskConfig.model_validate_toml(read_data_file(task_toml, "task.toml", task_dir))
+    except (ComposeError, ValueError):
+        return False
+
+    if config.environment.network_mode != NetworkMode.NO_NETWORK:
+        return False
+    phases = [config.agent, config.verifier]
+    phases += [phase for step in config.steps or [] for phase in (step.agent, step.verifier)]
+    return all(phase.network_mode in (None, NetworkMode.NO_NETWORK) for phase in phases)
 
 
 def _task_limits(task_environment: Mapping[str, Any]) -> dict[str, str]:

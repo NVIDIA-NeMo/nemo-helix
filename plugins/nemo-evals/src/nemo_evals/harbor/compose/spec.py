@@ -17,8 +17,10 @@ from nemo_evals.harbor.compose.models import (
     ComposeError,
     ComposeImage,
     ComposeMainSettings,
+    ComposeSecurity,
     ComposeService,
     ComposeTask,
+    ComposeTmpfs,
     ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.parser import parse_compose
@@ -217,6 +219,27 @@ def _mount_spec(mount: ComposeVolumeMount, volume_names: Mapping[str, str]) -> d
     return {"name": volume_names[mount.name], "mount_path": mount.mount_path, "read_only": mount.read_only}
 
 
+def _security_and_tmpfs_spec(security: ComposeSecurity | None, tmpfs: list[ComposeTmpfs]) -> dict[str, Any]:
+    """Render a container's restrictions and ``tmpfs`` as the ``security`` and ``tmpfs`` keys ``ComposeServices`` takes."""
+    spec: dict[str, Any] = {}
+    if security is not None:
+        # Only what the file sets, so the spec the extension reads stays as small as the file. `or None` drops a
+        # False or empty setting, but uid and gid are passed as they are: 0 is root, not unset.
+        settings = {
+            "run_as_user": security.user,
+            "run_as_group": security.group,
+            "read_only_root_filesystem": security.read_only or None,
+            "drop_capabilities": security.cap_drop or None,
+            "no_new_privileges": security.no_new_privileges or None,
+        }
+        spec["security"] = {key: value for key, value in settings.items() if value is not None}
+    if tmpfs:
+        spec["tmpfs"] = [
+            {"mount_path": mount.mount_path, **({"size_limit": mount.size} if mount.size else {})} for mount in tmpfs
+        ]
+    return spec
+
+
 def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: Mapping[str, str]) -> dict[str, Any]:
     """Render ``main``'s part of the spec; ``wait_budget_sec`` becomes its readiness timeout when it has a readiness check."""
     spec: dict[str, Any] = {}
@@ -234,6 +257,7 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: 
         spec["add_capabilities"] = main.add_capabilities
     if main.readiness is not None:
         spec["readiness"] = {"exec": main.readiness.exec_, "timeout_sec": _clamped_timeout_sec(wait_budget_sec)}
+    spec.update(_security_and_tmpfs_spec(main.security, main.tmpfs))
     return spec
 
 
@@ -281,6 +305,7 @@ def _service_spec(
         spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in service.volume_mounts]
     if service.shm_size is not None:
         spec["shm_size"] = service.shm_size
+    spec.update(_security_and_tmpfs_spec(service.security, service.tmpfs))
     return spec
 
 
