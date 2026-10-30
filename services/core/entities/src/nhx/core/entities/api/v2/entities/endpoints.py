@@ -34,6 +34,11 @@ from nhx.core.entities.api.dependencies import (
     WorkspaceRepository,
 )
 from nhx.core.entities.api.v2.entities.schemas import EntityCreateInput, EntityUpdate
+from nhx.core.entities.api.v2.entity_access import (
+    require_control_entity_access,
+    require_entity_read_access,
+    require_relationship_access,
+)
 from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
@@ -122,6 +127,7 @@ async def _validate_parent_access(
     accessible: set[str] | None,
     repository: EntityRepository,
     parent_id: str,
+    auth_client: AuthClient,
 ) -> None:
     """Ensure the parent exists and the caller may reference it (parent may live in another workspace).
 
@@ -137,6 +143,7 @@ async def _validate_parent_access(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Parent entity '{parent_id}' not found or not in accessible workspaces",
         )
+    await require_control_entity_access(auth_client, parent.workspace, parent.entity_type, "read")
 
 
 def _workspace_does_not_exist(workspace: str) -> EntityValidationError:
@@ -252,6 +259,7 @@ async def create_entity(
     auth_client: AuthClientDep,
 ) -> Entity:
     """Create a new entity."""
+    await require_control_entity_access(auth_client, workspace, entity_type, "create")
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(
         workspace_repository,
@@ -275,7 +283,7 @@ async def create_entity(
     )
 
     if entity.parent is not None:
-        await _validate_parent_access(accessible, repository, entity.parent)
+        await _validate_parent_access(accessible, repository, entity.parent, auth_client)
     try:
         new_entity = await repository.create_entity(
             workspace=workspace,
@@ -395,6 +403,8 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
+    await require_control_entity_access(auth_client, workspace, entity_type, "list")
+    await require_relationship_access(auth_client, filter)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
         accessible_workspaces = await get_accessible_workspaces(repository)
@@ -478,6 +488,7 @@ async def get_entity_by_name(
     parent: str | None = Query(default=None, description="Parent entity ID for nested entities"),
 ) -> Entity:
     """Get entity by name."""
+    await require_control_entity_access(auth_client, workspace, entity_type, "read")
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
@@ -533,6 +544,7 @@ async def update_entity_by_name(
     parent: str | None = Query(default=None, description="Parent entity ID for nested entities"),
 ) -> Entity:
     """Update entity by name."""
+    await require_control_entity_access(auth_client, workspace, entity_type, "update")
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(
         workspace_repository,
@@ -652,6 +664,7 @@ async def delete_entity_by_name(
     ),
 ) -> DeleteResponse:
     """Delete entity by name."""
+    await require_control_entity_access(auth_client, workspace, entity_type, "delete")
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
     await require_workspace_access(
@@ -708,6 +721,7 @@ async def get_entity_by_id(
     if entity is None:
         raise HTTPException(status_code=404, detail="Entity not found")
 
+    await require_entity_read_access(auth_client, entity.workspace, entity.entity_type)
     await validate_workspace_not_deleting(workspace_repository, auth_client, entity.workspace)
 
     return entity

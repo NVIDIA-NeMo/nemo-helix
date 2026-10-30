@@ -43,6 +43,7 @@ def test_taskset_run_real_authorization_denies_create_service_and_source(tmp_pat
         workspaces=["destination", "source"],
         projects=[],
         auth_bundle_cache_seconds=0,
+        auth_policy_data_refresh_interval=3600,
         access_log=True,
     ) as ctx:
         admin = {"X-NHX-Principal-Id": "service:integration-test"}
