@@ -131,15 +131,20 @@ async def create_deployment(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    image = body.image
+    if not image and is_container_deployment_mode(body.deployment_mode) and agent.reference is not None:
+        image = agent.reference.container_image or ""
+
     # The runner fails the deployment for this; the answer is already available here.
     if is_container_deployment_mode(body.deployment_mode) and not (
-        body.image or AgentsConfig.get().deployments.default_image
+        image or AgentsConfig.get().deployments.default_image
     ):
         raise HTTPException(
             status_code=400,
             detail=(
                 f"deployment_mode '{body.deployment_mode}' requires a container image. "
-                "Set 'image' on the request, or configure 'deployments.default_image'."
+                "Set 'image' on the request, register 'reference.container_image' on the agent, "
+                "or configure 'deployments.default_image'."
             ),
         )
 
@@ -156,9 +161,9 @@ async def create_deployment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
-    # A requested image may install adapters this server can't see; the container checks them itself.
+    # An agent image may install adapters this server can't see; the container checks them itself.
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
-        body.image.strip() and is_container_deployment_mode(body.deployment_mode)
+        image.strip() and is_container_deployment_mode(body.deployment_mode)
     ):
         # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
         await asyncio.to_thread(_validate_harness_kinds, merged.config)
@@ -181,7 +186,7 @@ async def create_deployment(
         spec_tracked_revision=spec.tracked_revision,
         status="pending",
         deployment_mode=body.deployment_mode,
-        image=body.image,
+        image=image,
         use_image_entrypoint=body.use_image_entrypoint,
         plugin_deployment=deployment_name if is_container_deployment_mode(body.deployment_mode) else "",
     ).with_auth_context(current_auth_context())
