@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { getGetSessionQueryKey } from '@nemo/sdk/generated/platform/sessions';
 import { getGetSpanQueryKey, getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getGetTraceQueryKey, getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
@@ -38,12 +39,27 @@ const renderSessionDetail = (sessionId = 'session-agent-run-001', search = '') =
             <IntakeSessionDetailRoute />
           </>
         ),
+        errorElement: <RouteErrorPanel />,
       },
     ],
   });
 
 describe('IntakeSessionDetailRoute', () => {
   afterEach(() => sessionStorage.clear());
+
+  it('defers a missing session to the route error panel', async () => {
+    server.use(
+      http.get(
+        mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'),
+        () => new HttpResponse(null, { status: 404 })
+      )
+    );
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderSessionDetail('missing-session');
+
+    expect(await screen.findByText('Not Found')).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
 
   it('hydrates the session header and all trace trajectories with summary payloads', async () => {
     const sessionDetailRequests: string[] = [];
@@ -129,7 +145,9 @@ describe('IntakeSessionDetailRoute', () => {
     expect(within(trajectory).getByText('Generate access-control guidance')).toBeInTheDocument();
 
     await waitFor(() => expect(traceListRequests).toHaveLength(1));
-    expect(sessionDetailRequests).toEqual(['session-agent-run-001']);
+    // The route's suspense read and the trajectories hook share one query; the test client's zero
+    // staleTime lets the second observer refetch it, so only check which session was requested.
+    expect(new Set(sessionDetailRequests)).toEqual(new Set(['session-agent-run-001']));
     expect(traceListRequests[0].searchParams.get('filter[session_id]')).toBe(
       'session-agent-run-001'
     );
@@ -164,7 +182,9 @@ describe('IntakeSessionDetailRoute', () => {
     expect(within(traceSummary).getByText('4')).toBeInTheDocument();
     expect(within(traceSummary).getByText('1,754')).toBeInTheDocument();
     expect(within(traceSummary).queryByText('47')).not.toBeInTheDocument();
-    expect(sessionDetailRequests).toEqual(['session-agent-run-001']);
+    // The route's suspense read and the trajectories hook share one query; the test client's zero
+    // staleTime lets the second observer refetch it, so only check which session was requested.
+    expect(new Set(sessionDetailRequests)).toEqual(new Set(['session-agent-run-001']));
   });
 
   it('links the trace agent from the trace summary header', async () => {

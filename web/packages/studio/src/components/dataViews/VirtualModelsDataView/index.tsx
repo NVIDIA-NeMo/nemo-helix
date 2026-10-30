@@ -15,6 +15,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import type {
   DatetimeFilter,
   VirtualModel,
@@ -121,7 +122,7 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
     workspace,
   ]);
 
-  const { data, isFetching, error } = useListVirtualModels(
+  const { data, isPlaceholderData, isLoading, error, refetch } = useListVirtualModels(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -284,7 +285,7 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
           DataViewRoot: {
             data: virtualModelsWithId,
             totalCount: pagination?.total_results,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
           },
           DataViewTableContent: {
             renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
@@ -299,7 +300,9 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to fetch virtual models'))}
+                onRetry={() => void refetch()}
               />
             ),
           },

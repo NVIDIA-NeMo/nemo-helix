@@ -10,7 +10,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { getSortParamWithWhitelist, getRequestStatus } from '@nemo/common/src/utils/query';
 import {
   SpanKind,
   type ListSpansMode,
@@ -374,7 +374,7 @@ const SeededIntakeSpansTable: FC<
         DataViewRoot: {
           data: tableData,
           totalCount: spansResponse?.pagination?.total_results,
-          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
+          requestStatus: getRequestStatus({ isLoading, isPlaceholderData }),
         },
         DataViewTableContent: {
           renderEmptyState: () =>

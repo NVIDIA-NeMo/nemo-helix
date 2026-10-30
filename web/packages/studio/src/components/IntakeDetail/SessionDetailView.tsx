@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { IconError } from '@nemo/icons/icons';
+import { useGetSessionSuspense } from '@nemo/sdk/generated/platform/sessions';
 import { PageHeader, Stack, StatusMessage } from '@nvidia/foundations-react-core';
 import { NoSpanSelected } from '@studio/components/IntakeDetail/NoSpanSelected';
 import { TraceDetailLayout } from '@studio/components/IntakeDetail/TraceDetailLayout';
@@ -19,7 +20,6 @@ import {
 } from '@studio/components/IntakeDetail/TraceViewToolbar';
 import { useSessionTrajectories } from '@studio/components/IntakeDetail/useSessionTrajectories';
 import { Loading } from '@studio/components/Layouts/Loading';
-import { NotFound } from '@studio/components/Layouts/NotFound';
 import {
   type BreadcrumbsItemProps,
   useBreadcrumbs,
@@ -66,16 +66,9 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
   const getSessionHref =
     routeContext?.kind === 'evaluation' ? routeContext.getSessionHref : defaultGetSessionHref;
 
-  const {
-    session,
-    sessionError,
-    isSessionLoading,
-    tracesError,
-    isTracesLoading,
-    trajectories,
-    explorer,
-    testCaseName,
-  } = useSessionTrajectories(workspace, sessionId);
+  const { data: session } = useGetSessionSuspense(workspace, sessionId);
+  const { tracesError, isTracesLoading, trajectories, explorer, testCaseName } =
+    useSessionTrajectories(workspace, sessionId);
   const sessionTitle =
     routeContext?.kind === 'evaluation' && testCaseName
       ? `Test case: ${testCaseName}`
@@ -148,33 +141,21 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
     [setSearchParams]
   );
 
-  if (sessionError?.response?.status === 404) {
-    return (
-      <NotFound
-        subheader="Session Not Found"
-        message="The session does not exist or you do not have permission to view it."
-      />
-    );
-  }
-
-  if (isSessionLoading || isTracesLoading) {
+  if (isTracesLoading) {
     return <Loading description="Loading session..." />;
   }
 
-  const error = sessionError ?? tracesError;
-  if (error) {
+  if (tracesError) {
     return (
       <StatusMessage
         className="mx-auto mt-density-2xl"
         size="medium"
         slotMedia={<IconError width={65} height={65} />}
         slotHeading="Error loading session"
-        slotSubheading={error.message}
+        slotSubheading={tracesError.message}
       />
     );
   }
-
-  if (!session) return null;
 
   const traceView = (
     <Stack gap="density-2xl" className="min-w-0">

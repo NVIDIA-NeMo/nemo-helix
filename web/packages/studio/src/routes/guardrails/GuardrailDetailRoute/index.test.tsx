@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { mockGuardrailConfigs } from '@studio/mocks/handlers/guardrails';
@@ -26,6 +27,7 @@ const routes = [
   {
     path: ROUTES.workspace.guardrailDetail,
     element: <GuardrailDetailRoute />,
+    errorElement: <RouteErrorPanel />,
     children: [
       { index: true, element: <Navigate to="config" replace /> },
       { path: ROUTES.workspace.guardrailConfig, element: <GuardrailConfigTab /> },
@@ -100,7 +102,7 @@ describe('GuardrailDetailRoute', () => {
     expect(screen.getByRole('switch', { name: 'Self Checks' })).not.toBeChecked();
   });
 
-  it('shows a loading state while fetching', async () => {
+  it('suspends to the loading fallback while fetching', async () => {
     server.use(
       http.get(
         `${PLATFORM_BASE_URL}/apis/guardrails/v2/workspaces/:workspace/configs/:name`,
@@ -111,16 +113,20 @@ describe('GuardrailDetailRoute', () => {
       )
     );
     renderDetail('pii-filter');
-    expect(await screen.findByText('Loading guardrail config...')).toBeInTheDocument();
+    expect(await screen.findByTestId('spinner')).toBeInTheDocument();
   });
 
-  it('shows an error state when the config cannot be loaded', async () => {
+  it('renders the route error panel when the config cannot be loaded', async () => {
+    // React and the router log the error the route throws to its errorElement.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderDetail('does-not-exist');
     expect(
-      await screen.findByText('Failed to load guardrail config.', undefined, {
+      await screen.findByTestId('error-panel', undefined, {
         timeout: XL_SELECTOR_TIMEOUT,
       })
     ).toBeInTheDocument();
+    expect(screen.getByText('Not Found')).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('saves the draft and clears the draft actions', async () => {

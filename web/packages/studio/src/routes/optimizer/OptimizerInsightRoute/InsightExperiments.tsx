@@ -7,6 +7,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Text } from '@nvidia/foundations-react-core';
@@ -56,8 +57,9 @@ export const InsightExperiments: FC<InsightExperimentsProps> = ({ workspace, ins
   const { pageIndex, pageSize } = dataViewState.pagination.state;
   const {
     data: response,
-    isError,
-    isFetching,
+    error,
+    isPlaceholderData,
+    isLoading,
     refetch,
   } = useListExperiments(
     workspace,
@@ -82,7 +84,7 @@ export const InsightExperiments: FC<InsightExperimentsProps> = ({ workspace, ins
       state={dataViewState}
       data={groups}
       totalCount={response?.pagination?.total_results ?? 0}
-      requestStatus={isError ? 'error' : isFetching ? 'loading' : undefined}
+      requestStatus={getRequestStatus({ error, isLoading, isPlaceholderData })}
       loadingRows={pageSize}
       makeColumns={wrapColumns(makeColumns)}
     >

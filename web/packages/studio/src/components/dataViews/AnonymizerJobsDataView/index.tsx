@@ -236,18 +236,11 @@ export const AnonymizerJobsDataView: FC = () => {
           DataViewTableContent: {
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={
                   getErrorMessage(error ?? new Error()) || 'Failed to load anonymizer jobs'
                 }
-                attributes={{
-                  ErrorMessage: {
-                    slotFooter: (
-                      <Button kind="secondary" onClick={() => refetch()}>
-                        Retry
-                      </Button>
-                    ),
-                  },
-                }}
+                onRetry={() => void refetch()}
               />
             ),
             renderEmptyState: () =>

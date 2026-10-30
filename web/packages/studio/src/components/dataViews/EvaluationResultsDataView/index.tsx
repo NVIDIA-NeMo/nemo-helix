@@ -103,6 +103,7 @@ export const EvaluationResultsDataView = ({
     data: jobsData,
     isLoading,
     error,
+    refetch,
   } = useEvalsListEvaluateJobs(
     workspace,
     {
@@ -189,7 +190,13 @@ export const EvaluationResultsDataView = ({
   const isInitialEmpty = jobs.length === 0 && !isLoading && !error && !hasActiveFilters;
 
   if (error) {
-    return <ErrorPanel errorMessage={getErrorMessage(error)} />;
+    return (
+      <ErrorPanel
+        error={error}
+        errorMessage={getErrorMessage(error)}
+        onRetry={() => void refetch()}
+      />
+    );
   }
 
   return (

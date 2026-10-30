@@ -8,7 +8,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
+import { getSortParamWithWhitelist, getRequestStatus } from '@nemo/common/src/utils/query';
 import { LayoutColumns } from '@nemo/icons/icons';
 import type { Trace, TraceFilter, TraceSortField } from '@nemo/sdk/generated/platform/schema';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
@@ -130,7 +130,7 @@ const SeededIntakeTracesTable: FC<
         DataViewRoot: {
           data: tracesResponse?.data ?? [],
           totalCount: tracesResponse?.pagination?.total_results,
-          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
+          requestStatus: getRequestStatus({ isLoading, isPlaceholderData }),
         },
         DataViewTableContent: {
           renderEmptyState: () =>

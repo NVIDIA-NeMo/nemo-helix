@@ -5,7 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { Beaker, IconDocument } from '@nemo/icons/icons';
-import { useEvalsGetEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
+import { useEvalsGetEvaluateJobSuspense } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   Badge,
@@ -22,7 +22,6 @@ import { DatasetEvalRowResultsPanel } from '@studio/components/evaluation/Jobs/d
 import { useDatasetEvalResults } from '@studio/components/evaluation/Jobs/datasetEval/useDatasetEvalResults';
 import { DetailsPanel } from '@studio/components/evaluation/Jobs/DetailsPanel';
 import { StatusLogsContent } from '@studio/components/evaluation/Jobs/StatusLogsContent';
-import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -37,11 +36,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { id } = useRequiredPathParams([ROUTE_PARAMS.evaluationJobId]);
 
-  const {
-    data: job,
-    error,
-    isPending: isJobPending,
-  } = useEvalsGetEvaluateJob(workspace, id, {
+  const { data: job } = useEvalsGetEvaluateJobSuspense(workspace, id, {
     query: {
       refetchOnMount: 'always',
       refetchInterval: (query) => {
@@ -60,7 +55,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
     isLoadingRows,
     scoresError,
     rowsError,
-  } = useDatasetEvalResults(workspace, id, job?.status);
+  } = useDatasetEvalResults(workspace, id, job.status);
 
   useBreadcrumbs({
     items: [
@@ -69,59 +64,30 @@ export const EvaluationResultDetailsRoute: FC = () => {
         slotLabel: 'Model Evaluations',
       },
       {
-        slotLabel: job?.name ?? id,
+        slotLabel: job.name ?? id,
       },
     ],
   });
-
-  if (isJobPending) {
-    return (
-      <AccessibleTitle title={`Evaluation ${id}`}>
-        <Loading description="Loading evaluation..." />
-      </AccessibleTitle>
-    );
-  }
-
-  const pageHeader = (
-    <PageHeader
-      className="p-0"
-      slotHeading={
-        <Flex align="center" gap="2">
-          {job?.name ?? id}
-          <Badge kind="outline" color="gray">
-            Dataset-Driven
-          </Badge>
-        </Flex>
-      }
-    />
-  );
-
-  // Without a job there is no status to gate results on, so show only the load error rather
-  // than empty score/row panels.
-  if (!job) {
-    return (
-      <AccessibleTitle title={`Evaluation ${id}`}>
-        <Stack className="overflow-auto" gap="density-2xl" padding="density-2xl">
-          <Flex align="center" justify="center" className="w-full">
-            <Stack className="w-full max-w-[1200px]" gap="density-2xl">
-              {pageHeader}
-              <DetailsPanel error />
-            </Stack>
-          </Flex>
-        </Stack>
-      </AccessibleTitle>
-    );
-  }
 
   return (
     <AccessibleTitle title={`Evaluation ${job.name ?? id}`}>
       <Stack className="overflow-auto" gap="density-2xl" padding="density-2xl">
         <Flex align="center" justify="center" className="w-full">
           <Stack className="w-full max-w-[1200px]" gap="density-2xl">
-            {pageHeader}
+            <PageHeader
+              className="p-0"
+              slotHeading={
+                <Flex align="center" gap="2">
+                  {job.name ?? id}
+                  <Badge kind="outline" color="gray">
+                    Dataset-Driven
+                  </Badge>
+                </Flex>
+              }
+            />
 
             <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
-              <DetailsPanel evaluationJob={job} error={!!error} />
+              <DetailsPanel evaluationJob={job} />
               <Panel slotHeading="Scores" slotIcon={<Beaker />} elevation="high" density="compact">
                 {isPending && (
                   <Block className="text-subtle">

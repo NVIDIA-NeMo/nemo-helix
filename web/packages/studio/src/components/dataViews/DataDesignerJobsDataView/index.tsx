@@ -235,18 +235,11 @@ export const DataDesignerJobsDataView: FC = () => {
           DataViewTableContent: {
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={
                   getErrorMessage(error ?? new Error()) || 'Failed to load Data Designer jobs'
                 }
-                attributes={{
-                  ErrorMessage: {
-                    slotFooter: (
-                      <Button kind="secondary" onClick={() => refetch()}>
-                        Retry
-                      </Button>
-                    ),
-                  },
-                }}
+                onRetry={() => void refetch()}
               />
             ),
             renderEmptyState: () =>

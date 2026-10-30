@@ -142,7 +142,7 @@ export function useDatasetsTable({
     data: datasetsResponse,
     refetch,
     isPending,
-    isFetching,
+    isPlaceholderData,
     error,
   } = enableFilters && ownerId ? ownedFirst : plain;
 
@@ -255,7 +255,7 @@ export function useDatasetsTable({
     datasets,
     refetch,
     isPending,
-    isFetching,
+    isPlaceholderData,
     error,
     resetFilters,
     handleRowClick,

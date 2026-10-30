@@ -11,7 +11,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { FolderOpen, IconDocument } from '@nemo/icons/icons';
 import {
-  useAgentOptimizationGetRunStrategyJob,
+  useAgentOptimizationGetRunStrategyJobSuspense,
   useAgentOptimizationListRunStrategyJobResults,
 } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
@@ -62,13 +62,8 @@ export const AgentOptimizationDetailRoute: FC = () => {
   const deployTrial = deployTarget?.jobKey === jobKey ? deployTarget.trial : null;
   const onDeploy = useCallback((trial: Trial) => setDeployTarget({ jobKey, trial }), [jobKey]);
 
-  const {
-    data: job,
-    isLoading: isLoadingJob,
-    error: jobError,
-  } = useAgentOptimizationGetRunStrategyJob(workspace, jobName, {
+  const { data: job } = useAgentOptimizationGetRunStrategyJobSuspense(workspace, jobName, {
     query: {
-      enabled: !!workspace && !!jobName,
       refetchInterval: (query) =>
         query.state.data?.status && TERMINAL_STATUSES.has(query.state.data.status)
           ? false
@@ -76,13 +71,13 @@ export const AgentOptimizationDetailRoute: FC = () => {
     },
   });
 
-  const status = job?.status ?? undefined;
+  const status = job.status ?? undefined;
   const isTerminal = status ? TERMINAL_STATUSES.has(status) : false;
   const hasFailed = status ? FAILED_STATUSES.has(status) : false;
   const isQueued = status ? QUEUED_STATUSES.has(status) : false;
-  const agentName = job?.spec?.agent?.split('/').pop() ?? undefined;
-  const isSwitchyard = job?.spec?.strategy === SWITCHYARD_STRATEGY;
-  const loadResults = !!workspace && !!jobName && isTerminal && !hasFailed;
+  const agentName = job.spec?.agent?.split('/').pop() ?? undefined;
+  const isSwitchyard = job.spec?.strategy === SWITCHYARD_STRATEGY;
+  const loadResults = isTerminal && !hasFailed;
 
   const { setBreadcrumbs } = useBreadcrumbs();
   useEffect(() => {
@@ -138,7 +133,6 @@ export const AgentOptimizationDetailRoute: FC = () => {
     workspace,
     name: jobName,
     jobStatus: status,
-    enabled: !!job,
   });
 
   const {
@@ -148,37 +142,9 @@ export const AgentOptimizationDetailRoute: FC = () => {
   } = useAgentOptimizationListRunStrategyJobResults(workspace, jobName, undefined, {
     query: {
       queryKey: ['optimization-artifacts', workspace, jobName, status],
-      enabled: !!job,
       refetchInterval: isTerminal ? false : JOB_POLLING_INTERVAL_MS,
     },
   });
-
-  if (isLoadingJob && !job) {
-    return (
-      <Flex align="center" justify="center" className="h-full w-full">
-        <Spinner size="medium" aria-label="Loading optimization..." />
-      </Flex>
-    );
-  }
-
-  if (!job && jobError && jobError.response?.status !== 404) {
-    return (
-      <Stack padding="density-2xl">
-        <ErrorMessage header="Could not load optimization" message={jobError.message} />
-      </Stack>
-    );
-  }
-
-  if (!job) {
-    return (
-      <Stack padding="density-2xl">
-        <ErrorMessage
-          header="Optimization not found"
-          message={`No optimization study named "${jobName}" in workspace "${workspace}".`}
-        />
-      </Stack>
-    );
-  }
 
   const errorMessage =
     typeof job.error_details?.message === 'string' ? job.error_details.message : undefined;
@@ -207,7 +173,10 @@ export const AgentOptimizationDetailRoute: FC = () => {
         />
 
         {hasFailed ? (
-          <ErrorPanel errorMessage={errorMessage} />
+          <ErrorPanel
+            errorMessage={errorMessage}
+            attributes={{ ErrorMessage: { header: 'Optimization Failed' } }}
+          />
         ) : !isTerminal ? (
           <StudyInProgress workspace={workspace} job={job} isQueued={isQueued} />
         ) : isSwitchyard ? (

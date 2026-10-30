@@ -21,6 +21,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   useSecretsDeleteSecret,
@@ -53,7 +54,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   const [modalSecret, setModalSecret] = useState<HelixSecretResponse>();
   const [modalOpen, setModalOpen] = useState<ModalState>('none');
 
-  const { data, refetch, isFetching, error } = useSecretsListSecrets(
+  const { data, refetch, isLoading, isPlaceholderData, error } = useSecretsListSecrets(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -181,7 +182,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
           DataViewRoot: {
             data: secretsWithId,
             totalCount: pagination?.total_results,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
           },
           DataViewTableContent: {
             renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
@@ -196,7 +197,9 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to fetch secrets'))}
+                onRetry={() => void refetch()}
               />
             ),
           },

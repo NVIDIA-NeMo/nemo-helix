@@ -99,7 +99,7 @@ export const routes: RouteObject[] = [
           },
           {
             element: <SuspenseOutlet />,
-            errorElement: <RouteErrorPanel title="Entity Store" />,
+            errorElement: <RouteErrorPanel />,
             children: [
               ...dashboardRoutes,
               ...baseModelsRoutes,

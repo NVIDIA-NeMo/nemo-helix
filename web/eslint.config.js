@@ -96,6 +96,13 @@ const baseRules = {
       selector: "JSXAttribute[name.name='style']",
       message: "Avoid inline 'style'; use styled components or CSS modules.",
     },
+    ...['Property[key.name="requestStatus"]', 'JSXAttribute[name.name="requestStatus"]'].map(
+      (target) => ({
+        selector: `${target} Identifier[name=/^is(Re)?[Ff]etching$/]`,
+        message:
+          'isFetching is also true during background refetches and polls, which blanks a loaded table. Use getRequestStatus(query) from @nemo/common/src/utils/query.',
+      })
+    ),
   ],
 };
 

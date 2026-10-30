@@ -157,7 +157,7 @@ export const AgentMonitorRoute: FC = () => {
 
         <InferenceLogsTable
           runs={filteredRuns}
-          isFetching={isFetching}
+          isLoading={filesListQuery.isLoading || runsQuery.isLoading}
           error={displayError}
           onRetry={() => {
             void filesListQuery.refetch();

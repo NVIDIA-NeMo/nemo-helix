@@ -3,7 +3,6 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
-import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
@@ -11,7 +10,11 @@ import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { CloseCircle, IconClipboard, Beaker, IconDocument } from '@nemo/icons/icons';
-import { evalsCancelAgentEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
+import {
+  evalsCancelAgentEvaluateJob,
+  getEvalsGetAgentEvaluateJobQueryKey,
+  useEvalsGetAgentEvaluateJobSuspense,
+} from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -32,7 +35,6 @@ import {
   agentNameForJob,
   evalConfigName,
   fetchAgentEvalBundle,
-  fetchAgentEvalJob,
   fetchAgentEvalResult,
   joinBundleByTask,
   parseBundleRef,
@@ -78,11 +80,8 @@ export const AgentEvaluationDetailRoute: FC = () => {
 
   // Job + status — refetched while the job is non-terminal so the badge stays
   // live without forcing a page reload.
-  const { data: job, isLoading: isLoadingJob } = useQuery({
-    queryKey: ['agent-eval-job', workspace, jobName] as const,
-    queryFn: ({ signal }) => fetchAgentEvalJob(workspace, jobName, signal),
-    enabled: !!workspace && !!jobName,
-    refetchInterval: (query) => (isTerminal(query.state.data?.status) ? false : 5_000),
+  const { data: job } = useEvalsGetAgentEvaluateJobSuspense(workspace, jobName, {
+    query: { refetchInterval: (query) => (isTerminal(query.state.data?.status) ? false : 5_000) },
   });
 
   // The "Evaluations" crumb links the agent's eval tab, but the agent name only arrives with
@@ -129,7 +128,9 @@ export const AgentEvaluationDetailRoute: FC = () => {
       await evalsCancelAgentEvaluateJob(workspace, jobName);
       toast.success('Job cancelled');
       setCancelModalOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['agent-eval-job', workspace, jobName] });
+      void queryClient.invalidateQueries({
+        queryKey: getEvalsGetAgentEvaluateJobQueryKey(workspace, jobName),
+      });
     } catch {
       toast.error('Failed to cancel job. Please try again.');
     } finally {
@@ -156,25 +157,6 @@ export const AgentEvaluationDetailRoute: FC = () => {
     enabled: !!workspace && isJobTerminal && !!result?.bundle_ref,
     refetchInterval: (query) => (query.state.data == null ? 5_000 : false),
   });
-
-  if (isLoadingJob && !job) {
-    return (
-      <Flex align="center" justify="center" className="h-full w-full">
-        <Spinner size="medium" aria-label="Loading evaluation..." />
-      </Flex>
-    );
-  }
-
-  if (!job) {
-    return (
-      <Stack padding="density-2xl">
-        <ErrorMessage
-          header="Evaluation not found"
-          message={`No evaluation job named "${jobName}" in workspace "${workspace}".`}
-        />
-      </Stack>
-    );
-  }
 
   const statusMessage =
     typeof job.status_details?.message === 'string' ? job.status_details.message : null;
@@ -233,7 +215,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
           >
             <Stack gap="density-xl">
               <EvalRunOutcomeBanner statusDetails={job.status_details} />
-              <KVPair label="Name" value={job.name} loading={isLoadingJob} />
+              <KVPair label="Name" value={job.name} />
               <KVPair
                 label="Status"
                 value={
@@ -247,14 +229,9 @@ export const AgentEvaluationDetailRoute: FC = () => {
                     )}
                   </Flex>
                 }
-                loading={isLoadingJob}
               />
-              <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} loading={isLoadingJob} />
-              <KVPair
-                label="Tasks"
-                value={String(job.spec.tasks?.length ?? '-')}
-                loading={isLoadingJob}
-              />
+              <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} />
+              <KVPair label="Tasks" value={String(job.spec.tasks?.length ?? '-')} />
               {evalConfigName(job) && (
                 <KVPair
                   label="Eval Config"
@@ -271,7 +248,6 @@ export const AgentEvaluationDetailRoute: FC = () => {
               <KVPair
                 label="Created"
                 value={job.created_at ? <RelativeTime datetime={job.created_at} /> : ''}
-                loading={isLoadingJob}
               />
               {artifactsFileset && (
                 <KVPair

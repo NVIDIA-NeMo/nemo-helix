@@ -67,7 +67,7 @@ export const GenerateJobReportRoute: FC = () => {
       }
     );
 
-  const dpEnabled = job?.spec?.config?.privacy?.dp_enabled ?? false;
+  const dpEnabled = job.spec?.config?.privacy?.dp_enabled ?? false;
 
   const handleSectionChange = (section: ReportSection) => {
     const refMap = {

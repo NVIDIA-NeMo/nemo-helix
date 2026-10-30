@@ -3,7 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insights';
-import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
+import { useGetEvaluationSuspense } from '@nemo/sdk/generated/platform/evaluations';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Badge, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import { EvaluationSessionsDataView } from '@studio/components/dataViews/EvaluationSessionsDataView';
@@ -23,7 +23,7 @@ export const EvaluationDetailRoute: FC = () => {
     ROUTE_PARAMS.experimentName,
     ROUTE_PARAMS.evaluationName,
   ]);
-  const { data: evaluation } = useGetEvaluation(workspace, evaluationName);
+  const { data: evaluation } = useGetEvaluationSuspense(workspace, evaluationName);
   // Evaluations reach their originating insight through the owning group's insight_id.
   const { data: experiment } = useGetExperiment(workspace, experimentName);
   const insightId = experiment?.insight_id ?? '';
@@ -49,7 +49,7 @@ export const EvaluationDetailRoute: FC = () => {
         <PageHeader
           className="p-0"
           slotHeading={evaluationName}
-          slotDescription={showInsightCard ? undefined : evaluation?.description || undefined}
+          slotDescription={showInsightCard ? undefined : evaluation.description || undefined}
         />
         <EvaluationDetailMetrics evaluationName={evaluationName} />
         {showInsightCard ? (
@@ -66,7 +66,7 @@ export const EvaluationDetailRoute: FC = () => {
         <div className="flex flex-col gap-4 border-t border-base pt-4">
           <div className="flex items-center gap-3">
             <Text kind="title/sm">Test cases</Text>
-            {evaluation?.run_count !== undefined && (
+            {evaluation.run_count !== undefined && (
               <Badge color="gray" kind="solid" className="text-sm">
                 {evaluation.run_count}
               </Badge>

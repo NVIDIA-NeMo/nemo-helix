@@ -6,13 +6,14 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
 import type { RunSummary } from '@studio/routes/agents/AgentMonitorRoute/telemetry';
 import { ComponentProps, FC, useEffect, useMemo } from 'react';
 
 interface Props {
   runs: RunSummary[];
-  isFetching?: boolean;
+  isLoading?: boolean;
   error?: unknown;
   onRetry?: () => void;
 }
@@ -49,7 +50,7 @@ const compareRunsBy = (a: RunRow, b: RunRow, columnId: string): number => {
   }
 };
 
-export const InferenceLogsTable: FC<Props> = ({ runs, isFetching, error, onRetry }) => {
+export const InferenceLogsTable: FC<Props> = ({ runs, isLoading, error, onRetry }) => {
   // Keep the page short enough to fit alongside the cards + chart so the data
   // view's internal overflow scroll doesn't capture the page's wheel events.
   const dataViewState = useStudioDataViewState({
@@ -168,7 +169,7 @@ export const InferenceLogsTable: FC<Props> = ({ runs, isFetching, error, onRetry
           DataViewRoot: {
             data: pagedRows,
             totalCount: rows.length,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error, isLoading }),
           },
           DataViewTableContent: {
             renderErrorState: () => (

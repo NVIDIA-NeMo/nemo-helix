@@ -11020,6 +11020,19 @@ export declare const fetchAllPages: <T>(fetchPage: (page: number, pageSize: numb
 //#endregion
 //#region src/utils/query.d.ts
 export declare const getJobRefetchInterval: (status?: HelixJobStatus) => number | false;
+/** The fields of a TanStack query result that {@link getRequestStatus} reads. */
+interface RequestStatusQuery {
+  error?: unknown;
+  isLoading?: boolean;
+  isPlaceholderData?: boolean;
+}
+/**
+ * A DataView's `requestStatus` for a query. Shows loading only when there's nothing current to
+ * show: the first load, or the previous page's placeholder rows while a new page, search or filter
+ * loads. Never use `isFetching` here; it is also true during background refetches and polls, which
+ * would blank a table that already has data.
+ */
+export declare const getRequestStatus: ({ error, isLoading, isPlaceholderData }: RequestStatusQuery) => QueryStatus | undefined;
 export declare const getSortParam: (sortingState: SortingState) => string;
 /**
  * Maps DataView sorting state to a sort query value when the API only allows specific fields.

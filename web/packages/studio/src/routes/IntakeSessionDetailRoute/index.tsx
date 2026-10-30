@@ -5,11 +5,10 @@ import {
   type SessionDetailRouteContext,
   SessionDetailView,
 } from '@studio/components/IntakeDetail/SessionDetailView';
-import { NotFound } from '@studio/components/Layouts/NotFound';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import type { FC } from 'react';
-import { useParams } from 'react-router';
 
 interface SessionDetailContentProps {
   sessionId: string;
@@ -21,17 +20,7 @@ export const SessionDetailContent: FC<SessionDetailContentProps> = (props) => {
   return <SessionDetailView workspace={workspace} {...props} />;
 };
 
-type SessionRouteParams = Record<typeof ROUTE_PARAMS.sessionId, string | undefined>;
-
 export const IntakeSessionDetailRoute: FC = () => {
-  const { [ROUTE_PARAMS.sessionId]: sessionId } = useParams<SessionRouteParams>();
-  if (!sessionId) {
-    return (
-      <NotFound
-        subheader="Session Not Found"
-        message="The session route is missing a session ID."
-      />
-    );
-  }
+  const { sessionId } = useRequiredPathParams([ROUTE_PARAMS.sessionId]);
   return <SessionDetailContent sessionId={sessionId} />;
 };

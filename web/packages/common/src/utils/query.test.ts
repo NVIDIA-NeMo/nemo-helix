@@ -3,7 +3,7 @@
 
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
-import { getJobRefetchInterval } from './query';
+import { getJobRefetchInterval, getRequestStatus } from './query';
 import { JOB_POLLING_INTERVAL_MS } from '../constants';
 import { CJobTerminalStatuses } from '../constants/query';
 
@@ -20,5 +20,20 @@ describe('getJobRefetchInterval', () => {
     expect(getJobRefetchInterval(HelixJobStatus.pending)).toBe(JOB_POLLING_INTERVAL_MS);
     expect(getJobRefetchInterval(HelixJobStatus.created)).toBe(JOB_POLLING_INTERVAL_MS);
     expect(getJobRefetchInterval(HelixJobStatus.cancelling)).toBe(JOB_POLLING_INTERVAL_MS);
+  });
+});
+
+describe('getRequestStatus', () => {
+  it('reports an error over everything else', () => {
+    expect(getRequestStatus({ error: new Error('x'), isLoading: true })).toBe('error');
+  });
+
+  it('is loading on the first load and while showing placeholder rows', () => {
+    expect(getRequestStatus({ isLoading: true })).toBe('loading');
+    expect(getRequestStatus({ isPlaceholderData: true })).toBe('loading');
+  });
+
+  it('is not loading during a background refetch of loaded data', () => {
+    expect(getRequestStatus({ isLoading: false, isPlaceholderData: false })).toBeUndefined();
   });
 });
