@@ -28,6 +28,7 @@ import {
   type CustomizationJob,
 } from '@studio/util/customizationBackend';
 import type { TrainingType } from '@studio/util/customizerSchema';
+import { expertParallelError } from '@studio/util/forms/expertParallel';
 import {
   AUTOMODEL_DEFAULT_SPEC,
   RL_DPO_DEFAULT_SPEC,
@@ -308,6 +309,25 @@ export const customizationFormSchema = z
       for (const issue of result.error.issues) {
         ctx.addIssue({ ...issue, path: [data.backend, ...issue.path] });
       }
+    }
+  });
+
+/**
+ * `customizationFormSchema` plus the checks that depend on the selected model's metadata,
+ * which the form values do not carry. `automodelExpertCount` comes from
+ * `expertParallelExpertCount`; while it is unknown those checks are skipped.
+ */
+export const customizationFormSchemaFor = (automodelExpertCount: number | undefined) =>
+  customizationFormSchema.superRefine((data, ctx) => {
+    if (data.backend !== 'automodel') return;
+    const parallelism = (data.automodel as Partial<AutomodelJobInput> | undefined)?.parallelism;
+    const message = expertParallelError(automodelExpertCount, parallelism ?? {});
+    if (message) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message,
+        path: ['automodel', 'parallelism', 'expert_parallel_size'],
+      });
     }
   });
 

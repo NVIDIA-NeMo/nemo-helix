@@ -46,6 +46,19 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         step={1}
         disabled={disabled}
       />
+      <ControlledSliderWithTextInput
+        useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
+        formFieldProps={{
+          slotLabel: 'Expert Parallel Size',
+          slotInfo:
+            "Shards a Mixture-of-Experts model's experts across GPUs, so each holds only its share. MoE models such as Nemotron 3.5 need a value above 1 that divides the expert count to train on more than one GPU. Must divide data parallel × context parallel size, and tensor parallel size must be 1 when this is above 1.",
+        }}
+        {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
+        min={1}
+        max={32}
+        step={1}
+        disabled={disabled}
+      />
       <AccordionRoot multiple>
         <AccordionItem value="advanced-parallelism" className="border-b-0">
           <AccordionTrigger>
@@ -91,19 +104,6 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                     'Splits the sequence dimension across GPUs, for long-sequence training.',
                 }}
                 {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_context_parallel_size')}
-                min={1}
-                max={8}
-                step={1}
-                disabled={disabled}
-              />
-              <ControlledSliderWithTextInput
-                useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
-                formFieldProps={{
-                  slotLabel: 'Expert Parallel Size',
-                  slotInfo:
-                    'Expert parallel size for MoE models. Must divide data_parallel_size × context_parallel_size, and tensor parallel size must be 1 when this is above 1.',
-                }}
-                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
                 min={1}
                 max={8}
                 step={1}
