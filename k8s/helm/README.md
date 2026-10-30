@@ -203,8 +203,8 @@ For the complete default values, see [values.yaml](values.yaml).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| agents | object | `{"subprocessDeployments":{"enabled":true}}` | Agents plugin settings that the API and controller pods both need. |
-| agents.subprocessDeployments.enabled | bool | `true` | Allow new subprocess-mode agent deployments. Set false to require a container mode (docker, k8s or openshell), for example so agents don't share the controller pod. Existing subprocess deployments keep running. |
+| agents | object | `{"subprocessDeployments":{"enabled":false}}` | Agents plugin settings that the API and controller pods both need. |
+| agents.subprocessDeployments.enabled | bool | `false` | Allow new subprocess-mode agent deployments, which run inside the controller pod. Off by default so agents deploy in k8s or openshell mode. Existing subprocess deployments keep running. |
 | api | object | [See values.yaml](values.yaml#L911) | API configuration settings for the api deployment |
 | api.affinity | object | `{}` | Affinity configuration for the API service. |
 | api.annotations | object | `{}` | Annotations to add to the API service deployment. |
