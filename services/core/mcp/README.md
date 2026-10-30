@@ -46,10 +46,17 @@ The HTTP transport acts on the platform with the server's own credentials, so it
 - **Authentication:** `--transport streamable-http` refuses to start unless `NHX_MCP_AUTH_TOKEN` is set (at least 16
   characters, no leading or trailing whitespace). Clients send it as `Authorization: Bearer <token>`. The token is read from the environment, not a
   flag, so it does not appear in the process list. Use a long random value.
+- **Transport encryption:** the server serves plain HTTP, so the bearer token is sent unencrypted. For any non-loopback
+  `--host`, terminate TLS in front of the server (reverse proxy) or use an encrypted tunnel (SSH, VPN).
 - **No anonymous non-loopback binds:** `--allow-unauthenticated` is accepted only when `--host` is a loopback address.
-- **Unauthenticated loopback is still reachable by local processes and by web pages** (DNS rebinding), because the
-  server does not check the `Host` header. Use `--allow-unauthenticated` only for short debugging sessions, and it
-  cannot be combined with `--enable-destructive-tools`.
+- **Host and Origin checks:** the HTTP transport rejects requests whose `Host` or `Origin` header is not trusted
+  (FastMCP `host_origin_protection="auto"`), which blocks DNS rebinding against a loopback-bound server. When a TLS
+  proxy forwards to the server over loopback and keeps the public `Host`, requests are rejected with 421 unless that
+  hostname is allowed: set `FASTMCP_HTTP_ALLOWED_HOSTS='["mcp.example.com"]'` on the server.
+  `"auto"` only checks loopback-bound servers: with a non-loopback `--host` the server does not check `Host` or
+  `Origin`, so the bearer token is the only access control there. Keep it secret and rotate it if it leaks.
+- **Unauthenticated loopback is still reachable by local processes.** Use `--allow-unauthenticated` only for short
+  debugging sessions, and it cannot be combined with `--enable-destructive-tools`.
 - **Destructive tools are off by default:** `delete_workspace` is registered only with `--enable-destructive-tools`,
   on every transport. Deleting a workspace cascades to everything in it, and an LLM client can be steered into calling
   it by injected content.

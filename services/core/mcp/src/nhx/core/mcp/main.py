@@ -102,7 +102,13 @@ def main() -> None:
         server.run(transport="stdio")
     else:
         logger.info(f"Starting MCP server with HTTP transport on {args.host}:{args.port}...")
-        server.run(transport=args.transport, host=args.host, port=args.port)  # type: ignore[call-arg]
+        # "auto" rejects untrusted Host/Origin headers when bound to loopback (DNS rebinding); FastMCP defaults to off
+        server.run(  # type: ignore[call-arg]
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            host_origin_protection="auto",
+        )
 
 
 if __name__ == "__main__":
