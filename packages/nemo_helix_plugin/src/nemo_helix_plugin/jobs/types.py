@@ -28,6 +28,7 @@ from nemo_helix_plugin.files.types import NAME_PATTERN_DESCRIPTION as FILESET_NA
 from nemo_helix_plugin.jobs.schemas import (
     HelixJobResultResponse,
     HelixJobStatus,
+    JobGroupStatus,
 )
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
@@ -435,6 +436,136 @@ class UpdateHelixJobRequest(BaseModel):
         if spec_supplied and (self.spec is None or self.platform_spec is None):
             raise ValueError("spec and platform_spec cannot be null")
         return self
+
+
+# ---------------------------------------------------------------------------
+# Job group request/response DTOs
+# ---------------------------------------------------------------------------
+
+
+class JobGroupMember(BaseModel):
+    """One member of a bulk job-group create: only what differs from the template.
+
+    The server expands ``template`` + each member into a full job at create time
+    and parents it to the group. ``config_patch`` is deep-merged into *every*
+    step's ``config`` of the template spec (members are independent full jobs
+    built from one shared spec), so a member specifies only the per-member
+    payload differences, not a whole spec.
+    """
+
+    model_config = ConfigDict(regex_engine="python-re")
+
+    name: JobName
+    config_patch: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-member overrides deep-merged into each template step's config. Keys present here win "
+        "over the template; nested dicts merge recursively, other values replace.",
+    )
+    timeout_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Per-member per-step staleness timeout. Overrides the group's default_timeout_seconds for this "
+        "member's steps. None falls back to the group default (and then the template's own value).",
+    )
+
+
+class CreateJobGroupRequest(BaseModel):
+    """Request model for creating a job group and expanding its members.
+
+    Carries one shared job-spec ``template`` plus a list of small ``members``.
+    The server expands template + each member entry into a full job parented to
+    the group. The group's ``default_timeout_seconds`` propagates into each
+    member's step lifecycle (``staleness_timeout_seconds``) unless the member
+    overrides it with its own ``timeout_seconds``.
+    """
+
+    model_config = ConfigDict(regex_engine="python-re")
+
+    name: Optional[JobName] = Field(default=None, description="Group name. Auto-generated when omitted.")
+    description: Optional[str] = None
+    project: Optional[str] = None
+    source: str
+    template: HelixJobSpec = Field(
+        ...,
+        description="Shared job specification expanded into every member job before each member's config_patch is "
+        "applied.",
+    )
+    spec: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Shared plugin-defined spec copied onto every member job (the opaque per-plugin payload).",
+    )
+    members: list[JobGroupMember] = Field(
+        ...,
+        min_length=1,
+        description="Per-member entries; each expands into one full job parented to the group.",
+    )
+    max_concurrent_jobs: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Caller-set ceiling on concurrently-running member jobs. Recorded on the group; admission "
+        "enforcement is handled separately and does not gate creation.",
+    )
+    fail_fast: bool = Field(
+        default=False,
+        description="When true, a single member failure should stop the rest of the group (enforced separately).",
+    )
+    default_timeout_seconds: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Group-default per-step staleness timeout propagated into each member unless the member "
+        "overrides it. None leaves each template step's own value in place.",
+    )
+    ownership: Optional[dict[str, Any]] = None
+    custom_fields: Optional[dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _validate_unique_member_names(self) -> Self:
+        names = [member.name for member in self.members]
+        if len(names) != len(set(names)):
+            raise ValueError("member names must be unique within a job group")
+        return self
+
+
+class UpdateJobGroupRequest(BaseModel):
+    """Validated partial update for a job group's mutable metadata.
+
+    Only the group's own management fields are mutable. Members are not added or
+    removed through this request, and the derived ``status`` is never writable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str | None = Field(default=None, json_schema_extra={"nullable": True})
+    max_concurrent_jobs: int | None = Field(default=None, ge=1, json_schema_extra={"nullable": True})
+    fail_fast: bool | None = None
+    default_timeout_seconds: int | None = Field(default=None, ge=0, json_schema_extra={"nullable": True})
+    custom_fields: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _require_at_least_one_field(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("at least one mutable job group field is required")
+        return self
+
+
+class JobGroupResponse(BaseModel):
+    """Response model for a job group, including its aggregate derived status."""
+
+    id: str
+    name: str
+    workspace: str = Field(..., description="Workspace identifier")
+    project: Optional[str] = Field(default=None, description="Project URN")
+    description: str | None = None
+    source: str
+    max_concurrent_jobs: Optional[int] = None
+    fail_fast: bool = False
+    default_timeout_seconds: Optional[int] = None
+    status: JobGroupStatus = Field(..., description="Aggregate status derived from member job statuses.")
+    member_count: int = Field(default=0, description="Number of member jobs parented to this group.")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ownership: Optional[dict[str, Any]] = None
+    custom_fields: Optional[dict[str, Any]] = None
 
 
 class HelixJobTaskUpdate(BaseModel):

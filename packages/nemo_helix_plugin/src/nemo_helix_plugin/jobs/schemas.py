@@ -156,6 +156,73 @@ class HelixJobStatus(str, Enum):
         return new_status in valid_transitions.get(self, set())
 
 
+class JobGroupStatus(str, Enum):
+    """Derived status of a :class:`JobGroup`, rolled up from its member jobs.
+
+    A group is terminal only once every member is terminal. The group ``status``
+    is never stored; it is computed on read from the member jobs' statuses
+    (see :func:`aggregate_job_group_status`).
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
+
+    @staticmethod
+    def terminals() -> list["JobGroupStatus"]:
+        return [JobGroupStatus.COMPLETED, JobGroupStatus.FAILED, JobGroupStatus.CANCELLED]
+
+    def is_terminal(self) -> bool:
+        return self in JobGroupStatus.terminals()
+
+
+def aggregate_job_group_status(member_statuses: list[HelixJobStatus]) -> JobGroupStatus:
+    """Roll up member job statuses into a single :class:`JobGroupStatus`.
+
+    Rules:
+    - An empty group (no members) is ``PENDING`` -- nothing has run.
+    - The group is terminal only when *every* member is terminal.
+      - ``FAILED`` if any member errored.
+      - ``CANCELLED`` if any member was cancelled (and none errored).
+      - ``COMPLETED`` only when every member completed successfully.
+    - Otherwise the group is non-terminal:
+      - ``CANCELLING`` if any member is cancelling or already cancelled while
+        others are still running (a cancel is sweeping the group).
+      - ``RUNNING`` if any member is active/pending/past-created but not terminal.
+      - ``PENDING`` when every member is still in ``CREATED``.
+
+    Cancel is driven by a separate ticket; the ``CANCELLING``/``CANCELLED``
+    arms exist so the derivation is coherent once cancel lands.
+    """
+    if not member_statuses:
+        return JobGroupStatus.PENDING
+
+    all_terminal = all(status.is_terminal() for status in member_statuses)
+    any_error = any(status == HelixJobStatus.ERROR for status in member_statuses)
+    any_cancelled = any(status == HelixJobStatus.CANCELLED for status in member_statuses)
+
+    if all_terminal:
+        if any_error:
+            return JobGroupStatus.FAILED
+        if any_cancelled:
+            return JobGroupStatus.CANCELLED
+        return JobGroupStatus.COMPLETED
+
+    any_cancel_in_flight = any(
+        status in (HelixJobStatus.CANCELLING, HelixJobStatus.CANCELLED) for status in member_statuses
+    )
+    if any_cancel_in_flight:
+        return JobGroupStatus.CANCELLING
+
+    if all(status == HelixJobStatus.CREATED for status in member_statuses):
+        return JobGroupStatus.PENDING
+
+    return JobGroupStatus.RUNNING
+
+
 class HelixJobTaskStatusResponse(BaseModel):
     id: str
     name: str

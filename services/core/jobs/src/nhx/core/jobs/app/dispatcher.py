@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import weakref
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
@@ -26,10 +27,12 @@ from nhx.common.jobs.schemas import (
     HelixJobStatusResponse,
     HelixJobStepStatusResponse,
     HelixJobTaskStatusResponse,
+    aggregate_job_group_status,
 )
 from nhx.common.observability import create_counter
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
+    CreateJobGroupRequest,
     HelixJobAttemptResponse,
     HelixJobAttemptSortField,
     HelixJobListSortField,
@@ -38,7 +41,9 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     HelixJobStepsListFilter,
     HelixJobStepWithContext,
     HelixJobTaskUpdate,
+    JobGroupResponse,
     UpdateHelixJobRequest,
+    UpdateJobGroupRequest,
     get_model_id,
     job_artifact_base_path,
 )
@@ -69,6 +74,7 @@ from nhx.core.jobs.entities import (
     HelixJobStep,
     HelixJobStorageReclaim,
     HelixJobTask,
+    JobGroup,
     get_step_spec_name,
 )
 from nhx.core.jobs.telemetry import build_job_run_telemetry, emit_job_run_event
@@ -133,6 +139,57 @@ def generate_job_name(source: str, short_id: str) -> str:
     prefix = re.sub(r"[^a-z0-9@.+_]+", "-", source.lower())
     prefix = re.sub(r"^[^a-z]+", "", prefix)[:_AUTO_NAME_SOURCE_MAX_LENGTH].rstrip("-")
     return f"{prefix or _AUTO_NAME_FALLBACK_PREFIX}-{short_id}"
+
+
+def _deep_merge(base: dict[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``patch`` into a copy of ``base``.
+
+    Nested dicts merge key-by-key; every other value (including lists) is
+    replaced wholesale by the patch. The inputs are not mutated.
+    """
+    merged = dict(base)
+    for key, value in patch.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, Mapping):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _effective_member_timeout(
+    member_override: int | None,
+    group_default: int | None,
+) -> int | None:
+    """Resolve the per-step staleness timeout for a member.
+
+    The member's own override wins; otherwise the group default applies; when
+    neither is set the template's own per-step value is left untouched.
+    """
+    if member_override is not None:
+        return member_override
+    return group_default
+
+
+def _expand_member_spec(
+    template: HelixJobSpec,
+    config_patch: Mapping[str, Any],
+    timeout_seconds: int | None,
+) -> HelixJobSpec:
+    """Build one member's full job spec from the shared template.
+
+    Deep-merges ``config_patch`` into every step's ``config`` and, when
+    ``timeout_seconds`` is set, applies it to every step's
+    ``lifecycle.staleness_timeout_seconds``. The template is copied, never
+    mutated.
+    """
+    member_spec = template.model_copy(deep=True)
+    for step in member_spec.steps:
+        if config_patch:
+            step.config = _deep_merge(step.config, config_patch)
+        if timeout_seconds is not None:
+            step.lifecycle.staleness_timeout_seconds = timeout_seconds
+    return member_spec
 
 
 class JobHasNoAttemptError(ValueError):
@@ -315,26 +372,33 @@ class JobDispatcher:
         job_req: CreateHelixJobRequest,
         workspace: str,
         auth_context: Optional[AuthContext] = None,
+        parent: Optional[str] = None,
     ) -> HelixJobResponse:
-        """Create a new job and its first step."""
+        """Create a new job and its first step.
+
+        ``parent`` parents the new job to another entity (e.g. a job group) via
+        the Entity Store parent relationship, making it unique within
+        ``(workspace, platform_job, parent, name)``.
+        """
         if job_req.name is None:
-            return await self._create_job(job_req, workspace, auth_context=auth_context)
+            return await self._create_job(job_req, workspace, auth_context=auth_context, parent=parent)
 
         async with _get_job_mutation_lock(job_req.name, workspace):
-            return await self._create_job(job_req, workspace, auth_context=auth_context)
+            return await self._create_job(job_req, workspace, auth_context=auth_context, parent=parent)
 
     async def _create_job(
         self,
         job_req: CreateHelixJobRequest,
         workspace: str,
         auth_context: Optional[AuthContext] = None,
+        parent: Optional[str] = None,
     ) -> HelixJobResponse:
         """Create a new job after the caller has acquired any needed name lock."""
         job_name = job_req.name
         if job_name is not None:
             # Check if a job with the same name already exists
             try:
-                existing_job = await self.store.get(HelixJob, job_name, workspace=workspace)
+                existing_job = await self.store.get(HelixJob, job_name, workspace=workspace, parent=parent)
                 if existing_job:
                     raise JobAlreadyExistsError(
                         f"Job with name '{job_name}' already exists in workspace '{workspace}'."
@@ -371,25 +435,27 @@ class JobDispatcher:
                 fileset_name = fileset_resp.data().name
 
             # Create job (ID is assigned by entity store)
-            job = await self.store.create(
-                HelixJob(
-                    name=job_name,
-                    workspace=workspace,
-                    project=job_req.project,
-                    description=job_req.description,
-                    source=job_req.source,
-                    spec=job_req.spec,
-                    platform_spec=platform_spec,
-                    control=control,
-                    fileset=fileset_name,
-                    output_location=job_req.output_location,
-                    status=HelixJobStatus.CREATED,
-                    ownership=job_req.ownership,
-                    custom_fields=job_req.custom_fields,
-                )
-                # Add auth_context separately, it's a PrivateAttr, so it's not set in the constructor
-                .with_auth_context(auth_context)
+            new_job = HelixJob(
+                name=job_name,
+                workspace=workspace,
+                project=job_req.project,
+                description=job_req.description,
+                source=job_req.source,
+                spec=job_req.spec,
+                platform_spec=platform_spec,
+                control=control,
+                fileset=fileset_name,
+                output_location=job_req.output_location,
+                status=HelixJobStatus.CREATED,
+                ownership=job_req.ownership,
+                custom_fields=job_req.custom_fields,
             )
+            # Parent the job to its group (if any) for parent-scoped membership.
+            if parent is not None:
+                new_job._parent = parent
+            # Add auth_context separately, it's a PrivateAttr, so it's not set in the constructor
+            new_job.with_auth_context(auth_context)
+            job = await self.store.create(new_job)
 
             # Create first attempt
             # Use short ID prefix to stay within 32 char name limit
@@ -449,6 +515,280 @@ class JobDispatcher:
             return await self.store.get(HelixJob, identifier, workspace=workspace)
         except EntityNotFoundError:
             return None
+
+    async def create_job_group(
+        self,
+        group_req: CreateJobGroupRequest,
+        workspace: str,
+        auth_context: Optional[AuthContext] = None,
+    ) -> JobGroupResponse:
+        """Create a job group and expand its members into parented jobs.
+
+        Each member is built by deep-merging its ``config_patch`` into every step
+        of the shared ``template`` and applying the effective per-step staleness
+        timeout (member override, else group default, else the template value).
+        Every expanded job is parented to the group via the Entity Store parent
+        relationship, so the group's members are exactly the jobs whose
+        ``parent`` is the group ID.
+
+        If any member fails to create, the group and the members already created
+        are rolled back so a partial group is never left behind.
+        """
+        group_name = group_req.name or generate_job_name(group_req.source, get_model_id("jobgroup")[-8:])
+
+        async with _get_job_mutation_lock(f"group:{group_name}", workspace):
+            try:
+                existing = await self.store.get(JobGroup, group_name, workspace=workspace)
+                if existing:
+                    raise JobAlreadyExistsError(
+                        f"Job group with name '{group_name}' already exists in workspace '{workspace}'."
+                    )
+            except EntityNotFoundError:
+                pass
+
+            new_group = JobGroup(
+                name=group_name,
+                workspace=workspace,
+                project=group_req.project,
+                description=group_req.description,
+                source=group_req.source,
+                max_concurrent_jobs=group_req.max_concurrent_jobs,
+                fail_fast=group_req.fail_fast,
+                default_timeout_seconds=group_req.default_timeout_seconds,
+                ownership=group_req.ownership,
+                custom_fields=group_req.custom_fields,
+            )
+            group = await self.store.create(new_group)
+
+            created_jobs: list[HelixJobResponse] = []
+            try:
+                for member in group_req.members:
+                    member_spec = _expand_member_spec(
+                        template=group_req.template,
+                        config_patch=member.config_patch,
+                        timeout_seconds=_effective_member_timeout(
+                            member_override=member.timeout_seconds,
+                            group_default=group_req.default_timeout_seconds,
+                        ),
+                    )
+                    member_req = CreateHelixJobRequest(
+                        name=member.name,
+                        description=group_req.description,
+                        project=group_req.project,
+                        spec=dict(group_req.spec),
+                        platform_spec=member_spec,
+                        source=group_req.source,
+                        ownership=group_req.ownership,
+                        custom_fields=group_req.custom_fields,
+                    )
+                    created = await self.create_job(member_req, workspace, auth_context=auth_context, parent=group.id)
+                    created_jobs.append(created)
+            except Exception:
+                # Roll back the partial group so a failed expansion leaves nothing behind.
+                for created in created_jobs:
+                    try:
+                        await self.delete_job(created.id, workspace)
+                    except Exception:
+                        logger.warning(
+                            "Failed to roll back member job during job group create failure",
+                            extra={"job": created.id, "group": group.name, "workspace": workspace},
+                        )
+                try:
+                    await self.store.delete_by_id(JobGroup, group.id)
+                except Exception:
+                    logger.warning(
+                        "Failed to roll back job group after member expansion failure",
+                        extra={"group": group.name, "workspace": workspace},
+                    )
+                raise
+
+            operations_counter.add(1, attributes={"operation": "create_job_group"})
+            logger.info(
+                "Created job group",
+                extra={"group": group.name, "workspace": workspace, "members": len(created_jobs)},
+            )
+
+            # Persist the group's initial status from the members just expanded. The status is a
+            # denormalized field (not recomputed per read); the controller's group roll-up keeps
+            # it current as members change thereafter.
+            group.status = aggregate_job_group_status([self._member_status(created) for created in created_jobs])
+            group = await self.store.update(group)
+
+            return self._build_job_group_response(group, member_count=len(created_jobs))
+
+    async def get_job_group(self, identifier: str, workspace: str) -> JobGroupResponse | None:
+        """Get a job group by name or ID, reading its persisted aggregate status."""
+        group = await self._resolve_job_group(identifier, workspace)
+        if group is None:
+            return None
+        member_count = await self._count_group_members(group.id, workspace)
+        return self._build_job_group_response(group, member_count=member_count)
+
+    async def list_job_groups(
+        self,
+        workspace: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        sort: Optional[HelixJobListSortField] = None,
+    ) -> Tuple[List[JobGroupResponse], int]:
+        """List job groups with their persisted aggregate status."""
+        page = 1
+        page_size = limit or 100
+        if offset is not None and limit is not None:
+            page = (offset // limit) + 1
+        sort_str = sort.value if sort else "-created_at"
+
+        response = await self.store.list(
+            JobGroup,
+            page=page,
+            page_size=page_size,
+            workspace=workspace,
+            sort=sort_str,
+        )
+        groups = [
+            self._build_job_group_response(group, member_count=await self._count_group_members(group.id, workspace))
+            for group in response.data
+        ]
+        return groups, response.pagination.total_results
+
+    async def update_job_group(
+        self,
+        identifier: str,
+        workspace: str,
+        update: UpdateJobGroupRequest,
+    ) -> JobGroupResponse | None:
+        """Apply a validated partial update to a job group's mutable metadata."""
+        resolved = await self._resolve_job_group(identifier, workspace)
+        if resolved is None:
+            return None
+        async with _get_job_mutation_lock(f"group:{resolved.name}", workspace):
+            try:
+                group = await self.store.get(JobGroup, resolved.name, workspace=workspace)
+            except EntityNotFoundError:
+                return None
+            if group.id != resolved.id:
+                return None
+
+            fields = update.model_fields_set
+            if "description" in fields:
+                group.description = update.description
+            if "max_concurrent_jobs" in fields:
+                group.max_concurrent_jobs = update.max_concurrent_jobs
+            if "fail_fast" in fields and update.fail_fast is not None:
+                group.fail_fast = update.fail_fast
+            if "default_timeout_seconds" in fields:
+                group.default_timeout_seconds = update.default_timeout_seconds
+            if "custom_fields" in fields:
+                group.custom_fields = update.custom_fields
+
+            group = await self.store.update(group)
+            operations_counter.add(1, attributes={"operation": "update_job_group"})
+            member_count = await self._count_group_members(group.id, workspace)
+            return self._build_job_group_response(group, member_count=member_count)
+
+    async def delete_job_group(self, identifier: str, workspace: str) -> bool:
+        """Delete a job group and all of its member jobs.
+
+        Each member is deleted through the normal job-deletion path, so a group
+        with a non-terminal member raises the same ``JobDeletionConflictError``
+        that deleting that job directly would.
+        """
+        group = await self._resolve_job_group(identifier, workspace)
+        if group is None:
+            return False
+        async with _get_job_mutation_lock(f"group:{group.name}", workspace):
+            members = await self._list_group_members(group.id, workspace)
+            for member in members:
+                await self.delete_job(member.id, workspace)
+            try:
+                await self.store.delete_by_id(JobGroup, group.id)
+            except EntityNotFoundError:
+                return False
+            operations_counter.add(1, attributes={"operation": "delete_job_group"})
+            return True
+
+    async def _resolve_job_group(self, identifier: str, workspace: str) -> Optional[JobGroup]:
+        """Resolve a job group by ID, falling back to its name within the workspace."""
+        try:
+            group = await self.store.get_by_id(JobGroup, identifier)
+            if group.workspace == workspace:
+                return group
+        except EntityNotFoundError:
+            pass
+        try:
+            return await self.store.get(JobGroup, identifier, workspace=workspace)
+        except EntityNotFoundError:
+            return None
+
+    async def _list_group_members(self, group_id: str, workspace: str) -> list[HelixJob]:
+        """Return every member job parented to the group.
+
+        Membership is the Entity Store ``parent`` relationship, so members are
+        the jobs whose top-level ``parent`` column equals the group ID. ``parent``
+        is a base column (not a ``data.*`` field), so it is filtered directly
+        rather than via ``filter_obj`` (which would namespace it under ``data.``).
+        """
+        members: list[HelixJob] = []
+        page = 1
+        parent_filter = ComparisonOperation(operator=FilterOperator.EQ, field="parent", value=group_id)
+        while True:
+            response = await self.store.list(
+                HelixJob,
+                filter_operation=parent_filter,
+                page=page,
+                page_size=_DELETE_PAGE_SIZE,
+                workspace=workspace,
+            )
+            members.extend(response.data)
+            if response.pagination.page >= response.pagination.total_pages:
+                return members
+            page = response.pagination.page + 1
+
+    def _build_job_group_response(self, group: JobGroup, member_count: int) -> JobGroupResponse:
+        """Assemble a group response from the group entity's own fields.
+
+        The aggregate ``status`` is read straight off the persisted entity rather than
+        recomputed from the members -- deriving it here would fan out a read over every
+        member, which does not scale to groups with thousands of members. The controller's
+        group roll-up keeps the stored value current.
+        """
+        return JobGroupResponse(
+            id=group.id,
+            name=group.name,
+            workspace=group.workspace,
+            project=group.project,
+            description=group.description,
+            source=group.source,
+            max_concurrent_jobs=group.max_concurrent_jobs,
+            fail_fast=group.fail_fast,
+            default_timeout_seconds=group.default_timeout_seconds,
+            status=group.status,
+            member_count=member_count,
+            created_at=group.created_at,  # type: ignore[arg-type]
+            updated_at=group.updated_at,  # type: ignore[arg-type]
+            ownership=group.ownership,
+            custom_fields=group.custom_fields,
+        )
+
+    async def _count_group_members(self, group_id: str, workspace: str) -> int:
+        """Return how many jobs are parented to the group without fetching them all.
+
+        Asks for a single-item page and reads the total off the pagination envelope, so
+        rendering a group response never fans a full read out over every member.
+        """
+        response = await self.store.list(
+            HelixJob,
+            filter_operation=ComparisonOperation(operator=FilterOperator.EQ, field="parent", value=group_id),
+            page=1,
+            page_size=1,
+            workspace=workspace,
+        )
+        return response.pagination.total_results
+
+    @staticmethod
+    def _member_status(member: HelixJobResponse) -> HelixJobStatus:
+        """The status a freshly-created member contributes to the group's initial rollup."""
+        return member.status
 
     async def update_job(
         self,
@@ -548,17 +888,25 @@ class JobDispatcher:
         if job_entity is None:
             return False
         async with _get_job_mutation_lock(job_entity.name, workspace):
-            return await self._delete_job_locked(job_entity.name, workspace, expected_id=job_entity.id)
+            return await self._delete_job_locked(
+                job_entity.name, workspace, expected_id=job_entity.id, parent=job_entity.parent
+            )
 
-    async def _delete_job_locked(self, job_name: str, workspace: str, expected_id: str | None = None) -> bool:
+    async def _delete_job_locked(
+        self, job_name: str, workspace: str, expected_id: str | None = None, parent: str | None = None
+    ) -> bool:
         """Delete a terminal job while holding the per-job mutation lock.
 
         ``expected_id`` guards against a same-name replacement: the identifier was
         resolved before the lock was taken, so re-verify the re-fetched job is
         still the one we resolved before deleting anything.
+
+        ``parent`` scopes the name re-fetch to the job's parent (e.g. a job group).
+        A member job is parent-scoped, so a name lookup without it would resolve
+        ``parent IS NULL`` and miss the member entirely.
         """
         try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
+            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace, parent=parent)
         except EntityNotFoundError:
             return False
         if expected_id is not None and job_entity.id != expected_id:
