@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_SIZE_OPTIONS,
+  type ModelFilterControls,
+} from '@nemo/common/src/api/models/modelFilters';
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelDropdown } from '@nemo/common/src/components/ModelSelectV2/ModelDropdown';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
@@ -121,6 +125,58 @@ describe('ModelDropdown', () => {
       await waitFor(() => expect(onSearchChange).toHaveBeenCalledWith('llama'));
       // The caller owns the query, so both models stay listed until new groups arrive.
       expect(listedModels()).toEqual(['nemotron-8b', 'llama-3.1-8b']);
+    });
+  });
+
+  describe('filters', () => {
+    const makeFilters = (overrides: Partial<ModelFilterControls> = {}): ModelFilterControls => ({
+      values: {},
+      onChange: vi.fn(),
+      providerOptions: [{ value: 'nvidia/build', label: 'build' }],
+      familyOptions: [{ value: 'llama', label: 'llama' }],
+      sizeOptions: MODEL_SIZE_OPTIONS,
+      providersLoading: false,
+      ...overrides,
+    });
+
+    it('hides the filter bar when no modelFilters are given', () => {
+      renderOpen();
+
+      expect(screen.queryByTestId('model-select-v2-filters')).not.toBeInTheDocument();
+    });
+
+    it('renders a provider, family and size filter', () => {
+      renderOpen({ modelFilters: makeFilters() });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by provider' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by family' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by size' })).toBeInTheDocument();
+    });
+
+    it('reports a picked option merged with the other filters', async () => {
+      const onChange = vi.fn();
+      renderOpen({ modelFilters: makeFilters({ values: { family: 'llama' }, onChange }) });
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by size' }));
+      fireEvent.click(await screen.findByRole('option', { name: 'Up to 3B' }));
+
+      expect(onChange).toHaveBeenCalledWith({ family: 'llama', size: 'small' });
+    });
+
+    it('disables a filter that has nothing to offer', () => {
+      renderOpen({ modelFilters: makeFilters({ familyOptions: [] }) });
+
+      expect(screen.getByRole('combobox', { name: 'Filter by family' })).toBeDisabled();
+    });
+
+    it('says the filters excluded everything when no models match', () => {
+      renderOpen({
+        groups: [],
+        emptyMessage: 'No models',
+        modelFilters: makeFilters({ values: { size: 'xlarge' } }),
+      });
+
+      expect(screen.getByText('No models match these filters')).toBeInTheDocument();
     });
   });
 
