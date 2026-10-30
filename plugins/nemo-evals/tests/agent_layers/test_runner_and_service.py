@@ -275,9 +275,14 @@ def test_the_job_fetches_the_installer_onto_storage_its_build_step_reads() -> No
 
 
 def test_the_layers_builder_name_covers_everything_the_layer_holds() -> None:
-    base = {"environment": "e" * 64, "agent_key": "k", "user": "agent", "platform": None}
-    name = layer_builder_name(**base)
+    name = layer_builder_name(environment="e" * 64, agent_key="k", user="agent", platform=None)
 
-    assert name.startswith("harbor-agent-") and name == layer_builder_name(**base)
-    for field, other in [("environment", "f" * 64), ("agent_key", "k2"), ("user", "root"), ("platform", "linux/arm64")]:
-        assert layer_builder_name(**{**base, field: other}) != name
+    assert name.startswith("harbor-agent-")
+    assert name == layer_builder_name(environment="e" * 64, agent_key="k", user="agent", platform=None)
+    others = [
+        layer_builder_name(environment="f" * 64, agent_key="k", user="agent", platform=None),
+        layer_builder_name(environment="e" * 64, agent_key="k2", user="agent", platform=None),
+        layer_builder_name(environment="e" * 64, agent_key="k", user="root", platform=None),
+        layer_builder_name(environment="e" * 64, agent_key="k", user="agent", platform="linux/arm64"),
+    ]
+    assert name not in others and len(set(others)) == len(others)
