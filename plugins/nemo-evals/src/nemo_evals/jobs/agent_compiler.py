@@ -142,6 +142,12 @@ def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
         yield endpoint.api_key_env, endpoint.api_key_secret.root
 
 
+def _agent_eval_image(*, is_colocated_gym: bool) -> str:
+    if is_colocated_gym:
+        return config.gym_tasks_image or get_qualified_image(GYM_AGENT_EVAL_IMAGE)
+    return config.container_image_ref or get_qualified_image(AGENT_EVAL_IMAGE)
+
+
 def _agent_eval_step(
     spec: AgentEvalSpec,
     profile: str | None,
@@ -155,11 +161,7 @@ def _agent_eval_step(
 
     is_gym_target = isinstance(spec.target, GymRunnerTarget)
     is_colocated_gym = is_gym_target and sandbox_plan is None
-    image = (
-        config.gym_tasks_image
-        if is_colocated_gym and config.gym_tasks_image is not None
-        else get_qualified_image(GYM_AGENT_EVAL_IMAGE if is_colocated_gym else AGENT_EVAL_IMAGE)
-    )
+    image = _agent_eval_image(is_colocated_gym=is_colocated_gym)
     executor = _executor(
         profile=profile,
         image=image,
@@ -184,11 +186,7 @@ def _agent_eval_cpu_step(
     """Build the CPU-backed evaluation step and keep its concrete executor type."""
     is_gym_target = isinstance(spec.target, GymRunnerTarget)
     is_colocated_gym = is_gym_target and sandbox_plan is None
-    image = (
-        config.gym_tasks_image
-        if is_colocated_gym and config.gym_tasks_image is not None
-        else get_qualified_image(GYM_AGENT_EVAL_IMAGE if is_colocated_gym else AGENT_EVAL_IMAGE)
-    )
+    image = _agent_eval_image(is_colocated_gym=is_colocated_gym)
     executor = CPUExecutionProviderSpec(
         profile=profile or "default",
         provider="cpu",

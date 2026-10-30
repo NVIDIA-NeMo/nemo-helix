@@ -846,7 +846,15 @@ async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     assert judge_urls == [f"http://nemo-api:8080{route}", f"http://localhost:9000{route}"]
 
 
-async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
+@pytest.mark.parametrize(
+    "image_ref",
+    [None, "registry.example.com/eval-tasks:custom", "registry.example.com/eval-tasks@sha256:" + "a" * 64],
+)
+async def test_evaluate_job_compile_produces_cpu_task_step(mocker: MockerFixture, image_ref: str | None) -> None:
+    from nemo_evals.config import EvaluatorConfig
+
+    mocker.patch("nemo_evals.jobs.compiler.get_config", return_value=EvaluatorConfig(container_image_ref=image_ref))
+    qualify = mocker.patch("nemo_evals.jobs.compiler.get_qualified_image", return_value="platform/nhx-tasks:release")
     spec = EvaluateSpec.model_validate(_exact_match_spec())
     compiled = await EvaluateJob.compile(
         workspace="default",
@@ -859,6 +867,12 @@ async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
     assert len(job_spec.steps) == 1
     step = job_spec.steps[0]
     assert step.name == "evaluate"
+    assert step.executor.provider == "cpu"
+    assert step.executor.container.image == (image_ref or "platform/nhx-tasks:release")
+    if image_ref:
+        qualify.assert_not_called()
+    else:
+        qualify.assert_called_once_with("nhx-tasks")
     _assert_metric_step_entrypoint(job_spec)
     assert step.config is not None
     config = cast(dict[str, Any], step.config)

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from nemo_evals.config import get_config
 from nemo_evals.jobs.evaluate import EvaluateSpec, evaluate_secret_refs
 from nemo_evals.jobs.secret_env import build_task_environment
 from nemo_helix_plugin.jobs.api_factory import (
@@ -47,7 +48,7 @@ def _evaluate_step(spec: EvaluateSpec, profile: str | None) -> HelixJobStep:
             profile=profile or "default",
             provider="cpu",
             container=ContainerSpec(
-                image=get_qualified_image("nhx-tasks"),
+                image=get_config().container_image_ref or get_qualified_image("nhx-tasks"),
                 entrypoint=["python", "-m"],
                 command=["nemo_evals.tasks.evaluate"],
             ),
