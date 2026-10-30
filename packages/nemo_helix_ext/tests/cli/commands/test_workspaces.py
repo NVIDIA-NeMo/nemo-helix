@@ -134,12 +134,57 @@ def test_delete() -> None:
     recorder = Recorder([httpx.Response(200, json={"message": "deleted", "id": "ml-team", "deleted_at": None})])
     runner, state = make_runner(recorder)
 
-    result = runner.invoke(app, ["workspaces", "delete", "ml-team"], obj=state)
+    result = runner.invoke(app, ["workspaces", "delete", "ml-team", "--yes"], obj=state)
 
     assert result.exit_code == 0, result.output
     assert recorder.last.method == "DELETE"
     assert recorder.last.url.path == "/apis/entities/v2/workspaces/ml-team"
     assert result.stdout.strip() == "deleted"
+
+
+def test_delete_without_yes_off_a_terminal_sends_nothing() -> None:
+    recorder = Recorder([])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, ["workspaces", "delete", "ml-team"], obj=state)
+
+    assert result.exit_code == 2
+    assert "--yes" in result.stderr
+    assert recorder.requests == []
+
+
+def test_delete_prompts_on_a_terminal_and_deletes_when_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.stdin_is_interactive", lambda: True)
+    recorder = Recorder([httpx.Response(200, json={"message": "deleted", "id": "ml-team", "deleted_at": None})])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, ["workspaces", "delete", "ml-team"], obj=state, input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Delete workspace 'ml-team'" in result.stdout
+    assert recorder.last.method == "DELETE"
+    assert recorder.last.url.path == "/apis/entities/v2/workspaces/ml-team"
+
+
+def test_delete_declined_on_a_terminal_sends_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.stdin_is_interactive", lambda: True)
+    recorder = Recorder([])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, ["workspaces", "delete", "ml-team"], obj=state, input="n\n")
+
+    assert result.exit_code == 1
+    assert recorder.requests == []
+
+
+def test_delete_short_yes_flag_skips_the_prompt() -> None:
+    recorder = Recorder([httpx.Response(200, json={"message": "deleted", "id": "ml-team", "deleted_at": None})])
+    runner, state = make_runner(recorder)
+
+    result = runner.invoke(app, ["workspaces", "delete", "ml-team", "-y"], obj=state)
+
+    assert result.exit_code == 0, result.output
+    assert recorder.last.method == "DELETE"
 
 
 def test_deletion_status_prints_the_stored_error() -> None:
@@ -172,7 +217,7 @@ def test_delete_not_found_maps_to_remote_error_exit_code() -> None:
     recorder = Recorder([httpx.Response(404, json={"detail": "Workspace 'nope' not found"})])
     runner, state = make_runner(recorder)
 
-    result = runner.invoke(app, ["workspaces", "delete", "nope"], obj=state)
+    result = runner.invoke(app, ["workspaces", "delete", "nope", "--yes"], obj=state)
 
     assert result.exit_code == 3
     assert "Not found" in result.stderr

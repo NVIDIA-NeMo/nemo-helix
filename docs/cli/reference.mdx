@@ -5816,6 +5816,9 @@ will handle deletion of all entities and external resources.
 
 Role bindings are immediately deleted to revoke access.
 
+Asks for confirmation first; pass `--yes` to skip it (required when not
+running interactively).
+
 **Examples:**
 
 
@@ -5832,6 +5835,10 @@ nemo workspaces delete [OPTIONS] NAME
 **Arguments:**
 
 * `<NAME>`
+
+**Options:**
+
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
