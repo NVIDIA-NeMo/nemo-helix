@@ -4,9 +4,8 @@
 import { z } from 'zod';
 
 // Registry of canned example agents. Each entry references curated static assets
-// under public/sample-agents/<dir>/ by path (fetched on demand, never bundled) —
-// mirroring src/constants/sampleDatasets.ts. Used by the Create Example Agent
-// modal (fetch + parse agent.yaml, inject model, POST).
+// under public/sample-agents/<dir>/ by path (fetched on demand, never bundled).
+// Used by the Create Example Agent modal (fetch + parse agent.yaml, inject model, POST).
 //
 // Agent configs only. Eval configs and datasets are NOT seeded from here: Studio's
 // Run Evaluation flow takes a user-supplied config and dataset, so the sample eval

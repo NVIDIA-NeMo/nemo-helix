@@ -33,6 +33,3 @@ export const PURPOSE_OPTIONS: {
     description: 'For executable environment packages consumed by sandboxed workloads.',
   },
 ];
-
-export const DATASET_TYPE_CUSTOM = 'custom';
-export const DATASET_TYPE_SAMPLE = 'sample';

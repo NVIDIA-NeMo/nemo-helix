@@ -4,11 +4,6 @@
 import { getErrorMessage as getApiErrorMessage } from '@nemo/common/src/api/common/utils';
 import { isHuggingFaceUrl, isNgcUrl } from '@studio/util/storageConfigFromUrl';
 
-export function getSampleDatasetName(workspace: string, sampleId: string): string {
-  const truncatedProjectName = workspace.split('-')[1] || workspace;
-  return `${sampleId}-${truncatedProjectName}`;
-}
-
 /**
  * User-facing error for external storage create failure, with a stable prefix per storage type
  * so the toast never shows raw [object Object] from API detail.

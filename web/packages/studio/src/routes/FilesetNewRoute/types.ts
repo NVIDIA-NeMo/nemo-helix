@@ -4,7 +4,6 @@
 import { entityNameSchema } from '@nemo/common/src/utils/entityName';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { FilesCreateFilesetBody } from '@nemo/sdk/generated/platform/zod/files';
-import { DATASET_TYPE_CUSTOM, DATASET_TYPE_SAMPLE } from '@studio/routes/FilesetNewRoute/constants';
 import { z } from 'zod';
 
 // Same pattern as the generated zod, but reports which rule the value breaks.
@@ -15,11 +14,9 @@ export const DatasetCreateFilesetFormSchema = FilesCreateFilesetBody.extend({
 
 export type CreateFilesetFormFields = z.infer<typeof DatasetCreateFilesetFormSchema>;
 
-/** Form extends schema with optional files (Upload/sample) and external storage inputs (url/secretKey). */
+/** Form extends schema with optional files (Upload) and external storage inputs (url/secretKey). */
 export type DatasetFormFields = CreateFilesetFormFields & {
   files?: File[];
   url?: string;
   secretKey?: string;
 };
-
-export type DatasetType = typeof DATASET_TYPE_CUSTOM | typeof DATASET_TYPE_SAMPLE;
