@@ -18,6 +18,7 @@ in this process, where the agent subprocess cannot read it back out.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import socket
@@ -32,9 +33,9 @@ from urllib.parse import urlsplit
 import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
 from nemo_helix_plugin.auth import platform_auth_enabled
-from nemo_helix_plugin.client.auth import TokenProviderAuth
+from nemo_helix_plugin.client.auth import EnvAccessToken, TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
-from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, get_env_access_token
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nemo_helix_plugin.client_provider import get_forwarding_headers, get_nemo_client
 
@@ -44,12 +45,20 @@ _STARTUP_TIMEOUT_SECONDS = 10.0
 _SHUTDOWN_TIMEOUT_SECONDS = 5
 
 
-def _gateway_models(config: AgentConfig) -> Iterator[tuple[ModelConfig, str]]:
+def _is_gateway_url(base_url: object) -> bool:
+    return isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/")
+
+
+def _onto_proxy(url: str, origin: str) -> str:
+    proxy = urlsplit(origin)
+    return urlsplit(url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+
+
+def _gateway_models(config: AgentConfig) -> Iterator[ModelConfig]:
     models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
     for model in models:
-        base_url = model.base_url or model.settings.get("base_url")
-        if isinstance(base_url, str) and urlsplit(base_url).path.startswith("/apis/inference-gateway/"):
-            yield model, base_url
+        if _is_gateway_url(model.base_url or model.settings.get("base_url")):
+            yield model
 
 
 def job_has_platform_identity() -> bool:
@@ -88,11 +97,42 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
     if origin is None or not routes_inference_through_gateway(config):
         return config
 
-    proxy = urlsplit(origin)
     runtime_config = config.model_copy(deep=True)
-    for model, original_url in _gateway_models(runtime_config):
-        model.base_url = urlsplit(original_url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+    for model in _gateway_models(runtime_config):
+        model.base_url = _onto_proxy(model.base_url or model.settings["base_url"], origin)
         model.settings.pop("base_url", None)
+    return runtime_config
+
+
+def _fabric_gateway_models(config: dict[str, Any]) -> Iterator[tuple[dict[str, Any], str]]:
+    models = config.get("models")
+    if not isinstance(models, dict):
+        return
+    for model in models.values():
+        if not isinstance(model, dict):
+            continue
+        settings = model.get("settings")
+        base_url = model.get("base_url") or (settings.get("base_url") if isinstance(settings, dict) else None)
+        if isinstance(base_url, str) and _is_gateway_url(base_url):
+            yield model, base_url
+
+
+def routes_fabric_inference_through_gateway(config: dict[str, Any]) -> bool:
+    """:func:`routes_inference_through_gateway` for a translated Fabric config."""
+    return any(_fabric_gateway_models(config))
+
+
+def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """:func:`rewrite_gateway_models` for a translated Fabric config, with the same contract."""
+    if origin is None or not routes_fabric_inference_through_gateway(config):
+        return config
+
+    runtime_config = copy.deepcopy(config)
+    for model, original_url in _fabric_gateway_models(runtime_config):
+        model["base_url"] = _onto_proxy(original_url, origin)
+        settings = model.get("settings")
+        if isinstance(settings, dict):
+            settings.pop("base_url", None)
     return runtime_config
 
 
@@ -126,11 +166,9 @@ def rewrite_intake_otlp_endpoints(config: AgentConfig, origin: str | None) -> Ag
     if origin is None or not exports_otlp_to_intake(config):
         return config
 
-    proxy = urlsplit(origin)
     runtime_config = config.model_copy(deep=True)
     for endpoint_config in _intake_otlp_endpoints(runtime_config.telemetry):
-        endpoint = urlsplit(endpoint_config["endpoint"])
-        endpoint_config["endpoint"] = endpoint._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+        endpoint_config["endpoint"] = _onto_proxy(endpoint_config["endpoint"], origin)
     return runtime_config
 
 
@@ -149,7 +187,7 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
     lifetime of one token.
     """
     token_file = os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR)
-    if not (token_file or os.environ.get("NHX_PRINCIPAL")):
+    if not (token_file or get_env_access_token() or os.environ.get("NHX_PRINCIPAL")):
         yield None
         return
 
@@ -163,6 +201,9 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
         # requests use the same provider, which exchanges again as tokens expire.
         provider.get_access_token()
         app = build_auth_proxy_app(base_url=base_url, auth=TokenProviderAuth(provider))
+    elif get_env_access_token():
+        # A subprocess Job under token exchange: the supervisor rotates the delegated token file.
+        app = build_auth_proxy_app(base_url=base_url, auth=TokenProviderAuth(EnvAccessToken()))
     else:
         with get_nemo_client() as client:
             headers = get_forwarding_headers(client)

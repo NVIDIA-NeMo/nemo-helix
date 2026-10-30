@@ -24,12 +24,15 @@ import logging
 from typing import TypeVar
 
 import httpx
+from nemo_helix_plugin.client.auth import EnvAccessToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, BaseNemoClient, NemoClient, NemoClientRuntime
-from nemo_helix_plugin.client.constants import is_workload_identity_token_file_set
+from nemo_helix_plugin.client.constants import get_env_access_token, is_workload_identity_token_file_set
 from nemo_helix_plugin.client.types import RetryPolicy
 from nhx.common.auth.models import Principal
 from nhx.common.auth.tasks import principal_from_env
 from nhx.common.client_runtime import build_platform_client_runtime
+from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
+from nhx.common.observability.otel import get_otel_headers
 from nhx.common.platform_client_context import (
     DELEGATED_PRINCIPAL_HEADERS,
     PRINCIPAL_OBO_HEADER,
@@ -54,6 +57,10 @@ DEFAULT_RETRY_POLICY = RetryPolicy(
 )
 
 ClientT = TypeVar("ClientT", bound=BaseNemoClient)
+
+
+def _subprocess_task_headers() -> dict[str, str]:
+    return {**MARK_INTERNAL_REQUEST_HEADERS, **get_otel_headers()}
 
 
 def _unrouted_endpoint(context: HelixClientContext) -> HelixEndpoint:
@@ -237,6 +244,18 @@ def get_task_nemo_client(
     """
     if http_client is None and is_workload_identity_token_file_set():
         return get_nemo_client(internal=True, workspace=workspace)
+    if get_env_access_token():
+        endpoint = resolve_platform_endpoint()
+        return NemoClient(
+            base_url=endpoint.connect_base_url,
+            workspace=workspace,
+            auth=EnvAccessToken(),
+            default_headers=_subprocess_task_headers(),
+            retry=DEFAULT_RETRY_POLICY,
+            http_client=http_client or endpoint.sync_sdk_http_client(),
+            owns_http_client=http_client is None,
+            client_runtime=build_platform_client_runtime(endpoint),
+        )
     if http_client is None:
         http_client = resolve_platform_endpoint().sync_sdk_http_client()
     principal = principal_from_env()
@@ -263,6 +282,18 @@ def get_async_task_nemo_client(
     """Async counterpart of :func:`get_task_nemo_client`. Wire-identical."""
     if http_client is None and is_workload_identity_token_file_set():
         return get_async_nemo_client(internal=True, workspace=workspace)
+    if get_env_access_token():
+        endpoint = resolve_platform_endpoint()
+        return AsyncNemoClient(
+            base_url=endpoint.connect_base_url,
+            workspace=workspace,
+            auth=EnvAccessToken(),
+            default_headers=_subprocess_task_headers(),
+            retry=DEFAULT_RETRY_POLICY,
+            http_client=http_client or endpoint.async_sdk_http_client(),
+            owns_http_client=http_client is None,
+            client_runtime=build_platform_client_runtime(endpoint),
+        )
     if http_client is None:
         http_client = resolve_platform_endpoint().async_sdk_http_client()
     principal = principal_from_env()

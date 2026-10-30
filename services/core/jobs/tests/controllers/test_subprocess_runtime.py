@@ -4,6 +4,7 @@
 import json
 import threading
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,8 +20,12 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     _build_otlp_log_exporter,
     _UnixSocketOTLPSession,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
     parse_secret_references,
+    refresh_subprocess_task_auth,
     start_log_capture,
+    task_access_token_refresh_interval,
+    write_task_access_token,
 )
 
 
@@ -60,7 +65,11 @@ def test_inject_secret_env_vars():
     response.__enter__.return_value = response
     response.__exit__.return_value = None
 
-    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen:
+    auth_config = SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None))
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
+    ):
         updated_env = inject_secret_env_vars(env.copy())
 
     assert updated_env["HF_TOKEN"] == "secret-value"
@@ -71,6 +80,132 @@ def test_inject_secret_env_vars():
     assert request.get_header("X-nhx-principal-on-behalf-of") == "creator@example.com"
     assert request.get_header("X-nhx-subject-account-id") == "account-creator"
     assert request.get_header("X-nhx-subject-aliases") == "legacy-creator,creator@example.com"
+
+
+def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled(tmp_path):
+    token_file = tmp_path / "config" / ".nhx-access-token"
+    principal = Principal(
+        id="creator@example.com",
+        account_id="account-creator",
+        authz_aliases=["creator@example.com"],
+    )
+    env = {
+        NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
+        NHX_PRINCIPAL_ENVVAR: principal.model_dump_json(exclude_none=True),
+        "NHX_SECRETS_URL": "http://secrets.example",
+    }
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object()))
+    response = MagicMock()
+    response.read.return_value = json.dumps({"value": "secret-value"}).encode("utf-8")
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
+    ):
+        provider_cls.return_value.get_access_token.return_value = "jobs-workload-token"
+        inject_subprocess_task_auth(env, token_file)
+        updated_env = inject_secret_env_vars(env.copy())
+
+    assert updated_env["HF_TOKEN"] == "secret-value"
+    assert "NHX_ACCESS_TOKEN" not in updated_env
+    assert updated_env["NHX_ACCESS_TOKEN_FILE"] == str(token_file)
+    assert token_file.read_text(encoding="utf-8") == "jobs-workload-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
+    provider_cls.assert_called_once_with(auth_config, "jobs", principal)
+    request = mock_urlopen.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer jobs-workload-token"
+    assert request.get_header("X-nhx-principal-id") is None
+    assert request.get_header("X-nhx-principal-on-behalf-of") is None
+
+
+@pytest.mark.parametrize(
+    ("auth_config", "principal_json"),
+    [
+        pytest.param(SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None)), None, id="auth-disabled"),
+        pytest.param(SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object())), None, id="no-principal"),
+        pytest.param(
+            SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object())), "{not json", id="bad-principal"
+        ),
+        pytest.param(
+            SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object())),
+            '{"id": ""}',
+            id="empty-principal-id",
+        ),
+    ],
+)
+def test_inject_subprocess_task_auth_withholds_token_without_delegable_principal(auth_config, principal_json, tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    env = {"NHX_ACCESS_TOKEN": "stale", "NHX_ACCESS_TOKEN_FILE": "/stale"}
+    if principal_json is not None:
+        env[NHX_PRINCIPAL_ENVVAR] = principal_json
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+    ):
+        inject_subprocess_task_auth(env, token_file)
+
+    provider_cls.assert_not_called()
+    assert "NHX_ACCESS_TOKEN" not in env
+    assert "NHX_ACCESS_TOKEN_FILE" not in env
+    assert not token_file.exists()
+
+
+def test_write_task_access_token_does_not_follow_a_pre_planted_temp_link(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    victim = tmp_path / "victim"
+    victim.write_text("keep", encoding="utf-8")
+    (tmp_path / ".nhx-access-token.tmp").symlink_to(victim)
+
+    write_task_access_token(token_file, "new-token")
+
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert token_file.read_text(encoding="utf-8") == "new-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_refresh_subprocess_task_auth_rotates_token_file(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    token_file.write_text("old-token", encoding="utf-8")
+    env = {NHX_PRINCIPAL_ENVVAR: Principal(id="creator@example.com").model_dump_json(exclude_none=True)}
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object()))
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+    ):
+        provider_cls.return_value.get_access_token.return_value = "new-token"
+        assert refresh_subprocess_task_auth(env, token_file) is True
+
+    assert token_file.read_text(encoding="utf-8") == "new-token"
+
+
+def test_refresh_subprocess_task_auth_reports_when_nothing_could_be_minted(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    auth_config = SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None))
+    env = {NHX_PRINCIPAL_ENVVAR: Principal(id="creator@example.com").model_dump_json(exclude_none=True)}
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config):
+        assert refresh_subprocess_task_auth(env, token_file) is False
+
+    assert not token_file.exists()
+
+
+def test_task_access_token_refresh_interval_is_half_the_token_ttl():
+    workload = SimpleNamespace(token_ttl_seconds=300)
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=workload))
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config):
+        assert task_access_token_refresh_interval() == 150
 
 
 def test_inject_secret_env_vars_rejects_missing_value_field():

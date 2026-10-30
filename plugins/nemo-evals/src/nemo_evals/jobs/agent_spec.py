@@ -42,7 +42,16 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Field, JsonValue, Tag
 logger = logging.getLogger(__name__)
 
 
-class ModelTarget(BaseModel):
+class _EvalTarget(BaseModel):
+    """Behavior every eval target answers, so callers read it directly instead of narrowing the union by type."""
+
+    @property
+    def fabric_config(self) -> dict[str, Any] | None:
+        """The Fabric config this target runs; ``None`` for targets that do not run Fabric."""
+        return None
+
+
+class ModelTarget(_EvalTarget):
     """Generate trials by calling a Model (OpenAI-compatible) endpoint.
 
     The prompt template *is* the request sent to the model, so it lives here with the endpoint.
@@ -62,7 +71,7 @@ class ModelTarget(BaseModel):
     )
 
 
-class AgentTarget(BaseModel):
+class AgentTarget(_EvalTarget):
     """Generate trials by calling a generic HTTP or NeMo Agent Toolkit target.
 
     The selected agent variant owns its request and response profile, so there is no
@@ -126,7 +135,7 @@ class RegisteredAgentSource(BaseModel):
 FabricSource: TypeAlias = FabricConfigSource | RegisteredAgentSource
 
 
-class FabricRunnerTarget(BaseModel):
+class FabricRunnerTarget(_EvalTarget):
     """Generate trials by driving an agent harness through the NeMo Fabric runtime.
 
     Fabric is harness-agnostic: the harness (Codex, Hermes, ...) is selected by the config's
@@ -206,6 +215,10 @@ class FabricRunnerTarget(BaseModel):
         if isinstance(self.source, FabricConfigSource):
             return self.source.config
         return self.resolved_config
+
+    @property
+    def fabric_config(self) -> dict[str, Any] | None:
+        return self.config
 
     @property
     def model(self) -> str | None:
@@ -305,7 +318,7 @@ REGISTERED_AGENT_HARBOR_IMPORT_PATH = (
 _LEGACY_HARBOR_AGENT_FIELDS = ("agent_name", "agent_import_path", "agent_model_name")
 
 
-class HarborRunnerTarget(BaseModel):
+class HarborRunnerTarget(_EvalTarget):
     """Generate trials by driving a Harbor job through the SDK's :class:`HarborAgentTaskRunner`.
 
     Runs in *native* mode: Harbor builds and runs its own ``JobConfig`` (executing each task in a
@@ -513,7 +526,7 @@ def registered_agent_gym_config_path(agent: AgentRef) -> str:
     return f"responses_api_agents/{REGISTERED_AGENT_GYM_COMPONENT}/configs/{registered_agent_gym_instance(agent)}.yaml"
 
 
-class GymRunnerTarget(BaseModel):
+class GymRunnerTarget(_EvalTarget):
     """Generate trials by driving a NeMo Gym environment through the SDK's :class:`GymAgentTaskRunner`.
 
     The deployment chooses colocated execution in the Gym task container or a separate sandboxed
