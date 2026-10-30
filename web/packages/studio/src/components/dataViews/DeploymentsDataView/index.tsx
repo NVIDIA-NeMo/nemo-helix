@@ -18,6 +18,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { useModelsListDeployments } from '@nemo/sdk/generated/platform/model-deployments';
 import {
   ModelDeployment,
@@ -55,7 +56,7 @@ export const DeploymentsDataView: FC<DeploymentsDataViewProps> = ({
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error, refetch } = useModelsListDeployments(
+  const { data, isPlaceholderData, isLoading, error, refetch } = useModelsListDeployments(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -141,7 +142,7 @@ export const DeploymentsDataView: FC<DeploymentsDataViewProps> = ({
           DataViewRoot: {
             data: data?.data ?? [],
             totalCount: pagination?.total_results,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
           },
           DataViewTableContent: {
             renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

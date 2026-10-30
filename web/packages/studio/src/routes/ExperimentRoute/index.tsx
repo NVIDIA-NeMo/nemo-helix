@@ -14,6 +14,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentFilter, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -174,7 +175,7 @@ export const ExperimentRoute: FC = () => {
             DataViewRoot: {
               data: experiments,
               totalCount: totalResults,
-              requestStatus: error ? 'error' : isLoading ? 'loading' : undefined,
+              requestStatus: getRequestStatus({ error, isLoading }),
             },
             DataViewSearchBar: { placeholder: 'Search experiments...' },
           }}

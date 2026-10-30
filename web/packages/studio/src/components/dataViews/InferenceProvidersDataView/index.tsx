@@ -25,6 +25,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useDeferredUnmount } from '@nemo/common/src/hooks/useDeferredUnmount';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import {
   getModelsListProvidersQueryKey,
   useModelsDeleteProvider,
@@ -82,7 +83,7 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
     ? ((sortState.desc ? `-${sortState.id}` : sortState.id) as ModelProviderSort)
     : '-created_at';
 
-  const { data, isFetching, error, refetch } = useModelsListProviders(
+  const { data, isPlaceholderData, isLoading, error, refetch } = useModelsListProviders(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -242,7 +243,7 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
           DataViewRoot: {
             data: providersWithId,
             totalCount: pagination?.total_results,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
           },
           DataViewTableContent: {
             renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

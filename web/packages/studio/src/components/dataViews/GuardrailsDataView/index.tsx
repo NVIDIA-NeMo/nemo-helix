@@ -12,7 +12,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getSortParam } from '@nemo/common/src/utils/query';
+import { getSortParam, getRequestStatus } from '@nemo/common/src/utils/query';
 import { Trash } from '@nemo/icons/icons';
 import { useGuardrailsListGuardrailConfigs } from '@nemo/sdk/generated/platform/guardrails';
 import type {
@@ -51,7 +51,7 @@ export const GuardrailsDataView: FC<GuardrailsDataViewProps> = ({
     columnVisibility: { created_at: false },
   });
 
-  const { data, isFetching, error, refetch } = useGuardrailsListGuardrailConfigs(
+  const { data, isPlaceholderData, isLoading, error, refetch } = useGuardrailsListGuardrailConfigs(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -194,7 +194,7 @@ export const GuardrailsDataView: FC<GuardrailsDataViewProps> = ({
         DataViewRoot: {
           data: data?.data ?? [],
           totalCount: pagination?.total_results,
-          requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+          requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
         },
         DataViewTableContent: {
           renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

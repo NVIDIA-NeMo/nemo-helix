@@ -74,6 +74,11 @@ Every workspace route renders inside `SuspenseOutlet` (loading fallback) and has
 - Secondary data (a tab's table, logs, results) stays on the regular hook with an
   inline state: `<ErrorPanel error={error} onRetry={refetch} />` or a DataView's
   `renderErrorState`.
+- Set a DataView's `requestStatus` with `getRequestStatus(query)` from
+  `@nemo/common/src/utils/query`. It shows loading only on the first load or while
+  placeholder rows are shown for a new page, never on a background refetch or
+  poll. ESLint rejects `isFetching` in `requestStatus` because it blanks a loaded
+  table on every refetch.
 - In tests, give the route `errorElement: <RouteErrorPanel />` to assert error
   states, and mock the `...Suspense` hook (returning `{ data }`) when the test
   mocks hooks instead of using MSW.

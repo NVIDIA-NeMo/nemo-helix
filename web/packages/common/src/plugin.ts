@@ -72,6 +72,7 @@ export type { FetchAllPagesOptions, PaginatedResponse } from '@nemo/common/src/a
 
 export {
   getJobRefetchInterval,
+  getRequestStatus,
   getSortParam,
   getSortParamWithWhitelist,
 } from '@nemo/common/src/utils/query';

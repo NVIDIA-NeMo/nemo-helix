@@ -8,6 +8,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { LayoutColumns, Warning } from '@nemo/icons/icons';
 import type { Trace, TraceFilter } from '@nemo/sdk/generated/platform/schema';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
@@ -39,7 +40,7 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
   const firstVisibleIndex = pageIndex * pageSize;
   const visibleTraceIds = traceIds.slice(firstVisibleIndex, firstVisibleIndex + pageSize);
 
-  const { data, error, isFetching, refetch } = useListTraces(
+  const { data, error, isFetching, isPlaceholderData, isLoading, refetch } = useListTraces(
     workspace,
     {
       filter: withOperators<TraceFilter>({ id: { $in: visibleTraceIds } }),
@@ -92,7 +93,7 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
           DataViewRoot: {
             data: traces,
             totalCount: traceIds.length,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
           },
           DataViewTableContent: {
             renderEmptyState: () => <EntityEmptyState entity="insightTraces" variant="first-use" />,

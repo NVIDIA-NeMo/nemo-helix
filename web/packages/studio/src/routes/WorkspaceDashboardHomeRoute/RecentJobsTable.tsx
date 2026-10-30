@@ -10,6 +10,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { getSourceTitle } from '@studio/components/dataViews/JobsDataView/sourceDisplay';
 import { SourceTag } from '@studio/components/dataViews/JobsDataView/SourceTag';
@@ -90,7 +91,7 @@ export const RecentJobsTable = () => {
         DataViewRoot: {
           data: pageRows,
           totalCount,
-          requestStatus: error ? 'error' : isLoading ? 'loading' : undefined,
+          requestStatus: getRequestStatus({ error, isLoading }),
         },
         DataViewPagination: { showWhileError: totalCount > 0 },
         DataViewTableContent: {

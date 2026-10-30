@@ -13,7 +13,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getSortParam } from '@nemo/common/src/utils/query';
+import { getSortParam, getRequestStatus } from '@nemo/common/src/utils/query';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobListSortField,
@@ -209,7 +209,7 @@ export const JobsDataView = () => {
         DataViewRoot: {
           data: jobs,
           totalCount: CUSTOMIZER_ENABLED ? jobsData?.pagination?.total_results || 0 : jobs.length,
-          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
+          requestStatus: getRequestStatus({ isLoading, isPlaceholderData }),
         },
         DataViewTableContent: {
           renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
