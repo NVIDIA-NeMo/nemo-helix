@@ -709,16 +709,20 @@ class DeploymentsRunnerBackend(RunnerBackend):
 
     def __init__(self, config: AgentsConfig) -> None:
         self._config: DeploymentsRunnerConfig = config.deployments
-        self._entities: NemoEntitiesClient | None = None
+        # Shared by the controller and API loops; a client's HTTP transport is bound to the loop that built it.
+        self._entities_by_loop: dict[asyncio.AbstractEventLoop, NemoEntitiesClient] = {}
         self._executor_registry: ExecutorRegistry | None = None
         self._executor_registry_lock = asyncio.Lock()
         self._executor_registry_task: asyncio.Task[ExecutorRegistry] | None = None
 
     def _entity_client(self) -> NemoEntitiesClient:
-        if self._entities is None:
+        loop = asyncio.get_running_loop()
+        entities = self._entities_by_loop.get(loop)
+        if entities is None:
             client = get_async_nemo_client(as_service="agents", internal=True)
-            self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
-        return self._entities
+            entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
+            self._entities_by_loop[loop] = entities
+        return entities
 
     def _build_registry(self) -> ExecutorRegistry:
         config = DeploymentsConfig.get()
@@ -1057,4 +1061,4 @@ class DeploymentsRunnerBackend(RunnerBackend):
         if self._executor_registry is not None:
             self._executor_registry.shutdown_all()
         self._executor_registry = None
-        self._entities = None
+        self._entities_by_loop.clear()
