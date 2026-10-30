@@ -151,3 +151,20 @@ def test_local_dataset_is_checked_the_same_way(tmp_path: Path) -> None:
 
     (tmp_path / "train.jsonl").write_bytes(_rows(2))
     assert check_local_dataset_rows(_dataset(), tmp_path / "train.jsonl").passed
+
+
+def test_a_local_file_is_picked_by_its_name_as_upload_lays_it_out(tmp_path: Path) -> None:
+    """Upload puts a lone file at the fileset root under its own name, and training picks it by that name."""
+
+    def select_training(paths: list[str]) -> list[str]:
+        if not (selected := [path for path in paths if path.startswith("train")]):
+            raise ValueError("No training files found.")
+        return selected
+
+    dataset = DatasetRows("training dataset", "ws/data", select_training, _require_text)
+    (tmp_path / "rows.json").write_bytes(_rows(2))
+    (tmp_path / "train.json").write_bytes(_rows(2) + json.dumps({"x": 1}).encode() + b"\n")
+
+    assert check_local_dataset_rows(dataset, tmp_path / "rows.json").message == "No training files found."
+    check = check_local_dataset_rows(dataset, tmp_path / "train.json")
+    assert (check.passed, check.message) == (False, f"{tmp_path}/train.json line 3 has no 'text'")

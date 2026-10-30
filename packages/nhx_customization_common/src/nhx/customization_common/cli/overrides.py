@@ -369,10 +369,11 @@ def _reject_conflicts(
     conflicts = find_conflicts(spec, refs, model=model, dataset=dataset, environment=environment)
     if not conflicts:
         return
-    fields = "; ".join(conflicts)
+    fields = ", ".join(conflicts)
     typer.echo(
-        f"Error: the job JSON already sets {fields}. Set each reference in one place: remove "
-        "the field from the job JSON to create it here, or drop the flag to use what the file names.",
+        f"Error: the job JSON already sets {fields}, and the matching --upload flag would "
+        "replace it. Set each reference in one place: remove the field from the job JSON to "
+        "create it here, or drop the flag to use what the file names.",
         err=True,
     )
     raise typer.Exit(code=2)

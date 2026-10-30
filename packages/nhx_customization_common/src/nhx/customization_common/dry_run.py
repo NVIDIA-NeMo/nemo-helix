@@ -36,7 +36,7 @@ class DatasetRows:
     fileset: str
     #: Training's own file picker: relative paths in, the files training reads out.
     select_files: Callable[[list[str]], list[str]]
-    #: Training's own row validator: ``(lines, source)``; raises on a bad row.
+    #: The backend's row validator: ``(lines, source)``; raises on a bad row.
     validate_lines: Callable[[list[str], str], object]
 
 
@@ -51,15 +51,16 @@ async def check_dataset_rows(
 def check_local_dataset_rows(dataset: DatasetRows, path: Path) -> JobDryRunCheck:
     """Check a local file or directory the way :func:`check_dataset_rows` checks a fileset."""
     try:
+        # Upload puts a lone file at the fileset root under its own name, so training picks it by that name.
         if path.is_file():
-            selected = {path.name: path}
+            listing = {path.name: path}
         else:
             listing = {f.relative_to(path).as_posix(): f for f in path.rglob("*") if f.is_file()}
-            selected = {rel: listing[rel] for rel in dataset.select_files(sorted(listing))}
-        for rel, file in selected.items():
+        selected = {rel: listing[rel] for rel in dataset.select_files(sorted(listing))}
+        for file in selected.values():
             with file.open("rb") as handle:
                 head = handle.read(_MAX_BYTES)
-            _validate_head(dataset, head, at_end=len(head) == file.stat().st_size, source=str(path / rel))
+            _validate_head(dataset, head, at_end=len(head) == file.stat().st_size, source=str(file))
     except Exception as e:
         return JobDryRunCheck(name=dataset.name, passed=False, message=str(e))
     return _passed(dataset, list(selected))
