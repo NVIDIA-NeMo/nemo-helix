@@ -396,6 +396,27 @@ def test_connection_config_keeps_the_sdk_timeout_when_unset(server: Server) -> N
     assert (config.domain, config.api_key, config.protocol, config.use_server_proxy) == ("d", "k", "https", False)
 
 
+def test_connection_config_sends_the_api_key_through_the_server_proxy(server: Server) -> None:
+    """Through the proxy, every SDK client sends the API key, which a multi-tenant server requires there."""
+    connection = Connection(domain="d", api_key="k", use_server_proxy=True)
+
+    config = OpenSandboxDriver(connection, sdk=mock_sdk(server)).connection_config()
+
+    assert config.headers == {"OPEN-SANDBOX-API-KEY": "k"}
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [Connection(domain="d", api_key="k"), Connection(domain="d", api_key=None, use_server_proxy=True)],
+    ids=["direct", "proxy-without-key"],
+)
+def test_connection_config_adds_no_headers_without_a_proxied_key(server: Server, connection: Connection) -> None:
+    """Direct to the sandbox, or without a key, the SDK's own headers are left alone."""
+    config = OpenSandboxDriver(connection, sdk=mock_sdk(server)).connection_config()
+
+    assert "headers" not in vars(config)
+
+
 def test_default_backoff_matches_harbor() -> None:
     """The default wait between create attempts doubles from 1 s and caps at 10 s, as in Harbor 0.20."""
     assert [harbor_backoff_sec(attempt) for attempt in range(1, 6)] == [1.0, 2.0, 4.0, 8.0, 10.0]

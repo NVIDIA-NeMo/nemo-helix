@@ -201,6 +201,11 @@ class OpenSandboxDriver:
         # Only override the SDK's own request timeout when one was configured.
         if self._connection.request_timeout_sec is not None:
             kwargs["request_timeout"] = timedelta(seconds=self._connection.request_timeout_sec)
+        # The SDK sends the API key only on its lifecycle calls. Its execd and egress clients, the readiness
+        # ping among them, reach the sandbox through the server's proxy, which a multi-tenant server
+        # authenticates too: without the key every one is a 401 and the sandbox never becomes ready.
+        if self._connection.use_server_proxy and self._connection.api_key:
+            kwargs["headers"] = {"OPEN-SANDBOX-API-KEY": self._connection.api_key}
         return self.sdk["ConnectionConfig"](**kwargs)
 
     async def create(self, request: CreateRequest, *, failure_check: FailureCheck | None = None) -> Any:
