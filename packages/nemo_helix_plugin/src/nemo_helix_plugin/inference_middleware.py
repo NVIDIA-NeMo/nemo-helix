@@ -1250,9 +1250,10 @@ class NemoInferenceMiddleware(ABC):
         """Refuse a call before IGW serves it.
 
         IGW calls this on every installed plugin, for every call on the ``model``, ``openai`` and ``provider``
-        routes, whether or not any VirtualModel lists the plugin, before any request middleware runs. Use it for
-        policy a caller's credential carries, which must hold on every route the caller can reach. It is on the
-        path of every call, so keep it fast: return at once for calls the plugin has no opinion on.
+        routes, whether or not any VirtualModel lists the plugin, before any request middleware runs. Implement it
+        for rules that must hold on every route a caller can reach, such as limits carried by the caller's
+        credential; request middleware runs only on the VirtualModels that list it. It runs on every call, so
+        return at once for calls the plugin has no rule for.
 
         Raises:
             InferenceMiddlewareError: Refuse the call with its ``status_code`` and ``detail``.

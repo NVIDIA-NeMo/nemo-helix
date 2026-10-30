@@ -271,6 +271,7 @@ static_resources:
                             patterns:
                               - exact: cookie
                               - exact: x-source
+                              - exact: x-api-key
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:
