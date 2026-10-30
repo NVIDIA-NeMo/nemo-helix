@@ -1192,6 +1192,8 @@ def test_deploy_forwards_environment_ref() -> None:
                 "deploy",
                 "--agent",
                 "a1",
+                "--mode",
+                "subprocess",
                 "--environment",
                 "default/env1",
                 "--no-wait",
@@ -1204,6 +1206,56 @@ def test_deploy_forwards_environment_ref() -> None:
     body = _j.loads(captured["body"])
     assert body["agent"] == "a1"
     assert body["environment"] == "default/env1"
+
+
+def _deployment_modes(subprocess_enabled: bool, *, default_image: bool) -> dict[str, Any]:
+    return {
+        "data": [
+            {"mode": "subprocess", "enabled": subprocess_enabled, "requires_image": False},
+            {"mode": "docker", "enabled": False, "requires_image": not default_image},
+            {"mode": "k8s", "enabled": True, "requires_image": not default_image},
+            {"mode": "openshell", "enabled": False, "requires_image": not default_image},
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ("subprocess_enabled", "expected_mode"),
+    [(True, "subprocess"), (False, "k8s")],
+)
+def test_deploy_without_mode_uses_the_platform_default(subprocess_enabled: bool, expected_mode: str) -> None:
+    posted: list[dict[str, Any]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path.endswith("/deployment-modes"):
+            return httpx.Response(200, json=_deployment_modes(subprocess_enabled, default_image=True))
+        posted.append(json.loads(req.content))
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(app, ["deploy", "--agent", "a1", "--no-wait"])
+
+    assert result.exit_code == 0, result.stderr
+    assert [body["deployment_mode"] for body in posted] == [expected_mode]
+
+
+def test_deploy_without_mode_fails_when_every_usable_mode_needs_an_image() -> None:
+    posted: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path.endswith("/deployment-modes"):
+            return httpx.Response(200, json=_deployment_modes(False, default_image=False))
+        posted.append(req)
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(app, ["deploy", "--agent", "a1", "--no-wait"])
+
+    assert result.exit_code == 1
+    assert "Pass --mode with --image" in result.stderr
+    assert posted == []
 
 
 def test_deploy_forwards_image_entrypoint_mode() -> None:
