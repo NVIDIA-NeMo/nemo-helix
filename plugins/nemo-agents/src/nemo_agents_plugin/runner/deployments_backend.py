@@ -470,10 +470,10 @@ def _backend_mismatch(executor: str | None, backend: str, mode: DeploymentMode) 
 def require_deployment_mode_available(agents_config: AgentsConfig, mode: DeploymentMode) -> None:
     """Refuse a mode that could not run, before a deployment is persisted for it."""
     if mode == "subprocess":
-        if not agents_config.subprocess_enabled:
+        if not agents_config.resolved_subprocess_enabled():
             raise ValueError(
                 "deployment_mode 'subprocess' is disabled on this platform. Use a container mode "
-                "('docker', 'k8s' or 'openshell'), or set 'agents.subprocess_enabled'."
+                f"({', '.join(sorted(CONTAINER_DEPLOYMENT_MODES))}), or set 'agents.subprocess_enabled: true'."
             )
         return
     executor = _resolve_executor_name(executor_for_mode(agents_config.deployments, mode))

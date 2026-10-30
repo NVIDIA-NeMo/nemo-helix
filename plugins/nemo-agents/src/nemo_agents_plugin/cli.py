@@ -1170,10 +1170,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the agent to deploy."),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Deployment name (auto-generated if omitted)."),
-        mode: str = typer.Option(
-            "subprocess",
+        mode: Optional[str] = typer.Option(
+            None,
             "--mode",
-            help="Runtime backend: subprocess (default), docker, k8s, or openshell.",
+            help=(
+                "Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the "
+                "platform allows it, otherwise to the first enabled mode that needs no --image."
+            ),
         ),
         image: Optional[str] = typer.Option(
             None,
@@ -1237,13 +1240,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         """
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         valid_modes: tuple[str, ...] = ("subprocess", *sorted(CONTAINER_DEPLOYMENT_MODES))
-        if mode not in valid_modes:
+        if mode is not None and mode not in valid_modes:
             typer.echo(f"Invalid --mode {mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
-        if image and mode == "subprocess":
+        if image and mode in (None, "subprocess"):
             typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if use_image_entrypoint and not supports_image_entrypoint(mode):
+        if use_image_entrypoint and (mode is None or not supports_image_entrypoint(mode)):
             typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
 
@@ -1251,6 +1254,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
         if environment is not None and not environment.strip():
             typer.echo("--environment must not be empty.", err=True)
             raise typer.Exit(code=2)
+        client = _agents_client(base_url, workspace)
+        if mode is None:
+            mode = _default_deployment_mode(client, workspace)
         payload: dict[str, Any] = {"agent": agent, "deployment_mode": mode}
         if name:
             payload["name"] = name
@@ -1260,7 +1266,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
             payload["use_image_entrypoint"] = True
         if environment is not None:
             payload["environment"] = environment
-        client = _agents_client(base_url, workspace)
         resp = _run_sdk(
             "POST agent API",
             lambda: _json_from_response(
@@ -1445,7 +1450,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
                     return only
             return default
 
-        resolved_mode = _detect("deployment_mode", mode, default="subprocess")
+        resolved_mode = _detect("deployment_mode", mode, default=None)
+        if resolved_mode is None:
+            resolved_mode = _default_deployment_mode(client, workspace)
         resolved_image = _detect("image", image, default=None)
         resolved_use_entrypoint = bool(_detect("use_image_entrypoint", use_image_entrypoint, default=False))
         resolved_environment = _detect("environment", environment, default=None)
@@ -2923,6 +2930,18 @@ def _print_entity(
 
 def _agents_client(_base_url: str, _workspace: str) -> AgentsClient:
     return shared_cli_client(AgentsClient)
+
+
+def _default_deployment_mode(client: AgentsClient, workspace: str) -> str:
+    modes = _run_sdk("GET agent API", lambda: client.list_deployment_modes(workspace=workspace).data())
+    mode = modes.default_mode()
+    if mode is None:
+        typer.echo(
+            "No deployment mode on this platform can run without an image. Pass --mode with --image.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return mode
 
 
 def _json_from_response(response: NemoResponse[Any]) -> Any:

@@ -6518,7 +6518,7 @@ nemo agents deploy [OPTIONS]
 
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess (default), docker, k8s, or openshell. [default: subprocess]
+* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the platform allows it, otherwise to the first enabled mode that needs no `--image`.
 * `--image, -i`: Container image for docker/k8s/openshell modes (falls back to deployments.default_image).
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.

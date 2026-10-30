@@ -13,7 +13,14 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.api.v2 import sample_agent as sample
-from nemo_helix_plugin.agents.types import Agent, AgentDeployment, CreateSampleAgentRequest, SampleAgentStreamEvent
+from nemo_helix_plugin.agents.types import (
+    Agent,
+    AgentDeployment,
+    CreateSampleAgentRequest,
+    DeploymentModeAvailability,
+    DeploymentModeList,
+    SampleAgentStreamEvent,
+)
 from nemo_helix_plugin.files.types import FilesetPurpose
 from nemo_helix_plugin.models.client import UnroutableModelError
 from nemo_helix_plugin.models.refs import ResolvedModelReference
@@ -112,6 +119,57 @@ async def test_model_change_allowed_before_deployment() -> None:
     assert agent_created and deployment_submitted and deployment.name == "dep-new"
     agents.delete_agent.assert_awaited_once()
     agents.register_agent.assert_awaited_once()
+
+
+def _modes(*, subprocess_enabled: bool, k8s_requires_image: bool) -> DeploymentModeList:
+    return DeploymentModeList(
+        data=[
+            DeploymentModeAvailability(mode="subprocess", enabled=subprocess_enabled, requires_image=False),
+            DeploymentModeAvailability(mode="k8s", enabled=True, requires_image=k8s_requires_image),
+        ]
+    )
+
+
+def _agents_without_deployments(model: ResolvedModelReference) -> MagicMock:
+    agents = MagicMock()
+    agents.list_deployments = AsyncMock(return_value=_Page([]))
+    agents.get_agent = AsyncMock(return_value=_wire(Agent(name=sample._AGENT_NAME, config=_config(model))))
+    agents.create_deployment = AsyncMock(return_value=_wire(AgentDeployment(name="dep-new", agent=sample._AGENT_NAME)))
+    return agents
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("subprocess_enabled", "expected_mode"), [(True, "subprocess"), (False, "k8s")])
+async def test_deployment_uses_an_enabled_mode(
+    monkeypatch: pytest.MonkeyPatch, subprocess_enabled: bool, expected_mode: str
+) -> None:
+    monkeypatch.setattr(
+        sample,
+        "deployment_modes",
+        lambda _config: _modes(subprocess_enabled=subprocess_enabled, k8s_requires_image=False),
+    )
+    model = _model()
+    agents = _agents_without_deployments(model)
+
+    await sample._agent_and_deployment(agents, "sample-owned", model, _config(model), "nemo-agents-spec-v1")
+
+    assert agents.create_deployment.await_args.kwargs["body"].deployment_mode == expected_mode
+
+
+@pytest.mark.asyncio
+async def test_deployment_fails_clearly_when_no_mode_can_run_the_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        sample, "deployment_modes", lambda _config: _modes(subprocess_enabled=False, k8s_requires_image=True)
+    )
+    model = _model()
+    agents = _agents_without_deployments(model)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sample._agent_and_deployment(agents, "sample-owned", model, _config(model), "nemo-agents-spec-v1")
+
+    assert exc_info.value.status_code == 400
+    assert "agents.subprocess_enabled" in str(exc_info.value.detail)
+    agents.create_deployment.assert_not_awaited()
 
 
 @pytest.mark.asyncio

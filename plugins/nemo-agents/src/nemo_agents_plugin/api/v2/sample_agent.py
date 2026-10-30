@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
@@ -14,7 +15,9 @@ import yaml
 from email_security_triage.resources import sample_file
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from nemo_agents_plugin.api.v2.deployments import deployment_modes
 from nemo_agents_plugin.authz import scope
+from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.utils import expand_env_vars
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import (
@@ -148,8 +151,20 @@ async def _agent_and_deployment(
     )
     if active is not None:
         return active, agent_created, False
+    mode = (await asyncio.to_thread(deployment_modes, AgentsConfig.get())).default_mode()
+    if mode is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No deployment mode can run the sample agent on this platform. Turn on subprocess deployments "
+                "('agents.subprocess_enabled: true'), or configure a container mode with "
+                "'agents.deployments.default_image'."
+            ),
+        )
     deployment = (
-        await agents.create_deployment(workspace=workspace, body=CreateDeploymentRequest(agent=_AGENT_NAME))
+        await agents.create_deployment(
+            workspace=workspace, body=CreateDeploymentRequest(agent=_AGENT_NAME, deployment_mode=mode)
+        )
     ).data()
     return deployment, agent_created, True
 

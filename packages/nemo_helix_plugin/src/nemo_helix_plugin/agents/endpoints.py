@@ -31,6 +31,7 @@ from nemo_helix_plugin.agents.types import (
     CreateSessionRequest,
     DeploymentLogsQueryParams,
     DeploymentLogsResponse,
+    DeploymentModeList,
     InvokeAgentRequest,
     JsonMap,
     JsonObject,
@@ -128,6 +129,11 @@ def create_deployment(*, workspace: str | None = None, body: CreateAgentDeployme
 @delete(f"{_DEPLOYMENTS}/{{name}}")
 @abstractmethod
 def delete_deployment(*, workspace: str | None = None, name: str) -> None: ...
+
+
+@get(f"{_PREFIX}/deployment-modes")
+@abstractmethod
+def list_deployment_modes(*, workspace: str | None = None) -> DeploymentModeList: ...
 
 
 @get(f"{_DEPLOYMENTS}/{{name}}/logs")

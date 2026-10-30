@@ -70,15 +70,28 @@ class _Recorder:
         deployments: list[dict[str, Any]],
         poll_statuses: list[str] | None = None,
         create_agent_status: int = 201,
+        subprocess_enabled: bool = True,
     ) -> None:
         self.deployments = deployments
         self.calls: list[tuple[str, str]] = []
+        self.deploy_bodies: list[dict[str, Any]] = []
+        self._subprocess_enabled = subprocess_enabled
         self._poll = iter(poll_statuses or ["running"])
         self._create_agent_status = create_agent_status
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         path = req.url.path
         self.calls.append((req.method, path))
+        if req.method == "GET" and path.endswith("/deployment-modes"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"mode": "subprocess", "enabled": self._subprocess_enabled, "requires_image": False},
+                        {"mode": "k8s", "enabled": True, "requires_image": False},
+                    ]
+                },
+            )
         # GET /deployments (list, for auto-detect + live filter)
         if req.method == "GET" and path.endswith("/deployments"):
             return httpx.Response(200, json=_page(self.deployments))
@@ -102,6 +115,7 @@ class _Recorder:
             return httpx.Response(self._create_agent_status, json={"name": "my-agent"})
         # POST /deployments (deploy)
         if req.method == "POST" and path.endswith("/deployments"):
+            self.deploy_bodies.append(json.loads(req.read()))
             return httpx.Response(201, json={"name": "agent-new", "status": "pending", "agent": "my-agent"})
         return httpx.Response(404)
 
@@ -353,6 +367,19 @@ def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path, make_cli_state)
     # redeploy proceeded to create+deploy.
     assert rec.ordered_ops() == ["delete", "create", "deploy"]
     assert "already absent" in result.output
+
+
+def test_redeploy_without_existing_deployment_uses_the_platform_default_mode(tmp_path: Path, make_cli_state) -> None:
+    rec = _Recorder(deployments=[], subprocess_enabled=False)
+    with patch(f"{_PATCH_PREFIX}.sleep"):
+        result = runner.invoke(
+            AgentsCLI().get_cli(),
+            ["redeploy", "--agent", "my-agent", "--agent-config", str(_write_config(tmp_path)), "--yes"],
+            obj=make_cli_state(rec),
+        )
+
+    assert result.exit_code == 0, result.output
+    assert [body["deployment_mode"] for body in rec.deploy_bodies] == ["k8s"]
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,7 @@ class _AgentsMethods:
     list_deployments = method(endpoints.list_deployments)
     create_deployment = method(endpoints.create_deployment)
     delete_deployment = method(endpoints.delete_deployment)
+    list_deployment_modes = method(endpoints.list_deployment_modes)
     get_deployment_logs = method(endpoints.get_deployment_logs)
     stream_deployment_logs = method(endpoints.stream_deployment_logs)
     create_session = method(endpoints.create_session)

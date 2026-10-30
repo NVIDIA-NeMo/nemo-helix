@@ -252,11 +252,11 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
 )
 async def list_deployment_modes(workspace: str) -> DeploymentModeList:
     """List every deployment mode and whether this platform can run it."""
-    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get()))
+    return await asyncio.to_thread(deployment_modes, AgentsConfig.get())
 
 
-def _all_mode_availability(agents_config: AgentsConfig) -> list[DeploymentModeAvailability]:
-    return [_mode_availability(agents_config, mode) for mode in get_args(DeploymentMode)]
+def deployment_modes(agents_config: AgentsConfig) -> DeploymentModeList:
+    return DeploymentModeList(data=[_mode_availability(agents_config, mode) for mode in get_args(DeploymentMode)])
 
 
 def _mode_availability(agents_config: AgentsConfig, mode: DeploymentMode) -> DeploymentModeAvailability:

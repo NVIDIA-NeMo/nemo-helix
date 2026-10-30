@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
-from nemo_helix_plugin.config import NemoConfig, nhx_user_data_dir
+from nemo_helix_plugin.config import NemoConfig, Runtime, get_platform_config, nhx_user_data_dir
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -158,12 +158,12 @@ class AgentsConfig(NemoConfig):
             "deployments-plugin backend regardless of this setting."
         ),
     )
-    subprocess_enabled: bool = Field(
-        default=True,
+    subprocess_enabled: bool | None = Field(
+        default=None,
         description=(
-            "Whether new subprocess-mode deployments are allowed. Turn off to require a container mode, "
-            "for example on a cluster where agents shouldn't share the controller pod. Existing "
-            "subprocess deployments keep running."
+            "Whether new subprocess-mode deployments are allowed. When unset, defaults to true for "
+            "docker/none runtimes and false for kubernetes, where agents would run inside the controller "
+            "pod. Existing subprocess deployments keep running."
         ),
     )
     deployments: DeploymentsRunnerConfig = Field(
@@ -174,3 +174,9 @@ class AgentsConfig(NemoConfig):
         default_factory=AgentJobsConfig,
         description="Containerized agent job settings.",
     )
+
+    def resolved_subprocess_enabled(self) -> bool:
+        """Whether new subprocess-mode deployments are allowed on this platform."""
+        if self.subprocess_enabled is not None:
+            return self.subprocess_enabled
+        return get_platform_config().runtime != Runtime.KUBERNETES
