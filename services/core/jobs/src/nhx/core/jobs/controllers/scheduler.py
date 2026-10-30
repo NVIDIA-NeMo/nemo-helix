@@ -285,8 +285,8 @@ class JobScheduler(HeartbeatMixin, Controller):
         set of pending steps as our queue for what to schedule next.
         """
         # The steps-list route parses ``filter`` as a deepObject query param, so
-        # the status list is sent as ``filter[status]=created,resuming`` (comma
-        # form), which the server splits back into a list.
+        # the schedulable statuses are sent as a comma-joined list (comma form),
+        # which the server splits back into a list.
         steps = []
         query = cast(
             ListStepsQueryParams,
