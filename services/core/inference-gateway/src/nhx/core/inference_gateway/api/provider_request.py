@@ -13,8 +13,8 @@ from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.middleware import API_KEY_HEADER_PATH_PREFIXES, request_bearer_token
 
 _DEFAULT_AUTH_HEADER_FORMAT = "Authorization: Bearer {{ auth_secret }}"
-# The only scope a forwarded caller credential may carry: it reaches inference and nothing else on the platform.
-_FORWARDABLE_SCOPES = frozenset({"inference"})
+# The only scope family a forwarded caller credential may carry: it reaches inference and nothing else on the platform.
+_FORWARDABLE_SCOPE_FAMILY = "inference"
 # Renders HTTP headers, not HTML. Autoescape would corrupt some secret values.
 _JINJA_ENV = Environment(autoescape=False)  # noqa: S701  # nosec B701
 
@@ -46,7 +46,7 @@ def upstream_credential(provider: ModelProvider, secret_value: str | None, heade
         return credential
     resolved = auth_client.resolved_bearer_token
     scopes = resolved.scopes if resolved is not None else lowered.get("x-nhx-scopes", "").split()
-    if not scopes or not set(scopes) <= _FORWARDABLE_SCOPES:
+    if not scopes or any(scope.split(":", 1)[0] != _FORWARDABLE_SCOPE_FAMILY for scope in scopes):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
