@@ -31,8 +31,6 @@ export const useDeploymentModes = (
   queryOptions?: Partial<UseQueryOptions<DeploymentModeList>>
 ): DeploymentModes => {
   const { data, isError } = useAgentsListDeploymentModes(workspace, { query: queryOptions });
-  // ponytail: no default subprocess job profile stands in for a Kubernetes install, where the gateway
-  // cannot reach a subprocess deployment in the controller pod. Drop once the server reports it disabled.
   const { isPending: profilesPending } = useJobsGetExecutionProfiles();
   const subprocessUnreachable = useImageBuildsUnsupported();
   return useMemo<DeploymentModes>(() => {
