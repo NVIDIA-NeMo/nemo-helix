@@ -78,6 +78,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
     COMPOSE_MAIN_FEATURE,
+    COMPOSE_SECURITY_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
@@ -704,23 +705,30 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if response.status_code != 200:
             raise RuntimeError(
                 "The OpenSandbox server does not run the NeMo compose services extension; "
-                f"GET /v1/nemo-ext/health returned {response.status_code}. See "
-                "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
+                f"GET /v1/nemo-ext/health returned {response.status_code}."
             )
 
         features = response.json().get("features") or []
         # An extension from before agent bundles answers the health check too, but would drop the bundle.
         if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in features:
             raise RuntimeError(
-                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
-                "the version in plugins/_temporary-scaled-evals/opensandbox_ext."
+                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles."
             )
         # An extension from before them would refuse a spec with no services, or main's command or working directory.
         if self._services is not None and self._services.uses_main_settings() and COMPOSE_MAIN_FEATURE not in features:
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
-                "change main, or main's command and working directory; upgrade it to the version in "
-                "plugins/_temporary-scaled-evals/opensandbox_ext."
+                "change main, or main's command and working directory."
+            )
+        # An extension from before them would refuse the spec's `security` and `tmpfs` as unknown fields.
+        if (
+            self._services is not None
+            and self._services.uses_security_settings()
+            and COMPOSE_SECURITY_FEATURE not in features
+        ):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension doesn't support a compose file's user, "
+                "read_only, cap_drop, security_opt or tmpfs."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
@@ -948,8 +956,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Run a command; explicit ``cwd``, then the task's workdir, then ``main``'s compose ``working_dir``, then the image's WORKDIR."""
         sandbox = self._require_sandbox()
         requested_uid = self._numeric_uid(self._resolve_user(user))
-        # Learn the image's uid before the first root command, so it can be mapped below.
-        if not self._image_uid_probed and requested_uid == 0:
+        # Learn the sandbox's own uid before the first command that names one, so `_uid_for` can compare them.
+        if not self._image_uid_probed and requested_uid is not None:
             await self._probe_image_uid()
         result = await self._driver.run(
             sandbox,
@@ -982,8 +990,17 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         return None
 
     def _uid_for(self, uid: int | None) -> int | None:
-        """The uid to send for a requested one: unchanged, except that root on a non-root image runs as the image's user."""
-        if uid != 0 or self._image_uid in (None, 0):
+        """The uid to send for a requested one; None runs the command as the sandbox's own user.
+
+        * The sandbox's own uid isn't sent. execd switches identity whenever it gets a uid, even to the one it already
+          runs as, and the switch needs ``CAP_SETGID``: on a sandbox that drops every capability, root commands on a
+          root image would all fail before they start.
+        * Root on a non-root image runs as the image's user, since execd can't switch to root there.
+        * Any other uid is sent as is.
+        """
+        if uid is None or uid == self._image_uid:
+            return None
+        if uid != 0 or self._image_uid is None:
             return uid
         if not self._warned_root_unavailable:
             self._warned_root_unavailable = True

@@ -14,21 +14,28 @@ network policy, and an ``execd-installer`` init container. Kubernetes does all t
 * ``run_once`` services become plain init containers, which must exit 0 before the next starts.
 * ``after_main`` services become regular containers that start next to ``sandbox``.
 * Host aliases resolve every service name, and ``main``, to 127.0.0.1.
+* Each container's ``security`` narrows its ``securityContext``, and each ``tmpfs`` becomes a
+  memory-backed ``emptyDir`` mounted only in that container.
 
 Pure functions over manifest dicts and kubernetes ``V1Pod`` objects; no API calls.
 """
 
 from __future__ import annotations
 
+import posixpath
+from pathlib import PurePosixPath
 from typing import Any
 
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_CONTAINER,
     INSTALLED_AGENT_DIR,
     ComposeServices,
+    Main,
     Readiness,
     SandboxAgentBundle,
+    Security,
     Service,
+    Tmpfs,
     VolumeMount,
 )
 
@@ -36,6 +43,9 @@ SANDBOX_CONTAINER = "sandbox"
 EGRESS_CONTAINER = "egress"
 # The volume the bundle is installed into when the template doesn't already mount /installed-agent.
 INSTALLED_AGENT_VOLUME = "nemo-installed-agent"
+# Folders the sandbox templates mount empty and writable for Harbor, so non-root images can write there. A task that
+# mounts its own folder at one of them gets its own instead: both are empty writable folders.
+REPLACEABLE_TEMPLATE_MOUNTS = frozenset({"/logs", "/solution"})
 
 # Probes run every second, so failure thresholds are roughly seconds while checks answer quickly: a
 # service gets ~10 minutes to become ready once it runs, egress 2 minutes.
@@ -67,6 +77,56 @@ def _probe(readiness: Readiness, failure_threshold: int) -> dict[str, Any]:
 def _mounts(mounts: list[VolumeMount]) -> list[dict[str, Any]]:
     """Container ``volumeMounts`` for spec mounts; each spec volume is the pod volume ``nemo-vol-<name>``."""
     return [{"name": f"nemo-vol-{m.name}", "mountPath": m.mount_path, "readOnly": m.read_only} for m in mounts]
+
+
+def _restrict(pod_spec: dict[str, Any], container: dict[str, Any], security: Security | None) -> None:
+    """Narrow ``container``'s ``securityContext`` by ``security``, keeping what it already sets.
+
+    Capabilities already dropped stay dropped, and any already added (``main``'s ``SYS_PTRACE``) stay added:
+    Kubernetes drops first, then adds, as Docker does with ``cap_drop: [ALL]`` and ``cap_add``.
+
+    A uid or gid the sandbox's template already sets, on the container or the whole pod, is the operator's, so a task
+    can't replace it: ``ValueError`` if it asks for a different one. A container's own value would override the pod's.
+    """
+    if security is None:
+        return
+    context: dict[str, Any] = container.setdefault("securityContext", {})
+    pod_context: dict[str, Any] = pod_spec.get("securityContext") or {}
+    for key, value in (("runAsUser", security.run_as_user), ("runAsGroup", security.run_as_group)):
+        if value is None:
+            continue
+        existing = context.get(key, pod_context.get(key))
+        if existing is not None and existing != value:
+            raise ValueError(
+                f"{container['name']}: the sandbox runs as {key} {existing}; a task can't change it to {value}"
+            )
+        context[key] = value
+    if security.read_only_root_filesystem:
+        context["readOnlyRootFilesystem"] = True
+    if security.no_new_privileges:
+        context["allowPrivilegeEscalation"] = False
+    if security.drop_capabilities:
+        capabilities = context.setdefault("capabilities", {})
+        capabilities["drop"] = sorted(set(capabilities.get("drop") or []) | set(security.drop_capabilities))
+
+
+def _tmpfs_volume_name(container: str, index: int) -> str:
+    """The pod volume for a container's ``index``-th tmpfs; ``Name`` and ``MAX_TMPFS_MOUNTS`` keep it within 63."""
+    return f"nemo-t{index}-{container}"
+
+
+def _add_tmpfs(pod_spec: dict[str, Any], container: dict[str, Any], tmpfs: list[Tmpfs]) -> None:
+    """Mount each of ``tmpfs`` into ``container`` as its own memory-backed ``emptyDir``.
+
+    Kubernetes creates an ``emptyDir`` with mode 0777, so Compose's usual ``mode=1777`` loses only its sticky bit.
+    """
+    for index, mount in enumerate(tmpfs):
+        name = _tmpfs_volume_name(container["name"], index)
+        empty_dir: dict[str, Any] = {"medium": "Memory"}
+        if mount.size_limit is not None:
+            empty_dir["sizeLimit"] = mount.size_limit
+        pod_spec.setdefault("volumes", []).append({"name": name, "emptyDir": empty_dir})
+        container.setdefault("volumeMounts", []).append({"name": name, "mountPath": mount.mount_path})
 
 
 def service_container(svc: Service, image_pull_policy: str) -> dict[str, Any]:
@@ -204,6 +264,42 @@ def agent_bundle_state(pod: Any) -> tuple[str | None, bool]:
     return None, True
 
 
+def _make_room_for_main_mounts(sandbox_container: dict[str, Any], main: Main) -> None:
+    """Remove the template's mounts that ``main``'s own volumes and tmpfs replace; ``ValueError`` where they can't.
+
+    Kubernetes rejects a container with two mounts at one path, and the sandbox templates already mount ``/logs``,
+    ``/solution`` and ``/installed-agent``. A task's own mount at ``/logs`` or ``/solution`` replaces the template's.
+    One at or inside ``/installed-agent`` is refused, since the agent is installed there and must stay read-only, as
+    is one at any other path the sandbox already mounts, which OpenSandbox itself may need.
+    """
+    # Where the task mounts its own folders in main. The spec already cleans these paths, so `/logs/` reads `/logs`.
+    task_mount_paths = {mount.mount_path for mount in [*main.volume_mounts, *main.tmpfs]}
+
+    # Nothing may be mounted over the agent's install, or inside it: a writable folder there would let the agent's
+    # files be replaced.
+    paths_in_agent_install = sorted(
+        path for path in task_mount_paths if PurePosixPath(path).is_relative_to(INSTALLED_AGENT_DIR)
+    )
+    if paths_in_agent_install:
+        raise ValueError(f"main can't mount {paths_in_agent_install}: the agent is installed in {INSTALLED_AGENT_DIR}")
+
+    sandbox_mounts = sandbox_container.get("volumeMounts") or []
+    # Paths the task and the sandbox both mount; Kubernetes would reject the pod with both.
+    doubly_mounted_paths = task_mount_paths & {posixpath.normpath(mount["mountPath"]) for mount in sandbox_mounts}
+
+    # Only the template's empty Harbor folders can give way to the task's. Anything else the sandbox mounts may be
+    # something OpenSandbox needs, so it's never replaced.
+    unreplaceable_paths = sorted(doubly_mounted_paths - REPLACEABLE_TEMPLATE_MOUNTS)
+    if unreplaceable_paths:
+        raise ValueError(f"main can't mount {unreplaceable_paths}: the sandbox already mounts something there")
+
+    # Drop the sandbox's mount at each such path; add_services then adds the task's own in its place.
+    if doubly_mounted_paths:
+        sandbox_container["volumeMounts"] = [
+            mount for mount in sandbox_mounts if posixpath.normpath(mount["mountPath"]) not in doubly_mounted_paths
+        ]
+
+
 def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull_policy: str) -> None:
     """Add ``services`` to the BatchSandbox pod spec in place; ``ValueError`` if the pod isn't shaped as expected.
 
@@ -222,7 +318,10 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
 
     # Services in spec order: init containers start one at a time, which gives depends_on order.
     for svc in services.services:
-        (containers if svc.role == "after_main" else init).append(service_container(svc, image_pull_policy))
+        container = service_container(svc, image_pull_policy)
+        _restrict(pod_spec, container, svc.security)
+        _add_tmpfs(pod_spec, container, svc.tmpfs)
+        (containers if svc.role == "after_main" else init).append(container)
 
     # Shared volumes and per-service /dev/shm are emptyDirs, so they live and die with the pod.
     volumes = pod_spec.setdefault("volumes", [])
@@ -233,8 +332,13 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
         if s.shm_size is not None
     )
 
-    # main is the stock sandbox container; it only gains mounts, the one allowed capability and its working directory.
+    # main is the stock sandbox container; it only gains mounts, the one allowed capability, its working directory and
+    # the restrictions the compose file puts on it.
     sandbox = containers[0]
+
+    # Ensure the main container can mount its own volumes and tmpfs
+    _make_room_for_main_mounts(sandbox, services.main)
+
     if services.main.working_dir is not None:
         # The stock server sets none, so the image's WORKDIR applied; Compose's `working_dir` replaces it.
         sandbox["workingDir"] = services.main.working_dir
@@ -243,6 +347,11 @@ def add_services(pod_spec: dict[str, Any], services: ComposeServices, image_pull
     if services.main.add_capabilities:
         caps = sandbox.setdefault("securityContext", {}).setdefault("capabilities", {})
         caps["add"] = sorted(set(caps.get("add") or []) | set(services.main.add_capabilities))
+
+    # Apply security context to the main container
+    _restrict(pod_spec, sandbox, services.main.security)
+    # Mount tmpfs to the main container
+    _add_tmpfs(pod_spec, sandbox, services.main.tmpfs)
 
     # Every container shares the pod network, so each Compose name is 127.0.0.1.
     pod_spec.setdefault("hostAliases", []).append({"ip": "127.0.0.1", "hostnames": [*services.names(), "main"]})
