@@ -863,6 +863,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/agent-layers:
+    post:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Request Taskset Run Agent Layers
+      description: 'Request each task''s agent layer for the agent a run with ``req``
+        would run; accepts no run.
+
+
+        An agent layer is a task''s image with the agent already installed. A run
+        whose tasks'' layers are ready starts
+
+        their trials from them, so the trials'' setup only checks the install. ``nemo
+        evals runs submit`` requests the
+
+        layers and waits for them before it submits. Returns no layers when the deployment
+        turns layers off or the run''s
+
+        agent can''t be layered (its setup isn''t an install). Follow each with the
+        task''s agent-layers route.'
+      operationId: request_taskset_run_agent_layers_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_agent_layers_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TasksetRunInput'
+      responses:
+        '202':
+          description: Each task's agent layer for the run's agent, started or already
+            running or ready
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentLayer'
+                title: Response Request Taskset Run Agent Layers Apis Evals V2 Workspaces  Workspace  Agent
+                  Evaluate Runs Agent Layers Post
+        '403':
+          description: The caller may not read a source, or submit container image
+            builds
+        '422':
+          description: Invalid request, missing or incompatible source, or unconfigured
+            execution
   /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}:
     get:
       tags:

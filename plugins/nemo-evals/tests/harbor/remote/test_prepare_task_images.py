@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 from nemo_builder_plugin.entities import ImageRuntimeConfig
+from nemo_evals.agent_layers.models import AgentLayer
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
@@ -27,6 +28,7 @@ from nemo_evals.harbor.remote.preparation import (
 from nemo_evals.image_builds.models import (
     BuildImage,
     BuildImageSource,
+    BuildStatus,
     ImageBuildRequest,
     TaskImageBuildEntity,
     build_entity_name,
@@ -475,3 +477,64 @@ async def test_check_reports_a_files_outage_as_retryable(clients, sandbox_policy
     monkeypatch.setattr(preparation, "read_task_archive", read)
     with pytest.raises(ImagePreparationUnavailableError, match="files is down"):
         await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients)
+
+
+def _layer(status: BuildStatus = "ready", ref: str | None = None) -> AgentLayer:
+    layered = image("main", ref or digest_ref("f")).model_copy(
+        update={
+            "status": "ready" if status == "ready" else "building",
+            "builder_image": "harbor-agent-main-1",
+            "build_job": "builder-harbor-agent-main-1",
+        }
+    )
+    return AgentLayer(
+        id="1", task="default/sort-task", revision="e" * 64, agent_key="k", status=status, job="j", image=layered
+    )
+
+
+async def test_a_ready_agent_layer_replaces_the_agent_image(clients, builds, store_task, sandbox_policy, entity_store):
+    """The run's trials start from the image with the agent installed; the verifier keeps the task's own image."""
+    digest = await store_task(config=SEPARATE)
+    await build(builds, digest)
+    await settle(
+        entity_store, digest, 1, "ready", images=[image("main", digest_ref("d")), image("verifier", digest_ref("e"))]
+    )
+    asked: list[tuple[str, str, str]] = []
+
+    async def layer(workspace: str, name: str, revision: str) -> AgentLayer | None:
+        asked.append((workspace, name, revision))
+        return _layer()
+
+    result = await prepare(task(digest), replace(clients, agent_layer=layer), sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert asked == [("default", "sort-task", digest)]
+    assert result.environment.agent_preinstalled
+    assert result.environment.agent.image_ref == digest_ref("f")
+    assert result.environment.agent.builder_image == "harbor-agent-main-1"
+    assert result.environment.agent.source_archive_digest == "a" * 64
+    assert result.images["agent"].prepared == result.environment.agent
+    assert result.environment.verifier is not None and result.environment.verifier.image_ref == digest_ref("e")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [None, _layer("running"), RuntimeError("read failed")],
+    ids=["no-layer", "layer-not-ready", "read-failed"],
+)
+async def test_without_a_ready_layer_the_task_runs_on_its_image(
+    clients, builds, store_task, sandbox_policy, entity_store, answer
+):
+    digest = await store_task(config={})
+    await build(builds, digest)
+    await settle(entity_store, digest, 1, "ready", images=[image("main", digest_ref("d"))])
+
+    async def layer(workspace: str, name: str, revision: str) -> AgentLayer | None:
+        if isinstance(answer, Exception):
+            raise InternalServerError(httpx.Response(500, json={"detail": "entities down"}))
+        return answer
+
+    result = await prepare(task(digest), replace(clients, agent_layer=layer), sandbox_policy)
+
+    assert result.status == "ready" and result.environment is not None
+    assert not result.environment.agent_preinstalled and result.environment.agent.image_ref == digest_ref("d")

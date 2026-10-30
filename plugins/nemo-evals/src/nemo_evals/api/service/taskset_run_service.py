@@ -5,15 +5,19 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import HTTPException
+from nemo_evals.agent_layers.models import AgentLayer, AgentLayerRequest
+from nemo_evals.agent_layers.run_agents import agent_layer_request
+from nemo_evals.agent_layers.service import AgentLayerService, agent_layer_key
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
+from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
@@ -34,6 +38,7 @@ from nemo_evals.harbor.remote.preparation import (
 from nemo_evals.harbor.remote.profile import ResolvedHarborSandboxPolicy
 from nemo_evals.harbor.remote.resources import defaulted_resources_notice
 from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_sandbox_policy
+from nemo_evals.image_builds.planning import ImagePlanError
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
@@ -41,6 +46,7 @@ from nemo_evals.jobs.gateway_models import require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
+from nemo_evals.task_identity import UnsupportedTaskKindError
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_evals.taskset_runs.plan_storage import delete_fileset_ref
@@ -310,6 +316,52 @@ class TasksetRunService:
             filter=result.filter,
         )
 
+    async def request_agent_layers(self, req: TasksetRunInput, *, workspace: str) -> list[AgentLayer]:
+        """Request each of the run's tasks' agent layers for its agent, as submit would resolve them; accepts nothing.
+
+        ``nemo evals runs submit`` calls this before it submits and waits for the layers, so the run's first trials
+        already start from them. Returns the layers requested, one per distinct task revision; none when layers are
+        off or the agent can't be layered. A task that can't be given a layer is left out: its trials install the
+        agent in setup.
+
+        Raises:
+            HTTPException: The caller cannot read a source.
+            TasksetRunResolutionError: A source is missing or incompatible.
+            ImageBuildForbiddenError: The caller may not submit Builder builds in a task's workspace.
+        """
+        harbor, _, _ = await self._check_execution(req)
+        await self._authorize(req, workspace)
+        if not harbor.agent_layers:
+            return []
+        _, spec = await self._resolve(req, workspace)
+        source = registered_agent_source(spec.target)
+        snapshot = source.files if source is not None else None
+        try:
+            agent = agent_layer_request(spec.target)
+            if agent is None:
+                return []
+            revisions = dict.fromkeys(
+                task.spec.provenance for task in spec.tasks if isinstance(task.spec, ResolvedHarborTaskDefinition)
+            )
+            limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
+
+            async def request(provenance: TaskProvenance) -> AgentLayer | None:
+                task_workspace, _, name = provenance.entity_name.partition("/")
+                jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=task_workspace)
+                service = AgentLayerService(self._entities, jobs, builder_authorizer(self._authorizer))
+                async with limit:
+                    try:
+                        return await service.request_layer(task_workspace, name, provenance.revision_digest, agent)
+                    except (ImagePlanError, UnsupportedTaskKindError) as exc:
+                        logger.info("Task %s gets no agent layer: %s", provenance.entity_name, exc)
+                        return None
+
+            return [layer for layer in await _all(request(p) for p in revisions) if layer is not None]
+        finally:
+            # Resolving a registered agent snapshots its files for the run; no run is accepted here.
+            if snapshot is not None:
+                await delete_fileset_ref(self._store.files_client, snapshot.root)
+
     async def submit(self, req: TasksetRunInput, *, workspace: str, caller: str) -> SubmitOutcome:
         """Authorize, freeze and atomically accept a run, or replay its stored status.
 
@@ -365,7 +417,8 @@ class TasksetRunService:
             except ValueError as exc:
                 raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
-            prepared = await self._prepare_images(spec.tasks, policy, caller=caller)
+            agent = agent_layer_request(spec.target) if harbor.agent_layers else None
+            prepared = await self._prepare_images(spec.tasks, policy, caller=caller, agent=agent)
             plan = TasksetRunPlan(
                 run_id=run_id,
                 workspace=workspace,
@@ -451,7 +504,12 @@ class TasksetRunService:
         return harbor, policy, profile
 
     async def _prepare_images(
-        self, tasks: list[ResolvedTask], policy: ResolvedHarborSandboxPolicy, *, caller: str
+        self,
+        tasks: list[ResolvedTask],
+        policy: ResolvedHarborSandboxPolicy,
+        *,
+        caller: str,
+        agent: AgentLayerRequest | None = None,
     ) -> list[PreparedHarborEnvironment]:
         """Each task's prepared images, in task order.
 
@@ -462,7 +520,10 @@ class TasksetRunService:
             TasksetRunResolutionError: Some task has no images; the message names each one and why.
         """
         clients = PreparationClients(
-            client=self._async_client, files=self._store.files_client, image_builds=self._image_builds
+            client=self._async_client,
+            files=self._store.files_client,
+            image_builds=self._image_builds,
+            agent_layer=self._agent_layers_for(agent) if agent is not None else None,
         )
         limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
 
@@ -485,6 +546,17 @@ class TasksetRunService:
         if rejected:
             raise TasksetRunResolutionError(f"tasks without images: {'; '.join(rejected)}")
         return [p.environment for p in preparations if p.environment is not None]
+
+    def _agent_layers_for(self, agent: AgentLayerRequest) -> Callable[[str, str, str], Awaitable[AgentLayer | None]]:
+        """Each task's ready layer for ``agent``, which the preparer starts the task's trials from; reads only."""
+        key = agent_layer_key(agent)
+
+        async def ready(workspace: str, name: str, revision: str) -> AgentLayer | None:
+            jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=workspace)
+            service = AgentLayerService(self._entities, jobs, builder_authorizer(self._authorizer))
+            return await service.ready_layer(workspace, name, revision, key)
+
+        return ready
 
     def _image_builds(self, workspace: str) -> ImageBuildService:
         """The image build service for tasks in ``workspace``; the preparer only reads builds through it."""

@@ -11,12 +11,13 @@ and ``FakePreparer`` (tests/conftest.py) changes with them.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, Self, get_args
 
 from harbor.models.task.verifier_mode import resolve_effective_verifier_env_config
+from nemo_evals.agent_layers.models import AgentLayer
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.harbor.compose.models import ComposeError, ComposeTask
 from nemo_evals.harbor.compose.spec import check_compose_task
@@ -148,6 +149,8 @@ class PreparationClients:
     client: AsyncNemoClient  # reads and Jobs on the caller's behalf
     files: AsyncFilesClient  # task archive reads
     image_builds: Callable[[str], ImageBuildService] | None = None  # the build service for a task's workspace
+    #: The task's ready agent layer for the run's agent, by ``(workspace, name, revision)``; None skips layers.
+    agent_layer: Callable[[str, str, str], Awaitable[AgentLayer | None]] | None = None
 
 
 class ImagePreparer(Protocol):
@@ -255,7 +258,37 @@ class ImageBuildPreparer:
                 f"{definition.provenance.entity_name}#{revision} has no image build; build it first "
                 "(`nemo evals runs submit` builds and waits)",
             )
-        return _from_build(build, definition)
+        preparation = _from_build(build, definition)
+        if clients.agent_layer is None or preparation.environment is None:
+            return preparation
+        try:
+            layer = await clients.agent_layer(workspace, name, revision)
+        except (NemoHTTPError, NemoEntityNotFoundError, RevisionNotFoundError) as exc:
+            # A layer only saves the trial its install: without one the task still runs, installing in setup.
+            logger.warning("Could not read the agent layer of task %s; its trials install the agent: %s", task.id, exc)
+            return preparation
+        return _with_agent_layer(preparation, layer) if layer is not None else preparation
+
+
+def _with_agent_layer(preparation: TaskPreparation, layer: AgentLayer) -> TaskPreparation:
+    """``preparation`` with its agent image replaced by ``layer``'s, the same image with the agent installed."""
+    image = layer.image
+    if image is None or image.status != "ready" or image.image_ref is None or preparation.environment is None:
+        return preparation
+    agent = PreparedImage(
+        image_ref=image.image_ref,
+        preparation_key=image.image_ref.rpartition("@")[2],
+        builder_image=image.builder_image,
+        build_job=image.build_job,
+        source_archive_digest=preparation.environment.agent.source_archive_digest,
+        runtime_config=image.runtime_config,
+    )
+    images = dict(preparation.images)
+    images["agent"] = ImagePreparation(
+        type="agent", preparation_key=agent.preparation_key, source="built", prepared=agent
+    )
+    environment = preparation.environment.model_copy(update={"agent": agent, "agent_preinstalled": True})
+    return preparation.model_copy(update={"images": images, "environment": environment})
 
 
 def _check_compose(task: ComposeTask, policy: ResolvedHarborSandboxPolicy) -> PreparationErrorInfo | None:

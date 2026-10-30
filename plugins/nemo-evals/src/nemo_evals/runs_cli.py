@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 import typer
+from nemo_evals.agent_layers.models import AgentLayer
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TaskInput, TasksetInput
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
@@ -531,6 +532,79 @@ def submit_run(
     raise AssertionError("unreachable")
 
 
+AGENT_LAYER_WAIT_SECONDS = 30 * 60
+"""How long submit waits for agent layers before it submits anyway: tasks without a ready layer install the agent."""
+
+
+def wait_for_agent_layers(
+    client: NemoClient,
+    body: dict[str, Any],
+    *,
+    workspace: str,
+    poll_seconds: float,
+    echo: Callable[[str], None],
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[AgentLayer]:
+    """Request the run's agent layers and follow each until it's ready or failed; returns the last of each.
+
+    Never stops the submit: a request the platform refuses, a failed layer or one still building after
+    ``AGENT_LAYER_WAIT_SECONDS`` only warns, and those tasks' trials install the agent in setup.
+    """
+    url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/agent-layers"
+    try:
+        response = client.http_client.post(
+            url, json=body, headers=client.request_headers(None, url=url), timeout=SUBMIT_TIMEOUT_SECONDS
+        )
+    except httpx.TransportError as exc:
+        echo(f"Agent layers not requested ({type(exc).__name__}); the run's trials install the agent")
+        return []
+    if response.status_code >= 400:
+        echo(f"Agent layers not requested ({response.status_code}: {_detail(response)}); trials install the agent")
+        return []
+    layers = [AgentLayer.model_validate(layer) for layer in response.json()]
+    if not layers:
+        return []
+    echo(f"{_layers_summary(layers)} Each is the task's image with the agent installed, so trials needn't install it.")
+    started = clock()
+    while any(layer.status not in TERMINAL_BUILD_STATUSES for layer in layers):
+        if clock() - started > AGENT_LAYER_WAIT_SECONDS:
+            echo("Agent layers still building; submitting now: those tasks' trials install the agent")
+            break
+        sleep(poll_seconds)
+        layers = [
+            _reread_layer(client, layer) if layer.status not in TERMINAL_BUILD_STATUSES else layer for layer in layers
+        ]
+    echo(_layers_summary(layers))
+    for layer in layers:
+        if layer.status == "failed":
+            echo(f"  {layer.task}: no agent layer ({layer.error or 'its build failed'}); its trials install the agent")
+    return layers
+
+
+def _reread_layer(client: NemoClient, layer: AgentLayer) -> AgentLayer:
+    """``layer`` as the task's agent-layers route lists it now; unchanged when it can't be read."""
+    workspace, _, name = layer.task.partition("/")
+    url = (
+        f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/tasks/{name}"
+        f"/revisions/{layer.revision}/agent-layers"
+    )
+    try:
+        response = client.http_client.get(url, headers=client.request_headers(None, url=url))
+    except httpx.TransportError:
+        return layer
+    if response.status_code != 200:
+        return layer
+    current = (AgentLayer.model_validate(item) for item in response.json())
+    return next((item for item in current if item.agent_key == layer.agent_key and item.id == layer.id), layer)
+
+
+def _layers_summary(layers: list[AgentLayer]) -> str:
+    states = ["building" if layer.status not in TERMINAL_BUILD_STATUSES else layer.status for layer in layers]
+    counts = ", ".join(f"{states.count(state)} {state}" for state in ("ready", "building", "failed"))
+    return f"Agent layers for {len(layers)} tasks: {counts}."
+
+
 def _detail(response: httpx.Response) -> str:
     try:
         return json.dumps(response.json().get("detail"))
@@ -747,9 +821,10 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 dataset=source,
                 idempotency_key=idempotency_key,
             )
-            status = submit_run(
-                client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
-            )
+            body = request.model_dump(mode="json", exclude_none=True)
+            if not no_build_images:
+                wait_for_agent_layers(client, body, workspace=workspace, poll_seconds=poll_seconds, echo=echo)
+            status = submit_run(client, body, workspace=workspace, echo=echo)
         except KeyboardInterrupt:
             echo("Stopped waiting; the image builds keep going.")
             raise typer.Exit(code=130) from None

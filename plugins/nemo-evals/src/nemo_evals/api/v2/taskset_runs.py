@@ -8,6 +8,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.exceptions import RequestValidationError
+from nemo_evals.agent_layers.models import AgentLayer
 from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
     IntakeUnavailableError,
@@ -27,6 +28,7 @@ from nemo_evals.api.taskset_run_schemas import (
 )
 from nemo_evals.authz import scope
 from nemo_evals.harbor.remote.preparation import ImagePreparationUnavailableError
+from nemo_evals.image_builds.service import ImageBuildForbiddenError
 from nemo_evals.taskset_runs.entities import MemberPhase
 from nemo_evals.taskset_runs.store import (
     CancelContended,
@@ -270,6 +272,38 @@ async def get_taskset_run(
     if result is None:
         raise HTTPException(status_code=404, detail="Taskset run not found")
     return result
+
+
+@router.post(
+    "/agent-evaluate/runs/agent-layers",
+    summary="Request Taskset Run Agent Layers",
+    response_description="Each task's agent layer for the run's agent, started or already running or ready",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        403: {"description": "The caller may not read a source, or submit container image builds"},
+        422: {"description": "Invalid request, missing or incompatible source, or unconfigured execution"},
+    },
+)
+@scope.write
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.CREATE])
+async def request_taskset_run_agent_layers(
+    workspace: str,
+    req: TasksetRunInput,
+    service: TasksetRunService = Depends(get_taskset_run_service),
+) -> list[AgentLayer]:
+    """Request each task's agent layer for the agent a run with ``req`` would run; accepts no run.
+
+    An agent layer is a task's image with the agent already installed. A run whose tasks' layers are ready starts
+    their trials from them, so the trials' setup only checks the install. ``nemo evals runs submit`` requests the
+    layers and waits for them before it submits. Returns no layers when the deployment turns layers off or the run's
+    agent can't be layered (its setup isn't an install). Follow each with the task's agent-layers route.
+    """
+    try:
+        return await service.request_agent_layers(req, workspace=workspace)
+    except TasksetRunResolutionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except ImageBuildForbiddenError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @router.post(

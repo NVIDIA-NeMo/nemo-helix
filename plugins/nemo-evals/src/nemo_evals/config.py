@@ -90,6 +90,15 @@ class HarborTaskJobsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    agent_layers: bool = Field(
+        default=True,
+        description=(
+            "Start each trial from its task's agent layer (the task's image with the run's agent already installed) "
+            "when one is ready, so the trial's setup only checks the install and opens no setup egress. `nemo evals "
+            "runs submit` requests the layers before it submits. False runs every trial on the plain task image."
+        ),
+    )
+
     dispatcher_image: str | None = Field(
         default=None,
         pattern=PINNED_IMAGE_REF_PATTERN,
