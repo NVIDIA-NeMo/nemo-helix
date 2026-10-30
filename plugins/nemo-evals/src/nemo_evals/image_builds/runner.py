@@ -16,7 +16,7 @@ from pathlib import Path
 
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import Platform, normalize_reference
-from nemo_builder_plugin.schema import FileSetSource, ImageSource
+from nemo_builder_plugin.schema import ImageSource
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.archive import MAX_ARCHIVE_BYTES, extract_task, run_blocking_archive_operation
@@ -24,12 +24,13 @@ from nemo_evals.harbor.archive_io import download_verified_async
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.builder import (
-    ENDED_JOB_STATUSES,
     ImageBuilder,
+    adopt_or_build,
     archive_source,
     builder_name,
     copy_builder_name,
     ensure_build,
+    job_gone,
 )
 from nemo_evals.image_builds.models import (
     TERMINAL_BUILD_STATUSES,
@@ -235,39 +236,48 @@ async def _downloaded(files: AsyncFilesClient, source: HarborArchiveSource) -> A
 
 
 async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition) -> None:
-    source: FileSetSource | ImageSource
-    dockerfile: str | None
-    if image.image is not None:
-        reference = str(normalize_reference(image.image))
-        if image.platform is None:
-            # An image published for one platform can only be copied for that one.
-            published = [p for p in await builder.image_platforms(reference) if p.startswith("linux/")]
-            if len(published) == 1:
-                image.platform = published[0]
-        name = copy_builder_name(reference, image.platform)
-        source, dockerfile = ImageSource(image=reference), None
-    else:
-        assert image.context_path is not None and image.dockerfile is not None
-        name = builder_name(
-            archive=definition.source.fileset_ref,
-            archive_digest=definition.source.files_hash,
-            context_path=image.context_path,
-            dockerfile=image.dockerfile,
-            platform=image.platform,
-        )
-        source, dockerfile = archive_source(definition.source.fileset_ref, image.context_path), image.dockerfile
     try:
-        submitted = await ensure_build(
-            builder, name=name, source=source, dockerfile=dockerfile, platform=image.platform
-        )
+        if image.image is not None:
+            builder_image = await _submit_copy(builder, image)
+        else:
+            builder_image = await _submit_build(builder, image, definition)
     except NemoClientError as exc:
         image.status = "failed"
         image.error = f"Builder refused the build: {exc}"
         return
-    builder_image = submitted.images[0]
     image.builder_image = builder_image.name
-    image.build_job = submitted.job
+    image.build_job = builder_image.provenance.job.rpartition("/")[2]
     _apply(image, builder_image)
+
+
+async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerImage:
+    assert image.image is not None
+    reference = str(normalize_reference(image.image))
+    if image.platform is None:
+        # An image published for one platform can only be copied for that one.
+        published = [p for p in await builder.image_platforms(reference) if p.startswith("linux/")]
+        if len(published) == 1:
+            image.platform = published[0]
+    submitted = await ensure_build(
+        builder,
+        name=copy_builder_name(reference, image.platform),
+        source=ImageSource(image=reference),
+        dockerfile=None,
+        platform=image.platform,
+    )
+    return submitted.images[0]
+
+
+async def _submit_build(builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition) -> ContainerImage:
+    """Use the build of a context with the same files when there is one, from any task; submit this task's otherwise."""
+    assert image.context_path is not None and image.dockerfile is not None and image.context_digest is not None
+    return await adopt_or_build(
+        builder,
+        name=builder_name(context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform),
+        source=archive_source(definition.source.fileset_ref, image.context_path),
+        dockerfile=image.dockerfile,
+        platform=image.platform,
+    )
 
 
 async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
@@ -279,11 +289,12 @@ async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
         try:
             current = await builder.get_image(image.builder_image)
             if current is not None and current.status == "pending" and image.build_job is not None:
-                status = await builder.job_status(image.build_job)
-                if status in ENDED_JOB_STATUSES or status is None:
+                # A build another task submitted may not have its job yet: Builder creates it after the row.
+                if await job_gone(builder, current):
                     # Builder never fails a row whose build failed: read it once more, after its job ended.
                     current = await builder.get_image(image.builder_image)
                     if current is not None and current.status == "pending":
+                        status = await builder.job_status(image.build_job)
                         image.status = "failed"
                         image.error = f"Builder job {image.build_job} ended ({status or 'gone'}) without the image"
                         changed = True

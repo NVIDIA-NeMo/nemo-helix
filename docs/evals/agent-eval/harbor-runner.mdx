@@ -891,6 +891,36 @@ The error changes `a2`'s status and error rollup; it does not discard or replace
 - **`n_attempts`** — desired attempts per task. On resume, Harbor runs only the missing attempts.
 - **`n_concurrent_trials`** — maximum trials Harbor runs concurrently.
 
+## Agent install reuse
+
+A local Docker trial normally installs its agent from scratch during setup. Instead, the runtime installs each agent once per task environment and reuses that install in every later trial of the environment. This covers Harbor's installed agents (such as `codex` and `claude-code`) and registered Fabric agents.
+
+1. The first trial that needs the install builds an *agent layer*. It starts a container from the task's environment image, runs the agent's setup in it as the task's agent user, and saves the result as the image `nemo-agent-layer:<key>`.
+2. Every later trial with the same environment, agent version, agent user and Harbor version starts from that image, in this run and in later runs on the same machine. Its setup only confirms the install, which takes seconds.
+3. Trials that need a layer another trial is still building wait for it, rather than building their own.
+
+The key leaves out the model, prompts and turn limits, so changing those reuses the same layer.
+
+An agent without a pinned `version` installs the newest release. Its layer is reused for one UTC day, then built again.
+
+If a layer can't be built, the trial installs its agent during setup, as it would without layers.
+
+Layers apply only to Harbor's default local Docker environment, and not to tasks that bring their own `docker-compose.yaml`.
+
+To turn layers off, set `NHX_HARBOR_AGENT_LAYERS=0`.
+
+To list layers:
+
+```bash
+docker images --filter label=nemo.agent-layer
+```
+
+To remove them:
+
+```bash
+docker image prune --all --filter label=nemo.agent-layer
+```
+
 ## Retries
 
 - **`max_retries`** — maximum extra attempts per trial during the current Harbor run; defaults to `0`.
