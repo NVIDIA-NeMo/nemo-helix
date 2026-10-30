@@ -76,6 +76,7 @@ from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -767,10 +768,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
         auth_context: AuthContext | None = None,
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
+        providers: dict[str, GatewayProviderBinding] | None = None,
         use_image_entrypoint: bool = False,
     ) -> DeploymentInfo:
         """Create DeploymentConfig + Deployment entities for the agent container."""
         del port  # Host port is allocated by the deployments executor, not agents.
+        if providers and deployment_mode != "openshell":
+            return DeploymentInfo(name=name, status="failed", error="Gateway providers require OpenShell execution.")
         if deployment_mode not in CONTAINER_DEPLOYMENT_MODES:
             return DeploymentInfo(
                 name=name,
@@ -904,6 +908,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
         except (ReservedSecretEnvVarError, ImageEntrypointUnsupportedError) as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
+        deployment_config.gateway_providers = providers or {}
         await entities.create(deployment_config)
         try:
             deployment = Deployment(

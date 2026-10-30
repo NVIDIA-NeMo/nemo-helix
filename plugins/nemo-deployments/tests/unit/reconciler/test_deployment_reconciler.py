@@ -13,10 +13,53 @@ from nemo_deployments_plugin.entities import Deployment, Prerequisite, StatusEve
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.orphan_cleanup import reconcile_orphans
 from nemo_deployments_plugin.types import DeploymentStatus
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding, ProviderAccessRevoked
 from reconciler.conftest import MockDeploymentBackend
 
 NO_VOLUMES: dict[tuple[str, str], Volume] = {}
+
+
+@pytest.mark.parametrize(
+    "status,error",
+    [
+        ("STARTING", RuntimeError),
+        ("STARTING", ProviderAccessRevoked),
+        ("READY", RuntimeError),
+        ("READY", ProviderAccessRevoked),
+        ("SUCCEEDED", RuntimeError),
+        ("FAILED", RuntimeError),
+    ],
+)
+async def test_provider_renewal_retries_without_recreating_workload(deployment_reconciler, mock_backend, status, error):
+    dep = make_deployment()
+    dep.status = "READY"
+    dep.with_auth_context(AuthContext(principal_id="user-1"))
+    cfg = make_deployment_config()
+    cfg.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})
+    }
+    deployment_reconciler.set_config_cache({("default", "cfg1"): cfg})
+    mock_backend.supports_gateway_providers = True
+    mock_backend.read_status_result = BackendStatusUpdate(status=status)
+    mock_backend.renew_gateway_credentials = AsyncMock(side_effect=error("sensitive RPC detail"))
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+    assert dep.status == status
+    assert not mock_backend.create_calls
+    if status in ("STARTING", "READY"):
+        args = mock_backend.renew_gateway_credentials.call_args.kwargs
+        assert args["workload"].id == dep.id
+        assert args["auth_context"].principal_id == "user-1"
+        assert ("access was removed" if error is ProviderAccessRevoked else "retrying") in dep.status_message
+        assert "sensitive" not in dep.status_message
+        mock_backend.renew_gateway_credentials.side_effect = None
+        mock_backend.read_status_result = BackendStatusUpdate(status="READY", status_message="running")
+        await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+        assert dep.status_message == "running"
+    else:
+        mock_backend.renew_gateway_credentials.assert_not_awaited()
+
 
 NOW = datetime(2026, 6, 30, 12, 0, 0, tzinfo=timezone.utc)
 STARTING_TIMEOUT_SECONDS = 60
@@ -659,6 +702,7 @@ async def test_delete_timeout_before_boundary_stays_deleting(
 
     assert dep.status == "DELETING"
     mock_entities.delete.assert_not_awaited()
+    mock_entities.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1027,3 +1071,33 @@ async def test_succeeded_prerequisite_in_index_allows_create(
 
     assert server.status == "STARTING"
     assert len(mock_backend.create_calls) == 1
+
+
+@pytest.mark.parametrize("create_failed", [False, True])
+async def test_provider_cleanup_survives_restart_and_deletion_timeout(
+    patch_reconciler_now, mock_entities, mock_backend, create_failed
+):
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS - 1)
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    mock_backend.delete_status = BackendStatusUpdate(
+        status="DELETING",
+        status_message="Retrying sandbox and provider cleanup.",
+        error_details={"reason": "provider_cleanup_pending"},
+    )
+    if create_failed:
+        dep.status = "PENDING"
+        dep.desired_state = "READY"
+        dep.status_history = []
+        mock_backend.create_deployment = AsyncMock(return_value=mock_backend.delete_status)
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+    mock_entities.update.assert_awaited()
+    mock_entities.delete.assert_not_awaited()
+    dep = Deployment.model_validate(dep.model_dump())
+    patch_reconciler_now.now.return_value = NOW + timedelta(seconds=DELETING_TIMEOUT_SECONDS * 2)
+    restarted = _starting_timeout_reconciler(mock_entities, mock_backend)
+    await _reconcile_stuck_deleting(restarted, mock_backend, dep)
+    assert dep.status == "DELETING"
+    mock_entities.delete.assert_not_awaited()
+    mock_backend.delete_status = BackendStatusUpdate(status="SUCCEEDED")
+    await _reconcile_stuck_deleting(restarted, mock_backend, dep)
+    mock_entities.delete.assert_awaited_once()

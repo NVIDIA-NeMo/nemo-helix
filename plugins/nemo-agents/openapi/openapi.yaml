@@ -2965,6 +2965,11 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
+        providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Providers
         agent:
           type: string
           title: Agent
