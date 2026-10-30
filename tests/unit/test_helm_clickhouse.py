@@ -93,6 +93,8 @@ def _env_by_name(container: dict) -> dict[str, dict]:
 
 
 def _sha256_text(value: str) -> str:
+    # Reproduces Helm's sha256sum for the pod annotation. This is a checksum, not a password hash.
+    # codeql[py/weak-sensitive-data-hashing]
     return hashlib.sha256(value.encode()).hexdigest()
 
 
