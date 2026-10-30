@@ -259,6 +259,17 @@ class EvaluatorConfig(NemoConfig):
         description="Operator execution timeout defaults, maximum request budget and finalization grace for taskset runs.",
     )
 
+    container_image_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional fully qualified image reference for evaluate and CPU agent-evaluate steps, including "
+            "saved-trial scoring and sandboxed Gym orchestration. When unset, uses "
+            "platform.image_registry/nhx-tasks:platform.image_tag. Does not override colocated Gym, "
+            "Gym sandbox hosts, Harbor taskset dispatchers, staging, retrieval, or image-build jobs."
+        ),
+    )
+
     gym_tasks_image: str | None = Field(
         default=None,
         description=(
