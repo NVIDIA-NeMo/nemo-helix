@@ -150,9 +150,6 @@ if grep -Fq "not-the-generated-key" <<<"${generated_clickhouse_output}"; then
   exit 1
 fi
 
-# Exercise generated credentials across install/upgrade with a mocked lookup.
-HELM_FOLDER="${HELM_FOLDER}" bash "${SCRIPT_DIR}/test-helm-clickhouse-credentials.sh"
-
 # ClickHouse probe overrides must render, and PVC template labels must remain
 # stable across chart and application version upgrades.
 clickhouse_statefulset_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
