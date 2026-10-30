@@ -110,6 +110,9 @@ async def test_model_change_allowed_before_deployment() -> None:
     agents.get_agent = AsyncMock(return_value=_wire(Agent(name=sample._AGENT_NAME, config=_config(old_model))))
     agents.delete_agent = AsyncMock()
     agents.register_agent = AsyncMock()
+    agents.list_deployment_modes = AsyncMock(
+        return_value=_wire(_modes(subprocess_enabled=True, k8s_requires_image=False))
+    )
     agents.create_deployment = AsyncMock(return_value=_wire(AgentDeployment(name="dep-new", agent=sample._AGENT_NAME)))
 
     deployment, agent_created, deployment_submitted = await sample._agent_and_deployment(
@@ -130,9 +133,10 @@ def _modes(*, subprocess_enabled: bool, k8s_requires_image: bool) -> DeploymentM
     )
 
 
-def _agents_without_deployments(model: ResolvedModelReference) -> MagicMock:
+def _agents_without_deployments(model: ResolvedModelReference, modes: DeploymentModeList) -> MagicMock:
     agents = MagicMock()
     agents.list_deployments = AsyncMock(return_value=_Page([]))
+    agents.list_deployment_modes = AsyncMock(return_value=_wire(modes))
     agents.get_agent = AsyncMock(return_value=_wire(Agent(name=sample._AGENT_NAME, config=_config(model))))
     agents.create_deployment = AsyncMock(return_value=_wire(AgentDeployment(name="dep-new", agent=sample._AGENT_NAME)))
     return agents
@@ -140,16 +144,9 @@ def _agents_without_deployments(model: ResolvedModelReference) -> MagicMock:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("subprocess_enabled", "expected_mode"), [(True, "subprocess"), (False, "k8s")])
-async def test_deployment_uses_an_enabled_mode(
-    monkeypatch: pytest.MonkeyPatch, subprocess_enabled: bool, expected_mode: str
-) -> None:
-    monkeypatch.setattr(
-        sample,
-        "deployment_modes",
-        lambda _config: _modes(subprocess_enabled=subprocess_enabled, k8s_requires_image=False),
-    )
+async def test_deployment_uses_an_enabled_mode(subprocess_enabled: bool, expected_mode: str) -> None:
     model = _model()
-    agents = _agents_without_deployments(model)
+    agents = _agents_without_deployments(model, _modes(subprocess_enabled=subprocess_enabled, k8s_requires_image=False))
 
     await sample._agent_and_deployment(agents, "sample-owned", model, _config(model), "nemo-agents-spec-v1")
 
@@ -157,12 +154,9 @@ async def test_deployment_uses_an_enabled_mode(
 
 
 @pytest.mark.asyncio
-async def test_deployment_fails_clearly_when_no_mode_can_run_the_sample(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        sample, "deployment_modes", lambda _config: _modes(subprocess_enabled=False, k8s_requires_image=True)
-    )
+async def test_deployment_fails_clearly_when_no_mode_can_run_the_sample() -> None:
     model = _model()
-    agents = _agents_without_deployments(model)
+    agents = _agents_without_deployments(model, _modes(subprocess_enabled=False, k8s_requires_image=True))
 
     with pytest.raises(HTTPException) as exc_info:
         await sample._agent_and_deployment(agents, "sample-owned", model, _config(model), "nemo-agents-spec-v1")

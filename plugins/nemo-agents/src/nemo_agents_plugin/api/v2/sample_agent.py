@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
@@ -15,9 +14,7 @@ import yaml
 from email_security_triage.resources import sample_file
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from nemo_agents_plugin.api.v2.deployments import deployment_modes
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.utils import expand_env_vars
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import (
@@ -151,7 +148,7 @@ async def _agent_and_deployment(
     )
     if active is not None:
         return active, agent_created, False
-    mode = (await asyncio.to_thread(deployment_modes, AgentsConfig.get())).default_mode()
+    mode = (await agents.list_deployment_modes(workspace=workspace)).data().default_mode()
     if mode is None:
         raise HTTPException(
             status_code=400,
