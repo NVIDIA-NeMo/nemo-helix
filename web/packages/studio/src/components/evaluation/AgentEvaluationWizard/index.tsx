@@ -68,6 +68,15 @@ import {
   type WizardStep,
 } from '@studio/components/evaluation/AgentEvaluationWizard/wizardSteps';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
+import { DatasetPanel } from '@studio/components/evaluation/EvalWizard/DatasetPanel';
+import {
+  entityNameField,
+  submitErrorMessage,
+  unsalvageableNameError,
+} from '@studio/components/evaluation/EvalWizard/entityNameField';
+import { hasMalformedBraces } from '@studio/components/evaluation/EvalWizard/judgePromptVariables';
+import { EVALUATION_FORM_DEFAULTS } from '@studio/components/evaluation/EvalWizard/types';
+import { useDatasetPreview } from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
 import {
   createRunEvaluation,
   evalConfigFilename,
@@ -75,24 +84,15 @@ import {
   evaluationFilesetName,
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
-import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
-import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
-import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
-import { DatasetPanel } from '@studio/components/evaluation/ModelEvaluationWizard/DatasetPanel';
-import { hasMalformedBraces } from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
-import { EVALUATION_FORM_DEFAULTS } from '@studio/components/evaluation/ModelEvaluationWizard/types';
-import { useDatasetPreview } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
-import {
-  entityNameField,
-  submitErrorMessage,
-  unsalvageableNameError,
-} from '@studio/components/evaluation/shared/entityNameField';
 import {
   EXPERIMENT_SETTINGS_DEFAULTS,
   experimentSettingsPayload,
   experimentSettingsSchemaShape,
-} from '@studio/components/evaluation/shared/experimentSettings';
-import { ExperimentSettingsFields } from '@studio/components/evaluation/shared/ExperimentSettingsFields';
+} from '@studio/components/evaluation/experimentSettings';
+import { ExperimentSettingsFields } from '@studio/components/evaluation/ExperimentSettingsFields';
+import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
+import type { PanelScoreFormData } from '@studio/components/evaluation/Jobs/form/ScoreModal';
+import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import {
   bareName,
   buildAgentEvalRequestBody,

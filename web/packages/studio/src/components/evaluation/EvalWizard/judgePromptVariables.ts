@@ -4,7 +4,7 @@
 import {
   CANONICAL_FIELDS,
   type CanonicalField,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 
 /** Names the render context carries regardless of the dataset. */
 export const ALWAYS_AVAILABLE = ['item', 'sample', 'scores', 'output_text', 'response'];
