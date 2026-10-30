@@ -6,6 +6,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Cog, Commit, CopyDoc } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
+import { useAgentsGetAgentSuspense } from '@nemo/sdk/generated/agents/agents';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
   Badge,
@@ -76,6 +77,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { [ROUTE_PARAMS.agentName]: agentName } = useParams<{ agentName: string }>();
+  // Suspends until the agent loads; a missing agent or failed load renders the route's error state.
+  useAgentsGetAgentSuspense(workspace, agentName ?? '');
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);

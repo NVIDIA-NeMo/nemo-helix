@@ -7,7 +7,9 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATION_FORM_ENABLED', 'false');
 });
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
+import { suppressConsoleError } from '@nemo/testing/utils/suppress-console';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -15,7 +17,7 @@ import { mockOptimizeJobs } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute, getAgentOptimizeRoute } from '@studio/routes/utils';
-import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
@@ -271,6 +273,7 @@ describe('AgentDetailRoute optimizations tab', () => {
                 <LocationDisplay />
               </>
             ),
+            errorElement: <RouteErrorPanel />,
           },
         ],
       });
@@ -291,14 +294,15 @@ describe('AgentDetailRoute optimizations tab', () => {
           HttpResponse.json({ detail: 'Not found' }, { status: 404 })
         )
       );
+      // React and the router log the error the route panel catches.
+      suppressConsoleError(
+        'The above error occurred in',
+        'React Router caught the following error',
+        'undefined'
+      );
       renderArrivingToOptimize();
 
-      // The param is stripped only once the agent query settles, so this is the effect's verdict.
-      await waitFor(() =>
-        expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).toBe(
-          `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`
-        )
-      );
+      expect(await screen.findByText('Not Found')).toBeInTheDocument();
       expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
     });
   });

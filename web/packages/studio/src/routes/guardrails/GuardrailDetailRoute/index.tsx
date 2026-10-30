@@ -4,9 +4,8 @@
  */
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { useGuardrailsGetGuardrailConfig } from '@nemo/sdk/generated/platform/guardrails';
-import { Flex, PageHeader, Stack, Tabs, Text } from '@nvidia/foundations-react-core';
-import { Loading } from '@studio/components/Layouts/Loading';
+import { useGuardrailsGetGuardrailConfigSuspense } from '@nemo/sdk/generated/platform/guardrails';
+import { Flex, PageHeader, Stack, Tabs } from '@nvidia/foundations-react-core';
 import { SuspenseOutlet } from '@studio/components/Layouts/SuspenseOutlet';
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -44,29 +43,7 @@ export const GuardrailDetailRoute: FC = () => {
     ],
   });
 
-  const queryEnabled = Boolean(workspace && guardrailConfigName);
-  const {
-    data: config,
-    isPending,
-    isError,
-  } = useGuardrailsGetGuardrailConfig(workspace, guardrailConfigName, {
-    query: { enabled: queryEnabled },
-  });
-
-  if (isPending) {
-    return <Loading description="Loading guardrail config..." />;
-  }
-
-  if (isError || !config) {
-    return (
-      <AccessibleTitle title={`Guardrail config ${guardrailConfigName}`}>
-        <Stack className="w-full h-full min-h-0 p-density-2xl" gap="density-xl">
-          <PageHeader slotHeading={guardrailConfigName} />
-          <Text className="text-feedback-danger">Failed to load guardrail config.</Text>
-        </Stack>
-      </AccessibleTitle>
-    );
-  }
+  const { data: config } = useGuardrailsGetGuardrailConfigSuspense(workspace, guardrailConfigName);
 
   return (
     <AccessibleTitle title={`Guardrail config ${guardrailConfigName}`}>

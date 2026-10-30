@@ -23,6 +23,18 @@ export interface UseCustomizationJobResult {
   refetch: () => void;
 }
 
+/** Narrows a platform job to a customization job, when its spec belongs to a known backend. */
+export const toCustomizationJob = (
+  data?: HelixJobResponse
+): Pick<UseCustomizationJobResult, 'job' | 'backend'> => {
+  const backend = getCustomizationBackend(data?.spec);
+  const job =
+    data && backend
+      ? ({ ...data, spec: data.spec as unknown as CustomizationJobSpec } as CustomizationJob)
+      : undefined;
+  return { job, backend };
+};
+
 export const useCustomizationJob = (
   workspace: string,
   name: string,
@@ -34,15 +46,8 @@ export const useCustomizationJob = (
     { query: query ?? {} }
   );
 
-  const backend = getCustomizationBackend(data?.spec);
-  const job =
-    data && backend
-      ? ({ ...data, spec: data.spec as unknown as CustomizationJobSpec } as CustomizationJob)
-      : undefined;
-
   return {
-    job,
-    backend,
+    ...toCustomizationJob(data),
     isLoading,
     isError,
     refetch: () => {

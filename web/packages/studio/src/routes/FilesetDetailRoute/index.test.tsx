@@ -27,7 +27,7 @@ const makeFileset = (purpose: FilesetPurpose): FilesetOutput =>
 // export intact so the file explorer's own hooks still resolve.
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
-  useFilesRetrieveFileset: () => ({ data: mockFileset, isPending: false, isError: false }),
+  useFilesRetrieveFilesetSuspense: () => ({ data: mockFileset }),
   useFilesListFilesetFiles: () => ({
     data: { data: [] },
     isPending: false,

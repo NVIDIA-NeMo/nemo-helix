@@ -95,7 +95,7 @@ describe('InsightTracesTable', () => {
 
     renderRoute(<InsightTracesTable workspace={DEFAULT_WORKSPACE} traceIds={[makeTrace(1).id]} />);
 
-    expect(await screen.findByText('Error')).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't Load Data")).toBeInTheDocument();
     expect(
       screen.queryByText(ENTITY_EMPTY_STATES.insightTraces.subheading)
     ).not.toBeInTheDocument();

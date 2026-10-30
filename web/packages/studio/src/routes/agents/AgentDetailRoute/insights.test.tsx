@@ -9,6 +9,7 @@ vi.hoisted(() => {
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { getCompassListInsightsQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
 import type { AnalysisRunResponse, InsightListItem } from '@nemo/sdk/generated/compass/schema';
+import { suppressConsoleError } from '@nemo/testing/utils/suppress-console';
 import { LIST_POLL_MS } from '@studio/api/useLatestAnalysisRun';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -62,6 +63,13 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   const runButton = () => screen.findByRole('button', { name: 'Run analysis now' });
   // The header's deployment picker carries its own status badge, so run statuses are read off the tab.
   const tabPanel = () => within(screen.getByRole('tabpanel'));
+  // The page suspends until the agent loads. Under fake timers, the tooltips it mounts once it
+  // resumes update outside act, which is a test-environment artifact rather than a page bug.
+  const renderInsights = async () => {
+    suppressConsoleError('was not wrapped in act');
+    renderDetail('?tab=insights');
+    await screen.findByRole('tabpanel');
+  };
   const nextPoll = (ms = JOB_POLLING_INTERVAL_MS) => act(() => vi.advanceTimersByTimeAsync(ms));
 
   beforeEach(() => {
@@ -110,7 +118,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   it('follows a run from queued to running to completed and reports new findings', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     latest = mockAnalysisRunWithJob('react-agent', 'created');
-    renderDetail('?tab=insights');
+    await renderInsights();
 
     expect(await tabPanel().findByText('Queued')).toBeInTheDocument();
     expect(await runButton()).toBeDisabled();
@@ -141,7 +149,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   it('reports a failed run and re-enables Run analysis now', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     latest = mockAnalysisRunWithJob('react-agent', 'active');
-    renderDetail('?tab=insights');
+    await renderInsights();
 
     expect(await tabPanel().findByText('Running')).toBeInTheDocument();
 
@@ -159,7 +167,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
 
   it('picks up a run started outside the page on the next list poll', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    renderDetail('?tab=insights');
+    await renderInsights();
 
     expect(await screen.findByText('Enabled')).toBeInTheDocument();
     await waitFor(async () => expect(await runButton()).toBeEnabled());
@@ -183,7 +191,7 @@ describe('AgentDetailRoute insights tab latest analysis run', () => {
   it('does not toast for a run that had already finished when the page opened', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     latest = mockAnalysisRunWithJob('react-agent', 'completed');
-    renderDetail('?tab=insights');
+    await renderInsights();
 
     expect(await tabPanel().findByText('Completed')).toBeInTheDocument();
     await nextPoll();

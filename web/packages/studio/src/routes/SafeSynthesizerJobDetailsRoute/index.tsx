@@ -45,12 +45,8 @@ export const GenerateJobDetailsRoute: FC = () => {
   const { data: jobResultSummary } =
     useDownloadJobResultSummaryV1beta1GenerateJobsJobIdResultsSummaryDownloadGet(
       workspace,
-      safeSynthesizerJobName || '',
-      {
-        query: {
-          enabled: !!safeSynthesizerJobName && isSuccessful,
-        },
-      }
+      safeSynthesizerJobName,
+      { query: { enabled: isSuccessful } }
     );
 
   const {

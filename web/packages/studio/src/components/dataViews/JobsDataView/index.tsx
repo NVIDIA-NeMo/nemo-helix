@@ -65,6 +65,7 @@ export const JobsDataView = () => {
     isLoading,
     isPlaceholderData,
     error,
+    refetch,
   } = useJobsListJobs(
     workspace,
     {
@@ -184,7 +185,13 @@ export const JobsDataView = () => {
   ];
 
   if (error) {
-    return <ErrorPanel errorMessage={getErrorMessage(error)} />;
+    return (
+      <ErrorPanel
+        error={error}
+        errorMessage={getErrorMessage(error)}
+        onRetry={() => void refetch()}
+      />
+    );
   }
 
   return (

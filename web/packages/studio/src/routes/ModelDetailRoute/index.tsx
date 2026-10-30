@@ -7,6 +7,7 @@ import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
 import { toInferenceModelName } from '@nemo/common/src/utils/models';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
+import { useModelsGetModelSuspense } from '@nemo/sdk/generated/platform/models';
 import {
   Badge,
   Button,
@@ -22,7 +23,6 @@ import {
 import { CustomizationOverview } from '@studio/components/CustomizationOverview';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { EvaluationResultsDataView } from '@studio/components/dataViews/EvaluationResultsDataView';
-import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useModelLineage } from '@studio/hooks/useModelLineage';
@@ -54,8 +54,9 @@ export const ModelDetailRoute: FC = () => {
   const { getQueryParam, setQueryParam } = useQueryParams();
   const navigate = useNavigate();
 
+  const { data: model } = useModelsGetModelSuspense(workspace, modelName);
   const lineage = useModelLineage(workspace, modelName, adapterName);
-  const { model, adapter, job, fileset } = lineage;
+  const { adapter, job, fileset } = lineage;
   const name = adapterName ?? modelName;
 
   const { job: jobDetails } = useCustomizationJob(job.workspace, job.jobName ?? '', {
@@ -114,25 +115,14 @@ export const ModelDetailRoute: FC = () => {
     };
   }
 
-  if (lineage.isLoading) {
-    return <Loading description="Loading model..." />;
-  }
-
-  if (lineage.isError || lineage.isAdapterMissing || !model) {
+  if (lineage.isAdapterMissing) {
     return (
       <AccessibleTitle title={name}>
         <Stack padding="density-2xl">
-          {lineage.isAdapterMissing ? (
-            <ErrorMessage
-              header="Adapter not found"
-              message={`The model "${modelName}" has no adapter named "${adapterName}".`}
-            />
-          ) : (
-            <ErrorMessage
-              header="Model not found"
-              message={`Couldn't load the model "${modelName}" in workspace "${workspace}".`}
-            />
-          )}
+          <ErrorMessage
+            header="Adapter not found"
+            message={`The model "${modelName}" has no adapter named "${adapterName}".`}
+          />
         </Stack>
       </AccessibleTitle>
     );

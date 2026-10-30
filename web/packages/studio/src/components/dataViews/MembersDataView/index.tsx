@@ -41,7 +41,8 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
     defaultSort: [{ id: 'principal', desc: false }],
   });
 
-  const { data, isLoading, error, isFetching, isForbidden } = useWorkspaceMembers(workspace);
+  const { data, isLoading, error, isFetching, isForbidden, refetch } =
+    useWorkspaceMembers(workspace);
 
   const membersWithId = useMemo<WorkspaceMemberWithId[]>(
     () => (data?.data ?? []).map((m) => ({ ...m, id: m.principal })),
@@ -166,7 +167,9 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
           ),
           renderErrorState: () => (
             <ErrorPanel
+              error={error}
               errorMessage={getErrorMessage(error ?? new Error('Failed to load members.'))}
+              onRetry={() => void refetch()}
             />
           ),
         },

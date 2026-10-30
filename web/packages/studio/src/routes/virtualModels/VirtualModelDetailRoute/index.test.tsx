@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { VirtualModelChatTab } from '@studio/routes/virtualModels/VirtualModelChatTab';
@@ -42,6 +43,7 @@ const renderDetailAt = (entry: string) =>
       {
         path: '/workspaces/:workspace/virtual-models/:virtualModelName',
         element: <VirtualModelDetailRoute />,
+        errorElement: <RouteErrorPanel />,
         children: [
           { index: true, element: <Navigate to="details" replace /> },
           {
@@ -74,7 +76,7 @@ describe('VirtualModelDetailRoute', () => {
     expect(await screen.findByText('my-vm')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByTestId('virtual-model-details-skeleton')).toBeInTheDocument();
+    expect(screen.getByTestId('spinner')).toBeInTheDocument();
   });
 
   it('renders core fields and middleware config read-only', async () => {
@@ -96,16 +98,13 @@ describe('VirtualModelDetailRoute', () => {
     expect(screen.getAllByText('None').length).toBeGreaterThan(0);
   });
 
-  it('shows an in-page error when the virtual model cannot be loaded', async () => {
+  it('defers a missing virtual model to the route error panel', async () => {
     server.use(http.get(VM_DETAIL_URL, () => new HttpResponse(null, { status: 404 })));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderDetailAt('/workspaces/default/virtual-models/missing-vm/details');
 
-    expect(
-      await screen.findByText(/Failed to load virtual model 'missing-vm'/)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/404/)).toBeInTheDocument();
-    // The heading still renders — it comes from the path, not the response.
-    expect(screen.getAllByText('missing-vm').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Not Found')).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('renders the chat tab without requesting the virtual model', async () => {
@@ -131,6 +130,6 @@ describe('VirtualModelDetailRoute', () => {
     server.use(http.get(VM_DETAIL_URL, () => HttpResponse.json(sampleVm)));
     renderDetailAt('/workspaces/default/virtual-models/my-vm');
 
-    expect(await screen.findByTestId('virtual-model-details-skeleton')).toBeInTheDocument();
+    expect(await screen.findByText('example-plugin.my-proxy')).toBeInTheDocument();
   });
 });

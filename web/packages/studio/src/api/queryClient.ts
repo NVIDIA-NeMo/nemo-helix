@@ -10,6 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
+import { isNonRetryableClientError } from '@nemo/common/src/api/common/utils';
 import { isLocalDevelopmentEnv } from '@studio/constants/environment';
 import { QueryClient, QueryClientConfig } from '@tanstack/react-query';
 
@@ -29,7 +30,9 @@ export const DEFAULT_QUERY_RETRY_COUNT = 3;
 export const queryClientConfig: QueryClientConfig = {
   defaultOptions: {
     queries: {
-      retry: DEFAULT_QUERY_RETRY_COUNT,
+      // A 404 or 403 won't change on retry; failing fast lets not-found and error states show immediately.
+      retry: (failureCount, error) =>
+        !isNonRetryableClientError(error) && failureCount < DEFAULT_QUERY_RETRY_COUNT,
       // With SSR, we usually want to set some default staleTime
       // above 0 to avoid refetching immediately on the client
       staleTime: 60 * 1000,

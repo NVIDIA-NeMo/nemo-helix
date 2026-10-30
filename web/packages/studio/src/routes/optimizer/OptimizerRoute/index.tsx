@@ -36,7 +36,7 @@ export const OptimizerRoute: FC = () => {
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error } = useCompassListInsights(
+  const { data, isFetching, error, refetch } = useCompassListInsights(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -159,7 +159,9 @@ export const OptimizerRoute: FC = () => {
                 ),
               renderErrorState: () => (
                 <ErrorPanel
+                  error={error}
                   errorMessage={getErrorMessage(error ?? new Error('Failed to fetch insights'))}
+                  onRetry={() => void refetch()}
                 />
               ),
             },

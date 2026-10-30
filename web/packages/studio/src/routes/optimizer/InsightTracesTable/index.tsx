@@ -39,7 +39,7 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
   const firstVisibleIndex = pageIndex * pageSize;
   const visibleTraceIds = traceIds.slice(firstVisibleIndex, firstVisibleIndex + pageSize);
 
-  const { data, error, isFetching } = useListTraces(
+  const { data, error, isFetching, refetch } = useListTraces(
     workspace,
     {
       filter: withOperators<TraceFilter>({ id: { $in: visibleTraceIds } }),
@@ -98,7 +98,9 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
             renderEmptyState: () => <EntityEmptyState entity="insightTraces" variant="first-use" />,
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to load traces'))}
+                onRetry={() => void refetch()}
               />
             ),
           },

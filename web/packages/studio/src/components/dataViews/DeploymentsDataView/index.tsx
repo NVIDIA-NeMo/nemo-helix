@@ -55,7 +55,7 @@ export const DeploymentsDataView: FC<DeploymentsDataViewProps> = ({
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error } = useModelsListDeployments(
+  const { data, isFetching, error, refetch } = useModelsListDeployments(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -156,7 +156,9 @@ export const DeploymentsDataView: FC<DeploymentsDataViewProps> = ({
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to fetch deployments'))}
+                onRetry={() => void refetch()}
               />
             ),
           },

@@ -1,13 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import type { MiddlewareCall, VirtualModel } from '@nemo/sdk/generated/platform/schema';
-import { useGetVirtualModel } from '@nemo/sdk/generated/platform/virtual-models';
-import { Block, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
+import { useGetVirtualModelSuspense } from '@nemo/sdk/generated/platform/virtual-models';
+import { Block, Stack, Text } from '@nvidia/foundations-react-core';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
@@ -60,25 +58,6 @@ const MiddlewarePipeline: FC<MiddlewarePipelineProps> = ({ label, calls }) => (
         None
       </Text>
     )}
-  </Stack>
-);
-
-/** Placeholder while the virtual model loads. The page heading and tabs render from the URL. */
-const DetailsSkeleton: FC = () => (
-  <Stack className="gap-density-lg" data-testid="virtual-model-details-skeleton">
-    <Stack className="gap-density-md">
-      {['created', 'default-model', 'autoprovisioned', 'models'].map((field) => (
-        <Flex key={field} align="center" className="gap-density-md">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-4 flex-1" />
-        </Flex>
-      ))}
-    </Stack>
-    <Stack className="gap-density-md">
-      <Skeleton className="h-5 w-24" />
-      <Skeleton className="h-16 w-full" />
-      <Skeleton className="h-16 w-full" />
-    </Stack>
   </Stack>
 );
 
@@ -150,20 +129,7 @@ export const VirtualModelDetailsTab: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { virtualModelName } = useRequiredPathParams([ROUTE_PARAMS.virtualModelName]);
 
-  const { data: virtualModel, error } = useGetVirtualModel(workspace, virtualModelName);
+  const { data: virtualModel } = useGetVirtualModelSuspense(workspace, virtualModelName);
 
-  if (virtualModel) {
-    return <VirtualModelDetails virtualModel={virtualModel} />;
-  }
-
-  if (error) {
-    return (
-      <ErrorPanel
-        title={`Failed to load virtual model '${virtualModelName}'`}
-        errorMessage={getErrorMessage(error)}
-      />
-    );
-  }
-
-  return <DetailsSkeleton />;
+  return <VirtualModelDetails virtualModel={virtualModel} />;
 };

@@ -71,7 +71,10 @@ export const RecentJobsTable = () => {
   const dataViewState = useStudioDataViewState({
     defaultPageSize: 10,
   });
-  const { pageRows, totalCount, isLoading, error } = useRecentJobs(workspace, dataViewState);
+  const { pageRows, totalCount, isLoading, error, refetch } = useRecentJobs(
+    workspace,
+    dataViewState
+  );
 
   const handleRowClick = useCallback<RowClickHandler<HelixJobResponse>>(
     (row, _index, event) => openRow(event, getJobDetailRoute(row, workspace)),
@@ -92,7 +95,11 @@ export const RecentJobsTable = () => {
         DataViewPagination: { showWhileError: totalCount > 0 },
         DataViewTableContent: {
           renderErrorState: () => (
-            <ErrorPanel errorMessage={error ? getErrorMessage(error) : undefined} />
+            <ErrorPanel
+              error={error}
+              errorMessage={error ? getErrorMessage(error) : undefined}
+              onRetry={() => void refetch()}
+            />
           ),
           renderEmptyState: () => (
             <EntityEmptyState

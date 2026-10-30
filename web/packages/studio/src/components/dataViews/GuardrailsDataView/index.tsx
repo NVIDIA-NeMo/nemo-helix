@@ -51,7 +51,7 @@ export const GuardrailsDataView: FC<GuardrailsDataViewProps> = ({
     columnVisibility: { created_at: false },
   });
 
-  const { data, isFetching, error } = useGuardrailsListGuardrailConfigs(
+  const { data, isFetching, error, refetch } = useGuardrailsListGuardrailConfigs(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -209,9 +209,11 @@ export const GuardrailsDataView: FC<GuardrailsDataViewProps> = ({
             ),
           renderErrorState: () => (
             <ErrorPanel
+              error={error}
               errorMessage={getErrorMessage(
                 error ?? new Error('Failed to fetch guardrail configs')
               )}
+              onRetry={() => void refetch()}
             />
           ),
         },

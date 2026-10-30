@@ -7,6 +7,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import { ShapeCircle } from '@nemo/icons/icons';
+import { useJobsGetJobSuspense } from '@nemo/sdk/generated/platform/jobs';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import {
   Flex,
@@ -23,7 +24,7 @@ import { CustomizationOverview } from '@studio/components/CustomizationOverview'
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChat } from '@studio/components/ModelChat';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
-import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
+import { toCustomizationJob } from '@studio/hooks/useCustomizationJob';
 import { useCustomizationJobStatus } from '@studio/hooks/useCustomizationJobStatus';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -50,9 +51,10 @@ export const CustomizationJobDetailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { customizationJobName } = useRequiredPathParams([ROUTE_PARAMS.customizationJobName]);
 
-  const { job, backend } = useCustomizationJob(workspace, customizationJobName, {
-    refetchInterval: (query) => getJobRefetchInterval(query.state.data?.status),
+  const { data } = useJobsGetJobSuspense(workspace, customizationJobName, {
+    query: { refetchInterval: (query) => getJobRefetchInterval(query.state.data?.status) },
   });
+  const { job, backend } = toCustomizationJob(data);
 
   useBreadcrumbs({
     items: [

@@ -182,6 +182,7 @@ describe('GuardrailsDataView', () => {
     expect(
       await screen.findByTestId('error-panel', undefined, { timeout: XL_SELECTOR_TIMEOUT })
     ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
   describe('sorting', () => {

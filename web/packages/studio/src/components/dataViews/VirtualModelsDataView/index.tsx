@@ -121,7 +121,7 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
     workspace,
   ]);
 
-  const { data, isFetching, error } = useListVirtualModels(
+  const { data, isFetching, error, refetch } = useListVirtualModels(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -299,7 +299,9 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to fetch virtual models'))}
+                onRetry={() => void refetch()}
               />
             ),
           },

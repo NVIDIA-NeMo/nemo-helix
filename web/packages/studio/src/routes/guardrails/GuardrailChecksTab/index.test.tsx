@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { GUARDRAIL_CHECKS_ENTITY_TYPE } from '@studio/api/guardrail-checks/types';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
@@ -47,6 +48,7 @@ const routes = [
   {
     path: ROUTES.workspace.guardrailDetail,
     element: <GuardrailDetailRoute />,
+    errorElement: <RouteErrorPanel />,
     children: [
       { index: true, element: <Navigate to="config" replace /> },
       { path: ROUTES.workspace.guardrailConfig, element: <GuardrailConfigTab /> },
@@ -362,14 +364,15 @@ describe('GuardrailChecksTab', () => {
   });
 
   it('shows the config error instead of the checks UI when the config cannot be loaded', async () => {
+    // React and the router log the error the route throws to its errorElement.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderChecks('does-not-exist');
 
     expect(
-      await screen.findByText('Failed to load guardrail config.', undefined, {
-        timeout: XL_SELECTOR_TIMEOUT,
-      })
+      await screen.findByTestId('error-panel', undefined, { timeout: XL_SELECTOR_TIMEOUT })
     ).toBeInTheDocument();
     expect(screen.queryByText('Guardrail Test Cases')).not.toBeInTheDocument();
     expect(screen.queryByText('Failed to load guardrail tests.')).not.toBeInTheDocument();
+    consoleError.mockRestore();
   });
 });

@@ -215,6 +215,7 @@ describe('JobsDataView', () => {
     renderComponent();
 
     expect(await screen.findByTestId('error-panel')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
   describe('polling', () => {

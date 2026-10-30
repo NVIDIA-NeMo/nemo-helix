@@ -105,6 +105,9 @@ describe('MembersDataView', () => {
       expect(
         screen.queryByText("You don't have permission to view members")
       ).not.toBeInTheDocument();
+      expect(
+        await screen.findByRole('button', { name: 'Retry' }, { timeout: XL_SELECTOR_TIMEOUT })
+      ).toBeInTheDocument();
     });
   });
 });

@@ -38,6 +38,7 @@ export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewSt
     isPending,
     isPlaceholderData,
     error,
+    refetch,
   } = useJobsListJobs(
     workspace,
     {
@@ -110,5 +111,6 @@ export const useRecentJobs = (workspace: string, dataViewState: StudioDataViewSt
     // `isPending`, not `isLoading`: a first load paused offline isn't fetching but has no rows.
     isLoading: isPending || isChangingPage || isBeyondLastPage,
     error: isLoadFailed ? (error ?? lastError ?? null) : null,
+    refetch,
   };
 };

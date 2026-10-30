@@ -98,6 +98,7 @@ export const AgentEvaluationsDataView = () => {
     data: jobsData,
     isLoading,
     error,
+    refetch,
   } = useEvalsListAgentEvaluateJobs(
     workspace,
     {
@@ -204,7 +205,9 @@ export const AgentEvaluationsDataView = () => {
   if (error) {
     return (
       <ErrorPanel
-        errorMessage={getErrorMessage(error ?? new Error('Failed to fetch evaluations'))}
+        error={error}
+        errorMessage={getErrorMessage(error)}
+        onRetry={() => void refetch()}
       />
     );
   }

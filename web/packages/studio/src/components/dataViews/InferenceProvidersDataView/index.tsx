@@ -82,7 +82,7 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
     ? ((sortState.desc ? `-${sortState.id}` : sortState.id) as ModelProviderSort)
     : '-created_at';
 
-  const { data, isFetching, error } = useModelsListProviders(
+  const { data, isFetching, error, refetch } = useModelsListProviders(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -261,9 +261,11 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(
                   error ?? new Error('Failed to fetch inference providers')
                 )}
+                onRetry={() => void refetch()}
               />
             ),
           },

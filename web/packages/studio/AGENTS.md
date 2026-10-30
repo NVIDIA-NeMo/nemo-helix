@@ -57,3 +57,25 @@ Wrong — transparent dropdown:
 
 Exception: call sites that fill SelectContent with custom children containing their
 own background (e.g. a sticky Block with bg-surface) are fine as-is.
+
+## Loading a page's data and handling errors
+
+Every workspace route renders inside `SuspenseOutlet` (loading fallback) and has a
+`RouteErrorPanel` as its `errorElement`. The panel shows "Not Found" for a 404,
+"No Access" for a 403, and otherwise the error with Retry and Go Back.
+
+- **Load the resource the URL names with the generated `use<Name>Suspense` hook**
+  (e.g. `useJobsGetJobSuspense`), not `use<Name>`. Its `data` is always defined,
+  and a failed load or missing resource falls through to the route's error panel,
+  so the page needs no loading, not-found, or error branches of its own.
+- Suspense hooks share their query key with the non-suspense hook, so existing
+  invalidations and other components reading the same query keep working. They
+  don't accept `enabled`; a background refetch error keeps the loaded data.
+- Secondary data (a tab's table, logs, results) stays on the regular hook with an
+  inline state: `<ErrorPanel error={error} onRetry={refetch} />` or a DataView's
+  `renderErrorState`.
+- In tests, give the route `errorElement: <RouteErrorPanel />` to assert error
+  states, and mock the `...Suspense` hook (returning `{ data }`) when the test
+  mocks hooks instead of using MSW.
+- The query client doesn't retry 4xx responses (other than 408/429), so a
+  not-found page shows immediately.

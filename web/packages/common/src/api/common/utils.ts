@@ -65,6 +65,12 @@ export const isConflictError = (error: unknown): boolean => {
 export const isForbiddenError = (error: unknown): boolean =>
   error instanceof AxiosError && error.response?.status === 403;
 
+/** A 4xx from the platform API that retrying won't fix (excludes 408 timeouts and 429 rate limits). */
+export const isNonRetryableClientError = (error: unknown): boolean => {
+  const status = error instanceof AxiosError ? error.response?.status : undefined;
+  return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
+};
+
 export const isServerError = (error: unknown): boolean =>
   error instanceof AxiosError && (error.response?.status ?? 0) >= 500;
 

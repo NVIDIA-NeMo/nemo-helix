@@ -133,7 +133,7 @@ export const ExperimentRoute: FC = () => {
     [filter, favoritesTruncated]
   );
 
-  const { data, isLoading, error } = useListExperiments(
+  const { data, isLoading, error, refetch } = useListExperiments(
     workspace,
     { page, page_size: pageSize, filter: listFilter },
     { query: { placeholderData: keepPreviousData } }
@@ -219,9 +219,11 @@ export const ExperimentRoute: FC = () => {
                 }}
                 renderErrorState={() => (
                   <ErrorPanel
+                    error={error}
                     errorMessage={getErrorMessage(
                       error ?? new Error('Failed to load experiments.')
                     )}
+                    onRetry={() => void refetch()}
                   />
                 )}
               >

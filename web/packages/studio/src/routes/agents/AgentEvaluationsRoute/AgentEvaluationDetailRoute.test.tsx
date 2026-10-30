@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { suppressConsoleError } from '@nemo/testing/utils/suppress-console';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -31,17 +33,25 @@ const renderDetail = () =>
   });
 
 describe('AgentEvaluationDetailRoute', () => {
-  it('renders the not-found state when the job lookup returns null', async () => {
-    // Default MSW handler returns ``{ data: [] }`` for the list endpoint;
-    // there's no handler for the single-job GET, so MSW falls through to a
-    // 404 → fetchAgentEvalJob resolves to null → not-found UI.
+  it('defers a missing job to the route error panel', async () => {
+    // React and the router log the error the route panel catches.
+    suppressConsoleError(
+      'The above error occurred in',
+      'React Router caught the following error',
+      'undefined'
+    );
+    // There's no handler for the single-job GET, so MSW falls through to a 404.
     renderRoute(<AgentEvaluationDetailRoute />, {
       history: getAgentEvaluationDetailRoute(workspace, 'eval-missing'),
       routes: [
-        { path: ROUTES.workspace.agentEvaluationDetail, element: <AgentEvaluationDetailRoute /> },
+        {
+          path: ROUTES.workspace.agentEvaluationDetail,
+          element: <AgentEvaluationDetailRoute />,
+          errorElement: <RouteErrorPanel />,
+        },
       ],
     });
-    expect(await screen.findByText('Evaluation not found')).toBeInTheDocument();
+    expect(await screen.findByText('Not Found')).toBeInTheDocument();
   });
 
   describe('run outcome', () => {

@@ -5,7 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { logStatusForJob } from '@nemo/common/src/utils/logs';
 import {
-  useAnonymizerGetRunJob,
+  useAnonymizerGetRunJobSuspense,
   useAnonymizerGetRunJobLogs,
   useAnonymizerListRunJobResults,
 } from '@nemo/sdk/generated/anonymizer/anonymizer';
@@ -32,18 +32,14 @@ export const AnonymizerJobDetailRoute: FC | null = ANONYMIZER_ENABLED
       const navigate = useNavigate();
       const { anonymizerJobName } = useRequiredPathParams([ROUTE_PARAMS.anonymizerJobName]);
 
-      const {
-        data: job,
-        isLoading: isLoadingJob,
-        error,
-      } = useAnonymizerGetRunJob(workspace, anonymizerJobName, {
+      const { data: job } = useAnonymizerGetRunJobSuspense(workspace, anonymizerJobName, {
         query: {
           refetchInterval: (query) =>
             isJobTerminated(query.state.data?.status) ? false : ANONYMIZER_POLLING_INTERVAL_MS,
         },
       });
 
-      const isTerminal = isJobTerminated(job?.status);
+      const isTerminal = isJobTerminated(job.status);
 
       const {
         data: results,
@@ -77,55 +73,47 @@ export const AnonymizerJobDetailRoute: FC | null = ANONYMIZER_ENABLED
               className="p-0"
               slotHeading={anonymizerJobName}
               slotActions={
-                job ? (
-                  <AnonymizerJobActionsMenu
-                    job={job}
-                    onDeleted={() => navigate(getWorkspaceAnonymizerRoute(workspace))}
-                  />
-                ) : null
+                <AnonymizerJobActionsMenu
+                  job={job}
+                  onDeleted={() => navigate(getWorkspaceAnonymizerRoute(workspace))}
+                />
               }
             />
 
-            {error ? (
-              <Banner kind="inline" status="error">
-                Could not load this job.
-              </Banner>
-            ) : (
-              <Stack gap="density-2xl" className="w-full min-w-0">
-                <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
-                  {job && !isLoadingJob ? <JobSummaryPanel job={job} /> : null}
-                  <ResultsPanel
-                    workspace={workspace}
-                    jobName={anonymizerJobName}
-                    results={results?.data ?? []}
-                    isLoading={isLoadingResults}
-                    isTerminal={isTerminal}
-                    loadError={!!resultsError}
-                  />
-                </Grid>
-                {isTerminal && artifactUrl ? (
-                  <>
-                    <ResultsPreviewPanel workspace={workspace} artifactUrl={artifactUrl} />
-                    <FailedRecordsPanel workspace={workspace} artifactUrl={artifactUrl} />
-                  </>
-                ) : null}
+            <Stack gap="density-2xl" className="w-full min-w-0">
+              <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
+                <JobSummaryPanel job={job} />
+                <ResultsPanel
+                  workspace={workspace}
+                  jobName={anonymizerJobName}
+                  results={results?.data ?? []}
+                  isLoading={isLoadingResults}
+                  isTerminal={isTerminal}
+                  loadError={!!resultsError}
+                />
+              </Grid>
+              {isTerminal && artifactUrl ? (
+                <>
+                  <ResultsPreviewPanel workspace={workspace} artifactUrl={artifactUrl} />
+                  <FailedRecordsPanel workspace={workspace} artifactUrl={artifactUrl} />
+                </>
+              ) : null}
 
-                <Panel slotHeading="Logs" elevation="high" density="compact">
-                  {logsError ? (
-                    <Banner kind="inline" status="error">
-                      Could not load logs for this job.
-                    </Banner>
-                  ) : (
-                    <LogViewer
-                      logs={logs?.data ?? []}
-                      isLoading={isLoadingLogs}
-                      logStatus={logStatusForJob(job?.status)}
-                      downloadFilename={`anonymizer-${anonymizerJobName}-logs.txt`}
-                    />
-                  )}
-                </Panel>
-              </Stack>
-            )}
+              <Panel slotHeading="Logs" elevation="high" density="compact">
+                {logsError ? (
+                  <Banner kind="inline" status="error">
+                    Could not load logs for this job.
+                  </Banner>
+                ) : (
+                  <LogViewer
+                    logs={logs?.data ?? []}
+                    isLoading={isLoadingLogs}
+                    logStatus={logStatusForJob(job.status)}
+                    downloadFilename={`anonymizer-${anonymizerJobName}-logs.txt`}
+                  />
+                )}
+              </Panel>
+            </Stack>
           </Stack>
         </AccessibleTitle>
       );

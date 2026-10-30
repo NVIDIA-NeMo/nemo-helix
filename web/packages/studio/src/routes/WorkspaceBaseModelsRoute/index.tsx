@@ -384,7 +384,9 @@ export const WorkspaceBaseModelsRoute: FC = () => {
             }
             renderErrorState={() => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to load base models.'))}
+                onRetry={refetch}
               />
             )}
           >

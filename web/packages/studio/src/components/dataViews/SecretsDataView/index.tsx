@@ -53,7 +53,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   const [modalSecret, setModalSecret] = useState<HelixSecretResponse>();
   const [modalOpen, setModalOpen] = useState<ModalState>('none');
 
-  const { data, refetch, isFetching, error } = useSecretsListSecrets(
+  const { data, refetch, isLoading, error } = useSecretsListSecrets(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -181,7 +181,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
           DataViewRoot: {
             data: secretsWithId,
             totalCount: pagination?.total_results,
-            requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+            requestStatus: error ? 'error' : isLoading ? 'loading' : undefined,
           },
           DataViewTableContent: {
             renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
@@ -196,7 +196,9 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={getErrorMessage(error ?? new Error('Failed to fetch secrets'))}
+                onRetry={() => void refetch()}
               />
             ),
           },
