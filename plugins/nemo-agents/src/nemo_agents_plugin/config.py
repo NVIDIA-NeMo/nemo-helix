@@ -158,6 +158,14 @@ class AgentsConfig(NemoConfig):
             "deployments-plugin backend regardless of this setting."
         ),
     )
+    subprocess_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether new subprocess-mode deployments are allowed. Turn off to require a container mode, "
+            "for example on a cluster where agents shouldn't share the controller pod. Existing "
+            "subprocess deployments keep running."
+        ),
+    )
     deployments: DeploymentsRunnerConfig = Field(
         default_factory=DeploymentsRunnerConfig,
         description="Container-mode (docker/k8s/openshell) settings for the deployments-plugin runner.",
