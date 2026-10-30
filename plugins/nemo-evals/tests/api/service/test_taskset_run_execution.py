@@ -3,10 +3,11 @@
 
 """Submit checks the deployment can run the request and reads every task's images, then accepts the run.
 
-It starts no task Jobs (the controller does) and no image builds.
+It starts no task Jobs (the controller does) and no image builds, only the tasks' agent layers.
 """
 
 import asyncio
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -366,24 +367,60 @@ class _RecordingJobs:
         return None
 
 
-async def test_a_runs_agent_layers_are_requested_once_per_task(service, two_task_body, monkeypatch):
-    """What `runs submit` asks for before it submits: each task's layer for the run's agent, and nothing accepted."""
+def _with_layers(service) -> None:
+    service._config.runs.harbor = service._config.runs.harbor.model_copy(update={"agent_layers": True})
+
+
+async def test_submit_starts_each_tasks_agent_layer_and_freezes_the_wait(
+    service, two_task_body, run_store, monkeypatch
+):
+    """Each task's layer for the run's agent, once per task; the run's tasks wait for them until the plan says."""
     _RecordingJobs.created = []
     monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _RecordingJobs)
+    _with_layers(service)
     two_task_body["spec"]["target"] = {
         "kind": "harbor",
         "source": {"name": "codex"},
         "agent_kwargs": {"version": "0.162.1"},
     }
 
-    layers = await service.request_agent_layers(TasksetRunInput.model_validate(two_task_body), workspace="default")
+    outcome = await submit(service, two_task_body)
 
-    assert sorted(layer.task for layer in layers) == ["default/task-1", "default/task-2"]
-    assert len({layer.agent_key for layer in layers}) == 1
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert plan.agent_layers is not None
+    assert plan.agent_layers.wait_until == service._clock() + timedelta(
+        seconds=service._config.runs.harbor.agent_layer_wait_seconds
+    )
     assert len(_RecordingJobs.created) == 2
+    # The plan's own images stay the task's: a task runs on its layer only once the controller finds it ready.
+    assert not any(environment.agent_preinstalled for environment in plan.task_environments)
 
 
-async def test_an_agent_that_installs_nothing_gets_no_layers(service, request_body, monkeypatch):
+async def test_an_agent_that_installs_nothing_gets_no_layers(service, request_body, run_store, monkeypatch):
+    _RecordingJobs.created = []
     monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _RecordingJobs)
+    _with_layers(service)
 
-    assert await service.request_agent_layers(TasksetRunInput.model_validate(request_body), workspace="default") == []
+    outcome = await submit(service, request_body)
+
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert plan.agent_layers is None and _RecordingJobs.created == []
+
+
+async def test_a_layer_that_cant_be_started_never_fails_the_submit(service, request_body, run_store, monkeypatch):
+    class _DownJobs(_RecordingJobs):
+        async def create(self, request) -> None:
+            raise RuntimeError("jobs down")
+
+    monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _DownJobs)
+    _with_layers(service)
+    request_body["spec"]["target"] = {
+        "kind": "harbor",
+        "source": {"name": "codex"},
+        "agent_kwargs": {"version": "0.162.1"},
+    }
+
+    outcome = await submit(service, request_body)
+
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    assert plan.agent_layers is None

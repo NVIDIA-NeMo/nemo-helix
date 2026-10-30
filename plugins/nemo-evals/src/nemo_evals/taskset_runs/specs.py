@@ -33,6 +33,17 @@ class RunIntakePublication(BaseModel):
     )
 
 
+class PlannedAgentLayers(BaseModel):
+    """The agent layers a run's tasks wait for: which install, and until when."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    key: str = Field(min_length=1, description="The run's agent install key (`AgentInstall.layer_key`).")
+    wait_until: datetime = Field(
+        description="When a task stops waiting for a layer that isn't ready and runs on its task_environments image."
+    )
+
+
 class TasksetRunPlan(BaseModel):
     """Freeze what submit resolved, so every later step runs exactly what was accepted.
 
@@ -97,6 +108,14 @@ class TasksetRunPlan(BaseModel):
     )
     intake: RunIntakePublication | None = Field(
         default=None, description="Publish the run's trials to this Intake Experiment; None publishes nowhere."
+    )
+    agent_layers: PlannedAgentLayers | None = Field(
+        default=None,
+        description=(
+            "The agent layers submit started for the run's agent: each task's image with the agent installed. Each "
+            "task waits in image_preparing for its layer, then runs on it, or on its task_environments image when the "
+            "layer fails or isn't ready by wait_until. None: the run's agent isn't layered."
+        ),
     )
 
     @model_validator(mode="after")

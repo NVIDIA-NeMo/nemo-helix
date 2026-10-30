@@ -921,6 +921,20 @@ To remove them:
 docker image prune --all --filter label=nemo.agent-layer
 ```
 
+### On Kubernetes
+
+A Kubernetes run reuses installs the same way, through Builder:
+
+1. Submit starts one agent layer for each task in the run: the task's image with the run's agent installed. Tasks whose environments hold the same files share one Builder build, so each install runs once per environment.
+2. Each task waits for its own layer, then runs on it. Its trials' setup only confirms the install, and the run opens no setup egress for them.
+3. If a layer fails, or isn't ready within `evals.runs.harbor.agent_layer_wait_seconds` (30 minutes by default), the task runs on its own image and its trials install the agent during setup.
+
+A layer expires after the `timeout_seconds` of the run that started it. A later run then builds a new one, from a Builder build no older than its own `timeout_seconds`.
+
+To turn Kubernetes layers off, set `evals.runs.harbor.agent_layers: false`.
+
+Builder pushes layers to repositories named `<repository_prefix>/<workspace>/harbor-agent-<key>`, and deletes none of them. To reclaim the space, add a lifecycle rule to your registry for repositories that match `*/harbor-agent-*`. Keep each image for at least twice `evals.runs.max_timeout_seconds`, plus `evals.runs.queue_timeout_seconds`, plus `evals.runs.max_timeout_seconds` again. With the defaults, that's 11 days. A rule that deletes a layer sooner can remove an image that a queued or running task still needs.
+
 ## Retries
 
 - **`max_retries`** — maximum extra attempts per trial during the current Harbor run; defaults to `0`.

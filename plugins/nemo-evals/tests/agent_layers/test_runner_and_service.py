@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
@@ -15,14 +16,14 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
-from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, layer_entity_name
+from nemo_evals.agent_layers.models import AgentLayer, AgentLayerEntity, AgentLayerRequest, layer_entity_name
 from nemo_evals.agent_layers.runner import (
     AgentLayerBuildSpec,
     layer_builder_name,
     relative_link,
     run_agent_layer_build,
 )
-from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
+from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key, newest_layer
 from nemo_evals.entities import TaskEntity
 from nemo_evals.image_builds.service import BuildJob
 from nemo_evals.jobs.agent_layer_build import INSTALLER_ARCHIVE, agent_layer_build_job_request, is_job_for
@@ -32,6 +33,13 @@ from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 _CODEX = AgentLayerRequest(name="codex", kwargs={"version": "0.162.1"})
+_TTL = timedelta(hours=1)
+
+
+async def _request(service: AgentLayerService, name: str, digest: str, agent: AgentLayerRequest = _CODEX, **at: Any):
+    """``service.request_layer`` for a run with a one-hour timeout, now unless ``now`` says otherwise."""
+    now = at.get("now", datetime.now(timezone.utc))
+    return await service.request_layer("default", name, digest, agent, ttl=_TTL, now=now)
 
 
 class _Jobs:
@@ -49,8 +57,8 @@ async def _allow(workspace: str) -> None:
     pass
 
 
-def _ready(name: str) -> ContainerImage:
-    return ContainerImage(
+def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
+    image = ContainerImage(
         name=name,
         workspace="default",
         status="ready",
@@ -65,6 +73,8 @@ def _ready(name: str) -> ContainerImage:
             request_digest="sha256:" + "a" * 64,
         ),
     )
+    image._created_at = created_at or datetime.now(timezone.utc)
+    return image
 
 
 class _Builder:
@@ -164,7 +174,7 @@ _ENV = {
 async def _requested(entity_store, store_task, name: str = "sort-task") -> tuple[AgentLayerBuildSpec, _Jobs]:
     jobs = _Jobs()
     digest = await store_task(name, config={"agent": {"user": "agent"}})
-    layer = await AgentLayerService(entity_store, jobs, _allow).request_layer("default", name, digest, _CODEX)
+    layer = await _request(AgentLayerService(entity_store, jobs, _allow), name, digest)
     assert layer is not None
     spec = AgentLayerBuildSpec(
         workspace="default", task=name, revision_digest=digest, agent_key=layer.agent_key, attempt=1
@@ -244,33 +254,85 @@ async def test_a_request_starts_the_layers_job_once(entity_store, store_task) ->
     digest = await store_task(config={})
     service = AgentLayerService(entity_store, jobs, _allow)
 
-    first = await service.request_layer("default", "sort-task", digest, _CODEX)
-    again = await service.request_layer("default", "sort-task", digest, _CODEX)
+    first = await _request(service, "sort-task", digest)
+    again = await _request(service, "sort-task", digest)
 
     assert first is not None and again is not None and first.id == again.id == "1"
     assert [request.name for request in jobs.created] == [first.job, first.job]  # the second confirms the same Job
     assert first.agent_key == agent_layer_key(_CODEX)
 
 
+async def _make_ready(entity_store, digest: str, attempt: int = 1) -> AgentLayerEntity:
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    stored = await entity_store.get(
+        AgentLayerEntity,
+        name=layer_entity_name(digest, agent_layer_key(_CODEX), attempt),
+        workspace="default",
+        parent=head.id,
+    )
+    stored.status = "ready"
+    return await entity_store.update(stored)
+
+
 async def test_a_ready_layer_is_returned_without_a_job(entity_store, store_task) -> None:
     jobs = _Jobs()
     digest = await store_task(config={})
     service = AgentLayerService(entity_store, jobs, _allow)
-    layer = await service.request_layer("default", "sort-task", digest, _CODEX)
-    assert layer is not None
-    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
-    stored = await entity_store.get(
-        AgentLayerEntity, name=layer_entity_name(digest, layer.agent_key, 1), workspace="default", parent=head.id
-    )
-    stored.status = "ready"
-    await entity_store.update(stored)
+    await _request(service, "sort-task", digest)
+    await _make_ready(entity_store, digest)
     jobs.created.clear()
 
-    ready = await service.ready_layer("default", "sort-task", digest, layer.agent_key)
-    again = await service.request_layer("default", "sort-task", digest, _CODEX)
+    again = await _request(service, "sort-task", digest)
+    newest = await newest_layer(entity_store, "default", "sort-task", digest, agent_layer_key(_CODEX))
 
-    assert ready is not None and again is not None and again.status == "ready"
+    assert again is not None and again.status == "ready" and again.id == "1"
+    assert newest is not None and newest.status == "ready" and newest.attempt == 1
     assert jobs.created == []
+
+
+async def test_a_layer_expires_after_its_runs_timeout_and_the_next_run_starts_another(entity_store, store_task) -> None:
+    jobs = _Jobs()
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, jobs, _allow)
+    start = datetime(2026, 10, 30, 12, tzinfo=timezone.utc)
+    first = await _request(service, "sort-task", digest, now=start)
+    await _make_ready(entity_store, digest)
+
+    assert first is not None and first.expires_at == start + _TTL
+    before = await _request(service, "sort-task", digest, now=start + _TTL - timedelta(seconds=1))
+    after = await _request(service, "sort-task", digest, now=start + _TTL)
+
+    assert before is not None and before.id == "1"
+    assert after is not None and after.id == "2" and after.status == "pending"
+    second = await newest_layer(entity_store, "default", "sort-task", digest, agent_layer_key(_CODEX))
+    # The new attempt reuses no Builder build older than one TTL.
+    assert second is not None and second.built_after == start
+
+
+async def test_a_builder_build_older_than_the_layers_cutoff_is_rebuilt(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
+    spec, _ = await _requested(entity_store, store_task)
+    builder, files = _Builder(), _Files()
+    await _run(entity_store, spec, builder, files, tmp_path)
+    ((name, _, _),) = builder.submits
+    builder.rows[f"{name}-1"] = _ready(f"{name}-1", created_at=datetime.now(timezone.utc) - 2 * _TTL)
+    await _make_ready(entity_store, spec.revision_digest)
+    later, _ = await _requested_again(entity_store, spec, now=datetime.now(timezone.utc) + _TTL)
+
+    layer = await _run(entity_store, later, builder, files, tmp_path)
+
+    assert layer.status == "ready" and layer.image is not None and layer.image.builder_image == f"{name}-2"
+    assert [submitted for submitted, _, _ in builder.submits] == [name, name]
+
+
+async def _requested_again(
+    entity_store, spec: AgentLayerBuildSpec, *, now: datetime
+) -> tuple[AgentLayerBuildSpec, AgentLayer | None]:
+    layer = await _request(AgentLayerService(entity_store, _Jobs(), _allow), spec.task, spec.revision_digest, now=now)
+    assert layer is not None
+    return spec.model_copy(update={"attempt": int(layer.id)}), layer
 
 
 async def test_an_agent_whose_setup_isnt_an_install_is_refused(entity_store, store_task) -> None:
@@ -278,7 +340,7 @@ async def test_an_agent_whose_setup_isnt_an_install_is_refused(entity_store, sto
     service = AgentLayerService(entity_store, _Jobs(), _allow)
 
     with pytest.raises(AgentNotLayerableError):
-        await service.request_layer("default", "sort-task", digest, AgentLayerRequest(name="oracle"))
+        await _request(service, "sort-task", digest, AgentLayerRequest(name="oracle"))
 
 
 def test_the_job_fetches_the_installer_onto_storage_its_build_step_reads() -> None:

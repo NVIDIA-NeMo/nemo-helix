@@ -47,7 +47,6 @@ from nemo_evals.runs_cli import (
     selection_suffix,
     submit_run,
     task_state,
-    wait_for_agent_layers,
 )
 from nemo_evals.sdk.resources import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
@@ -130,7 +129,6 @@ def submitting(monkeypatch):
     seen.refuse = False
     seen.phase = "accepted"
     monkeypatch.setattr("nemo_evals.runs_cli.submit_run", submit)
-    monkeypatch.setattr("nemo_evals.runs_cli.wait_for_agent_layers", lambda *args, **kwargs: [])
     client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "ac9")
 
     def invoke(*args: str):
@@ -552,73 +550,6 @@ def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(
     with pytest.raises(RuntimeError, match="the run may still be accepted.*--idempotency-key k-123$"):
         submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
     assert timeouts == [SUBMIT_TIMEOUT_SECONDS]  # sent once, with the long timeout
-
-
-def _layer(status: str, *, error: str | None = None) -> dict:
-    return {
-        "id": "1",
-        "task": "default/sort",
-        "revision": "e" * 64,
-        "agent_key": "k",
-        "status": status,
-        "job": "agent-layer-build-x-1",
-        "error": error,
-    }
-
-
-def _layers_client(answers: list[httpx.Response], requests: list[httpx.Request]) -> NemoClient:
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return answers.pop(0)
-
-    return NemoClient(base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
-
-
-def test_submit_requests_the_runs_agent_layers_and_follows_each_until_ready() -> None:
-    requests: list[httpx.Request] = []
-    client = _layers_client(
-        [
-            httpx.Response(202, json=[_layer("running")]),
-            httpx.Response(200, json=[_layer("running")]),
-            httpx.Response(200, json=[_layer("ready")]),
-        ],
-        requests,
-    )
-    lines: list[str] = []
-
-    layers = wait_for_agent_layers(
-        client, {"spec": {}}, workspace="default", poll_seconds=0, echo=lines.append, sleep=lambda _: None
-    )
-
-    assert [layer.status for layer in layers] == ["ready"]
-    assert requests[0].method == "POST" and requests[0].url.path.endswith("/agent-evaluate/runs/agent-layers")
-    assert json.loads(requests[0].content) == {"spec": {}}
-    assert requests[1].url.path == f"/apis/evals/v2/workspaces/default/tasks/sort/revisions/{'e' * 64}/agent-layers"
-    assert lines[-1] == "Agent layers for 1 tasks: 1 ready, 0 building, 0 failed."
-
-
-def test_a_failed_layer_only_warns() -> None:
-    client = _layers_client([httpx.Response(202, json=[_layer("failed", error="compose_unsupported: no")])], [])
-    lines: list[str] = []
-
-    layers = wait_for_agent_layers(client, {}, workspace="default", poll_seconds=0, echo=lines.append)
-
-    assert [layer.status for layer in layers] == ["failed"]
-    assert any("compose_unsupported" in line and "install the agent" in line for line in lines)
-
-
-@pytest.mark.parametrize(
-    "answer",
-    [httpx.Response(403, json={"detail": "may not build"}), httpx.Response(202, json=[])],
-    ids=["refused", "no-layers"],
-)
-def test_no_layers_leaves_the_submit_to_go_ahead(answer: httpx.Response) -> None:
-    lines: list[str] = []
-
-    assert (
-        wait_for_agent_layers(_layers_client([answer], []), {}, workspace="default", poll_seconds=0, echo=lines.append)
-        == []
-    )
 
 
 @pytest.fixture

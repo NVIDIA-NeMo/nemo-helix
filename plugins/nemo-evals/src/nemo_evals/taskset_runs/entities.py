@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar, Self
 
+from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityBase
@@ -156,7 +157,7 @@ class MemberPhase(StrEnum):
     outcomes so controllers can track each task without changing the run's plan.
     """
 
-    IMAGE_PREPARING = "image_preparing"  # The task's environment image is being located or built.
+    IMAGE_PREPARING = "image_preparing"  # Waiting for the task's agent layer; holds no slot.
     IMAGE_READY = "image_ready"  # The image exists; the task Job is not registered yet.
     REGISTERED = "registered"  # The task Job is registered with the Jobs Service (see task_job).
     SUCCEEDED = "succeeded"  # The task Job finished and its outputs were collected.
@@ -203,6 +204,14 @@ class TasksetRunMemberEntity(EntityBase):
         ),
     )
     error: str | None = Field(default=None, description="Why this task failed or expired; None otherwise.")
+    agent_layer: PreparedImage | None = Field(
+        default=None,
+        description=(
+            "The task's agent layer, its agent image with the run's agent installed, which its Job runs on instead of "
+            "the plan's agent image. Written when the member leaves image_preparing and never changed after; None: "
+            "the task runs on the plan's image and installs the agent in setup."
+        ),
+    )
     bundle_ref: str | None = Field(
         default=None, description="The task's agent-eval-results bundle; set when the member succeeds."
     )
@@ -268,10 +277,14 @@ def assert_run_transition(old: TasksetRunPhase, new: TasksetRunPhase) -> None:
         raise ValueError(f"illegal taskset run transition: {old} -> {new}")
 
 
-# Members are created in image_ready (their images are in the plan), so image_preparing is unused. Settled phases
-# have no way out. Same-phase writes are allowed: image_ready → image_ready (the create intent, create_sent_at) and
-# registered → registered (job_status).
+# A run with agent layers creates its members in image_preparing; they leave it for the queue (image_ready) once
+# their layer is ready, failed or overdue, or settle when the run stops first. Other runs create them in image_ready.
+# Settled phases have no way out. Same-phase writes are allowed: image_ready → image_ready (the create intent,
+# create_sent_at) and registered → registered (job_status).
 _ALLOWED_MEMBER_TRANSITIONS = {
+    MemberPhase.IMAGE_PREPARING: frozenset(
+        {MemberPhase.IMAGE_READY, MemberPhase.FAILED, MemberPhase.CANCELLED, MemberPhase.EXPIRED}
+    ),
     MemberPhase.IMAGE_READY: frozenset(
         {
             MemberPhase.IMAGE_READY,

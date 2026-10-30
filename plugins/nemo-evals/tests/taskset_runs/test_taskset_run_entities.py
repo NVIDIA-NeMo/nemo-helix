@@ -147,11 +147,14 @@ def test_record_required_fields(entity_type) -> None:
 
 @pytest.mark.parametrize(("old", "new"), list(product(MemberPhase, repeat=2)))
 def test_member_transition_matrix(old: MemberPhase, new: MemberPhase) -> None:
-    """A member leaves the queue once and a settled member never changes; same-phase writes stay open."""
+    """A member leaves its layer wait and the queue once, and a settled member never changes; same-phase writes of a
+    queued or registered member stay open."""
     settled = {"succeeded", "failed", "cancelled", "expired"}
-    allowed = {("image_ready", p) for p in {"image_ready", "registered", *(settled - {"succeeded"})}} | {
-        ("registered", p) for p in {"registered", *settled}
-    }
+    allowed = (
+        {("image_preparing", p) for p in {"image_ready", *(settled - {"succeeded"})}}
+        | {("image_ready", p) for p in {"image_ready", "registered", *(settled - {"succeeded"})}}
+        | {("registered", p) for p in {"registered", *settled}}
+    )
     if (old.value, new.value) in allowed:
         assert assert_member_transition(old, new) is None
     else:
@@ -186,6 +189,7 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "dispatcher_profile",
         "task_environments",
         "intake",
+        "agent_layers",
     }
     with pytest.raises(ValidationError, match="frozen"):
         setattr(plan, "run_id", "changed")  # setattr: ty already rejects a direct write to a frozen field
