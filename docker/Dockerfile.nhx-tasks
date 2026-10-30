@@ -91,8 +91,7 @@ ADD --chmod=0755 --checksum=sha256:86f268d81b898f3e144c5ecff2ad2fda2c5802e042d61
     /opt/nemo/codex/codex-x86_64-unknown-linux-musl.tar.gz
 ENV TIKTOKEN_CACHE_DIR=/app/tiktoken-cache
 ENV VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app/.venv/lib/python${PY_VERSION}/site-packages"
+    PATH="/app/.venv/bin:$PATH"
 USER 0
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \

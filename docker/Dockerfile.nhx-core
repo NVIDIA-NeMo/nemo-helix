@@ -79,8 +79,7 @@ COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /u
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
 COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-core/ /usr/share/nemo-helix/source-distributions/nhx-core/
 ENV VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app/.venv/lib/python${PY_VERSION}/site-packages"
+    PATH="/app/.venv/bin:$PATH"
 COPY --chown=1000:1000 --from=nhx-jobs-launcher /artifacts/jobs-launcher /tools/jobs-launcher
 ENTRYPOINT ["nemo", "services", "run"]
 EXPOSE 8080
