@@ -2754,6 +2754,7 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - opensandbox-sdk-compatibility
       - agents-mini-swe-agent-tests
       - agents-nooa-tests
       - agents-claude-tests
