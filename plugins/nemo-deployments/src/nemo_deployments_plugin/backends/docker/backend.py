@@ -329,8 +329,14 @@ class DockerDeploymentBackend(DeploymentBackend):
         docker_cfg = parse_docker_backend_config(backend_config)
         if config.backend_config.docker is not None:
             docker_cfg = config.backend_config.docker
-        if docker_cfg.network is None and self._executor_config.network is not None:
-            docker_cfg = docker_cfg.model_copy(update={"network": self._executor_config.network})
+        # Validate untrusted primary-network input before any init/primary/sidecar
+        # container is created. Do not apply this to the internally generated
+        # container:<primary> namespace join used by sidecars below.
+        try:
+            network = self._executor_config.resolve_network(docker_cfg.network)
+        except ValueError as exc:
+            return BackendStatusUpdate(status="FAILED", status_message=str(exc))
+        docker_cfg = docker_cfg.model_copy(update={"network": network})
 
         dep_key = deployment_key(workspace, name)
         gpu_pool = self._gpu_pool

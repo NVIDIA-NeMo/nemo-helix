@@ -768,7 +768,12 @@ async def test_create_deployment_backend_config_network_overrides_executor_defau
     ):
         backend = DockerDeploymentBackend(
             mock_client,
-            {"docker_timeout": 60, "pull_images": False, "network": "executor-network"},
+            {
+                "docker_timeout": 60,
+                "pull_images": False,
+                "network": "executor-network",
+                "allowed_networks": ["deployment-network"],
+            },
         )
         backend._client = mock_docker_client
 
