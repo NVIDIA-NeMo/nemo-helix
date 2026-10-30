@@ -73,7 +73,7 @@ def workspace_cluster(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tupl
     dockerfile = build_dir / "Dockerfile"
     dockerfile.write_text(
         "FROM python:3.13.15-slim-bookworm\n"
-        "COPY --from=ghcr.io/astral-sh/uv:0.11.33 /uv /usr/local/bin/uv\n"
+        "COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv\n"
         "RUN uv pip install --system pydantic==2.12.0 PyYAML==6.0.2\n"
         "COPY src/sandboxed_gym /opt/src/sandboxed_gym\n"
         "COPY --from=rl-source sandbox_config.py /opt/src/grpo_sandbox_config.py\n"
