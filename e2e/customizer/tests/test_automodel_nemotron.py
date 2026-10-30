@@ -47,7 +47,7 @@ def test_automodel_nemotron_lightning_lora_uplift(
     spec = AutomodelJobInput.model_validate(
         {
             "model": f"{ws}/{base_entity}",
-            "dataset": {"training": f"{ws}/{squad_fileset}", "validation": f"{ws}/{squad_fileset}"},
+            "dataset": {"training": f"{ws}/{squad_fileset}"},
             "training": {
                 "training_type": "sft",
                 "finetuning_type": "lora",

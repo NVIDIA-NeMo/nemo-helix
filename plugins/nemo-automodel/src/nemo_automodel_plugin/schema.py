@@ -86,9 +86,13 @@ class LoRAParams(AutomodelSchema):
 
 class DatasetSpec(AutomodelSchema):
     training: str = Field(
-        description="Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory."
+        description=(
+            "Dataset fileset as 'name', 'workspace/name', or either form with a '#path/' directory. "
+            "Holds the training files and, optionally, the validation files, told apart by name "
+            "(train.jsonl, validation.jsonl). Without validation files, schedule.validation_split "
+            "of the training rows is held out for validation."
+        )
     )
-    validation: str | None = None
     prompt_template: str | None = None
     shuffle: bool = Field(
         default=True,
@@ -509,6 +513,18 @@ class AutomodelJobOutput(AutomodelSchema):
         default=None,
         description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_fields(cls, data: object) -> object:
+        """Drop ``dataset.validation`` from jobs stored before it was removed, so they still render.
+
+        :class:`AutomodelJobInput` still rejects it: the dataset fileset holds the validation files.
+        """
+        if isinstance(data, dict) and isinstance(data.get("dataset"), dict) and "validation" in data["dataset"]:
+            dataset = {key: value for key, value in data["dataset"].items() if key != "validation"}
+            return {**data, "dataset": dataset}
+        return data
 
     def validate_for_training(self) -> None:
         """MoE / parallelism constraints (ported from legacy CustomizationJobOutput)."""

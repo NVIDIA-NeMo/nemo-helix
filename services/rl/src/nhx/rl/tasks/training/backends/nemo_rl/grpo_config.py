@@ -40,7 +40,13 @@ from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     resolve_job_storage_pvc_claim,
 )
 from nhx.rl.tasks.training.chat_templates import resolve_chat_template
-from nhx.rl.tasks.training.datasets.preparation import compute_val_check_interval, prepare_dataset
+from nhx.rl.tasks.training.datasets.preparation import (
+    VAL_FILE,
+    DatasetFormatError,
+    compute_val_check_interval,
+    discover_dataset_files,
+    prepare_dataset,
+)
 from nhx.rl.tasks.training.datasets.validation import DatasetValidator
 
 logger = logging.getLogger(__name__)
@@ -252,8 +258,16 @@ def _resolve_gym_paths(
     """
     gym = customizer_config.gym
     if gym and gym.sandboxed and gym.sandbox_dataset_path:
-        pvc_train = Path(customizer_config.dataset.path) / "training.jsonl"
-        pvc_val = Path(customizer_config.dataset.path) / "validation.jsonl"
+        # Read in place, so the files are picked by name and not merged.
+        dataset_path = Path(customizer_config.dataset.path)
+        train_files, val_files = discover_dataset_files(dataset_path)
+        if len(train_files) > 1 or len(val_files) > 1:
+            raise DatasetFormatError(
+                "A sandboxed GRPO dataset holds one training file and at most one validation file; found "
+                f"{[f.name for f in train_files]} and {[f.name for f in val_files]} in {dataset_path}."
+            )
+        pvc_train = train_files[0]
+        pvc_val = val_files[0] if val_files else dataset_path / VAL_FILE
         validator = DatasetValidator(training_type=customizer_config.training.training_type)
         validator.validate_dataset(str(pvc_train))
         if pvc_val.is_file():
@@ -452,14 +466,14 @@ def compile_grpo_config(
     )
     # NeMo-RL asserts a validation dataset exists whenever any of val_period /
     # val_at_start / val_at_end is set. A Gym dataset fileset only has to carry
-    # training.jsonl, so turn validation off entirely rather than assert in setup().
+    # a training file, so turn validation off entirely rather than assert in setup().
     has_validation = bool(val_samples)
     val_period = val_check_interval if has_validation else 0
     val_at_start = customizer_config.schedule.val_at_start and has_validation
     val_at_end = customizer_config.schedule.val_at_end and has_validation
     if not has_validation and (customizer_config.schedule.val_at_end or customizer_config.schedule.val_at_start):
         logger.warning(
-            "No validation.jsonl in the Gym dataset; disabling validation and best-checkpoint selection for this run."
+            "No validation file in the Gym dataset; disabling validation and best-checkpoint selection for this run."
         )
 
     cfg["grpo"] = {

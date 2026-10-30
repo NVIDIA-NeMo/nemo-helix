@@ -5,7 +5,7 @@ import json
 
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
-from nemo_automodel_plugin.schema import AutomodelJobInput, DeploymentParams, ExportSpec
+from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, DeploymentParams, ExportSpec
 from pydantic import ValidationError
 
 
@@ -477,3 +477,32 @@ def test_pipeline_schedule_rejects_an_unknown_rounding_mode() -> None:
                 "parallelism": {"pipeline": {"round_virtual_stages_to_pp_multiple": "sideways"}},
             }
         )
+
+
+def test_a_separate_validation_fileset_is_rejected() -> None:
+    """Validation files live in the dataset fileset; there is no second reference to set."""
+    with pytest.raises(ValidationError, match="validation"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "llama",
+                "dataset": {"training": "default/train", "validation": "default/val"},
+                "training": {"training_type": "sft"},
+            },
+        )
+
+
+@pytest.mark.parametrize("validation", [None, "default/val"])
+def test_a_stored_job_with_the_removed_validation_field_still_renders(validation: str | None) -> None:
+    """Jobs stored before ``dataset.validation`` was removed carry it, as null or a reference."""
+    stored = {
+        "model": "default/base",
+        "dataset": {"training": "default/train", "validation": validation},
+        "training": {"training_type": "sft"},
+        "schedule": {"epochs": 1},
+        "batch": {"global_batch_size": 4, "micro_batch_size": 1},
+        "optimizer": {},
+        "parallelism": {},
+        "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+    }
+
+    assert "validation" not in AutomodelJobOutput.model_validate(stored).dataset.model_dump()

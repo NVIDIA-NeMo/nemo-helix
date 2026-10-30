@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -762,6 +763,37 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
+
+
+def test_resolve_target_routes_platform_fabric_model_through_job_auth_proxy(tmp_path: Path) -> None:
+    platform_url = "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    config = {
+        "metadata": {"name": "a"},
+        "harness": {"adapter_id": "nvidia.fabric.codex"},
+        "models": {
+            "default": {
+                "provider": "openai",
+                "model": "test",
+                "base_url": platform_url,
+                "api_key_env": "NEMO_AGENTS_IGW_API_KEY",
+            }
+        },
+        "environment": {"env": {"NEMO_AGENTS_IGW_API_KEY": "not-used"}},
+    }
+    fabric_target = FabricRunnerTarget(source=FabricConfigSource(config=config))
+
+    target, _, _ = AgentEvalJob._resolve_target(
+        fabric_target,
+        _job_context(tmp_path),
+        fabric_gateway_origin="http://127.0.0.1:9019",
+    )
+
+    assert isinstance(target, FabricAgentRuntime)
+    assert target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert target._config["environment"]["env"]["NEMO_AGENTS_IGW_API_KEY"] == "not-used"
+    assert config["models"]["default"]["base_url"] == platform_url
 
 
 def test_resolve_target_builds_harbor_runtime_from_runner_target(
@@ -2393,6 +2425,76 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
         assert getattr(fake.received_target, "name", None) == target.model.name
     else:
         assert getattr(fake.received_target, "name", None) == target.agent.name
+
+
+def test_only_fabric_targets_expose_a_fabric_config() -> None:
+    fabric_config = {"harness": {"adapter_id": "nvidia.fabric.codex"}}
+    fabric = FabricRunnerTarget(source=FabricConfigSource(config=fabric_config))
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    others = [
+        ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+        AgentTarget(agent=_agent()),
+        HarborRunnerTarget(),
+    ]
+
+    assert fabric.fabric_config == fabric_config
+    assert [target.fabric_config for target in others] == [None, None, None]
+
+
+def test_non_fabric_job_starts_no_auth_proxy(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch("nemo_evals.jobs.agent_evaluate.platform_auth_proxy")
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+    )
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity()
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_not_called()
+
+
+def test_sync_fabric_job_uses_auth_proxy_for_platform_model(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.platform_auth_proxy",
+        return_value=nullcontext("http://127.0.0.1:9019"),
+    )
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "a"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+                "models": {
+                    "default": {
+                        "provider": "openai",
+                        "model": "test",
+                        "base_url": "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1",
+                    }
+                },
+            }
+        )
+    )
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_called_once_with()
+    assert isinstance(fake.received_target, FabricAgentRuntime)
+    assert fake.received_target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
 
 
 def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: MockerFixture) -> None:

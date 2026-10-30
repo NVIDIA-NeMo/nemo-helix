@@ -29,7 +29,7 @@ Discriminated by `training.type`: `"dpo"` or `"grpo"`. **`training.type` is requ
 ```
 
 - `model` is a **string** ref to a registered model entity (`"name"` or `"workspace/name"`) — not an object (unsloth) and not the HF id.
-- `dataset` is a **single string** ref to a preference fileset containing `training.jsonl` + `validation.jsonl` (see `references/dataset-formats.md` § NeMo-RL). There is no separate validation ref.
+- `dataset` is a **single string** ref to a preference fileset containing a training file and, optionally, a validation file (such as `train.jsonl` + `validation.jsonl`); without a validation file, 10% of the training rows are held out (see `references/dataset-formats.md` § NeMo-RL). There is no separate validation ref.
 - `output.name` is the full-weight model entity the job registers. Output type is always `model` (no adapter).
 
 ## GRPO job JSON layout (NeMo Gym)
@@ -54,7 +54,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 ```
 
 - `environment` is **required** for GRPO — a string ref to a FileSet with `purpose=environment` carrying a valid `nemo-environment.yaml`, in any of the three formats.
-- `dataset` is Gym JSONL (`training.jsonl` required, `validation.jsonl` optional) — rollout rows, **not** DPO preference triples and **not** `messages[]` at the top level.
+- `dataset` is Gym JSONL (a training file such as `training.jsonl` required, a validation file such as `validation.jsonl` optional; named like `train*.jsonl` and `val*.jsonl` or `dev*.jsonl`, or placed directly in `train/` (or `training/`) and `val/` (or `validation/`, `dev/`)) — rollout rows, **not** DPO preference triples and **not** `messages[]` at the top level.
 - `sandboxed` is **not** a job field: it is platform config (`NHX_RL_SANDBOXED_GYM_DEFAULT`, default `true`), and so are the two settings submit checks for it (`rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**).
 
 ## Field reference — shared training knobs
@@ -73,7 +73,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 | `epochs` | `1` | Passes over the dataset. |
 | `max_steps` | `null` | Global step cap. Caps the run at `min(max_steps, epochs × steps_per_epoch)`, so combined with `epochs` it stops a run mid-epoch. |
 | `val_check_interval` | `null` | Float ≤ 1.0 = fraction of epoch; > 1.0 = step count. |
-| `val_at_end` | `true` | Run a final validation pass after the last step. Keep enabled: it makes the final checkpoint carry validation metrics so best-checkpoint selection (`metric_name`/`keep_top_k`) works — otherwise NeMo-RL warns and falls back to the latest checkpoint. Set `false` only to skip the extra eval. **GRPO:** ignored when the dataset ships no `validation.jsonl` — the compiler disables validation rather than fail in `setup()`. |
+| `val_at_end` | `true` | Run a final validation pass after the last step. Keep enabled: it makes the final checkpoint carry validation metrics so best-checkpoint selection (`metric_name`/`keep_top_k`) works — otherwise NeMo-RL warns and falls back to the latest checkpoint. Set `false` only to skip the extra eval. **GRPO:** ignored by a sandboxed run whose dataset ships no validation file — the compiler disables validation rather than fail in `setup()`. Otherwise 10% of the training rows are held out for validation. |
 | `keep_top_k` | `1` | Number of best checkpoints to retain (DPO ranks by validation loss; GRPO by `val:total_reward/mean`). |
 | `batch_size` | `32` | Global batch across all GPUs. **DPO:** preference **pairs**. **GRPO:** must divide `num_prompts_per_step × num_generations_per_prompt` — see the GRPO table. |
 | `micro_batch_size` | `1` | Per-GPU micro batch. |
@@ -105,7 +105,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 | `vllm_tensor_parallel_size` | `null` | Tensor parallelism for the rollout engine alone. Defaults to `min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node)`. Set it when the model needs several GPUs to hold inference weights but you want the policy trained at a different tensor-parallel size. |
 | `vllm_gpu_memory_utilization` | `0.5` | Fraction of each GPU vLLM reserves for weights plus KV cache. Raise toward `0.7` for large models, which otherwise cannot load their weight shard. |
 | `log_nemo_gym_full_result_tables` | `false` | Log every rollout's full NeMo-Gym result payload to the user's own W&B as a Table (`<agent>/full_result`). **This is the only place the generated text is readable** — the per-step `train_data_step*.jsonl` carries generations as token ids and leaves `content` empty. Each row is one JSON blob holding the decoded prompt (`prompt_str`), decoded generation (`generation_str`) and every reward component the environment returned; W&B cannot sort or filter on fields *inside* that blob. Payloads are large, so enable it for short debugging runs, not steady-state training. **Requires `integrations.wandb`** — NeMo-RL skips the Tables entirely when W&B is off, so the job is rejected at submit rather than logging nothing. |
-| `val_at_start` | `false` | Run validation **before** the first training step. Enable to measure uplift: baseline and result come from one job on the same data and generation settings, instead of a separate baseline run that must be kept in sync. Costs a full rollout pass, hence off by default. Ignored without a `validation.jsonl`. **GRPO only** — DPO always validates at step 0, since its validation needs no generation. |
+| `val_at_start` | `false` | Run validation **before** the first training step. Enable to measure uplift: baseline and result come from one job on the same data and generation settings, instead of a separate baseline run that must be kept in sync. Costs a full rollout pass, hence off by default. Ignored by a sandboxed run without a validation file. **GRPO only** — DPO always validates at step 0, since its validation needs no generation. |
 | `max_new_tokens` | `null` → `max_seq_length` | Cap on tokens generated per rollout turn. **Known limitation:** NeMo Gym's `verifiers_agent` does not yet honour this — see below. |
 | `normalize_rewards` | `true` | |
 | `overlong_filtering` | `false` | Zero the loss contribution of rollouts truncated at the generation cap, so the policy is not penalised for responses it was cut off from finishing. Enable when many rollouts are truncated. |

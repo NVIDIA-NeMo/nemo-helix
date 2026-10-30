@@ -21,11 +21,17 @@ import logging
 import os
 import shutil
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
+from nemo_agents_plugin.jobs.gateway_proxy import (
+    platform_auth_proxy,
+    rewrite_fabric_gateway_models,
+    routes_fabric_inference_through_gateway,
+)
 from nemo_evals.config import get_config
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
 from nemo_evals.jobs.agent_compiler import (
@@ -487,6 +493,7 @@ class _AgentEvalJobBase(NemoJob):
         ctx: JobContext,
         *,
         configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
+        fabric_gateway_origin: str | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -503,8 +510,10 @@ class _AgentEvalJobBase(NemoJob):
             _require_fabric_env_secrets_resolved(target)
             target = upgrade_registered_agent_config(target)
             assert target.config is not None  # canonical spec guarantees resolution ran
+            config = expand_mcp_secret_env(target.config, os.environ)
+            config = rewrite_fabric_gateway_models(config, fabric_gateway_origin)
             fabric_runtime = FabricAgentRuntime(
-                config=expand_mcp_secret_env(target.config, os.environ),
+                config=config,
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
@@ -604,42 +613,52 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         self._prepared_tasks(tasks)
-        target, prompt_template, params = self._resolve_target(
-            spec.target, ctx, configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx)
+        fabric_config = spec.target.fabric_config if spec.target is not None else None
+        proxy = (
+            platform_auth_proxy()
+            if fabric_config is not None and routes_fabric_inference_through_gateway(fabric_config)
+            else nullcontext(None)
         )
-        bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
-        if bundle_dir.exists():
-            shutil.rmtree(bundle_dir)
-        run_config = AgentEvalRunConfig(
-            params=params,
-            prompt_template=prompt_template,
-            parallelism=spec.max_concurrent_tasks,
-            labels=spec.labels,
-            fail_fast=spec.fail_fast,
-            work_dir=bundle_dir,
-            run_id=self._run_id(),
-        )
-        evaluator = self._build_evaluator(platform_client, spec.target)
-        include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
-        endpoint = target if isinstance(target, Model | AgentBase) else None
-        with (
-            gateway_models_as_job([metric for task in tasks for metric in task.metrics], endpoint) as called_target,
-            capture_evaluator_request_logs() as request_logs,
-        ):
-            with capture_agent_evaluation_usage(
-                ctx.usage,
-                request_logs,
-                include_trial_measurements=include_trial_measurements,
-            ) as usage_capture:
-                result = usage_capture.record(
-                    evaluator.run_sync(
-                        tasks=tasks, trials=spec.trials, target=called_target or target, config=run_config
+        with proxy as fabric_gateway_origin:
+            target, prompt_template, params = self._resolve_target(
+                spec.target,
+                ctx,
+                configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx),
+                fabric_gateway_origin=fabric_gateway_origin,
+            )
+            bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
+            if bundle_dir.exists():
+                shutil.rmtree(bundle_dir)
+            run_config = AgentEvalRunConfig(
+                params=params,
+                prompt_template=prompt_template,
+                parallelism=spec.max_concurrent_tasks,
+                labels=spec.labels,
+                fail_fast=spec.fail_fast,
+                work_dir=bundle_dir,
+                run_id=self._run_id(),
+            )
+            evaluator = self._build_evaluator(platform_client, spec.target)
+            include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
+            endpoint = target if isinstance(target, Model | AgentBase) else None
+            with (
+                gateway_models_as_job([metric for task in tasks for metric in task.metrics], endpoint) as called_target,
+                capture_evaluator_request_logs() as request_logs,
+            ):
+                with capture_agent_evaluation_usage(
+                    ctx.usage,
+                    request_logs,
+                    include_trial_measurements=include_trial_measurements,
+                ) as usage_capture:
+                    result = usage_capture.record(
+                        evaluator.run_sync(
+                            tasks=tasks, trials=spec.trials, target=called_target or target, config=run_config
+                        )
                     )
-                )
-        # Only the run's target is restored. A streaming agent's trials keep the address actually called in
-        # their ``endpoint`` metadata, as failed trials' errors do.
-        if endpoint is not None and called_target is not endpoint and result.metadata.target is not None:
-            result.metadata.target.config["url"] = endpoint.url
+            # Only the run's target is restored. A streaming agent's trials keep the address actually called in
+            # their ``endpoint`` metadata, as failed trials' errors do.
+            if endpoint is not None and called_target is not endpoint and result.metadata.target is not None:
+                result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)

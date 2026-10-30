@@ -26,7 +26,12 @@ from nhx.core.inference_gateway.api.mock_provider import (
     is_mock_request,
 )
 from nhx.core.inference_gateway.api.model_cache import ModelCache
-from nhx.core.inference_gateway.api.proxy import PROXY_OPENAPI_EXTRA, build_next_request, proxy_request
+from nhx.core.inference_gateway.api.proxy import (
+    PROXY_OPENAPI_EXTRA,
+    UpstreamProviderContext,
+    build_next_request,
+    proxy_request,
+)
 from nhx.core.inference_gateway.api.validation import validate_workspace_and_name
 
 logger = logging.getLogger(__name__)
@@ -175,4 +180,13 @@ async def provider_proxy(
         required_extra_headers=model_info.model_provider.required_extra_headers,
     )
 
-    return await proxy_request(http_client, next_request_info)
+    return await proxy_request(
+        http_client,
+        next_request_info,
+        upstream_context=UpstreamProviderContext(
+            model_provider_name=name,
+            provider_host_url=model_info.model_provider.host_url,
+            workspace=workspace,
+            purpose=f"proxying {trailing_uri!r}",
+        ),
+    )

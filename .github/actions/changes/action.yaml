@@ -202,6 +202,7 @@ runs:
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
             - 'packages/nhx_sandbox/**'
+            - 'services/core/entities/**'
             - 'services/core/auth/src/nhx/core/auth/app/embedded_pdp/**'
             - 'services/core/auth/src/nhx/core/auth/app/policies/**'
             - 'services/core/auth/src/nhx/core/auth/app/scope_families.py'
@@ -212,6 +213,8 @@ runs:
             - 'packages/nhx_testing/src/nhx/testing/**'
             - 'services/core/files/src/nhx/core/files/service.py'
             - 'services/core/secrets/src/nhx/core/secrets/service.py'
+            # test_service_storage_auth_integration.py imports EntitiesService.
+            - 'services/core/entities/src/nhx/core/entities/service.py'
           e2e:
             - 'e2e/**'
           docs:

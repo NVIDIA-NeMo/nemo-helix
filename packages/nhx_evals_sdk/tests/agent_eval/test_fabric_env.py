@@ -10,6 +10,7 @@ import pytest
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import (
     host_fabric_config,
     model_fabric_config,
+    sandbox_fabric_config,
     validate_fabric_env,
 )
 from nhx_evals_sdk.resolver_protocols import MissingSecretError
@@ -24,6 +25,12 @@ class _Source:
         if env_name not in self.names:
             raise MissingSecretError(f"secret {secret_ref.root!r} is missing; export SOURCE_KEY")
         return self.names[env_name]
+
+
+@pytest.fixture(autouse=True)
+def _clear_process_tls_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("NHX_CLIENT_SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
+        monkeypatch.delenv(name, raising=False)
 
 
 _REFS = {"KEY": SecretRef("ws/key")}
@@ -144,6 +151,65 @@ def test_host_keeps_bare_bindings_and_returns_an_independent_config() -> None:
     assert prepared == config
     prepared["models"]["default"]["settings"]["nested"].append(2)
     assert config["models"]["default"] == _ROLE
+
+
+def test_host_forwards_process_tls_settings_without_overriding_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SSL_CERT_FILE", "/runtime/ca.pem")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/runtime/requests.pem")
+    monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", "/runtime/client.pem")
+    config = {
+        "environment": {"env": {"SSL_CERT_FILE": "/agent/ca.pem", "MODE": "test"}},
+        "mcp": {
+            "servers": {
+                "stdio": {"transport": "stdio", "url": "python", "env": {"SSL_CERT_FILE": "/tool/ca.pem"}},
+                "http": {"transport": "streamable_http", "url": "https://mcp.example.test"},
+            }
+        },
+    }
+
+    prepared = host_fabric_config(config, {}, _Source(), model=None)
+
+    assert prepared["environment"]["env"] == {
+        "NHX_CLIENT_SSL_CERT_FILE": "/runtime/client.pem",
+        "REQUESTS_CA_BUNDLE": "/runtime/requests.pem",
+        "SSL_CERT_FILE": "/agent/ca.pem",
+        "MODE": "test",
+    }
+    assert prepared["mcp"]["servers"]["stdio"]["env"] == {
+        "NHX_CLIENT_SSL_CERT_FILE": "${NHX_CLIENT_SSL_CERT_FILE}",
+        "REQUESTS_CA_BUNDLE": "${REQUESTS_CA_BUNDLE}",
+        "SSL_CERT_FILE": "/tool/ca.pem",
+    }
+    assert "env" not in prepared["mcp"]["servers"]["http"]
+    assert config["mcp"]["servers"]["stdio"]["env"] == {"SSL_CERT_FILE": "/tool/ca.pem"}
+
+
+def test_sandbox_forwards_only_tls_variables_the_sandbox_defines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SSL_CERT_FILE", "/host/ca.pem")
+    config = {
+        "environment": {"env": {"REQUESTS_CA_BUNDLE": "/sandbox/requests.pem", "MODE": "test"}},
+        "mcp": {"servers": {"tool": {"transport": "stdio", "url": "python"}}},
+    }
+
+    prepared = sandbox_fabric_config(config, model=None, sandbox_env={"NHX_CLIENT_SSL_CERT_FILE": "/sandbox/c.pem"})
+
+    assert prepared["environment"]["env"] == {"REQUESTS_CA_BUNDLE": "/sandbox/requests.pem", "MODE": "test"}
+    assert prepared["mcp"]["servers"]["tool"]["env"] == {
+        "NHX_CLIENT_SSL_CERT_FILE": "${NHX_CLIENT_SSL_CERT_FILE}",
+        "REQUESTS_CA_BUNDLE": "${REQUESTS_CA_BUNDLE}",
+    }
+    assert "env" not in config["mcp"]["servers"]["tool"]
+
+
+def test_host_forwards_configured_tls_settings_absent_from_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = {
+        "environment": {"env": {"SSL_CERT_FILE": "/agent/ca.pem"}},
+        "mcp": {"servers": {"tool": {"transport": "stdio", "url": "python"}}},
+    }
+
+    prepared = host_fabric_config(config, {}, _Source(), model=None)
+
+    assert prepared["mcp"]["servers"]["tool"]["env"] == {"SSL_CERT_FILE": "${SSL_CERT_FILE}"}
 
 
 @pytest.mark.parametrize("models", [{}, {"default": {"provider": "nvidia", "model": "m"}}])

@@ -8,6 +8,7 @@ from pathlib import Path
 from tools.ci.test_selection_audit import (
     AuditFinding,
     AuditReport,
+    _python_files,
     audit_repository,
     parse_change_action,
     parse_workflow_jobs,
@@ -16,6 +17,17 @@ from tools.ci.test_selection_audit import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_python_files_excludes_local_environments(tmp_path: Path) -> None:
+    source = tmp_path / "test_example.py"
+    source.write_text("import example\n", encoding="utf-8")
+    for directory in (".venv", ".flox"):
+        cached = tmp_path / "nested" / directory / "cache" / "dependency.py"
+        cached.parent.mkdir(parents=True)
+        cached.write_bytes(b"\xff")
+
+    assert _python_files(tmp_path) == (source,)
 
 
 def test_change_action_resolves_output_aliases() -> None:

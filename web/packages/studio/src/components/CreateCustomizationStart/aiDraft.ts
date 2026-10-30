@@ -178,8 +178,8 @@ const record = (value: unknown): Job => (isPlainObject(value) ? value : {});
 
 /**
  * Replaces every reference with the user's picks — the model is told it may write
- * placeholders — and drops a teacher, which the user picks in the form. The validation
- * reference follows the form's own rule: the dataset itself, when it ships a validation split.
+ * placeholders — and drops a teacher, which the user picks in the form. The backend finds the
+ * validation files in the dataset itself, so there is no validation reference to fill.
  */
 const applyInputs = (
   backend: CustomizationBackend,
@@ -187,14 +187,13 @@ const applyInputs = (
   { model, dataset, environment }: DraftInputs
 ): Job => {
   const modelRef = getEntityReference(model);
-  const validationRef = dataset.hasValidation ? dataset.fileset : undefined;
   if (backend === 'automodel') {
     const training = { ...record(job.training) };
     delete training.teacher_model;
     return {
       ...job,
       model: modelRef,
-      dataset: { ...record(job.dataset), training: dataset.fileset, validation: validationRef },
+      dataset: { ...record(job.dataset), training: dataset.fileset },
       training,
     };
   }
@@ -205,7 +204,6 @@ const applyInputs = (
       dataset: {
         ...record(job.dataset),
         path: dataset.fileset,
-        validation_path: validationRef,
         // Set from the dataset's format, as the form does once the draft loads.
         ...(dataset.schema && {
           apply_chat_template: usesChatTemplate(dataset.schema.variant),

@@ -181,16 +181,18 @@ class TrainingSpec(UnslothSchema):
 class DatasetSpec(UnslothSchema):
     """Training data location + shape.
 
-    ``path`` and ``validation_path`` are platform fileset references
-    (``"name"`` or ``"workspace/name"``). The plugin's run downloads
-    each fileset before training; ``train_sft`` only ever sees a local
-    filesystem path.
+    ``path`` is a platform fileset reference (``"name"`` or ``"workspace/name"``)
+    holding the training files and, optionally, the validation files, told apart by
+    name (:mod:`nhx.customization_common.dataset_files`). The plugin's run downloads
+    the fileset before training; ``train_sft`` only ever sees a local filesystem path.
     """
 
     path: str = Field(
         description=(
-            "Training fileset reference: 'name' (uses the job's workspace) "
-            "or 'workspace/name'. Resolved to a local path by the plugin run."
+            "Dataset fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. "
+            "Holds the training files and, optionally, the validation files, told apart by name "
+            "(train.jsonl, validation.jsonl). Without validation files, schedule.validation_split "
+            "of the training rows is held out for validation."
         ),
     )
     text_field: str = Field(default="text", description="Row field consumed by SFTTrainer.")
@@ -198,12 +200,6 @@ class DatasetSpec(UnslothSchema):
         default=False,
         description=(
             "If True, expects rows with a 'messages' field and applies tokenizer.apply_chat_template at training time."
-        ),
-    )
-    validation_path: str | None = Field(
-        default=None,
-        description=(
-            "Optional validation fileset reference (same format as 'path'). Downloaded under the same scheme."
         ),
     )
     packing: bool = Field(default=False, description="trl.SFTTrainer packing flag.")
@@ -233,6 +229,12 @@ class ScheduleSpec(UnslothSchema):
     logging_steps: int = Field(default=1, gt=0)
     save_steps: int | None = Field(default=None, gt=0)
     eval_steps: int | None = Field(default=None, gt=0)
+    validation_split: float | None = Field(
+        default=0.1,
+        gt=0,
+        lt=1,
+        description="Validation split to use when the dataset has no validation files.",
+    )
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
     seed: int = 3407
     lr_scheduler_kwargs: dict[str, Any] | None = Field(
@@ -350,6 +352,18 @@ class UnslothJobOutput(UnslothSchema):
         default=None,
         description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_fields(cls, data: object) -> object:
+        """Drop ``dataset.validation_path`` from jobs stored before it was removed, so they still render.
+
+        ``UnslothJobInput`` still rejects it: the dataset fileset holds the validation files.
+        """
+        if isinstance(data, dict) and isinstance(data.get("dataset"), dict) and "validation_path" in data["dataset"]:
+            dataset = {key: value for key, value in data["dataset"].items() if key != "validation_path"}
+            return {**data, "dataset": dataset}
+        return data
 
     @model_validator(mode="after")
     def _resolve_learning_rate(self) -> Self:
