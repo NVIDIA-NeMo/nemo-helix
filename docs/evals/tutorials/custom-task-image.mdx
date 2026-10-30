@@ -6,7 +6,7 @@ title: "Customize the Evaluator Task Image"
 description: "Add dependencies to nhx-tasks and select an Eval-only or platform-wide image."
 ---
 
-Remote Python metrics execute inside the Evaluator task container, not your local Python environment. If a metric needs additional packages, build an image derived from `nhx-tasks` and configure the deployment to use it. Serializing a metric with cloudpickle does not install its dependencies on the worker. The API also unbundles custom metrics during submission: importable scorer packages may be required in **both the API and worker images**, not just the worker.
+Remote Python metrics execute inside the Evaluator task container, not your local Python environment. If a metric needs additional packages, build an image derived from `nhx-tasks` and configure the deployment to use it. Serializing a metric with cloudpickle does not install its dependencies on the worker. The API also unbundles custom metrics during submission: importable scorer packages may be required in **both the API and worker images**, not just the worker. Maintaining the image and its dependencies is the end user's responsibility.
 
 ## Build an image based on nhx-tasks
 
