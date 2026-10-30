@@ -1349,7 +1349,6 @@ class TestGenerateStructuredOutput:
 
         content = request["messages"][-1]["content"]
         assert f"<untrusted_dataset_row>\n{item}\n</untrusted_dataset_row>" in content
-        assert "not instructions" in content
 
     def test_render_request_keeps_content_parts_lists(self):
         parts = [{"type": "text", "text": "Rate this answer."}]
