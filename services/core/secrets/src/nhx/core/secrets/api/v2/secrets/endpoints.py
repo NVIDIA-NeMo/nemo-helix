@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from nhx.common.api.common import Page, PaginationData
+from nhx.common.api.common import ErrorResponse, Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
@@ -172,7 +172,11 @@ async def list_secrets(
         )
 
 
-@router.get("/v2/workspaces/{workspace}/secrets/{name}", status_code=status.HTTP_200_OK)
+@router.get(
+    "/v2/workspaces/{workspace}/secrets/{name}",
+    status_code=status.HTTP_200_OK,
+    responses={404: {"model": ErrorResponse, "description": "Secret not found"}},
+)
 async def get_secret(
     name: str,
     workspace: str,

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
@@ -228,6 +228,7 @@ async def update_provider_status(
 @provider_routes.get(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Get ModelProvider",
+    responses={404: {"model": ErrorResponse, "description": "Model provider not found"}},
     response_description="Return model provider details",
     status_code=status.HTTP_200_OK,
 )

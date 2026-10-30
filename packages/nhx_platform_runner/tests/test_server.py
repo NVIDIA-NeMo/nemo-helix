@@ -284,6 +284,8 @@ def test_create_app_openapi_registers_rebased_query_param_schemas(monkeypatch):
     try:
         app = server.create_app(services=[QueryParamSchemaService()])
         spec = app.openapi()
+        assert spec["info"]["title"] == "NeMo Helix API"
+        assert spec["info"]["description"] == "API for NeMo Helix services"
         schemas = spec["components"]["schemas"]
         filter_param = next(
             param

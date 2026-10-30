@@ -57,7 +57,7 @@ CORPUS = os.environ.get(
     "RETRIEVAL_CORPUS",
     "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random",
 )
-PROVIDER = os.environ.get("RETRIEVAL_PROVIDER", "system/nvidia-build")
+PROVIDER = os.environ.get("RETRIEVAL_PROVIDER", "default/nvidia-build")
 # RETRIEVAL_CHAT_MODEL takes precedence over the shared NVIDIA_MODEL override.
 CHAT_MODEL = os.environ.get("RETRIEVAL_CHAT_MODEL", os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"))
 EMBED_MODEL = os.environ.get("RETRIEVAL_EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
@@ -75,7 +75,7 @@ Equivalent CLI, using the same pinned sample corpus without an upload:
 nemo data-designer retrieval-preview --workspace default --spec '{
   "generate": {
     "corpus": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random",
-    "provider": "system/nvidia-build",
+    "provider": "default/nvidia-build",
     "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "quality_judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -86,7 +86,7 @@ nemo data-designer retrieval-preview --workspace default --spec '{
 
 nemo data-designer retrieval-generate --workspace default --spec '{
   "corpus": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/sample_corpus/nv_pp_random",
-  "provider": "system/nvidia-build",
+  "provider": "default/nvidia-build",
   "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "quality_judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",

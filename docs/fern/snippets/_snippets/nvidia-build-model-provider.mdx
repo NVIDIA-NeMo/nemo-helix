@@ -7,7 +7,10 @@ description: ""
 ---
 <Note>
 
-`nemo setup` pre-configures a `default/nvidia-build` model provider during local startup.
+When you configure NVIDIA Build with `nemo setup`, it registers the `nvidia-build` model provider
+in the setup workspace (`--workspace`, otherwise the active context workspace, falling back to `default`).
+These tutorials assume setup used `default`, so they reference `default/nvidia-build`.
+If you used another workspace, substitute `<workspace>/nvidia-build` and list providers in that workspace.
 This provider routes inference requests to models hosted on `build.nvidia.com` using the API base URL `https://integrate.api.nvidia.com`
 and the NGC API key with `Public API Endpoints` permissions provided during deployment.
 

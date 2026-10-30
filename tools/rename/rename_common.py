@@ -43,7 +43,7 @@ PRODUCT_REPLACEMENTS = [
     ("NeMoPlatform", "NeMoHelix"),
     ("NeMo-Platform", "NeMo-Helix"),
     ("NeMo-platform", "NeMo-Helix"),
-    ("Nemo Platform", "Nemo Helix"),
+    ("Nemo Platform", "NeMo Helix"),
     ("NemoPlatform", "NemoHelix"),
     ("Nemo-Platform", "Nemo-Helix"),
     ("Nemo-platform", "Nemo-Helix"),
