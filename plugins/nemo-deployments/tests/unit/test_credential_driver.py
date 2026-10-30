@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
+import stat
 import tempfile
 import time
 from collections.abc import Iterator
@@ -22,6 +24,16 @@ import jwt
 import pytest
 import time_machine
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
+from nemo_deployments_plugin.backends.openshell.credential_driver.server import read_private_file, running_server
+from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
+from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import (
+    CredentialInitializationError,
+    check_ready,
+    prepare_credentials,
+)
+from nemo_deployments_plugin.backends.openshell.credential_driver.sidecar import (
+    main as sidecar_main,
+)
 from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import (
     BindingScope,
     RegistrationClaims,
@@ -149,6 +161,87 @@ async def test_driver_rejects_mismatched_auth_mode_before_secret_access(harness:
             },
         )
     assert not harness.calls
+
+
+def test_auth_disabled_sidecar_needs_only_signing_key(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    destination = tmp_path / "private"
+    prepare_credentials(source, destination, auth_disabled=True)
+    assert (destination / "registration.key").read_bytes() == KEY
+    assert not (destination / "helix.token").exists()
+    with pytest.raises(CredentialInitializationError, match="helix.token"):
+        prepare_credentials(source, destination)  # Missing token never selects disabled mode implicitly.
+    (source / "helix.token").write_bytes(b"staged-service-token")
+    prepare_credentials(source, destination)
+    (source / "helix.token").unlink()
+    (source / "registration.key").write_bytes(b"different-signing-key-32-bytes-long")
+    with pytest.raises(CredentialInitializationError, match="explicit migration"):
+        prepare_credentials(source, destination, auth_disabled=True)
+    assert (destination / "helix.token").read_bytes() == b"staged-service-token"
+    (source / "registration.key").write_bytes(KEY)
+    prepare_credentials(source, destination, auth_disabled=True)
+    assert not (destination / "helix.token").exists()
+    assert (destination / "registration.key").read_bytes() == KEY
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        ("missing-token", "Cannot open mounted helix.token"),
+        ("short-key", "signing key of at least 32 bytes"),
+        ("key-mismatch", "explicit migration is required"),
+        ("invalid-utf8", "nonempty UTF-8 token"),
+    ],
+)
+def test_sidecar_init_reports_safe_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: str, expected: str
+) -> None:
+    source, destination = tmp_path / "source", tmp_path / "private"
+    source.mkdir()
+    key = source / "registration.key"
+    token = source / "helix.token"
+    key.write_bytes(KEY)
+    token.write_bytes(b"sensitive-service-token")
+    if failure == "missing-token":
+        token.unlink()
+    elif failure == "short-key":
+        key.write_bytes(b"sensitive-short-key")
+    elif failure == "key-mismatch":
+        prepare_credentials(source, destination)
+        key.write_bytes(b"sensitive-different-key-32-bytes-long")
+    else:
+        token.write_bytes(b"sensitive-service-token\xff")
+    with patch("sys.argv", ["sidecar", "init", "--source", str(source), "--destination", str(destination)]):
+        with pytest.raises(SystemExit) as error:
+            sidecar_main()
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    assert expected in output.err
+    assert "sensitive" not in output.err
+    assert KEY.decode() not in output.err
+    assert not output.out
+
+
+@pytest.mark.parametrize("command", ["init", "healthcheck"])
+def test_sidecar_unexpected_errors_do_not_disclose_credentials(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str
+) -> None:
+    module = "nemo_deployments_plugin.backends.openshell.credential_driver.sidecar"
+    if command == "init":
+        argv = ["sidecar", "init", "--source", str(tmp_path), "--destination", str(tmp_path)]
+        function = "prepare_credentials"
+    else:
+        argv = ["sidecar", "healthcheck", "--socket-path", str(tmp_path / "driver.sock")]
+        function = "check_ready"
+    with patch("sys.argv", argv), patch(f"{module}.{function}", side_effect=ValueError("sensitive-token")):
+        with pytest.raises(SystemExit) as error:
+            sidecar_main()
+    assert error.value.code == 1
+    output = capsys.readouterr()
+    assert output.err == "Credential-driver initialization or readiness check failed.\n"
+    assert not output.out
 
 
 @pytest.mark.asyncio
@@ -400,6 +493,25 @@ def socket_directory() -> Iterator[Path]:
         yield Path(name)
 
 
+@pytest.mark.asyncio
+async def test_sidecar_recovers_stale_socket_and_rejects_second_driver(
+    harness: Harness, socket_directory: Path
+) -> None:
+    path = socket_directory / "driver.sock"
+    # SIGKILL leaves the same filesystem artifact: a socket with no listener.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
+        stale.bind(str(path))
+    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    async with running_server(driver, path):
+        await check_ready(path)
+        with pytest.raises(ValueError, match="Another credential driver"):
+            async with running_server(driver, path):
+                pytest.fail("A second driver acquired the socket")
+        await check_ready(path)
+    assert not path.exists()
+    assert not harness.calls  # Readiness does not read secrets or require Helix.
+
+
 @pytest.mark.parametrize("kind", ["file", "symlink", "listener"])
 def test_sidecar_does_not_remove_other_socket_owners(socket_directory: Path, kind: str) -> None:
     from nemo_deployments_plugin.backends.openshell.credential_driver.server import socket_lease
@@ -418,6 +530,79 @@ def test_sidecar_does_not_remove_other_socket_owners(socket_directory: Path, kin
             with socket_lease(path):
                 pytest.fail("Existing path was accepted")
         assert path.lstat().st_ino == inode
+
+
+def test_sidecar_stages_private_files_and_rotates_only_token(tmp_path: Path) -> None:
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    (source / "helix.token").write_text("token-one")
+    prepare_credentials(source, destination)
+    assert destination.stat().st_mode & 0o777 == 0o700
+    assert read_private_file(destination / "registration.key") == KEY
+    assert read_private_file(destination / "helix.token") == b"token-one"
+    inode = (destination / "helix.token").stat().st_ino
+    (source / "helix.token").write_text("token-two")
+    prepare_credentials(source, destination)
+    assert read_private_file(destination / "helix.token") == b"token-two"
+    assert (destination / "helix.token").stat().st_ino != inode
+    (source / "registration.key").write_bytes(b"replacement-signing-key-32-bytes!")
+    (source / "helix.token").write_text("token-three")
+    with pytest.raises(ValueError, match="explicit migration"):
+        prepare_credentials(source, destination)
+    assert read_private_file(destination / "registration.key") == KEY
+    assert read_private_file(destination / "helix.token") == b"token-two"
+
+
+def test_sidecar_syncs_rotated_and_removed_token_before_success(tmp_path: Path) -> None:
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY)
+    token = source / "helix.token"
+    token.write_bytes(b"old-token")
+    prepare_credentials(source, destination)
+    token.write_bytes(b"new-token")
+    original_fsync = os.fsync
+    synced_tokens: list[bytes | None] = []
+
+    def sync_and_observe(descriptor: int) -> None:
+        original_fsync(descriptor)
+        info = os.fstat(descriptor)
+        if stat.S_ISDIR(info.st_mode):
+            assert info.st_ino == destination.stat().st_ino
+            staged = destination / "helix.token"
+            synced_tokens.append(staged.read_bytes() if staged.exists() else None)
+
+    module = "nemo_deployments_plugin.backends.openshell.credential_driver.sidecar"
+    with patch(f"{module}.os.fsync", side_effect=sync_and_observe):
+        prepare_credentials(source, destination)
+        assert synced_tokens[-1] == b"new-token"
+        prepare_credentials(source, destination, auth_disabled=True)
+        assert synced_tokens[-1] is None
+
+    def fail_directory_sync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("Directory sync failed")
+        original_fsync(descriptor)
+
+    with patch(f"{module}.os.fsync", side_effect=fail_directory_sync):
+        with pytest.raises(OSError, match="Directory sync failed"):
+            prepare_credentials(source, destination)
+
+
+@pytest.mark.parametrize("invalid", ["symlink", "empty", "oversize", "short-key"])
+def test_sidecar_rejects_invalid_mounted_credentials(tmp_path: Path, invalid: str) -> None:
+    source, destination = tmp_path / "mount", tmp_path / "private"
+    source.mkdir()
+    (source / "registration.key").write_bytes(KEY if invalid != "short-key" else b"short")
+    token = source / "helix.token"
+    if invalid == "symlink":
+        token.symlink_to(source / "registration.key")
+    else:
+        token.write_bytes(b"x" * (65537 if invalid == "oversize" else 0) if invalid != "short-key" else b"token")
+    with pytest.raises((OSError, ValueError)):
+        prepare_credentials(source, destination)
+    assert not destination.exists()
 
 
 @pytest.mark.asyncio
