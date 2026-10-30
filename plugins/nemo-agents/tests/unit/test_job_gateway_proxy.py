@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import socket
 from pathlib import Path
@@ -87,6 +88,60 @@ def test_rebases_all_gateway_models_without_mutating_input(workload: Mock) -> No
     assert config.model_dump() == before
     workload.assert_called_once()
     _assert_closed(proxy_url)
+
+
+def test_rebases_translated_fabric_config_without_mutating_input() -> None:
+    config = {
+        "harness": {"adapter_id": "nvidia.fabric.deepagents"},
+        "models": {
+            "default": {
+                "provider": "openai",
+                "model": "test",
+                "base_url": f"http://platform{GATEWAY_PATH}?version=1",
+            },
+            "legacy": {
+                "provider": "openai",
+                "model": "test",
+                "settings": {"base_url": f"http://platform{GATEWAY_PATH}"},
+            },
+            "direct": {"provider": "openai", "model": "test", "base_url": "https://provider.test/v1"},
+        },
+    }
+    before = copy.deepcopy(config)
+
+    assert gateway_proxy.routes_fabric_inference_through_gateway(config)
+    runtime = gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019")
+
+    assert runtime["models"]["default"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}?version=1"
+    assert runtime["models"]["legacy"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}"
+    assert "base_url" not in runtime["models"]["legacy"]["settings"]
+    assert runtime["models"]["direct"]["base_url"] == "https://provider.test/v1"
+    assert config == before
+
+
+@pytest.mark.parametrize("models", [None, "not-a-mapping", {"default": "not-a-mapping", "bad": None}])
+def test_malformed_fabric_models_are_skipped_instead_of_crashing(models: object) -> None:
+    config = {"harness": {"adapter_id": "nvidia.fabric.deepagents"}, "models": models}
+
+    assert not gateway_proxy.routes_fabric_inference_through_gateway(config)
+    assert gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019") is config
+
+
+def test_fabric_model_with_non_mapping_settings_is_still_rebased() -> None:
+    config = {"models": {"default": {"base_url": f"http://platform{GATEWAY_PATH}", "settings": "oops"}}}
+
+    runtime = gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019")
+
+    assert runtime["models"]["default"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}"
+
+
+def test_ambient_user_access_token_does_not_start_a_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NHX_ACCESS_TOKEN is the user's CLI override, not a delegated job token."""
+    monkeypatch.delenv("NHX_ACCESS_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "user-cli-token")
+
+    with gateway_proxy.platform_auth_proxy() as origin:
+        assert origin is None
 
 
 @pytest.mark.parametrize("principal", [None, ""])
@@ -243,6 +298,28 @@ def test_principal_headers_preserve_identity_and_replace_caller_headers(
     forwarded = httpserver.log[0][0].headers
     assert "Authorization" not in forwarded
     assert "X-NHX-Internal" not in forwarded
+    _assert_closed(proxy_url)
+
+
+def test_proxy_forwards_the_rotating_subprocess_access_token(
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, tmp_path: Path
+) -> None:
+    token_file = tmp_path / ".nhx-access-token"
+    token_file.write_text("first-token", encoding="utf-8")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"job-user"}')
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(""))
+    httpserver.expect_request(GATEWAY_PATH).respond_with_json({"ok": True})
+    with gateway_proxy.platform_auth_proxy() as origin:
+        runtime = gateway_proxy.rewrite_gateway_models(_config(), origin)
+        proxy_url = runtime.models["default"].base_url
+        assert proxy_url is not None
+        assert httpx.get(proxy_url).status_code == 200
+        token_file.write_text("second-token", encoding="utf-8")
+        assert httpx.get(proxy_url).status_code == 200
+    forwarded = [request.headers for request, _ in httpserver.log]
+    assert [headers["Authorization"] for headers in forwarded] == ["Bearer first-token", "Bearer second-token"]
+    assert all("X-NHX-Principal-Id" not in headers for headers in forwarded)
     _assert_closed(proxy_url)
 
 

@@ -60,7 +60,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric import _common
 from nhx_evals_sdk.agent_eval.runtimes.fabric._sandbox_execution import SandboxExecution
 from nhx_evals_sdk.agent_eval.runtimes.fabric.env import (
     host_fabric_config,
-    model_fabric_config,
+    sandbox_fabric_config,
     validate_fabric_env,
 )
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import ensure_fabric_image
@@ -357,8 +357,8 @@ class FabricAgentRuntime:
         return Fabric(), agent_config
 
     async def _open_sandbox(self, provider: SandboxProvider) -> SandboxExecution:
-        agent_config = model_fabric_config(self._config, model=self._model)
         env = env_secret_values(self._env_secrets, self._secret_resolver)
+        agent_config = sandbox_fabric_config(self._config, model=self._model, sandbox_env=env)
         if self._image is None:
             # Build-if-missing; a first build compiles nemo-fabric (minutes), so keep it off the event loop.
             self._image = await asyncio.to_thread(ensure_fabric_image)

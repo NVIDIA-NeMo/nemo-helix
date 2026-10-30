@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -18,9 +19,15 @@ from urllib.request import Request, urlopen
 
 import httpx
 import requests
-from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import (
+    ACCESS_TOKEN_ENVVAR,
+    ACCESS_TOKEN_FILE_ENVVAR,
+    WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+)
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR, Principal
+from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
+from nhx.common.config import get_auth_config
 from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
 from opentelemetry._logs import Logger
 from opentelemetry._logs.severity import SeverityNumber
@@ -165,6 +172,76 @@ def parse_secret_references(secrets_env: str) -> list[SecretReference]:
     return references
 
 
+def _mint_task_access_token(principal: Principal | None) -> str | None:
+    """A ``jobs`` service token delegated to *principal*, or ``None`` without workload token exchange."""
+    auth_config = get_auth_config()
+    if not (auth_config.enabled and auth_config.oidc.workload is not None):
+        return None
+    on_behalf_of = principal.effective_principal if principal is not None and principal.id else None
+    return ServiceWorkloadAccessTokenProvider(auth_config, "jobs", on_behalf_of).get_access_token()
+
+
+def _delegable_principal(env: dict[str, str]) -> Principal | None:
+    principal = _principal_from_env(env)
+    return principal if principal is not None and principal.id else None
+
+
+def write_task_access_token(token_file: Path, token: str) -> None:
+    """Atomically replace *token_file* with *token*, readable only by this user."""
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = token_file.with_name(f".{token_file.name}.tmp")
+    # The child shares this uid and can pre-plant the temp path: refuse to follow or reuse anything there.
+    tmp.unlink(missing_ok=True)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(token)
+    os.replace(tmp, token_file)
+
+
+def inject_subprocess_task_auth(env: dict[str, str], token_file: Path) -> dict[str, str]:
+    """Give the child a short-lived bearer token delegated from its job principal, via a rotatable file.
+
+    Without workload token exchange, or without a principal to delegate from, the child gets no
+    token: it must never hold an undelegated service identity.
+    """
+    env.pop(ACCESS_TOKEN_ENVVAR, None)
+    env.pop(ACCESS_TOKEN_FILE_ENVVAR, None)
+    principal = _delegable_principal(env)
+    if principal is None or not (token := _mint_task_access_token(principal)):
+        return env
+    write_task_access_token(token_file, token)
+    env[ACCESS_TOKEN_FILE_ENVVAR] = str(token_file)
+    return env
+
+
+def task_access_token_refresh_interval() -> float:
+    """Seconds between re-minting a child's token: half the token lifetime."""
+    workload = get_auth_config().oidc.workload
+    return (workload.token_ttl_seconds if workload is not None else 300) / 2
+
+
+def refresh_subprocess_task_auth(env: dict[str, str], token_file: Path) -> bool:
+    """Re-mint the child's delegated token into *token_file*; the child re-reads it on each request.
+
+    ``False`` when there was nothing to mint, so the caller keeps retrying instead of treating it as rotated.
+    """
+    principal = _delegable_principal(env)
+    if principal is None or not (token := _mint_task_access_token(principal)):
+        return False
+    write_task_access_token(token_file, token)
+    return True
+
+
+def _access_token_from_env(env: dict[str, str]) -> str | None:
+    token_file = env.get(ACCESS_TOKEN_FILE_ENVVAR)
+    if not token_file:
+        return None
+    try:
+        return Path(token_file).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
 def inject_secret_env_vars(env: dict[str, str], *, secrets_url: str | None = None) -> dict[str, str]:
     secrets_env = env.get(NEMO_JOB_SECRETS_ENVVAR, "")
     references = parse_secret_references(secrets_env)
@@ -181,6 +258,7 @@ def inject_secret_env_vars(env: dict[str, str], *, secrets_url: str | None = Non
         env[reference.env_var_name] = _fetch_secret(
             api_base_url=api_base_url,
             principal=principal,
+            access_token=_access_token_from_env(env),
             workspace=reference.workspace,
             secret_name=reference.secret_name,
         )
@@ -301,12 +379,19 @@ def _principal_from_env(env: dict[str, str]) -> Principal | None:
         return None
 
 
-def _fetch_secret(*, api_base_url: str, principal: Principal | None, workspace: str, secret_name: str) -> str:
+def _fetch_secret(
+    *,
+    api_base_url: str,
+    principal: Principal | None,
+    access_token: str | None,
+    workspace: str,
+    secret_name: str,
+) -> str:
     request = Request(
         url=f"{api_base_url}/apis/secrets/v2/workspaces/{quote(workspace, safe='')}/secrets/{quote(secret_name, safe='')}/access",
         method="GET",
     )
-    for name, value in _secret_request_headers(principal).items():
+    for name, value in _secret_request_headers(principal, access_token=access_token).items():
         request.add_header(name, value)
 
     try:
@@ -329,7 +414,13 @@ def _validate_http_url(url: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be an absolute http or https URL")
 
 
-def _secret_request_headers(principal: Principal | None) -> dict[str, str]:
+def _secret_request_headers(principal: Principal | None, *, access_token: str | None = None) -> dict[str, str]:
+    if access_token:
+        return {"Authorization": f"Bearer {access_token}"}
+
+    if token := _mint_task_access_token(principal):
+        return {"Authorization": f"Bearer {token}"}
+
     if principal is None or not principal.id:
         return Principal(id="service:jobs", authz_aliases=["service:jobs"]).get_headers()
     effective_principal = principal.effective_principal
