@@ -32,9 +32,44 @@ uv run nemo-mcp
 # Or with custom configuration
 uv run nemo-mcp --base-url https://your-nhx-instance.com
 
-# With HTTP transport (for debugging)
-uv run nemo-mcp --transport streamable-http --port 8080
+# With HTTP transport: a bearer token is required
+NHX_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" uv run nemo-mcp --transport streamable-http --port 8080
+
+# Local debugging without a token (loopback hosts only)
+uv run nemo-mcp --transport streamable-http --port 8080 --allow-unauthenticated
 ```
+
+### Security
+
+The HTTP transport acts on the platform with the server's own credentials, so it is locked down by default:
+
+- **Authentication:** `--transport streamable-http` refuses to start unless `NHX_MCP_AUTH_TOKEN` is set (at least 16
+  characters, no leading or trailing whitespace). Clients send it as `Authorization: Bearer <token>`. The token is read from the environment, not a
+  flag, so it does not appear in the process list. Use a long random value.
+- **Transport encryption:** the server serves plain HTTP, so the bearer token is sent unencrypted. For any non-loopback
+  `--host`, terminate TLS in front of the server (reverse proxy) or use an encrypted tunnel (SSH, VPN).
+- **No anonymous non-loopback binds:** `--allow-unauthenticated` is accepted only when `--host` is a loopback address.
+- **Host and Origin checks:** the HTTP transport rejects requests whose `Host` or `Origin` header is not trusted
+  (FastMCP `host_origin_protection="auto"`), which blocks DNS rebinding against a loopback-bound server. When a TLS
+  proxy forwards to the server over loopback and keeps the public `Host`, requests are rejected with 421 unless that
+  hostname is allowed: set `FASTMCP_HTTP_ALLOWED_HOSTS='["mcp.example.com"]'` on the server.
+  `"auto"` only checks loopback-bound servers: with a non-loopback `--host` the server does not check `Host` or
+  `Origin`, so the bearer token is the only access control there. Keep it secret and rotate it if it leaks.
+- **Unauthenticated loopback is still reachable by local processes.** Use `--allow-unauthenticated` only for short
+  debugging sessions, and it cannot be combined with `--enable-destructive-tools`.
+- **Destructive tools are off by default:** `delete_workspace` is registered only with `--enable-destructive-tools`,
+  on every transport. Deleting a workspace cascades to everything in it, and an LLM client can be steered into calling
+  it by injected content.
+- **Identity:** the token controls who can reach the server. Calls to the platform still use the server's own
+  identity, not the caller's. Do not expose the server to users who should not have that level of access.
+
+### Upgrade notes
+
+- `delete_workspace` is no longer registered by default, on every transport (including stdio, e.g. via `.mcp.json`).
+  Clients that relied on it must start the server with `--enable-destructive-tools`.
+- `--transport streamable-http` now refuses to start without `NHX_MCP_AUTH_TOKEN`. Set the token and send it as
+  `Authorization: Bearer <token>`, or use `--allow-unauthenticated` on a loopback host for local debugging.
+- `--allow-unauthenticated` is rejected on stdio and when `NHX_MCP_AUTH_TOKEN` is set, instead of being ignored.
 
 ### Manually Interact with Server
 
@@ -110,6 +145,12 @@ Future expansion will support mounting service-specific MCP servers from:
 ## Development
 
 ### Run Tests
+
+Unit tests cover the HTTP authentication, the CLI startup rules and the destructive-tool gate. They run in-process and need no platform:
+
+```bash
+uv run --frozen pytest services/core/mcp/tests/unit -q
+```
 
 Manual integration test verifies the MCP server correctly connects to NeMo Helix. NeMo Helix must be running locally:
 

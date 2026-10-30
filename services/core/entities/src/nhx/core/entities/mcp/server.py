@@ -21,7 +21,7 @@ from nhx.common.mcp import format_error_response
 logger = logging.getLogger(__name__)
 
 
-def create_server(base_url: str | None = None) -> FastMCP:
+def create_server(base_url: str | None = None, enable_destructive_tools: bool = False) -> FastMCP:
     """
     Create and configure the entities service MCP server.
 
@@ -30,6 +30,9 @@ def create_server(base_url: str | None = None) -> FastMCP:
 
     Args:
         base_url: Optional NeMo Helix base URL
+        enable_destructive_tools: Also register tools that delete resources
+            (``delete_workspace``). Off by default because an LLM client can be
+            steered into calling them.
 
     Returns:
         Configured FastMCP server instance with entities tools registered
@@ -142,7 +145,6 @@ def create_server(base_url: str | None = None) -> FastMCP:
         except Exception as e:
             return format_error_response(e)
 
-    @server.tool(description="Delete a workspace from the NeMo Helix")
     async def delete_workspace(
         name: str,
     ) -> dict[str, Any]:
@@ -170,5 +172,8 @@ def create_server(base_url: str | None = None) -> FastMCP:
             }
         except Exception as e:
             return format_error_response(e)
+
+    if enable_destructive_tools:
+        server.tool(description="Delete a workspace from the NeMo Helix")(delete_workspace)
 
     return server

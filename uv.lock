@@ -144,7 +144,7 @@ overrides = [
     { name = "cryptography", specifier = ">=50.0.0,<51" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
     { name = "diskcache", marker = "sys_platform == 'never'" },
-    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "fastmcp", specifier = ">=3.4.4" },
     { name = "fschat", marker = "sys_platform == 'never'" },
     { name = "gitpython", specifier = ">=3.1.62" },
     { name = "grpcio", specifier = ">=1.71.0" },
@@ -8328,7 +8328,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "fastmcp", specifier = ">=3.4.4" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
 ]
