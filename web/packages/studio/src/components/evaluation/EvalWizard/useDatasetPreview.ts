@@ -126,10 +126,8 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     { query: { enabled: filesetEnabled } }
   );
 
-  const fileSize = useMemo(
-    () => filesResponse?.data?.find((file) => file.path === path)?.size,
-    [filesResponse, path]
-  );
+  const fileSize = filesResponse?.data?.find((file) => file.path === path)?.size;
+  const readsWholeFile = format === 'json' || format === 'parquet';
 
   /** Byte budget for the Range request.
    *
@@ -143,11 +141,8 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
    *  cannot be parsed at all, and Parquet keeps its metadata in the footer, so
    *  both are read whole -- the same thing ``handleInferFromExisting`` does for
    *  every format. */
-  const readsWholeFile = format === 'json' || format === 'parquet';
-  const fileBytes = useMemo(() => {
-    if (fileSize === undefined) return undefined;
-    return readsWholeFile ? fileSize : Math.min(fileSize, HEAD_BYTES);
-  }, [fileSize, readsWholeFile]);
+  const fileBytes =
+    readsWholeFile || fileSize === undefined ? fileSize : Math.min(fileSize, HEAD_BYTES);
 
   const wholeFile = useFilesetFile({
     workspace: parsed?.workspace ?? '',
@@ -157,10 +152,7 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
   });
 
   /** Whether the read covers the entire file, i.e. whether a row total is real. */
-  const isComplete = useMemo(
-    () => fileBytes !== undefined && fileBytes === fileSize,
-    [fileBytes, fileSize]
-  );
+  const isComplete = fileBytes !== undefined && fileBytes === fileSize;
 
   const {
     data: preview,
