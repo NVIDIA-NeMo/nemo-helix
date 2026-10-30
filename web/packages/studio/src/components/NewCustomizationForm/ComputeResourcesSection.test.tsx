@@ -64,11 +64,12 @@ const Harness: FC<HarnessProps> = ({ gpus, expertParallelSize }) => {
       >
         TP 2
       </button>
-      {(['rl', 'automodel'] as const).map((backend) => (
-        <button key={backend} type="button" onClick={() => form.setValue('backend', backend)}>
-          {backend}
-        </button>
-      ))}
+      <button
+        type="button"
+        onClick={() => form.setValue('automodel.parallelism.expert_parallel_size', 3)}
+      >
+        EP 3
+      </button>
     </FormProvider>
   );
 };
@@ -78,60 +79,47 @@ describe('ComputeResourcesSection expert parallelism', () => {
     modelEntity.current = nemotronMoe;
   });
 
-  it('pre-fills the largest valid size for a multi-GPU MoE run and follows the GPU count', async () => {
+  it('pre-fills the largest valid size and replaces it only once the GPU count makes it invalid', async () => {
     render(<Harness gpus={4} />);
     expect(await screen.findByTestId('ep')).toHaveTextContent('4');
-    expect(screen.getByText('Expert Parallel Size')).toBeVisible();
 
     await userEvent.click(screen.getByRole('button', { name: '2 GPUs' }));
     expect(screen.getByTestId('ep')).toHaveTextContent('2');
 
+    // Still valid on 8 GPUs, so it stays.
     await userEvent.click(screen.getByRole('button', { name: '8 GPUs' }));
-    expect(screen.getByTestId('ep')).toHaveTextContent('8');
-
-    await userEvent.click(screen.getByRole('button', { name: '1 GPUs' }));
-    expect(screen.getByTestId('ep')).toHaveTextContent('unset');
+    expect(screen.getByTestId('ep')).toHaveTextContent('2');
   });
 
-  it('keeps an explicit size and flags it when it does not fit', async () => {
+  it('keeps a smaller valid size from a template', async () => {
+    render(<Harness gpus={4} expertParallelSize={2} />);
+    expect(await screen.findByTestId('ep')).toHaveTextContent('2');
+  });
+
+  it('replaces a template size that does not fit the GPU count', async () => {
     render(<Harness gpus={4} expertParallelSize={8} />);
-    expect(screen.getByTestId('ep')).toHaveTextContent('8');
+    expect(await screen.findByTestId('ep')).toHaveTextContent('4');
+  });
+
+  it('flags an invalid size entered directly instead of replacing it', async () => {
+    render(<Harness gpus={4} />);
+    await userEvent.click(screen.getByRole('button', { name: 'EP 3' }));
+    expect(screen.getByTestId('ep')).toHaveTextContent('3');
     expect(
       await screen.findByText('With 4 GPUs, expert parallel size must be one of 2, 4.')
     ).toBeInTheDocument();
   });
 
-  it('keeps following the GPU count after the section remounts', async () => {
+  it('flags tensor parallelism on a model that needs expert parallelism', async () => {
     render(<Harness gpus={4} />);
-    expect(await screen.findByTestId('ep')).toHaveTextContent('4');
-
-    await userEvent.click(screen.getByRole('button', { name: 'rl' }));
-    await userEvent.click(screen.getByRole('button', { name: 'automodel' }));
-    await userEvent.click(screen.getByRole('button', { name: '2 GPUs' }));
-    expect(screen.getByTestId('ep')).toHaveTextContent('2');
-  });
-
-  it('keeps a template size that matches the pre-fill when the GPU count changes', async () => {
-    render(<Harness gpus={4} expertParallelSize={4} />);
-    await userEvent.click(screen.getByRole('button', { name: '2 GPUs' }));
-    expect(screen.getByTestId('ep')).toHaveTextContent('4');
-    expect(
-      await screen.findByText('With 2 GPUs, expert parallel size must be one of 2.')
-    ).toBeInTheDocument();
-  });
-
-  it('does not pre-fill from a tensor-parallel layout it rejects', async () => {
-    render(<Harness gpus={4} />);
-    expect(await screen.findByTestId('ep')).toHaveTextContent('4');
-
     await userEvent.click(screen.getByRole('button', { name: 'TP 2' }));
-    expect(screen.getByTestId('ep')).toHaveTextContent('unset');
     expect(await screen.findByText(/does not support tensor parallelism/)).toBeInTheDocument();
   });
 
-  it('leaves the size unset for a model that does not need it', () => {
+  it('shows the field but leaves it unset for a model that does not need it', () => {
     modelEntity.current = { spec: { checkpoint_model_name: 'LlamaForCausalLM' } } as ModelEntity;
     render(<Harness gpus={4} />);
+    expect(screen.getByText('Expert Parallel Size')).toBeVisible();
     expect(screen.getByTestId('ep')).toHaveTextContent('unset');
   });
 });
