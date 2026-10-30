@@ -15,9 +15,11 @@ import pytest
 
 pytest.importorskip("openshell")
 
+from nemo_helix_plugin.openshell.isolation import restricted_platform_policy
 from nemo_helix_plugin.openshell.provider_client import ProviderGatewayClient
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
+from openshell._proto.sandbox_pb2 import SandboxPolicy
 
 
 async def _check_provider_types(client: ProviderGatewayClient) -> None:
@@ -39,4 +41,11 @@ async def _check_provider_types(client: ProviderGatewayClient) -> None:
     assert_type(await client.get_sandbox(pb.GetSandboxRequest()), pb.SandboxResponse)
     assert_type(
         await client.detach_sandbox_provider(pb.DetachSandboxProviderRequest()), pb.DetachSandboxProviderResponse
+    )
+
+
+def _check_policy_type(policy: SandboxPolicy) -> None:
+    assert_type(
+        restricted_platform_policy(policy, host="helix.example", port=443, workspace="team", binaries=[]),
+        SandboxPolicy,
     )
