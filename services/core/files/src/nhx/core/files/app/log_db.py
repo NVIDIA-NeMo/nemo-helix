@@ -261,6 +261,15 @@ class DuckDBLogRepository:
         return "/".join(path_parts)
 
     @staticmethod
+    def _sql_string_literal(value: str) -> str:
+        """Quote ``value`` as a DuckDB string literal.
+
+        Storage paths come from fileset storage config and can contain apostrophes, which would otherwise end
+        the literal early. DuckDB string literals have no backslash escapes, so doubling ``'`` is sufficient.
+        """
+        return "'" + value.replace("'", "''") + "'"
+
+    @staticmethod
     def _ensure_single_statement(query: str) -> None:
         sql = query.strip()
         if ";" in sql.rstrip(" ;\n\t"):
@@ -278,7 +287,7 @@ class DuckDBLogRepository:
                 if key in cls.PARTITION_COLUMNS and not cls.SAFE_PARTITION_VALUE.fullmatch(str(value)):
                     raise InvalidFilterError(f"Invalid partition value: {value} for key: {key}.")
         query_path = cls._build_query_path(base_path, filters)
-        base_table = f"read_parquet('{query_path}', hive_partitioning=1)"
+        base_table = f"read_parquet({cls._sql_string_literal(query_path)}, hive_partitioning=1)"
 
         # Determine which filters were pushed into path vs need WHERE clause.
         # Filters are pushed contiguously from the start of PARTITION_COLUMNS.
@@ -683,7 +692,7 @@ class DuckDBLogRepository:
                     SELECT workspace, job, job_attempt, job_step, job_task, log_message, timestamp
                     FROM {table_name}
                     ORDER BY timestamp
-                ) TO '{base_path}' (
+                ) TO {cls._sql_string_literal(base_path)} (
                     FORMAT PARQUET,
                     PARTITION_BY (job, job_attempt, job_step, job_task),
                     APPEND
