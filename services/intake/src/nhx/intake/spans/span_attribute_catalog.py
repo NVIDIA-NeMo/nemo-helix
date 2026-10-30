@@ -419,7 +419,11 @@ def to_semantic_value(value: Any, spec: AttributeSpec) -> str | int | float | bo
         text = str(value)
         return text or None
     if spec.bag == AttributeBag.BOOL:
-        return bool(value)
+        if isinstance(value, bool):
+            return value
+        if value in ("true", "false"):
+            return value == "true"
+        raise ValueError(f"Invalid boolean value for {spec.field.value}: {value!r}")
     if spec.scale is not None:
         return _decimal(value)
     if isinstance(value, bool):

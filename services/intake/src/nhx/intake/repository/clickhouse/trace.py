@@ -733,17 +733,24 @@ _METRIC_FIELDS = (*_TOKEN_ROLLUP_FIELDS, "cost_usd")
 
 
 def _rollup_columns() -> str:
-    """Each metric of a trace's rollup, whether gateway call spans gave it, and whether the trace is superseded."""
+    """Each metric of a trace's rollup, whether gateway call spans gave it or left calls uncounted, and whether the
+    trace is superseded."""
     columns = [
-        f"rollups.{field} AS {field}, rollups.{field}_from_gateway AS {field}_from_gateway" for field in _METRIC_FIELDS
+        f"rollups.{field} AS {field}, rollups.{field}_from_gateway AS {field}_from_gateway, "
+        f"rollups.{field}_gateway_uncounted AS {field}_gateway_uncounted"
+        for field in _METRIC_FIELDS
     ]
     return ", ".join([*columns, "rollups.usage_superseded AS usage_superseded"])
 
 
 def _session_coverage_columns() -> str:
-    """Per session: whether any selected trace got each metric from gateway call spans."""
+    """Per session and metric: whether any selected trace got it from gateway call spans, and whether a marked trace
+    must count it because some trace left gateway calls uncounted."""
+    session = "OVER (PARTITION BY roots.workspace, roots.session_id)"
     return ", ".join(
-        f"max(rollups.{field}_from_gateway) OVER (PARTITION BY roots.workspace, roots.session_id) AS {field}_covered"
+        f"max(rollups.{field}_from_gateway) {session} AS {field}_covered, "
+        f"max(rollups.{field}_gateway_uncounted) {session} "
+        f"AND max(rollups.usage_superseded AND isNotNull(rollups.{field})) {session} AS {field}_marked_counts"
         for field in _METRIC_FIELDS
     )
 
@@ -756,8 +763,9 @@ def _metric_select_columns() -> str:
     ]
     for field in _METRIC_FIELDS:
         source = (
-            f"if(traces.usage_superseded AND NOT traces.{field}_from_gateway "
-            f"AND traces.{field}_covered, NULL, traces.{field})"
+            f"multiIf(traces.{field}_marked_counts, if(traces.{field}_from_gateway, NULL, traces.{field}), "
+            f"traces.usage_superseded AND NOT traces.{field}_from_gateway AND traces.{field}_covered, NULL, "
+            f"traces.{field})"
         )
         columns.extend(
             (

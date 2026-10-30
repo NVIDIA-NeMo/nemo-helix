@@ -537,8 +537,9 @@ async def test_trace_metrics_buckets_by_day_in_the_requested_timezone():
     assert "avg(traces.latency_ms) AS latency_ms_mean" in query
     # One combined aggregate per metric rather than a quantile state per percentile.
     counted = (
-        "if(traces.usage_superseded AND NOT traces.input_tokens_from_gateway "
-        "AND traces.input_tokens_covered, NULL, traces.input_tokens)"
+        "multiIf(traces.input_tokens_marked_counts, if(traces.input_tokens_from_gateway, NULL, traces.input_tokens), "
+        "traces.usage_superseded AND NOT traces.input_tokens_from_gateway AND traces.input_tokens_covered, NULL, "
+        "traces.input_tokens)"
     )
     assert f"quantiles(0.9, 0.99)({counted}) AS input_tokens_quantiles" in query
     assert "quantiles(0.5, 0.9, 0.95, 0.99)(traces.latency_ms) AS latency_ms_quantiles" in query
