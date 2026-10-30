@@ -3,6 +3,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import {
   getEntityReference,
@@ -75,6 +76,7 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
+import { expertParallelError, expertParallelExpertCount } from '@studio/util/forms/expertParallel';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type FieldErrors, FormProvider, type Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -216,6 +218,10 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     control: form.control,
     name: 'automodel.training.finetuning_type',
   });
+  const automodelModel = useWatch({ control: form.control, name: 'automodel.model' });
+  const automodelExpertCount = expertParallelExpertCount(
+    useModelEntity(backend === 'automodel' ? automodelModel : undefined)
+  );
   const unslothFinetuningType = useWatch({
     control: form.control,
     name: 'unsloth.training.finetuning_type',
@@ -365,6 +371,17 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
 
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
+
+    if (backend === 'automodel') {
+      const expertParallelIssue = expertParallelError(
+        automodelExpertCount,
+        fields.automodel.parallelism ?? {}
+      );
+      if (expertParallelIssue) {
+        setValidationErrors([expertParallelIssue]);
+        return;
+      }
+    }
 
     // Reuse the dataset checks shown in the setup panel before creating any resources.
     if (datasetValidation.isPending) {
