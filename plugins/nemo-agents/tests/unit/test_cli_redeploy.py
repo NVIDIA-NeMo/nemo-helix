@@ -400,6 +400,31 @@ def test_redeploy_refuses_disabled_mode_before_teardown(tmp_path: Path, make_cli
     assert rec.ordered_ops() == []
 
 
+def test_redeploy_refuses_image_required_mode_without_image_before_teardown(tmp_path: Path, make_cli_state) -> None:
+    rec = _Recorder(
+        deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running", "deployment_mode": "subprocess"}],
+        subprocess_enabled=False,
+    )
+    result = runner.invoke(
+        AgentsCLI().get_cli(),
+        [
+            "redeploy",
+            "--agent",
+            "my-agent",
+            "--agent-config",
+            str(_write_config(tmp_path)),
+            "--yes",
+            "--mode",
+            "docker",
+        ],
+        obj=make_cli_state(rec),
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "'docker' has no default image" in result.output
+    assert rec.ordered_ops() == []
+
+
 # ---------------------------------------------------------------------------
 # --wait exit codes
 # ---------------------------------------------------------------------------

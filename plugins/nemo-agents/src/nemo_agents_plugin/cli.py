@@ -1471,6 +1471,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 err=True,
             )
             raise typer.Exit(code=2)
+        resolved_availability = next(a for a in available_modes.data if a.mode == resolved_mode)
+        if resolved_availability.requires_image and not resolved_image:
+            typer.echo(
+                f"Error: deployment mode {resolved_mode!r} has no default image on this platform; pass --image.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
         if resolved_image and resolved_mode == "subprocess":
             typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
